@@ -16,6 +16,7 @@ path = "src/main.rs"
 [features]
 managed-fault-fixture = ["nac-core/managed-fault-fixture"]
 review-fixture = ["nac-core/review-fixture"]
+native-auth-fixture = ["nac-core/test-support"]
 
 [dependencies]
 nac-contracts = { path = "../nac-contracts" }
@@ -40,6 +41,7 @@ utoipa-axum = "0.3"
 utoipa-swagger-ui = { version = "10.0.2", default-features = false, features = ["axum", "vendored"] }
 
 [dev-dependencies]
+nac-process = { path = "../nac-process" }
 base64.workspace = true
 flate2 = "1"
 nac-core = { path = "../nac-core", features = ["test-support"] }

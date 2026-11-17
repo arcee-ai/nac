@@ -11,7 +11,12 @@ interface ProjectActions {
     rename: (project: ProjectRecord) => void;
     remove: (project: ProjectRecord) => void;
     togglePin: (project: ProjectRecord) => Promise<void>;
-    /** Starts a chat inside a project, inheriting its location and defaults. */
+    /**
+     * Opens Home's composer pointed at a project: the one new-session flow. The
+     * session is created when the user sends. `firstChat` is accepted for
+     * existing callers (an empty project's redirect) and replaces the history
+     * entry so Back does not bounce through the redirect.
+     */
     newChat: (projectId: string, firstChat?: boolean) => Promise<void>;
 }
 /**

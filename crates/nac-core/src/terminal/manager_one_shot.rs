@@ -560,3 +560,7 @@ impl TerminalManager {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "manager_one_shot_tests.rs"]
+mod tests;

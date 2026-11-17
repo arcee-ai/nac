@@ -1,10 +1,4 @@
-/**
- * The Usage button and the token, cost and time readings it opens: in the
- * session header, and as a bare glyph in the phone composer, which has no
- * header. The run clock lives here rather than in either bar, so a running
- * session re-renders this button every second instead of the whole bar.
- */
-export declare function SessionUsage({ context, contextShare, input, output, cacheRead, cost, running, startedAt, lastElapsedMs, environment, compact, }: {
+interface UsageReadingsProps {
     context: string;
     /** How much of the model's window the context fills, when that is known. */
     contextShare: string | null;
@@ -19,6 +13,19 @@ export declare function SessionUsage({ context, contextShare, input, output, cac
     lastElapsedMs: number | null;
     /** Where the session runs, for a screen with no header to say it. */
     environment?: string | null;
-    /** The bare glyph rather than the labelled header button. */
+}
+/**
+ * The token, cost and time readings as a quiet two-column list: the session
+ * menu's Usage section. The run clock lives here, so a running session
+ * re-renders this list every second rather than the menu around it.
+ */
+export declare function SessionUsageReadings(props: UsageReadingsProps): import("react").JSX.Element;
+/**
+ * The Usage button and the readings it opens, as a bare glyph in the phone
+ * composer. The session header shows the same readings in its menu.
+ */
+export declare function SessionUsage({ compact, ...props }: UsageReadingsProps & {
+    /** The bare glyph rather than the labelled button. */
     compact?: boolean;
 }): import("react").JSX.Element;
+export {};

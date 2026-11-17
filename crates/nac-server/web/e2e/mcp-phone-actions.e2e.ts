@@ -120,7 +120,8 @@ for (const mode of ["RED", "GREEN"] as const)
               await evidence(info, "f1-all-targets-before-floor.json", states);
               await capture(page, info, `f1-${mode}-${environment.name}-${state}`);
             };
-            await collect("list", list, ["Close"]);
+            // The list is the Settings page itself (no Close); its one action is the target.
+            await collect("list", list, ["Add server"]);
             await list.getByRole("button", { name: "Add server", exact: true }).click();
             const catalog = page.getByRole("dialog", { name: "Add server", exact: true });
             await collect("catalog", catalog, ["Close"]);

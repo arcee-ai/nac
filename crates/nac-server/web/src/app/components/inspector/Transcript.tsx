@@ -1,7 +1,16 @@
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { CommandCard } from "@/app/features/human-shell/CommandCard";
 import { useNavigate } from "react-router-dom";
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import {
   Button,
@@ -13,12 +22,15 @@ import {
   ShimmerLoader,
 } from "@/app/atoms";
 import { InitialPrompts } from "@/app/components/inspector/InitialPrompts";
+import { DayDivider } from "@/app/components/inspector/transcript/DayDivider";
+import { dayKey } from "@/app/components/inspector/transcript/days";
 import { JumpToLatest } from "@/app/components/inspector/transcript/JumpToLatest";
 import { RunFailureRecovery } from "@/app/components/inspector/RunFailureRecovery";
 import { ModelMessage } from "@/app/components/inspector/ModelMessage";
 import { UserMessage } from "@/app/components/inspector/UserMessage";
 import { useTranscriptModelContext } from "@/app/components/inspector/transcript/TranscriptModelContext";
 import { DelegatedCompletionCard } from "@/app/features/delegation/presentation/DelegatedCompletionCard";
+import { GoalContinuationCard } from "@/app/features/goals/presentation/GoalContinuationCard";
 import { useInsightsNavigation } from "@/app/features/insights/useInsightsNavigation";
 import { useAuthErrorSuppressed } from "@/app/hooks/useAuthErrorSuppressed";
 import { useErrorNotice, type ErrorNotice } from "@/app/hooks/useErrorNotice";
@@ -74,6 +86,7 @@ export const TranscriptRecoveryNotice = memo(function TranscriptRecoveryNotice({
       role="status"
       variant={ChatSessionMessageVariant.Info}
       title="Session recovered"
+      className="mt-6"
     >
       {warning}
     </ChatSessionMessage>
@@ -89,13 +102,16 @@ export const TranscriptRecoveryNotice = memo(function TranscriptRecoveryNotice({
 function resendTargetIndex(turns: TranscriptTurn[]): number | null {
   for (let index = turns.length - 1; index >= 0; index -= 1) {
     const turn = turns[index];
-    if (turn?.kind === "delegated-completion") return null;
+    if (turn?.kind === "delegated-completion" || turn?.kind === "goal-continuation") return null;
     if (turn?.kind === "user" && !turn.pending) return index;
   }
   return null;
 }
 
 const NO_BLOCKS: ModelTurn["blocks"] = [];
+
+/** Past this many rows, settled turns off screen skip layout until scrolled to. */
+const LONG_TRANSCRIPT_ROWS = 24;
 
 /**
  * Read-only transcript from the canonical snapshot plus a live typing indicator
@@ -114,6 +130,7 @@ export function Transcript({
     useRunError,
     useCancelArmed,
     useActivity,
+    useRunStartedAt,
     setOptimisticUserPrompt,
     pushLocalEvent,
   } = useNativeRuntime().stores.runtimeStore;
@@ -129,6 +146,7 @@ export function Transcript({
 
   const stopping = useCancelArmed(sessionId);
   const activity = useActivity();
+  const runStartedAt = useRunStartedAt();
   const error = useRunError();
   const liveFailure = useRunFailure();
   const modelRetryAttempt = useModelRetryAttempt();
@@ -348,6 +366,20 @@ export function Transcript({
     [replyKey],
   );
   const rows = showModelPending ? [...turns, placeholder] : turns;
+  // Prompts that open a new calendar day after an earlier one get a divider;
+  // the first day of the conversation needs none.
+  const days = useMemo(() => {
+    const opens = new Map<string, boolean>();
+    let previous: number | null = null;
+    for (const turn of baseTurns) {
+      if (turn.kind !== "user") continue;
+      const day = dayKey(turn.createdAt);
+      if (day == null) continue;
+      opens.set(turn.key, previous !== null && day !== previous);
+      previous = day;
+    }
+    return opens;
+  }, [baseTurns]);
 
   const { openThread } = useInsightsNavigation();
   // Opening a snapshot points the panel at that run's revision rather than at
@@ -435,11 +467,11 @@ export function Transcript({
         role="status"
         aria-label={revealed ? undefined : "Loading conversation"}
         className={cn(
-          "pointer-events-none absolute inset-x-0 top-3 px-4 transition-opacity duration-150 ease-in-out md:top-[90px] md:px-8",
+          "pointer-events-none absolute inset-x-0 top-3 px-4 transition-opacity duration-150 ease-in-out md:top-[90px] md:px-6",
           revealed ? "opacity-0" : "opacity-100 delay-200",
         )}
       >
-        <div className="mx-auto w-full max-w-[640px]">
+        <div className="mx-auto w-full max-w-[var(--column-width)]">
           <ShimmerLoader rows={3} rowClassName="h-[48px]" />
         </div>
       </div>
@@ -449,12 +481,12 @@ export function Transcript({
       {showInitialPrompts ? (
         <div
           className={cn(
-            "absolute inset-x-0 top-3 flex overflow-auto px-4 md:top-[90px] md:px-8",
+            "absolute inset-x-0 top-3 flex overflow-auto px-4 md:top-[90px] md:px-6",
             isMobile ? "bottom-[128px]" : "bottom-[136px]",
             fade,
           )}
         >
-          <div className="m-auto w-full max-w-[640px]">
+          <div className="m-auto w-full max-w-[var(--column-width)]">
             <InitialPrompts />
           </div>
         </div>
@@ -465,16 +497,17 @@ export function Transcript({
             so the first message keeps its existing clearance. */}
         <div
           ref={contentRef}
+          data-transcript-long={rows.length > LONG_TRANSCRIPT_ROWS || undefined}
           className={cn(
-            "flex flex-col pt-3 md:pt-[90px] [&>*]:shrink-0 px-4 md:px-8",
+            "flex flex-col gap-0 pt-4 md:pt-8 [&>*]:shrink-0 px-4 md:px-6",
             // The phone's input is a bare pill rather than a padded card, so
             // the run-out under the last message shrinks with it. A long
             // draft, the goal editor or queued messages make the composer
-            // taller, and the run-out still clears it. The 640px column keeps
-            // 32px off the edges of a chat narrower than it.
+            // taller, and the run-out still clears it. The 720px column keeps
+            // 24px off the edges of a chat narrower than it (16px on phones).
             isMobile
               ? "pb-[max(180px,calc(var(--composer-height,0px)_+_40px))]"
-              : "pb-[max(320px,calc(var(--composer-height,0px)_+_40px))] mx-auto max-w-[704px]",
+              : "pb-[max(320px,calc(var(--composer-height,0px)_+_40px))] mx-auto w-full max-w-[calc(var(--column-width)_+_48px)]",
           )}
         >
           {snapshot?.message_page?.has_older ? (
@@ -489,7 +522,10 @@ export function Transcript({
                 {olderMessages.isPending ? "Loading…" : "Load older"}
               </Button>
               {olderMessages.isError ? (
-                <div role="alert" className="flex items-center gap-2 text-basic-muted label-small">
+                <div
+                  role="alert"
+                  className="flex items-center gap-2 type-body-chrome text-basic-muted"
+                >
                   <span>Couldn’t load older messages.</span>
                   <Button
                     variant={ButtonVariant.Ghost}
@@ -509,6 +545,9 @@ export function Transcript({
               if (turn.kind === "delegated-completion") {
                 return <DelegatedCompletionCard key={turn.key} turn={turn} />;
               }
+              if (turn.kind === "goal-continuation") {
+                return <GoalContinuationCard key={turn.key} sessionId={sessionId} turn={turn} />;
+              }
               if (turn.kind === "user") {
                 const command = (snapshot?.shell_commands ?? []).find(
                   (candidate) =>
@@ -525,26 +564,30 @@ export function Transcript({
                       readOnly={readOnly}
                     />
                   );
+                const day = turn.pending ? null : dayKey(turn.createdAt);
+                const newDay = day != null && days.get(turn.key) === true;
                 return (
-                  <UserMessage
-                    key={turn.key}
-                    text={turn.text}
-                    sessionId={sessionId}
-                    pending={turn.pending}
-                    terminalSelection={
-                      (turn.pending
-                        ? submitted?.terminal_selection
-                        : snapshot?.terminal_selection_attributions?.find(
-                            (reference) => reference.message_index === turn.messageIndex,
-                          )?.evidence) ?? undefined
-                    }
-                    invokedSkills={turn.invokedSkills}
-                    messageIndex={turn.pending ? undefined : turn.messageIndex}
-                    actionsDisabled={actionsBusy}
-                    readOnly={readOnly}
-                    onRefresh={!readOnly && refreshIndex === index ? resend : null}
-                    onRevert={readOnly ? null : openRevert}
-                  />
+                  <Fragment key={turn.key}>
+                    {newDay ? <DayDivider day={day} /> : null}
+                    <UserMessage
+                      text={turn.text}
+                      sessionId={sessionId}
+                      pending={turn.pending}
+                      terminalSelection={
+                        (turn.pending
+                          ? submitted?.terminal_selection
+                          : snapshot?.terminal_selection_attributions?.find(
+                              (reference) => reference.message_index === turn.messageIndex,
+                            )?.evidence) ?? undefined
+                      }
+                      invokedSkills={turn.invokedSkills}
+                      messageIndex={turn.pending ? undefined : turn.messageIndex}
+                      actionsDisabled={actionsBusy}
+                      readOnly={readOnly}
+                      onRefresh={!readOnly && refreshIndex === index ? resend : null}
+                      onRevert={readOnly ? null : openRevert}
+                    />
+                  </Fragment>
                 );
               }
 
@@ -554,7 +597,12 @@ export function Transcript({
               let precedingUser: Extract<TranscriptTurn, { kind: "user" }> | null = null;
               for (let prior = index - 1; prior >= 0; prior -= 1) {
                 const candidate = rows[prior];
-                if (candidate?.kind === "delegated-completion") break;
+                // NAC admitted a goal run, so there is no typed prompt to repeat.
+                if (
+                  candidate?.kind === "delegated-completion" ||
+                  candidate?.kind === "goal-continuation"
+                )
+                  break;
                 if (candidate?.kind === "user") {
                   precedingUserIndex = prior;
                   precedingUser = candidate;
@@ -573,6 +621,7 @@ export function Transcript({
                   active={(running || turn === placeholder) && lastIsThisRun}
                   isLast={lastIsThisRun}
                   activity={running && lastIsThisRun ? activity : undefined}
+                  runStartedAt={running && lastIsThisRun ? runStartedAt : null}
                   selectedThreadEpisode={panel === "insights" ? selectedThreadEpisode : null}
                   selectedGroupId={panel === "insights" ? selectedGroupId : null}
                   onSelectThread={openThread}
@@ -613,6 +662,7 @@ export function Transcript({
               variant={ChatSessionMessageVariant.Error}
               title={notice.title}
               action={notice.action}
+              className="mt-6"
             >
               {notice.description}
             </ChatSessionMessage>
@@ -623,22 +673,25 @@ export function Transcript({
               role="status"
               variant={ChatSessionMessageVariant.Info}
               title={`Connection interrupted; retrying model response (attempt ${modelRetryAttempt})`}
+              className="mt-6"
             >
               The abandoned partial stream was cleared before this attempt began.
             </ChatSessionMessage>
           ) : null}
 
           {durableFailure ? (
-            <RunFailureRecovery
-              failure={durableFailure}
-              goal={goal}
-              backend={backend}
-              onResumeGoal={resumeGoal}
-              onOpenSettings={() => sessionActions.settings(sessionId)}
-              onRegenerate={
-                latestUser?.kind === "user" ? () => resend(latestUser.messageIndex) : null
-              }
-            />
+            <div className="mt-6">
+              <RunFailureRecovery
+                failure={durableFailure}
+                goal={goal}
+                backend={backend}
+                onResumeGoal={resumeGoal}
+                onOpenSettings={() => sessionActions.settings(sessionId)}
+                onRegenerate={
+                  latestUser?.kind === "user" ? () => resend(latestUser.messageIndex) : null
+                }
+              />
+            </div>
           ) : null}
 
           {(snapshot?.shell_commands ?? [])

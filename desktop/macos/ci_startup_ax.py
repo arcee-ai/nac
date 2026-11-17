@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import secrets
+import stat
 import re
 import threading
 import time
@@ -19,7 +20,7 @@ DIAGNOSTIC_STAGES = {'configuration', 'admission', 'initial_snapshot', 'trust', 
     'app_window', 'owned_frame', 'ax_observation', 'closing_snapshot', 'closing_lifetime',
     'closing_integrity', 'receipt_publication', 'parent_lost'}
 DIAGNOSTIC_CODES = {'ownership_invalid', 'ownership_arguments_unavailable', 'process_probe_unavailable',
-                    'decoding_failure', 'foundation_failure', 'other'}
+                    'decoding_failure', 'foundation_failure', 'other', 'sample_refused'}
 
 
 def require(value, reason):
@@ -67,6 +68,7 @@ def declaration(profile, helper, tests):
     folder = profile['root'] / 'ax-witness'
     require(not folder.exists() and helper.is_absolute() and helper.resolve() == helper, 'AX declaration paths')
     folder.mkdir(mode=0o700)
+    (folder / 'requests').mkdir(mode=0o700)  # Runner request-only writer namespace.
     time_limit(300, 15)
     from ci import RUN_DEADLINE
     bound = active()
@@ -75,6 +77,39 @@ def declaration(profile, helper, tests):
     return dict(path=str(folder / 'receipt.json'), nonce=secrets.token_hex(32), helper_path=str(helper),
         helper_sha256=digest(helper), support_sha256={name: digest(tests / 'desktop/macos/startup_xctest' / name) for name in SUPPORT},
         owner_pid=os.getpid(), deadline_ns=str(int(deadline * 1_000_000_000)))
+
+
+def sample_diagnostic(row):
+    """Closed passive first-publication context, never a consumed proof or input ticket."""
+    required = {'capture', 'began_ns', 'ended_ns', 'sequence', 'refusal_generation', 'refusal_stage', 'request_present'}
+    require(type(row) is dict and required <= set(row) <= required | {'request', 'first_api_failure'}
+            and row['capture'] == 'first_published_refusal_not_client_consumption'
+            and row['refusal_stage'] in ('ax_predicate_refused', 'sample_deadline')
+            and type(row['request_present']) is bool, 'AX sample fields')
+    def number(value):
+        require(type(value) is str and re.fullmatch(r'0|[1-9][0-9]{0,19}', value)
+                and int(value) < 2**64, 'AX sample counter')
+        return int(value)
+    for key in ('began_ns', 'ended_ns', 'sequence', 'refusal_generation'):
+        number(row[key])
+    require(number(row['began_ns']) <= number(row['ended_ns']) and number(row['sequence']) > 0
+            and number(row['refusal_generation']) > 0, 'AX sample order')
+    require(('request' in row) == row['request_present'], 'AX sample request presence')
+    if 'request' in row:
+        request = row['request']
+        require(type(request) is dict and set(request) == {'id', 'entered_ns', 'deadline_ns', 'baseline_sequence', 'refusal_generation'}
+                and type(request['id']) is str and re.fullmatch(r'[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}', request['id']), 'AX sample request')
+        for key in ('entered_ns', 'deadline_ns', 'baseline_sequence', 'refusal_generation'):
+            number(request[key])
+        require(number(request['entered_ns']) < number(row['began_ns']) < number(request['deadline_ns'])
+                and number(request['baseline_sequence']) <= number(row['sequence'])
+                and number(request['refusal_generation']) <= number(row['refusal_generation']), 'AX sample request order')
+    if 'first_api_failure' in row:
+        fact = row['first_api_failure']
+        require(type(fact) is dict and set(fact) == {'attribute', 'api_code'}
+                and type(fact['attribute']) is str and fact['attribute'] in {'AXWindows', 'AXChildren', 'AXRole', 'AXPosition', 'AXSize', 'AXFocusedUIElement', 'AXFocused', 'AXValue', 'AXParent'}
+                and type(fact['api_code']) is int and -(2**31) <= fact['api_code'] < 2**31, 'AX sample API failure')
+    return row
 
 
 class AXCompanion:
@@ -225,6 +260,74 @@ class AXCompanion:
             self.terminal = {key: row[key] for key in ('target', 'app_launch_epoch', 'window_number', 'status')}
         return self.settlement
 
+    def preflight_diagnostic(self):
+        """Untrusted first local throw, retained independently of interrupted xcresult."""
+        try:
+            path = Path(self.declaration['path'] + '.failure')
+            parent = path.parent
+            require(parent.resolve() == parent, 'Preflight diagnostic parent')
+            info = parent.stat()
+            require(stat.S_ISDIR(info.st_mode) and info.st_uid == os.getuid()
+                    and stat.S_IMODE(info.st_mode) == 0o700, 'Preflight diagnostic directory')
+            descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            with os.fdopen(descriptor, 'rb') as stream:
+                info = os.fstat(stream.fileno())
+                require(stat.S_ISREG(info.st_mode) and info.st_uid == os.getuid() and info.st_nlink == 1
+                        and stat.S_IMODE(info.st_mode) == 0o400 and 0 < info.st_size <= 2048,
+                        'Preflight diagnostic file')
+                data = stream.read(2049)
+                require(len(data) == info.st_size, 'Preflight diagnostic size')
+            def unique(pairs):
+                row = {}
+                for key, value in pairs:
+                    require(key not in row, 'Preflight diagnostic duplicate')
+                    row[key] = value
+                return row
+            row = json.loads(data, object_pairs_hook=unique)
+            require(type(row) is dict and set(row) == {'schema', 'acceptance', 'nonce', 'configuration_sha256',
+                    'step', 'operation_index', 'error_family'} and row['schema'] == 'nac342-first-preflight-failure-v1'
+                    and row['acceptance'] is False and row['nonce'] == self.declaration['nonce']
+                    and row['configuration_sha256'] == digest(self.config_path), 'Preflight diagnostic binding')
+            require(type(row['step']) is str and row['step'] in {'startup_checks', 'before_guard', 'before_record',
+                    'public_target', 'prepare_interaction', 'final_recheck', 'finish_interaction', 'input',
+                    'after_guard', 'after_record', 'terminal',
+                    'request_schema', 'request_id', 'request_root_id',
+                    'request_surface', 'request_kind', 'request_label_size',
+                    'request_label_required', 'request_point_count', 'request_point_x_finite',
+                    'request_point_x_float', 'request_point_y_finite', 'request_point_y_float',
+                    'request_value_keyboard', 'request_value_kind', 'request_value_size',
+                    'request_shape', 'request_anchor_frame', 'request_root_frame',
+                    'request_containment', 'request_deadline', 'request_counters',
+                    'read_parent', 'read_open', 'read_metadata',
+                    'read_bytes', 'publish_parent', 'publish_encode',
+                    'publish_size', 'publish_open', 'publish_write',
+                    'publish_open_access_denied', 'publish_open_not_permitted', 'publish_open_read_only',
+                    'publish_open_exists', 'publish_open_resource', 'publish_open_path', 'publish_open_other',
+                    'publish_mode', 'publish_close', 'publish_rename',
+                    'decode_size', 'decode_keys', 'decode_json',
+                    'decode_object', 'decode_fields', 'decode_process',
+                    'decode_observation', 'decode_interaction', 'decode_focus',
+                    'decode_types', 'clock_monotonic', 'read_declaration',
+                    'read_port', 'read_load', 'read_numbers',
+                    'read_clock', 'read_window', 'read_case_deadline',
+                    'read_sample_order', 'read_sequence_bytes', 'read_binding',
+                    'read_helper_identity', 'read_waiting', 'read_target_binding',
+                    'read_target_identity', 'read_sequence', 'read_status',
+                    'read_observation', 'read_folder_binding', 'prepare_state',
+                    'prepare_ticket', 'prepare_publication', 'consume_deadline',
+                    'consume_numbers', 'consume_refusal', 'consume_sample_numbers',
+                    'consume_sample_window', 'consume_sequence', 'consume_observation',
+                    'consume_surface_binding', 'consume_focus_presence', 'consume_focus',
+                    'consume_no_focus', 'consume_proof_presence', 'consume_proof_binding',
+                    'consume_freshness', 'consume_pending', 'consume_target_identity',
+                    'consume_evidence_limit', 'read_cutoff'} and type(row['operation_index']) is int
+                    and 0 <= row['operation_index'] <= 11 and type(row['error_family']) is str
+                    and row['error_family'] in {'receipt_missing', 'receipt_invalid', 'receipt_refused',
+                    'receipt_expired', 'decoding', 'foundation', 'other'}, 'Preflight diagnostic projection')
+            return row
+        except BaseException:
+            return None  # Never changes failure/abort/input/cleanup authority.
+
     def failure_diagnostic(self):
         """Read only the bounded static failure log; absence never affects custody."""
         try:
@@ -239,7 +342,7 @@ class AXCompanion:
             row = json.loads(data, object_pairs_hook=unique)
             required = {'schema', 'acceptance', 'stage', 'code', 'clock_basis',
                 'observed_uptime_ns', 'sequence', 'refusal_generation', 'binding'}
-            require(type(row) is dict and required <= set(row) <= required | {'pre_refusal_paired'}
+            require(type(row) is dict and required <= set(row) <= required | {'pre_refusal_paired', 'first_refused_sample'}
                 and row['schema'] == 'nac342-ax-failure-diagnostic-v1' and row['acceptance'] is False
                 and row['stage'] in DIAGNOSTIC_STAGES and row['code'] in DIAGNOSTIC_CODES
                 and row['clock_basis'] == 'DispatchTime.uptimeNanoseconds', 'AX diagnostic fields')
@@ -252,6 +355,15 @@ class AXCompanion:
             require(type(row['binding']) is dict and row['binding'] == expected, 'AX diagnostic source binding')
             if 'pre_refusal_paired' in row:
                 paired_diagnostic(row['pre_refusal_paired'])
+            if 'first_refused_sample' in row:
+                sample_diagnostic(row['first_refused_sample'])
+                require(int(row['first_refused_sample']['ended_ns']) <= int(row['observed_uptime_ns'])
+                        and all(int(row['first_refused_sample'][key]) <= int(row[key])
+                                for key in ('sequence', 'refusal_generation')), 'AX sample observation order')
+            if row['code'] == 'sample_refused':
+                require('first_refused_sample' in row and row['stage'] == 'ax_observation'
+                        and all(row[key] == row['first_refused_sample'][key]
+                                for key in ('sequence', 'refusal_generation')), 'AX sample-only record')
             return row
         except BaseException:
             return None  # No new acceptance, stop, cleanup or failure precedence.
@@ -294,7 +406,7 @@ def require_guard_proof(row, config, configuration_sha256, witness):
     expected.update({key: witness[key] for key in ('app_pid', 'app_launch_epoch', 'window_number')})
     expected.update(schema='nac342-ax-guards-v1', configuration_sha256=configuration_sha256,
                     helper_sha256=config['ax_witness']['helper_sha256'], support_sha256=config['ax_witness']['support_sha256'])
-    require(type(row) is dict and set(row) == set(expected) | {'rows'}
+    require(type(row) is dict and set(row) == set(expected) | {'rows', 'interactions'}
         and all(row[k] == v and type(row[k]) is type(v) for k, v in expected.items() if k != 'app_launch_epoch')
         and type(row['app_launch_epoch']) in (int, float) and row['app_launch_epoch'] == witness['app_launch_epoch'], 'AX guard header')
     require(type(row['rows']) is list and len(row['rows']) == 26, 'AX guard count')
@@ -321,4 +433,51 @@ def require_guard_proof(row, config, configuration_sha256, witness):
             require(type(value) is str and len(value) == 36 and str(uuid.UUID(value)) == value.lower()
                 and identities.get(key, value) == value, 'AX guard retained identity')
             identities[key] = value
+    require_interaction_proof(row['interactions'], row['rows'])
     return row
+
+
+def require_interaction_proof(interactions, guards):
+    """Eleven private-text-free point proofs between the existing input fences."""
+    import math
+    import uuid
+    require(type(interactions) is list and len(interactions) == 11, 'AX interaction count')
+    ids, targets = set(), {}
+    kinds = ['button', 'button', 'panel', 'field', 'field', 'field', 'button', 'button', 'message', 'message', 'button']
+    def number(text):
+        require(type(text) is str and re.fullmatch(r'0|[1-9][0-9]{0,19}', text) and int(text) < 2**64,
+                'AX interaction clock')
+        return int(text)
+    for index, (entry, kind) in enumerate(zip(interactions, kinds)):
+        keys = {'request_id', 'target_id', 'kind', 'surface', 'point', 'anchor_frame', 'keyboard', 'focus_checked',
+                'sequence', 'began_ns', 'ended_ns', 'entered_ns', 'consumed_ns', 'deadline_ns', 'finalized_ns'}
+        require(type(entry) is dict and set(entry) == keys, 'AX interaction fields')
+        for key in ('request_id', 'target_id'):
+            value = entry[key]
+            require(type(value) is str and len(value) == 36 and str(uuid.UUID(value)) == value.lower()
+                and (key != 'request_id' or value not in ids), 'AX interaction identity')
+            if key == 'request_id': ids.add(value)
+        target_key = kind if kind != 'button' else str(index)
+        require(targets.get(target_key, entry['target_id']) == entry['target_id'], 'AX interaction retained target')
+        targets[target_key] = entry['target_id']
+        before, after = guards[2 + index * 2:4 + index * 2]
+        keyboard = index in (2, 3, 4, 5, 9)
+        require(entry['kind'] == kind and entry['surface'] == before['surface']
+            and type(entry['keyboard']) is bool and entry['keyboard'] == keyboard
+            and type(entry['focus_checked']) is bool and entry['focus_checked'] == keyboard,
+            'AX interaction intent')
+        point, frame = entry['point'], entry['anchor_frame']
+        require(type(point) is list and len(point) == 2 and type(frame) is list and len(frame) == 4
+            and all(type(n) in (int, float) and math.isfinite(n) for n in point + frame)
+            and frame[2] > 0 and frame[3] > 0
+            and frame[0] <= point[0] < frame[0] + frame[2] and frame[1] <= point[1] < frame[1] + frame[3],
+            'AX interaction geometry')
+        seq, began, ended, entered, consumed, deadline, finalized = [number(entry[k]) for k in
+            ('sequence', 'began_ns', 'ended_ns', 'entered_ns', 'consumed_ns', 'deadline_ns', 'finalized_ns')]
+        require(number(before['sequence']) < seq < number(after['sequence'])
+            and number(before['consumed_ns']) <= entered < began <= ended <= consumed <= finalized
+            and finalized < number(after['entered_ns']) and finalized < deadline
+            and deadline <= number(before['entered_ns']) + 30_000_000_000
+            and ended - began <= 1_000_000_000 and finalized - ended <= 1_000_000_000,
+            'AX interaction final freshness/fences')
+    return interactions

@@ -25,13 +25,13 @@ function TaskLabel({ text, active }: { text: string; active: boolean }) {
     <>
       <Icon
         iconName={IconName.Info}
-        size={16}
-        className={cn("shrink-0", active ? "text-basic-primary" : "text-btn-secondary")}
+        size={14}
+        className={cn("shrink-0", active ? "text-basic-primary" : "text-basic-tertiary")}
       />
       <span
         className={cn(
-          "underline label-micro",
-          active ? "text-basic-primary" : "text-btn-secondary",
+          "type-meta-strong underline decoration-[var(--f-line-strong)] underline-offset-2",
+          active ? "text-basic-primary" : "text-basic-secondary",
         )}
       >
         {text}

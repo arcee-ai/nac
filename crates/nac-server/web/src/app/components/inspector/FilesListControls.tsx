@@ -1,31 +1,136 @@
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 
-import { Button, ButtonSize, ButtonVariant, Icon, IconName, StickyButton } from "@/app/atoms";
+import { Icon, IconName } from "@/app/atoms";
 import { BranchPicker } from "@/app/components/inspector/BranchPicker";
 import { CommitPopover } from "@/app/components/inspector/CommitPopover";
 import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
+import { cn } from "@/app/lib/cn";
+import { revisionOrdinal, revisionTitle } from "@/app/lib/revisions";
+import { useWorkspaceRevisions } from "@/app/services/queries";
 import { type FileListing } from "@/app/store/sessionLayoutStore";
 import type { ChangedFileStat } from "@/app/types/api";
 
-/** The design's one-word labels, with names that say what each one lists. */
+/** Short labels, with names that say what each one lists. */
 const LISTINGS: { listing: FileListing; label: string; name: string }[] = [
+  { listing: "changed", label: "Changed", name: "Diff of changed files" },
   { listing: "tree", label: "All", name: "All files" },
-  { listing: "changed", label: "Diff", name: "Diff of changed files" },
 ];
 
-/** How the files are listed, and the commit action. */
+interface SegmentOption {
+  key: string;
+  label: string;
+  /** The accessible name, when the visible label is shorter. */
+  name?: string;
+  title?: string;
+}
+
+/**
+ * Two or three quiet pills inside a washed track, the selected one raised on
+ * the surface. Each option is a toggle button so its name stays its own.
+ */
+function Segmented({
+  label,
+  options,
+  value,
+  large,
+  onChange,
+}: {
+  label: string;
+  options: SegmentOption[];
+  value: string;
+  large: boolean;
+  onChange: (key: string) => void;
+}) {
+  return (
+    <div
+      role="group"
+      aria-label={label}
+      className={cn(
+        "inline-flex min-w-0 shrink-0 items-center gap-0.5 rounded-pill bg-[var(--f-wash-1)] p-0.5",
+      )}
+    >
+      {options.map((option) => {
+        const selected = option.key === value;
+        return (
+          <button
+            key={option.key}
+            type="button"
+            aria-pressed={selected}
+            aria-label={option.name}
+            title={option.title}
+            onClick={() => onChange(option.key)}
+            className={cn(
+              "min-w-0 truncate rounded-pill transition-colors duration-150 ease-out",
+              "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-border-focus-outline)]",
+              large ? "h-11 px-4 type-label" : "h-6 px-2.5 type-meta-strong",
+              selected
+                ? "bg-elevation-level-1 text-basic-primary shadow-sm"
+                : "text-basic-tertiary hover:text-basic-primary",
+            )}
+          >
+            {option.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * Which checkout the panel describes: the working tree against HEAD, or what
+ * one finished run changed. Choosing a snapshot here opens the newest one
+ * unless another is already selected; the session's revision picker and the
+ * History panel share the same selection.
+ */
+export function FilesScopeToggle({
+  sessionId,
+  revision,
+  large = false,
+}: {
+  sessionId: string;
+  revision: number | null;
+  large?: boolean;
+}) {
+  const { selectRevision } = useNativeRuntime().stores.sessionLayoutStore;
+  const { data } = useWorkspaceRevisions(sessionId);
+  const revisions = data ?? [];
+  if (revisions.length === 0) return null;
+  const index = revision == null ? 0 : revisions.findIndex((item) => item.id === revision);
+  const shown = revisions[Math.max(0, index)];
+  const title = revisionTitle(revisionOrdinal(Math.max(0, index), revisions.length));
+  return (
+    <Segmented
+      label="Changes to show"
+      large={large}
+      value={revision == null ? "tree" : "revision"}
+      options={[
+        { key: "tree", label: "Working tree", title: "Every uncommitted change in the checkout" },
+        {
+          key: "revision",
+          label: title,
+          title: `What the run captured as ${title} changed`,
+        },
+      ]}
+      onChange={(key) => selectRevision(key === "tree" ? null : (revision ?? shown.id))}
+    />
+  );
+}
+
+/** How the files are listed, which changes they show, and the commit action. */
 export function FilesListToolbar({
   sessionId,
   listing,
   changed,
   revision,
   readOnly,
+  reveal,
 }: {
   sessionId: string;
   listing: FileListing;
   changed: ChangedFileStat[];
   revision: number | null;
   readOnly: boolean;
+  reveal?: import("react").ReactNode;
 }) {
   const { selectFileListing } = useNativeRuntime().stores.sessionLayoutStore;
 
@@ -35,61 +140,57 @@ export function FilesListToolbar({
   const commit = readOnly ? null : (
     <CommitPopover sessionId={sessionId} changed={changed} revision={revision} />
   );
+  const tabs = (
+    <Segmented
+      label="List files"
+      large={isMobile}
+      value={listing}
+      options={LISTINGS.map((item) => ({
+        key: item.listing,
+        label: item.label,
+        name: item.name,
+      }))}
+      onChange={(key) => selectFileListing(key as FileListing)}
+    />
+  );
+  // The same cached list the toggle reads; without snapshots there is no scope to pick.
+  const hasRevisions = (useWorkspaceRevisions(sessionId).data?.length ?? 0) > 0;
+  const scope = hasRevisions ? (
+    <FilesScopeToggle sessionId={sessionId} revision={revision} large={isMobile} />
+  ) : null;
 
   if (isMobile) {
     return (
       <div className="flex flex-wrap items-center gap-2">
-        {LISTINGS.map((item) => (
-          <StickyButton
-            key={item.listing}
-            className="!h-11"
-            buttonClassName="!h-11 !min-w-11"
-            variant={
-              listing === item.listing ? ButtonVariant.GhostHighlighted : ButtonVariant.Ghost
-            }
-            aria-pressed={listing === item.listing}
-            aria-label={item.name}
-            onClick={() => selectFileListing(item.listing)}
-          >
-            {item.label}
-          </StickyButton>
-        ))}
+        {tabs}
+        {reveal}
         {commit}
+        {scope}
       </div>
     );
   }
 
-  const tabs = (
-    <div className="flex flex-1 min-w-0 items-center gap-1">
-      {LISTINGS.map((item) => (
-        <Button
-          key={item.listing}
-          size={ButtonSize.Small}
-          variant={listing === item.listing ? ButtonVariant.GhostHighlighted : ButtonVariant.Ghost}
-          aria-pressed={listing === item.listing}
-          aria-label={item.name}
-          onClick={() => selectFileListing(item.listing)}
-        >
-          {item.label}
-        </Button>
-      ))}
-    </div>
-  );
-
   // A tablet's list header is already the bar, with the back button before it.
   if (isTablet) {
     return (
-      <div className="flex flex-1 min-w-0 items-center gap-[10px] pr-2">
+      <div className="flex flex-1 min-w-0 items-center gap-2 pr-2">
         {tabs}
+        <span className="flex-1" />
+        {reveal}
         {commit}
       </div>
     );
   }
 
   return (
-    <div className="flex items-center gap-3 h-12 px-3 shrink-0 border-b border-muted @max-[560px]:gap-2 @max-[560px]:px-2">
-      {tabs}
-      {commit}
+    <div className="flex flex-col shrink-0 gap-2 px-2 py-2 border-b border-tertiary">
+      <div className="flex min-w-0 items-center gap-1.5">
+        {tabs}
+        <span className="flex-1" />
+        {reveal}
+        {commit}
+      </div>
+      {scope ? <div className="flex min-w-0">{scope}</div> : null}
     </div>
   );
 }
@@ -111,7 +212,7 @@ export function FilesBranchRow({
   return (
     <div className="flex min-w-0 items-center px-2 pb-2">
       {readOnly ? (
-        <span className="label-micro flex min-w-0 items-center gap-1.5 py-1 pl-1 text-btn-secondary">
+        <span className="type-meta-strong flex min-w-0 items-center gap-1.5 py-1 pl-1 text-basic-secondary">
           <Icon iconName={IconName.Scheme} size={16} className="shrink-0" />
           <span className="truncate">{branch}</span>
         </span>

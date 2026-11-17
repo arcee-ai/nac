@@ -10,6 +10,7 @@ import {
   parseDelegatedCompletion,
   type DelegatedCompletion,
 } from "@/app/features/delegation/completion";
+import { parseGoalContinuation } from "@/app/features/goals/continuation";
 import type { JsonObject, JsonValue } from "@/app/lib/json";
 import { isString } from "@/app/lib/primitive";
 import { stripNativeToolMarkup } from "@/app/lib/toolMarkup";
@@ -133,7 +134,25 @@ export interface DelegatedCompletionTurn {
   createdAt: string | null;
 }
 
-export type TranscriptTurn = UserTurn | ModelTurn | DelegatedCompletionTurn;
+/**
+ * A run NAC admitted for a durable goal. Its stored message is the control
+ * prompt the model reads; the transcript shows only the goal and objective.
+ */
+export interface GoalContinuationTurn {
+  kind: "goal-continuation";
+  key: string;
+  goalId: string;
+  objective: string;
+  /**
+   * The goal's first run in a fully loaded transcript. Unknown, and so false,
+   * while older messages are still unloaded.
+   */
+  first: boolean;
+  messageIndex: number;
+  createdAt: string | null;
+}
+
+export type TranscriptTurn = UserTurn | ModelTurn | DelegatedCompletionTurn | GoalContinuationTurn;
 
 /**
  * Key of a model turn that exists only as a stream, with nothing persisted to
@@ -624,6 +643,7 @@ export function buildTranscript(
   };
 
   const turns: TranscriptTurn[] = [];
+  const goalsSeen = new Set<string>();
   let current: ModelTurn | null = null;
   /**
    * How many entries of the duration history each model turn stands for. The
@@ -649,6 +669,20 @@ export function buildTranscript(
           messageIndex: absoluteIndex,
           createdAt: createdAt[index] ?? null,
         });
+        return;
+      }
+      const continuation = parseGoalContinuation(message.content);
+      if (continuation) {
+        turns.push({
+          kind: "goal-continuation",
+          key: `goal-continuation-${absoluteIndex}`,
+          goalId: continuation.goalId,
+          objective: continuation.objective,
+          first: windowStart === 0 && !goalsSeen.has(continuation.goalId),
+          messageIndex: absoluteIndex,
+          createdAt: createdAt[index] ?? null,
+        });
+        goalsSeen.add(continuation.goalId);
         return;
       }
       turns.push({

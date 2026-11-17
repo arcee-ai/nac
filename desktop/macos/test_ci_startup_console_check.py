@@ -9,6 +9,57 @@ from unittest.mock import patch
 
 import ci_startup_console_check as check
 import ci_startup_fixture as fixture
+import test_ci_startup_console as console
+
+
+class ConsoleRecordingSourceTests(unittest.TestCase):
+    def source(self):
+        data = Path(__file__).with_name('startup_xctest').joinpath('StartupJourneys.swift').read_bytes()
+        self.assertEqual(hashlib.sha256(data).hexdigest(), fixture.TEST_FILES['StartupJourneys.swift'])
+        return data.decode()
+
+    def trace(self, source, case):
+        # Exercise the real source-trace assertions with isolated mutant bytes.
+        # Only this synthetic control replaces their digest; production source
+        # admission still requires the exact nominated checkout and inventory.
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / 'StartupJourneys.swift'
+            path.write_text(source)
+            hashes = {**fixture.TEST_FILES, 'StartupJourneys.swift': hashlib.sha256(path.read_bytes()).hexdigest()}
+            with patch.dict(os.environ, {'NAC_STARTUP_TEST_SOURCE': str(path)}), \
+                    patch.object(console, 'TEST_FILES', hashes):
+                return console.StartupConsoleTests().source_trace(case)
+
+    def test_checked_default_and_nonrecorded_input_checks_keep_exact_export_counts(self):
+        source = self.source()
+        self.assertEqual(len(fixture.operations({'scenario': 'configuredLocal', 'home': '/private/owned home'})), 11)
+        for case, expected in (('onboarding', 5), ('configuredLocal', 27), ('invalidConfig', 4), ('futureStore', 4)):
+            with self.subTest(case=case):
+                self.assertEqual(len(self.trace(source, case)), expected)
+
+    def test_missing_swallowed_disabled_or_wrong_default_recording_is_rejected(self):
+        source = self.source()
+        ordinary = 'try guardWindow(ui, running: running, paths: paths, launch: launch, number: number)'
+        immediate = ordinary[:-1] + ', record: false)'
+        record = 'if record { observations.append(state) }'
+        mutations = {
+            'wrong-default': ('record: Bool = true', 'record: Bool = false'),
+            'missing-console': ('let state = try console()', 'let state: [String: Any] = [:]'),
+            'swallowed-console': ('let state = try console()', 'let state = (try? console()) ?? [:]'),
+            'disabled-recording': (record, 'if false { observations.append(state) }'),
+            'missing-recording': (record, '_ = state'),
+            'unconditional-recording': (record, 'observations.append(state)'),
+            'duplicate-recording': (record, record + '\n        observations.append(state)'),
+            'ordinary-not-recorded': (ordinary, immediate),
+            'immediate-recorded': (immediate, ordinary[:-1] + ', record: true)'),
+            'missing-immediate-check': (immediate, '_ = number'),
+        }
+        for name, (before, after) in mutations.items():
+            self.assertEqual(source.count(before), 1, name)
+            changed = source.replace(before, after, 1)
+            for case in fixture.CASES:
+                with self.subTest(mutation=name, case=case), self.assertRaises(AssertionError):
+                    self.trace(changed, case)
 
 
 class RequiredConsoleTests(unittest.TestCase):
@@ -22,32 +73,63 @@ class RequiredConsoleTests(unittest.TestCase):
         hashes = {name: hashlib.sha256(data).hexdigest() for name, data in payloads.items()}
         return directory, hashes
 
-    def test_panel_gate_requires_exactly_nine_with_zero_skips(self):
+    def test_panel_gate_requires_exactly_forty_four_with_zero_skips(self):
         def skip():
             raise unittest.SkipTest('panel proof skipped')
         good = unittest.TextTestRunner(stream=io.StringIO()).run(
-            unittest.TestSuite([unittest.FunctionTestCase(lambda: None) for _ in range(9)]))
-        check.require_complete(good, 9)
+            unittest.TestSuite([unittest.FunctionTestCase(lambda: None) for _ in range(44)]))
+        check.require_complete(good, 44)
         bad = unittest.TextTestRunner(stream=io.StringIO()).run(
-            unittest.TestSuite([unittest.FunctionTestCase(lambda: None) for _ in range(8)]
+            unittest.TestSuite([unittest.FunctionTestCase(lambda: None) for _ in range(43)]
                                + [unittest.FunctionTestCase(skip)]))
-        with self.assertRaisesRegex(RuntimeError, 'all 9 tests with zero skips'):
-            check.require_complete(bad, 9)
-        with self.assertRaisesRegex(RuntimeError, 'zero skips'):
-            check.require_complete(good, 8)
+        with self.assertRaisesRegex(RuntimeError, 'all 44 tests with zero skips'):
+            check.require_complete(bad, 44)
+        for wrong_count in (43, 45):
+            with self.assertRaisesRegex(RuntimeError, 'zero skips'):
+                check.require_complete(good, wrong_count)
 
-    def test_nine_total_cannot_hide_wrong_six_plus_three_class_distribution(self):
+    def test_actual_nominated_panel_classes_require_six_seven_thirty_one_without_execution(self):
+        source = Path(check.__file__).with_name('startup_xctest').joinpath('StartupJourneys.swift')
+        result = unittest.TestResult()
+        result.testsRun = 44
+        with patch.object(check.sys, 'platform', 'darwin'), patch.object(check, 'admit_source', return_value=source), \
+                patch.object(check.unittest, 'TextTestRunner') as runner:
+            runner.return_value.run.return_value = result
+            self.assertIs(check.run_required('/unused', panel=True), result)
+            suite = runner.return_value.run.call_args.args[0]
+            self.assertEqual([group.countTestCases() for group in suite], [6, 7, 31])
+            names = [case.id() for group in suite for case in group]
+            self.assertTrue(any('catch_preserves_error_identity' in name for name in names))
+            self.assertTrue(any('float_selection' in name for name in names))
+
+    def test_thirty_or_thirty_two_receipt_controls_fail_before_any_runner(self):
+        source = Path(check.__file__).with_name('startup_xctest').joinpath('StartupJourneys.swift')
+        loader = check.unittest.defaultTestLoader.loadTestsFromTestCase
+        for count in (30, 32):
+            def load(case):
+                if case.__name__ == 'ReceiptControls':
+                    return unittest.TestSuite([unittest.FunctionTestCase(lambda: None) for _ in range(count)])
+                return loader(case)
+            with self.subTest(count=count), patch.object(check.sys, 'platform', 'darwin'), \
+                    patch.object(check, 'admit_source', return_value=source), \
+                    patch.object(check.unittest.defaultTestLoader, 'loadTestsFromTestCase', side_effect=load), \
+                    patch.object(check.unittest, 'TextTestRunner') as runner:
+                with self.assertRaisesRegex(RuntimeError, 'exact thirty-one'):
+                    check.run_required('/unused', panel=True)
+                runner.assert_not_called()
+
+    def test_thirteen_total_cannot_hide_wrong_six_plus_seven_class_distribution(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve(); directory, hashes = self.source(root)
             text = 'import unittest\n'
-            for name, count in (('NativeFolderPolicyTests', 5), ('AXRefusalTests', 4)):
+            for name, count in (('NativeFolderPolicyTests', 5), ('AXRefusalTests', 8)):
                 text += 'class ' + name + '(unittest.TestCase):\n'
                 text += ''.join('    def test_' + str(n) + '(self): pass\n' for n in range(count))
             (directory / 'test_contract.py').write_text(text)
             hashes['test_contract.py'] = hashlib.sha256(text.encode()).hexdigest()
             with patch.object(check.sys, 'platform', 'darwin'), patch.object(fixture, 'TEST_FILES', hashes), \
                     patch.object(fixture, 'require_checkout'), patch.object(check.unittest, 'TextTestRunner') as runner:
-                with self.assertRaisesRegex(RuntimeError, 'exact six geometry and three AX'):
+                with self.assertRaisesRegex(RuntimeError, 'exact six geometry and seven AX'):
                     check.run_required(root, panel=True)
                 runner.assert_not_called()
 

@@ -89,20 +89,21 @@ body,
 body {
   background-color: var(--color-bg-elevation-ground);
   color: var(--color-text-basic-primary);
-  font-family:
-    Inter,
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    Roboto,
-    sans-serif;
+  font-family: var(--font-sans);
+  font-size: var(--type-sm);
+  font-feature-settings: var(--font-features);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background-color: color-mix(in oklch, var(--f-blue) 22%, transparent);
 }
 
 *::-webkit-scrollbar {
-  width: 4px;
-  height: 4px;
+  width: 8px;
+  height: 8px;
 }
 
 *::-webkit-scrollbar-track {
@@ -110,8 +111,14 @@ body {
 }
 
 *::-webkit-scrollbar-thumb {
-  background-color: var(--color-bg-divider-tertiary);
-  border-radius: 2px;
+  background-color: var(--f-wash-4);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 9999px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--f-line-ink);
 }
 
 /* Where two scrollbars meet WebKit paints an opaque white square unless this

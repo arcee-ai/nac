@@ -89,7 +89,9 @@ final class StartupSmoke {
             }
             write()
             RunLoop.main.perform(inModes: [.common]) { [self] in
-                MainActor.assumeIsolated { app.window.performClose(nil) }
+                // ALL-344 close now preserves normal work. Fixture cleanup
+                // explicitly selects Stop on the real native Quit sheet.
+                MainActor.assumeIsolated { app.quit.stopFixture() }
             }
         }
     }
@@ -117,15 +119,16 @@ final class StartupSmoke {
         let workingFolder = "[...document.querySelectorAll('button')].find(b => b.textContent.trim() === \(json(initial)) || b.textContent.includes('/path/to/project'))"
         try await waitJS("working-folder control", "return !!(\(workingFolder));")
         _ = try await js("\(workingFolder).click(); return true;")
-        try await waitJS("shared folder picker", "return !!document.querySelector('input[placeholder=\"/path/to/directory\"]');")
-        _ = try await js("""
-        const input = document.querySelector('input[placeholder="/path/to/directory"]');
-        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input, \(json(workspace)));
-        input.dispatchEvent(new Event('input',{bubbles:true})); return true;
-        """)
-        _ = try await js("document.querySelector('input[placeholder=\"/path/to/directory\"]').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true})); return true;")
-        try await waitJS("selected working folder", "return document.body.innerText.includes(\(json("Selected: " + workspace)));")
-        _ = try await js("[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Select' && !b.disabled).click(); return true;")
+        // LOCAL_APP hands Working Folder to the real AppKit sheet. The smoke
+        // settles that open sheet with the fixture folder through the panel's
+        // own checks; NativePathJourney's XCTest covers a person's clicks in it.
+        try await wait("native folder sheet") {
+            self.app.window.attachedSheet is NSOpenPanel && self.app.nativePaths?.smokeSnapshot["pending"] as? Bool == true
+        }
+        guard app.nativePaths?.smokeChooseFolder(workspace) == true else {
+            throw DesktopStartupError.message("Native folder sheet had no pending request to settle")
+        }
+        try await waitJS("selected working folder", "return [...document.querySelectorAll('button')].some(b => b.getAttribute('aria-label') === \(json("Choose Working Folder: " + workspace)));")
         if vendor { try await selectVendorModel() }
         try await waitJS("configured project ready", "return [...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Create Project' && !b.disabled);")
         _ = try await js("[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Create Project' && !b.disabled).click(); return true;")
@@ -213,7 +216,13 @@ final class StartupSmoke {
 
     private func commandJourney() async throws {
         if scenario.contains("mcp") {
-            _ = try await js("document.querySelector('button[aria-label^=\"MCP servers\"]').click(); return true;")
+            // MCP servers is a Settings section: the sidebar's Settings gear,
+            // then the section link (the shell has no MCP button).
+            try await waitJS("shared Settings navigation", "return !!document.querySelector('button[aria-label=Settings]');")
+            _ = try await js("document.querySelector('button[aria-label=Settings]').click(); return true;")
+            let mcpEntry = "[...(document.querySelector('nav[aria-label=\"Settings sections\"]')?.querySelectorAll('a') || [])].find(a => a.textContent.trim() === 'MCP servers')"
+            try await waitJS("shared Settings sections", "return !!(\(mcpEntry));")
+            _ = try await js("\(mcpEntry).click(); return true;")
             try await waitJS("shared MCP library", "return [...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Custom server');")
             _ = try await js("[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Custom server').click(); return true;")
             try await waitJS("MCP transport choices", "return [...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Stdio');")

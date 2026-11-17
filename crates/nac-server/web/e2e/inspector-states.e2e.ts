@@ -1,4 +1,4 @@
-import { createDirectSession, expect, showSidePanel, test } from "./harness";
+import { createDirectSession, expect, showPhonePanel, showSidePanel, test } from "./harness";
 import {
   captureInspector,
   serveInspectorVersion,
@@ -35,12 +35,11 @@ test("captures matched inspector loading, error and empty states", async ({
           return route.fallback();
         });
         await page.goto(`${harness.baseUrl}/#/session/${parent}/delegated`);
-        if (width < 768)
-          await page.getByRole("button", { name: "Open panel", exact: true }).click();
+        if (width < 768) await showPhonePanel(page, "Subagents");
         else {
           await showSidePanel(page);
-          if (width < 1280)
-            await page.getByRole("button", { name: "Open list", exact: true }).click();
+          const list = page.getByRole("button", { name: "Open list", exact: true });
+          if (width < 1280 && (await list.isVisible())) await list.click();
         }
         await expect(page.getByText("Loading subagents…", { exact: true }).first()).toBeVisible();
         await captureInspector(page, `${version}-${width}-subagents-loading`);
@@ -53,7 +52,8 @@ test("captures matched inspector loading, error and empty states", async ({
         await expect(page.getByText("No subagents yet", { exact: true })).toBeVisible();
         await expect(alert).toHaveCount(0);
         await captureInspector(page, `${version}-${width}-subagents-empty`);
-        await page.getByRole("tab", { name: "Insights", exact: true }).click();
+        if (width < 768) await showPhonePanel(page, "Insights");
+        else await page.getByRole("tab", { name: "Insights", exact: true }).click();
         await expect(page.getByText("No insights yet", { exact: true })).toBeVisible();
         await captureInspector(page, `${version}-${width}-insights-no-selection`);
       } finally {

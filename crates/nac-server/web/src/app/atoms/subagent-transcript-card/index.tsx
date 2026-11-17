@@ -5,8 +5,6 @@ import { cn } from "../../lib/cn";
 import { sessionBehaviorName } from "../../lib/sessionBehavior";
 import type { SessionBehavior, SessionLineage } from "../../types/api";
 import Icon, { IconName } from "../icon";
-import ModelLoader, { ModelLoaderSize } from "../model-loader";
-import SessionBehaviorIcon, { SessionBehaviorIconSize } from "../session-behavior-icon";
 
 export enum SubagentCardStatus {
   Ready = "ready",
@@ -42,11 +40,23 @@ interface SubagentTranscriptCardProps {
   className?: string;
 }
 
-const TITLE_TONE: Record<SubagentCardStatus, string> = {
-  [SubagentCardStatus.Ready]: "text-basic-primary",
-  [SubagentCardStatus.Running]: "text-shimmer-basic",
-  [SubagentCardStatus.Failed]: "text-basic-primary",
-  [SubagentCardStatus.NotFound]: "text-basic-muted",
+/**
+ * The status ladder's dot for each card state, drawn as `StatusDot` draws it.
+ * The card's own words carry the state, so the dot stays out of its text.
+ */
+const DOT: Record<SubagentCardStatus, string> = {
+  [SubagentCardStatus.Ready]: "bg-[var(--f-green)]",
+  [SubagentCardStatus.Running]: "bg-[var(--f-ink)] status-dot-pulse",
+  [SubagentCardStatus.Failed]: "bg-[var(--f-red)]",
+  [SubagentCardStatus.NotFound]: "bg-[var(--f-ink-5)] opacity-60",
+};
+
+/** What the state line says when the card is given no outcome of its own. */
+const STATE_TEXT: Record<SubagentCardStatus, string> = {
+  [SubagentCardStatus.Ready]: "Ready",
+  [SubagentCardStatus.Running]: "Working…",
+  [SubagentCardStatus.Failed]: "Failed",
+  [SubagentCardStatus.NotFound]: "No session found",
 };
 
 const STATUS_NAME: Record<SubagentCardStatus, string | null> = {
@@ -57,53 +67,14 @@ const STATUS_NAME: Record<SubagentCardStatus, string | null> = {
 };
 
 const LINK_CLASS = cn(
-  "pointer-events-auto relative z-10 flex h-7 min-w-0 items-center gap-1 rounded-interaction p-1 label-micro",
-  "text-btn-secondary hover:text-btn-secondary-hovered active:text-btn-secondary-pressed",
-  "[&_.icon]:text-fill-btn-secondary hover:[&_.icon]:text-fill-btn-secondary-hovered active:[&_.icon]:text-fill-btn-secondary-pressed",
-  "-outline-offset-2 outline-[var(--color-border-focus-outline)] focus-visible:outline-2",
+  "pointer-events-auto relative z-10 inline-flex h-7 shrink-0 items-center gap-0.5 rounded-pill pl-2.5 pr-1.5 type-meta-strong",
+  "text-basic-secondary transition-colors duration-150 ease-out hover:bg-[var(--f-wash-2)] hover:text-basic-primary max-md:min-h-11",
+  "outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus-outline)]",
 );
 
-function CardLeading({
-  status,
-  behavior,
-  lineage,
-  showBehaviorIcon,
-}: Pick<SubagentTranscriptCardProps, "status" | "behavior" | "lineage" | "showBehaviorIcon">) {
-  switch (status) {
-    case SubagentCardStatus.Running:
-      return <ModelLoader size={ModelLoaderSize.Medium} />;
-    case SubagentCardStatus.Failed:
-      return (
-        <Icon
-          iconName={IconName.Close}
-          size={20}
-          aria-hidden
-          className="shrink-0 text-error-primary"
-        />
-      );
-    case SubagentCardStatus.NotFound:
-      return (
-        <Icon
-          iconName={IconName.Close}
-          size={20}
-          aria-hidden
-          className="shrink-0 text-fill-btn-secondary-disabled"
-        />
-      );
-    default:
-      return showBehaviorIcon ? (
-        <SessionBehaviorIcon
-          behavior={behavior}
-          lineage={lineage}
-          size={SessionBehaviorIconSize.Medium}
-          className="text-fill-btn-secondary"
-        />
-      ) : null;
-  }
-}
-
 /**
- * A child session in its parent's transcript.
+ * A child session in its parent's transcript: a small quiet card with the
+ * status ladder's dot, the child's title, one line of state and a way to it.
  *
  * The card is a `div`, so no interactive element nests in another: a stretched
  * button opens the child in Subagents and the "Go to session" link sits above
@@ -139,13 +110,17 @@ const SubagentTranscriptCard: React.FC<SubagentTranscriptCardProps> = ({
       : null;
   const openName = [`Open ${title} in Subagents`, typeName, statusName].filter(Boolean).join(", ");
 
+  // The behavior glyph gave way to the status dot, so the type is in words here.
+  const state = [typeName, label ?? STATE_TEXT[status]].filter(Boolean).join(" · ");
+
   return (
     <div
       title={notFound ? undefined : title}
       className={cn(
-        "relative isolate flex w-[320px] max-w-full min-w-0 flex-col gap-4 rounded-[16px] p-3",
-        "bg-elevation-level-1",
-        "-outline-offset-2 outline-[var(--color-border-focus-outline)] has-[>button:focus-visible]:outline-2",
+        "relative isolate flex w-[440px] max-w-full min-w-0 items-center gap-3 rounded-card border border-tertiary px-3.5 py-2.5",
+        "bg-elevation-level-1 transition-colors duration-150 ease-out",
+        openable && "hover:border-secondary",
+        "has-[>button:focus-visible]:ring-2 has-[>button:focus-visible]:ring-[var(--color-border-focus-outline)]",
         className,
       )}
     >
@@ -155,63 +130,49 @@ const SubagentTranscriptCard: React.FC<SubagentTranscriptCardProps> = ({
           aria-label={openName}
           aria-describedby={reason ? errorId : undefined}
           onClick={onOpen}
-          className="absolute inset-0 rounded-[inherit] outline-none hover:bg-btn-ghost-hovered active:bg-btn-ghost-pressed"
+          className="absolute inset-0 rounded-[inherit] outline-none hover:bg-[var(--f-wash-1)] active:bg-[var(--f-wash-2)]"
         />
       ) : null}
+      <span aria-hidden className="relative flex size-4 shrink-0 items-center justify-center">
+        <span className={cn("block size-2 rounded-pill", DOT[status])} />
+      </span>
       <div
-        className={cn(
-          "relative flex min-w-0 items-start gap-2.5 p-1",
-          openable && "pointer-events-none",
-        )}
+        className={cn("relative flex min-w-0 flex-1 flex-col", openable && "pointer-events-none")}
       >
-        <CardLeading
-          status={status}
-          behavior={behavior}
-          lineage={lineage}
-          showBehaviorIcon={showBehaviorIcon}
-        />
-        <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <span className={cn("truncate label-small", TITLE_TONE[status])}>
-            {notFound ? "Not found" : title}
-          </span>
-          {reason ? (
-            <p
-              id={errorId}
-              title={reason}
-              className="line-clamp-3 text-xs break-words text-error-primary"
-            >
-              {reason}
-            </p>
-          ) : null}
-        </div>
-        {typeName && !openable ? <span className="sr-only">, {typeName}</span> : null}
-      </div>
-      {notFound ? (
-        <div className="relative flex h-7 min-w-0 items-center justify-end p-1">
-          <span className="truncate text-xs text-basic-muted">No session found</span>
-        </div>
-      ) : label || href ? (
-        <div
+        <span
           className={cn(
-            "relative flex h-7 min-w-0 items-center justify-end gap-1",
-            openable && "pointer-events-none",
+            "truncate type-label",
+            notFound ? "text-basic-muted" : "text-basic-primary",
           )}
         >
-          {label ? (
-            <span className="min-w-0 truncate px-1 text-xs text-basic-muted">{label}</span>
+          {notFound ? "Not found" : title}
+        </span>
+        <span
+          title={reason ?? undefined}
+          className={cn(
+            "truncate type-meta",
+            status === SubagentCardStatus.Failed ? "text-error-primary" : "text-basic-tertiary",
+          )}
+        >
+          <span>{state}</span>
+          {reason ? (
+            <>
+              <span aria-hidden> · </span>
+              <span id={errorId}>{reason}</span>
+            </>
           ) : null}
-          {href ? (
-            <a
-              href={href}
-              onClick={onSessionLinkClick}
-              aria-label={`Go to session ${title}`}
-              className={LINK_CLASS}
-            >
-              <span className="truncate">Go to session</span>
-              <Icon iconName={IconName.Right} size={16} aria-hidden className="shrink-0" />
-            </a>
-          ) : null}
-        </div>
+        </span>
+      </div>
+      {href ? (
+        <a
+          href={href}
+          onClick={onSessionLinkClick}
+          aria-label={`Go to session ${title}`}
+          className={LINK_CLASS}
+        >
+          <span>Go to session</span>
+          <Icon iconName={IconName.Right} size={14} aria-hidden className="shrink-0" />
+        </a>
       ) : null}
     </div>
   );

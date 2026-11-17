@@ -42,19 +42,20 @@ const Radio: React.FC<RadioProps> = ({
       <span
         aria-hidden="true"
         className={cn(
-          "size-4 rounded-full border shadow-concave",
-          disabled
-            ? cn("bg-btn-secondary-disabled", checked ? "border-primary" : "border-muted")
-            : "border-primary bg-btn-secondary group-hover:bg-btn-secondary-hovered group-active:bg-btn-secondary-pressed",
+          "size-4 rounded-pill border transition-colors duration-150 ease-out motion-reduce:transition-none",
+          checked
+            ? disabled
+              ? "border-transparent bg-btn-primary-disabled"
+              : "border-transparent bg-btn-primary group-hover:bg-btn-primary-hovered"
+            : disabled
+              ? "border-muted bg-btn-secondary-disabled"
+              : "border-secondary bg-btn-secondary group-hover:border-[var(--f-line-ink)] group-active:bg-btn-secondary-pressed",
         )}
       />
       {checked ? (
         <span
           aria-hidden="true"
-          className={cn(
-            "pointer-events-none absolute left-1/2 top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full shadow-convex",
-            disabled ? "radio-mark-disabled" : "radio-mark",
-          )}
+          className="pointer-events-none absolute left-1/2 top-1/2 size-1.5 -translate-x-1/2 -translate-y-1/2 rounded-pill bg-[var(--color-fill-btn-primary)]"
         />
       ) : null}
       <span
@@ -63,7 +64,9 @@ const Radio: React.FC<RadioProps> = ({
       />
     </span>
     {children ? (
-      <span className={cn("label-small", disabled ? "text-basic-muted" : "text-basic-primary")}>
+      <span
+        className={cn("type-body-chrome", disabled ? "text-basic-muted" : "text-basic-primary")}
+      >
         {children}
       </span>
     ) : null}

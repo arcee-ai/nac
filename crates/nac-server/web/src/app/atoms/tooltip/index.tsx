@@ -11,8 +11,9 @@ import Popover from "../popover";
 export { AnchorPlacement as TooltipPosition };
 type TooltipPosition = AnchorPlacement;
 
+/** An inverse ink chip: 12px type, a small corner, only the softest lift. */
 const BOX_BASE =
-  "tooltip-box text-left w-max h-fit max-w-[240px] flex flex-col gap-1 shadow-xl bg-elevation-ground-inverse p-2 rounded-interaction fade motion-reduce:!animate-none";
+  "tooltip-box text-left w-max h-fit max-w-[260px] flex flex-col gap-0.5 shadow-md bg-elevation-ground-inverse px-2 py-1.5 rounded-md fade motion-reduce:!animate-none";
 
 interface TooltipTextProps {
   title?: React.ReactNode;
@@ -34,7 +35,7 @@ const TooltipText: React.FC<TooltipTextProps> = ({
     <div className="flex gap-2 items-center">
       <div
         className={cn(
-          isMobile ? "label-medium" : "label-micro",
+          isMobile ? "type-label" : "type-meta-strong",
           "flex-grow",
           inverted ? "text-primary-inverse" : "text-basic-primary",
         )}
@@ -51,7 +52,7 @@ const TooltipText: React.FC<TooltipTextProps> = ({
       <div
         className={cn(
           "w-fit h-fit",
-          inverted ? "text-micro text-secondary-inverse" : "text-medium text-basic-secondary",
+          inverted ? "type-meta text-secondary-inverse" : "type-body-chrome text-basic-secondary",
         )}
       >
         {description}
@@ -104,8 +105,8 @@ const MobileTooltip: React.FC<MobileTooltipProps> = ({
         <div className="px-4 py-2 flex overflow-hidden gap-3">
           <Icon
             iconName={IconName.Info}
-            size={24}
-            className="w-6 min-w-6 max-w-6"
+            size={20}
+            className="mt-px w-5 min-w-5 max-w-5"
             color="var(--color-fill-basic-tertiary)"
           />
           <div className="flex flex-col gap-2 min-w-0">

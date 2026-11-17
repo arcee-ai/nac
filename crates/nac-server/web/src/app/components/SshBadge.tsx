@@ -13,8 +13,9 @@ import { cn } from "@/app/lib/cn";
 export type SshBadgeState = "connected" | "disconnected" | "reconnect";
 
 /**
- * Compact SSH status label for the chat bar and settings header. Connected is
- * quiet cyan; a break shows the warning glyph, and reconnect adds a refresh.
+ * Compact SSH status label for the composer row and settings header. Connected
+ * is quiet ink; a break shows the warning glyph in red, and reconnect adds a
+ * refresh.
  */
 export function SshBadge({
   state,
@@ -30,7 +31,10 @@ export function SshBadge({
     <div className={cn("flex items-center h-4 shrink-0", broken ? "gap-1" : null, className)}>
       {broken ? <Icon iconName={IconName.Danger} size={16} className="text-error-primary" /> : null}
       <span
-        className={cn("tag-label uppercase", broken ? "text-error-primary" : "text-info-primary")}
+        className={cn(
+          "type-tag rounded-xs px-1 leading-4",
+          broken ? "text-error-primary" : "bg-[var(--f-wash-2)] text-basic-secondary",
+        )}
       >
         SSH
       </span>

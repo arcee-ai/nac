@@ -11,6 +11,15 @@ struct EngineIdentity: Codable, Equatable {
     let build_id: String
     let source_revision: String
     let track: String
+
+    var isNativeAuthFixture: Bool { build_id.hasPrefix("native-auth-fixture-v1-") }
+    var matchesShellBuild: Bool {
+        #if NATIVE_AUTH_FIXTURE
+        return isNativeAuthFixture && track == "dev"
+        #else
+        return !isNativeAuthFixture
+        #endif
+    }
 }
 
 struct EngineReceipt: Decodable {
@@ -38,6 +47,9 @@ final class EngineProtocol {
     private(set) var ready: EngineReceipt?
 
     init(identity: EngineIdentity, store: URL) throws {
+        guard identity.matchesShellBuild else {
+            throw PreviewError.message("The bundled engine does not match this app's normal or isolated auth-fixture build.")
+        }
         self.identity = identity
         guard let parent = realpath(store.deletingLastPathComponent().path, nil) else {
             throw PreviewError.message("Could not resolve the selected store directory.")
@@ -77,11 +89,9 @@ final class EngineProtocol {
             pending.removeAll(keepingCapacity: true)
             guard receipt.version == 1, receipt.incarnation == incarnation else { throw invalid() }
             if receipt.kind == "failed" {
+                guard ready == nil else { throw invalid() }
                 // Display a shell-owned message; never render arbitrary peer bytes.
-                if receipt.stage == "startup", receipt.code == "store_schema_incompatible" {
-                    throw PreviewError.message("The selected store uses a newer database schema. Quit NAC and reopen this store with a compatible version of NAC. Keep your configuration and data; do not delete or downgrade the store. No alternative store was selected.")
-                }
-                throw PreviewError.message("The bundled engine could not initialize its selected store or listener. Check directory access and whether another NAC process owns this store.")
+                throw EngineFailure.startup(stage: receipt.stage, code: receipt.code)
             }
             guard receipt.kind == "ready", ready == nil,
                   receipt.identity == identity, receipt.store == store,

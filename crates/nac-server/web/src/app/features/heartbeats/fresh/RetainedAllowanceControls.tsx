@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Input } from "@/app/atoms";
+import { Button, ButtonVariant, Input } from "@/app/atoms";
 import type { FreshTaskRetainedAllowance } from "@/app/types/api";
 import { useFreshRetainedAllowance } from "./queries";
 
@@ -18,13 +18,13 @@ export function RetainedAllowanceControls({
   return (
     <section
       aria-label="Host retained task allowance"
-      className="rounded border border-muted p-3 flex flex-col gap-3"
+      className="type-body-chrome flex flex-col gap-3 rounded-lg bg-elevation-sublevel-variant-A p-4 text-basic-secondary"
     >
-      <p>
+      <p className="tabular text-basic-primary">
         Host retained resources: {allowance.retained_count} / {allowance.retained_limit} across all
         interval task schedules.
       </p>
-      <p className="text-small text-basic-muted">
+      <p className="type-meta text-basic-tertiary">
         Reservations and partial launches count even after task deletion. A limit change preserves
         existing resources and suspended schedules; review a suspended schedule before resuming it.
       </p>
@@ -49,16 +49,18 @@ export function RetainedAllowanceControls({
             onChange={(event) => setDraft({ ...draft, limit: event.target.valueAsNumber })}
           />
           <div className="flex flex-wrap gap-2">
-            <Button type="submit" disabled={disabled || busy}>
+            <Button type="submit" variant={ButtonVariant.Primary} disabled={disabled || busy}>
               Save host allowance
             </Button>
-            <Button disabled={busy} onClick={() => setDraft(null)}>
+            <Button variant={ButtonVariant.Ghost} disabled={busy} onClick={() => setDraft(null)}>
               Cancel host allowance change
             </Button>
           </div>
         </form>
       ) : (
         <Button
+          variant={ButtonVariant.Secondary}
+          className="self-start"
           disabled={disabled || busy}
           onClick={() =>
             setDraft({ revision: allowance.revision, limit: allowance.retained_limit })
@@ -68,15 +70,21 @@ export function RetainedAllowanceControls({
         </Button>
       )}
       {command.error && (
-        <div role="alert" className="flex flex-col gap-2">
+        <div role="alert" className="flex flex-col items-start gap-2 text-error-primary">
           <p>{command.error.message}</p>
           {command.intent && (
-            <Button disabled={command.control.isPending} onClick={command.retry}>
+            <Button
+              variant={ButtonVariant.Secondary}
+              disabled={command.control.isPending}
+              onClick={command.retry}
+            >
               Retry same allowance request
             </Button>
           )}
           {command.rejected && (
-            <Button onClick={command.reviewLatest}>Review latest host allowance</Button>
+            <Button variant={ButtonVariant.Secondary} onClick={command.reviewLatest}>
+              Review latest host allowance
+            </Button>
           )}
         </div>
       )}

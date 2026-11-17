@@ -74,28 +74,50 @@ async function retainedJourney(
   const invoking = await createSession(request, harness, "direct", project);
   await page.goto(`${harness.baseUrl}/#/session/${invoking}/files`);
   await expect(page.getByRole("combobox", { name: "Message" })).toBeVisible();
-  // A broken source fails visibly; ordinary creation requires explicit intent.
+  // A broken source never offers an isolated checkout, and nothing is
+  // created until the user explicitly starts an ordinary session.
   const metadata = path.join(harness.runRoot, "saved-git-metadata");
   await fs.rename(path.join(repo, ".git"), metadata);
   await fs.writeFile(path.join(repo, ".git"), "gitdir: /missing-nac-gitdir\n");
+  const sourceRead = () =>
+    page.waitForResponse(
+      (response) => new URL(response.url()).pathname === `/projects/${project}/task-launch-source`,
+    );
+  const brokenSource = sourceRead();
   await page
     .getByRole("button", { name: /^New [Ss]ession$/ })
     .first()
     .click();
-  await page.getByRole("button", { name: "Agent Session", exact: true }).click();
-  const sourceError = page.getByRole("dialog").filter({ hasText: "Git source unavailable" });
-  await expect(sourceError).toBeVisible();
-  await sourceError.getByRole("button", { name: "Use existing checkout" }).click();
-  await expect(sourceError).not.toBeVisible();
-  await expect(page).not.toHaveURL(new RegExp(invoking));
+  // New session is Home's composer, preset to this session's project.
+  await expect(page).toHaveURL(`${harness.baseUrl}/#/?project=${project}`);
+  const prompt = page.getByRole("textbox", { name: "What should we work on?", exact: true });
+  await expect(prompt).toBeFocused();
+  // Isolated checkouts are a direct-agent choice; pick Agent when orchestration offers others.
+  const chooseAgent = async () => {
+    const behavior = page.getByRole("button", { name: /^Behavior: / });
+    // The chips render with the composer; wait for them before deciding.
+    await expect(page.getByRole("button", { name: /^Project: / })).toBeVisible();
+    if ((await behavior.count()) === 0) return;
+    await behavior.click();
+    await page.getByRole("menuitemradio", { name: /^Agent(?! \+)/ }).click();
+  };
+  await chooseAgent();
+  const broken = await brokenSource;
+  const brokenBody = broken.ok() ? await broken.json() : null;
+  // Either the read fails or it reports the source ineligible; neither offers isolation.
+  expect(brokenBody?.eligible ?? false).toBe(false);
+  const isolated = page.getByRole("button", { name: "Isolated checkout" });
+  await expect(isolated).toHaveCount(0);
+  expect((await (await request.get(`${harness.baseUrl}/sessions`)).json()).length).toBe(1);
   await fs.unlink(path.join(repo, ".git"));
   await fs.rename(metadata, path.join(repo, ".git"));
-  await page.goto(`${harness.baseUrl}/#/session/${invoking}/files`);
-  await page
-    .getByRole("button", { name: /^New [Ss]ession$/ })
-    .first()
-    .click();
-  await page.getByRole("button", { name: "Agent Session", exact: true }).click();
+  await page.reload();
+  await chooseAgent();
+  // An eligible source offers the opt-in isolated checkout.
+  await isolated.click();
+  await expect(isolated).toHaveAttribute("aria-pressed", "true");
+  await prompt.fill("FIRST_RETAINED_BRIEF");
+  await page.getByRole("button", { name: "Set up isolated task", exact: true }).click();
   const dialog = page.getByRole("dialog").filter({ hasText: "New isolated task" });
   await expect(dialog).toBeVisible();
   await dialog

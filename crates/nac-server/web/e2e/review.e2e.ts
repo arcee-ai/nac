@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
-import { createDirectSession, expect, test, waitForRunIdle } from "./harness";
+import { createDirectSession, expect, showSessionPanel, test, waitForRunIdle } from "./harness";
 
 // Runs only against a `review-fixture` build (make test-e2e-review), whose
 // scripted reviewer rejects reads of paths containing "blocked" and approves
@@ -91,8 +91,9 @@ test("reviews eligible requests, returns blocked actions and reviews an authoriz
   await harness.provider.waitForRequestCount(3);
   await waitForRunIdle(request, harness, sessionId);
 
-  // Settled tool details live in Insights; the transcript retains their activity badge.
-  await page.getByRole("button", { name: /^Total activity: \d+\.\ds$/ }).click();
+  // Settled tool details live in Insights; the turn's work fold opens them there.
+  await page.getByRole("button", { name: /^Worked for / }).click();
+  await page.getByRole("button", { name: "Open in Insights", exact: true }).click();
   const reads = page.getByRole("group", { name: "File Read", exact: true });
   await expect(reads.filter({ hasText: "allowed.txt" })).toBeVisible();
   const blockedCall = reads.filter({ hasText: "code=review_rejected" });
@@ -131,6 +132,8 @@ test("reviews eligible requests, returns blocked actions and reviews an authoriz
     { kind: "text", text: "authorized retry complete", stream: true },
   );
 
+  // The floating Insights drawer covers the composer's permission chip.
+  await page.getByRole("button", { name: "Hide panel", exact: true }).click();
   await page.getByRole("button", { name: /^Approve for me enabled/ }).click();
   const reviews = page.getByRole("region", { name: "Automatic reviews" });
   await expect(page.getByRole("status", { name: "Review service status" })).toContainText(
@@ -145,6 +148,7 @@ test("reviews eligible requests, returns blocked actions and reviews an authoriz
 
   await harness.provider.waitForRequestCount(5);
   await waitForRunIdle(request, harness, sessionId);
+  await showSessionPanel(page, "Insights");
   await page.getByRole("button", { name: /^Total activity: \d+\.\ds, 1$/ }).click();
   await expect(reads.filter({ hasText: "blocked.txt" })).toBeVisible();
   const completed = harness.provider.requests.find(

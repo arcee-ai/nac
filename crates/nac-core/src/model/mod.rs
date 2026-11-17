@@ -276,7 +276,7 @@ pub async fn run_codex_auth_action(action: CodexAuthAction) -> Result<()> {
     match action {
         CodexAuthAction::Login => codex_auth_login().await,
         CodexAuthAction::Status => codex_auth_status(),
-        CodexAuthAction::Logout => codex_auth_logout(),
+        CodexAuthAction::Logout => codex_auth_logout().await,
     }
 }
 
@@ -484,6 +484,19 @@ pub async fn begin_managed_arcee_repair(
     })
 }
 
+/// Exercises the ordinary local device-login owner against an explicit test
+/// service. The credential retains the canonical issuer and legacy client;
+/// production `begin_login` has no endpoint override.
+#[cfg(feature = "test-support")]
+pub async fn begin_local_arcee_login_with_auth_service_for_test(
+    auth_service_base_url: &str,
+) -> Result<PendingDeviceLogin> {
+    let login = arcee::begin_local_arcee_device_login_for_test(auth_service_base_url).await?;
+    Ok(PendingDeviceLogin {
+        inner: PendingDeviceLoginKind::Arcee(login),
+    })
+}
+
 /// Test-support entry point for exercising the real managed repair lifecycle
 /// against a loopback authorization service while retaining the configured
 /// issuer as the credential's security identity.
@@ -517,10 +530,11 @@ pub fn managed_auth_snapshot(provider: ManagedAuthProvider) -> Result<ManagedAut
 }
 
 /// Removes the stored credential, reporting whether there was one to remove.
-pub fn managed_auth_logout(provider: ManagedAuthProvider) -> Result<bool> {
+/// Codex removal waits for an in-flight refresh without blocking the executor.
+pub async fn managed_auth_logout(provider: ManagedAuthProvider) -> Result<bool> {
     match provider {
         ManagedAuthProvider::Arcee => arcee::arcee_auth_remove(),
-        ManagedAuthProvider::Codex => chatgpt_codex::codex_auth_remove(),
+        ManagedAuthProvider::Codex => chatgpt_codex::codex_auth_remove().await,
     }
 }
 

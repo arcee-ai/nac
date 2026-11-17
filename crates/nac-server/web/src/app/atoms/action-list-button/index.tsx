@@ -43,7 +43,7 @@ interface ActionListButtonProps {
    */
   icon: IconName;
   label: string;
-  /** Rendered uppercase, in every status; the caller leaves it out where a row has none. */
+  /** Quiet trailing meta (a duration, a count), in every status; left out where a row has none. */
   meta?: string;
   status?: ActionListButtonStatus;
   size?: ActionListButtonSize;
@@ -166,7 +166,7 @@ const ActionListButton: React.FC<ActionListButtonProps> = ({
       {meta ? (
         <span
           className={cn(
-            "shrink-0 text-[10px] leading-[12px] uppercase text-basic-muted",
+            "shrink-0 text-2xs leading-[14px] font-medium tabular-nums text-basic-muted",
             metaClassName,
           )}
         >

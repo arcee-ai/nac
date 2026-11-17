@@ -22,22 +22,52 @@ RECEIPT_FAILURES = ('malformed', 'truncated', 'missing-receipt', 'duplicate', 'o
                     'wrong-version', 'wrong-build', 'wrong-source', 'wrong-track',
                     'wrong-store', 'wrong-incarnation', 'wrong-endpoint')
 SCENARIOS = ('normal', 'engine-exit', 'missing', 'exit', 'close-startup', 'timeout',
-             'migration-failure', 'bind-conflict') + RECEIPT_FAILURES + CASES
+             'migration-failure', 'bind-conflict', 'commands', 'commands-input') + RECEIPT_FAILURES + CASES
 
 
 def session_lock_state():
-    """Read only the lock bit; never collect the console users' identities."""
+    """Observe published lock bits only; this does not prove captured paint."""
     try:
         tree = plistlib.loads(subprocess.check_output(['/usr/sbin/ioreg', '-n', 'Root', '-d1', '-a']))
-        nodes = list(tree) if isinstance(tree, list) else [tree]
-        values = []
+        roots = list(tree) if isinstance(tree, list) else [tree]
+        nodes = [(node, True) for node in roots]
+        values, malformed = [], False
         while nodes:
-            node = nodes.pop()
+            node, is_root = nodes.pop()
             if not isinstance(node, dict):
+                malformed = True
                 continue
-            values.extend(row['CGSSessionScreenIsLocked'] for row in node.get('IOConsoleUsers', [])
-                          if isinstance(row, dict) and 'CGSSessionScreenIsLocked' in row)
-            nodes.extend(node.get('IORegistryEntryChildren', []))
+            if is_root and 'IOConsoleLocked' in node:
+                value = node['IOConsoleLocked']
+                if type(value) is bool:
+                    values.append(value)
+                else:
+                    malformed = True
+            rows = node.get('IOConsoleUsers', [])
+            if not isinstance(rows, list):
+                malformed = True
+                rows = []
+            for row in rows:
+                if not isinstance(row, dict):
+                    malformed = True
+                elif 'CGSSessionScreenIsLocked' in row:
+                    value = row['CGSSessionScreenIsLocked']
+                    if type(value) is bool:
+                        values.append(value)
+                    else:
+                        malformed = True
+            children = node.get('IORegistryEntryChildren', [])
+            if isinstance(children, list):
+                nodes.extend((child, False) for child in children)
+            else:
+                malformed = True
+        # Hosted Aqua may omit the optional CGS flags while explicitly publishing
+        # Root.IOConsoleLocked=false. Any positive locked fact still wins, and
+        # missing/malformed facts never turn into an unlocked observation.
+        if any(values):
+            return dict(observed=True, locked=True)
+        if malformed:
+            return dict(observed=False, locked=None)
         return dict(observed=bool(values), locked=any(values) if values else None)
     except (OSError, subprocess.CalledProcessError, plistlib.InvalidFileException):
         return dict(observed=False, locked=None)
@@ -170,6 +200,15 @@ def main():
         try:
             relocated = Path(temporary) / 'Moved folder with spaces' / app.name
             shutil.copytree(app, relocated)
+            command_driver = None
+            if 'commands-input' in scenarios:
+                command_driver = Path(temporary) / 'CommandInputDriver'
+                with (output / 'command-driver-build.log').open('w') as log:
+                    subprocess.run(['xcrun', 'swiftc', '-parse-as-library', '-swift-version', '5',
+                                    '-framework', 'AppKit', '-framework', 'CoreGraphics',
+                                    '-framework', 'IOKit', '-framework', 'CryptoKit',
+                                    'desktop/macos/CommandInputDriver.swift', '-o', str(command_driver)],
+                                   check=True, timeout=90, stdout=log, stderr=subprocess.STDOUT)
             engine = relocated / 'Contents/Resources/nac-web'
             saved = engine.with_name('saved-engine')
             engine.rename(saved)
@@ -177,7 +216,13 @@ def main():
                 # Each scenario launches the bundle in a different cwd and with a
                 # poisoned parent environment. The engine receives a clean allowlist.
                 for scenario in scenarios:
-                    if scenario in ('normal', 'engine-exit', 'migration-failure', 'ci-terminal') + CASES:
+                    driver = None
+                    if scenario == 'commands-input':
+                        # A previous failed run may have left a terminal phase or
+                        # acknowledgement in this owned evidence directory.
+                        for name in ('commands-input-phase.json', 'commands-input-ack.json'):
+                            (output / name).unlink(missing_ok=True)
+                    if scenario in ('normal', 'engine-exit', 'migration-failure', 'ci-terminal', 'commands', 'commands-input') + CASES:
                         os.link(saved, engine)
                     elif scenario == 'missing':
                         engine.unlink(missing_ok=True)
@@ -202,18 +247,35 @@ def main():
                     with (output / f'{scenario}.log').open('w') as log:
                         actors_settled = False
                         process = None
-                        process = subprocess.Popen(['/usr/bin/open', '-n', '-W', '-a', str(relocated),
+                        launch = ['/usr/bin/open', '-n', '-W', '-a', str(relocated),
                             '--stdout', str(output / f'{scenario}-app.log'),
                             '--stderr', str(output / f'{scenario}-app.log'),
                             '--env', 'NAC_HOME=/DO-NOT-USE-PERSONAL-NAC',
                             '--env', 'NAC_MANAGED_CONFIG=/DO-NOT-INHERIT',
                             '--env', 'OPENAI_API_KEY=must-not-reach-engine', '--args',
-                            '--smoke-output', str(evidence), '--smoke-scenario', scenario],
+                            '--smoke-output', str(evidence), '--smoke-scenario', scenario]
+                        if scenario == 'commands-input':
+                            launch.append('--commands-external')
+                        process = subprocess.Popen(launch,
                             cwd='/', stdout=log, stderr=log, start_new_session=True,
                             env={**os.environ, 'NAC_HOME': '/DO-NOT-USE-PERSONAL-NAC',
                                  'NAC_MANAGED_CONFIG': '/DO-NOT-INHERIT',
                                  'OPENAI_API_KEY': 'must-not-reach-engine'})
-                        code = process.wait(timeout=115)
+                        if scenario == 'commands-input':
+                            with (output / 'command-driver.log').open('w') as driver_log:
+                                driver = subprocess.Popen([str(command_driver), str(output),
+                                                           str(relocated), metadata['source_head']],
+                                                          cwd='/', stdout=driver_log,
+                                                          stderr=subprocess.STDOUT, start_new_session=True)
+                                code = process.wait(timeout=115)
+                                try:
+                                    driver_code = driver.wait(timeout=5)
+                                except subprocess.TimeoutExpired:
+                                    # Preserve the app's receipt as the primary
+                                    # failure; the owned driver is reaped below.
+                                    driver_code = None
+                        else:
+                            code = process.wait(timeout=115)
                     control_result = control.finish()
                     result = json.loads(evidence.read_text())
                     result['session_before'] = session_before
@@ -231,6 +293,10 @@ def main():
                     result['relocated_app'] = str(relocated)
                     evidence.write_text(json.dumps(result, indent=2) + '\n')
                     assert (code == 0 or scenario.startswith('parent-loss')) and result.get('passed'), f'{scenario} failed: {result}'
+                    if scenario == 'commands-input':
+                        if driver_code != 0:
+                            raise RuntimeError('External OS command driver did not accept the app result; see command-driver.log')
+                        assert result['commands']['input']['source'] == 'external-public-OS-driver', result
                     assert result['engine_reaped'] and result['profile_removed'], result
                     if not scenario.startswith('parent-loss'):
                         assert result['identity_retired'], result
@@ -268,6 +334,13 @@ def main():
             finally:
                 failure = sys.exception()
                 try:
+                    if driver is not None and driver.poll() is None:
+                        driver.terminate()
+                        try:
+                            driver.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            driver.kill()
+                            driver.wait(timeout=5)
                     # This handle is ours even when app/engine authority is unknown.
                     if process is not None and process.poll() is None:
                         process.terminate()

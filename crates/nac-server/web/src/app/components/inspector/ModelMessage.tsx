@@ -11,15 +11,21 @@ import {
   ForkSessionItem,
   Icon,
   IconName,
-  ToolsAndReasoningBadge,
   Tooltip,
   TooltipPosition,
 } from "@/app/atoms";
 import { SnapshotBadge, type FilesPanelLink } from "@/app/components/inspector/SnapshotBadge";
 import { ThreadWave, type SelectThread } from "@/app/components/inspector/ThreadWave";
+import { LiveStatusLine } from "@/app/components/inspector/transcript/LiveStatusLine";
+import { liveTurnLabel } from "@/app/components/inspector/transcript/stepLabels";
+import { WorkFoldView } from "@/app/components/inspector/transcript/WorkFold";
+import {
+  layoutModelTurn,
+  type TurnLayoutItem,
+} from "@/app/components/inspector/transcript/foldLayout";
+import type { ModelTurnItem } from "@/app/features/insights/model/types";
 import { partitionModelTurn } from "@/app/features/insights/model/segments";
 import { formatMessageDate } from "@/app/features/insights/transcript/messageDate";
-import { TranscriptGroupBadge } from "@/app/features/insights/transcript/TranscriptGroupBadge";
 import { TranscriptSessionCard } from "@/app/features/insights/transcript/TranscriptSessionCard";
 import {
   usePreviousTurn,
@@ -43,24 +49,19 @@ function modelCopyText(turn: ModelTurn): string {
 /** Must match the activity the runtime store sets when orchestrator compaction starts. */
 const COMPACTION_ACTIVITY = "Compacting context…";
 
-/** Dimmed at rest; keyboard focus lifts it so the focus ring keeps its contrast. */
-const ACTION_CLASS =
-  "opacity-75 hover:opacity-100 focus-visible:opacity-100 max-md:!size-11 max-md:!min-h-11";
+/** Phones keep their 44px targets; the row's tone does the quieting. */
+const ACTION_CLASS = "max-md:!size-11 max-md:!min-h-11";
 
 /**
- * What the run is busy with when nothing in the turn shows it. The badge only
- * lends its look: with nothing to open it stays inert, and the status carries
- * the label.
+ * The turn's items in the order the page draws them, nothing folded. Stands in
+ * whenever the fold layout is unavailable, so the answer is never lost.
  */
-function RunStatusBadge({ label }: { label: string }) {
-  return (
-    <div role="status">
-      <span className="sr-only">{label}</span>
-      <div inert className="flex">
-        <ToolsAndReasoningBadge label={label} inProgress />
-      </div>
-    </div>
-  );
+function plainLayout(items: readonly ModelTurnItem[]): TurnLayoutItem[] {
+  return items.flatMap<TurnLayoutItem>((item) => {
+    if (item.kind === "session") return [item];
+    if (item.kind === "group" || !("block" in item)) return [];
+    return [{ kind: "block", key: item.block.key, block: item.block }];
+  });
 }
 
 interface ModelMessageProps {
@@ -70,11 +71,13 @@ interface ModelMessageProps {
   active: boolean;
   /**
    * What the run is doing right now, of which only the compaction status is
-   * shown: live badges and thread waves already name tools and threads. Only
-   * the active turn is given it, so the finished ones are not re-rendered every
+   * shown: the turn's own steps already name tools and threads. Only the
+   * active turn is given it, so the finished ones are not re-rendered every
    * time the line changes.
    */
   activity?: string;
+  /** Wall-clock start of the run behind the active turn, for its live clock. */
+  runStartedAt?: number | null;
   /** Stretches the last bubble so stick-to-bottom lands below the fold. */
   isLast?: boolean;
   /** Episode key of the thread card the panels are pointing at, if any. */
@@ -133,6 +136,7 @@ const ModelMessageBody = memo(function ModelMessageBody({
   date,
   active,
   activity,
+  runStartedAt = null,
   isLast = false,
   selectedThreadEpisode,
   selectedGroupId = null,
@@ -153,6 +157,7 @@ const ModelMessageBody = memo(function ModelMessageBody({
 }: ModelMessageBodyProps) {
   perfRender("ModelMessage");
   const items = useMemo(() => partitionModelTurn(turn, previous), [turn, previous]);
+  const layout = useMemo(() => layoutModelTurn(items) ?? plainLayout(items), [items]);
   const compacting = active && activity === COMPACTION_ACTIVITY;
   const canRefresh = !readOnly && onRefresh != null && userMessageIndex != null;
   const canRevert = !readOnly && onRevert != null && userMessageIndex != null;
@@ -164,79 +169,72 @@ const ModelMessageBody = memo(function ModelMessageBody({
   const cancelled = turn.blocks.some(
     (block) => block.kind === "text" && block.text.trim() === RUN_CANCELLED_MARKER,
   );
-  const frame = cn(
-    "flex flex-col items-start gap-6 w-full max-w-full min-w-0 py-6",
-    isLast && "min-h-[calc(70vh-316px)]",
-  );
-  // Until the run shows anything, the reply is only the word that it is working.
-  if (active && items.length === 0 && !compacting) {
-    return (
-      <div className={frame}>
-        <p role="status" className="label-small text-shimmer-primary">
-          Working…
-        </p>
-      </div>
-    );
-  }
+  const liveLabel = active
+    ? compacting
+      ? COMPACTION_ACTIVITY
+      : (liveTurnLabel(items) ?? "Working…")
+    : null;
+
   return (
-    <div className={frame}>
-      {/* Nothing in here clips: a badge's focus ring reaches 4px past it, which
-          the inset keeps inside the chat's scroll area. */}
-      <div className="flex flex-col items-start gap-6 w-full min-w-0 md:pl-2">
-        {items.map((item, index) => {
-          if (item.kind === "group") {
-            return (
-              <TranscriptGroupBadge
-                key={item.id}
-                group={item.group}
-                active={active}
-                trailing={!compacting && index === items.length - 1}
-                selected={item.id === selectedGroupId}
-                interactive={interactive}
-              />
-            );
-          }
-          if (item.kind === "session") {
-            return <TranscriptSessionCard key={item.id} entry={item} interactive={interactive} />;
-          }
-          const { block } = item;
-          if (block.kind === "wave") {
-            return (
-              <ThreadWave
-                key={block.key}
-                rows={block.rows}
-                selected={selectedThreadEpisode}
-                onSelect={interactive ? onSelectThread : undefined}
-              />
-            );
-          }
-          if (block.text.trim() === RUN_CANCELLED_MARKER) return null;
+    <div
+      data-turn=""
+      className={cn(
+        "group/turn flex w-full min-w-0 max-w-full flex-col items-start gap-4 pt-2",
+        isLast && "min-h-[calc(70vh-316px)]",
+      )}
+    >
+      {layout.map((entry) => {
+        if (entry.kind === "fold") {
           return (
-            <Markdown
-              key={block.key}
-              streaming={active}
-              // The prose skin's paragraph margins would add to the gap between items.
-              className="[&>:first-child]:!mt-0 [&>:last-child]:!mb-0"
-            >
-              {block.text}
-            </Markdown>
+            <WorkFoldView
+              key={entry.key}
+              fold={entry}
+              active={active}
+              turnDurationMs={turn.durationMs}
+              selectedGroupId={selectedGroupId}
+              interactive={interactive}
+            />
           );
-        })}
-        {/* Compaction runs between model calls, so nothing above moves while it does. */}
-        {compacting ? <RunStatusBadge label={COMPACTION_ACTIVITY} /> : null}
-        {!active && snapshotRevision && filesPanel ? (
-          <SnapshotBadge revision={snapshotRevision} panel={filesPanel} />
-        ) : null}
-        {cancelled ? (
-          <ChatSessionMessage
-            variant={ChatSessionMessageVariant.Danger}
-            title="Run cancelled by user"
-          />
-        ) : null}
-      </div>
+        }
+        if (entry.kind === "session") {
+          return <TranscriptSessionCard key={entry.id} entry={entry} interactive={interactive} />;
+        }
+        const { block } = entry;
+        if (block.kind === "wave") {
+          return (
+            <ThreadWave
+              key={block.key}
+              rows={block.rows}
+              selected={selectedThreadEpisode}
+              onSelect={interactive ? onSelectThread : undefined}
+            />
+          );
+        }
+        if (block.text.trim() === RUN_CANCELLED_MARKER) return null;
+        return (
+          <Markdown
+            key={block.key}
+            streaming={active}
+            // The prose skin's paragraph margins would add to the gap between items.
+            className="transcript-prose [&>:first-child]:!mt-0 [&>:last-child]:!mb-0"
+          >
+            {block.text}
+          </Markdown>
+        );
+      })}
+
+      {!active && snapshotRevision && filesPanel ? (
+        <SnapshotBadge revision={snapshotRevision} panel={filesPanel} />
+      ) : null}
+      {cancelled ? (
+        <ChatSessionMessage
+          variant={ChatSessionMessageVariant.Danger}
+          title="Run cancelled by user"
+        />
+      ) : null}
 
       {!readOnly && forks.length > 0 ? (
-        <div className="flex flex-col gap-2 w-full min-w-0 md:pl-2 [&>*]:shrink-0">
+        <div className="flex w-full min-w-0 flex-col gap-2 [&>*]:shrink-0">
           {forks.map((fork) => (
             <ForkSessionItem
               key={fork.session_id}
@@ -252,105 +250,117 @@ const ModelMessageBody = memo(function ModelMessageBody({
         </div>
       ) : null}
 
-      {/* Same resend / revert endpoints as the user bubble above — they always
-          address that prompt. Hidden while this turn is still streaming. */}
-      {!active ? (
-        <div className="flex items-center gap-6 w-full min-w-0">
-          <div className="flex items-center gap-3 shrink-0">
-            {canRefresh ? (
-              <Tooltip
-                title="Regenerate from the original prompt (rewinds later transcript and workspace changes)"
-                position={TooltipPosition.BottomRight}
-              >
-                <Button
-                  size={ButtonSize.Small}
-                  variant={ButtonVariant.Ghost}
-                  content={ButtonContent.Icon}
-                  aria-label="Regenerate from original prompt"
-                  disabled={actionsDisabled}
-                  onClick={() => onRefresh(userMessageIndex)}
-                  className={ACTION_CLASS}
-                >
-                  <Icon iconName={IconName.Refresh} size={16} />
-                </Button>
-              </Tooltip>
-            ) : null}
+      {/* The live line and the actions take the same height, so the turn does
+          not move when one gives way to the other. The actions address the
+          prompt above — same resend / revert endpoints as its bubble. */}
+      {liveLabel ? (
+        <LiveStatusLine label={liveLabel} since={runStartedAt} />
+      ) : (
+        <div
+          className={cn(
+            "-ml-1 -mt-2 flex h-8 w-full min-w-0 items-center gap-0.5 max-md:h-11",
+            "transition-opacity duration-150 ease-out motion-reduce:transition-none",
+            // The newest answer keeps its actions in view; older ones show
+            // them on hover or focus. Touch has no hover, so it always shows.
+            isLast
+              ? "opacity-100"
+              : "opacity-0 group-hover/turn:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100",
+          )}
+        >
+          <CopyButton
+            value={copyText}
+            size={ButtonSize.Small}
+            variant={ButtonVariant.Ghost}
+            title="Copy message"
+            position={TooltipPosition.BottomRight}
+            iconSize={16}
+            className={ACTION_CLASS}
+          />
 
-            {canRevert ? (
-              <Tooltip title="Revert to this snapshot" position={TooltipPosition.BottomRight}>
+          {canRefresh ? (
+            <Tooltip
+              title="Regenerate from the original prompt (rewinds later transcript and workspace changes)"
+              position={TooltipPosition.BottomRight}
+            >
+              <Button
+                size={ButtonSize.Small}
+                variant={ButtonVariant.Ghost}
+                content={ButtonContent.Icon}
+                aria-label="Regenerate from original prompt"
+                disabled={actionsDisabled}
+                onClick={() => onRefresh(userMessageIndex)}
+                className={ACTION_CLASS}
+              >
+                <Icon iconName={IconName.Refresh} size={16} />
+              </Button>
+            </Tooltip>
+          ) : null}
+
+          {canRevert ? (
+            <Tooltip title="Revert to this snapshot" position={TooltipPosition.BottomRight}>
+              <Button
+                size={ButtonSize.Small}
+                variant={ButtonVariant.Ghost}
+                content={ButtonContent.Icon}
+                aria-label="Revert to this snapshot"
+                disabled={actionsDisabled}
+                onClick={() => onRevert(userMessageIndex, userText)}
+                className={ACTION_CLASS}
+              >
+                <Icon iconName={IconName.TurnLeft} size={16} />
+              </Button>
+            </Tooltip>
+          ) : readOnly ? null : (
+            <Tooltip
+              title="This message is not in the transcript yet"
+              position={TooltipPosition.BottomRight}
+            >
+              <span className="inline-flex">
                 <Button
                   size={ButtonSize.Small}
                   variant={ButtonVariant.Ghost}
                   content={ButtonContent.Icon}
                   aria-label="Revert to this snapshot"
-                  disabled={actionsDisabled}
-                  onClick={() => onRevert(userMessageIndex, userText)}
+                  disabled
                   className={ACTION_CLASS}
                 >
                   <Icon iconName={IconName.TurnLeft} size={16} />
                 </Button>
-              </Tooltip>
-            ) : readOnly ? null : (
-              <Tooltip
-                title="This message is not in the transcript yet"
-                position={TooltipPosition.BottomRight}
+              </span>
+            </Tooltip>
+          )}
+
+          {!readOnly && onFork != null && forkIndex != null ? (
+            <Tooltip title="Create fork" position={TooltipPosition.BottomRight}>
+              <Button
+                size={ButtonSize.Small}
+                variant={ButtonVariant.Ghost}
+                content={ButtonContent.Icon}
+                aria-label="Create fork"
+                disabled={actionsDisabled}
+                onClick={() => onFork(forkIndex)}
+                className={ACTION_CLASS}
               >
-                <span className="inline-flex">
-                  <Button
-                    size={ButtonSize.Small}
-                    variant={ButtonVariant.Ghost}
-                    content={ButtonContent.Icon}
-                    aria-label="Revert to this snapshot"
-                    disabled
-                    className={ACTION_CLASS}
-                  >
-                    <Icon iconName={IconName.TurnLeft} size={16} />
-                  </Button>
-                </span>
-              </Tooltip>
-            )}
+                <Icon iconName={IconName.Scheme} size={16} />
+              </Button>
+            </Tooltip>
+          ) : null}
 
-            {!readOnly && onFork != null && forkIndex != null ? (
-              <Tooltip title="Create fork" position={TooltipPosition.BottomRight}>
-                <Button
-                  size={ButtonSize.Small}
-                  variant={ButtonVariant.Ghost}
-                  content={ButtonContent.Icon}
-                  aria-label="Create fork"
-                  disabled={actionsDisabled}
-                  onClick={() => onFork(forkIndex)}
-                  className={ACTION_CLASS}
-                >
-                  <Icon iconName={IconName.Scheme} size={16} />
-                </Button>
-              </Tooltip>
-            ) : null}
-
-            <CopyButton
-              value={copyText}
-              size={ButtonSize.Small}
-              variant={ButtonVariant.Ghost}
-              title="Copy message"
-              position={TooltipPosition.BottomRight}
-              iconSize={16}
-              className={ACTION_CLASS}
-            />
-          </div>
           {date ? (
-            <span className="min-w-0 truncate label-2xs text-basic-muted whitespace-nowrap">
+            <span className="ml-2 min-w-0 truncate whitespace-nowrap type-meta text-basic-muted">
               {date}
             </span>
           ) : null}
         </div>
-      ) : null}
+      )}
     </div>
   );
 });
 
 /**
- * Everything the model did for one prompt, in the order it happened: groups of
- * reasoning and tool calls, prose, the sessions it launched and the waves of
- * threads it ran.
+ * Everything the model did for one prompt, in the order it happened: the work
+ * folded behind one line, the sessions it launched, the waves of threads it
+ * ran and the answer it gave.
  */
 export const ModelMessage = memo(function ModelMessage(props: ModelMessageProps) {
   const previous = usePreviousTurn(props.turn);

@@ -1,4 +1,12 @@
 import type { TaskLaunchRequest } from "../../types/api";
+/**
+ * Whether a project can start an isolated task (a committed Local Git source),
+ * and its saved default branch. Only asked for while it can matter.
+ */
+export declare function useTaskLaunchSource(projectId: string | null, enabled: boolean): import("@tanstack/react-query").UseQueryResult<NoInfer<{
+    default_ref?: string | null;
+    eligible: boolean;
+}>, Error>;
 export declare function useTaskLaunch(projectId: string): {
     inventory: import("@tanstack/react-query").UseQueryResult<NoInfer<{
         created_at: string;

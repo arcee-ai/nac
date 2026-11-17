@@ -307,6 +307,18 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         path: string;
         truncated: boolean;
     }>;
+    /**
+     * Creates one named folder inside a listed local directory. Never retried
+     * here: a lost answer leaves the outcome unknown, so the caller looks
+     * before it offers to try again.
+     */
+    createFolder: (parent: string, name: string) => Promise<{
+        path: string;
+    }>;
+    /** The same on the SSH host the picker is browsing, never on this machine. */
+    createSshFolder: (target: SshTarget, parent: string, name: string) => Promise<{
+        path: string;
+    }>;
     /** Validates the key as a side effect: a bad key cannot list models. */
     listProviderModels: (payload: ProviderModelsRequest, signal?: AbortSignal) => Promise<{
         base_url: string;
@@ -398,6 +410,15 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         updated_at: string;
     }>;
     deleteSshConfig: (configId: string) => Promise<void>;
+    /**
+     * Literal OpenSSH `Host` aliases from the NAC server's own `~/.ssh/config`
+     * (not the browser's machine). Names only; problems arrive as warnings.
+     */
+    listSshAliases: (signal?: AbortSignal) => Promise<{
+        aliases: string[];
+        undiscoverable_patterns: number;
+        warnings: import("./openapi.generated.js").components["schemas"]["OpenSshAliasWarning"][];
+    }>;
     getMcpLibrary: (signal?: AbortSignal) => Promise<{
         entries: import("./openapi.generated.js").components["schemas"]["McpLibraryEntry"][];
     }>;
@@ -823,6 +844,7 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         delivered_run_id?: string | null;
         delivery: import("./openapi.generated.js").components["schemas"]["InboxDelivery"];
         id: number;
+        origin: import("./openapi.generated.js").components["schemas"]["InboxItemOrigin"];
         prompt: string;
         session_id: string;
         status: import("./openapi.generated.js").components["schemas"]["InboxStatus"];
@@ -839,6 +861,7 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         delivered_run_id?: string | null;
         delivery: import("./openapi.generated.js").components["schemas"]["InboxDelivery"];
         id: number;
+        origin: import("./openapi.generated.js").components["schemas"]["InboxItemOrigin"];
         prompt: string;
         session_id: string;
         status: import("./openapi.generated.js").components["schemas"]["InboxStatus"];
@@ -855,6 +878,7 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         delivered_run_id?: string | null;
         delivery: import("./openapi.generated.js").components["schemas"]["InboxDelivery"];
         id: number;
+        origin: import("./openapi.generated.js").components["schemas"]["InboxItemOrigin"];
         prompt: string;
         session_id: string;
         status: import("./openapi.generated.js").components["schemas"]["InboxStatus"];
@@ -871,6 +895,7 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         delivered_run_id?: string | null;
         delivery: import("./openapi.generated.js").components["schemas"]["InboxDelivery"];
         id: number;
+        origin: import("./openapi.generated.js").components["schemas"]["InboxItemOrigin"];
         prompt: string;
         session_id: string;
         status: import("./openapi.generated.js").components["schemas"]["InboxStatus"];
@@ -1052,6 +1077,7 @@ export declare function createNacApi(nacClient: NacClient, options?: {
     }>;
     getWorkspaceFiles: (id: string, revision: number | null, signal?: AbortSignal) => Promise<{
         files: string[];
+        path_root?: string | null;
         truncated: boolean;
     }>;
     getWorkspaceFile: (id: string, path: string, revision: number | null, signal?: AbortSignal) => Promise<{
@@ -1063,6 +1089,11 @@ export declare function createNacApi(nacClient: NacClient, options?: {
     }>;
     /** Ask nac-web to open a local workspace path with the OS default handler. */
     openWorkspacePath: (id: string, path: string) => Promise<{
+        fell_back_to_parent: boolean;
+        opened: string;
+    }>;
+    /** Explicit existing Local target only; never opens a missing parent. */
+    revealWorkspacePath: (id: string, path: string, expectedWorkspaceRoot: string, expectedPathRoot: string, signal?: AbortSignal) => Promise<{
         fell_back_to_parent: boolean;
         opened: string;
     }>;

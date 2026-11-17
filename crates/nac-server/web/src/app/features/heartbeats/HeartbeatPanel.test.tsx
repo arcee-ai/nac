@@ -17,6 +17,7 @@ vi.mock("@/app/runtime/RuntimeContext", () => ({
     stores: { sessionLayoutStore: { showSidePanelList: vi.fn() } },
   }),
 }));
+vi.mock("@/app/hooks/useMediaQuery", () => ({ useIsMobile: () => false }));
 vi.mock("@/app/components/inspector/PanelSplit", () => ({
   PanelSplit: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   PanelRow: () => null,

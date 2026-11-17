@@ -191,7 +191,7 @@ export const InsightsList = memo(function InsightsList({
   if (!hasRows) {
     return (
       <>
-        <p className="p-1 label-micro text-basic-muted">{emptyCopy.title}</p>
+        <p className="px-2.5 py-2 type-meta text-basic-tertiary">{emptyCopy.title}</p>
         {footer}
       </>
     );

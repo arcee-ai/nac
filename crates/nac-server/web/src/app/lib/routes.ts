@@ -47,8 +47,32 @@ export function isSessionPanel(value: string | undefined): value is SessionPanel
   return (SESSION_PANELS as readonly string[]).includes(value ?? "");
 }
 
+/** Full-page settings destinations (`/settings/:section`). */
+export const SETTINGS_SECTIONS = [
+  "general",
+  "appearance",
+  "models",
+  "mcp",
+  "capabilities",
+  "ssh",
+  "managed",
+  "shortcuts",
+  "about",
+] as const;
+
+export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
+
+export function isSettingsSection(value: string | undefined): value is SettingsSection {
+  // SAFETY: widening the readonly tuple for `includes` only.
+  return (SETTINGS_SECTIONS as readonly string[]).includes(value ?? "");
+}
+
 export const routes = {
   list: () => "/",
+  /** Home's composer, optionally pointed at a project: the one new-session flow. */
+  newSession: (projectId?: string | null) =>
+    projectId ? `/?project=${encodeURIComponent(projectId)}` : "/",
+  settings: (section: SettingsSection = "general") => `/settings/${section}`,
   session: (sessionId: string, panel: SessionPanel = DEFAULT_SESSION_PANEL) =>
     `/session/${encodeURIComponent(sessionId)}/${panel}`,
   /** Redirects to the project's newest session, or offers to start one. */

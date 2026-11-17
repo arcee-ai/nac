@@ -74,7 +74,7 @@ function RenameForm({
       footer={
         <>
           <Button
-            variant={ButtonVariant.Tertiary}
+            variant={ButtonVariant.Ghost}
             content={ButtonContent.Text}
             onClick={onClose}
             disabled={update.isPending}

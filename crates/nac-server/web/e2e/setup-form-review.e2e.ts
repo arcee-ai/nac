@@ -96,14 +96,27 @@ for (const zoomed of [false, true]) {
       const id = await createProject(request, harness);
       await page.goto(`${harness.baseUrl}/#/project/${id}`);
       await page.reload();
-      const chat = page.getByRole("dialog", { name: "New Chat", exact: true });
+      // An empty project opens Home's composer; its model chip holds the
+      // per-session model setup the New Chat dialog used to.
+      await expect(page).toHaveURL(new RegExp(`#/\\?project=${id}$`));
+      await page
+        .getByRole("button", { name: /^(?:Model: .+|Choose a model)$/ })
+        .first()
+        .click();
+      const chat = page.getByRole("dialog", { name: "Model for this session", exact: true });
       await expect(chat).toBeVisible();
       await inspectModelSetup(chat, "chat");
       await chat.getByRole("button", { name: "Close", exact: true }).click();
-      const menu = page.getByRole("button", { name: "Open the menu", exact: true });
-      if (await menu.isVisible()) await menu.click();
-      await page.getByRole("button", { name: "Configurations", exact: true }).click();
-      const configurations = page.getByRole("dialog", { name: "Configurations", exact: true });
+      await expect(chat).toHaveCount(0);
+      // Configurations is Settings › Models & providers, reached from the phone menu.
+      await page.getByRole("button", { name: "Open the menu", exact: true }).click();
+      await page
+        .getByRole("dialog", { name: "Menu", exact: true })
+        .getByRole("button", { name: "Settings", exact: true })
+        .click();
+      await page.getByRole("link", { name: /^Models & providers/ }).click();
+      const configurations = page.getByRole("region", { name: "Configurations", exact: true });
+      await expect(configurations).toBeVisible();
       const name = configurations.getByRole("textbox", { name: "Configuration name", exact: true });
       await expect(name).toHaveValue("E2E scripted provider");
       const changes: unknown[] = [];
@@ -129,7 +142,9 @@ for (const zoomed of [false, true]) {
       expect(await error.getAttribute("id")).toBe(description);
       expect(changes).toEqual([]);
       const fieldGeometry = await name.evaluate((node) => {
-        const owner = node.closest('[data-slot="dialog-content"], [data-slot="sheet-content"]')!;
+        const owner = node.closest(
+          '[data-slot="dialog-content"], [data-slot="sheet-content"], [data-settings-surface]',
+        )!;
         const footer = owner.querySelector("footer")!.getBoundingClientRect();
         const field = node.getBoundingClientRect();
         const message = node.ownerDocument

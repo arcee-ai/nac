@@ -18,12 +18,16 @@ interface FileListTabButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLBut
     variant?: FileListTabButtonVariant;
     size?: FileListTabButtonSize;
     /**
-     * The design's `GH State`. It tints the name through every state; a file
-     * adds the status letter, a folder tints its chevron instead.
+     * The design's `GH State`. A changed name reads in full ink (a deleted one
+     * struck through); a file adds the coloured status letter.
      */
     status?: GitStatus | null;
     /** The design's `isActive`: the file that is open, or a folder that is expanded. */
     active?: boolean;
+    /** Lines the change added, drawn as a tabular `+N` before the status letter. */
+    additions?: number | null;
+    /** Lines the change removed, drawn as a tabular `−N`. */
+    deletions?: number | null;
 }
 /**
  * A row of the Files panel's list: a file with its type icon, or a folder with

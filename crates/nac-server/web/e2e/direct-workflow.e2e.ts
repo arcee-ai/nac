@@ -55,15 +55,20 @@ for (const mobile of [false, true]) {
         },
       });
       const NativeEventSource = globalThis.EventSource;
+      // Counts session observation streams only; the app-wide fleet
+      // attention stream (/attention/stream) stays open by design.
       globalThis.EventSource = class extends NativeEventSource {
         private released = false;
+        private readonly counted: boolean;
         constructor(url: string | URL, options?: EventSourceInit) {
           super(url, options);
+          this.counted = String(url).includes("/sessions/");
+          if (!this.counted) return;
           evidence.opened += 1;
           evidence.active += 1;
         }
         override close() {
-          if (!this.released) {
+          if (this.counted && !this.released) {
             this.released = true;
             evidence.closed += 1;
             evidence.active -= 1;
@@ -95,9 +100,13 @@ for (const mobile of [false, true]) {
       // canonical snapshot rather than accepting the pre-snapshot placeholder.
       await expect(page.getByRole("button", { name: "High", exact: true })).toBeVisible();
       if (!mobile) {
-        await page.getByRole("button", { name: "Usage", exact: true }).click();
-        await expect(page.getByText("Context tokens", { exact: true })).toBeVisible();
-        await page.getByRole("button", { name: "Usage", exact: true }).click();
+        // Usage readings live in the header's Session menu.
+        const menu = page.getByRole("button", { name: "Session menu", exact: true });
+        await menu.click();
+        const details = page.getByRole("dialog", { name: "Session", exact: true });
+        await expect(details.getByText("Context tokens", { exact: true })).toBeVisible();
+        await menu.click();
+        await expect(details).toHaveCount(0);
       }
     }
     const boundary = new ScriptGate();

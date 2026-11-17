@@ -105,6 +105,25 @@ fn snapshot(
 }
 
 impl PermissionBroker {
+    /// Passive current membership for an additional reader. It takes the same
+    /// review -> pending -> observation guards as installation, but registers
+    /// nothing, publishes nothing, and never makes the reader an approver or an
+    /// interactive client: headless Ask still fails closed exactly as before.
+    pub(crate) fn attention_snapshot(&self) -> AttentionBrokerSnapshot {
+        let review = self
+            .review
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let pending = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let attention = self
+            .attention
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        snapshot(&self.session_id, &review, &pending, &attention)
+    }
     pub(crate) fn replace_attention_observer(
         &self,
         expected: Option<Uuid>,

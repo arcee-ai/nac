@@ -18,15 +18,20 @@ export function TaskLaunchModal({
   defaultRef,
   onClose,
   onExistingCheckout,
+  initialPrompt = "",
+  initialTitle = "",
 }: {
   projectId: string;
   defaultRef: string | null;
   onClose: () => void;
   onExistingCheckout: () => void;
+  /** Home's composer text, carried in as the brief. */
+  initialPrompt?: string;
+  initialTitle?: string;
 }) {
   const location = useLocation();
-  const [title, setTitle] = useState("");
-  const [prompt, setPrompt] = useState("");
+  const [title, setTitle] = useState(initialTitle);
+  const [prompt, setPrompt] = useState(initialPrompt);
   const [gitRef, setGitRef] = useState("");
   const [branch, setBranch] = useState(defaultRef ?? "");
   const launch = useTaskLaunch(projectId);

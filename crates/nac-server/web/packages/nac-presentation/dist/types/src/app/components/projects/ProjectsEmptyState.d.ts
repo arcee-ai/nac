@@ -8,10 +8,8 @@ interface ProjectsEmptyStateProps {
     mobile: boolean;
 }
 /**
- * Shown in place of the whole list — rail and search bar included — while the
- * account has no projects and no loose chats, which is how the design frames
- * the state at every width. A filtered-away list keeps the regular chrome
- * instead.
+ * Home with no projects and no loose sessions: one calm "Add a project" card.
+ * Managed hosts lead with "Add repository" and show what is ready.
  */
 export declare function ProjectsEmptyState({ onStart, onAddRepository, onManagedSettings, modelReady, githubConnected, mobile, }: ProjectsEmptyStateProps): import("react").JSX.Element;
 export {};

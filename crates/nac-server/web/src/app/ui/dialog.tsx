@@ -28,6 +28,8 @@ type DialogProps = Omit<React.ComponentProps<typeof DialogPrimitive.Root>, "moda
   inertBackground?: boolean;
   /** False keeps this layer open on Escape, without dismissing a layer below it. */
   closeOnEscape?: boolean;
+  /** A view transition may consume Escape while retaining this same layer. */
+  onEscape?: (event: KeyboardEvent) => void;
 };
 
 /**
@@ -43,6 +45,7 @@ function Dialog({
   layer = "modal",
   inertBackground = layer === "modal",
   closeOnEscape = true,
+  onEscape,
   children,
 }: DialogProps) {
   const [uncontrolledOpen, setUncontrolledOpen] = React.useState(defaultOpen);
@@ -58,7 +61,7 @@ function Dialog({
     kind: layer,
     content,
     inertBackground,
-    onEscape: closeOnEscape ? close : undefined,
+    onEscape: closeOnEscape ? (onEscape ?? close) : undefined,
   });
   return (
     <DialogLayerContext.Provider value={{ layer: handle, content, close }}>

@@ -1,0 +1,195 @@
+{
+  "record_kind": "native_layerization_attribution",
+  "status": "partial_native_sample_incomplete",
+  "shared_probe_sha256": "0cfd5f9110ed0cdfd3ba5ea88b953d470333b1061c9f99250598eb81b118a4f2",
+  "artifacts": {
+    "packet.json": {
+      "sha256": "185ee12ad3c747c32f94c37fc137ae0d72bcabb0a8eb78cb03386beca73c5fb2",
+      "bytes": 47439
+    },
+    "renderer.cpuprofile": {
+      "sha256": "ee230562784397733d2a2b34fbae41a60f9a6dfe8c1955005f6a738546f6f211",
+      "bytes": 1467936
+    },
+    "renderer-trace.json": {
+      "sha256": "98096edc584066718b06052b9b64506654107e4869fdfba26e6f40d9d398fd08",
+      "bytes": 27537246
+    }
+  },
+  "native_start": {
+    "focused": true,
+    "visible": true,
+    "hidden": false,
+    "accessibilityEnabled": true,
+    "rendererPid": 33667,
+    "accessibilityEvents": [
+      {
+        "enabled": true,
+        "at": 1794617098496
+      }
+    ],
+    "minimized": false,
+    "throttle": true,
+    "displayId": 1,
+    "displayBounds": {
+      "x": 0,
+      "y": 0,
+      "width": 1512,
+      "height": 982
+    },
+    "scaleFactor": 2,
+    "frequency": 120.0006103515625,
+    "contentBounds": {
+      "x": 116,
+      "y": 123,
+      "width": 1280,
+      "height": 800
+    },
+    "counters": {
+      "blurs": 0,
+      "hides": 0
+    },
+    "disablingSwitches": [
+      [
+        "disable-background-timer-throttling",
+        false
+      ],
+      [
+        "disable-renderer-backgrounding",
+        false
+      ],
+      [
+        "disable-frame-rate-limit",
+        false
+      ]
+    ]
+  },
+  "native_end": {
+    "focused": true,
+    "visible": true,
+    "hidden": false,
+    "accessibilityEnabled": true,
+    "rendererPid": 33667,
+    "accessibilityEvents": [
+      {
+        "enabled": true,
+        "at": 1794617098496
+      }
+    ],
+    "minimized": false,
+    "throttle": true,
+    "displayId": 1,
+    "displayBounds": {
+      "x": 0,
+      "y": 0,
+      "width": 1512,
+      "height": 982
+    },
+    "scaleFactor": 2,
+    "frequency": 120.0006103515625,
+    "contentBounds": {
+      "x": 116,
+      "y": 123,
+      "width": 1280,
+      "height": 800
+    },
+    "counters": {
+      "blurs": 0,
+      "hides": 0
+    },
+    "disablingSwitches": [
+      [
+        "disable-background-timer-throttling",
+        false
+      ],
+      [
+        "disable-renderer-backgrounding",
+        false
+      ],
+      [
+        "disable-frame-rate-limit",
+        false
+      ]
+    ]
+  },
+  "accessibility_before_activation": false,
+  "top_trace_summed_durations_ms": [
+    {
+      "name": "Layerize",
+      "n": 959,
+      "sum_ms": 19513.771
+    },
+    {
+      "name": "FunctionCall",
+      "n": 24908,
+      "sum_ms": 3062.408
+    },
+    {
+      "name": "Layout",
+      "n": 604,
+      "sum_ms": 510.06
+    },
+    {
+      "name": "TimerFire",
+      "n": 8602,
+      "sum_ms": 367.781
+    },
+    {
+      "name": "Paint",
+      "n": 6503,
+      "sum_ms": 337.211
+    },
+    {
+      "name": "EventDispatch",
+      "n": 2866,
+      "sum_ms": 329.316
+    },
+    {
+      "name": "FireAnimationFrame",
+      "n": 631,
+      "sum_ms": 313.614
+    },
+    {
+      "name": "V8.GC_MC_BACKGROUND_MARKING",
+      "n": 212,
+      "sum_ms": 242.453
+    },
+    {
+      "name": "V8.GC_SCAVENGER_BACKGROUND_SCAVENGE_PARALLEL",
+      "n": 1132,
+      "sum_ms": 194.606
+    },
+    {
+      "name": "UpdateLayoutTree",
+      "n": 1426,
+      "sum_ms": 165.638
+    },
+    {
+      "name": "PrePaint",
+      "n": 1662,
+      "sum_ms": 78.363
+    },
+    {
+      "name": "MinorGC",
+      "n": 76,
+      "sum_ms": 68.158
+    }
+  ],
+  "typing_layerize": {
+    "n": 199,
+    "sum_ms": 11855.558,
+    "p50_ms": 59.263,
+    "p95_ms": 62.358,
+    "max_ms": 79.467
+  },
+  "native_sample": {
+    "status": "failed",
+    "reason": "10s bounded process invocation did not produce sample artifact; no permission diagnosis established"
+  },
+  "limits": [
+    "Summed trace categories may nest and overlap; not exclusive total CPU.",
+    "Layerize identifies native compositor phase, not exact C++ function.",
+    "AX enabling correlates with observer activation; no causal isolation.",
+    "Instrumentation adds overhead; not acceptance distributions."
+  ]
+}

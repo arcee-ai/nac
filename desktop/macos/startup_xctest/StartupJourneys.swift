@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import CoreGraphics
 import CryptoKit
 import CoreFoundation
@@ -121,8 +122,178 @@ struct StartupPaths {
 }
 // END PATH POLICY
 
+
+
+// BEGIN ONBOARDING TITLE (compiled verbatim; no AX access in this decision)
+private enum StartupOnboardingTitle {
+    static let text = "No projects yet"
+
+    struct Candidate {
+        let elementType: Int
+        let exists, enabled, hittable: Bool
+        let value: Any?
+        let frame: CGRect
+    }
+
+    static func visible<Element>(wait: () -> Bool, elements: () -> [Element],
+                                 staticTextType: Int, project: (Element) -> Candidate,
+                                 window: () -> CGRect, verify: () -> Bool) -> Bool {
+        guard wait() else { return false }
+        let matches = elements()
+        // Reject ambiguity before reading any candidate attributes.
+        guard matches.count == 1 else { return false }
+        let title = project(matches[0])
+        guard title.elementType == staticTextType, title.exists, title.enabled, title.hittable,
+              let value = title.value as? String, value == text else { return false }
+        let frame = title.frame, bounds = window()
+        let finite = [frame.minX, frame.minY, frame.width, frame.height,
+                      bounds.minX, bounds.minY, bounds.width, bounds.height].allSatisfy { $0.isFinite }
+        // CGRect.infinite uses finite sentinel components on CoreGraphics.
+        return finite && !frame.isInfinite && !bounds.isInfinite
+            && !frame.isEmpty && !bounds.isEmpty && frame.intersects(bounds) && verify()
+    }
+}
+// END ONBOARDING TITLE
+
+// BEGIN QUERY DIAGNOSTIC (compiled verbatim; no AX access in this projection)
+private enum StartupQueryDiagnostic {
+    static let queries = ["app_webviews", "window_webviews", "legacy_title", "app_static_title",
+        "window_static_title", "window_label_title", "window_value_title", "window_identifier_title",
+        "window_button_start", "legacy_button_start", "window_label_subtitle", "window_value_subtitle"]
+    static let targets = ["No projects yet", "Create your first and start building!", "Get Started"]
+    static let targetIndices = [0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 1, 1]
+
+    static func requireOnboarding(wait: () -> Bool, diagnose: () -> Void) throws {
+        let exists = wait()
+        if !exists { diagnose() }
+        if !exists { throw NSError(domain: "NAC342", code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "Shared onboarding absent"]) }
+    }
+
+    struct Candidate {
+        let fields: [String: Any]
+        let bounded: Bool
+    }
+
+    static func candidate(_ input: [String: Any], target: Int) -> Candidate? {
+        let names: Set<String> = ["element_type", "exists", "hittable", "enabled", "window_intersection",
+                                  "label", "value", "identifier"]
+        guard Set(input.keys) == names, targets.indices.contains(target),
+              let type = StartupConsolePolicy.integer(input["element_type"]), (0...1000).contains(type),
+              let label = input["label"] as? String, let identifier = input["identifier"] as? String else { return nil }
+        var fields: [String: Any] = ["element_type": type]
+        for key in ["exists", "hittable", "enabled", "window_intersection"] {
+            guard let value = StartupConsolePolicy.boolean(input[key]) else { return nil }
+            fields[key] = value
+        }
+        let value = input["value"] as? String
+        fields["value_is_string"] = value != nil
+        var bounded = true
+        for (key, text) in [("label", Optional(label)), ("value", value), ("identifier", Optional(identifier))] {
+            let within = text.map { $0.utf8.count <= 256 } ?? true
+            bounded = bounded && within
+            fields[key + "_exact"] = within && text == targets[target]
+            fields[key + "_contains"] = within && (text?.contains(targets[target]) ?? false)
+            fields[key + "_trim_exact"] = within && text?.trimmingCharacters(in: .whitespacesAndNewlines) == targets[target]
+        }
+        return Candidate(fields: fields, bounded: bounded)
+    }
+
+    struct Census {
+        let start: Double
+        private(set) var rows: [[String: Any]] = []
+        private(set) var reads = 0
+        private var elapsed = 0
+        private var elapsedOverflow = false
+        private var reason = "none"
+        private var last: Double
+        private var projected = 0
+
+        init(start: Double) { self.start = start; last = start }
+
+        mutating func stop(_ next: String) {
+            let priority = ["none", "candidate_limit", "count_limit", "time_budget", "clock_invalid"]
+            if priority.firstIndex(of: next)! > priority.firstIndex(of: reason)! { reason = next }
+        }
+
+        mutating func available(now: Double) -> Bool {
+            if reason == "clock_invalid" { return false }
+            let delta = now - start
+            guard start.isFinite, start >= 0, now.isFinite, now >= last, delta.isFinite else {
+                elapsed = 0; elapsedOverflow = false; stop("clock_invalid"); return false
+            }
+            last = now
+            elapsedOverflow = delta > 600
+            elapsed = elapsedOverflow ? 600000 : Int(delta * 1000)
+            if delta >= 5 { stop("time_budget"); return false }
+            return reason != "count_limit" && reason != "clock_invalid"
+        }
+
+        mutating func readCandidate() -> Bool {
+            guard reads < 8 else { stop("candidate_limit"); return false }
+            reads += 1 // Count attempts, including rejected/overlength projections.
+            return true
+        }
+
+        mutating func append(count raw: Any, candidates: [Candidate], truncated: Bool) -> Bool {
+            guard rows.count < 12, let count = StartupConsolePolicy.integer(raw), count >= 0,
+                  candidates.count <= 4, projected + candidates.count <= reads,
+                  candidates.count <= count,
+                  rows.count >= 4 || (candidates.isEmpty && !truncated) else { return false }
+            let overflow = count > 4096
+            guard !overflow || candidates.isEmpty else { return false }
+            let cut = truncated || candidates.contains { !$0.bounded }
+            guard rows.count < 4 || overflow || cut || candidates.count == count else { return false }
+            if cut { stop("candidate_limit") }
+            if overflow { stop("count_limit") }
+            rows.append(["query": queries[rows.count], "count": min(count, 4096), "overflow": overflow,
+                         "candidate_truncated": cut, "candidates": candidates.map(\.fields)])
+            projected += candidates.count
+            return true
+        }
+
+        func record(binding: [String: Any], scenario: String,
+                    guardBefore: Bool, guardAfter: Bool) -> [String: Any]? {
+            let hex40 = ["source_sha", "test_source_sha", "harness_sha"]
+            let hex64 = ["startup_source_sha256", "configuration_sha256", "native_sha256"]
+            let names = Set(hex40 + hex64 + ["app_path", "app_pid", "app_launch_epoch", "window_number"])
+            guard guardBefore, guardAfter, Set(binding.keys) == names,
+                  ["onboarding", "configuredLocal"].contains(scenario),
+                  rows.count == 12 || reason != "none",
+                  let path = binding["app_path"] as? String, StartupPaths.lexical(path),
+                  path.hasSuffix("/Moved app folder with spaces/NAC.app"),
+                  let pid = StartupConsolePolicy.integer(binding["app_pid"]), pid > 0,
+                  let window = StartupConsolePolicy.integer(binding["window_number"]), window > 0,
+                  let epoch = binding["app_launch_epoch"] as? NSNumber,
+                  CFGetTypeID(epoch) != CFBooleanGetTypeID(), epoch.doubleValue.isFinite, epoch.doubleValue > 0 else { return nil }
+            for (keys, width) in [(hex40, 40), (hex64, 64)] {
+                for key in keys {
+                    guard let text = binding[key] as? String,
+                          text.range(of: "^[0-9a-f]{\(width)}$", options: .regularExpression) != nil else { return nil }
+                }
+            }
+            return binding.merging(["schema": "nac342-query-diagnostic-v1", "version": 1,
+                "phase": "onboarding", "scenario": scenario, "legacy_exists": false,
+                "guard_before": guardBefore, "guard_after": guardAfter, "status": reason == "none" ? "complete" : "partial",
+                "stop_reason": reason, "elapsed_ms": elapsed, "elapsed_overflow": elapsedOverflow,
+                "queries": rows]) { _, new in new }
+        }
+    }
+    static func read<T>(_ census: inout Census, now: Double, body: () -> T) -> T? {
+        guard census.available(now: now) else { return nil }
+        return body()
+    }
+
+    static func encode(_ record: [String: Any]) -> Data? {
+        guard let data = try? JSONSerialization.data(withJSONObject: record, options: [.sortedKeys]),
+              data.count <= 8192 else { return nil }
+        return data
+    }
+}
+// END QUERY DIAGNOSTIC
+
 /// Proposed external public-XCTest actor. ALL-354 must include this source in
-/// an actual generated runner before it is runnable. No app bridge or file IPC.
+/// an actual generated runner. H owns the read-only AX receipt; no product bridge.
 final class StartupJourneys: XCTestCase {
     struct Fixture: Decodable {
         let schema, scenario, contract_baseline, source_sha, bundle_id: String
@@ -133,6 +304,7 @@ final class StartupJourneys: XCTestCase {
         let manifest_sha256, package_identity_sha256, engine_identity_sha256: String
         let engine_identity: Identity
         let environment: [String: String]
+        let ax_witness: StartupAXDeclaration?
     }
     struct Identity: Decodable, Equatable {
         let product_version, source_revision, track, build_id: String
@@ -140,7 +312,7 @@ final class StartupJourneys: XCTestCase {
     private var observations: [[String: Any]] = []
     // Root-nominated356 contract. The actor observes the unique UI message;
     // actual typed receipt/source inclusion is independently bound by354.
-    private let futureRecovery = "The selected store uses a newer database schema. Quit NAC and reopen this store with a compatible newer NAC app. Keep your configuration and data; do not delete or downgrade the store. No alternative store was selected."
+    private let futureRecovery = "The selected store uses a newer database schema. Quit NAC and reopen this store with a compatible version of NAC. Keep your configuration and data; do not delete or downgrade the store. No alternative store was selected."
 
     private func require(_ condition: @autoclosure () -> Bool, _ message: String) throws {
         if !condition() { throw NSError(domain: "NAC342", code: 1,
@@ -288,7 +460,7 @@ final class StartupJourneys: XCTestCase {
 
     @MainActor
     private func guardWindow(_ ui: XCUIApplication, running: NSRunningApplication,
-                             paths: StartupPaths, launch: Date, number: Int) throws {
+                             paths: StartupPaths, launch: Date, number: Int, record: Bool = true) throws {
         try incarnation(running, paths: paths, launch: launch)
         try require(NSWorkspace.shared.frontmostApplication?.processIdentifier == running.processIdentifier
             && ui.windows.count == 1, "Ordinary app lost unique foreground window")
@@ -299,7 +471,69 @@ final class StartupJourneys: XCTestCase {
                 && ($0[kCGWindowNumber as String] as? NSNumber)?.intValue == number
                 && ($0[kCGWindowLayer as String] as? NSNumber)?.intValue == 0
         }.count == 1, "Exact owned window is not on screen")
-        observations.append(try console())
+        let state = try console()
+        if record { observations.append(state) }
+    }
+
+    @MainActor
+    private func queryDiagnostic(_ ui: XCUIApplication, guardTarget: () throws -> Void,
+                                 binding: [String: Any], scenario: String) throws {
+        try guardTarget()
+        let window = ui.windows.firstMatch
+        let title = StartupQueryDiagnostic.targets[0], subtitle = StartupQueryDiagnostic.targets[1]
+        let start = StartupQueryDiagnostic.targets[2]
+        func match(_ query: XCUIElementQuery, _ attribute: String, _ text: String) -> XCUIElementQuery {
+            query.matching(NSPredicate(format: attribute + " == %@", text))
+        }
+        let any = window.descendants(matching: .any)
+        let queries = [ui.webViews, window.webViews,
+            ui.webViews.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", title)),
+            match(ui.staticTexts, "label", title), match(window.staticTexts, "label", title),
+            match(any, "label", title), match(any, "value", title), match(any, "identifier", title),
+            match(window.buttons, "label", start), match(ui.webViews.buttons, "label", start),
+            match(any, "label", subtitle), match(any, "value", subtitle)]
+        var census = StartupQueryDiagnostic.Census(start: ProcessInfo.processInfo.systemUptime)
+        for (index, query) in queries.enumerated() {
+            guard census.available(now: ProcessInfo.processInfo.systemUptime) else { break }
+            // One explicit query materialization. SDK-internal work/latency is
+            // not bounded by our result/attribute caps or between-call budget.
+            let elements = query.allElementsBoundByAccessibilityElement
+            var candidates: [StartupQueryDiagnostic.Candidate] = []
+            var truncated = false
+            if index >= 4 && elements.count <= 4096 {
+                for element in elements.prefix(4) {
+                    guard census.available(now: ProcessInfo.processInfo.systemUptime),
+                          census.readCandidate() else { truncated = true; break }
+                    // Each public attribute getter is independently admitted;
+                    // a slow prior getter cannot authorize the next one.
+                    func read<T>(_ body: () -> T) -> T? {
+                        StartupQueryDiagnostic.read(&census, now: ProcessInfo.processInfo.systemUptime, body: body)
+                    }
+                    guard let frame = read({ element.frame }), let owned = read({ window.frame }),
+                          let type = read({ Int(element.elementType.rawValue) }),
+                          let exists = read({ element.exists }), let hittable = read({ element.isHittable }),
+                          let enabled = read({ element.isEnabled }), let label = read({ element.label }),
+                          let value = read({ element.value ?? NSNull() }),
+                          let identifier = read({ element.identifier }) else { truncated = true; break }
+                    let finite = [frame.minX, frame.minY, frame.width, frame.height,
+                                  owned.minX, owned.minY, owned.width, owned.height].allSatisfy { $0.isFinite }
+                    let input: [String: Any] = ["element_type": type, "exists": exists,
+                        "hittable": hittable, "enabled": enabled,
+                        "window_intersection": finite && !frame.isEmpty && frame.intersects(owned),
+                        "label": label, "value": value, "identifier": identifier]
+                    guard let candidate = StartupQueryDiagnostic.candidate(input,
+                        target: StartupQueryDiagnostic.targetIndices[index]) else { truncated = true; break }
+                    candidates.append(candidate)
+                }
+                truncated = truncated || elements.count > candidates.count
+            }
+            guard census.append(count: elements.count, candidates: candidates, truncated: truncated) else { return }
+        }
+        _ = census.available(now: ProcessInfo.processInfo.systemUptime)
+        try guardTarget()
+        guard let record = census.record(binding: binding, scenario: scenario, guardBefore: true, guardAfter: true),
+              StartupQueryDiagnostic.encode(record) != nil else { return }
+        try attachment(record, name: "nac342-query-diagnostic-v1-onboarding")
     }
 
     @MainActor
@@ -338,6 +572,7 @@ final class StartupJourneys: XCTestCase {
         var captured = false
         // Cleanup is exact public application termination. Engine/process-tree
         // settlement and profile deletion remain external owner observations.
+        var failedConfiguredPreflight = false
         defer {
             do {
                 if !running.isTerminated {
@@ -351,19 +586,25 @@ final class StartupJourneys: XCTestCase {
                             add(image)
                         }
                     }
-                    try incarnation(running, paths: paths, launch: launch)
-                    ui.terminate()
+                    if !failedConfiguredPreflight {
+                        try incarnation(running, paths: paths, launch: launch)
+                        ui.terminate()
+                    }
                 }
-                let stopped = ui.wait(for: .notRunning, timeout: 30)
-                try attachment(["schema": "nac342-cleanup-v1", "scenario": fixture.scenario,
-                    "configuration_sha256": digest(bytes), "app_pid": Int(running.processIdentifier),
-                    "app_path": paths.emittedPath, "app_termination_observed": stopped,
-                    "engine_cleanup": "requires_external_exact_owner_audit",
-                    "profile_cleanup": "requires_external_exact_owner_audit"],
-                    name: "nac342-cleanup-v1-" + fixture.scenario)
-                XCTAssertTrue(stopped, "Owned app termination unresolved; retain fixture")
+                if !failedConfiguredPreflight {
+                    let stopped = ui.wait(for: .notRunning, timeout: 30)
+                    try attachment(["schema": "nac342-cleanup-v1", "scenario": fixture.scenario,
+                        "configuration_sha256": digest(bytes), "app_pid": Int(running.processIdentifier),
+                        "app_path": paths.emittedPath, "app_termination_observed": stopped,
+                        "engine_cleanup": "requires_external_exact_owner_audit",
+                        "profile_cleanup": "requires_external_exact_owner_audit"],
+                        name: "nac342-cleanup-v1-" + fixture.scenario)
+                    XCTAssertTrue(stopped, "Owned app termination unresolved; retain fixture")
+                }
             } catch { XCTFail("Owned app identity/cleanup attachment unavailable; retain fixture for external cleanup") }
         }
+        let failureEvidence = StartupFailureEvidence(fixture.ax_witness, configurationSHA: digest(bytes))
+        do {
         try require(ui.windows.firstMatch.waitForExistence(timeout: 45), "No startup window")
         let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
             as? [[String: Any]] ?? []
@@ -375,11 +616,93 @@ final class StartupJourneys: XCTestCase {
         let number = try XCTUnwrap((owned[0][kCGWindowNumber as String] as? NSNumber)?.intValue)
         targetWindow = number
         var operations: [String] = []
-        func guardTarget() throws {
-            try guardWindow(ui, running: running, paths: paths, launch: launch, number: number)
+        let rootWindow = ui.windows.element(boundBy: 0)
+        var folderSurface: StartupNativeFolderPolicy.Surface = .form
+        let axClient: StartupAXClient?
+        if fixture.scenario == "configuredLocal" {
+            let declaration = try XCTUnwrap(fixture.ax_witness, "External AX declaration missing")
+            try require(declaration.path == fixture.fixture_root + "/ax-witness/receipt.json"
+                && declaration.nonce.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil
+                && Set(declaration.support_sha256.keys) == ["StartupAXGuard.swift", "StartupAXReceipt.swift"],
+                "External AX declaration differs")
+            axClient = StartupAXClient(declaration, configurationSHA: digest(bytes),
+                pid: running.processIdentifier, launch: launch.timeIntervalSince1970,
+                window: number, executable: paths.native.path)
+        } else { axClient = nil }
+        var axRefusalEmitted = false
+        func panel() throws -> XCUIElement {
+            let sheets = rootWindow.children(matching: .sheet).allElementsBoundByAccessibilityElement
+            try require(sheets.count == 1, "Owned root has no unique attached folder panel")
+            return sheets[0]
         }
-        func dispatch(_ name: String, action: () -> Void) throws {
+        func goToField() throws -> XCUIElement {
+            let sheets = try panel().children(matching: .sheet).allElementsBoundByAccessibilityElement
+            try require(sheets.count == 1, "Folder panel has no unique attached Go to Folder sheet")
+            let fields = sheets[0].textFields.matching(NSPredicate(format: "label == %@", "Go to the folder:"))
+                .allElementsBoundByAccessibilityElement
+            try require(fields.count == 1, "Owned Go to Folder field absent or ambiguous")
+            let field = fields[0]
+            try require(StartupNativeFolderPolicy.usable(exists: field.exists, enabled: field.isEnabled,
+                hittable: field.isHittable, frame: field.frame, owner: sheets[0].frame),
+                "Owned Go to Folder field is not actionable")
+            return field
+        }
+        func validateFolderSurface(_ ticket: StartupAXClient.Ticket) throws {
+            let roots = rootWindow.children(matching: .sheet).allElementsBoundByAccessibilityElement
+            let nested = roots.count == 1 ? roots[0].children(matching: .sheet).count : 0
+            try require(StartupNativeFolderPolicy.surface(folderSurface, windows: ui.windows.count,
+                rootSheets: roots.count, nestedSheets: nested, allSheets: ui.descendants(matching: .sheet).count),
+                "Foreign, ambiguous or stale native folder surface")
+            if folderSurface != .form {
+                let sheet = try panel()
+                try require(StartupNativeFolderPolicy.attached(exists: sheet.exists,
+                    frame: sheet.frame, owner: rootWindow.frame),
+                    "Folder panel is not attached to the owned root")
+                if folderSurface == .panel {
+                    try require(StartupNativeFolderPolicy.usable(exists: sheet.exists, enabled: sheet.isEnabled,
+                        hittable: sheet.isHittable, frame: sheet.frame, owner: rootWindow.frame),
+                        "Owned folder panel is not actionable")
+                }
+            }
+            let field: (CGRect, String)?
+            if folderSurface == .goTo {
+                let target = try goToField()
+                field = (target.frame, try XCTUnwrap(target.value as? String))
+            } else { field = nil }
+            _ = try XCTUnwrap(axClient).consume(ticket, surface: folderSurface, rootFrame: rootWindow.frame, field: field)
+        }
+        var guardTicket: StartupAXClient.Ticket?
+        func guardTarget() throws {
+            do {
+                let ticket = try axClient?.begin()
+                try guardWindow(ui, running: running, paths: paths, launch: launch, number: number)
+                try require((try? Data(contentsOf: URL(fileURLWithPath: path))) == bytes,
+                    "Frozen fixture configuration changed")
+                if let ticket { try validateFolderSurface(ticket) }
+                guardTicket = ticket
+            } catch {
+                if !axRefusalEmitted, let client = axClient,
+                   let data = StartupAXRefusal.diagnosticData(client.failureData, stage: client.refusalStage),
+                   var record = try? json(data) {
+                    axRefusalEmitted = true
+                    record.merge(["scenario": fixture.scenario, "surface": folderSurface.rawValue,
+                        "source_sha": fixture.source_sha, "test_source_sha": fixture.test_source_sha,
+                        "harness_sha": fixture.harness_sha, "startup_source_sha256": fixture.startup_source_sha256,
+                        "configuration_sha256": digest(bytes), "app_pid": Int(running.processIdentifier),
+                        "app_launch_epoch": launch.timeIntervalSince1970, "window_number": number]) { _, new in new }
+                    try? attachment(record, name: "nac342-ax-refusal-v1-" + fixture.scenario)
+                }
+                throw error
+            }
+        }
+        func dispatch(_ name: String, after: StartupNativeFolderPolicy.Surface? = nil,
+                      target: XCUIElement? = nil, kind: String = "button", keyboard: Bool = false,
+                      semantic: (name: String, query: XCUIElementQuery)? = nil,
+                      action: (XCUICoordinate?) throws -> Void) throws {
+            failureEvidence.operationIndex = operations.count + 1
+            failureEvidence.step = .before_guard
             try guardTarget()
+            let ticket = guardTicket
             let index = operations.count + 1
             func retain(_ stage: String) throws {
                 try attachment(["schema": "nac342-dispatch-v1", "scenario": fixture.scenario,
@@ -389,10 +712,69 @@ final class StartupJourneys: XCTestCase {
                     "app_path": paths.emittedPath, "native_sha256": fixture.native_sha256],
                     name: String(format: "nac342-dispatch-v1-%02d-%@", index, stage))
             }
+            failureEvidence.step = .before_record
             try retain("before")
-            action()
+            failureEvidence.step = .public_target
+            var coordinate: XCUICoordinate?
+            var actionRequest: StartupAXInteractionRequest?
+            if let client = axClient {
+                let target = try XCTUnwrap(target), ticket = try XCTUnwrap(ticket)
+                let anchor = target.frame, root = rootWindow.frame
+                try require(target.exists && target.isEnabled && target.isHittable,
+                    "Interaction target lost public eligibility")
+                let center = target.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+                let (selected, point) = try StartupInteractionPolicy.selectCoordinate(anchor: anchor, center: center,
+                    screenPoint: { $0.screenPoint }, offset: { $0.withOffset($1) })
+                // The original selector supplies intent; matching(identifier:) can
+                // match a public title/placeholder even when .label is empty.
+                func namedTargetMatches(_ expected: String) -> Bool {
+                    guard let semantic, semantic.name == expected, semantic.query.count == 1,
+                          semantic.query.firstMatch.frame == anchor else { return false }
+                    return StartupInteractionPolicy.semanticName(expected: expected, kind: kind,
+                        title: target.title, label: target.label,
+                        placeholder: kind == "message" ? target.placeholderValue : nil) == expected
+                }
+                let semanticName: String
+                if ["button", "message"].contains(kind) {
+                    guard let semantic else { throw StartupAXReceiptError.invalid }
+                    semanticName = semantic.name
+                    try StartupAXFiles.need(namedTargetMatches(semanticName))
+                } else { semanticName = target.label }
+                let value = keyboard && ["field", "message"].contains(kind) ? try XCTUnwrap(target.value as? String) : nil
+                let field: (CGRect, String)?
+                if folderSurface == .goTo {
+                    let input = try goToField()
+                    field = (input.frame, try XCTUnwrap(input.value as? String))
+                } else { field = nil }
+                failureEvidence.step = .prepare_interaction
+                let request = try client.prepareInteraction(ticket, point: point, anchor: anchor, kind: kind, label: semanticName,
+                    keyboard: keyboard, value: value, rootFrame: root, field: field, diagnostic: failureEvidence)
+                // Same public coordinate and anchor after AX proof, immediately
+                // before final freshness consumption and dispatch. This fence is
+                // bounded, not atomic with the eventual delivered OS event.
+                failureEvidence.step = .finish_interaction
+                try client.finishInteraction(request, recheck: {
+                    failureEvidence.step = .final_recheck
+                    try guardWindow(ui, running: running, paths: paths, launch: launch, number: number, record: false)
+                    try require((try? Data(contentsOf: URL(fileURLWithPath: path))) == bytes
+                        && target.exists && target.isEnabled && target.isHittable
+                        && (["button", "message"].contains(kind) ? namedTargetMatches(request.label) : target.label == request.label)
+                        && StartupInteractionPolicy.unchanged(point: selected.screenPoint, expected: point,
+                            anchor: target.frame, expectedAnchor: anchor, root: rootWindow.frame, expectedRoot: root)
+                        && (!keyboard || value == nil || target.value as? String == value),
+                        "Interaction point, anchor, focus value or frozen resource changed")
+                })
+                actionRequest = request
+                coordinate = selected
+            }
+            failureEvidence.step = .input
+            try action(coordinate)
+            if let request = actionRequest { try axClient!.completeInteraction(request) }
             operations.append(name)
+            if let after { folderSurface = after }
+            failureEvidence.step = .after_guard
             try guardTarget()
+            failureEvidence.step = .after_record
             try retain("after")
         }
         func text(_ value: String, native: Bool = false) -> XCUIElement {
@@ -403,7 +785,9 @@ final class StartupJourneys: XCTestCase {
             let elements = query.matching(identifier: label)
             try require(elements.firstMatch.waitForExistence(timeout: 20) && elements.count == 1
                 && elements.firstMatch.isHittable && elements.firstMatch.isEnabled, "Public control absent/ambiguous: " + label)
-            try dispatch("click:" + label) { elements.firstMatch.click() }
+            try dispatch("click:" + label, target: elements.firstMatch, semantic: (label, elements)) { coordinate in
+                if let coordinate { coordinate.click() } else { elements.firstMatch.click() }
+            }
         }
         try guardTarget()
         if ["invalidConfig", "futureStore"].contains(fixture.scenario) {
@@ -423,26 +807,91 @@ final class StartupJourneys: XCTestCase {
             try require(ui.webViews.allElementsBoundByIndex.allSatisfy { !$0.isHittable },
                         "Recovery unexpectedly activated shared workspace")
         } else {
-            try require(text("No projects yet").waitForExistence(timeout: 45), "Shared onboarding absent")
+            let window = ui.windows.firstMatch
+            let onboarding = window.descendants(matching: .staticText)
+                .matching(NSPredicate(format: "value == %@", StartupOnboardingTitle.text))
+            try StartupQueryDiagnostic.requireOnboarding(wait: {
+                StartupOnboardingTitle.visible(wait: {
+                    onboarding.firstMatch.waitForExistence(timeout: 45)
+                }, elements: { onboarding.allElementsBoundByAccessibilityElement },
+                staticTextType: Int(XCUIElement.ElementType.staticText.rawValue), project: { title in
+                    StartupOnboardingTitle.Candidate(elementType: Int(title.elementType.rawValue),
+                        exists: title.exists, enabled: title.isEnabled, hittable: title.isHittable,
+                        value: title.value, frame: title.frame)
+                }, window: { window.frame }, verify: {
+                    (try? guardTarget()) != nil
+                        && (try? Data(contentsOf: URL(fileURLWithPath: path))) == bytes
+                })
+            }, diagnose: {
+                // Historical v1 certifies the original label wait failed.
+                // A value-assertion failure cannot emit that unchanged record.
+            })
             if fixture.scenario == "configuredLocal" {
                 try click(ui.webViews.buttons, "Get Started")
-                try click(ui.webViews.buttons, fixture.home)
-                let fields = ui.webViews.textFields.matching(NSPredicate(format: "placeholderValue == %@", "/path/to/directory"))
-                try require(fields.firstMatch.waitForExistence(timeout: 15) && fields.count == 1
-                    && fields.firstMatch.isHittable, "Shared folder input absent/ambiguous")
-                try dispatch("click:folder-input") { fields.firstMatch.click() }
-                try dispatch("key:command-a-folder-input") { fields.firstMatch.typeKey("a", modifierFlags: .command) }
-                try dispatch("type:owned-workspace") { fields.firstMatch.typeText(fixture.workspace) }
-                try dispatch("key:return-folder-input") { fields.firstMatch.typeKey(.return, modifierFlags: []) }
-                try require(text("Selected: " + fixture.workspace).waitForExistence(timeout: 20), "Folder selection unconfirmed")
-                try click(ui.webViews.buttons, "Select")
+                func folderControl(_ path: String) throws -> (element: XCUIElement, query: XCUIElementQuery) {
+                    let controls = rootWindow.webViews.buttons.matching(
+                        NSPredicate(format: "label == %@", "Choose Working Folder: " + path))
+                    try require(controls.firstMatch.waitForExistence(timeout: 10), "Working Folder control missing")
+                    let matches = controls.allElementsBoundByAccessibilityElement
+                    try require(matches.count == 1, "Working Folder control ambiguous")
+                    let control = matches[0]
+                    try require(StartupNativeFolderPolicy.usable(exists: control.exists, enabled: control.isEnabled,
+                        hittable: control.isHittable, frame: control.frame, owner: rootWindow.frame),
+                        "Working Folder control is not actionable")
+                    return (control, controls)
+                }
+                let initial = try folderControl(fixture.home)
+                try dispatch("click:Choose Working Folder: " + fixture.home, after: .panel, target: initial.element,
+                    semantic: ("Choose Working Folder: " + fixture.home, initial.query)) { coordinate in
+                    try XCTUnwrap(coordinate).click()
+                    try require(rootWindow.children(matching: .sheet).firstMatch.waitForExistence(timeout: 10),
+                        "Owned native folder panel did not appear")
+                }
+                let shortcutPanel = try panel()
+                try dispatch("key:command-shift-g-native-folder", after: .goTo, target: shortcutPanel, kind: "panel", keyboard: true) { _ in
+                    shortcutPanel.typeKey("g", modifierFlags: [.command, .shift])
+                    let nested = try panel().children(matching: .sheet)
+                    try require(nested.firstMatch.waitForExistence(timeout: 10), "Owned Go to Folder sheet did not appear")
+                }
+                let selectAllField = try goToField()
+                try dispatch("key:command-a-native-go-to-folder", target: selectAllField, kind: "field", keyboard: true) { _ in
+                    selectAllField.typeKey("a", modifierFlags: .command)
+                }
+                let workspaceField = try goToField()
+                try dispatch("type:owned-workspace", target: workspaceField, kind: "field", keyboard: true) { _ in
+                    workspaceField.typeText(fixture.workspace)
+                    try require(workspaceField.value as? String == fixture.workspace, "Go to Folder value differs from declared workspace")
+                }
+                let goTo = try panel().children(matching: .sheet).element(boundBy: 0)
+                let returnField = try goToField()
+                try dispatch("key:return-native-go-to-folder", after: .panel, target: returnField, kind: "field", keyboard: true) { _ in
+                    returnField.typeKey(.return, modifierFlags: [])
+                    try require(goTo.waitForNonExistence(timeout: 10), "Owned Go to Folder sheet survived submission")
+                }
+                let selectedPanel = try panel()
+                let select = selectedPanel.buttons.matching(NSPredicate(format: "label == %@", "Select"))
+                try require(select.firstMatch.waitForExistence(timeout: 10) && select.count == 1
+                    && select.firstMatch.isEnabled && select.firstMatch.isHittable,
+                    "Owned native Select absent or ambiguous")
+                try dispatch("click:native-folder-Select", after: .form, target: select.element(boundBy: 0),
+                    semantic: ("Select", select)) { coordinate in
+                    try XCTUnwrap(coordinate).click()
+                    try require(selectedPanel.waitForNonExistence(timeout: 10), "Owned native folder panel survived selection")
+                }
+                let filled = try folderControl(fixture.workspace)
+                try require(StartupNativeFolderPolicy.selected(filled.element.label, workspace: fixture.workspace),
+                    "Exact declared workspace did not reach the normal project form")
                 try click(ui.webViews.buttons, "Create Project")
                 let message = ui.webViews.descendants(matching: .any).matching(identifier: "Message")
                 try require(message.firstMatch.waitForExistence(timeout: 30) && message.count == 1
                     && message.firstMatch.isHittable, "Shared Message accessibility target absent/ambiguous")
-                try dispatch("click:Message") { message.firstMatch.click() }
-                try dispatch("type:FINDER_CONFIGURED_LOCAL_startup-home") {
-                    message.firstMatch.typeText("FINDER_CONFIGURED_LOCAL_startup-home")
+                let messageField = message.firstMatch
+                try dispatch("click:Message", target: messageField, kind: "message", semantic: ("Message", message)) { coordinate in
+                    try XCTUnwrap(coordinate).click()
+                }
+                try dispatch("type:FINDER_CONFIGURED_LOCAL_startup-home", target: messageField, kind: "message", keyboard: true,
+                    semantic: ("Message", message)) { _ in
+                    messageField.typeText("FINDER_CONFIGURED_LOCAL_startup-home")
                 }
                 try click(ui.webViews.buttons, "Send")
                 try require(text("Finder configured local response.").waitForExistence(timeout: 55), "Dummy configured response absent")
@@ -450,6 +899,7 @@ final class StartupJourneys: XCTestCase {
                 // the external354 fixture owner, not guessed from UI text.
             }
         }
+        failureEvidence.step = .terminal
         try guardTarget()
         let screenshot = ui.windows.firstMatch.screenshot()
         let image = screenshot.pngRepresentation
@@ -460,6 +910,18 @@ final class StartupJourneys: XCTestCase {
         add(imageAttachment)
         captured = true
         try guardTarget()
+        if let axClient {
+            try require(axClient.evidence.count == 26 && axClient.interactions.count == 11, "External AX guard/interaction trace incomplete")
+            let rows = try JSONSerialization.jsonObject(with: JSONEncoder().encode(axClient.evidence))
+            let interactions = try JSONSerialization.jsonObject(with: JSONEncoder().encode(axClient.interactions))
+            try attachment(["schema": "nac342-ax-guards-v1", "configuration_sha256": digest(bytes),
+                "source_sha": fixture.source_sha, "test_source_sha": fixture.test_source_sha,
+                "harness_sha": fixture.harness_sha, "app_pid": Int(running.processIdentifier),
+                "app_launch_epoch": launch.timeIntervalSince1970, "window_number": number,
+                "helper_sha256": axClient.declaration.helper_sha256,
+                "support_sha256": axClient.declaration.support_sha256, "rows": rows, "interactions": interactions],
+                name: "nac342-ax-guards-v1-configuredLocal")
+        }
         let expectedPrivateFailure: [String: Any] = fixture.scenario == "futureStore"
             ? ["kind": "failed", "version": 1, "code": "store_schema_incompatible", "stage": "startup"] : [:]
         try attachment(["schema": fixture.schema, "scenario": fixture.scenario,
@@ -482,6 +944,17 @@ final class StartupJourneys: XCTestCase {
             "private_failure_observation": "not_read_by_public_UI_actor",
             "four_case_acceptance": "requires_producer_source_binding_SDK_run_and_external_integrity_audits"],
             name: "nac342-ordinary-v1-" + fixture.scenario)
+        } catch {
+            // Keep the failed XCTest result alive through its own commit. The
+            // existing external exact-identity owner settles this failed case
+            // after collection; this flag grants no input or cleanup authority.
+            failedConfiguredPreflight = fixture.scenario == "configuredLocal"
+            if let record = failureEvidence.capture(error) {
+                try? attachment(json(JSONEncoder().encode(record)),
+                    name: "nac342-first-preflight-failure-v1-" + fixture.scenario)
+            }
+            throw error // Preserve the original failure before the outer teardown defer.
+        }
     }
 }
 

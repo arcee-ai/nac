@@ -33,6 +33,10 @@ interface UserMessageProps {
     /** Parent-owned delegated transcripts expose copy but no mutation affordances. */
     readOnly?: boolean;
 }
-/** The prompt bubble. Pending ones are dimmed until the snapshot catches up. */
+/**
+ * The prompt, as a soft bubble on the right of the column. Pending ones are
+ * dimmed until the snapshot catches up. Its actions wait under it until the
+ * pointer or focus comes to the prompt; touch shows them always.
+ */
 export declare const UserMessage: import("react").MemoExoticComponent<({ text, terminalSelection, sessionId, pending, invokedSkills, messageIndex, onRefresh, onRevert, actionsDisabled, readOnly, }: UserMessageProps) => import("react").JSX.Element>;
 export {};

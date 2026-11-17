@@ -5,7 +5,7 @@ import { Sheet, SheetContent, SheetOverlay, SheetPortal } from "../../ui/sheet";
 import CoverBackground from "../cover-background";
 
 /** Kept in step with the transition below, so the sheet is torn down after it. */
-const EXIT_MS = 300;
+const EXIT_MS = 200;
 
 interface BottomSheetProps {
   open: boolean;
@@ -19,6 +19,7 @@ interface BottomSheetProps {
 /**
  * The mobile face of a popover: a sheet that slides up from the bottom edge
  * instead of a panel floating next to a trigger that is barely on screen.
+ * 20px top corners, a grab handle, and the home-indicator inset below.
  */
 const BottomSheet: React.FC<BottomSheetProps> = ({
   open,
@@ -87,7 +88,7 @@ const BottomSheet: React.FC<BottomSheetProps> = ({
     >
       <SheetPortal forceMount>
         <SheetOverlay asChild>
-          <CoverBackground open={!down} zIndex={zIndex} className="!duration-300" />
+          <CoverBackground open={!down} zIndex={zIndex} />
         </SheetOverlay>
         <SheetContent
           side="bottom"
@@ -97,15 +98,18 @@ const BottomSheet: React.FC<BottomSheetProps> = ({
           onOpenAutoFocus={(event) => event.preventDefault()}
           style={{ zIndex }}
           className={cn(
-            "fixed inset-x-0 bottom-0 flex flex-col min-h-[120px] max-h-[75dvh] overflow-y-auto overscroll-contain",
-            "rounded-t-3xl py-4 bg-elevation-level-2 shadow-2xl",
-            "transition-transform duration-300 ease-in-out motion-reduce:transition-none [&>*]:shrink-0",
+            "fixed inset-x-0 bottom-0 flex flex-col min-h-[120px] max-h-[min(75dvh,calc(100%-16px))] overflow-y-auto overscroll-contain",
+            "rounded-t-sheet bg-elevation-level-2 pt-1 pb-[calc(12px+env(safe-area-inset-bottom))] shadow-2xl",
+            "transition-transform duration-200 ease-[var(--ease-drawer)] motion-reduce:transition-none [&>*]:shrink-0",
             down ? "translate-y-full" : "translate-y-0",
             className,
           )}
           onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => e.stopPropagation()}
         >
+          <div aria-hidden className="flex justify-center pt-1 pb-2">
+            <span className="h-1 w-9 rounded-pill bg-[var(--f-wash-4)]" />
+          </div>
           {children}
         </SheetContent>
       </SheetPortal>

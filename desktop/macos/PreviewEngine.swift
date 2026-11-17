@@ -14,14 +14,62 @@ final class PreviewEngine {
     var receipt: EngineReceipt? { run?.receipt }
     var onReady: ((URL) -> Void)?
     var onExit: ((Int32) -> Void)?
-    var onFailure: ((String) -> Void)?
+    var onFailure: ((EngineFailure) -> Void)?
 
     #if !LOCAL_APP
     func launch(executable: URL, profile: PreviewProfile, provider: FixtureProvider) throws {
         var environment = profile.environment
         environment["MODELS_DEV_URL"] = provider.baseURL.appendingPathComponent("models-dev").absoluteString
+        #if PREVIEW_SMOKE
+        environment = Self.recordingEnvironment(environment, provider: provider.baseURL, arguments: CommandLine.arguments)
+        #endif
         try launch(executable: executable, configuration: EngineLaunchConfiguration(
             cwd: profile.workspace, store: profile.store, environment: environment))
+    }
+    #endif
+
+    #if PREVIEW_SMOKE && !LOCAL_APP
+    // Exactly this ready run's diagnostic reader, never a process lookup or new pipe.
+    func observeExternalAuthDiagnostics(incarnation: String, makeConsumer: (Bool) -> ((Data) -> Void)) -> (() -> Void)? {
+        dispatchPrecondition(condition: .onQueue(.main))
+        guard let run, run.receipt?.incarnation == incarnation, run.authDiagnosticConsumer == nil else { return nil }
+        let token = UUID()
+        run.authDiagnosticConsumer = (token, makeConsumer(run.authDiagnosticAtRecordBoundary))
+        return { [weak run] in
+            dispatchPrecondition(condition: .onQueue(.main))
+            if run?.authDiagnosticConsumer?.0 == token { run?.authDiagnosticConsumer = nil }
+        }
+    }
+
+    static func recordingEnvironment(_ original: [String: String], provider: URL,
+                                     arguments: [String]) -> [String: String] {
+        var environment = original
+        if arguments.filter({ $0 == "--smoke-scenario" }).count == 1,
+           let option = arguments.firstIndex(of: "--smoke-scenario"), option + 1 < arguments.count,
+           arguments[option + 1] == "offline-api-key" {
+            for name in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"] {
+                environment[name] = provider.absoluteString
+            }
+            environment["NO_PROXY"] = "127.0.0.1"
+            environment["no_proxy"] = "127.0.0.1"
+        }
+        if arguments.filter({ $0 == "--smoke-scenario" }).count == 1,
+           let option = arguments.firstIndex(of: "--smoke-scenario"), option + 1 < arguments.count,
+           arguments[option + 1] == "external-navigation-recording" {
+            // Only this disposable child uses the already rejecting fixture as
+            // a proxy. It never forwards CONNECT or changes the host environment.
+            for name in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"] {
+                environment[name] = provider.absoluteString
+            }
+            environment["NO_PROXY"] = "127.0.0.1,localhost,::1"
+        }
+        if arguments.filter({ $0 == "--smoke-scenario" }).count == 1,
+           let option = arguments.firstIndex(of: "--smoke-scenario"), option + 1 < arguments.count,
+           arguments[option + 1] == "external-auth" {
+            environment["NAC_TELEMETRY"] = "stderr"
+            environment["NAC_TELEMETRY_SCENARIO"] = "native-external-auth"
+        }
+        return environment
     }
     #endif
 
@@ -57,9 +105,47 @@ final class PreviewEngine {
     #if PREVIEW_SMOKE
     func loseChannel() { run?.loseChannel() }
     #endif
+
+    #if PREVIEW_SMOKE && LOCAL_APP
+    private var smokeFaultRun: EngineRun?
+    var smokeFaultReceipt: [String: Any]? { smokeFaultRun?.smokeFaultReceipt }
+    // Fixture-only: no PID or process name is accepted from the controller.
+    func crashOwnedEngineForSmoke(expectedIncarnation: String) -> Bool {
+        dispatchPrecondition(condition: .onQueue(.main))
+        guard let run, run.receipt?.incarnation == expectedIncarnation else { return false }
+        let issued = run.crashOwnedEngineForSmoke(expectedIncarnation: expectedIncarnation)
+        if run.smokeFaultReceipt != nil { smokeFaultRun = run }
+        return issued
+    }
+    #endif
 }
 
 private final class EngineRun {
+    #if PREVIEW_SMOKE && LOCAL_APP
+    private var smokeCrashUsed = false
+    private(set) var smokeFaultReceipt: [String: Any]?
+    // All retirement and waitpid work is on this same queue. Until waitpid,
+    // this exact spawned child reserves its PID even if it has already exited.
+    func crashOwnedEngineForSmoke(expectedIncarnation: String,
+                                 signal: (pid_t, Int32) -> Int32 = Darwin.kill) -> Bool {
+        dispatchPrecondition(condition: .onQueue(.main))
+        guard pid > 0, exitSource != nil, channelFD >= 0, !smokeCrashUsed,
+              receipt?.incarnation == expectedIncarnation else { return false }
+        smokeCrashUsed = true
+        let result = signal(pid, SIGKILL)
+        smokeFaultReceipt = ["owner": "native-smoke-owned-engine-crash",
+            "requested_incarnation": expectedIncarnation, "owned_pid": Int(pid),
+            "signal_requested": Int(SIGKILL), "syscall_result": Int(result), "reaped": false]
+        return result == 0
+    }
+    func recordSmokeFaultReap(waitedPID: pid_t, status: Int32) {
+        guard var fact = smokeFaultReceipt else { return }
+        fact["waited_pid"] = Int(waitedPID)
+        fact["raw_wait_status"] = Int(status)
+        fact["reaped"] = waitedPID == pid
+        smokeFaultReceipt = fact
+    }
+    #endif
     #if PREVIEW_SMOKE
     var holdHello = false
     #endif
@@ -67,6 +153,14 @@ private final class EngineRun {
     let protocolState: EngineProtocol
     var receipt: EngineReceipt? { pid > 0 && !stopping && !failed ? protocolState.ready : nil }
     private(set) var log = ""
+    #if PREVIEW_SMOKE && !LOCAL_APP
+    // BEGIN EXTERNAL AUTH DIAGNOSTIC ALIGNMENT
+    // Replacement decoding cannot invent ASCII LF; inspect only the consumed
+    // stream's final boundary on this same MainActor, never seed raw bytes here.
+    var authDiagnosticAtRecordBoundary: Bool { log.isEmpty || log.hasSuffix("\n") }
+    // END EXTERNAL AUTH DIAGNOSTIC ALIGNMENT
+    var authDiagnosticConsumer: (UUID, (Data) -> Void)?
+    #endif
     private var output: DispatchSourceRead?
     private var channel: DispatchSourceRead?
     private var exitSource: DispatchSourceProcess?
@@ -76,7 +170,7 @@ private final class EngineRun {
     private var failed = false
     var onReady: ((URL) -> Void)?
     var onExit: ((Int32) -> Void)?
-    var onFailure: ((String) -> Void)?
+    var onFailure: ((EngineFailure) -> Void)?
 
     init(identity: EngineIdentity, store: URL) throws {
         protocolState = try EngineProtocol(identity: identity, store: store)
@@ -145,7 +239,12 @@ private final class EngineRun {
             // The unreaped leader still reserves this group identity.
             kill(-pid, SIGKILL)
             var status: Int32 = 0
+            #if PREVIEW_SMOKE && LOCAL_APP
+            let waitedPID = waitpid(pid, &status, 0)
+            recordSmokeFaultReap(waitedPID: waitedPID, status: status)
+            #else
             waitpid(pid, &status, 0)
+            #endif
             pid = 0
             channelFD = -1
             output?.cancel(); output = nil
@@ -229,22 +328,32 @@ private final class EngineRun {
             let data = Data(bytes[..<count])
             if protocolInput {
                 do { if let ready = try protocolState.receive(data) { endpoint = ready } }
+                catch let failure as EngineFailure { fail(failure); return }
                 catch { fail(error.localizedDescription); return }
             } else {
+                // BEGIN EXTERNAL AUTH DIAGNOSTIC READ SINK
+                #if PREVIEW_SMOKE && !LOCAL_APP
+                authDiagnosticConsumer?.1(data)
+                #endif
                 log += String(decoding: data, as: UTF8.self)
                 if log.utf8.count > 65536 {
                     // Leave room for replacement scalars at a split UTF-8 boundary.
                     log = String(decoding: log.utf8.suffix(65528), as: UTF8.self)
                 }
+                // END EXTERNAL AUTH DIAGNOSTIC READ SINK
             }
         }
         if let endpoint, !failed, !stopping { onReady?(endpoint) }
     }
 
     private func fail(_ message: String) {
+        fail(EngineFailure.message(message))
+    }
+
+    private func fail(_ failure: EngineFailure) {
         guard !failed, !stopping else { return }
         failed = true
-        onFailure?(message)
+        onFailure?(failure)
         stop {}
     }
 

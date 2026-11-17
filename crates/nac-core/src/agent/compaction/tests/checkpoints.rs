@@ -7,6 +7,10 @@ use crate::store::orchestrator_compaction::{
 };
 use crate::types::{FunctionCall, Message, ToolCall};
 
+fn as_transcript(messages: &[Message]) -> crate::agent::TranscriptMessages {
+    messages.to_vec().into()
+}
+
 #[test]
 fn restore_falls_back_from_newest_invalid_checkpoint() {
     let path = temp_store_path("fallback");
@@ -58,7 +62,7 @@ fn restore_falls_back_from_newest_invalid_checkpoint() {
     state.restore_newest_valid_checkpoint(&messages).unwrap();
     assert_eq!(state.active_checkpoint_for_test().unwrap().id, valid.id);
     let view = state
-        .plan(&messages, &[], CompactionReason::Auto)
+        .plan(&as_transcript(&messages), &[], CompactionReason::Auto)
         .prepared
         .messages;
     assert!(serde_json::to_string(&view).unwrap().contains("valid"));
@@ -99,12 +103,17 @@ fn checkpoint_refresh_preserves_sample_for_same_projection_and_invalidates_chang
     .unwrap();
     let mut state = state(path.clone(), Some(1_000));
     state.restore_newest_valid_checkpoint(&messages).unwrap();
-    state.record_ordinary_context(&messages, 50, messages.len(), Some(first.id));
+    state.record_ordinary_context(
+        &as_transcript(&messages),
+        50,
+        messages.len(),
+        Some(first.id),
+    );
 
     state.restore_newest_valid_checkpoint(&messages).unwrap();
     assert_eq!(
         state
-            .plan(&messages, &[], CompactionReason::Auto)
+            .plan(&as_transcript(&messages), &[], CompactionReason::Auto)
             .prepared
             .context_estimate,
         50
@@ -117,7 +126,11 @@ fn checkpoint_refresh_preserves_sample_for_same_projection_and_invalidates_chang
         .unwrap();
     assert_eq!(state.active_checkpoint_for_test().unwrap().id, first.id);
     let prepared = state
-        .plan(&changed_projection, &[], CompactionReason::Auto)
+        .plan(
+            &as_transcript(&changed_projection),
+            &[],
+            CompactionReason::Auto,
+        )
         .prepared;
     assert_eq!(
         prepared.context_estimate,
@@ -125,7 +138,12 @@ fn checkpoint_refresh_preserves_sample_for_same_projection_and_invalidates_chang
     );
 
     state.restore_newest_valid_checkpoint(&messages).unwrap();
-    state.record_ordinary_context(&messages, 50, messages.len(), Some(first.id));
+    state.record_ordinary_context(
+        &as_transcript(&messages),
+        50,
+        messages.len(),
+        Some(first.id),
+    );
     let (source, policy) = checkpoint_digests(&messages, 3);
     let second = append_orchestrator_compaction_checkpoint(
         &path,
@@ -146,7 +164,9 @@ fn checkpoint_refresh_preserves_sample_for_same_projection_and_invalidates_chang
     .unwrap();
     state.restore_newest_valid_checkpoint(&messages).unwrap();
     assert_eq!(state.active_checkpoint_for_test().unwrap().id, second.id);
-    let prepared = state.plan(&messages, &[], CompactionReason::Auto).prepared;
+    let prepared = state
+        .plan(&as_transcript(&messages), &[], CompactionReason::Auto)
+        .prepared;
     assert_eq!(
         prepared.context_estimate,
         estimate_message_tokens(&prepared.messages).saturating_add(estimate_tool_tokens(&[]))
@@ -206,7 +226,9 @@ fn wrapper_only_checkpoint_falls_back_to_older_valid_row() {
     let mut state = state(path.clone(), None);
     state.restore_newest_valid_checkpoint(&messages).unwrap();
     assert_eq!(state.active_checkpoint_for_test().unwrap().id, valid.id);
-    let view = state.plan(&messages, &[], CompactionReason::Auto).prepared;
+    let view = state
+        .plan(&as_transcript(&messages), &[], CompactionReason::Auto)
+        .prepared;
     assert!(serde_json::to_string(&view.messages)
         .unwrap()
         .contains("valid"));
@@ -244,10 +266,15 @@ fn repaired_transcript_clears_stale_checkpoint_before_candidate_and_sample_use()
     .unwrap();
     let mut state = state(path.clone(), Some(1));
     state.restore_newest_valid_checkpoint(&messages).unwrap();
-    state.record_ordinary_context(&messages, 50, messages.len(), Some(checkpoint.id));
+    state.record_ordinary_context(
+        &as_transcript(&messages),
+        50,
+        messages.len(),
+        Some(checkpoint.id),
+    );
 
     messages[1] = assistant("repaired answer");
-    let candidate = candidate(state.plan(&messages, &[], CompactionReason::Auto));
+    let candidate = candidate(state.plan(&as_transcript(&messages), &[], CompactionReason::Auto));
     assert_eq!(candidate.previous_checkpoint_id, None);
     let encoded = serde_json::to_string(&candidate.summary_messages).unwrap();
     assert!(encoded.contains("repaired answer"));
@@ -255,7 +282,7 @@ fn repaired_transcript_clears_stale_checkpoint_before_candidate_and_sample_use()
     assert!(state.active_checkpoint_for_test().is_none());
     assert!(
         state
-            .plan(&messages, &[], CompactionReason::Auto)
+            .plan(&as_transcript(&messages), &[], CompactionReason::Auto)
             .prepared
             .context_estimate
             != 50
@@ -328,8 +355,18 @@ fn restore_accepts_legacy_user_assistant_and_end_boundaries_but_rejects_unsafe_p
                 state.active_checkpoint_for_test().unwrap().id,
                 checkpoint.id
             );
-            state.record_ordinary_context(&appended, 20, appended.len(), Some(checkpoint.id));
-            assert_eq!(state.prepare(&appended, &[]).context_estimate, 20);
+            state.record_ordinary_context(
+                &as_transcript(&appended),
+                20,
+                appended.len(),
+                Some(checkpoint.id),
+            );
+            assert_eq!(
+                state
+                    .prepare(&as_transcript(&appended), &[])
+                    .context_estimate,
+                20
+            );
         }
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }

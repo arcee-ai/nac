@@ -62,10 +62,10 @@ export const InsightsFilter = memo(function InsightsFilter({
       aria-labelledby={labelId}
       className={cn(
         "flex min-w-0 items-center gap-3",
-        isTablet ? "flex-1" : "h-14 shrink-0 border-b border-muted pl-3 pr-2",
+        isTablet ? "flex-1" : "h-11 shrink-0 border-b border-tertiary pl-3.5 pr-1.5",
       )}
     >
-      <span id={labelId} className="flex-1 label-micro text-basic-primary">
+      <span id={labelId} className="flex-1 type-meta text-basic-tertiary">
         Show:
       </span>
       <Select

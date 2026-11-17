@@ -1,3 +1,38 @@
+# Current interaction preflight supplier
+
+The current ten-file test supplier contains StartupJourneys.swift and the shared
+StartupAXGuard.swift/StartupAXReceipt.swift actor and client, with its guides,
+contract and controls. H compiles those same two shared Swift files with its
+finite companion. The Runner publishes one closed private point request and
+consumes the readonly proof on that existing port. The ordinary app sandbox
+is unchanged. The approved 2026-11-10 test-runner exception grants writes only
+to the derived request-only child, with App Sandbox and both signature gates
+required. P12 remains a normal integration-only product input;
+this supplier does not rebuild or relabel it.
+
+[AX-WITNESS-CONTRACT.md](AX-WITNESS-CONTRACT.md) is the current accepted contract.
+It replaces exhaustive raw CG association with explicit public-coordinate global
+AX ownership preflight and accepts the last-instant coordinate race. Initial
+singleton root binding, retained AX identities, source/nonce binding, original
+30s ticket, <=1s sample/final freshness, exact focus/value, all postconditions and
+positive cleanup remain. Pointer dispatch uses the same checked public
+XCUICoordinate; no atomic or observed delivered-event equality is claimed.
+
+The source controls contain six geometry tests, seven exact reader/refusal tests
+with inert AX adapters, and twenty whole-client/file/request controls. Run:
+
+```sh
+NAC342_SWIFT_PANEL_PROOF=1 PYTHONPATH=desktop/macos/startup_xctest python3 -B -m unittest test_contract.NativeFolderPolicyTests test_contract.AXRefusalTests -v
+NAC342_AX_WITNESS_PROOF=1 python3 -B -m unittest discover -s desktop/macos/startup_xctest -p test_ax_witness.py -v
+```
+
+These compile actual source against deterministic value/API ports. They execute
+no live AX actor, app or input. Full helper SDK compilation and separately owned
+full-Xcode/native qualification remain distinct evidence obligations. Historical
+sections below retain their original attribution; superseded supplier counts,
+request prohibition and input-selection rules do not override the current
+contract linked above.
+
 # Ordinary startup XCTest proposal (ALL-342)
 
 Preparation only. `StartupJourneys.swift` is not included in an Xcode target in
@@ -18,7 +53,9 @@ Root's product nomination is now P
 `d443a2aca506def2817b9afc0c9a20a75f5c4b5d`, with an available normal ad-hoc
 package. The earlier helper Q was `57b16ef4`, followed by published Q
 `1412af562c56edebc63dbf61af849f08e2255b54`. This first path repair requires a
-new exact Q nomination before inclusion. H
+new exact Q nomination before inclusion. Published path repair Q
+`ddb2cb82ba9f17e662a96ccfe7b2f08442470d81` is the base for the separate local
+query-diagnostic unit described below; it also needs a new exact nomination. H
 `a4ec6b17a92dabd28501fa427992528cd3729100` remains an interface reference.
 Keep P, Q and eventual H identities distinct; only the four files in this
 directory may be supplied from Q, and only the Swift file is a test input.
@@ -37,7 +74,7 @@ Root nominated ALL-356's exact source contract (present in P; actual ordinary
 UI remains unqualified): private v1 `kind: failed`, `code: store_schema_incompatible`,
 `stage: startup`, with this exact shell-owned visible guidance:
 
-> The selected store uses a newer database schema. Quit NAC and reopen this store with a compatible newer NAC app. Keep your configuration and data; do not delete or downgrade the store. No alternative store was selected.
+> The selected store uses a newer database schema. Quit NAC and reopen this store with a compatible version of NAC. Keep your configuration and data; do not delete or downgrade the store. No alternative store was selected.
 
 The public UI actor requires this complete literal in one visible native text
 element. It records `exact_unique_message_observed_producer_binding_required`
@@ -230,10 +267,206 @@ qualification; launch/input/PNG remain uncaptured and input completion unknown.
 This repair is local source preparation pending the same bounded affected
 review, root nomination and H's matching observer/source-hash update.
 
+## Native configuredLocal adapter and current recovery sentence
+
+The ordinary full-P9 Local directory capability opens the maintained native
+`NSOpenPanel`. The configuredLocal test therefore uses the exact
+`Choose Working Folder: <home>` control, its owned attached panel, that panel's
+attached Go to Folder sheet, and native Select. It requires the full declared
+workspace in the normal form before Create Project. It does not use the web
+`/path/to/directory` picker, disable native capability, or run ALL347's separate
+reload/Reveal/Unicode mission.
+
+The eleven inputs are Get Started, Choose Working Folder, Cmd+Shift+G, Cmd+A,
+type owned workspace, Return, native Select, Create Project, Message, type the
+fixed prompt, and Send. Every input retains the original before/after dispatch
+records, app/incarnation/path/config/root-window and positive console guards.
+The surface graph admits only one root with its exact attached panel/subsheet;
+public AX handles cannot rebind to a replacement panel. Missing, foreign,
+ambiguous, cancelled or stale surfaces fail closed. The root's single-window
+rule remains; no numeric window-range fallback is introduced.
+
+macOS focus proof uses only read-only public ApplicationServices AX attributes
+on the already admitted PID, with a one-second messaging timeout, exact scoped
+sheet identity, positive focus, role, geometry and value. There is no AX action,
+attribute mutation, trust prompt, permission provisioning, private API or KVC.
+Missing existing AX admission or an unsupported AX/XCTest hierarchy is a gate.
+Public APIs are documented in [Application Services](https://developer.apple.com/documentation/applicationservices)
+and [XCUIElement](https://developer.apple.com/documentation/xcuiautomation/xcuielement).
+Actual full-Xcode typechecking and observed AX coordinate/hierarchy compatibility
+remain required; parser and inert projection controls cannot qualify them.
+
+`NAC342_SWIFT_PANEL_PROOF=1` runs the compile-verbatim surface, stable identity,
+focused-target and exact form-value policy controls. These use synthetic
+Foundation/CoreGraphics projections and never invoke AX or XCTest. The
+controls also construct native `CGRect.infinite`/null/zero sentinels and reject
+invalid control, owner and attached-panel geometry. Attachment remains independent
+of parent hittability while its Go to Folder sub-sheet is present. The opt-in
+must be supplied in a required source-bound Mac test lane to claim enforcement;
+an ordinary skipped proof is not coverage. Preserve the existing title proof.
+
+A failed public AX folder-surface guard retains at most one
+`nac342-ax-refusal-v1-configuredLocal` JSON attachment before the unchanged
+XCTUnwrap refusal. Its 8 KiB bound contains only the first observed refusal,
+terminal guard, numeric error/count/frame facts and exact P/Q/H/configuration,
+PID/launch/window binding. A rejected candidate may precede the terminal guard;
+the first observation is not a claim of the exclusive cause. It performs no
+extra AX reads after refusal, tree/text dump, trust prompt or action. Acceptance
+stays false. Source-only stub controls exercise the actual extracted AX methods;
+SDK/runtime behavior remains separate. H must explicitly admit and export this
+optional failed-test attachment before mandatory success/cleanup evidence checks;
+current older collectors do not retain it. Source production alone is not export
+or runtime validation.
+
+Root354 owns H's new exact Q commit/four source hashes, complete operations
+list, generated runner/config source hashes and collector/test/consumer handoff.
+H's `FUTURE_MESSAGE` and R's `GUIDANCE` verify the private engine wire and retain
+its complete `compatible newer NAC app` sentence. They must not be changed to
+the different native UI sentence. Q's Swift/Python visible-message assertion
+uses `compatible version of NAC`; the typed stage/code binds the UI projection
+to the unchanged private producer. Do not unify product wording or permit one
+boundary's literal as proof of the other. Successful source flow still has eleven inputs and console counts
+5/27/4/4 (onboarding/configuredLocal/invalidConfig/futureStore). H must derive and
+assert that exact trace from this successor, not accept a range or reuse the old
+web-picker operation names. If a later qualified SDK requires another input,
+change the explicit trace and exact count together under its source allocation.
+Public-own521's separately recorded missing-Q test-skip gap remains open.
+
+The full futureStore sentence above is now the exact maintained P9 wording,
+including `compatible version of NAC`. Both the Swift unique full-message wait
+and Python exact-equality contract retain typed startup/schema binding, the 35s
+wait, no workspace activation or alternative store, DB/config preservation,
+no WAL/SHM and independently owned cleanup/producer evidence. This is a test
+contract correction; no product wording or generic-message fallback changes.
+
+## Historical Q55 failure-only onboarding query diagnostics
+
+This section describes the original label assertion through Q55cb. The
+successor assertion below does not emit this unchanged v1 diagnostic.
+
+The Qddb/Hd7b actual onboarding attempt reached the full45s legacy text wait
+and failed `Shared onboarding absent`; its guarded failure PNG painted the
+expected onboarding title and Get Started button. H's readiness/empty-store
+and entry-asset audit passed separately. No actual AX hierarchy was retained,
+so scope/type/attribute cause is unknown. This differs from the earlier
+externally interrupted attempt. No selector or product accessibility repair is
+claimed by this unit, and no new runtime/SDK/input/paint acceptance is supplied.
+
+The named assertion wrapper keeps exactly one call to
+`ui.webViews.staticTexts` with `label CONTAINS` and the same45s wait. A false
+legacy result triggers one best-effort diagnostic, then always throws the same
+NAC342/code1/`Shared onboarding absent` error. Other-query matches cannot turn
+that failure into success. The four cases, inputs and existing observation,
+dispatch and cleanup schemas remain unchanged.
+
+Optional attachment `nac342-query-diagnostic-v1-onboarding` uses schema
+`nac342-query-diagnostic-v1`, version1. The frozen standalone contract SHA256 is
+`c87143afcbe81ea58522f868a96537195ef7d9b8e20068a4c5519d575195b913`;
+append-only clarification SHA256 is
+`fa7d5c8a30001c0ab8065fa3d9cf0020acb16317a3aef4d882f697d4368cf6d5`.
+Examples are synthetic historical bindings, never current Q/H nominations.
+H alone admits/retains this optional failure attachment against its actual
+selected test/config/source/App/window witness; it cannot replace a missing
+final observation or make `input_completion_unknown` false.
+
+The census uses12 ordered, fixed public query materializations for three known
+fixture texts. Only counts and capped type/state/comparison booleans leave the
+actor; no arbitrary label/value/identifier, hierarchy, exception text or hash
+of uncontrolled text is retained. Source/config/PID/epoch/window/native hash
+bind the record; App/window/console/resource guards and unchanged config bytes
+must hold before and after. Failed guards suppress census emission. Only an
+in-memory XCTest attachment is created; no profile/store or app-output file is
+read. Missing/partial evidence stays missing/partial.
+
+Each materialization uses `allElementsBoundByAccessibilityElement`, not a
+separate count evaluation. Query indices0..3 are count-only; index4
+`window_static_title` begins candidate reads. At most4 candidates per query,
+8total,4096 reported matches per row and8KiB JSON are allowed. Longer-than256
+UTF8 attribute strings yield unavailable comparison flags and partial evidence.
+The5s budget is checked before each public attribute getter, between query
+materializations and once after the last operation. An unfinished candidate is
+discarded and remains partial; its attempt still consumes the read budget.
+A synthetic slow-first-getter control covers this boundary. Complete requires final elapsed strictly below5000ms; exactly5000 is partial.
+Invalid/backward clocks become sticky `clock_invalid` with elapsed0 and no
+overflow; finite elapsed above600000 is clamped with overflow/time-budget.
+SDK-internal array/RPC work, memory and individual call latency are unqualified;
+these caps do not bound an individual public framework call. No second wait,
+retry, refocus, input, timeout increase, DOM/private API, OCR-based pass or
+alternate-element fallback is introduced.
+
+## Exact-value onboarding title assertion successor
+
+Root authorized one test-owned source repair after the fourth failed ordinary
+startup episode: run41246104964/job124669877870, Q55cb/H14e/Pd443/R25046.
+The retained complete749ms diagnostic SHA256
+`1a2bc4759bf2c450833eeb53dc2f6afd643b44498f5756e942f8f673232397f6`
+reported zero legacy label matches but exactly one owned-window value-title
+match: StaticText48, existing/enabled/hittable/intersecting, exact String value.
+The subtitle independently had the same value-only result. The original PNG
+was visibly onboarding; the original45s assertion still failed. This evidence
+supports this episode's attribute/query mismatch, not every host or earlier
+failure's cause, and does not qualify a passing startup case.
+
+Only the onboarding title assertion changes. It queries StaticText descendants
+of the already uniquely guarded window with exact `value == "No projects yet"`.
+One45s existence wait precedes one result-set materialization. Exactly one
+candidate is required before reading attributes; its actual SDK type, exact
+String value, existence, enabled/hittable state and finite, nonempty window
+intersection must pass; CoreGraphics infinite sentinel rectangles are refused
+even though their components can be finite. Frame geometry is only a visibility guard, never an
+input coordinate. The final original App/window/console/resource guard and
+unchanged configuration bytes must pass before success. No OR-label fallback,
+contains/trim/case folding, second wait, refocus, retry or global helper change
+is added. Public framework call latency is not given a new hard wall-clock bound.
+
+The unchanged pure wrapper still throws NAC342/code1/`Shared onboarding absent`
+on false. Its diagnostic callback is deliberately empty for the new assertion:
+historical v1 `legacy_exists:false` certifies the original label wait's result,
+which a failed value assertion cannot certify. The frozen c871/fa7 contracts,
+historical producer/policy code and H optional collector are unchanged. A new
+failure may lack that optional census; missing evidence cannot pass acceptance.
+Any future census requires a separately frozen, honest assertion contract.
+
+Get Started and all later-flow/native recovery selectors remain unchanged.
+The current click helper uses `matching(identifier:)`, which Apple defines to
+also match title, label, value and placeholderValue; zero sampled label-button
+matches do not prove that helper fails. Button and later-flow AX attributes
+remain unqualified. The full four-state matrix and existing launch, dispatch,
+observation, source/resource binding and cleanup contracts remain required.
+B1/B2/B3 and no-argument Finder coverage are separate, unallocated work.
+
+`test_title_assertion.py` compiles the exact pure title decision plus original
+error wrapper. Its H14e old-RED/new-model-GREEN fixture uses retained comparison
+facts and explicitly synthetic rectangles, never invented actual raw labels or
+geometry. Negatives reject ambiguity before attribute reads, wrong types/values,
+unavailable interaction state, invalid geometry and failed final bindings.
+These controls establish no XCUI query, actual visibility or input behavior.
+The previous Q55 actor built under Xcode26.6/SDK26.5/Swift5 language mode on H14e;
+the changed actor requires fresh exact-source full SDK build-for-testing and
+separate root runtime allocation. Neither is established by these local controls.
+
+First-failure evidence uses a lexical `do/catch` inside the existing
+`@MainActor` test method, beneath its application teardown defer. The catch
+calls the passive nonthrowing recorder and rethrows the original error before
+teardown. The first capture returns the same closed record even if private file
+publication fails. The lexical catch best-effort attaches that record as named
+XCTest JSON before the same original throw; an attachment error cannot replace
+it. The latch prevents retrying either channel. Success and unconfigured cases
+publish neither channel. H may retain this exact nonce/configuration-bound
+attachment on an incomplete failed case without accepting that case or changing
+its original collection error. File and attachment evidence establish no global
+failure precedence or input/cleanup authority. Keeping the journey's nested guard and dispatch functions in this
+lexical actor scope avoids a generic nonisolated callback boundary. Publication
+is best effort and first-only even if a failed file port later recovers.
+The inert receipt controls compile this actor scope and execute the exact
+journey catch with retained error identity, publication failure and success
+fixtures; they do not compile the XCUI target or run a public UI test. The full
+generated XCTest target remains a required separate SDK compilation gate.
+
 ## Local preparation checks
 
 ```sh
-NAC342_PRODUCT_SOURCE_ROOT=<clean-exact-P-checkout> NAC342_SWIFT_POLICY_PROOF=1 NAC342_SWIFT_PATH_PROOF=1 \
+NAC342_PRODUCT_SOURCE_ROOT=<clean-exact-P-checkout> NAC342_SWIFT_POLICY_PROOF=1 NAC342_SWIFT_PATH_PROOF=1 NAC342_SWIFT_QUERY_PROOF=1 NAC342_SWIFT_TITLE_PROOF=1 \
   python3 -B -m unittest discover -s desktop/macos/startup_xctest -p 'test_*.py' -v
 swiftc -frontend -parse desktop/macos/startup_xctest/StartupJourneys.swift
 ```
@@ -248,12 +481,188 @@ block and exercises physical declarations, verified `/var` URL observations,
 spaces, emitted paths, missing/wrong-type resources, lexical/containment/layout
 failures, declared symlinks and same-path resource replacement. Its temporary
 files are inert fixtures; missing profile/store leaves are never inspected.
+The query proof compiles the exact pure assertion/projection block and checks
+failure invariance, scope/type/attribute distinctions, strict types/caps,
+privacy, guard/binding rejection and final clock edges. It does not execute
+XCUI queries, prove actor SDK compilation or produce actual AX evidence.
 These proofs perform no live console observation or GUI action.
 The normal package tests use tiny synthetic non-executable artifacts and P's
 real owner validator; they require the separate nominated P checkout. Missing
-P or either Swift opt-in is an explicit skipped proof, not a passing substitute.
+P or any requested Swift opt-in is an explicit skipped proof, not a passing substitute.
 
 No new dependency, workflow, SDK install, app/engine change, project generation,
 PR publication, actual UI execution, or live-provider request is performed by
 these commands. Current-head readiness and ordinary four-state qualification
 remain outstanding until root/354 completes the actual integration and evidence.
+
+The first-failure record keeps its seven-field schema and all legacy step values.
+Preparation additionally records closed checkpoints at the original request
+shape, anchor/root frame, containment, deadline, ticket, publication and consume
+guards. File publication marks parent, encoding/size, open, write, mode, close and
+rename before those original operations; receipt reading marks its existing
+file, decoding, identity, sequence, refusal, surface, focus and freshness guards.
+Only the optional passive recorder reference travels through these calls.
+There is no callback/actor hop or additional protocol. The first record is still
+latched before diagnostic publication, so a failed diagnostic write cannot
+replace its original step or error, and the independent XCTest attachment remains
+available. Inert failures distinguish checkpoints; they do not identify the
+Actual13 predicate or establish native input/acceptance.
+
+## Query semantic-name compatibility successor
+
+A unique matching(identifier:) query may succeed by title, label, value or
+placeholderValue; it does not establish a nonempty XCUIElement.label. Named
+button/message dispatches therefore carry the original selector's trusted name
+and frozen query explicitly. The same query cardinality, anchor and a matching
+public title/label (Message-only placeholder fallback) are required before the
+request and again after AX proof. The name is nonempty and bounded to1024 UTF8
+bytes, with no truncation or arbitrary identifier-only acceptance. A correct
+title is not vetoed by an unrelated empty or oversized label. The AX adapter
+checks the same intended name through existing title/description, with narrowly
+typed Message-only placeholder fallback; role, PID, global hit, retained CFEqual
+ancestry, focus/value and exact public coordinate/freshness remain required.
+
+The original request-name expression rejects the documented empty-label/correct-
+title case in the retained RED characterization; the repaired expression and
+exact extracted public recheck pass it and the oversized incidental-label case.
+Owning controls also reject missing/wrong/oversized intended names, identifier-
+only targets, button placeholders, duplicate/stale queries and wrong AX names or
+placeholder types, alongside all existing point/identity/focus/refusal controls.
+The selected23 receipt,6 geometry and7 AX methods remain unchanged in count.
+Atomic closed shape checkpoints preserve evaluation order and original errors.
+
+Actual14 localized request_shape/receipt_invalid/op1. Its raw label/length were
+not retained; empty versus oversized is unproven. This compatibility repair is
+supported by public API/source contracts, not a claim of that individual operand
+or native acceptance. Fresh SDK and full native qualification remain required.
+See Apple's [matching query documentation](https://developer.apple.com/documentation/xcuiautomation/xcuielementquery/matching(_:identifier:)).
+
+## New-candidate process-image capture
+
+The external metadata owner may observe an unadmitted child between its native
+image census and a bundled-engine argv capture. Only an original native_argv
+rejection can enter the narrow recovery: the candidate is not already known,
+its allowed parent is the retained native app and independently rechecked, and
+its PID, birth, UID and parent are unchanged while a new positive probe shows
+the exact bundled-engine image. The rejected tuple is discarded; one fresh full
+argv/environment capture is checked against that engine image and a final
+coherent identity/parent bookend before normal atomic record/known publication.
+
+Stable invalid native argv, known identity changes, foreign/new identity or
+parent changes, repeated transitions, missing/denied probes, malformed captures
+and prohibited credentials remain fail-closed. No marker flag is role authority,
+no argv0 alias is normalized and no ambiguity produces partial success or
+retirement. Existing exact invocation/environment, ancestry, resource, freshness,
+input and cleanup contracts remain. Canonical injected snapshot controls cover
+the transition and adversarial cases; they do not prove Actual15's unretained
+exec-race hypothesis or native acceptance. No raw argv diagnostics are exported.
+
+## Failed configured journey settlement
+
+After an already caught configuredLocal journey failure, preserve the original
+closed failure record, independent XCTest attachment, guarded failure image and
+throw. Its defer leaves app termination to the existing external exact-identity
+owner after failed XCTest result collection. It emits no test-side cleanup claim.
+Successful public teardown and every other case retain their original behavior.
+The external owner alone proves app/engine retirement and profile removal; an
+unknown identity or cleanup still retains the fixture. Live API/origin/UI guards,
+helper abort, input refusal, original error, deadlines and all acceptance checks
+remain unchanged. This avoids manufacturing listener absence before XCTest can
+commit its failed result; it does not establish Actual16's causal sequence or
+original failing predicate. That teardown repair did not change Runner sandbox
+permissions; the separately approved request-only exception is described below.
+
+The existing receipt controls execute the actual catch and entire teardown with
+inert XCUI adapters across failed/successful/other-case/image-denial/terminated
+states. Separate inert Python controls exercise the actual caller, audit, helper
+supervisor and settlement owner. They provide no SDK or native UI acceptance.
+
+Initial guard refusal diagnostics preserve nonnil rich bytes exactly, including
+malformed bytes (which cannot trigger a fallback). Only absent rich data with an
+already held `sample_deadline`, `ax_predicate_refused`, `target_retiring`, or
+`target_retired` stage supplies the existing stage-only first/terminal refusal.
+The same once-only attachment and provenance merge apply; unknown/default stages
+remain omitted. This passive retention adds no witness reads, input, retry or
+acceptance authority and does not identify Actual18's unretained producer stage.
+
+## Approved request-only Runner directory (2026-11-10)
+
+Maintainer Allison approved the reviewed test-runner exception for the configured
+local development journey. H creates one fresh owned canonical 0700 `requests`
+child under the private proof directory. Both canonical Swift owners derive
+`parent(receipt.path)/requests/request.json` without changing the seven-key
+declaration or closed request payload. Atomic temporary/final requests and their
+readback/unlink stay in that child. Only its exact trailing-slash path may gain
+Runner read/write access. Proof, stop and best-effort failure siblings stay in
+the parent, outside the grant; the independent XCTest failure attachment remains.
+No app, engine, HOME, NAC_HOME, store, profile, parent/root or global write expands.
+
+The designated project writer supplies source entitlements for the configured
+case only. App Sandbox stays enabled. The existing build owner first builds and
+independently inspects a normal same-source/configuration/toolchain baseline,
+then both actual signed candidate outputs. The Runner process must preserve its
+entire actual typed XML baseline, including AX/testmanager, plus only the exact
+child grant. The hosted loadable MH_BUNDLE test library instead preserves its
+own actual verified entitlement absence. Both strict signatures and actual
+APPL/BNDL, generated-hosted and bounded all-slice Mach-O code roles remain checked;
+absence is explicitly tagged and distinct from an empty dictionary or missing
+evidence. No entitlements are fabricated or force-embedded into library code. Canonical source/project/selected and ordinary scheme/configuration,
+binary/Info/xctestrun/toolchain and directory identities remain checked. Missing
+propagation or any broader/dropped permission fails before input. No generated
+xcent edits, re-signing workaround, new transport or automatic request reissue.
+Nonconfigured and compile-only SDK cases keep the ordinary single builder.
+
+This directory grant covers the child and descendants, not only one filename;
+nonce/configuration binding remains application validation. Inert controls and
+source approval establish neither actual Xcode propagation nor OS enforcement.
+Build-only verification must stop after generated_runner. Actual proof/stop
+nonwritability, alias/rename behavior, native AX/input predicates and positive
+process/profile/store settlement still require separately admitted evidence.
+The approval does not reset spent qualifications or waive any acceptance guard.
+
+BuildOnly01's normal signed Runner had valid XML while its strictly verified
+loadable test bundle had only the exact Executable display line, with no XML.
+The collector now records that observed library absence without requiring the
+library to carry process Sandbox/AX entitlements. The actual candidate remains
+unmeasured until a fresh admitted build: changed/present library payload,
+missing Runner XML, broader or nonpropagated process grants still fail closed.
+False-acceptance actual signature observations are retained before admission.
+No re-signing, generated-xcent edit or library-entitlements forcing is used.
+
+## Approved one-action handoff (2026-11-10)
+
+The immutable request now stays present through one public input and its existing
+bounded postcondition. Q publishes a closed nonce/config/request/target/cutoff
+claim at `requests/request.json.handoff`; H acknowledges it in readonly
+`receipt.json.handoff` without refreshing the existing AX sample. Q waits within
+that SAME sample's <=1s age, then performs the existing final public query,
+semantic/point/geometry/focus/value checks and final original proof validation
+immediately before the ONE action. H pauses AX only in that declared handoff,
+continuing its parent/process/resource/config/helper/frame checks under the
+original cutoff while the independent metadata owner continues custody.
+
+After the existing action/postcondition returns, Q completes the same claim.
+The after guard must consume a complete newly begun <=1s AX sample with exact
+completion identity, same retained roots and ORIGINAL ticket cutoff. H holds
+the first post-action result (including refusal); Q clears the request only
+after the complete after guard. No next prepare, action replay, refusal retry,
+freshness renewal, sleep, permission expansion or product behavior follows.
+The canonical inert class now has31 methods (25 legacy plus6 handoff controls);
+the required H gate composes6 geometry+7 AX/refusal+31 receipt controls=44 with
+zero skips. Its actual-H-loop control reads the current H producer source path
+provided by that gate; canonical Q client/lease/journey bytes remain immutable.
+Source/SDK checks are separate from actual native and positive cleanup evidence.
+
+After consuming the after guard, Q unlinks its request/claim and waits within the
+SAME post-sample freshness/original cutoff for H's exact completed drain ACK in
+the readonly parent. H publishes it only when its held post-proof loop observes
+request loss. Q cannot prepare the next request before this explicit drain ACK;
+there is no polling-timing assumption or sleep-based request-order barrier.
+
+The canonical client may await only the exact already-validated outgoing ready
+publication at action-completion and ordinary-return boundaries; those bytes
+never count as the new guard. Original cutoff, sequence/generation, refusal,
+malformed/changed-byte and foreign-marker checks remain terminal. During drain,
+Q retains and revalidates the completed child claim through H's exact readonly
+ACK, then removes it before clearing local pending state. Actual H post-hold
+controls interleave request opening and claim reading to cover this ordering.

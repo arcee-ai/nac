@@ -2,12 +2,33 @@
 use super::*;
 
 pub(super) fn normalized(id: &str, source: &Source) -> Option<AttentionSourceSnapshot> {
-    let stored = source.stored.as_ref()?;
-    let supported = stored.primary && stored.direct;
-    let broker = source
-        .service
-        .as_ref()
-        .and_then(|service| service.broker.as_ref());
+    Some(classify(
+        id,
+        source.epoch,
+        source.stored.as_ref()?,
+        source.service.as_ref(),
+        source
+            .binding
+            .as_ref()
+            .map(|binding| binding.config_version),
+    ))
+}
+
+/// The single attention classification shared by the native observer and the
+/// browser fleet read. `bound_config` is `Some` only for an installed owner.
+pub(in crate::application) fn classify(
+    id: &str,
+    epoch: Uuid,
+    stored: &AttentionStoredSession,
+    service: Option<&AttentionServiceSnapshot>,
+    bound_config: Option<Option<i64>>,
+) -> AttentionSourceSnapshot {
+    // Primary direct sessions own settled work and goals. Traditional children
+    // additionally report their own broker decisions and topology, attributed
+    // to the child session; orchestration topologies stay unsupported.
+    let primary = stored.primary && stored.direct;
+    let supported = primary || (stored.traditional_child && stored.direct);
+    let broker = service.and_then(|service| service.broker.as_ref());
     let mut pending: Vec<_> = stored.question.clone().into_iter().collect();
     let broker_available = if supported {
         if let Some(AttentionBrokerSnapshot {
@@ -43,9 +64,9 @@ pub(super) fn normalized(id: &str, source: &Source) -> Option<AttentionSourceSna
     } else {
         AttentionFacet::Unknown
     };
-    let work = source.service.as_ref().and_then(|service| {
+    let work = service.and_then(|service| {
         let work = service.settled.as_ref()?;
-        if !supported || stored.manual_unsettled || stored.inbox_pending || !pending.is_empty() {
+        if !primary || stored.manual_unsettled || stored.inbox_pending || !pending.is_empty() {
             return None;
         }
         if work.goal.as_ref() != stored.goal.as_ref().map(|goal| &goal.identity)
@@ -61,7 +82,7 @@ pub(super) fn normalized(id: &str, source: &Source) -> Option<AttentionSourceSna
                 return None;
             }
             if work.goal.is_none() {
-                let config_version = source.binding.as_ref()?.config_version;
+                let config_version = bound_config?;
                 if !stored.verifies_goal_free_idle(&work.run_id, config_version) {
                     return None;
                 }
@@ -80,14 +101,14 @@ pub(super) fn normalized(id: &str, source: &Source) -> Option<AttentionSourceSna
         }
         Some(work.clone())
     });
-    Some(AttentionSourceSnapshot {
+    AttentionSourceSnapshot {
         source: AttentionSource {
             session_id: id.to_owned(),
-            epoch: source.epoch,
+            epoch,
         },
         revision: 0,
         availability: AttentionAvailability {
-            work: if !supported {
+            work: if !primary {
                 AttentionFacet::Unsupported
             } else if work.is_some() {
                 AttentionFacet::Available
@@ -109,7 +130,7 @@ pub(super) fn normalized(id: &str, source: &Source) -> Option<AttentionSourceSna
         },
         work,
         pending,
-    })
+    }
 }
 pub(super) fn emit(hub: &AttentionHub, source: &mut Source, change: AttentionChange) -> Result<()> {
     let Some(published) = source.published.as_mut() else {

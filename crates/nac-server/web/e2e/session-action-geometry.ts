@@ -11,6 +11,7 @@ export async function recordSessionAction(control: Locator, info: TestInfo, name
       return {
         tag: element.tagName,
         classes: element.className,
+        sessionRow: element.hasAttribute("data-session-row"),
         label: element.getAttribute("aria-label"),
         x: rect.x,
         y: rect.y,
@@ -72,15 +73,20 @@ export async function recordSessionAction(control: Locator, info: TestInfo, name
   return geometry;
 }
 
+/**
+ * On a touch device a navigation row's actions sit in flow, fully shown and
+ * unclipped: the wrapper is the row's direct child that holds the actions.
+ */
 export function expectExposedRowAction(geometry: Awaited<ReturnType<typeof recordSessionAction>>) {
   expect(geometry.media["(hover: none)"]).toBe(true);
-  const wrapper = geometry.ancestors.find((node) =>
-    node.classes.includes("session-name-row-actions"),
-  );
-  expect(wrapper).toBeDefined();
-  expect(wrapper!.clipPath).toBe("none");
-  expect(wrapper!.position).toBe("static");
-  expect(wrapper!.overflow).toBe("visible");
-  expect(wrapper!.width).toBeGreaterThan(1);
-  expect(wrapper!.height).toBeGreaterThan(1);
+  const row = geometry.ancestors.findIndex((node) => node.sessionRow);
+  expect(row).toBeGreaterThan(0);
+  const wrapper = geometry.ancestors[row - 1];
+  expect(wrapper.clipPath).toBe("none");
+  expect(["static", "relative"]).toContain(wrapper.position);
+  expect(wrapper.overflow).toBe("visible");
+  expect(wrapper.opacity).toBe("1");
+  expect(wrapper.pointerEvents).toBe("auto");
+  expect(wrapper.width).toBeGreaterThan(1);
+  expect(wrapper.height).toBeGreaterThan(1);
 }

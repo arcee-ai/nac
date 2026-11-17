@@ -13,6 +13,7 @@ import {
 import { ModelMessage } from "@/app/components/inspector/ModelMessage";
 import { UserMessage } from "@/app/components/inspector/UserMessage";
 import { DelegatedCompletionCard } from "@/app/features/delegation/presentation/DelegatedCompletionCard";
+import { GoalContinuationCard } from "@/app/features/goals/presentation/GoalContinuationCard";
 import { ChildTranscriptScope } from "@/app/features/insights/transcript/ChildTranscriptScope";
 import { useSessionBehaviorIconVisible } from "@/app/features/ui-policy/useSessionBehaviorIconVisible";
 import { useDelegatedPreviewStream } from "@/app/hooks/useDelegatedPreviewStream";
@@ -35,7 +36,7 @@ function ignoreThread(): void {}
 function lastUserText(turns: TranscriptTurn[]): string | null {
   for (let index = turns.length - 1; index >= 0; index -= 1) {
     const turn = turns[index];
-    if (turn.kind === "delegated-completion") return null;
+    if (turn.kind === "delegated-completion" || turn.kind === "goal-continuation") return null;
     if (turn.kind === "user") return turn.text;
   }
   return null;
@@ -161,25 +162,25 @@ export function SubagentPreview({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {header ? (
-        <div className="flex h-14 shrink-0 items-center gap-2 border-b border-muted bg-elevation-ground px-4">
+        <div className="flex h-12 shrink-0 items-center gap-2.5 border-b border-tertiary px-4">
           {showBehaviorIcon ? (
-            <Icon iconName={icon} size={20} className="shrink-0 text-basic-secondary" />
+            <Icon iconName={icon} size={16} className="shrink-0 text-basic-tertiary" />
           ) : null}
           <SessionNameDisclosure
             key={sessionId}
             name={title}
             running={running}
-            className={cn("label-small min-w-0 flex-1 truncate text-left", "text-basic-primary")}
+            className={cn("type-strong min-w-0 flex-1 truncate text-left", "text-basic-primary")}
           />
           <Button
             size={ButtonSize.Small}
-            variant={ButtonVariant.Ghost}
+            variant={ButtonVariant.Secondary}
             content={ButtonContent.IconRight}
             aria-label="Open"
             aria-description="Open this child’s own Insights and Files"
             onClick={onOpen}
           >
-            Open child
+            Open session
             <Icon iconName={IconName.External} />
           </Button>
         </div>
@@ -214,7 +215,7 @@ export function SubagentPreview({
               {snapshot.isError ? (
                 <div
                   role="alert"
-                  className="flex flex-wrap items-center gap-2 py-4 text-sm leading-5 text-error-primary"
+                  className="flex flex-wrap items-center gap-2 py-4 type-body-chrome text-error-primary"
                 >
                   <span>Couldn’t load the child conversation.</span>
                   <Button
@@ -229,7 +230,7 @@ export function SubagentPreview({
               ) : null}
               {olderFailed && hasOlder ? (
                 <div role="alert" className="mb-4 flex flex-wrap items-center gap-2">
-                  <span className="label-small text-basic-muted">
+                  <span className="type-meta text-basic-tertiary">
                     Couldn’t load older messages.
                   </span>
                   <Button
@@ -245,6 +246,9 @@ export function SubagentPreview({
               {turns.map((turn, index) => {
                 if (turn.kind === "delegated-completion") {
                   return <DelegatedCompletionCard key={turn.key} turn={turn} interactive={false} />;
+                }
+                if (turn.kind === "goal-continuation") {
+                  return <GoalContinuationCard key={turn.key} sessionId={sessionId} turn={turn} />;
                 }
                 if (turn.kind === "user") {
                   return (
@@ -308,7 +312,9 @@ export function SubagentPreview({
                 />
               ) : null}
               {turns.length === 0 && !running && fallbackText ? (
-                <p className="label-small py-4 text-basic-secondary">{fallbackText}</p>
+                <p className="type-body-chrome whitespace-pre-wrap py-4 text-basic-secondary">
+                  {fallbackText}
+                </p>
               ) : null}
             </ChildTranscriptScope>
           </div>

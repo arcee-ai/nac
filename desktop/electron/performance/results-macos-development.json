@@ -1,0 +1,1524 @@
+{
+  "schema_version": 1,
+  "acceptance": "early-development-proxies-only",
+  "recorded_at_utc": "2026-11-14T01:35:30.384131+00:00",
+  "source_revision": "4cada76fc45235b229f02034243b09145100c1ed",
+  "host": {
+    "os": "27.0.1",
+    "cpu": "Apple M5 Max",
+    "memory_bytes": 38654705664,
+    "displays": [
+      {
+        "gpu": "Apple M5 Max",
+        "name": "Color LCD",
+        "pixels": "3024 x 1964",
+        "resolution": "1512 x 982 @ 120.00Hz",
+        "automatic_brightness": "spdisplays_yes",
+        "main": "spdisplays_yes"
+      }
+    ],
+    "power": "Now drawing from 'AC Power'\n -InternalBattery-0 (id=<redacted-battery-registry-id>)\t80%; AC attached; not charging present: true",
+    "power_after": "Now drawing from 'AC Power'\n -InternalBattery-0 (id=<redacted-battery-registry-id>)\t80%; AC attached; not charging present: true"
+  },
+  "arms": {
+    "swift": {
+      "engine_sha256": "3e6400da275a45c2803a3bddea8f9f984dac75d0fcf4abbff173615aee9384c7",
+      "shell_sha256": "ade6b271d2f8d72ac3b6e6e769296ce24118bba6a2ada12be299a5d188d28320",
+      "engine_identity": {
+        "product_version": "0.1.4",
+        "build_id": "dev-4cada76fc45235b229f02034243b09145100c1ed",
+        "source_revision": "4cada76fc45235b229f02034243b09145100c1ed",
+        "track": "dev"
+      },
+      "bundle_name": "NAC.app"
+    },
+    "electron": {
+      "engine_sha256": "3e6400da275a45c2803a3bddea8f9f984dac75d0fcf4abbff173615aee9384c7",
+      "shell_sha256": "1e04968c9a63ee6851fae7bbd6c31dd6968c6489b8090e98e9353d2cd5b099b2",
+      "engine_identity": {
+        "product_version": "0.1.4",
+        "build_id": "dev-4cada76fc45235b229f02034243b09145100c1ed",
+        "source_revision": "4cada76fc45235b229f02034243b09145100c1ed",
+        "track": "dev"
+      },
+      "bundle_name": "NAC Electron.app"
+    }
+  },
+  "failures": [],
+  "settings": {
+    "samples": 5,
+    "settle_seconds": 10.0,
+    "idle_seconds": 10,
+    "cache_state": "OS caches retained; no purge; independent persistent app profiles",
+    "workload": "empty disposable store",
+    "seed_store_sha256": null
+  },
+  "summary": {
+    "swift": {
+      "launch_to_visible_native_window_ms": {
+        "n": 5,
+        "min": 338.20524998009205,
+        "median": 350.9694167878479,
+        "p95": 355.09858280420303,
+        "max": 355.09858280420303
+      },
+      "hide_to_launchservices_reopen_ms": {
+        "n": 5,
+        "min": 145.66091704182327,
+        "median": 148.1025000102818,
+        "p95": 154.93512502871454,
+        "max": 154.93512502871454
+      },
+      "resource_trials_included": 5,
+      "resource_trials_excluded": 0,
+      "idle_trial_median_cpu_percent_one_core": {
+        "n": 5,
+        "min": 0.6445551657421313,
+        "median": 0.6647421102659394,
+        "p95": 0.6859724349713692,
+        "max": 0.6859724349713692
+      },
+      "idle_trial_median_physical_footprint_mib": {
+        "n": 5,
+        "min": 165.17684173583984,
+        "median": 167.7860565185547,
+        "p95": 185.06755828857422,
+        "max": 185.06755828857422
+      }
+    },
+    "electron": {
+      "launch_to_visible_native_window_ms": {
+        "n": 5,
+        "min": 561.6464999038726,
+        "median": 592.9290419444442,
+        "p95": 659.7178331576288,
+        "max": 659.7178331576288
+      },
+      "hide_to_launchservices_reopen_ms": {
+        "n": 5,
+        "min": 151.4761671423912,
+        "median": 152.34324987977743,
+        "p95": 158.3812499884516,
+        "max": 158.3812499884516
+      },
+      "resource_trials_included": 5,
+      "resource_trials_excluded": 0,
+      "idle_trial_median_cpu_percent_one_core": {
+        "n": 5,
+        "min": 0.5662595702650401,
+        "median": 0.6371368597329856,
+        "p95": 0.6599183647695313,
+        "max": 0.6599183647695313
+      },
+      "idle_trial_median_physical_footprint_mib": {
+        "n": 5,
+        "min": 256.75672912597656,
+        "median": 259.81929779052734,
+        "p95": 280.6162872314453,
+        "max": 280.6162872314453
+      }
+    }
+  },
+  "normal_trial_summaries": [
+    {
+      "arm": "swift",
+      "trial": 0,
+      "store_state": "fresh",
+      "launch_to_visible_native_window_ms": 354.08279206603765,
+      "idle_summary": {
+        "cpu_percent_one_core": {
+          "n": 10,
+          "min": 0.5363588023260925,
+          "median": 0.6647421102659394,
+          "p95": 3.215707489265739,
+          "max": 3.215707489265739
+        },
+        "engine_cpu_percent_one_core": {
+          "n": 10,
+          "min": 0.5341008506384278,
+          "median": 0.5777362474385033,
+          "p95": 0.8497227480090587,
+          "max": 0.8497227480090587
+        },
+        "physical_footprint_mib": {
+          "n": 11,
+          "min": 184.3644561767578,
+          "median": 185.06755828857422,
+          "p95": 195.9738311767578,
+          "max": 195.9738311767578
+        },
+        "process_count": {
+          "n": 11,
+          "min": 7,
+          "median": 7,
+          "p95": 7,
+          "max": 7
+        },
+        "collector_ms": {
+          "n": 11,
+          "min": 63.27524990774691,
+          "median": 67.21941684372723,
+          "p95": 100.93320813030005,
+          "max": 100.93320813030005
+        },
+        "unavailable_pid_samples": 0,
+        "membership_changes": 0,
+        "complete_stable_intervals": true
+      },
+      "hide_to_launchservices_reopen_ms": 147.4034998100251,
+      "cleanup_settled": true
+    },
+    {
+      "arm": "electron",
+      "trial": 0,
+      "store_state": "fresh",
+      "launch_to_visible_native_window_ms": 659.7178331576288,
+      "idle_summary": {
+        "cpu_percent_one_core": {
+          "n": 10,
+          "min": 0.5885157324529234,
+          "median": 0.6599183647695313,
+          "p95": 2.257305862511502,
+          "max": 2.257305862511502
+        },
+        "engine_cpu_percent_one_core": {
+          "n": 10,
+          "min": 0.49834893035791816,
+          "median": 0.5479647474938026,
+          "p95": 0.9224033270403695,
+          "max": 0.9224033270403695
+        },
+        "physical_footprint_mib": {
+          "n": 11,
+          "min": 280.5069122314453,
+          "median": 280.6162872314453,
+          "p95": 286.5069122314453,
+          "max": 286.5069122314453
+        },
+        "process_count": {
+          "n": 11,
+          "min": 7,
+          "median": 7,
+          "p95": 7,
+          "max": 7
+        },
+        "collector_ms": {
+          "n": 11,
+          "min": 65.73479110375047,
+          "median": 67.55949999205768,
+          "p95": 68.97391588427126,
+          "max": 68.97391588427126
+        },
+        "unavailable_pid_samples": 0,
+        "membership_changes": 0,
+        "complete_stable_intervals": true
+      },
+      "hide_to_launchservices_reopen_ms": 158.07937504723668,
+      "cleanup_settled": true
+    },
+    {
+      "arm": "electron",
+      "trial": 1,
+      "store_state": "returning",
+      "launch_to_visible_native_window_ms": 568.7567079439759,
+      "idle_summary": {
+        "cpu_percent_one_core": {
+          "n": 10,
+          "min": 0.6037290487374665,
+          "median": 0.6371368597329856,
+          "p95": 2.1859352870340905,
+          "max": 2.1859352870340905
+        },
+        "engine_cpu_percent_one_core": {
+          "n": 10,
+          "min": 0.49617341956827776,
+          "median": 0.5472733904173972,
+          "p95": 1.0099746314070153,
+          "max": 1.0099746314070153
+        },
+        "physical_footprint_mib": {
+          "n": 11,
+          "min": 256.60047912597656,
+          "median": 256.75672912597656,
+          "p95": 263.94422912597656,
+          "max": 263.94422912597656
+        },
+        "process_count": {
+          "n": 11,
+          "min": 7,
+          "median": 7,
+          "p95": 7,
+          "max": 7
+        },
+        "collector_ms": {
+          "n": 11,
+          "min": 64.860625192523,
+          "median": 67.71391700021923,
+          "p95": 69.5532918907702,
+          "max": 69.5532918907702
+        },
+        "unavailable_pid_samples": 0,
+        "membership_changes": 0,
+        "complete_stable_intervals": true
+      },
+      "hide_to_launchservices_reopen_ms": 152.34324987977743,
+      "cleanup_settled": true
+    },
+    {
+      "arm": "swift",
+      "trial": 1,
+      "store_state": "returning",
+      "launch_to_visible_native_window_ms": 350.9694167878479,
+      "idle_summary": {
+        "cpu_percent_one_core": {
+          "n": 10,
+          "min": 0.4514383827828829,
+          "median": 0.6445551657421313,
+          "p95": 3.085146535766402,
+          "max": 3.085146535766402
+        },
+        "engine_cpu_percent_one_core": {
+          "n": 10,
+          "min": 0.44723650166089346,
+          "median": 0.5277340062165532,
+          "p95": 0.8855704883513146,
+          "max": 0.8855704883513146
+        },
+        "physical_footprint_mib": {
+          "n": 11,
+          "min": 166.89547729492188,
+          "median": 168.12985229492188,
+          "p95": 177.83297729492188,
+          "max": 177.83297729492188
+        },
+        "process_count": {
+          "n": 11,
+          "min": 7,
+          "median": 7,
+          "p95": 7,
+          "max": 7
+        },
+        "collector_ms": {
+          "n": 11,
+          "min": 66.33725017309189,
+          "median": 67.41695804521441,
+          "p95": 76.08616584911942,
+          "max": 76.08616584911942
+        },
+        "unavailable_pid_samples": 0,
+        "membership_changes": 0,
+        "complete_stable_intervals": true
+      },
+      "hide_to_launchservices_reopen_ms": 154.93512502871454,
+      "cleanup_settled": true
+    },
+    {
+      "arm": "swift",
+      "trial": 2,
+      "store_state": "returning",
+      "launch_to_visible_native_window_ms": 355.09858280420303,
+      "idle_summary": {
+        "cpu_percent_one_core": {
+          "n": 10,
+          "min": 0.4929683725077265,
+          "median": 0.6859724349713692,
+          "p95": 3.0022439295316787,
+          "max": 3.0022439295316787
+        },
+        "engine_cpu_percent_one_core": {
+          "n": 10,
+          "min": 0.4868260310574308,
+          "median": 0.5954925247923268,
+          "p95": 1.0890033148342397,
+          "max": 1.0890033148342397
+        },
+        "physical_footprint_mib": {
+          "n": 11,
+          "min": 165.53607940673828,
+          "median": 166.34857940673828,
+          "p95": 176.45795440673828,
+          "max": 176.45795440673828
+        },
+        "process_count": {
+          "n": 11,
+          "min": 7,
+          "median": 7,
+          "p95": 7,
+          "max": 7
+        },
+        "collector_ms": {
+          "n": 11,
+          "min": 62.60700011625886,
+          "median": 67.32062506489456,
+          "p95": 68.37250012904406,
+          "max": 68.37250012904406
+        },
+        "unavailable_pid_samples": 0,
+        "membership_changes": 0,
+        "complete_stable_intervals": true
+      },
+      "hide_to_launchservices_reopen_ms": 145.66091704182327,
+      "cleanup_settled": true
+    },
+    {
+      "arm": "electron",
+      "trial": 2,
+      "store_state": "returning",
+      "launch_to_visible_native_window_ms": 592.9290419444442,
+      "idle_summary": {
+        "cpu_percent_one_core": {
+          "n": 10,
+          "min": 0.5290714190474085,
+          "median": 0.6422997967308499,
+          "p95": 2.103905332036806,
+          "max": 2.103905332036806
+        },
+        "engine_cpu_percent_one_core": {
+          "n": 10,
+          "min": 0.442133746367964,
+          "median": 0.5555243763324207,
+          "p95": 0.9429204250854464,
+          "max": 0.9429204250854464
+        },
+        "physical_footprint_mib": {
+          "n": 11,
+          "min": 257.6629104614258,
+          "median": 257.7410354614258,
+          "p95": 258.3035354614258,
+          "max": 258.3035354614258
+        },
+        "process_count": {
+          "n": 11,
+          "min": 7,
+          "median": 7,
+          "p95": 7,
+          "max": 7
+        },
+        "collector_ms": {
+          "n": 11,
+          "min": 63.6909999884665,
+          "median": 67.18487502075732,
+          "p95": 72.3227090202272,
+          "max": 72.3227090202272
+        },
+        "unavailable_pid_samples": 0,
+        "membership_changes": 0,
+        "complete_stable_intervals": true
+      },
+      "hide_to_launchservices_reopen_ms": 151.4761671423912,
+      "cleanup_settled": true
+    },
+    {
+      "arm": "electron",
+      "trial": 3,
+      "store_state": "returning",
+      "launch_to_visible_native_window_ms": 561.6464999038726,
+      "idle_summary": {
+        "cpu_percent_one_core": {
+          "n": 10,
+          "min": 0.44424816773951703,
+          "median": 0.5662595702650401,
+          "p95": 2.552490349121573,
+          "max": 2.552490349121573
+        },
+        "engine_cpu_percent_one_core": {
+          "n": 10,
+          "min": 0.3601624479876328,
+          "median": 0.4577012978236781,
+          "p95": 1.0062153194489059,
+          "max": 1.0062153194489059
+        },
+        "physical_footprint_mib": {
+          "n": 11,
+          "min": 262.39742279052734,
+          "median": 262.45992279052734,
+          "p95": 268.60054779052734,
+          "max": 268.60054779052734
+        },
+        "process_count": {
+          "n": 11,
+          "min": 7,
+          "median": 7,
+          "p95": 7,
+          "max": 7
+        },
+        "collector_ms": {
+          "n": 11,
+          "min": 62.999791000038385,
+          "median": 67.31762504205108,
+          "p95": 69.11399983800948,
+          "max": 69.11399983800948
+        },
+        "unavailable_pid_samples": 0,
+        "membership_changes": 0,
+        "complete_stable_intervals": true
+      },
+      "hide_to_launchservices_reopen_ms": 152.33670896850526,
+      "cleanup_settled": true
+    },
+    {
+      "arm": "swift",
+      "trial": 3,
+      "store_state": "returning",
+      "launch_to_visible_native_window_ms": 338.20524998009205,
+      "idle_summary": {
+        "cpu_percent_one_core": {
+          "n": 10,
+          "min": 0.48335165322092605,
+          "median": 0.6591568824685337,
+          "p95": 2.8419634378018284,
+          "max": 2.8419634378018284
+        },
+        "engine_cpu_percent_one_core": {
+          "n": 10,
+          "min": 0.4795766831519917,
+          "median": 0.5532502795419874,
+          "p95": 1.0305334606440861,
+          "max": 1.0305334606440861
+        },
+        "physical_footprint_mib": {
+          "n": 11,
+          "min": 166.7860565185547,
+          "median": 167.7860565185547,
+          "p95": 177.6923065185547,
+          "max": 177.6923065185547
+        },
+        "process_count": {
+          "n": 11,
+          "min": 7,
+          "median": 7,
+          "p95": 7,
+          "max": 7
+        },
+        "collector_ms": {
+          "n": 11,
+          "min": 66.493459045887,
+          "median": 67.66287493519485,
+          "p95": 69.95616690255702,
+          "max": 69.95616690255702
+        },
+        "unavailable_pid_samples": 0,
+        "membership_changes": 0,
+        "complete_stable_intervals": true
+      },
+      "hide_to_launchservices_reopen_ms": 148.1025000102818,
+      "cleanup_settled": true
+    },
+    {
+      "arm": "swift",
+      "trial": 4,
+      "store_state": "returning",
+      "launch_to_visible_native_window_ms": 348.13233301974833,
+      "idle_summary": {
+        "cpu_percent_one_core": {
+          "n": 10,
+          "min": 0.515818831871673,
+          "median": 0.6728272310228349,
+          "p95": 3.0246782397673333,
+          "max": 3.0246782397673333
+        },
+        "engine_cpu_percent_one_core": {
+          "n": 10,
+          "min": 0.515818831871673,
+          "median": 0.5937862144047199,
+          "p95": 0.9452700294645128,
+          "max": 0.9452700294645128
+        },
+        "physical_footprint_mib": {
+          "n": 11,
+          "min": 164.42686462402344,
+          "median": 165.17684173583984,
+          "p95": 176.00498962402344,
+          "max": 176.00498962402344
+        },
+        "process_count": {
+          "n": 11,
+          "min": 7,
+          "median": 7,
+          "p95": 7,
+          "max": 7
+        },
+        "collector_ms": {
+          "n": 11,
+          "min": 61.00783287547529,
+          "median": 61.969167087227106,
+          "p95": 63.5050421115011,
+          "max": 63.5050421115011
+        },
+        "unavailable_pid_samples": 0,
+        "membership_changes": 0,
+        "complete_stable_intervals": true
+      },
+      "hide_to_launchservices_reopen_ms": 154.70287506468594,
+      "cleanup_settled": true
+    },
+    {
+      "arm": "electron",
+      "trial": 4,
+      "store_state": "returning",
+      "launch_to_visible_native_window_ms": 595.9587080869824,
+      "idle_summary": {
+        "cpu_percent_one_core": {
+          "n": 10,
+          "min": 0.4356725226427818,
+          "median": 0.6038595299970351,
+          "p95": 2.143000757791159,
+          "max": 2.143000757791159
+        },
+        "engine_cpu_percent_one_core": {
+          "n": 10,
+          "min": 0.3764074133220336,
+          "median": 0.5267810142986107,
+          "p95": 1.0458707541183083,
+          "max": 1.0458707541183083
+        },
+        "physical_footprint_mib": {
+          "n": 11,
+          "min": 259.74117279052734,
+          "median": 259.81929779052734,
+          "p95": 265.74117279052734,
+          "max": 265.74117279052734
+        },
+        "process_count": {
+          "n": 11,
+          "min": 7,
+          "median": 7,
+          "p95": 7,
+          "max": 7
+        },
+        "collector_ms": {
+          "n": 11,
+          "min": 61.62783387117088,
+          "median": 62.27808305993676,
+          "p95": 64.36370802111924,
+          "max": 64.36370802111924
+        },
+        "unavailable_pid_samples": 0,
+        "membership_changes": 0,
+        "complete_stable_intervals": true
+      },
+      "hide_to_launchservices_reopen_ms": 158.3812499884516,
+      "cleanup_settled": true
+    }
+  ],
+  "raw_samples": "evidence/2026-11-13-review-normal.jsonl",
+  "excluded_attempts": [
+    {
+      "attempt_id": "electron-performance-final-normal",
+      "reason": "Concurrent packaged-app activity invalidated the observation; native hide return and unavailable LaunchServices launchDate handling caused observer failure.",
+      "failures": [
+        {
+          "arm": "swift",
+          "trial": 0,
+          "error": "AssertionError: Hide rejected"
+        },
+        {
+          "arm": "swift",
+          "trial": 0,
+          "error": "Cleanup: RuntimeError: Candidate app incarnation changed"
+        }
+      ]
+    },
+    {
+      "attempt_id": "electron-performance-4a-normal",
+      "reason": "Observer treated asynchronous native hide return as failure, then saw a stale LaunchServices record after the exact app PID exited.",
+      "failures": [
+        {
+          "arm": "swift",
+          "trial": 0,
+          "error": "AssertionError: Hide rejected"
+        },
+        {
+          "arm": "swift",
+          "trial": 0,
+          "error": "Cleanup: CalledProcessError: Command '['<repo>/target/electron-performance-4a-normal/tools/window-observer', 'state', '<repo>/target/electron-performance-swift-4a/NAC.app']' died with <Signals.SIGTRAP: 5>."
+        }
+      ]
+    },
+    {
+      "attempt_id": "electron-performance-review-normal",
+      "reason": "FirstvisibleElectronopeninganimation1278pxcomparedincorrectlyagainststeady1280px; explicitphaseadmissioncorrected; allpriorcellsinthisattempt excluded; collectorinterruptedonsecondElectronQuitgate thennativeStop+independentbundlepathabsenceaudit.",
+      "raw": "evidence/2026-11-13-review-normal-excluded.jsonl"
+    }
+  ],
+  "excluded_raw_samples": "evidence/2026-11-13-excluded.jsonl",
+  "workflow_comparison": {
+    "status": "canonical_packaged_fade_retention_repair_verified_early_proxies_only",
+    "shared_original_probe_sha256": "b3e8097d5efc5d6bcd467c850c424f341fa3c1c0a68b411ee04a51afb700d3da",
+    "focused_probe_sha256": "0cfd5f9110ed0cdfd3ba5ea88b953d470333b1061c9f99250598eb81b118a4f2",
+    "original_cells": {
+      "electron": {
+        "distributions": {
+          "typing_event_to_raf_ms": {
+            "n": 200,
+            "median": 57.5,
+            "p95": 59.799999952316284,
+            "p99": 60.89999985694885,
+            "max": 64.29999995231628
+          },
+          "history_open_to_dom_raf_ms": {
+            "n": 5,
+            "median": 278.10000014305115,
+            "p95": 521.2999999523163,
+            "p99": 521.2999999523163,
+            "max": 521.2999999523163
+          },
+          "scroll_frame_gaps_ms": {
+            "n": 120,
+            "median": 57.799999952316284,
+            "p95": 60.200000047683716,
+            "p99": 88.90000009536743,
+            "max": 271.09999990463257
+          },
+          "streaming_dom_mutation_gaps_ms": {
+            "n": 30,
+            "median": 100.10000002384186,
+            "p95": 106.5,
+            "p99": 107.60000014305115,
+            "max": 107.60000014305115
+          }
+        },
+        "terminal": [
+          {
+            "pressure_bytes_at_least": 266240,
+            "pressure_api_to_visual_dom_raf_ms": 107.5,
+            "resize_api_to_status_ms": 5.700000047683716,
+            "interrupt_api_to_visual_dom_raf_ms": 41.59999990463257
+          },
+          {
+            "pressure_bytes_at_least": 266240,
+            "pressure_api_to_visual_dom_raf_ms": 91.5,
+            "resize_api_to_status_ms": 6.799999952316284,
+            "interrupt_api_to_visual_dom_raf_ms": 41.799999952316284
+          },
+          {
+            "pressure_bytes_at_least": 266240,
+            "pressure_api_to_visual_dom_raf_ms": 75,
+            "resize_api_to_status_ms": 4.200000047683716,
+            "interrupt_api_to_visual_dom_raf_ms": 41.60000014305115
+          }
+        ],
+        "terminal_close_api_to_settled_ms": 111.59999990463257,
+        "stream_send_to_complete_dom_raf_ms": 2273.7999999523163
+      },
+      "swift": {
+        "distributions": {
+          "typing_event_to_raf_ms": {
+            "n": 200,
+            "median": 17.0,
+            "p95": 17,
+            "p99": 18,
+            "max": 18
+          },
+          "history_open_to_dom_raf_ms": {
+            "n": 5,
+            "median": 166,
+            "p95": 488,
+            "p99": 488,
+            "max": 488
+          },
+          "scroll_frame_gaps_ms": {
+            "n": 120,
+            "median": 17.0,
+            "p95": 18,
+            "p99": 77,
+            "max": 123
+          },
+          "streaming_dom_mutation_gaps_ms": {
+            "n": 30,
+            "median": 101.5,
+            "p95": 105,
+            "p99": 105,
+            "max": 105
+          }
+        },
+        "terminal": [
+          {
+            "interrupt_api_to_visual_dom_raf_ms": 50,
+            "pressure_api_to_visual_dom_raf_ms": 157,
+            "pressure_bytes_at_least": 266240,
+            "resize_api_to_status_ms": 9
+          },
+          {
+            "interrupt_api_to_visual_dom_raf_ms": 51,
+            "pressure_api_to_visual_dom_raf_ms": 116,
+            "pressure_bytes_at_least": 266240,
+            "resize_api_to_status_ms": 6
+          },
+          {
+            "interrupt_api_to_visual_dom_raf_ms": 48,
+            "pressure_api_to_visual_dom_raf_ms": 116,
+            "pressure_bytes_at_least": 266240,
+            "resize_api_to_status_ms": 6
+          }
+        ],
+        "terminal_close_api_to_settled_ms": 161,
+        "stream_send_to_complete_dom_raf_ms": 2265
+      }
+    },
+    "original_raw": "evidence/2026-11-13-workflow-original.jsonl",
+    "attribution_raw": "evidence/2026-11-13-frame-attribution.jsonl",
+    "native_focus_counterevidence": "electron-frame-reopen-attribution.log: native focused=false while renderer document.hasFocus=true; backgroundThrottling=true, no disabling flags. DOM focus therefore did not establish native foreground admission.",
+    "remaining_gate": "Finiteearlydevelopmentcomparisoncomplete. Broaderfrozenbudgets/physicalpaint/trustedinput/soak/hidden/Linuxqualificationremainopen.",
+    "excluded_exploratory_attempts": [
+      {
+        "attempt_id": "electron-focused-native-scale.log / execution57839",
+        "reason": "The shared observer metadata changed during the exploratory source handoff. Native focus lifetime was not admitted; timing values cannot identify a stable matched observer.",
+        "raw_log": "evidence/2026-11-13-exploratory-scale.log"
+      }
+    ],
+    "focused_native_observer": {
+      "shared_js_sha256": "0cfd5f9110ed0cdfd3ba5ea88b953d470333b1061c9f99250598eb81b118a4f2",
+      "swift_probe_source_sha256": "50c53b0dbc9f43d05ff48d90422d97360a156f32463dc61626f27c78fdbcd7a4",
+      "canonical_product_source_revision": "4a8628e1f655bcd51fbc0ad6db509257e6d4b79d",
+      "isolated_source_worktree": "detached4a plus only owned JavaScript/Swift observer modifications; make setup and canonical instance-build passed",
+      "swift_build_receipt_sha256": "af77156f9384d1e311aeef1f9bdba41cb1eefb6184d653e17837b3514b319c18",
+      "actual_foreground_run": "not_admitted_console_locked; manual unlock required"
+    },
+    "observed_electron_displays": [
+      {
+        "id": 3,
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "width": 2560,
+          "height": 1440
+        },
+        "scaleFactor": 1,
+        "frequency_hz": 120.00000762939453,
+        "internal": false
+      },
+      {
+        "id": 1,
+        "bounds": {
+          "x": -786,
+          "y": 1440,
+          "width": 1512,
+          "height": 982
+        },
+        "scaleFactor": 2,
+        "frequency_hz": 120.0006103515625,
+        "internal": true
+      },
+      {
+        "id": 2,
+        "bounds": {
+          "x": -2560,
+          "y": 0,
+          "width": 2560,
+          "height": 1440
+        },
+        "scaleFactor": 1,
+        "frequency_hz": 120.00000762939453,
+        "internal": false
+      }
+    ],
+    "resumed_raw": "evidence/2026-11-13-workflow-resumed.jsonl",
+    "layerization_attribution": "evidence/2026-11-13-layerization-attribution.json",
+    "resumed_environment": {
+      "power": "AC Power, ~93% at resumed collection; different from battery normal-launch cells",
+      "display": "actual builtin display ID1;1512x982 points;scale2;120Hz;1280x800 viewport DPR2",
+      "admission": "native focus start/end and sticky losses, stable actual display geometry, focused current textarea, shared JS SHA0cfd...18a4f2"
+    },
+    "resumed_cells": [
+      {
+        "record_kind": "native_focused_workflow",
+        "arm": "electron",
+        "observation_mode": "CUA attached Electron; no CUA attached Swift",
+        "distributions": {
+          "typing_event_to_raf_ms": {
+            "n": 200,
+            "p50": 57.799999952316284,
+            "p95": 59.59999990463257,
+            "p99": 61,
+            "max": 67.20000004768372
+          },
+          "history_open_to_dom_raf_ms": {
+            "n": 5,
+            "p50": 279.2000000476837,
+            "p95": 528.5999999046326,
+            "p99": 528.5999999046326,
+            "max": 528.5999999046326
+          },
+          "scroll_frame_gaps_ms": {
+            "n": 120,
+            "p50": 58,
+            "p95": 61.200000047683716,
+            "p99": 93.70000004768372,
+            "max": 307.59999990463257
+          },
+          "streaming_dom_mutation_gaps_ms": {
+            "n": 30,
+            "p50": 99.70000004768372,
+            "p95": 105.10000014305115,
+            "p99": 106.70000004768372,
+            "max": 106.70000004768372
+          }
+        },
+        "native_accessibility": null,
+        "terminal": [
+          {
+            "pressure_bytes_at_least": 266240,
+            "pressure_api_to_visual_dom_raf_ms": 102.20000004768372,
+            "resize_api_to_status_ms": 5.299999952316284,
+            "interrupt_api_to_visual_dom_raf_ms": 42.30000019073486
+          },
+          {
+            "pressure_bytes_at_least": 266240,
+            "pressure_api_to_visual_dom_raf_ms": 91.39999985694885,
+            "resize_api_to_status_ms": 4.799999952316284,
+            "interrupt_api_to_visual_dom_raf_ms": 41.59999990463257
+          },
+          {
+            "pressure_bytes_at_least": 266240,
+            "pressure_api_to_visual_dom_raf_ms": 101,
+            "resize_api_to_status_ms": 5.700000047683716,
+            "interrupt_api_to_visual_dom_raf_ms": 41.69999980926514
+          }
+        ],
+        "terminal_close_api_to_settled_ms": 139.80000019073486
+      },
+      {
+        "record_kind": "native_focused_workflow",
+        "arm": "swift",
+        "observation_mode": "CUA attached Electron; no CUA attached Swift",
+        "distributions": {
+          "typing_event_to_raf_ms": {
+            "n": 200,
+            "p50": 17,
+            "p95": 18,
+            "p99": 18,
+            "max": 22
+          },
+          "history_open_to_dom_raf_ms": {
+            "n": 5,
+            "p50": 100,
+            "p95": 475,
+            "p99": 475,
+            "max": 475
+          },
+          "scroll_frame_gaps_ms": {
+            "n": 120,
+            "p50": 17,
+            "p95": 18,
+            "p99": 91,
+            "max": 120
+          },
+          "streaming_dom_mutation_gaps_ms": {
+            "n": 30,
+            "p50": 100,
+            "p95": 105,
+            "p99": 107,
+            "max": 107
+          }
+        },
+        "native_accessibility": null,
+        "terminal": [
+          {
+            "interrupt_api_to_visual_dom_raf_ms": 50,
+            "pressure_api_to_visual_dom_raf_ms": 126,
+            "pressure_bytes_at_least": 266240,
+            "resize_api_to_status_ms": 6
+          },
+          {
+            "interrupt_api_to_visual_dom_raf_ms": 50,
+            "pressure_api_to_visual_dom_raf_ms": 100,
+            "pressure_bytes_at_least": 266240,
+            "resize_api_to_status_ms": 6
+          },
+          {
+            "interrupt_api_to_visual_dom_raf_ms": 50,
+            "pressure_api_to_visual_dom_raf_ms": 99,
+            "pressure_bytes_at_least": 266240,
+            "resize_api_to_status_ms": 6
+          }
+        ],
+        "terminal_close_api_to_settled_ms": 88
+      },
+      {
+        "record_kind": "observation_mode_control",
+        "arm": "electron",
+        "observation_mode": "no CUA attachment; AXfalse admission failed, endtrue",
+        "distributions": {
+          "typing_event_to_raf_ms": {
+            "n": 200,
+            "p50": 58.299999952316284,
+            "p95": 60.40000009536743,
+            "p99": 62.19999980926514,
+            "max": 66.20000004768372
+          },
+          "history_open_to_dom_raf_ms": {
+            "n": 5,
+            "p50": 279.09999990463257,
+            "p95": 545.7999999523163,
+            "p99": 545.7999999523163,
+            "max": 545.7999999523163
+          },
+          "scroll_frame_gaps_ms": {
+            "n": 120,
+            "p50": 58.299999952316284,
+            "p95": 61,
+            "p99": 91.09999990463257,
+            "max": 276.09999990463257
+          },
+          "streaming_dom_mutation_gaps_ms": {
+            "n": 30,
+            "p50": 101.09999990463257,
+            "p95": 108,
+            "p99": 110.60000014305115,
+            "max": 110.60000014305115
+          }
+        },
+        "native_accessibility": {
+          "before_activation": false,
+          "events": [],
+          "end": true,
+          "start": false,
+          "observation_mode": "native application focus without CUA attachment"
+        },
+        "terminal": [
+          {
+            "pressure_bytes_at_least": 266240,
+            "pressure_api_to_visual_dom_raf_ms": 102.20000004768372,
+            "resize_api_to_status_ms": 5.5,
+            "interrupt_api_to_visual_dom_raf_ms": 41.60000014305115
+          },
+          {
+            "pressure_bytes_at_least": 266240,
+            "pressure_api_to_visual_dom_raf_ms": 91.39999985694885,
+            "resize_api_to_status_ms": 5.200000047683716,
+            "interrupt_api_to_visual_dom_raf_ms": 58.200000047683716
+          },
+          {
+            "pressure_bytes_at_least": 266240,
+            "pressure_api_to_visual_dom_raf_ms": 100,
+            "resize_api_to_status_ms": 5.3999998569488525,
+            "interrupt_api_to_visual_dom_raf_ms": 57.39999985694885
+          }
+        ],
+        "terminal_close_api_to_settled_ms": 88.20000004768372
+      },
+      {
+        "record_kind": "observation_mode_control",
+        "arm": "swift",
+        "observation_mode": "CUA attached with native fullAX snapshot and Raise before gate",
+        "distributions": {
+          "typing_event_to_raf_ms": {
+            "n": 200,
+            "p50": 17,
+            "p95": 17,
+            "p99": 18,
+            "max": 18
+          },
+          "history_open_to_dom_raf_ms": {
+            "n": 5,
+            "p50": 100,
+            "p95": 508,
+            "p99": 508,
+            "max": 508
+          },
+          "scroll_frame_gaps_ms": {
+            "n": 120,
+            "p50": 17,
+            "p95": 18,
+            "p99": 87,
+            "max": 130
+          },
+          "streaming_dom_mutation_gaps_ms": {
+            "n": 30,
+            "p50": 100,
+            "p95": 105,
+            "p99": 105,
+            "max": 105
+          }
+        },
+        "native_accessibility": null,
+        "terminal": [
+          {
+            "interrupt_api_to_visual_dom_raf_ms": 50,
+            "pressure_api_to_visual_dom_raf_ms": 147,
+            "pressure_bytes_at_least": 266240,
+            "resize_api_to_status_ms": 7
+          },
+          {
+            "interrupt_api_to_visual_dom_raf_ms": 50,
+            "pressure_api_to_visual_dom_raf_ms": 100,
+            "pressure_bytes_at_least": 266240,
+            "resize_api_to_status_ms": 8
+          },
+          {
+            "interrupt_api_to_visual_dom_raf_ms": 50,
+            "pressure_api_to_visual_dom_raf_ms": 117,
+            "pressure_bytes_at_least": 266240,
+            "resize_api_to_status_ms": 6
+          }
+        ],
+        "terminal_close_api_to_settled_ms": 115
+      },
+      {
+        "record_kind": "compositing_hypothesis_control",
+        "arm": "electron",
+        "observation_mode": "test-only .chat-response transform:none; backface-visibility:visible",
+        "distributions": {
+          "typing_event_to_raf_ms": {
+            "n": 200,
+            "p50": 59.90000009536743,
+            "p95": 62,
+            "p99": 66.5,
+            "max": 66.79999995231628
+          },
+          "history_open_to_dom_raf_ms": {
+            "n": 5,
+            "p50": 284.59999990463257,
+            "p95": 722.5999999046326,
+            "p99": 722.5999999046326,
+            "max": 722.5999999046326
+          },
+          "scroll_frame_gaps_ms": {
+            "n": 120,
+            "p50": 60.200000047683716,
+            "p95": 62.80000019073486,
+            "p99": 98.20000004768372,
+            "max": 276.80000019073486
+          },
+          "streaming_dom_mutation_gaps_ms": {
+            "n": 30,
+            "p50": 100.29999995231628,
+            "p95": 106.09999990463257,
+            "p99": 107.90000009536743,
+            "max": 107.90000009536743
+          }
+        },
+        "native_accessibility": {
+          "before_activation": false,
+          "events": [
+            {
+              "enabled": true
+            }
+          ],
+          "end": true,
+          "start": true,
+          "observation_mode": "explicit native observer activation gate"
+        },
+        "terminal": [
+          {
+            "pressure_bytes_at_least": 266240,
+            "pressure_api_to_visual_dom_raf_ms": 105.5,
+            "resize_api_to_status_ms": 5.700000047683716,
+            "interrupt_api_to_visual_dom_raf_ms": 41.5
+          },
+          {
+            "pressure_bytes_at_least": 266240,
+            "pressure_api_to_visual_dom_raf_ms": 116.59999990463257,
+            "resize_api_to_status_ms": 4.900000095367432,
+            "interrupt_api_to_visual_dom_raf_ms": 42.09999990463257
+          },
+          {
+            "pressure_bytes_at_least": 266240,
+            "pressure_api_to_visual_dom_raf_ms": 116.90000009536743,
+            "resize_api_to_status_ms": 5.3999998569488525,
+            "interrupt_api_to_visual_dom_raf_ms": 41.5
+          }
+        ],
+        "terminal_close_api_to_settled_ms": 112.40000009536743
+      }
+    ],
+    "supported_attribution": {
+      "phase": "Chromium Layerize, native compositor phase",
+      "all_trace_layerize_sum_ms": 19513.771,
+      "typing_layerize_n": 199,
+      "typing_layerize_sum_ms": 11855.558,
+      "typing_layerize_p50_ms": 59.263,
+      "typing_layerize_p95_ms": 62.358,
+      "native_sample": "incomplete: bounded10s command did notproduce artifact; no permission or exact C++ function claim",
+      "controls": [
+        "No CUA attachment did not isolateAXfalse: startsfalse ends true, so failed that admission.",
+        "WK full CUA AXsnapshot before gate still yields17/18ms proxies.",
+        "Removing only .chat-response forced transform/backface in test CSS did not repair:62/62.8ms; production CSS unchanged."
+      ],
+      "limitations": "Instrumented trace adds overhead and categories may nest; used for attribution, not acceptance. AXcausation not established."
+    },
+    "fade_fill_repair_control": {
+      "typing_p95_ms": 8.600000143051147,
+      "scroll_p95_ms": 9.099999904632568,
+      "computed_styles": [
+        {
+          "opacity": "1",
+          "fill": "none",
+          "animation": "fadeInOut",
+          "duration": "0.15s",
+          "easing": "ease-out",
+          "keyframes": [
+            {
+              "offset": "0%",
+              "opacity": "0"
+            },
+            {
+              "offset": "100%",
+              "opacity": "1"
+            }
+          ],
+          "animations": []
+        },
+        {
+          "opacity": "1",
+          "fill": "none",
+          "animation": "fadeInOut",
+          "duration": "0.15s",
+          "easing": "ease-out",
+          "keyframes": [
+            {
+              "offset": "0%",
+              "opacity": "0"
+            },
+            {
+              "offset": "100%",
+              "opacity": "1"
+            }
+          ],
+          "animations": []
+        }
+      ],
+      "native_accessibility": {
+        "before_activation": false,
+        "events": [
+          {
+            "enabled": true
+          }
+        ],
+        "end": true,
+        "start": true,
+        "observation_mode": "explicit native observer activation gate"
+      },
+      "no_huge_active_opacity_layer": true,
+      "canonical_verification": "PASS on source4cada exactsameengine/assets botharms, noCSSoverride; finaldefault actualElectron assertsvisiblefinalopacityandnoheldfinishedanimations"
+    },
+    "native_layer_sample": "evidence/2026-11-13-native-layer-sample.json",
+    "unmeasured_abort": {
+      "fixture": "oFFwoA",
+      "app_pid": 40385,
+      "engine_pid": 40395,
+      "reason": "TestCSSopacity!important would suppressfade; caught beforegate; nevermeasured; gate timeout + ordinarycleanup, exactprocessesabsent"
+    },
+    "canonical_product_revision": "4cada76fc45235b229f02034243b09145100c1ed",
+    "canonical_engine_sha256": "3e6400da275a45c2803a3bddea8f9f984dac75d0fcf4abbff173615aee9384c7",
+    "canonical_cells": {
+      "electron": {
+        "distributions": {
+          "typing_event_to_raf_ms": {
+            "n": 200,
+            "p50_ms": 8.299999952316284,
+            "p95_ms": 8.600000143051147,
+            "p99_ms": 9.200000047683716,
+            "max_ms": 9.299999952316284,
+            "sum_ms": 1663.6000006198883
+          },
+          "history_open_to_dom_raf_ms": {
+            "n": 5,
+            "p50_ms": 141.20000004768372,
+            "p95_ms": 530.8999998569489,
+            "p99_ms": 530.8999998569489,
+            "max_ms": 530.8999998569489,
+            "sum_ms": 1167.2000000476837
+          },
+          "scroll_frame_gaps_ms": {
+            "n": 120,
+            "p50_ms": 8.299999952316284,
+            "p95_ms": 33.5,
+            "p99_ms": 94.59999990463257,
+            "max_ms": 279.7000000476837,
+            "sum_ms": 1547.5999999046326
+          },
+          "streaming_dom_mutation_gaps_ms": {
+            "n": 30,
+            "p50_ms": 100.40000009536743,
+            "p95_ms": 105.29999995231628,
+            "p99_ms": 106.80000019073486,
+            "max_ms": 106.80000019073486,
+            "sum_ms": 2197.0
+          }
+        },
+        "terminal": [
+          {
+            "pressure_bytes_at_least": 266240,
+            "pressure_api_to_visual_dom_raf_ms": 106.79999995231628,
+            "resize_api_to_status_ms": 5.5,
+            "interrupt_api_to_visual_dom_raf_ms": 41.299999952316284
+          },
+          {
+            "pressure_bytes_at_least": 266240,
+            "pressure_api_to_visual_dom_raf_ms": 116.79999995231628,
+            "resize_api_to_status_ms": 4.900000095367432,
+            "interrupt_api_to_visual_dom_raf_ms": 42.299999952316284
+          },
+          {
+            "pressure_bytes_at_least": 266240,
+            "pressure_api_to_visual_dom_raf_ms": 115.70000004768372,
+            "resize_api_to_status_ms": 7.599999904632568,
+            "interrupt_api_to_visual_dom_raf_ms": 41.59999990463257
+          }
+        ],
+        "terminal_close_api_to_settled_ms": 85.70000004768372,
+        "shared_probe_sha256": "0cfd5f9110ed0cdfd3ba5ea88b953d470333b1061c9f99250598eb81b118a4f2",
+        "native_display": {
+          "displayId": 1,
+          "displayFrequency": 120.0006103515625,
+          "internal": true,
+          "scaleFactor": 2,
+          "displayBounds": {
+            "x": 0,
+            "y": 0,
+            "width": 1512,
+            "height": 982
+          },
+          "contentBounds": {
+            "x": 116,
+            "y": 123,
+            "width": 1280,
+            "height": 800
+          },
+          "end": {
+            "displayId": 1,
+            "displayFrequency": 120.0006103515625,
+            "internal": true,
+            "scaleFactor": 2,
+            "displayBounds": {
+              "x": 0,
+              "y": 0,
+              "width": 1512,
+              "height": 982
+            },
+            "contentBounds": {
+              "x": 116,
+              "y": 123,
+              "width": 1280,
+              "height": 800
+            }
+          }
+        }
+      },
+      "swift": {
+        "distributions": {
+          "typing_event_to_raf_ms": {
+            "n": 200,
+            "p50_ms": 17,
+            "p95_ms": 18,
+            "p99_ms": 18,
+            "max_ms": 21,
+            "sum_ms": 3333
+          },
+          "history_open_to_dom_raf_ms": {
+            "n": 5,
+            "p50_ms": 116,
+            "p95_ms": 491,
+            "p99_ms": 491,
+            "max_ms": 491,
+            "sum_ms": 923
+          },
+          "scroll_frame_gaps_ms": {
+            "n": 120,
+            "p50_ms": 17,
+            "p95_ms": 18,
+            "p99_ms": 123,
+            "max_ms": 127,
+            "sum_ms": 2265
+          },
+          "streaming_dom_mutation_gaps_ms": {
+            "n": 30,
+            "p50_ms": 100,
+            "p95_ms": 105,
+            "p99_ms": 105,
+            "max_ms": 105,
+            "sum_ms": 2199
+          }
+        },
+        "terminal": [
+          {
+            "interrupt_api_to_visual_dom_raf_ms": 51,
+            "pressure_api_to_visual_dom_raf_ms": 151,
+            "pressure_bytes_at_least": 266240,
+            "resize_api_to_status_ms": 7
+          },
+          {
+            "interrupt_api_to_visual_dom_raf_ms": 49,
+            "pressure_api_to_visual_dom_raf_ms": 115,
+            "pressure_bytes_at_least": 266240,
+            "resize_api_to_status_ms": 7
+          },
+          {
+            "interrupt_api_to_visual_dom_raf_ms": 51,
+            "pressure_api_to_visual_dom_raf_ms": 118,
+            "pressure_bytes_at_least": 266240,
+            "resize_api_to_status_ms": 7
+          }
+        ],
+        "terminal_close_api_to_settled_ms": 88,
+        "shared_probe_sha256": "0cfd5f9110ed0cdfd3ba5ea88b953d470333b1061c9f99250598eb81b118a4f2",
+        "native_display": {
+          "available_screens": [
+            {
+              "backing_scale_factor": 2,
+              "display_id": 1,
+              "frame": {
+                "height": 982,
+                "width": 1512,
+                "x": 0,
+                "y": 0
+              }
+            }
+          ],
+          "backing_scale_factor": 2,
+          "content_bounds": {
+            "height": 800,
+            "width": 1280,
+            "x": 0,
+            "y": 0
+          },
+          "display_id": 1,
+          "screen_frame": {
+            "height": 982,
+            "width": 1512,
+            "x": 0,
+            "y": 0
+          },
+          "window_frame": {
+            "height": 832,
+            "width": 1280,
+            "x": 116,
+            "y": 87
+          }
+        }
+      }
+    },
+    "canonical_raw": "evidence/2026-11-13-review-workflow.jsonl",
+    "review_normal_excluded_raw": "evidence/2026-11-13-review-normal-excluded.jsonl",
+    "scroll_initial_tail_limitation": {
+      "electron_p95_ms": 33.5,
+      "swift_p95_ms": 18,
+      "electron_max_ms": 279.7,
+      "swift_max_ms": 127,
+      "electron_spikes_over_33ms_indices": [
+        3,
+        4,
+        5,
+        6,
+        7,
+        12,
+        21
+      ],
+      "swift_spikes_over_33ms_indices": [
+        1,
+        2,
+        3
+      ],
+      "all120_electron_total_ms": 1547.5999999046326,
+      "all120_swift_total_ms": 2265,
+      "interpretation": "Persistent60mscadence repaired. Initialroute/paint/animationentryspikes remain; no trimming orpaintqualification. Precise attribution of residualinitialspikes not isolated."
+    }
+  },
+  "observer_provenance": {
+    "checkout_revision": "43c10917557b329d6fb82e90e1903e80519e04cb",
+    "source_sha256": {
+      "compare.py": "ce031de13c5436cf71903163839ac69ef4c09394b532588285995b6cda382602",
+      "WindowObserver.swift": "acade2d4273b2096b566f80d44e529271044c8b8f3ff937ed854089aa63e25fb",
+      "process_sample.c": "62457fca743bf77a55b37b7032e9849291c880d99acf044a643823f3f8ec4868"
+    },
+    "executable_sha256": {
+      "window-observer": "8cd08ad60da76db63b0d7c739fc9289bebce90da8ad46d072b87092857fa3377",
+      "process-sample": "ed0614a5dbbecf2126a96aab17dd83198157c38a149b02a58c62725f880706f7"
+    }
+  },
+  "normal_display_condition_limitation": "Closedforfinalnormalrun: actualwindowdisplayID1/bounds1512x982/scale2/120Hz recordedatlaunch,everyidlesampleandreopen; samplestateactiveTrue; firstvisibleproxycanincludeopeninganimation. Physicalpaintnotmeasured.",
+  "historical_normal_4a": {
+    "source_revision": "4a8628e1f655bcd51fbc0ad6db509257e6d4b79d",
+    "summary": {
+      "swift": {
+        "launch_to_visible_native_window_ms": {
+          "n": 5,
+          "min": 319.6106660179794,
+          "median": 326.24816708266735,
+          "p95": 343.87229196727276,
+          "max": 343.87229196727276
+        },
+        "hide_to_launchservices_reopen_ms": {
+          "n": 5,
+          "min": 119.48545905761421,
+          "median": 125.91825006529689,
+          "p95": 130.45670790597796,
+          "max": 130.45670790597796
+        },
+        "resource_trials_included": 5,
+        "resource_trials_excluded": 0,
+        "idle_trial_median_cpu_percent_one_core": {
+          "n": 5,
+          "min": 0.6457987524160935,
+          "median": 0.690768192448562,
+          "p95": 0.7036788853790428,
+          "max": 0.7036788853790428
+        },
+        "idle_trial_median_physical_footprint_mib": {
+          "n": 5,
+          "min": 164.25482940673828,
+          "median": 166.3488540649414,
+          "p95": 168.7863311767578,
+          "max": 168.7863311767578
+        }
+      },
+      "electron": {
+        "launch_to_visible_native_window_ms": {
+          "n": 5,
+          "min": 523.2236250303686,
+          "median": 533.6312078870833,
+          "p95": 816.2888749502599,
+          "max": 816.2888749502599
+        },
+        "hide_to_launchservices_reopen_ms": {
+          "n": 5,
+          "min": 120.93037483282387,
+          "median": 121.37420894578099,
+          "p95": 125.10929210111499,
+          "max": 125.10929210111499
+        },
+        "resource_trials_included": 5,
+        "resource_trials_excluded": 0,
+        "idle_trial_median_cpu_percent_one_core": {
+          "n": 5,
+          "min": 0.6027442257116814,
+          "median": 0.631050808975125,
+          "p95": 0.6628895432486321,
+          "max": 0.6628895432486321
+        },
+        "idle_trial_median_physical_footprint_mib": {
+          "n": 5,
+          "min": 256.022216796875,
+          "median": 257.31927490234375,
+          "p95": 281.89774322509766,
+          "max": 281.89774322509766
+        }
+      }
+    },
+    "raw": "evidence/2026-11-13-normal.jsonl",
+    "conditions": "Earlier battery40\u219237%; actualpertrialtargetdisplay/DPRnotrecorded; notmergedwithfinalACreviewcells."
+  },
+  "normal_native_conditions": {
+    "all_idle_native_active": true,
+    "display_id": 1,
+    "bounds_points": {
+      "width": 1512,
+      "height": 982
+    },
+    "retina_scale": 2,
+    "reported_mode_hz": 120,
+    "all_complete_stable_intervals": true,
+    "all_exact_cohorts_settled": true,
+    "first_visible_geometry": "Rawopeninganimationboundsretained; steadyresourcegeometryadmittedafter10ssettle; warmproxyrecordedbeforeseparatelyobservedgeometrysettlement."
+  },
+  "evidence_scope": {
+    "kind": "historical development measurements",
+    "collection_date_local": "2026-11-13 America/Los_Angeles; some records use 2026-11-14 UTC",
+    "measured_product_revision": "4cada76fc45235b229f02034243b09145100c1ed",
+    "publication_context": "Collected before the later merge of dev at 87e8eb6b3 for PR publication; does not measure the current PR head. Current-head checks are reported separately in the PR.",
+    "privacy": "<repo> denotes the disposable checkout root. Battery registry identifiers are redacted; hardware/power conditions and numerical measurements are preserved. Session/process/window identifiers belong to disposable fixtures.",
+    "hash_semantics": "Product binary, shell, observer, and original private-capture hashes retain their original meaning. packet_sha256/artifact hashes identify original local captures, not these public sanitized record subsets; no recorded hash names an altered tracked evidence file."
+  }
+}

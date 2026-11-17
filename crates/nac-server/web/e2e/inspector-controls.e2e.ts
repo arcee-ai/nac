@@ -2,7 +2,14 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { Locator, Response } from "@playwright/test";
 
-import { createDirectSession, expect, showSubagents, startForegroundChild, test } from "./harness";
+import {
+  createDirectSession,
+  expect,
+  showPhonePanel,
+  showSubagents,
+  startForegroundChild,
+  test,
+} from "./harness";
 import {
   captureInspector,
   inspectorZoomBrowser,
@@ -47,7 +54,7 @@ test("inspector phone controls retain 44px hit areas at native scale and actual 
       );
       expect(width).toBe(390 / zoom);
       await page.goto(`${harness.baseUrl}/#/session/${parent}/files`);
-      await page.getByRole("button", { name: "Open panel", exact: true }).click();
+      await showPhonePanel(page, "Files");
       await readyInspectorFiles(page, width);
       const files = page.getByRole("dialog", { name: "Files", exact: true });
       const measured: {
@@ -125,9 +132,13 @@ test("inspector phone controls retain 44px hit areas at native scale and actual 
           response.status() === status
         );
       };
+      // A phone shows one panel sheet at a time: leave Files, then pick
+      // Subagents from the header's panel list.
+      await page.keyboard.press("Escape");
+      await expect(files).toHaveCount(0);
       const [unavailable] = await Promise.all([
         page.waitForResponse((response) => childrenResponse(response, 503)),
-        page.getByRole("tab", { name: "Subagents", exact: true }).click(),
+        showPhonePanel(page, "Subagents"),
       ]);
       expect(await unavailable.finished()).toBeNull();
       const alert = page.getByRole("alert").filter({ hasText: "Subagents could not be loaded" });

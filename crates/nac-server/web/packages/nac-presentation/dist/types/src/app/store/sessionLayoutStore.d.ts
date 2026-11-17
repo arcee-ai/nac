@@ -23,6 +23,7 @@ interface SubagentPageReturn {
     context: InsightsReturnContext;
     expanded: boolean;
     collapsed: boolean;
+    drawerContent: DrawerContent;
 }
 interface SessionLayoutState {
     activeSessionId: string | null;
@@ -39,17 +40,26 @@ interface SessionLayoutState {
     }>;
     /** Unique fresh-visit source; exact child returns restore the saved parent source. */
     insightSelectionEpoch: number;
-    /** Side box slid off to its 52px icon rail. Defaults to collapsed. */
+    /**
+     * The drawer is closed. Focus opens a session with no drawer, so this
+     * defaults to true; a header pill, the transcript or a desktop command
+     * opens it on the route's panel.
+     */
     collapsed: boolean;
     /** Whether the next collapsed change should tween; restoring a project's stored rail does not. */
     sidePanelAnimate: boolean;
     /**
-     * Project the collapsed preference belongs to. Null until the open session's
-     * project is known. Switching projects restores that project's stored rail.
+     * Project the open preference belongs to. Null until the open session's
+     * project is known. Only a store created with `rememberPerProject` restores
+     * a project's stored drawer; Focus's default never does.
      */
     sidePanelProjectId: string | null;
-    /** Side box lifted out of the row into a full-screen dialog. */
+    /** The floating drawer fills the window instead of its 560px column. */
     expanded: boolean;
+    /** The drawer docks as a column beside the chat instead of floating (⌘\). */
+    pinned: boolean;
+    /** What the open drawer holds: the route's panel, or the session goal. */
+    drawerContent: DrawerContent;
     /**
      * Whether a narrow panel is showing its list of rows. There is no room for
      * the list beside the detail at that width, so the panel opens on the row it
@@ -92,18 +102,26 @@ interface SessionLayoutState {
     fileListing: FileListing;
 }
 export type FileListing = "tree" | "changed";
+export type DrawerContent = "panel" | "goal";
 /** One presentation lifetime; hosted preferences are ephemeral. */
-export declare function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "setItem">): {
+export declare function createSessionLayoutStore(storage?: Pick<Storage, "getItem" | "setItem">, { rememberPerProject, }?: {
+    /** Restore each project's last drawer state. Off: every session opens quiet. */
+    rememberPerProject?: boolean;
+}): {
     release: () => void;
     sessionLayoutStore: import("../lib/store").Store<SessionLayoutState>;
     bindSidePanelProject: (projectId: string) => void;
     unbindSidePanelProject: () => void;
     toggleSidePanelExpanded: () => void;
+    leaveFocusedSidePanel: () => void;
     openSidePanelList: () => void;
     toggleSidePanelCollapsed: () => void;
+    openDrawer: (drawerContent?: DrawerContent) => void;
+    closeDrawer: () => void;
+    toggleDrawerPinned: () => void;
     showSidePanelList: (panelList: boolean) => void;
     toggleSidePanelList: () => void;
-    revealSidePanel: (asDialog?: boolean) => void;
+    revealSidePanel: (_asDialog?: boolean) => void;
     selectThread: (selectedThread: string | null, selectedThreadEpisode?: string | null) => void;
     selectInsight: (selectedInsight: InsightSelection | null) => void;
     toggleInsightGroup: (groupId: string, expanded?: boolean) => void;
@@ -134,6 +152,8 @@ export declare function createSessionLayoutStore(storage?: Pick<Storage, "getIte
     useSidePanelCollapsed: () => boolean;
     useSidePanelAnimate: () => boolean;
     useSidePanelExpanded: () => boolean;
+    useDrawerPinned: () => boolean;
+    useDrawerContent: () => DrawerContent;
     useSidePanelList: () => boolean;
     useSelectedThread: () => string | null;
     useSelectedThreadEpisode: () => string | null;
@@ -148,7 +168,7 @@ export declare function createSessionLayoutStore(storage?: Pick<Storage, "getIte
     useToggledFolders: () => ReadonlySet<string>;
     useFileListing: () => FileListing;
 };
-export declare const release: () => void, sessionLayoutStore: import("../lib/store").Store<SessionLayoutState>, bindSidePanelProject: (projectId: string) => void, unbindSidePanelProject: () => void, toggleSidePanelExpanded: () => void, openSidePanelList: () => void, toggleSidePanelCollapsed: () => void, showSidePanelList: (panelList: boolean) => void, toggleSidePanelList: () => void, revealSidePanel: (asDialog?: boolean) => void, selectThread: (selectedThread: string | null, selectedThreadEpisode?: string | null) => void, selectInsight: (selectedInsight: InsightSelection | null) => void, toggleInsightGroup: (groupId: string, expanded?: boolean) => void, selectInsightsFilter: (insightsFilter: InsightsFilter) => void, selectWorkset: (selectedWorkset: string | null) => void, selectSubagent: (parentSessionId: string, key: string) => void, selectRevision: (selectedRevision: number | null) => void, selectFile: (selectedFile: string | null) => void, toggleFolder: (path: string) => void, selectFileListing: (fileListing: FileListing) => void, setSidePanelAnimate: (sidePanelAnimate: boolean) => void, resetSessionSelection: () => void, activateSessionSelection: (sessionId: string | null) => void, rememberInsightsReturn: (parentSessionId: string, shown: InsightSelection | null, thread?: {
+export declare const release: () => void, sessionLayoutStore: import("../lib/store").Store<SessionLayoutState>, bindSidePanelProject: (projectId: string) => void, unbindSidePanelProject: () => void, toggleSidePanelExpanded: () => void, leaveFocusedSidePanel: () => void, openSidePanelList: () => void, toggleSidePanelCollapsed: () => void, openDrawer: (drawerContent?: DrawerContent) => void, closeDrawer: () => void, toggleDrawerPinned: () => void, showSidePanelList: (panelList: boolean) => void, toggleSidePanelList: () => void, revealSidePanel: (_asDialog?: boolean) => void, selectThread: (selectedThread: string | null, selectedThreadEpisode?: string | null) => void, selectInsight: (selectedInsight: InsightSelection | null) => void, toggleInsightGroup: (groupId: string, expanded?: boolean) => void, selectInsightsFilter: (insightsFilter: InsightsFilter) => void, selectWorkset: (selectedWorkset: string | null) => void, selectSubagent: (parentSessionId: string, key: string) => void, selectRevision: (selectedRevision: number | null) => void, selectFile: (selectedFile: string | null) => void, toggleFolder: (path: string) => void, selectFileListing: (fileListing: FileListing) => void, setSidePanelAnimate: (sidePanelAnimate: boolean) => void, resetSessionSelection: () => void, activateSessionSelection: (sessionId: string | null) => void, rememberInsightsReturn: (parentSessionId: string, shown: InsightSelection | null, thread?: {
     name: string;
     episode: string | null;
 }) => void, restoreInsightsReturn: (parentSessionId: string) => boolean, rememberInsightListPosition: (sessionId: string, top: number, anchor?: {
@@ -157,5 +177,5 @@ export declare const release: () => void, sessionLayoutStore: import("../lib/sto
 } | null, source?: {
     focusNonce: number;
     sourceEpoch: number;
-}) => void, rememberSubagentPage: (parentSessionId: string, childSessionId: string) => void, useInsightsReturn: (sessionId: string) => boolean, useSidePanelCollapsed: () => boolean, useSidePanelAnimate: () => boolean, useSidePanelExpanded: () => boolean, useSidePanelList: () => boolean, useSelectedThread: () => string | null, useSelectedThreadEpisode: () => string | null, useSelectedInsight: () => InsightSelection | null, useInsightFocusNonce: () => number, useExpandedInsightGroups: () => ReadonlySet<string>, useInsightsFilter: () => InsightsFilter, useSelectedWorkset: () => string | null, useSelectedSubagent: (parentSessionId: string) => string | null, useSelectedRevision: () => number | null, useSelectedFile: () => string | null, useToggledFolders: () => ReadonlySet<string>, useFileListing: () => FileListing;
+}) => void, rememberSubagentPage: (parentSessionId: string, childSessionId: string) => void, useInsightsReturn: (sessionId: string) => boolean, useSidePanelCollapsed: () => boolean, useSidePanelAnimate: () => boolean, useSidePanelExpanded: () => boolean, useDrawerPinned: () => boolean, useDrawerContent: () => DrawerContent, useSidePanelList: () => boolean, useSelectedThread: () => string | null, useSelectedThreadEpisode: () => string | null, useSelectedInsight: () => InsightSelection | null, useInsightFocusNonce: () => number, useExpandedInsightGroups: () => ReadonlySet<string>, useInsightsFilter: () => InsightsFilter, useSelectedWorkset: () => string | null, useSelectedSubagent: (parentSessionId: string) => string | null, useSelectedRevision: () => number | null, useSelectedFile: () => string | null, useToggledFolders: () => ReadonlySet<string>, useFileListing: () => FileListing;
 export {};

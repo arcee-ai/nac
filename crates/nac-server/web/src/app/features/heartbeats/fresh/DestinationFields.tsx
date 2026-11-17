@@ -15,14 +15,14 @@ export function DestinationFields({
   const update = (patch: Partial<FreshTaskDestination>) => onChange({ ...value, ...patch });
   return (
     <fieldset className="flex flex-col gap-4" aria-label="Scheduled task destination">
-      <p>
+      <p className="type-body-chrome text-basic-secondary">
         {git
           ? "Each occurrence creates an isolated retained Git checkout. Source edits are excluded."
           : "This Local project has no Git repository. Each task uses the project directory and shares its files with other tasks."}
       </p>
       {git && (
         <>
-          <p>
+          <p className="type-body-chrome text-basic-secondary">
             Default branch: {savedDefaultRef ?? "choose the project's configured branch below"}. Its
             current committed head is resolved once for each new occurrence.
           </p>

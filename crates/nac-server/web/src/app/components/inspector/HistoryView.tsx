@@ -1,5 +1,6 @@
 import { Icon, IconName, Loader, LoaderSize, LoaderVariant } from "@/app/atoms";
-import { PanelEmpty } from "@/app/components/inspector/PanelSplit";
+import { PanelQuiet } from "@/app/components/inspector/PanelQuiet";
+import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
 import { revisionOrdinal, revisionTitle } from "@/app/lib/revisions";
 import { formatStoreTime } from "@/app/lib/format";
@@ -8,12 +9,14 @@ import { useWorkspaceRevisions } from "@/app/services/queries";
 
 function Row({
   title,
+  meta,
   subtitle,
   trailing,
   selected,
   onClick,
 }: {
   title: string;
+  meta?: string;
   subtitle: string | null;
   trailing?: React.ReactNode;
   selected: boolean;
@@ -23,27 +26,36 @@ function Row({
     <button
       type="button"
       className={cn(
-        "flex items-start gap-2 w-full min-h-11 p-3 rounded-[8px] text-left",
-        selected ? "btn-ghost-highlighted" : "btn-ghost",
+        "group flex w-full min-h-11 items-start gap-3 rounded-md px-3 py-2.5 text-left",
+        "transition-colors duration-150 ease-out",
+        "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--color-border-focus-outline)]",
+        selected ? "bg-[var(--f-wash-2)]" : "hover:bg-[var(--f-wash-1)]",
       )}
       aria-pressed={selected}
+      // Spoken as "Snapshot 3 · Nov 4, 10:12", then its label.
+      aria-label={[meta ? `${title} · ${meta}` : title, subtitle].filter(Boolean).join(" ")}
       onClick={onClick}
     >
-      <Icon
-        iconName={selected ? IconName.Check : IconName.History}
-        size={20}
-        className="shrink-0 mt-[2px]"
-      />
-      <span className="flex-1 min-w-0 flex flex-col">
-        <span className="text-sm leading-5 font-medium text-basic-primary break-words">
-          {title}
+      <span className="mt-0.5 flex size-4 shrink-0 items-center justify-center">
+        {selected ? (
+          <Icon iconName={IconName.Check} size={16} className="text-basic-primary" />
+        ) : (
+          <Icon iconName={IconName.History} size={14} className="text-basic-muted" />
+        )}
+      </span>
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="flex min-w-0 items-baseline gap-2">
+          <span className="min-w-0 truncate type-label text-basic-primary">{title}</span>
+          {meta ? (
+            <span className="shrink-0 type-meta tabular text-basic-muted">{meta}</span>
+          ) : null}
         </span>
         {subtitle ? (
-          <span className="text-xs leading-4 text-basic-tertiary break-words">{subtitle}</span>
+          <span className="type-meta text-basic-tertiary break-words">{subtitle}</span>
         ) : null}
       </span>
       {trailing ? (
-        <span className="shrink-0 flex items-center gap-1 code code-small mt-[6px]">
+        <span className="mt-0.5 flex shrink-0 items-center gap-1.5 type-meta tabular">
           {trailing}
         </span>
       ) : null}
@@ -53,8 +65,8 @@ function Row({
 
 /**
  * Every revision the session has captured, newest first, with the live working
- * tree at the top. A wide screen switches these from the session header; a
- * phone has no header chip, so they get a panel of their own.
+ * tree at the top. A wide screen also switches these from the session header;
+ * the selection here is the same one the Changes panel and that picker read.
  */
 export function HistoryView({
   sessionId,
@@ -65,24 +77,40 @@ export function HistoryView({
   selected: number | null;
   onSelect: (revision: number | null) => void;
 }) {
+  const isMobile = useIsMobile();
   const { data, isLoading, error } = useWorkspaceRevisions(sessionId);
   const revisions = data ?? [];
 
   if (error) {
-    return <PanelEmpty>{errorMessage(error)}</PanelEmpty>;
+    return (
+      <PanelQuiet tone="error" live="alert">
+        {errorMessage(error)}
+      </PanelQuiet>
+    );
   }
 
   return (
-    // A phone's panel: clear of the floating header and of the tab bar.
-    <div className="flex flex-col flex-1 min-h-0 overflow-auto px-2 pt-16 pb-32 gap-1 bg-elevation-ground [&>*]:shrink-0">
+    // A phone's panel runs under its floating header and above the tab bar.
+    <div
+      className={cn(
+        "flex flex-col flex-1 min-h-0 overflow-auto gap-0.5 [&>*]:shrink-0",
+        isMobile ? "px-2 pt-16 pb-32" : "px-3 py-3",
+      )}
+    >
       <Row
         title="Working tree"
         subtitle="The files as they are right now"
         selected={selected == null}
         onClick={() => onSelect(null)}
       />
+      {revisions.length > 0 || isLoading ? (
+        <p className="px-3 pt-4 pb-1 type-meta text-basic-muted">Snapshots</p>
+      ) : null}
       {isLoading ? (
-        <div className="flex items-center gap-2 p-2 label-small text-basic-tertiary">
+        <div
+          role="status"
+          className="flex items-center gap-2 px-3 py-2 type-meta text-basic-tertiary"
+        >
           <Loader size={LoaderSize.Small} variant={LoaderVariant.Neutral} />
           Reading snapshots…
         </div>
@@ -90,14 +118,15 @@ export function HistoryView({
       {revisions.map((revision, index) => (
         <Row
           key={revision.id}
-          title={`${revisionTitle(revisionOrdinal(index, revisions.length))} · ${formatStoreTime(revision.created_at)}`}
+          title={revisionTitle(revisionOrdinal(index, revisions.length))}
+          meta={formatStoreTime(revision.created_at)}
           subtitle={revision.label.trim() || null}
           selected={revision.id === selected}
           trailing={
             revision.additions || revision.deletions ? (
               <>
-                <span className="text-success-primary">+{revision.additions}</span>
-                <span className="text-error-primary">-{revision.deletions}</span>
+                <span className="text-[var(--f-green-text)]">+{revision.additions}</span>
+                <span className="text-[var(--f-red-text)]">−{revision.deletions}</span>
               </>
             ) : null
           }
@@ -105,9 +134,9 @@ export function HistoryView({
         />
       ))}
       {!isLoading && revisions.length === 0 ? (
-        <div className="p-2 label-small text-basic-tertiary">
+        <p className="px-3 pt-4 type-meta text-basic-tertiary">
           No snapshots yet. One is taken every time a run finishes.
-        </div>
+        </p>
       ) : null}
     </div>
   );

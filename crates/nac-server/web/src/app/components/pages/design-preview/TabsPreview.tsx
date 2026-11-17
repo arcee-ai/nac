@@ -49,14 +49,14 @@ function TabButtonMatrix() {
     <div className="grid w-fit grid-cols-[160px_repeat(4,200px)] items-center gap-x-4 gap-y-2">
       <span />
       {STATES.map((state) => (
-        <span key={state.label} className="label-micro text-basic-muted">
+        <span key={state.label} className="type-meta-strong text-basic-muted">
           {state.label}
         </span>
       ))}
       {TAB_VARIANTS.flatMap((variant) =>
         TAB_SIZES.map((size) => (
           <Fragment key={`${variant.label}-${size.label}`}>
-            <span className="label-small text-basic-secondary">
+            <span className="type-body-chrome text-basic-secondary">
               {variant.label}, {size.label}
             </span>
             {STATES.map((state) => (
@@ -68,7 +68,7 @@ function TabButtonMatrix() {
                 disabled={state.disabled}
               >
                 <Icon iconName={IconName.Search} />
-                <span className="flex-1 min-w-0 truncate text-left">New chat</span>
+                <span className="flex-1 min-w-0 truncate text-left">New session</span>
                 <Icon iconName={IconName.Edit} />
               </TabButton>
             ))}
@@ -84,14 +84,14 @@ function HorizontalTabMatrix() {
     <div className="grid w-fit grid-cols-[160px_repeat(5,max-content)] items-center justify-items-start gap-x-6 gap-y-3">
       <span />
       {ITEM_CONTENTS.map((content) => (
-        <span key={content.label} className="label-micro text-basic-muted">
+        <span key={content.label} className="type-meta-strong text-basic-muted">
           {content.label}
         </span>
       ))}
       {ITEM_SIZES.flatMap((size) =>
         STATES.map((state) => (
           <Fragment key={`${size.label}-${state.label}`}>
-            <span className="label-small text-basic-secondary">
+            <span className="type-body-chrome text-basic-secondary">
               {size.label}, {state.label.toLowerCase()}
             </span>
             {ITEM_CONTENTS.map((content) => (
@@ -122,11 +122,11 @@ export function TabsPreview() {
   return (
     <>
       <div className="flex flex-col gap-3">
-        <span className="label-medium text-basic-primary">Tab button</span>
+        <span className="type-subheading text-basic-primary">Rows (menus, lists)</span>
         <TabButtonMatrix />
       </div>
       <div className="flex flex-col gap-3">
-        <span className="label-medium text-basic-primary">Horizontal tab item</span>
+        <span className="type-subheading text-basic-primary">Tabs</span>
         <HorizontalTabMatrix />
       </div>
     </>

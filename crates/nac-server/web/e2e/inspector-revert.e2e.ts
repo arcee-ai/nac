@@ -4,7 +4,14 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { Page } from "@playwright/test";
 
-import { createDirectSession, expect, showSidePanel, test, waitForRunIdle } from "./harness";
+import {
+  createDirectSession,
+  expect,
+  showPhonePanel,
+  showSidePanel,
+  test,
+  waitForRunIdle,
+} from "./harness";
 import { captureInspector, inspectorPane } from "./inspector-evidence";
 import { ScriptGate } from "./scripted-provider";
 
@@ -15,12 +22,32 @@ async function fileList(page: Page, mobile: boolean) {
     if (await back.isVisible()) await back.click();
   }
 }
+/** The header's Session menu holds the wide layout's branch and snapshot pickers. */
+async function sessionDetails(page: Page) {
+  const details = page.getByRole("dialog", { name: "Session", exact: true });
+  if (!(await details.isVisible()))
+    await page.getByRole("button", { name: "Session menu", exact: true }).click();
+  await expect(details).toBeVisible();
+  return details;
+}
+async function closeSessionDetails(page: Page) {
+  const details = page.getByRole("dialog", { name: "Session", exact: true });
+  if (await details.isVisible()) await page.keyboard.press("Escape");
+  await expect(details).toHaveCount(0);
+}
 async function chooseRevision(page: Page, name: RegExp, mobile: boolean) {
   await fileList(page, mobile);
-  if (mobile) await page.getByRole("tab", { name: "History", exact: true }).click();
-  else await page.getByRole("button", { name: /^Snapshot:/ }).click();
+  if (mobile) {
+    // A phone keeps snapshots in its History panel, one sheet at a time.
+    await showPhonePanel(page, "History");
+    await page.getByRole("button", { name }).click();
+    await showPhonePanel(page, "Files");
+    return;
+  }
+  const details = await sessionDetails(page);
+  await details.getByRole("button", { name: /^Snapshot:/ }).click();
   await page.getByRole("button", { name }).click();
-  if (mobile) await page.getByRole("tab", { name: "Files", exact: true }).click();
+  await closeSessionDetails(page);
 }
 
 for (const width of [1440, 390]) {
@@ -87,9 +114,11 @@ for (const width of [1440, 390]) {
       )
         workspaceOperations.push(new URL(sent.url()).pathname);
     });
-    if (mobile) await page.getByRole("button", { name: "Open panel", exact: true }).click();
-    else await showSidePanel(page);
-    await page.getByRole("tab", { name: "Files", exact: true }).click();
+    if (mobile) await showPhonePanel(page, "Files");
+    else {
+      await showSidePanel(page);
+      await page.getByRole("tab", { name: "Files", exact: true }).click();
+    }
     const chooseFile = async () => {
       await fileList(page, mobile);
       const pane = inspectorPane(page, width, "Files");
@@ -111,9 +140,12 @@ for (const width of [1440, 390]) {
     await fileList(page, mobile);
     await expect(page.getByRole("button", { name: "Commit", exact: true })).toBeDisabled();
     await captureInspector(page, `after-${width}-captured-revision`);
-    await chooseRevision(page, /^Working tree/, mobile);
+    // The picker's row names its subtitle; the Files scope toggle is "Working tree" alone.
+    await chooseRevision(page, /^Working tree \S/, mobile);
     await fileList(page, mobile);
-    const branch = page.getByRole("button", { name: "Branch: main", exact: true });
+    // A phone's file list carries the branch; a wide header's Session menu does.
+    const branchScope = mobile ? page : await sessionDetails(page);
+    const branch = branchScope.getByRole("button", { name: "Branch: main", exact: true });
     await branch.focus();
     await page.keyboard.press("Enter");
     const findBranch = page.getByPlaceholder("Find or create a branch");
@@ -125,8 +157,9 @@ for (const width of [1440, 390]) {
     await findBranch.fill("inspector-feature");
     await page.getByRole("button", { name: "Create inspector-feature", exact: true }).click();
     await expect(
-      page.getByRole("button", { name: "Branch: inspector-feature", exact: true }),
+      branchScope.getByRole("button", { name: "Branch: inspector-feature", exact: true }),
     ).toBeVisible();
+    if (!mobile) await closeSessionDetails(page);
     const commit = page.getByRole("button", { name: "Commit", exact: true });
     await commit.focus();
     await page.keyboard.press("Enter");

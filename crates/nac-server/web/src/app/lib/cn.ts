@@ -19,7 +19,24 @@ const twMerge = extendTailwindMerge({
       radius: ["interaction"],
     },
     classGroups: {
-      "font-size": [{ text: ["big", "medium", "small", "micro"] }],
+      "font-size": [
+        { text: ["big", "medium", "small", "micro"] },
+        {
+          type: [
+            "display",
+            "title",
+            "heading",
+            "subheading",
+            "strong",
+            "label",
+            "body",
+            "body-chrome",
+            "meta",
+            "meta-strong",
+            "tag",
+          ],
+        },
+      ],
     },
   },
 });
