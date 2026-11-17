@@ -28,6 +28,11 @@ test("normal packaged source, launch identity and private canonical store agree"
       .update(await fs.readFile(path.join(resources, "nac-web")))
       .digest("hex"),
   ).toBe(manifest.engineSha256);
+  expect(
+    createHash("sha256")
+      .update(await fs.readFile(path.join(resources, "checkpoint-helper")))
+      .digest("hex"),
+  ).toBe(manifest.checkpointHelperSha256);
   if (process.env.NAC_ELECTRON_CI_SHA)
     expect(manifest.sourceRevision).toBe(process.env.NAC_ELECTRON_CI_SHA);
 });

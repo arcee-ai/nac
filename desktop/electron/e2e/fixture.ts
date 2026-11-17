@@ -138,6 +138,20 @@ export const test = base.extend<{ candidate: Candidate; developmentPathOverrides
       }).trim();
       expect(custody).toMatch(new RegExp(`^${applicationProcess.pid}\\s+.*\\/engine-launcher$`));
       ownedPids.push(custodyPid);
+      const checkpointPath = packaged
+        ? path.join(packaged, "Contents/Resources/checkpoint-helper")
+        : path.join(root, "target/electron-resources/checkpoint-helper");
+      const checkpoints = execFileSync("/bin/ps", ["-axo", "pid=,ppid=,comm="], {
+        encoding: "utf8",
+      })
+        .split("\n")
+        .map((row) => row.match(/^\s*(\d+)\s+(\d+)\s+(.*)$/))
+        .filter(
+          (row) => row && Number(row[2]) === applicationProcess.pid && row[3] === checkpointPath,
+        )
+        .map((row) => Number(row![1]));
+      expect(checkpoints).toHaveLength(1);
+      ownedPids.push(...checkpoints);
       const api = async (
         route: string,
         data?: unknown,

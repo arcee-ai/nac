@@ -7,6 +7,8 @@ Route sources: `crates/nac-server/web/src/App.tsx` and
 that every scenario passed on a hosted runner. Use the exact candidate's
 `identity.json`, `scenarios.json` and `cleanup.json` for observed verdicts.
 ALL-642's original Mac/Linux acceptance stays broader than this Mac CI slice.
+The selected follow-up joins storage/recovery source `18b2ebdfa` and passive
+notification modules `ff885d564`; current-head packets remain the verdict source.
 
 ## Route and feature mapping
 
@@ -40,8 +42,9 @@ workflow claim, even when browser tests exist. Browser scenarios below are in
 | MCP library/OAuth | Covered: `native.spec.ts` local Rust PKCE success/denial/wrong-state/cancel through actual native bridge | OS browser opener is doubled; full MCP tool execution/config matrix deferred; browser `mcp-arguments.e2e.ts`, `settings-mcp-visual.e2e.ts` |
 | Local/SSH/Podman backend selection | Partial: local only in current app scenarios | SSH/Podman actual-app construction/admission deferred; browser `setup-ssh.e2e.ts`, `human-shell.e2e.ts`; no backend switching by approval |
 | Navigation/tabs/drafts | Covered: representative route/menu/modal guards and retained document, `native.spec.ts`, `lifecycle.spec.ts` | Full tabs/draft/restart matrix deferred; browser `prompt-drafts.e2e.ts`, `navigation-header.e2e.ts` |
-| Durable state/recovery/Swift fixture migration | Peer-owned ALL-639 follow-up specs discovered automatically when integrated | Do not infer acceptance from this baseline; inspect integrated scenario verdicts and storage owner's fixture controls |
-| Default-off notification frontier/target response | Peer-owned ALL-641 follow-up specs discovered automatically when integrated | Delivery/click/authorization on signed OS candidate stays separate; no interactive permission expectation in CI |
+| Durable state/Swift fixture migration | Added: `storage.spec.ts` cross-Quit/new-port Review/Restore and acknowledged clear, Swift v1 fixture handoff, delayed storage ACK/menu cancellation | Full migration/corruption/concurrent-writer failure controls stay with `test/storage.test.cjs` and `test/native-storage.test.cjs`; no personal stores |
+| Renderer/transport recovery and suspend boundaries | Added: `recovery.spec.ts` real renderer crash with approval/queue/PTY, failed GET, bounded recovery/menu reload, Quit Cancel/Stop, accepted-write drain and simulated suspend/resume/engine death; adapted `load-failure.spec.ts` | A lost renderer canonically denies its pending manual approval in Rust; queued work may run once through the durable scheduler. Same-engine recovery sends no approval/input replay. Actual system sleep remains deferred |
+| Default-off notification frontier/target response | Peer-owned `notification.spec.ts` automatically selected on integration; real Rust semantic feed/main/preload plus trusted native delivery doubles | Delivery/click/authorization on signed OS candidate stays separate; inspect the integrated exact-head verdict before claiming this journey passed. No interactive permission expectation in CI |
 | Native menu/Edit/links/folder cancellation | Covered: `native.spec.ts` actual main/preload, trusted links, wrong frames/stale document, OS opener double, helper EOF/reap | AppKit folder success/Finder reveal/real browser are manual, `NATIVE-MANUAL.md`, `NATIVE-ACCEPTANCE.md` (historical revisions only) |
 | Renderer sandbox / isolation / Node off / throttling | Covered: `workflow.spec.ts`; added exact package/launch/store identity in `ci-smoke.spec.ts` | No `--no-sandbox`, alternative IPC or fixed-port adoption permitted |
 | Close/reopen, protected Quit, crash/contention/Retry | Covered: `lifecycle.spec.ts`, `startup-quit.spec.ts`, `load-failure.spec.ts`, `startup-cleanup.spec.ts` | Main-controller dialog outcomes/faults are explicit test actors; actual startup sheet clicks are manual |
