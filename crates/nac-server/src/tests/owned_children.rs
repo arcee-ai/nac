@@ -1,5 +1,121 @@
 use super::*;
 
+#[tokio::test]
+async fn foreign_child_attachment_is_uncached_until_peer_lease_retires() {
+    let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("foreign_child_uncached_lifecycle");
+    let home = root.join("nac-home");
+    std::fs::create_dir_all(&home).unwrap();
+    let _env = ScopedModelEnv::isolated(&home, Some("owned-child-fixture-key"));
+    let (base, _requests) = scripted_direct_responses(&["successor report"]);
+    seed_direct_session_with_base_url(&root, "parent", base.clone());
+    seed_direct_session_with_base_url(&root, "child", base);
+    let path = root.join("store.db");
+    nac_core::store::create_traditional_child_relationship(
+        &path,
+        "parent",
+        "child",
+        "general",
+        "uncached child",
+    )
+    .unwrap();
+    let original = nac_core::store::begin_traditional_child_run(
+        &path,
+        "child",
+        "foreign-run",
+        TraditionalChildExecutionMode::Foreground,
+    )
+    .unwrap();
+    let start = sessions::load_session(&path, "child")
+        .unwrap()
+        .messages
+        .len() as u64;
+    nac_core::store::TranscriptLogWriter::new(&path)
+        .unwrap()
+        .append_run_prompt(
+            "child",
+            start,
+            &Message::User {
+                content: "foreign prompt".into(),
+            },
+            "foreign-run",
+        )
+        .unwrap();
+    let peer = sessions::SessionOperationLease::try_acquire(&path, "child").unwrap();
+    let manager = test_manager(&root);
+    let controller = nac_core::traditional_children::controller_for(&path).unwrap();
+    let waiting = tokio::spawn(async move {
+        controller
+            .start(
+                nac_core::traditional_children::TraditionalChildStartRequest {
+                    parent_session_id: "parent".into(),
+                    child_session_id: Some("child".into()),
+                    profile: "general".into(),
+                    description: Some("uncached child".into()),
+                    prompt: "queued after peer".into(),
+                    origin: nac_core::store::InputOrigin::Automation,
+                    execution_mode: TraditionalChildExecutionMode::Foreground,
+                },
+            )
+            .await
+    });
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if !nac_core::store::list_session_inbox(&path, "child")
+                .unwrap()
+                .is_empty()
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("foreground input must be queued");
+    waiting.abort();
+    assert!(waiting.await.unwrap_err().is_cancelled());
+    assert!(!manager
+        .inner
+        .active_sessions
+        .read()
+        .await
+        .contains_key("child"));
+    let first = manager.attach_session("child").await.unwrap();
+    let second = manager.attach_session("child").await.unwrap();
+    assert!(
+        !Arc::ptr_eq(&first, &second),
+        "foreign observers are not cached owners"
+    );
+    assert!(!manager
+        .inner
+        .active_sessions
+        .read()
+        .await
+        .contains_key("child"));
+    assert_eq!(
+        nac_core::store::load_traditional_child(&path, "child")
+            .unwrap()
+            .unwrap(),
+        original
+    );
+    drop(first);
+    drop(second);
+    drop(peer);
+    let canonical = manager.attach_session("child").await.unwrap();
+    assert!(manager
+        .inner
+        .active_sessions
+        .read()
+        .await
+        .get("child")
+        .is_some_and(|cached| Arc::ptr_eq(cached, &canonical)));
+    drop(canonical);
+    manager.stop_local_run_admission().await;
+    manager.quiesce_persistence_callers().await;
+    drop(manager);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 fn init_owned_child_workspace(root: &std::path::Path) {
     std::fs::write(root.join(".gitignore"), "store.db*\nnac-home/\n").unwrap();
     for args in [
