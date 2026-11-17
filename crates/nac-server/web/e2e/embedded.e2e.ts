@@ -573,6 +573,9 @@ test("persists session auto-approval, drains pending asks, and restores manual m
   await selectApprovalMode(page, sessionId, "manual");
   await page.keyboard.press("Escape");
   await expect(page.getByRole("button", { name: "Permissions", exact: true })).toBeVisible();
+  // The drawer slides out before it unmounts; the next ask must find only the
+  // attention card's Allow once, not the closing drawer's.
+  await expect(page.getByRole("dialog", { name: "Permissions", exact: true })).toHaveCount(0);
 
   harness.provider.enqueue(
     "manual-after-disable",
