@@ -107,6 +107,21 @@ test("keeps the parent conversation while selecting siblings, closing and focusi
   await expect(parent).toBeVisible();
   await expect(parentDraft).toHaveValue("Parent draft stays here");
   await expect(page).toHaveURL(new RegExp(`/session/${parentId}/delegated$`));
+
+  // Detailed opens activity by default, but each child's explicit choice still wins.
+  await page.evaluate(() => localStorage.setItem("nac.transcriptDensity", "detailed"));
+  await page.reload();
+  await showSubagents(page, false);
+  await panel.getByRole("button", { name: "First child", exact: true }).click();
+  const detailedFirst = panel.locator("[data-work-fold]").first().getByRole("button").first();
+  await expect(detailedFirst).toHaveAttribute("aria-expanded", "true");
+  await detailedFirst.click();
+  await panel.getByRole("button", { name: "Second child", exact: true }).click();
+  await expect(
+    panel.locator("[data-work-fold]").first().getByRole("button").first(),
+  ).toHaveAttribute("aria-expanded", "true");
+  await panel.getByRole("button", { name: "First child", exact: true }).click();
+  await expect(detailedFirst).toHaveAttribute("aria-expanded", "false");
 });
 
 for (const [name, viewport, mobile] of [
