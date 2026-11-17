@@ -56,8 +56,11 @@ workflow claim, even when browser tests exist. Browser scenarios below are in
 `NAC_ELECTRON_CI=1` discovers every `*.spec.ts`, including newly integrated peer
 specs. The explicit excluded files are development defaults, manual startup Quit,
 manual relocated native acceptance, PR visual capture, windowless native Quit,
-the two opt-in frame/CPU diagnostics, and `notification-adapter.spec.ts`'s opt-in
-OS authorization/delivery probe. Regular integrated notification journey specs
+the two opt-in frame/CPU diagnostics, and the optional
+`notification-adapter.spec.ts` / `notification-native.spec.ts` OS request probes.
+The latter attempts a real semantic notification in the current packaged app;
+its callback/accounting receipt is separate from physical banner/click/withdraw
+observations and signed qualification. Regular integrated notification journey specs
 remain selected; native delivery is not implied by those actors.
 `performance.spec.ts`'s ordinary bounded
 workflow remains included. Its opt-in Swift comparison requires a separately

@@ -21,6 +21,7 @@ module.exports = defineConfig({
         "**/frame-diagnostic.spec.ts",
         "**/performance-attribution.spec.ts",
         "**/notification-adapter.spec.ts",
+        "**/notification-native.spec.ts",
       ]
     : [],
   reporter: ci ? [["list"], ["json", { outputFile: process.env.NAC_ELECTRON_CI_REPORT }]] : "list",
