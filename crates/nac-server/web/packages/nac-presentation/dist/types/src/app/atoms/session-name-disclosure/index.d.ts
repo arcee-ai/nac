@@ -7,8 +7,10 @@ export declare function useSessionNameDisclosure(name: string, description?: str
     overlay: import("react").JSX.Element | null;
 };
 /** A heading's name is itself the explicit read-only disclosure action. */
-export default function SessionNameDisclosure({ name, className, running, }: {
+export default function SessionNameDisclosure({ name, className, running, quietIcon, }: {
     name: string;
     className?: string;
     running?: boolean;
+    /** Show the info glyph only on hover or keyboard focus (a page title). */
+    quietIcon?: boolean;
 }): import("react").JSX.Element;

@@ -83,23 +83,36 @@ for (const mobile of [false, true]) {
       const response = await request.get(`${harness.baseUrl}/sessions/${id}/permissions`);
       expect((await response.json()).requests).toHaveLength(0);
     }
+    // Owned children's requests surface one at a time in the parent's single
+    // attention card (a one-line bar on a phone); Review all opens the full
+    // sheet, which never opens by itself.
+    const card = page.getByRole("dialog", { name: "Permission required", exact: true });
+    const dialog = card;
+    const pending = dialog.getByRole("region", { name: "Pending permission requests" });
+    const counter = (count: number) => page.getByText(`1 of ${count}`, { exact: true });
+    const reviewAll = async () => {
+      if (mobile) await page.getByRole("button", { name: /^Approval needed/ }).click();
+      await card.getByRole("button", { name: "Review all", exact: true }).click();
+      await expect(pending).toBeVisible();
+    };
     childGate.release();
-    await expect(page.getByRole("region", { name: "Pending permission requests" })).toContainText(
-      "Pending requests (2)",
-    );
+    await expect(counter(2)).toBeVisible();
+    await reviewAll();
+    await expect(pending).toContainText("Pending requests (2)");
     await page.keyboard.press("Escape");
+    await expect(pending).toBeHidden();
     await expect(page.getByRole("button", { name: "Permissions (2)", exact: true })).toHaveCount(1);
     await page.getByRole("combobox", { name: "Message" }).fill("ALL333_parent_TOKEN");
     await page.getByRole("button", { name: "Send", exact: true }).click();
     await harness.provider.waitForRequestCount(3);
-    const dialog = page.getByRole("dialog", { name: "Permission required", exact: true });
+    await expect(counter(3)).toBeVisible();
+    await reviewAll();
     await expect(dialog).toHaveCount(1);
-    await expect(dialog.getByRole("region", { name: "Pending permission requests" })).toContainText(
-      "Pending requests (3)",
-    );
+    await expect(pending).toContainText("Pending requests (3)");
     await page.keyboard.press("Escape");
+    await expect(pending).toBeHidden();
     await expect(page.getByRole("button", { name: "Permissions (3)", exact: true })).toHaveCount(1);
-    await expect(page.getByText("(3 pending)", { exact: true })).toBeVisible();
+    await expect(page.getByText("3 pending", { exact: true })).toBeVisible();
 
     // The broker intentionally rejects pending asks when its LAST interactive
     // client disconnects. Keep additional observers attached so this reload
@@ -117,50 +130,58 @@ for (const mobile of [false, true]) {
         if (entry.resourceType() === "eventsource") subscriptions.add(entry.url());
       });
       await page.reload();
+      // The recovered queue is back in the card after reload, all three requests in it.
+      await expect(counter(3)).toBeVisible();
+      await reviewAll();
       await expect(dialog).toHaveCount(1);
-      await expect(
-        dialog.getByRole("region", { name: "Pending permission requests" }),
-      ).toContainText("Pending requests (3)");
+      await expect(pending).toContainText("Pending requests (3)");
       for (const child of children) {
         await expect
           .poll(() => [...subscriptions].some((url) => url.includes(`/sessions/${child}/`)))
           .toBe(true);
       }
+      // Measure once the sheet has finished sliding in: full width on a phone,
+      // its right column on desktop.
       if (mobile) await expect.poll(async () => (await dialog.boundingBox())?.x).toBe(0);
+      else
+        await expect
+          .poll(async () => {
+            const bounds = await dialog.boundingBox();
+            return bounds ? bounds.x + bounds.width <= (page.viewportSize()?.width ?? 0) : false;
+          })
+          .toBe(true);
       // Check actual rendered text bounds, including long child descriptions
       // and unbroken session IDs. The atom's nowrap/fixed-height styles must
       // not clip an approval choice on a narrow viewport.
-      const rows = await dialog
-        .getByRole("region", { name: "Pending permission requests" })
-        .getByRole("button")
-        .evaluateAll((buttons) =>
-          buttons.map((button) => {
-            const bounds = button.getBoundingClientRect();
-            const range = button.ownerDocument.createRange();
-            range.selectNodeContents(button);
-            return {
-              left: bounds.left,
-              right: bounds.right,
-              top: bounds.top,
-              bottom: bounds.bottom,
-              viewport: button.ownerDocument.defaultView!.innerWidth,
-              text: Array.from(
-                range.getClientRects() as ArrayLike<{
-                  left: number;
-                  right: number;
-                  top: number;
-                  bottom: number;
-                }>,
-                (rect) => ({
-                  left: rect.left,
-                  right: rect.right,
-                  top: rect.top,
-                  bottom: rect.bottom,
-                }),
-              ),
-            };
-          }),
-        );
+      const rows = await pending.getByRole("button").evaluateAll((buttons) =>
+        buttons.map((button) => {
+          const bounds = button.getBoundingClientRect();
+          const range = button.ownerDocument.createRange();
+          range.selectNodeContents(button);
+          return {
+            left: bounds.left,
+            right: bounds.right,
+            top: bounds.top,
+            bottom: bounds.bottom,
+            viewport: button.ownerDocument.defaultView!.innerWidth,
+            text: Array.from(
+              range.getClientRects() as ArrayLike<{
+                left: number;
+                right: number;
+                top: number;
+                bottom: number;
+              }>,
+              (rect) => ({
+                left: rect.left,
+                right: rect.right,
+                top: rect.top,
+                bottom: rect.bottom,
+              }),
+            ),
+          };
+        }),
+      );
+      expect(rows).toHaveLength(3);
       for (const row of rows) {
         expect(row.left).toBeGreaterThanOrEqual(0);
         expect(row.right).toBeLessThanOrEqual(row.viewport);
@@ -205,7 +226,7 @@ for (const mobile of [false, true]) {
       await expect(access).toContainText(
         `Requested by child agent “${descriptions.second}” (${children[1]})`,
       );
-      await dialog.getByRole("button", { name: "Reject", exact: true }).click();
+      await dialog.getByRole("button", { name: "Deny", exact: true }).click();
       await harness.provider.waitForRequestCount(6);
       for (const response of await Promise.all(starts)) expect(response.status()).toBe(201);
       await waitForRunIdle(request, harness, parent);
@@ -294,7 +315,16 @@ test("last-client disconnect dismisses queued access without executing it", asyn
   await expect(page.getByRole("dialog", { name: "Permission required", exact: true })).toHaveCount(
     0,
   );
-  await page.getByRole("button", { name: "Create File", exact: true }).click();
+  // The dismissed write settles as a failed step of its turn's work; Insights shows why.
+  const work = page.getByRole("button", { name: /^Worked for .+ · 1 failed$/ });
+  await expect(work).toBeVisible();
+  await work.click();
+  await expect(work).toHaveAttribute("aria-expanded", "true");
+  await page
+    .locator("[data-work-fold]")
+    .filter({ has: work })
+    .getByRole("button", { name: "Open in Insights", exact: true })
+    .click();
   await expect(
     page.getByRole("button", { name: "Create File, failed", exact: true }),
   ).toHaveAttribute("aria-pressed", "true");

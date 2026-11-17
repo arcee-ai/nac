@@ -23,6 +23,7 @@ fn row() -> AttentionStoredSession {
     AttentionStoredSession {
         id: "session".into(),
         primary: true,
+        traditional_child: false,
         direct: true,
         questions_supported: true,
         goal: None,

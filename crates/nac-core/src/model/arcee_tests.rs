@@ -83,6 +83,35 @@ fn simulated_product_version_bump_updates_arcee_auth_header_exactly() {
     assert_eq!(user_agent_for_version("9.8.7"), "nac/9.8.7");
 }
 
+#[test]
+fn test_service_preserves_http_https_and_rejects_invalid_urls_without_exposing_them() {
+    for (input, expected) in [
+        ("http://127.0.0.1:43123", "http://127.0.0.1:43123"),
+        ("http://127.0.0.1:43123///", "http://127.0.0.1:43123"),
+        (
+            "https://fixture.example.test/",
+            "https://fixture.example.test",
+        ),
+    ] {
+        assert_eq!(ArceeAuthService::for_test(input).base_url, expected);
+    }
+    for invalid in [
+        "",
+        "private-canary",
+        "ftp://fixture.example.test/private-canary",
+    ] {
+        let failure = std::panic::catch_unwind(|| ArceeAuthService::for_test(invalid))
+            .expect_err("invalid fixture service must still be rejected");
+        let message = failure
+            .downcast_ref::<&str>()
+            .copied()
+            .or_else(|| failure.downcast_ref::<String>().map(String::as_str))
+            .expect("fixture failure has a fixed diagnostic");
+        assert_eq!(message, "test auth service URL must be absolute HTTP(S)");
+        assert!(!message.contains("private-canary"));
+    }
+}
+
 #[tokio::test]
 async fn device_code_request_uses_expected_contract_and_parses_complete_uri() {
     let server = ScriptedServer::start(vec![ScriptedResponse::json(
@@ -1004,6 +1033,7 @@ async fn concurrent_refreshes_single_flight_and_reopen_the_rotated_record() {
             |auth| auth.access_token == "stale-access",
             &auth_path,
             &lock_path,
+            crate::model::auth_store::DEFAULT_CREDENTIAL_LOCK_TIMEOUT,
             |_| Ok(ArceeAuthService::for_test(&service_base_url)),
         )
         .await
@@ -1016,6 +1046,7 @@ async fn concurrent_refreshes_single_flight_and_reopen_the_rotated_record() {
             |auth| auth.access_token == "stale-access",
             &auth_path,
             &lock_path,
+            crate::model::auth_store::DEFAULT_CREDENTIAL_LOCK_TIMEOUT,
             |_| Ok(ArceeAuthService::for_test(&service_base_url)),
         )
         .await
@@ -1084,6 +1115,7 @@ async fn refresh_destination_comes_only_from_the_stored_auth_issuer() {
             |_| true,
             &auth_path,
             &lock_path,
+            crate::model::auth_store::DEFAULT_CREDENTIAL_LOCK_TIMEOUT,
             move |issuer| {
                 let base_url = if issuer == selected_issuer {
                     &selected_url
@@ -1330,4 +1362,30 @@ fn token_refused_after_refresh_asks_for_a_sign_in_again() {
     assert_eq!(failure.kind, RunFailureKind::Authentication);
     assert_eq!(failure.http_status, Some(401));
     assert!(failure.summary.contains("Sign in again"));
+}
+
+#[tokio::test]
+async fn arcee_refresh_lock_wait_gives_up_after_the_given_timeout() {
+    let dir = TestDir::new("refresh-lock-timeout");
+    let lock_path = dir.0.join("arcee_auth.json.lock");
+    let held = nac_credential_store::try_acquire_credential_lock(&lock_path)
+        .unwrap()
+        .expect("uncontended refresh lock");
+    let started = std::time::Instant::now();
+
+    let error = acquire_refresh_lock(&lock_path, Duration::from_millis(200))
+        .await
+        .err()
+        .expect("refresh lock acquired while held elsewhere");
+
+    let waited = started.elapsed();
+    assert!(waited >= Duration::from_millis(200), "{waited:?}");
+    assert!(waited < Duration::from_secs(5), "{waited:?}");
+    assert!(error.to_string().contains("waited 200 ms"), "{error:#}");
+
+    drop(held);
+    let lock = acquire_refresh_lock(&lock_path, Duration::from_millis(200))
+        .await
+        .expect("refresh lock once released");
+    drop(lock);
 }

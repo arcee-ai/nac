@@ -7,6 +7,31 @@ fn backend() -> Arc<ExecutionBackend> {
 }
 
 #[tokio::test]
+async fn busy_model_preparation_keeps_controller_and_ticket_unchanged() {
+    let manager = TerminalManager::for_direct();
+    let name = manager.next_session_name();
+    manager
+        .create(name.clone(), "sleep 60", None, 80, 24, &backend())
+        .await
+        .unwrap();
+    manager.retain_with_cancellation(&name, None).await.unwrap();
+    let before = manager.prepare_model_input(&name).unwrap();
+    let sessions = manager.sessions.lock().await;
+    let control = sessions[&name].input_control().status();
+    let error = manager.prepare_model_input(&name).err().unwrap();
+    assert_eq!(
+        error.to_string(),
+        "terminal input owner is busy; retry preparation"
+    );
+    assert_eq!(sessions[&name].input_control().status(), control);
+    assert!(!control.in_flight);
+    drop(sessions);
+    assert_eq!(manager.prepare_model_input(&name).unwrap(), before);
+    manager.remove_all().await.unwrap();
+    assert!(manager.sessions.lock().await.is_empty());
+}
+
+#[tokio::test]
 async fn retained_agent_and_human_handoff_keep_exact_process_and_literal_adapter() {
     let manager = TerminalManager::for_direct();
     let backend = backend();

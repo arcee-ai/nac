@@ -3,12 +3,9 @@ import React, { createContext, useCallback, useContext, useEffect, useState } fr
 export type Theme = "light" | "dark" | "system";
 export type ResolvedTheme = "light" | "dark";
 
-const THEMES: Theme[] = ["light", "dark", "system"];
+export const THEMES: readonly Theme[] = ["system", "light", "dark"];
 const STORAGE_KEY = "nac-theme";
-
-// The product ships dark-only for now. Theme plumbing (tokens, types, storage)
-// stays so light / system can come back without a redesign.
-const FORCED_THEME: ResolvedTheme = "dark";
+const DARK_QUERY = "(prefers-color-scheme: dark)";
 
 interface ThemeContextValue {
   theme: Theme;
@@ -19,63 +16,99 @@ interface ThemeContextValue {
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
-const prefersDark = () => window.matchMedia("(prefers-color-scheme: dark)").matches;
-
-function resolve(_theme: Theme): ResolvedTheme {
-  return FORCED_THEME;
+function prefersDark(): boolean {
+  return typeof window !== "undefined" && typeof window.matchMedia === "function"
+    ? window.matchMedia(DARK_QUERY).matches
+    : true;
 }
 
-function applyToDOM(): void {
+function resolve(theme: Theme, systemDark: boolean): ResolvedTheme {
+  if (theme === "system") return systemDark ? "dark" : "light";
+  return theme;
+}
+
+/**
+ * The document owns the theme class for the standalone app. `index.html`
+ * applies the same rule before first paint, so this only keeps it current.
+ */
+function applyToDOM(resolved: ResolvedTheme): void {
   const root = document.documentElement;
-  root.setAttribute("data-theme", FORCED_THEME);
+  root.setAttribute("data-theme", resolved);
   root.classList.remove("light", "dark");
-  root.classList.add(FORCED_THEME);
-  root.style.colorScheme = FORCED_THEME;
+  root.classList.add(resolved);
+  root.style.colorScheme = resolved;
+  const meta = document.querySelector('meta[name="color-scheme"]');
+  if (meta) meta.setAttribute("content", resolved);
 }
 
-function initialTheme(): Theme {
-  // SAFETY: the stored value is validated against THEMES on the next line, so
-  // a foreign string never escapes as a Theme.
-  const saved = localStorage.getItem(STORAGE_KEY) as Theme | null;
-  if (saved && THEMES.includes(saved)) return saved;
-  return prefersDark() ? "dark" : "light";
+function readStored(): Theme | null {
+  try {
+    // SAFETY: the stored value is validated against THEMES before it is used,
+    // so a foreign string never escapes as a Theme.
+    const saved = localStorage.getItem(STORAGE_KEY) as Theme | null;
+    return saved && THEMES.includes(saved) ? saved : null;
+  } catch {
+    return null;
+  }
 }
 
+function writeStored(theme: Theme): void {
+  try {
+    localStorage.setItem(STORAGE_KEY, theme);
+  } catch {
+    // Storage can be unavailable (private mode, sandboxed host); the choice
+    // still applies for this page.
+  }
+}
+
+/**
+ * Light, dark, or follow the system. A `local` provider is a packed
+ * presentation inside someone else's page: it never touches the host
+ * document or its storage, and the theme class lives on the presentation
+ * root instead.
+ */
 export const ThemeProvider: React.FC<{ children?: React.ReactNode; local?: boolean }> = ({
   children,
   local = false,
 }) => {
-  const [theme, setThemeState] = useState<Theme>(() => (local ? "dark" : initialTheme()));
+  const [theme, setThemeState] = useState<Theme>(() =>
+    local ? "dark" : (readStored() ?? "system"),
+  );
+  const [systemDark, setSystemDark] = useState(prefersDark);
+
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return undefined;
+    const query = window.matchMedia(DARK_QUERY);
+    const onChange = () => setSystemDark(query.matches);
+    query.addEventListener?.("change", onChange);
+    return () => query.removeEventListener?.("change", onChange);
+  }, []);
+
+  const resolved = resolve(theme, systemDark);
+
+  useEffect(() => {
+    if (!local) applyToDOM(resolved);
+  }, [local, resolved]);
 
   const setTheme = useCallback(
     (next: Theme) => {
       if (!THEMES.includes(next)) return;
       setThemeState(next);
-      if (!local) {
-        localStorage.setItem(STORAGE_KEY, next);
-        applyToDOM();
-      }
+      if (!local) writeStored(next);
     },
     [local],
   );
 
   const toggleTheme = useCallback(() => {
     setThemeState((prev) => {
-      const next: Theme = prev === "light" ? "dark" : prev === "dark" ? "system" : "light";
-      if (!local) {
-        localStorage.setItem(STORAGE_KEY, next);
-        applyToDOM();
-      }
+      const next = THEMES[(THEMES.indexOf(prev) + 1) % THEMES.length];
+      if (!local) writeStored(next);
       return next;
     });
   }, [local]);
 
-  useEffect(() => {
-    if (!local) applyToDOM();
-  }, [local]);
-
   return (
-    <ThemeContext.Provider value={{ theme, resolved: resolve(theme), setTheme, toggleTheme }}>
+    <ThemeContext.Provider value={{ theme, resolved, setTheme, toggleTheme }}>
       {children}
     </ThemeContext.Provider>
   );

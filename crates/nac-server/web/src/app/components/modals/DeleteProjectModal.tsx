@@ -1,6 +1,13 @@
 import { useLocation, useNavigate } from "react-router-dom";
 
-import { Button, ButtonContent, ButtonVariant, Modal, ModalSize } from "@/app/atoms";
+import {
+  Button,
+  ButtonContent,
+  ButtonVariant,
+  Modal,
+  ModalDescription,
+  ModalSize,
+} from "@/app/atoms";
 import { toRunError } from "@/app/lib/providerError";
 import { routes, sessionIdFromPath } from "@/app/lib/routes";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
@@ -8,7 +15,7 @@ import { useDeleteProject } from "@/app/services/queries";
 import type { DeleteProjectSessions, ProjectRecord } from "@/app/types/api";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 
-const plural = (count: number) => (count === 1 ? "chat" : "chats");
+const plural = (count: number) => (count === 1 ? "session" : "sessions");
 
 export function DeleteProjectModal({
   open,
@@ -46,10 +53,10 @@ export function DeleteProjectModal({
       const deleted = deletedIds.length;
       toast.success(
         deleted > 0
-          ? `Project and ${deleted} ${plural(deleted)} removed`
+          ? `Project and ${deleted} ${plural(deleted)} deleted`
           : kept > 0
-            ? `Project removed; ${kept} ${plural(kept)} kept`
-            : "Project removed",
+            ? `Project deleted; ${kept} ${plural(kept)} kept`
+            : "Project deleted",
       );
       onClose();
     } catch (error) {
@@ -61,16 +68,18 @@ export function DeleteProjectModal({
     <Modal
       open={open}
       onClose={onClose}
-      title="Remove Project?"
+      title="Delete project"
       size={ModalSize.Medium}
+      alert
       footer={
         <>
           {!isMobile && (
             <Button
-              variant={ButtonVariant.Tertiary}
+              variant={ButtonVariant.Ghost}
               content={ButtonContent.Text}
               onClick={onClose}
               disabled={remove.isPending}
+              className="mr-auto"
             >
               Cancel
             </Button>
@@ -81,7 +90,7 @@ export function DeleteProjectModal({
             onClick={() => void submit("keep")}
             disabled={remove.isPending}
           >
-            Keep Sessions
+            Delete project, keep sessions
           </Button>
           <Button
             variant={ButtonVariant.SecondaryDestructive}
@@ -89,21 +98,24 @@ export function DeleteProjectModal({
             onClick={() => void submit("delete")}
             loading={remove.isPending}
           >
-            Remove Project and Sessions
+            Delete project and sessions
           </Button>
         </>
       }
     >
-      <div className="flex flex-col gap-4">
-        <p>
-          Remove <span className="text-basic-primary">&quot;{project?.name}&quot;</span> from NAC?
-        </p>
-        <p>
-          Files at <code className="break-all text-basic-primary">{project?.cwd}</code> will be
-          preserved. Select Keep Sessions to leave its chats unassigned, or remove the Project and
-          its chats together.
-        </p>
-      </div>
+      <ModalDescription className="flex flex-col gap-3">
+        <span>
+          <span className="text-basic-primary">“{project?.name}”</span> will be deleted from NAC.
+          Its files stay where they are:
+        </span>
+        <code className="code-small block break-all rounded-md bg-elevation-sublevel-variant-A px-2.5 py-1.5 text-basic-secondary">
+          {project?.cwd}
+        </code>
+        <span>
+          Keep its sessions and they move to “No project”, or delete them with the project — their
+          conversations can’t be recovered.
+        </span>
+      </ModalDescription>
     </Modal>
   );
 }

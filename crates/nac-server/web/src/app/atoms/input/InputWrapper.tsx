@@ -35,11 +35,10 @@ const InputWrapper: React.FC<InputWrapperProps> = ({
   children,
 }) => {
   const labelSize = caption === "compact" ? LabelSize.Micro : LabelSize.Small;
-  const captionClass =
-    caption === "compact" ? "label-micro" : caption === "large" ? "label-small" : "text-micro";
+  const captionClass = caption === "large" ? "type-body-chrome" : "type-meta";
 
   return (
-    <div className={cn("flex text-left flex-col gap-1", className)}>
+    <div className={cn("flex text-left flex-col gap-1.5", className)}>
       {label ? (
         <div className="flex items-baseline gap-1 min-w-0">
           <Label
@@ -55,7 +54,7 @@ const InputWrapper: React.FC<InputWrapperProps> = ({
           {required ? (
             <span
               className={cn(
-                "label-small shrink-0",
+                "type-label shrink-0",
                 validation ? "text-error-primary" : "text-basic-primary",
               )}
             >
@@ -70,7 +69,7 @@ const InputWrapper: React.FC<InputWrapperProps> = ({
           {validationText}
         </p>
       ) : !validation && hintText ? (
-        <p id={descriptionId} className="text-micro text-basic-muted">
+        <p id={descriptionId} className="type-meta text-basic-tertiary">
           {hintText}
         </p>
       ) : null}

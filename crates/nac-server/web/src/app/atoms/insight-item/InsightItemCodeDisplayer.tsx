@@ -32,15 +32,15 @@ interface InsightItemCodeDisplayerProps {
 }
 
 /**
- * The design's mono is 12/16 without tracking. `.code` sets a 1.5 line height
+ * Focus mono at 12.5/20 without tracking. `.code` sets its own line height
  * and tracking in unlayered CSS, which only `!` utilities outrank.
  */
 const CONTENT_TYPE =
-  "code code-small font-medium !leading-4 !tracking-normal whitespace-pre-wrap break-words";
+  "code text-[length:var(--type-mono)] !leading-5 !tracking-normal whitespace-pre-wrap break-words";
 
 /**
- * A tool call's input or output inside an `InsightItem`, behind a 2px muted
- * rule. The caller owns the state and the full content: "Show full" asks for
+ * A tool call's input or output inside an `InsightItem`, on the code surface
+ * in a hairline box. The caller owns the state and the full content: "Show full" asks for
  * it, Loading keeps the preview on screen with the link disabled, and Expanded
  * shows the full content with "Hide" and a copy button. Long lines wrap, so
  * the detail column stays the only scroller.
@@ -69,10 +69,10 @@ const InsightItemCodeDisplayer: React.FC<InsightItemCodeDisplayerProps> = ({
       role="group"
       aria-labelledby={showHeading ? headingId : undefined}
       aria-label={showHeading ? undefined : title}
-      className="flex w-full min-w-0 flex-col gap-2 border-l-2 border-muted pl-4"
+      className="flex w-full min-w-0 flex-col gap-1.5"
     >
       {showHeading ? (
-        <p id={headingId} className="break-words text-micro font-semibold text-basic-primary">
+        <p id={headingId} className="break-words type-meta text-basic-tertiary">
           {title}
         </p>
       ) : null}
@@ -81,18 +81,18 @@ const InsightItemCodeDisplayer: React.FC<InsightItemCodeDisplayerProps> = ({
         aria-busy={loading || undefined}
         className={cn(
           CONTENT_TYPE,
-          "empty:hidden",
-          loading ? "text-shimmer-basic motion-reduce:animate-none" : "text-basic-tertiary",
+          "empty:hidden rounded-lg border border-tertiary bg-[var(--color-code-bg)] px-3 py-2",
+          loading ? "text-shimmer-basic motion-reduce:animate-none" : "text-basic-secondary",
         )}
       >
         {content}
       </div>
       {error && state === InsightItemCodeDisplayerState.Default ? (
-        <p role="alert" className="break-words text-micro text-error-primary">
+        <p role="alert" className="break-words type-meta text-error-primary">
           {error}
         </p>
       ) : null}
-      {note && expanded ? <p className="break-words text-micro text-basic-muted">{note}</p> : null}
+      {note && expanded ? <p className="break-words type-meta text-basic-muted">{note}</p> : null}
       {showsToggle || expanded ? (
         <div className="flex w-full items-start gap-4">
           {showsToggle ? (

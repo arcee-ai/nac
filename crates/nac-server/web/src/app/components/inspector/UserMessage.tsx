@@ -51,10 +51,14 @@ interface UserMessageProps {
   readOnly?: boolean;
 }
 
-/** Dimmed at rest; keyboard focus lifts it so the focus ring keeps its contrast. */
-const ACTION_CLASS = "opacity-75 focus-visible:opacity-100";
+/** Phones keep their 44px targets; the row's tone does the quieting. */
+const ACTION_CLASS = "max-md:!size-11 max-md:!min-h-11";
 
-/** The prompt bubble. Pending ones are dimmed until the snapshot catches up. */
+/**
+ * The prompt, as a soft bubble on the right of the column. Pending ones are
+ * dimmed until the snapshot catches up. Its actions wait under it until the
+ * pointer or focus comes to the prompt; touch shows them always.
+ */
 export const UserMessage = memo(function UserMessage({
   text,
   terminalSelection,
@@ -71,12 +75,16 @@ export const UserMessage = memo(function UserMessage({
   const canRefresh = !readOnly && onRefresh != null && messageIndex != null;
   const canRevert = !readOnly && onRevert != null && messageIndex != null;
   return (
-    <div className="flex flex-col items-end w-full max-w-full py-6">
+    <div
+      data-turn=""
+      className="group/prompt flex w-full max-w-full flex-col items-end pt-4 first:pt-2"
+    >
       <div
         className={cn(
-          "w-full p-5 overflow-hidden rounded-[16px] bg-elevation-level-2",
-          "label-small text-basic-primary whitespace-pre-wrap break-words",
-          "transition-opacity duration-150",
+          "min-w-0 overflow-hidden rounded-[18px] bg-elevation-sublevel-variant-B",
+          "type-body text-basic-primary whitespace-pre-wrap break-words",
+          "transition-opacity duration-150 ease-out motion-reduce:transition-none",
+          terminalSelection ? "w-full p-3" : "max-w-[85%] px-4 py-2.5 max-md:max-w-[92%]",
           pending && "opacity-60",
         )}
       >
@@ -93,7 +101,7 @@ export const UserMessage = memo(function UserMessage({
 
       {invokedSkills && invokedSkills.length > 0 ? (
         <div
-          className="flex items-center gap-1 pt-1.5 pr-1 label-micro text-basic-tertiary"
+          className="flex items-center gap-1 pt-1.5 pr-2 type-meta text-basic-tertiary"
           title="Skill content was expanded into the prompt sent to the agent"
         >
           <Icon iconName={IconName.Bolt} size={12} color="var(--color-fill-basic-tertiary)" />
@@ -109,7 +117,9 @@ export const UserMessage = memo(function UserMessage({
       <div
         aria-hidden={pending || undefined}
         className={cn(
-          "flex items-center justify-end gap-3 max-w-full min-w-0 pt-2",
+          "-mr-1 mt-1 flex h-7 min-w-0 max-w-full items-center justify-end gap-0.5 max-md:h-11",
+          "transition-opacity duration-150 ease-out motion-reduce:transition-none",
+          "opacity-0 group-hover/prompt:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100",
           pending && "invisible",
         )}
       >

@@ -48,13 +48,23 @@ enum DesktopStartup {
 
     static func select(executable: URL, identity: EngineIdentity, options: Options,
                        inherited: [String: String], fallbackHome: String = NSHomeDirectory()) async throws -> EngineLaunchConfiguration {
+        guard identity.matchesShellBuild else {
+            throw DesktopStartupError.message("The bundled engine does not match this app's normal or isolated auth-fixture build.")
+        }
         let home = inherited["HOME"] ?? fallbackHome
         guard home.hasPrefix("/") || options.directory?.hasPrefix("/") == true else {
             throw DesktopStartupError.message("HOME is not an absolute directory. Pass --directory with an existing absolute path and relaunch NAC.")
         }
         let directory = options.directory ?? home
-        let cwd = URL(fileURLWithPath: directory.hasPrefix("/") ? directory :
-            URL(fileURLWithPath: home).appendingPathComponent(directory).path).resolvingSymlinksInPath()
+        let bootstrap = URL(fileURLWithPath: directory.hasPrefix("/") ? directory :
+            URL(fileURLWithPath: home).appendingPathComponent(directory).path)
+        #if NATIVE_AUTH_FIXTURE
+        // Foundation hides Darwin's /private prefix for existing paths. The
+        // closed fixture admits its explicit POSIX spelling before discovery.
+        let cwd = bootstrap
+        #else
+        let cwd = bootstrap.resolvingSymlinksInPath()
+        #endif
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: cwd.path, isDirectory: &isDirectory), isDirectory.boolValue else {
             throw DesktopStartupError.message("The bootstrap directory is unavailable. Pass --directory with an existing directory and relaunch NAC.")

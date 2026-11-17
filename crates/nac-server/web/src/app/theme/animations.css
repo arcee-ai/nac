@@ -169,3 +169,54 @@
 .chat-loader-dot:nth-child(3) {
   animation-delay: 0.24s;
 }
+
+/* The status ladder's "working" dot breathes; it never spins. */
+@keyframes status-dot-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+.status-dot-pulse {
+  animation: status-dot-pulse 1.6s ease-in-out infinite;
+}
+
+/* One shimmering live-status line ("Thinking…", "Running tests…"). */
+@keyframes focus-shimmer {
+  from {
+    background-position: 150% 0;
+  }
+  to {
+    background-position: -50% 0;
+  }
+}
+.focus-shimmer {
+  background-image: linear-gradient(
+    90deg,
+    var(--f-ink-3) 0%,
+    var(--f-ink-3) 35%,
+    var(--f-ink) 50%,
+    var(--f-ink-3) 65%,
+    var(--f-ink-3) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: focus-shimmer 2.2s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-dot-pulse,
+  .focus-shimmer {
+    animation: none;
+  }
+  .focus-shimmer {
+    -webkit-text-fill-color: currentColor;
+    color: var(--f-ink-3);
+  }
+}

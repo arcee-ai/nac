@@ -129,7 +129,7 @@ func inspect(_ path: String, kind: String) throws -> [String: Any] {
     let top1 = observations.map { $0.topCandidates(1).first }
     let text = top1.compactMap { $0?.string }.joined(separator: " ")
     let markers = ["chat": ["Hello from the isolated NAC Mac preview"], "terminal": ["NAC354_TRUSTED_XY"],
-                   "workspace": ["WK_RICH_COMPLETE"], "approval": ["Permission required"],
+                   "workspace": ["WK_RICH_COMPLETE"], "approval": ["Approval needed"],
                    "workspace-rich": ["export const webkitFixture = 351", "System WebKit", "shared React", "A formula"],
                    "instance-empty": ["No projects yet", "Get Started"],
                    "instance-conflict": ["Another NAC process", "Retry", "store-path"],

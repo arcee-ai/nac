@@ -5,6 +5,8 @@ export type BrowseKind = "directory" | "toml" | "file";
 /** How often the session list is refreshed; the list has no event stream. */
 export const SESSIONS_POLL_MS = 5000;
 export const WORKSPACE_STATS_POLL_MS = 30_000;
+/** Fleet attention polling cadence while its stream is not live. */
+export const FLEET_ATTENTION_POLL_MS = 5000;
 
 export const queryKeys = {
   storeInfo: ["store"] as const,
@@ -17,6 +19,7 @@ export const queryKeys = {
   managedAuth: ["managed-auth"] as const,
   modelConfigs: ["model-configs"] as const,
   sshConfigs: ["ssh-configs"] as const,
+  sshAliases: ["ssh-aliases"] as const,
   mcpLibrary: ["mcp-library"] as const,
   mcpServers: ["mcp-servers"] as const,
   mcpRuntime: ["mcp-runtime"] as const,
@@ -52,6 +55,7 @@ export const queryKeys = {
   sessionSnapshot: (id: string) => ["session", id, "snapshot"] as const,
   sessionSkills: (id: string) => ["session", id, "skills"] as const,
   sessionsAll: ["sessions"] as const,
+  fleetAttention: (projectId: string | null) => ["fleet-attention", { projectId }] as const,
   threadEventsRoot: (id: string) => ["session", id, "thread-events"] as const,
   threadEvents: (id: string, threadName: string) =>
     ["session", id, "thread-events", threadName] as const,

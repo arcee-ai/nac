@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { cn } from "../../lib/cn";
 import Icon, { IconName } from "../icon";
 import Button from "../button";
 import "./toast.css";
@@ -17,11 +18,23 @@ interface ToastProps {
   onClose: () => void;
 }
 
-const VARIANT_STYLES = {
-  [ToastVariant.Info]: "text-info-primary",
-  [ToastVariant.Success]: "text-success-primary",
+/**
+ * Info and success are an ink chip (the inverse surface); an error or a
+ * needs-you notice is a raised surface whose text carries the signal colour,
+ * so it is read as different before it is read at all.
+ */
+const SURFACE = {
+  [ToastVariant.Info]: "nac-toast-ink bg-elevation-ground-inverse text-primary-inverse",
+  [ToastVariant.Success]: "nac-toast-ink bg-elevation-ground-inverse text-primary-inverse",
+  [ToastVariant.Error]: "bg-elevation-level-3 text-error-primary",
+  [ToastVariant.Danger]: "bg-elevation-level-3 text-basic-primary",
+} satisfies Record<ToastVariant, string>;
+
+const ICON_TONE = {
+  [ToastVariant.Info]: "text-secondary-inverse",
+  [ToastVariant.Success]: "text-secondary-inverse",
   [ToastVariant.Error]: "text-error-primary",
-  [ToastVariant.Danger]: "text-danger-primary",
+  [ToastVariant.Danger]: "text-danger-tertiary",
 } satisfies Record<ToastVariant, string>;
 
 const VARIANT_ICONS = {
@@ -31,6 +44,7 @@ const VARIANT_ICONS = {
   [ToastVariant.Danger]: IconName.Danger,
 } satisfies Record<ToastVariant, IconName>;
 
+/** A small floating pill: 13px, one icon, the message and a quiet dismiss. */
 const Toast: React.FC<ToastProps> = ({ content, variant, dismissing, onClose }) => {
   const [mounted, setMounted] = useState(false);
 
@@ -40,35 +54,41 @@ const Toast: React.FC<ToastProps> = ({ content, variant, dismissing, onClose }) 
   }, []);
 
   const isVisible = mounted && !dismissing;
+  const urgent = variant === ToastVariant.Error || variant === ToastVariant.Danger;
 
   return (
-    <div className="overflow-hidden">
-      <div className="nac-toast w-full pointer-events-auto" data-visible={isVisible}>
-        <div className="nac-toast-content rounded-xl border border-tertiary bg-elevation-level-2 flex gap-3 items-start p-4 pr-14 relative text-basic-primary shadow-lg w-full">
-          <Icon
-            iconName={VARIANT_ICONS[variant]}
-            size={20}
-            className={`shrink-0 mt-0.5 ${VARIANT_STYLES[variant]}`}
-          />
-          <span
-            role={
-              variant === ToastVariant.Error || variant === ToastVariant.Danger ? "alert" : "status"
-            }
-            aria-atomic="true"
-            className="nac-toast-message flex-grow min-w-0 text-sm leading-5 break-words [overflow-wrap:anywhere] whitespace-pre-line"
-          >
-            {content}
-          </span>
-          <Button
-            variant={Button.Variant.Ghost}
-            content={Button.Content.Icon}
-            className="nac-toast-dismiss absolute top-1 right-1 !size-11 shrink-0"
-            aria-label="Dismiss notification"
-            onClick={onClose}
-          >
-            <Icon iconName={IconName.Close} />
-          </Button>
-        </div>
+    <div
+      className="nac-toast pointer-events-none flex w-full justify-center"
+      data-visible={isVisible}
+    >
+      <div
+        className={cn(
+          "nac-toast-content pointer-events-auto relative flex max-w-full items-start gap-2 rounded-sheet py-1.5 pr-1.5 pl-3.5 shadow-lg",
+          SURFACE[variant],
+        )}
+      >
+        <Icon
+          iconName={VARIANT_ICONS[variant]}
+          size={16}
+          className={cn("mt-[6px] shrink-0", ICON_TONE[variant])}
+        />
+        <span
+          role={urgent ? "alert" : "status"}
+          aria-atomic="true"
+          className="nac-toast-message type-body-chrome min-w-0 flex-grow py-[4px] break-words [overflow-wrap:anywhere] whitespace-pre-line"
+        >
+          {content}
+        </span>
+        <Button
+          variant={Button.Variant.Ghost}
+          size={Button.Size.Small}
+          content={Button.Content.Icon}
+          className="nac-toast-dismiss !size-7 shrink-0 max-md:!size-11 max-md:-my-2 max-md:-mr-1"
+          aria-label="Dismiss notification"
+          onClick={onClose}
+        >
+          <Icon iconName={IconName.Close} />
+        </Button>
       </div>
     </div>
   );

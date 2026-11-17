@@ -2,14 +2,16 @@ import path from "node:path";
 import fs from "node:fs/promises";
 import type { Page } from "@playwright/test";
 import { createSession, expect, test, waitForRunIdle } from "./harness";
+import {
+  leaveSettings,
+  openCapabilities,
+  openSettingsSection,
+  settingsSection,
+} from "./settings-focus";
 
-async function inspect(page: Page, mobile: boolean) {
-  if (mobile) await page.getByRole("button", { name: "Open the menu", exact: true }).click();
-  await page.getByRole("button", { name: "NAC capabilities", exact: true }).click();
-  if (mobile) await expect(page.getByRole("dialog", { name: "Menu", exact: true })).toBeHidden();
-  const context = page.getByRole("dialog", { name: "NAC capabilities", exact: true });
-  await expect(context.getByText("installed-runtime", { exact: true })).toBeVisible();
-  return context;
+/** Settings › Capabilities for the session on screen, by the palette (the product entry). */
+async function inspect(page: Page) {
+  return openCapabilities(page);
 }
 async function capture(page: Page, name: string) {
   if (!process.env.NAC_PRODUCT_CONTEXT_CAPTURES) return;
@@ -39,9 +41,10 @@ for (const mobile of [false, true]) {
     await expect(page.getByRole("combobox", { name: "Message" })).toBeVisible();
     await expect(page.getByRole("button", { name: "High", exact: true })).toBeVisible();
     const baseline = process.env.NAC_PRODUCT_CONTEXT_BASELINE === "1";
-    if (mobile) await page.getByRole("button", { name: "Open the menu", exact: true }).click();
     await capture(page, `${mobile ? "phone" : "desktop"}-navigation`);
     if (baseline) {
+      // Pre-Settings-page builds: the capabilities entry is absent from the old menu.
+      if (mobile) await page.getByRole("button", { name: "Open the menu", exact: true }).click();
       await expect(page.getByRole("button", { name: "NAC capabilities", exact: true })).toHaveCount(
         0,
       );
@@ -50,63 +53,63 @@ for (const mobile of [false, true]) {
       await capture(page, `${mobile ? "phone" : "desktop"}-mcp`);
       return;
     }
-    if (mobile) await page.keyboard.press("Escape");
     const mutations: string[] = [];
     page.on("request", (event) => {
       const route = new URL(event.url()).pathname;
       // These POST endpoints are read-only queries. Existing configuration
-      // dialogs inspect provider models without saving credentials/configuration.
+      // pages inspect provider models without saving credentials/configuration.
       const passivePost =
         event.method() === "POST" &&
         ["/product-destinations/resolve", "/providers/models"].includes(route);
       if (event.method() !== "GET" && !passivePost) mutations.push(`${event.method()} ${route}`);
     });
     const original = page.url();
-    let context = await inspect(page, mobile);
+    const capabilitiesUrl = `${harness.baseUrl}/#/settings/capabilities?session=${id}`;
+    // Capabilities is a Settings section scoped to the session it was opened from.
+    let context = await inspect(page);
+    await expect(page).toHaveURL(capabilitiesUrl);
     await expect(context.getByText("direct", { exact: true })).toBeVisible();
     await expect(context.getByText("local", { exact: true })).toBeVisible();
-    await expect(page).toHaveURL(original);
-    await expect(page.getByRole("dialog", { name: "MCP servers", exact: true })).toHaveCount(0);
+    await expect(settingsSection(page, "MCP servers")).toHaveCount(0);
     await capture(page, `${mobile ? "phone" : "desktop"}-capabilities`);
-    // Keyboard activation and existing atom focus return, with no Markdown action bridge.
+    // Keyboard activation goes through the bounded navigation bridge, with no Markdown action bridge.
     const mcp = context.getByRole("button", { name: "Open MCP settings", exact: true });
     await mcp.focus();
     await page.keyboard.press("Enter");
-    const mcpDialog = page.getByRole("dialog", { name: "MCP servers", exact: true });
-    await expect(mcpDialog).toBeVisible();
+    const mcpSection = settingsSection(page, "MCP servers");
+    await expect(mcpSection).toBeVisible();
+    await expect(page).toHaveURL(`${harness.baseUrl}/#/settings/mcp`);
     await capture(page, `${mobile ? "phone" : "desktop"}-mcp`);
-    await page.keyboard.press("Escape");
-    await expect(mcpDialog).toBeHidden();
+    // Leaving Settings returns to the session the user came from.
+    await leaveSettings(page);
+    await expect(mcpSection).toHaveCount(0);
     await expect(page).toHaveURL(original);
-    // The replaced context modal is unmounted; focus must return into the view.
-    await expect
-      .poll(() =>
-        page.evaluate(
-          "!!document.activeElement && document.activeElement !== document.body && !document.activeElement.closest('[inert]')",
-        ),
-      )
-      .toBe(true);
+    await expect(page.getByRole("combobox", { name: "Message" })).toBeVisible();
     for (const [label, title] of [
-      ["Configurations", "Configurations"],
-      ["Model authentication", "Configurations"],
-      ["SSH configurations", "SSH configs"],
+      ["Configurations", "Models & providers"],
+      ["Model authentication", "Models & providers"],
+      ["SSH configurations", "SSH hosts"],
     ]) {
-      context = await inspect(page, mobile);
+      context = await inspect(page);
       await context.getByRole("button", { name: `Open ${label}`, exact: true }).click();
-      const dialog = page.getByRole("dialog", { name: title, exact: true });
-      await expect(dialog).toBeVisible();
-      await page.keyboard.press("Escape");
-      await expect(dialog).toBeHidden();
+      const section = settingsSection(page, title);
+      await expect(section).toBeVisible();
+      await leaveSettings(page);
+      await expect(section).toHaveCount(0);
+      await expect(page).toHaveURL(original);
     }
     for (const [label, panel] of [
       ["Subagents", "delegated"],
       ["Files", "files"],
       ["Terminal", "terminal"],
     ]) {
-      context = await inspect(page, mobile);
+      context = await inspect(page);
       await context.getByRole("button", { name: `Open ${label}`, exact: true }).click();
       await expect(context).toBeHidden();
+      // The panel opens inside the session the capabilities described.
       await expect(page).toHaveURL(new RegExp(`/session/${id}/${panel}$`));
+      // A phone opens the panel as its bottom sheet; wider, the floating
+      // drawer. Either is a dialog that Escape closes.
       const panelDialog = mobile
         ? page.getByRole("dialog", { name: label, exact: true })
         : page.getByRole("dialog");
@@ -114,7 +117,7 @@ for (const mobile of [false, true]) {
       await page.keyboard.press("Escape");
       await expect(panelDialog).toBeHidden();
     }
-    context = await inspect(page, mobile);
+    context = await inspect(page);
     await context.getByRole("button", { name: "Open History", exact: true }).click();
     if (mobile) {
       await expect(context).toBeHidden();
@@ -126,9 +129,9 @@ for (const mobile of [false, true]) {
     } else {
       await expect(context).toBeVisible();
       await expect(context.getByText(/use the revision selector on desktop/)).toBeVisible();
-      await page.keyboard.press("Escape");
+      await expect(page).toHaveURL(capabilitiesUrl);
     }
-    context = await inspect(page, mobile);
+    context = await inspect(page);
     await context.getByRole("button", { name: "Open Projects", exact: true }).click();
     await expect(page).toHaveURL(`${harness.baseUrl}/#/`);
     expect(mutations).toEqual([]);
@@ -195,7 +198,9 @@ test("native context tools resolve an explicit headless destination without exec
   harness.provider.assertConsumed();
   await page.goto(`${harness.baseUrl}/#/session/${id}/insights`);
   await expect(page.getByText("Open MCP in the sidebar.", { exact: false }).first()).toBeVisible();
-  await expect(page.getByRole("dialog", { name: "MCP servers", exact: true })).toHaveCount(0);
+  // A headless resolution never navigates the browser to Settings.
+  await expect(page).toHaveURL(`${harness.baseUrl}/#/session/${id}/insights`);
+  await expect(settingsSection(page, "MCP servers")).toHaveCount(0);
   await expect(page.locator('a[href^="nac:"]')).toHaveCount(0);
   const outputs = JSON.stringify(harness.provider.requests.at(-1)?.body);
   expect(outputs).toContain("opened");
@@ -228,19 +233,18 @@ test("replacing an injected runtime discards a pending navigation for the same s
     });
     await page.goto(fixture.baseUrl);
     await expect(page.getByRole("combobox", { name: "Message" })).toBeVisible();
-    const context = await inspect(page, false);
+    const context = await inspect(page);
     await context.getByRole("button", { name: "Open MCP settings", exact: true }).click();
     await accepted;
     await page.getByRole("button", { name: "Replace runtime", exact: true }).click();
     release();
+    // The replacement presentation starts on its own session route; the retired
+    // runtime's pending receipt cannot navigate it to Settings.
     await expect(page.getByRole("combobox", { name: "Message" })).toBeVisible();
-    await expect(page.getByRole("dialog", { name: "MCP servers", exact: true })).toHaveCount(0);
-    await expect(page.getByRole("dialog", { name: "NAC capabilities", exact: true })).toHaveCount(
-      0,
-    );
-    await page.getByRole("button", { name: "NAC capabilities", exact: true }).click();
-    await expect(page.getByRole("dialog", { name: "NAC capabilities", exact: true })).toBeVisible();
-    await expect(page.getByRole("dialog", { name: "MCP servers", exact: true })).toHaveCount(0);
+    await expect(settingsSection(page, "MCP servers")).toHaveCount(0);
+    await expect(settingsSection(page, "Capabilities")).toHaveCount(0);
+    await inspect(page);
+    await expect(settingsSection(page, "MCP servers")).toHaveCount(0);
     expect(
       fixture.calls.filter((call) => call.path === "/product-destinations/resolve"),
     ).toHaveLength(1);
@@ -263,28 +267,28 @@ test("an old standalone document cannot read or navigate a replacement server at
   const id = await createSession(request, harness, "direct");
   await page.goto(`${harness.baseUrl}/#/session/${id}/insights`);
   await expect(page.getByRole("button", { name: "High", exact: true })).toBeVisible();
-  let context = await inspect(page, false);
+  let context = await inspect(page);
   await context.getByRole("button", { name: "Open MCP settings", exact: true }).click();
-  await expect(page.getByRole("dialog", { name: "MCP servers", exact: true })).toBeVisible();
-  await page.keyboard.press("Escape");
+  await expect(settingsSection(page, "MCP servers")).toBeVisible();
+  await leaveSettings(page);
+  await expect(page.getByRole("button", { name: "High", exact: true })).toBeVisible();
   const origin = harness.baseUrl;
   await harness.restart("1", undefined, true);
   expect(harness.baseUrl).toBe(origin);
-  context = page.getByRole("dialog", { name: "NAC capabilities", exact: true });
-  await page.getByRole("button", { name: "NAC capabilities", exact: true }).click();
+  context = await openSettingsSection(page, "Capabilities");
   await expect(context.getByRole("alert")).toHaveText(
     "Product context is unavailable. Reload this app to reconnect to its current serving instance.",
   );
   await expect(context.getByRole("button", { name: "Open MCP settings", exact: true })).toHaveCount(
     0,
   );
-  await expect(page.getByRole("dialog", { name: "MCP servers", exact: true })).toHaveCount(0);
-  await page.keyboard.press("Escape");
+  await expect(settingsSection(page, "MCP servers")).toHaveCount(0);
+  await leaveSettings(page);
   await page.reload();
   await expect(page.getByRole("button", { name: "High", exact: true })).toBeVisible();
-  context = await inspect(page, false);
+  context = await inspect(page);
   await context.getByRole("button", { name: "Open MCP settings", exact: true }).click();
-  await expect(page.getByRole("dialog", { name: "MCP servers", exact: true })).toBeVisible();
+  await expect(settingsSection(page, "MCP servers")).toBeVisible();
   expect(harness.provider.requests).toHaveLength(0);
 });
 
@@ -314,7 +318,7 @@ test("a delayed old navigation receipt cannot open UI after a same-origin servin
   try {
     await page.goto(`${origin}/#/session/${id}/insights`);
     await expect(page.getByRole("button", { name: "High", exact: true })).toBeVisible();
-    const context = await inspect(page, false);
+    const context = await inspect(page);
     await context.getByRole("button", { name: "Open MCP settings", exact: true }).click();
     await accepted;
     await harness.restart("1", undefined, true);
@@ -326,7 +330,8 @@ test("a delayed old navigation receipt cannot open UI after a same-origin servin
     await expect(
       context.getByRole("button", { name: "Open MCP settings", exact: true }),
     ).toHaveCount(0);
-    await expect(page.getByRole("dialog", { name: "MCP servers", exact: true })).toHaveCount(0);
+    await expect(settingsSection(page, "MCP servers")).toHaveCount(0);
+    await expect(page).toHaveURL(`${origin}/#/settings/capabilities?session=${id}`);
     await capture(page, "desktop-serving-replaced");
     expect(harness.provider.requests).toHaveLength(0);
   } finally {

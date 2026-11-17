@@ -15,6 +15,9 @@ vi.mock("@/app/features/ui-policy/UiPolicyProvider", () => ({
 }));
 
 vi.mock("@/app/components/AppShell", () => ({ AppShell: () => <Outlet /> }));
+vi.mock("@/app/features/inbox/InboxProvider", () => ({
+  InboxProvider: ({ children }: { children: React.ReactNode }) => children,
+}));
 vi.mock("@/app/providers/ProjectActionsProvider", () => ({
   ProjectActionsProvider: ({ children }: { children: React.ReactNode }) => children,
 }));

@@ -3,7 +3,14 @@ import path from "node:path";
 import { chromium } from "@playwright/test";
 
 import { createDirectSession, expect, test, waitForRunIdle } from "./harness";
-import { ANSWER, PROMPT, REASONING, serveReasoningBaseline } from "./reasoning-fixture";
+import {
+  ANSWER,
+  PROMPT,
+  REASONING,
+  closePanels,
+  openWorkInInsights,
+  serveReasoningBaseline,
+} from "./reasoning-fixture";
 
 test.use({ orchestration: "0" });
 
@@ -52,9 +59,7 @@ test("reasoning reading controls work at actual 200 percent tab zoom", async ({
     expect(run.status()).toBe(202);
     await waitForRunIdle(request, harness, id);
     await page.goto(`${harness.baseUrl}/#/session/${id}/files`);
-    const filesDialog = page.getByRole("dialog", { name: "Files", exact: true });
-    if (await filesDialog.isVisible())
-      await filesDialog.getByRole("button", { name: "Close", exact: true }).click();
+    await closePanels(page);
     const zoom = await worker.evaluate(async (url) => {
       const { chrome } = globalThis as unknown as {
         chrome: {
@@ -80,23 +85,22 @@ test("reasoning reading controls work at actual 200 percent tab zoom", async ({
       .toBe(2);
     for (const width of [1440, 390]) {
       await page.setViewportSize({ width, height: 900 });
-      await page
-        .getByRole("button", { name: /^(Total activity:|Thoughts)/ })
-        .first()
-        .click();
+      await openWorkInInsights(page);
       const detail = page.getByRole("region", { name: "Insights detail" });
       if (!process.env.NAC_REASONING_BASELINE_DIST) {
-        // At real tab zoom this can be a phone dialog. Its disclosure state
-        // settles before the enclosing entry transition finishes.
+        // At real tab zoom this is a phone's bottom sheet (a drawer otherwise).
+        // Its disclosure state settles before the sheet's entry transition ends.
         await expect
           .poll(() =>
             detail.evaluate((element) => {
-              const surface = element.closest('[data-slot="dialog-content"]');
-              if (!surface)
-                return !element.ownerDocument.defaultView!.matchMedia("(max-width: 767.98px)")
-                  .matches;
+              const view = element.ownerDocument.defaultView!;
+              const surface = element.closest('[data-slot="sheet-content"]');
+              if (!surface) return !view.matchMedia("(max-width: 767.98px)").matches;
+              const rect = surface.getBoundingClientRect();
               return (
-                Math.abs(surface.getBoundingClientRect().left) <= 1 &&
+                rect.left >= -1 &&
+                rect.right <= view.innerWidth + 1 &&
+                rect.bottom <= view.innerHeight + 1 &&
                 surface
                   .getAnimations()
                   .every(
@@ -113,7 +117,7 @@ test("reasoning reading controls work at actual 200 percent tab zoom", async ({
         const geometry = await toggle.evaluate((element) => {
           const view = element.ownerDocument.defaultView!;
           const box = element.getBoundingClientRect();
-          const surface = element.closest('[data-slot="dialog-content"]');
+          const surface = element.closest('[data-slot="sheet-content"]');
           const rect = surface?.getBoundingClientRect();
           return {
             url: element.ownerDocument.location.href,
@@ -160,9 +164,7 @@ test("reasoning reading controls work at actual 200 percent tab zoom", async ({
         await fs.copyFile(file, path.join(process.env.NAC_REASONING_CAPTURE_DIR, name));
       }
       await page.goto(`${harness.baseUrl}/#/session/${id}/files`);
-      const filesDialog = page.getByRole("dialog", { name: "Files", exact: true });
-      if (await filesDialog.isVisible())
-        await filesDialog.getByRole("button", { name: "Close", exact: true }).click();
+      await closePanels(page);
     }
     harness.provider.assertConsumed();
   } finally {

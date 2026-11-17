@@ -156,17 +156,17 @@ const noop = () => {};
 function ButtonStatesPreview() {
   return (
     <div className="flex flex-col gap-2">
-      <span className="label-micro text-basic-muted">File button</span>
+      <span className="type-meta-strong text-basic-muted">File button</span>
       <div className="grid w-fit grid-cols-[auto_repeat(3,auto)] items-center gap-x-4 gap-y-2">
         <span />
         {SIZES.map(({ size, title }) => (
-          <span key={size} className="label-micro text-basic-muted">
+          <span key={size} className="type-meta-strong text-basic-muted">
             {title}
           </span>
         ))}
         {BUTTON_STATES.map((state) => (
           <Fragment key={state.title}>
-            <span className="label-micro text-basic-tertiary">{state.title}</span>
+            <span className="type-meta-strong text-basic-tertiary">{state.title}</span>
             {SIZES.map(({ size }) => (
               <div key={size} className={GROUND}>
                 <FileButton
@@ -190,7 +190,7 @@ function ButtonStatesPreview() {
 function TruncationPreview() {
   return (
     <div className="flex flex-col gap-2">
-      <span className="label-micro text-basic-muted">A long name in 200px</span>
+      <span className="type-meta-strong text-basic-muted">A long name in 200px</span>
       <div className="flex flex-wrap items-start gap-4">
         {SIZES.map(({ size }) => (
           <div key={size} className={`w-[200px] ${GROUND}`}>
@@ -211,17 +211,17 @@ function TruncationPreview() {
 function BadgePreview() {
   return (
     <div className="flex flex-col gap-2">
-      <span className="label-micro text-basic-muted">Code changes badge</span>
+      <span className="type-meta-strong text-basic-muted">Code changes badge</span>
       <div className="grid w-fit grid-cols-[64px_repeat(3,auto)] items-center gap-x-6 gap-y-2">
         <span />
         {BADGE_SAMPLES.map(({ title }) => (
-          <span key={title} className="label-micro text-basic-muted">
+          <span key={title} className="type-meta-strong text-basic-muted">
             {title}
           </span>
         ))}
         {SIZES.map(({ badge, title }) => (
           <Fragment key={badge}>
-            <span className="label-micro text-basic-tertiary">{title}</span>
+            <span className="type-meta-strong text-basic-tertiary">{title}</span>
             {BADGE_SAMPLES.map((sample) => (
               <CodeChangesBadge
                 key={sample.title}
@@ -250,7 +250,7 @@ function OpenableList({
   const [open, setOpen] = useState(files[1]?.path ?? null);
   return (
     <div className="flex w-[280px] flex-col gap-2">
-      <span className="label-micro text-basic-muted">{caption}</span>
+      <span className="type-meta-strong text-basic-muted">{caption}</span>
       <div className={GROUND}>
         <FileButtonsList
           aria-label="Changed files"
@@ -259,7 +259,7 @@ function OpenableList({
           onOpen={setOpen}
         />
       </div>
-      <span className="label-micro text-basic-tertiary">Open file: {open ?? "none"}</span>
+      <span className="type-meta-strong text-basic-tertiary">Open file: {open ?? "none"}</span>
     </div>
   );
 }
@@ -287,7 +287,7 @@ function ListsPreview() {
 function GitStatusLabelsPreview() {
   return (
     <div className="flex flex-col gap-2">
-      <span className="label-micro text-basic-muted">Git status labels</span>
+      <span className="type-meta-strong text-basic-muted">Git status labels</span>
       <div className={`flex w-fit gap-3 ${GROUND}`}>
         {Object.values(GitStatus).map((status) => (
           <GitStatusLabel key={status} status={status} />
@@ -303,17 +303,17 @@ const listRowName = (variant: FileListTabButtonVariant) =>
 function FileListRowsPreview() {
   return (
     <div className="flex flex-col gap-2">
-      <span className="label-micro text-basic-muted">File list tab button, Small</span>
+      <span className="type-meta-strong text-basic-muted">File list tab button, Small</span>
       <div className="grid w-fit grid-cols-[auto_repeat(5,160px)] items-center gap-x-3 gap-y-1">
         <span />
         {LIST_ROW_STATES.map(({ title }) => (
-          <span key={title} className="label-micro text-basic-muted">
+          <span key={title} className="type-meta-strong text-basic-muted">
             {title}
           </span>
         ))}
         {GIT_STATES.map(({ title, status }) => (
           <Fragment key={title}>
-            <span className="label-micro text-basic-tertiary">{title}</span>
+            <span className="type-meta-strong text-basic-tertiary">{title}</span>
             {LIST_ROW_STATES.map((row) => (
               <div key={row.title} className={GROUND}>
                 <FileListTabButton
@@ -329,7 +329,7 @@ function FileListRowsPreview() {
           </Fragment>
         ))}
       </div>
-      <span className="label-micro text-basic-muted">File list tab button, Large</span>
+      <span className="type-meta-strong text-basic-muted">File list tab button, Large</span>
       <div className="flex flex-wrap items-start gap-4">
         {LIST_ROW_STATES.filter((row) => !row.disabled).map((row) => (
           <div key={row.title} className={`w-[280px] ${GROUND}`}>
@@ -384,7 +384,7 @@ function CodeDisplayerPreview() {
     <div className="flex flex-wrap items-start gap-6">
       {samples.map(({ title, tokens }) => (
         <div key={title} className="flex w-[480px] flex-col gap-2">
-          <span className="label-micro text-basic-muted">{title}</span>
+          <span className="type-meta-strong text-basic-muted">{title}</span>
           <div className={GROUND}>
             <CodeDisplayer
               aria-label={`Changes to ${DIFF_PATH}`}

@@ -4,7 +4,15 @@ import path from "node:path";
 import { createDirectSession, expect, test, waitForRunIdle } from "./harness";
 import { ScriptGate } from "./scripted-provider";
 
-import { REASONING, ANSWER, PROMPT, serveReasoningBaseline } from "./reasoning-fixture";
+import {
+  REASONING,
+  ANSWER,
+  PROMPT,
+  WORK_FOLD,
+  closePanels,
+  openWorkInInsights,
+  serveReasoningBaseline,
+} from "./reasoning-fixture";
 
 test.use({ orchestration: "0" });
 
@@ -49,9 +57,8 @@ for (const width of [1440, 768, 390]) {
     await page.getByRole("button", { name: "Send", exact: true }).click();
     await gate.accepted;
     try {
-      const activity = page.getByRole("button", { name: "Thinking…", exact: true }).first();
-      await expect(activity).toBeVisible();
-      await activity.click();
+      // The live turn's work line opens its group in Insights.
+      await openWorkInInsights(page);
       const detail = page.getByRole("region", { name: "Insights detail" });
       await expect(detail.getByText(REASONING.split("\n\n")[0], { exact: true })).toBeVisible();
       await capture("live");
@@ -128,9 +135,8 @@ for (const width of [1440, 768, 390]) {
       await capture("reduced-motion");
       await page.goto(`${harness.baseUrl}/#/session/${id}/files`);
       await expect(page.getByText(ANSWER, { exact: true })).toBeVisible();
-      const filesDialog = page.getByRole("dialog", { name: "Files", exact: true });
-      if (await filesDialog.isVisible())
-        await filesDialog.getByRole("button", { name: "Close", exact: true }).click();
+      // The drawer stays open across the hash change and covers the answer.
+      await closePanels(page);
       await page.getByRole("button", { name: "Copy message", exact: true }).last().click();
       await expect
         .poll(() =>
@@ -145,10 +151,8 @@ for (const width of [1440, 768, 390]) {
         .toBe(ANSWER);
       await capture("answer");
       await page.reload();
-      await page
-        .getByRole("button", { name: /^Total activity:/ })
-        .first()
-        .click();
+      await closePanels(page);
+      await openWorkInInsights(page);
       if (!baseline)
         await expect(
           page
@@ -199,15 +203,11 @@ test("empty reasoning stays absent and settled long reasoning has one scroll own
     await page.goto(`${harness.baseUrl}/#/session/${id}/files`);
     await expect(page.getByText(ANSWER, { exact: true })).toBeVisible();
     if (name === "empty") {
-      await expect(page.getByRole("button", { name: /^(Total activity:|Thoughts$)/ })).toHaveCount(
-        0,
-      );
+      await expect(page.getByRole("button", { name: WORK_FOLD })).toHaveCount(0);
       continue;
     }
-    await page
-      .getByRole("button", { name: /^(Total activity:|Thoughts$)/ })
-      .first()
-      .click();
+    await closePanels(page);
+    await openWorkInInsights(page);
     const detail = page.getByRole("region", { name: "Insights detail" });
     await detail.getByRole("button", { name: /^Reasoning/ }).click();
     await expect(detail.getByText(/^Reasoning paragraph 0:/)).toBeVisible();
@@ -248,7 +248,7 @@ for (const outcome of ["cancel", "failure"] as const) {
     await page.getByRole("button", { name: "Send", exact: true }).click();
     await gate.accepted;
     try {
-      await expect(page.getByRole("button", { name: "Thinking…", exact: true })).toBeVisible();
+      await expect(page.getByRole("button", { name: /^Thinking\b/ })).toBeVisible();
       if (outcome === "cancel") {
         await page.getByRole("button", { name: "Stop run", exact: true }).first().click();
         // Keep the provider held until cancellation settles. Releasing first can
@@ -295,7 +295,7 @@ for (const reading of ["open", "focus", "selection"] as const) {
     await page.getByRole("button", { name: "Send", exact: true }).click();
     await gate.accepted;
     try {
-      await page.getByRole("button", { name: "Thinking…", exact: true }).click();
+      await openWorkInInsights(page);
       const detail = page.getByRole("region", { name: "Insights detail" });
       const toggle = detail.getByRole("button", { name: "Thinking…", exact: true });
       const link = detail.getByRole("link", { name: "Cache notes" });

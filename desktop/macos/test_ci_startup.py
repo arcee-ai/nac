@@ -25,7 +25,8 @@ class StartupSupervisorTests(unittest.TestCase):
 
     def exercise(self, *, sdk_failure=False, cleanup_failure=False, test_failure=False, integrity_failure=False,
                  diagnostic_error=None, witness_rejection=False, configured=False, ax_failure=False,
-                 companion_diagnostic_error=False, ui_failure=False, settled_ax_failure=False, export_failure=False, pre_input_failure=False, observer_stop_failure=False):
+                 companion_diagnostic_error=False, ui_failure=False, settled_ax_failure=False, export_failure=False, pre_input_failure=False, observer_stop_failure=False,
+                 first_failure_diagnostic=None):
         with tempfile.TemporaryDirectory() as temporary, ExitStack() as stack:
             root = Path(temporary).resolve()
             scenario = 'configuredLocal' if configured else 'onboarding'
@@ -52,6 +53,7 @@ class StartupSupervisorTests(unittest.TestCase):
             witness.failure_receipt.return_value = {'scope': 'synthetic unit owner receipt'}
             companion = MagicMock(failure=None, settlement=None)
             companion.failure_diagnostic.return_value = None
+            companion.preflight_diagnostic.return_value = first_failure_diagnostic
             if companion_diagnostic_error:
                 companion.failure_diagnostic.side_effect = RuntimeError('private diagnostic canary')
             companion.stop.return_value = {'owned_processes_settled': True}
@@ -88,7 +90,7 @@ class StartupSupervisorTests(unittest.TestCase):
             provider = MagicMock()
             provider.start.return_value = 'http://127.0.0.1:4321'
             provider.stop.return_value = {'scope': 'synthetic provider'}
-            def generated(*args):
+            def generated(*args, **options):
                 calls.append('full-sdk-build')
                 if sdk_failure:
                     raise RuntimeError('SDK unavailable')
@@ -120,7 +122,7 @@ class StartupSupervisorTests(unittest.TestCase):
                     raise primary
             def collect(*args):
                 calls.append('collect')
-                if diagnostic_error is not None:
+                if diagnostic_error is not None or first_failure_diagnostic is not None:
                     raise RuntimeError('Interrupted test has no complete dispatch receipt')
                 attachments = folder / 'attachments'
                 attachments.mkdir()
@@ -139,6 +141,8 @@ class StartupSupervisorTests(unittest.TestCase):
                 'collect': collect, 'require_integrity': MagicMock(return_value={}), 'remove_profile': MagicMock()}
             if integrity_failure:
                 replacements['require_integrity'].side_effect = RuntimeError('protected bytes changed')
+            # Signature admission has its own real-call-path inert tests.
+            stack.enter_context(patch('ci_startup_signatures.recheck_private_build'))
             for name, replacement in replacements.items():
                 stack.enter_context(patch('ci_startup.' + name, replacement))
             if export_failure:
@@ -194,12 +198,17 @@ class StartupSupervisorTests(unittest.TestCase):
                 companion.start.assert_called_once()
                 companion.stop.assert_called_once()
                 self.assertEqual(result['errors']['ax_owner'] is not None, ax_failure or settled_ax_failure)
-                self.assertEqual(replacements['persisted_audit'].call_count, 0 if ax_failure or ui_failure or settled_ax_failure else 1)
+                self.assertEqual(replacements['persisted_audit'].call_count, 0 if ax_failure or ui_failure or settled_ax_failure or test_failure else 1)
             if test_failure:
                 self.assertFalse(result['passed'])
                 self.assertEqual(result['errors']['test']['type'], 'RuntimeError')
-                if diagnostic_error is None and not witness_rejection:
+                if diagnostic_error is None and first_failure_diagnostic is None and not witness_rejection:
                     self.assertIsNone(result['errors']['collector'])
+            if first_failure_diagnostic is not None:
+                self.assertEqual(result['first_preflight_failure_diagnostic'], first_failure_diagnostic)
+                self.assertEqual(json.loads((folder / 'first-preflight-failure.json').read_text()), first_failure_diagnostic)
+                self.assertFalse(result['passed'])
+                self.assertTrue(result['input_completion_unknown'])
             if diagnostic_error is not None:
                 metadata = json.loads((folder / 'live-api-diagnostic.json').read_text())
                 self.assertEqual(metadata['caller_abort'], {'observed': True, 'origin': 'audit'})
@@ -241,6 +250,10 @@ class StartupSupervisorTests(unittest.TestCase):
 
     def test_ui_failure_before_input_requests_zero_public_tests(self):
         self.exercise(pre_input_failure=True)
+
+    def test_first_failure_export_preserves_primary_error_and_existing_cleanup(self):
+        self.exercise(configured=True, test_failure=True,
+                      first_failure_diagnostic=dict(acceptance=False, step='prepare_interaction', error_family='receipt_invalid'))
 
     def test_unknown_metadata_helper_retains_profile_after_positive_app_settlement(self):
         self.exercise(observer_stop_failure=True)

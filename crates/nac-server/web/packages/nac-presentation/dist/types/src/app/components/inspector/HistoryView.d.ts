@@ -1,7 +1,7 @@
 /**
  * Every revision the session has captured, newest first, with the live working
- * tree at the top. A wide screen switches these from the session header; a
- * phone has no header chip, so they get a panel of their own.
+ * tree at the top. A wide screen also switches these from the session header;
+ * the selection here is the same one the Changes panel and that picker read.
  */
 export declare function HistoryView({ sessionId, selected, onSelect, }: {
     sessionId: string;

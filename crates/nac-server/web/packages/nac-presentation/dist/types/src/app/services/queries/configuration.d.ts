@@ -1,6 +1,8 @@
 import { type QueryClient } from "@tanstack/react-query";
 import { type BrowseKind } from "./keys";
 import type { BackendKind, SshTarget, UpdateMcpServerRequest, UpdateModelConfigurationRequest, UpdateSshConfigurationRequest } from "../../types/api";
+/** Where a listing comes from: the server's own filesystem or one SSH host. */
+export type BrowseSource = SshTarget | null;
 /**
  * Directory listing from the machine running the server. Only fetched while
  * the picker is open, and never cached long: the filesystem moves under us.
@@ -24,6 +26,35 @@ export declare function useSshBrowsePath(target: SshTarget | null, path: string 
     truncated: boolean;
 }>, Error>;
 /**
+ * Asks the server afresh for the listing a typed path names, with the same
+ * request the picker browses with. The server expands `~` and canonicalizes,
+ * so whatever resolves here is the path the listing would show after Enter;
+ * a missing, non-directory or unreadable path rejects with the server's error.
+ *
+ * Every call is its own request, outside the query cache: a request already
+ * running for the same path may predate a change on disk, and a listing or
+ * another picker may share that cache entry, so it is neither reused nor
+ * canceled.
+ */
+export declare function useResolveBrowsePath(): (source: BrowseSource, path: string | null, kind: BrowseKind, hidden: boolean) => Promise<{
+    entries: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["BrowseEntry"][];
+    home?: string | null;
+    parent?: string | null;
+    path: string;
+    truncated: boolean;
+}>;
+/**
+ * Creates one named folder inside a listed directory, on the server's own
+ * filesystem or on the SSH host `source` names — never anywhere else.
+ *
+ * Sent once and never retried: a lost answer leaves the outcome unknown, so
+ * the caller looks for the folder before it offers to try again. Listings of
+ * that source are refreshed whatever the answer, since one may now be stale.
+ */
+export declare function useCreateFolder(): (source: BrowseSource, parent: string, name: string) => Promise<{
+    path: string;
+}>;
+/**
  * Opens the connection the launch form needs before it can offer anything
  * remote, and reports the login home so the form can start there.
  *
@@ -40,6 +71,15 @@ export declare function useSshConnect(): import("@tanstack/react-query").UseMuta
 }, Error, SshTarget, unknown>;
 export declare function useSshConfigs(): import("@tanstack/react-query").UseQueryResult<NoInfer<{
     configurations: import("../../types/openapi.generated").components["schemas"]["SshConfigurationRecord"][];
+}>, Error>;
+/**
+ * OpenSSH aliases from the NAC server's `~/.ssh/config`. Discovery degrades to
+ * a partial list instead of failing, so a refusal here only hides the group.
+ */
+export declare function useSshAliases(enabled?: boolean): import("@tanstack/react-query").UseQueryResult<NoInfer<{
+    aliases: string[];
+    undiscoverable_patterns: number;
+    warnings: import("../../types/openapi.generated").components["schemas"]["OpenSshAliasWarning"][];
 }>, Error>;
 export declare function useCreateSshConfig(): import("@tanstack/react-query").UseMutationResult<{
     config_id: string;

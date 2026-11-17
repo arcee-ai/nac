@@ -4,7 +4,7 @@ import path from "node:path";
 import type { Locator, Page, Route } from "@playwright/test";
 import { createNacApi } from "../packages/nac-client/dist/api.js";
 import { NacClient } from "../packages/nac-client/dist/nacClient.js";
-import { createDirectSession, expect, test, waitForRunIdle } from "./harness";
+import { createDirectSession, expect, showSidePanel, test, waitForRunIdle } from "./harness";
 import { ScriptGate } from "./scripted-provider";
 
 // These browser-only names are evaluated by Playwright, never by the Node test runner.
@@ -52,13 +52,13 @@ async function command(page: Page, text: string) {
   await page.keyboard.type(text);
   await page.keyboard.press("Enter");
 }
-async function show(page: Page, base: string, session: string) {
+async function show(page: Page, base: string, session: string, dock = false) {
   await page.goto(base + "/#/session/" + session + "/terminal");
-  const button = page.getByRole("button", { name: "Show panel", exact: true });
   const pane = page.getByRole("region", { name: "Session terminal", exact: true });
   // Document load can precede the session query and React's panel controls.
-  await expect(button.or(pane)).toBeVisible();
-  if (await button.isVisible()) await button.click();
+  // These journeys resize the window, so keep the terminal in the floating
+  // drawer instead of a dock that the app moves away below 1280px.
+  await showSidePanel(page, { dock });
   await expect(pane).toBeVisible();
   return pane;
 }
@@ -204,7 +204,9 @@ test("connected native shell, less resize, and trusted browser bracketed UTF-8 p
       "  if select.select([0],[],[],0.1)[0]: data+=os.read(0,4096)",
       "finally:",
       " termios.tcsetattr(0,termios.TCSANOW,saved); sys.stdout.write('\\x1b[?2004l'); sys.stdout.flush()",
-      "open('paste_bytes.json','w').write(json.dumps(list(data)))",
+      "with open('paste_bytes.json.tmp','w') as target:",
+      " target.write(json.dumps(list(data)))",
+      "os.replace('paste_bytes.json.tmp','paste_bytes.json')",
     ].join("\n") + "\n",
   );
   const pane = await show(page, harness.baseUrl, session);
@@ -277,12 +279,19 @@ test("connected native shell, less resize, and trusted browser bracketed UTF-8 p
     );
     expect(pasteInputs).toHaveLength(0);
     await page.keyboard.press(shortcut);
+    // Wait for a complete capture; missing or malformed JSON cannot satisfy
+    // the exact expected-byte assertion below.
     await expect
-      .poll(async () =>
-        JSON.parse(
-          await fs.readFile(path.join(workspace, "paste_bytes.json"), "utf8").catch(() => "null"),
-        ),
-      )
+      .poll(async () => {
+        const text = await fs
+          .readFile(path.join(workspace, "paste_bytes.json"), "utf8")
+          .catch(() => "");
+        try {
+          return JSON.parse(text);
+        } catch {
+          return null;
+        }
+      })
       .toEqual(Array.from(new TextEncoder().encode("\x1b[200~Ω中\rliteral paste\x1b[201~")));
     expect(pasteInputs.flat(), "trusted paste product input bytes").toEqual(
       Array.from(new TextEncoder().encode("\x1b[200~Ω中\rliteral paste\x1b[201~")),
@@ -329,7 +338,7 @@ test("pane disposal releases observer seats and connected OSC52/OSC8 stays withi
   const session = await createDirectSession(request, harness);
   const api = createNacApi(new NacClient({ endpoint: harness.baseUrl, credentials: "omit" }));
   await api.setPermissionApprovalMode(session, "auto_approve");
-  let pane = await show(page, harness.baseUrl, session);
+  let pane = await show(page, harness.baseUrl, session, true);
   await prepareNewShell(pane);
   await pane.getByRole("button", { name: /^New shell$/i }).click();
   await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
@@ -338,7 +347,7 @@ test("pane disposal releases observer seats and connected OSC52/OSC8 stays withi
   try {
     for (; cycles < 6; cycles += 1) {
       await page.getByRole("button", { name: "Hide panel", exact: true }).click();
-      await page.getByRole("button", { name: "Show panel", exact: true }).click();
+      await showSidePanel(page);
       await page.evaluate((id) => {
         location.hash = "/session/" + id + "/files";
       }, session);
@@ -594,12 +603,13 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
   // Reproduce the observed CI race: the first live history refresh completes
   // after the drag but before copy. Its empty-state row must not resize xterm.
   const historyPattern = `**/sessions/${session}/executions/history`;
+  // The drawer can mount the pane more than once while it opens, so every read
+  // until the empty state has rendered counts as the initial load.
   const holdHistory = async (route: Route) => {
     if (!initialHistory) {
       historyPending();
       await historyReleased;
     }
-    initialHistory = false;
     await route.continue();
   };
   await page.route(historyPattern, holdHistory);
@@ -628,6 +638,7 @@ test("connected renderer keeps copy selection, input, resize and Ctrl-C responsi
   const pane = await show(page, harness.baseUrl, session);
   await prepareNewShell(pane);
   await expect(pane.getByText("No recent activity is available.")).toBeVisible();
+  initialHistory = false;
   await pane.getByRole("button", { name: /^New shell$/i }).click();
   await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
   const terminal = (await api.listUserTerminals(session)).terminals[0].terminal_id;

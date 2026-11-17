@@ -259,15 +259,15 @@ function ActionStatesGrid() {
 
   return (
     <div className="grid grid-cols-[136px_repeat(4,minmax(0,1fr))] items-center gap-x-3 gap-y-1">
-      <span className="label-micro text-basic-muted">Type</span>
+      <span className="type-meta-strong text-basic-muted">Type</span>
       {STATUS_COLUMNS.map(({ status, title }) => (
-        <span key={status} className="px-2 label-micro text-basic-muted">
+        <span key={status} className="px-2 type-meta-strong text-basic-muted">
           {title}
         </span>
       ))}
       {rows.map(({ sample, active }) => (
         <Fragment key={`${sample.type}-${active}`}>
-          <span className="truncate label-micro text-basic-tertiary">
+          <span className="truncate type-meta-strong text-basic-tertiary">
             {active ? `${sample.type}, active` : sample.type}
           </span>
           {STATUS_COLUMNS.map(({ status }) => (

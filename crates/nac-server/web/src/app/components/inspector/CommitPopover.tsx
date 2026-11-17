@@ -32,6 +32,10 @@ function blockedReason(
   return null;
 }
 
+/** The commit chord as this platform spells it. */
+const COMMIT_KEYS =
+  typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.userAgent) ? "⌘↩" : "Ctrl+↩";
+
 const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? "" : "s"}`;
 
 /**
@@ -85,6 +89,21 @@ export function CommitPopover({
     );
   };
 
+  const summary = (
+    <span className="flex min-w-0 items-center gap-2 type-meta text-basic-tertiary">
+      <span className="min-w-0 truncate">{plural(changed.length, "file")}</span>
+      <span aria-hidden className="tabular text-[var(--f-green-text)]">
+        +{additions}
+      </span>
+      <span aria-hidden className="tabular text-[var(--f-red-text)]">
+        −{deletions}
+      </span>
+      <span className="sr-only">
+        {additions} additions, {deletions} deletions
+      </span>
+    </span>
+  );
+
   return (
     <Popover
       open={open}
@@ -94,13 +113,19 @@ export function CommitPopover({
       sticky
       placement={PopoverPlacement.BottomRight}
       size={PopoverSize.Medium}
-      sheetClassName="gap-3 px-4"
+      panelClassName="!gap-3 !p-3"
+      sheetClassName="gap-3 px-4 pb-4"
       content={
         <>
+          <div className="flex items-baseline justify-between gap-3 px-0.5">
+            <span className="type-strong text-basic-primary">Commit all changes</span>
+            {summary}
+          </div>
           <TextArea
             autoFocus
             rows={3}
-            textAreaSize={TextAreaSize.Small}
+            textAreaSize={isMobile ? TextAreaSize.Medium : TextAreaSize.Small}
+            textAreaClassName="!rounded-lg !p-2.5 type-body-chrome max-md:!text-base resize-none"
             aria-label="Commit message"
             placeholder="Commit message"
             value={message}
@@ -115,36 +140,33 @@ export function CommitPopover({
             }}
           />
 
-          <div className="flex items-center gap-2 p-1 text-xs leading-4 text-basic-tertiary">
-            <span className="flex-1 min-w-0 truncate">
-              Staging {plural(changed.length, "file")}
-            </span>
-            <span className="code code-small text-success-primary">+{additions}</span>
-            <span className="code code-small text-error-primary">-{deletions}</span>
-          </div>
-
           {commit.error ? (
-            <div className="p-1 text-sm leading-5 text-error-primary">
+            <p role="alert" className="px-0.5 type-meta text-error-primary">
               {errorMessage(commit.error)}
-            </div>
+            </p>
           ) : null}
 
-          <Button
-            size={ButtonSize.Medium}
-            className="max-md:!min-h-11"
-            variant={ButtonVariant.Secondary}
-            disabled={!message.trim()}
-            loading={commit.isPending}
-            onClick={submit}
-          >
-            Commit
-          </Button>
+          <div className="flex items-center gap-3 px-0.5">
+            <span className="flex-1 min-w-0 truncate type-meta text-basic-muted">
+              {isMobile ? "Stages every change in the checkout" : `${COMMIT_KEYS} to commit`}
+            </span>
+            <Button
+              size={isMobile ? ButtonSize.Large : ButtonSize.Small}
+              variant={ButtonVariant.Primary}
+              className="shrink-0"
+              disabled={!message.trim()}
+              loading={commit.isPending}
+              onClick={submit}
+            >
+              Commit
+            </Button>
+          </div>
         </>
       }
     >
       {isMobile ? (
         // A phone's list header draws it as a 44px primary pill beside the
-        // listing pills, not as the toolbar's flat 24px button.
+        // listing pills.
         <StickyButton
           className="shrink-0 !h-11"
           buttonClassName="!h-11 !min-w-11"
@@ -160,7 +182,7 @@ export function CommitPopover({
         <Button
           className="max-w-[120px] shrink-0"
           size={ButtonSize.Small}
-          variant={ButtonVariant.Secondary}
+          variant={ButtonVariant.Primary}
           disabled={Boolean(reason)}
           aria-expanded={open}
           title={reason ?? "Commit every change in the checkout"}

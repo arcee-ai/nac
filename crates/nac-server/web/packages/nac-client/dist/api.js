@@ -96,6 +96,18 @@ export function createNacApi(nacClient, options = {}) {
             body: { ...target, path, hidden },
             signal,
         }),
+        /**
+         * Creates one named folder inside a listed local directory. Never retried
+         * here: a lost answer leaves the outcome unknown, so the caller looks
+         * before it offers to try again.
+         */
+        createFolder: (parent, name) => request("POST", "/fs/folders", {
+            body: { parent, name },
+        }),
+        /** The same on the SSH host the picker is browsing, never on this machine. */
+        createSshFolder: (target, parent, name) => request("POST", "/ssh/folders", {
+            body: { ...target, parent, name },
+        }),
         /** Validates the key as a side effect: a bad key cannot list models. */
         listProviderModels: (payload, signal) => request("POST", "/providers/models", { body: payload, signal }),
         /**
@@ -121,6 +133,11 @@ export function createNacApi(nacClient, options = {}) {
             body: payload,
         }),
         deleteSshConfig: (configId) => request("DELETE", `/ssh-configs/${encodeURIComponent(configId)}`),
+        /**
+         * Literal OpenSSH `Host` aliases from the NAC server's own `~/.ssh/config`
+         * (not the browser's machine). Names only; problems arrive as warnings.
+         */
+        listSshAliases: (signal) => request("GET", "/ssh/aliases", { signal }),
         // The MCP library is a curated catalog served by the binary; servers are
         // saved into config.toml, keyed by name, and parsed when a session starts.
         getMcpLibrary: (signal) => request("GET", "/mcp_library/library", { signal }),
@@ -268,6 +285,15 @@ export function createNacApi(nacClient, options = {}) {
         /** Ask nac-web to open a local workspace path with the OS default handler. */
         openWorkspacePath: (id, path) => request("POST", `${sessionPath(id)}/workspace/open`, {
             body: { path },
+        }),
+        /** Explicit existing Local target only; never opens a missing parent. */
+        revealWorkspacePath: (id, path, expectedWorkspaceRoot, expectedPathRoot, signal) => request("POST", `${sessionPath(id)}/workspace/reveal`, {
+            body: {
+                path,
+                expected_workspace_root: expectedWorkspaceRoot,
+                expected_path_root: expectedPathRoot,
+            },
+            signal,
         }),
         getWorkspaceRevisions: (id, signal) => request("GET", `${sessionPath(id)}/workspace/revisions`, { signal }),
         getWorkspaceRevisionChanges: (id, revision, signal) => request("GET", `${sessionPath(id)}/workspace/revisions/${revision}/changes`, { signal }),

@@ -68,10 +68,12 @@ RUN apk upgrade --no-cache && apk add --no-cache build-base autoconf automake bi
 FROM runtime-package-sdk AS runtime-packages
 COPY docker/managed/packages/sources.lock.json docker/managed/packages/fetch-sources.sh /recipe/
 RUN sh /recipe/fetch-sources.sh
-COPY docker/managed/packages/build-krb5.sh docker/managed/packages/krb5-libraries.list /recipe/
+COPY docker/managed/packages/build-krb5.sh docker/managed/packages/krb5-libraries.list docker/managed/packages/test-krb5-regressions.sh docker/managed/packages/krb5-negoex-vector.c docker/managed/packages/krb5-negoex-header.c docker/managed/packages/krb5-cred-list.c /recipe/
 RUN sh /recipe/build-krb5.sh
 COPY docker/managed/packages/build-curl.sh /recipe/
 RUN sh /recipe/build-curl.sh
+COPY docker/managed/packages/test-curl-patch-order.py docker/managed/packages/curl-multi-done.patch /recipe/
+RUN python3 /recipe/test-curl-patch-order.py
 COPY docker/managed/packages/build-libssh2.sh docker/managed/packages/test-libssh2-consumers.sh docker/managed/packages/libssh2-regressions.c docker/managed/packages/libssh2-list-followups.patch docker/managed/packages/libssh2-pointer-followup.patch /recipe/
 RUN sh /recipe/build-libssh2.sh
 COPY docker/managed/packages/build-sasl.sh /recipe/
@@ -229,6 +231,12 @@ RUN chmod 0555 /usr/local/bin/nac-web /usr/local/bin/nac-managed-entrypoint /usr
     && uv --version \
     && test "$(stat -c '%u:%g' /home/nac)" = 10001:10001 \
     && python3 /usr/local/libexec/nac/collect-runtime-provenance.py
+
+# Retain the caller's source identity in final image metadata after all runtime
+# build steps, so a new candidate revision does not invalidate package layers.
+# An omitted build argument stays empty; evidence qualification rejects it.
+ARG NAC_SOURCE_REVISION
+LABEL org.opencontainers.image.revision="${NAC_SOURCE_REVISION}"
 
 # Keep LFS filters outside HOME, which is replaced by a persistent mount.
 # The system installation above remains available after dropping privileges.

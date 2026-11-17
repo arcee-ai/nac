@@ -40,6 +40,46 @@ struct ProtocolTests {
         rejected(duplicate, record + record) // duplicate within one dispatch
         rejected(try parser(), Data(repeating: 120, count: EngineProtocol.limit + 1))
         rejected(try parser(), Data("{bad}\n".utf8))
+        let busy = try parser()
+        var failure: [String: Any] = ["kind": "failed", "version": 1, "incarnation": busy.incarnation,
+                                    "stage": "startup", "code": "store_owned", "message": "private-peer-canary"]
+        do { _ = try busy.receive(line(failure)); preconditionFailure("Busy was accepted as readiness") }
+        catch { precondition(error as? EngineFailure == .storeOwned) }
+        let schema = try parser()
+        failure["incarnation"] = schema.incarnation
+        failure["code"] = "store_schema_incompatible"
+        do { _ = try schema.receive(line(failure)); preconditionFailure("Future store was accepted as readiness") }
+        catch {
+            precondition(error as? EngineFailure == .storeSchemaIncompatible)
+            precondition(error.localizedDescription == "The selected store uses a newer database schema. Quit NAC and reopen this store with a compatible version of NAC. Keep your configuration and data; do not delete or downgrade the store. No alternative store was selected.")
+            precondition(!error.localizedDescription.contains("private-peer-canary"))
+        }
+        // A stale launch or wrong protocol cannot create a recognized conflict.
+        for code in ["store_owned", "store_schema_incompatible"] {
+            for key in ["version", "incarnation"] {
+                let state = try parser()
+                failure["incarnation"] = state.incarnation
+                failure["version"] = 1
+                failure["code"] = code
+                if key == "version" { failure[key] = 2 }
+                else { failure[key] = "stale-launch" }
+                rejected(state, try line(failure))
+            }
+        }
+        let unknown = try parser()
+        failure["incarnation"] = unknown.incarnation
+        failure["version"] = 1
+        failure["code"] = "private-peer-canary"
+        do { _ = try unknown.receive(line(failure)); preconditionFailure("Failure accepted") }
+        catch {
+            precondition(error as? EngineFailure != .storeOwned)
+            precondition(!error.localizedDescription.contains("private-peer-canary"))
+        }
+        failure["incarnation"] = state.incarnation
+        for code in ["store_owned", "store_schema_incompatible"] {
+            failure["code"] = code
+            rejected(state, try line(failure)) // no startup failure after readiness
+        }
         for key in ["kind", "version", "incarnation", "endpoint", "identity", "store", "schema"] {
             let state = try parser()
             var value = try ready(state)
@@ -62,7 +102,7 @@ struct ProtocolTests {
             precondition(text.contains("directory access"))
         }
         // Failed startup/listener/unknown codes do not establish a newer schema.
-        for (stage, code) in [("startup", "engine_unavailable"), ("startup", "store_owned"),
+        for (stage, code) in [("startup", "engine_unavailable"),
                               ("listener", "bind_failed"), ("startup", "unknown")] {
             let state = try parser()
             do {

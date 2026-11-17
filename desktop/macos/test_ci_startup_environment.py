@@ -26,8 +26,11 @@ do {
     let value = try StartupEnvironmentCheck.record(executable: request["executable"] as! String,
         nativePath: request["native"] as! String, enginePath: request["engine"] as! String,
         argv: request["argv"] as! [String], environment: request["observed"] as! [String: String],
-        launcher: request["launcher"] as! [String: String], child: request["child"] as! [String: String])
+        launcher: request["launcher"] as! [String: String], child: request["child"] as! [String: String],
+        previouslyKnown: request["previously_known"] as? Bool ?? false)
     FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]))
+} catch let error as StartupEnvironmentRejection where request["diagnose"] as? Bool == true {
+    FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject: error.detail, options: [.sortedKeys]))
 } catch { FileHandle.standardOutput.write(Data("null".utf8)) }
 '''
 
@@ -207,6 +210,72 @@ class ProductionEnvironmentControls(unittest.TestCase):
                 request = self.request(role)
                 request['child'] = {**self.child, **change}
                 self.assertIsNone(self.validate(request))
+
+    def rejection(self, request, predicate, **operands):
+        request['diagnose'] = True
+        actual = self.validate(request)
+        expected = dict(executable_class='native' if request['executable'] == request['native']
+                        else 'bundled_engine' if request['executable'] == request['engine'] else 'descendant',
+                        previously_known=request.get('previously_known', False), predicate=predicate, **operands)
+        self.assertEqual(actual, expected)
+        self.assertLess(len(json.dumps(actual)), 512)
+        self.assertNotIn('PRIVATE-CANARY', json.dumps(actual))
+
+    def test_closed_contract_and_prohibited_reasons_preserve_evaluation_order(self):
+        for check in ('key_set', 'empty_launcher', 'non_path_value'):
+            request = self.request('launcher')
+            if check == 'key_set': request['child'] = {}
+            elif check == 'empty_launcher': request['launcher'] = request['child'] = {}
+            else: request['child'] = {**self.child, 'HOME': 'PRIVATE-CANARY'}
+            request['observed']['PRIVATE-CANARY_TOKEN'] = 'PRIVATE-CANARY'
+            request['argv'] = []
+            self.rejection(request, 'contract', contract_check=check)
+        for key, category in [('PRIVATE-CANARY_TOKEN', 'token'), ('PRIVATE-CANARY_API_KEY', 'api_key'),
+                              ('NAC_MANAGED_CONFIG', 'managed_config')]:
+            for role in ('launcher', 'configuration_helper', 'engine', 'descendant'):
+                request = self.request(role)
+                request['previously_known'] = True
+                request['observed'][key] = 'PRIVATE-CANARY'
+                request['argv'] = []  # Prohibited checks still precede argv checks.
+                self.rejection(request, 'prohibited', category=category)
+
+    def test_closed_argv_rejections_use_only_flags_and_correct_class(self):
+        for role in ('launcher', 'configuration_helper', 'engine'):
+            for matches in (False, True):
+                for helper in (False, True):
+                    for serving in (False, True):
+                        request = self.request(role)
+                        request['argv'] = ([request['executable']] if matches else ['PRIVATE-CANARY'])
+                        request['argv'] += (['__desktop-configuration'] if helper else []) + (['--bind'] if serving else [])
+                        accepted = matches and (not helper and not serving if role == 'launcher' else helper != serving)
+                        if accepted:
+                            self.assertIsNotNone(self.validate(request))
+                        else:
+                            self.rejection(request, 'native_argv' if role == 'launcher' else 'engine_argv',
+                                           argv0_matches=matches, helper_present=helper, serving_present=serving)
+
+    def test_every_controlled_field_absent_or_different_is_redacted_for_each_role(self):
+        for role in ('launcher', 'configuration_helper', 'engine', 'descendant'):
+            for field in self.launcher:
+                for difference in ('absent', 'different'):
+                    request = self.request(role)
+                    if difference == 'absent': del request['observed'][field]
+                    else: request['observed'][field] = 'PRIVATE-CANARY'
+                    self.rejection(request, 'controlled_value', field=field, difference=difference)
+        request = self.request('descendant')
+        request['launcher'] = request['child'] = {'PRIVATE-CANARY': 'PRIVATE-CANARY'}
+        request['observed'] = {}
+        self.rejection(request, 'controlled_value', field='other', difference='absent')
+
+    def test_accepted_output_remains_exact_and_descendant_argv_is_not_newly_validated(self):
+        for role in ('launcher', 'configuration_helper', 'engine', 'descendant'):
+            request = self.request(role)
+            request['previously_known'] = True
+            if role == 'descendant': request['argv'] = ['PRIVATE-CANARY', '__desktop-configuration', '--bind']
+            self.assertEqual(self.validate(request), dict(kind='app' if role == 'launcher'
+                else 'descendant' if role == 'descendant' else 'engine', environment_role=role,
+                environment=self.launcher if role == 'launcher' else self.child,
+                configuration_helper=role == 'configuration_helper', serving=role == 'engine'))
 
 
 if __name__ == '__main__':

@@ -9,13 +9,12 @@ import {
   Icon,
   IconName,
   StickyButton,
-  TabButton,
-  TabButtonSize,
   TerminalTabButton,
   TerminalTabButtonSize,
 } from "@/app/atoms";
 import { PanelListNote } from "@/app/components/inspector/PanelMessages";
-import { PanelEmpty, PanelSplit } from "@/app/components/inspector/PanelSplit";
+import { PanelQuiet } from "@/app/components/inspector/PanelQuiet";
+import { PanelSplit } from "@/app/components/inspector/PanelSplit";
 import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
 import { usePanelListMarksOpen } from "@/app/hooks/usePanelListMarksOpen";
 import { cn } from "@/app/lib/cn";
@@ -110,9 +109,7 @@ function TerminalPaneOwner({ sessionId, onReviewSelection }: TerminalPaneProps) 
     ? "Opening shell…"
     : open.isError
       ? "Retry opening same shell"
-      : isMobile || isTablet
-        ? "New Shell"
-        : "New shell";
+      : "New shell";
   const toolbar = isMobile ? (
     <StickyButton
       variant={ButtonVariant.Secondary}
@@ -126,10 +123,10 @@ function TerminalPaneOwner({ sessionId, onReviewSelection }: TerminalPaneProps) 
     </StickyButton>
   ) : isTablet ? (
     <div className="flex flex-1 min-w-0 items-center gap-[10px] pl-0.5">
-      <span className="flex-1 min-w-0 truncate header-sm text-basic-primary">Terminals</span>
+      <span className="flex-1 min-w-0 truncate type-strong text-basic-primary">Terminals</span>
       <Button
         size={ButtonSize.Medium}
-        variant={ButtonVariant.Ghost}
+        variant={ButtonVariant.Secondary}
         content={ButtonContent.IconLeft}
         disabled={open.isPending}
         onClick={launch}
@@ -139,11 +136,20 @@ function TerminalPaneOwner({ sessionId, onReviewSelection }: TerminalPaneProps) 
       </Button>
     </div>
   ) : (
-    <div className="flex flex-col justify-center gap-1 h-12 p-2 shrink-0 border-b border-muted">
-      <TabButton size={TabButtonSize.Small} disabled={open.isPending} onClick={launch}>
+    <div className="flex items-center gap-2 px-2 py-2 shrink-0 border-b border-tertiary">
+      <span className="flex-1 min-w-0 truncate pl-1 type-meta-strong text-basic-tertiary">
+        Terminals
+      </span>
+      <Button
+        size={ButtonSize.Small}
+        variant={ButtonVariant.Secondary}
+        content={ButtonContent.IconLeft}
+        disabled={open.isPending}
+        onClick={launch}
+      >
         <Icon iconName={IconName.Add} />
-        <span className="text-left flex-grow">{launchLabel}</span>
-      </TabButton>
+        {launchLabel}
+      </Button>
     </div>
   );
 
@@ -152,7 +158,7 @@ function TerminalPaneOwner({ sessionId, onReviewSelection }: TerminalPaneProps) 
     // The split insets a desktop column itself; narrower lists still owe the design's.
     <div
       className={cn(
-        "flex flex-col gap-1 [&>*]:shrink-0",
+        "flex flex-col gap-0.5 [&>*]:shrink-0",
         isTablet && "pt-2 pb-4",
         isMobile && "pt-2",
       )}
@@ -206,11 +212,11 @@ function TerminalPaneOwner({ sessionId, onReviewSelection }: TerminalPaneProps) 
     detail = entry ? (
       <HistoryDetail key={entry.id} sessionId={sessionId} entry={entry} menuSlot={menuSlot} />
     ) : (
-      <PanelEmpty>
+      <PanelQuiet live={history.isPending ? "status" : undefined}>
         {history.isPending
           ? "Loading recent activity…"
           : "Selected activity is no longer in bounded history."}
-      </PanelEmpty>
+      </PanelQuiet>
     );
   } else if (source && heading) {
     detail = (
@@ -224,14 +230,14 @@ function TerminalPaneOwner({ sessionId, onReviewSelection }: TerminalPaneProps) 
       />
     );
   } else if (id) {
-    detail = <PanelEmpty>Selected execution unavailable.</PanelEmpty>;
+    detail = <PanelQuiet>Selected execution unavailable.</PanelQuiet>;
   } else if (list.isPending) {
-    detail = <PanelEmpty>Loading executions…</PanelEmpty>;
+    detail = <PanelQuiet live="status">Loading executions…</PanelQuiet>;
   } else {
     detail = (
-      <PanelEmpty title="No terminal open">
+      <PanelQuiet title="No terminal open">
         Open a shell to start typing. Terminal output stays separate from the conversation.
-      </PanelEmpty>
+      </PanelQuiet>
     );
   }
 
@@ -255,12 +261,7 @@ function TerminalPaneOwner({ sessionId, onReviewSelection }: TerminalPaneProps) 
           isMobile ? (
             <>
               {heading?.agent ? (
-                <Badge
-                  text="Agent"
-                  color={BadgeColor.Blue}
-                  background={false}
-                  className="mr-2 shrink-0"
-                />
+                <Badge text="Agent" color={BadgeColor.Gray} className="mr-2 shrink-0" />
               ) : null}
               {slot}
             </>

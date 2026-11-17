@@ -89,18 +89,18 @@ const LONG_TITLE = "Investigate the flaky parser tests in the store layer";
 /** Hover, press and keyboard focus are live: point at, press or Tab through a card. */
 export function SubagentCardSection() {
   return (
-    <BoxSurface title="Subagent transcript card">
+    <BoxSurface title="Subagent transcript card" bodyClassName="overflow-x-auto">
       <div className="p-4 flex flex-col gap-6 overflow-x-auto [&>*]:shrink-0">
         <div className="grid w-fit grid-cols-[200px_repeat(2,320px)] items-center gap-x-4 gap-y-3">
           <span />
           {ICON_COLUMNS.map((column) => (
-            <span key={column.label} className="label-micro text-basic-muted">
+            <span key={column.label} className="type-meta-strong text-basic-muted">
               {column.label}
             </span>
           ))}
           {CARD_ROWS.map((row) => (
             <Fragment key={row.label}>
-              <span className="label-small text-basic-secondary">{row.label}</span>
+              <span className="type-body-chrome text-basic-secondary">{row.label}</span>
               {ICON_COLUMNS.map((column) => (
                 <SubagentTranscriptCard
                   key={column.label}
@@ -112,7 +112,7 @@ export function SubagentCardSection() {
           ))}
         </div>
         <div className="flex flex-col gap-2">
-          <span className="label-micro text-basic-muted">Narrow container · 240px</span>
+          <span className="type-meta-strong text-basic-muted">Narrow container · 240px</span>
           <div className="flex w-[240px] flex-col gap-3">
             <SubagentTranscriptCard
               title={LONG_TITLE}

@@ -134,10 +134,13 @@ export default function SessionNameDisclosure({
   name,
   className,
   running = false,
+  quietIcon = false,
 }: {
   name: string;
   className?: string;
   running?: boolean;
+  /** Show the info glyph only on hover or keyboard focus (a page title). */
+  quietIcon?: boolean;
 }) {
   const disclosure = useSessionNameDisclosure(name);
   return (
@@ -145,7 +148,7 @@ export default function SessionNameDisclosure({
       {disclosure.hint(
         <button
           type="button"
-          className={`flex items-center gap-1 text-left ${className ?? ""}`}
+          className={`${quietIcon ? "group/name " : ""}flex items-center gap-1 text-left ${className ?? ""}`}
           aria-label={`View full name: ${name}`}
           aria-haspopup="dialog"
           disabled={!name}
@@ -154,7 +157,15 @@ export default function SessionNameDisclosure({
           <span className={`min-w-0 flex-1 truncate ${running ? "text-shimmer-basic" : ""}`}>
             {name}
           </span>
-          <Icon iconName={IconName.Info} size={16} className="shrink-0 text-basic-tertiary" />
+          <Icon
+            iconName={IconName.Info}
+            size={16}
+            className={`shrink-0 text-basic-tertiary${
+              quietIcon
+                ? " opacity-0 transition-opacity duration-150 group-hover/name:opacity-100 group-focus-visible/name:opacity-100"
+                : ""
+            }`}
+          />
         </button>,
       )}
       {disclosure.overlay}

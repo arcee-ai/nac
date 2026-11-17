@@ -28,6 +28,7 @@ declare const document: { activeElement: DomElement };
 declare const navigator: { clipboard: { writeText(text: string): Promise<void> } };
 declare function getComputedStyle(element: DomElement): {
   outlineStyle: string;
+  boxShadow: string;
   overflowX: string;
   overflowY: string;
 };
@@ -58,9 +59,12 @@ function recordWrites(page: Page) {
   return sent;
 }
 
+/** The saved server's editor: the Settings page manager keeps it selected; a phone reopens its sheet. */
 async function reopen(page: Page, mobile: boolean, name: string) {
   if (mobile) await page.getByRole("button", { name, exact: true }).click();
-  const dialog = page.getByRole("dialog").last();
+  const dialog = mobile
+    ? page.getByRole("dialog", { name, exact: true })
+    : page.getByRole("region", { name: "MCP servers", exact: true });
   // The phone editor slides in; measure it only once its position has stopped changing.
   const left = async () => (await dialog.boundingBox())?.x;
   await expect
@@ -93,14 +97,19 @@ async function paste(page: Page, field: Locator, text: string, selection?: [numb
   await page.keyboard.press("ControlOrMeta+V");
 }
 
-/** The focused element, by accessible label, with its focus ring drawn. */
+/**
+ * The focused element, by accessible label, with its focus ring drawn. Focus
+ * fields draw their ring as a box-shadow halo; other controls use an outline.
+ */
 async function focused(page: Page) {
   return page.evaluate(() => {
     const element = document.activeElement;
     const style = getComputedStyle(element);
     return {
       name: element.getAttribute("aria-label") ?? element.textContent?.trim(),
-      ring: element.matches(":focus-visible") && style.outlineStyle !== "none",
+      ring:
+        element.matches(":focus-visible") &&
+        (style.outlineStyle !== "none" || style.boxShadow !== "none"),
     };
   });
 }
@@ -321,9 +330,18 @@ for (const mobile of [false, true]) {
       expect(sent.map((call) => call.body.args)).toEqual([args, args]);
 
       const editing = await reopen(page, mobile, "argument_rows");
-      for (const [at, value] of args.entries()) await expect(field(at + 1)).toHaveValue(value);
+      for (const [at, value] of args.entries())
+        await expect(
+          editing.getByRole("textbox", { name: `Argument ${at + 1}`, exact: true }),
+        ).toHaveValue(value);
       await expect(editing.getByRole("textbox", { name: /^Argument \d+$/ })).toHaveCount(5);
-      await expectNoSidewaysOverflow(editing, controls);
+      await expectNoSidewaysOverflow(
+        editing,
+        editing
+          .getByRole("textbox", { name: /^Argument \d+$/ })
+          .or(editing.getByRole("button", { name: /^Remove argument \d+$/ }))
+          .or(editing.getByRole("button", { name: "Add argument", exact: true })),
+      );
       const saved = (
         await (await request.get(`${harness.baseUrl}/mcp_library/servers`)).json()
       ).servers.find((server: { name: string }) => server.name === "argument_rows");
@@ -395,10 +413,8 @@ process.stdout.write(JSON.stringify({'X-Fixture-Token':'helper-ran'}));\n`,
       // The helper inherits the server environment, so first prove an unset forwarded name fails.
       await forwarded.fill("NAC_E2E_UNSET_FORWARD");
       await testConnection.click();
-      const failureDialog = page.getByRole("dialog", {
-        name: mobile ? "Custom server" : "MCP servers",
-        exact: true,
-      });
+      // The form's owner: the Settings page manager, or the phone's "Custom server" sheet.
+      const failureDialog = form;
       await expect(
         failureDialog.getByRole("alert").filter({ hasText: /^Test failed:/ }),
       ).toBeVisible();

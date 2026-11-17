@@ -36,8 +36,8 @@ const StickyButton: React.FC<StickyButtonProps> & {
   return (
     <div
       className={cn(
-        elevated && "h-10 rounded-full bg-elevation-level-3 shadow-xl",
-        !elevated && !tertiary && "h-10 rounded-full",
+        elevated && "h-10 rounded-pill bg-elevation-level-3 shadow-md",
+        !elevated && !tertiary && "h-10 rounded-pill",
         stretches ? "flex w-full" : "inline-flex w-fit",
         className,
       )}

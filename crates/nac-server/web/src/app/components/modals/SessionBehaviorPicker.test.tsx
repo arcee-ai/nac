@@ -13,22 +13,22 @@ describe("session behavior picker", () => {
 
     expect(screen.getAllByRole("radio")).toHaveLength(3);
     expect(
-      screen.getByRole("radio", { name: /^NAC orchestrator /i }).getAttribute("aria-checked"),
+      screen.getByRole("radio", { name: /^Orchestrator /i }).getAttribute("aria-checked"),
     ).toBe("true");
-    expect(screen.getByText(/start a new chat to choose a different behavior/i)).toBeTruthy();
+    expect(screen.getByText(/start a new session to choose a different behavior/i)).toBeTruthy();
 
-    const orchestrator = screen.getByRole("radio", { name: /^NAC orchestrator /i });
+    const orchestrator = screen.getByRole("radio", { name: /^Orchestrator /i });
     expect(orchestrator.textContent).toMatch(/planner/i);
     expect(orchestrator.textContent).toMatch(/does not edit directly/i);
     expect(orchestrator.textContent).toMatch(/retained NAC worker threads/i);
     expect(orchestrator.textContent).toMatch(/Insights and Worksets/i);
 
-    const direct = screen.getByRole("radio", { name: /^Direct coding agent /i });
+    const direct = screen.getByRole("radio", { name: /^Agent (?!\+)/i });
     expect(direct.textContent).toMatch(/persistent coding agent/i);
     expect(direct.textContent).toMatch(/edits files and runs commands directly/i);
     expect(direct.textContent).toMatch(/fresh-context traditional coding agents/i);
 
-    const hybrid = screen.getByRole("radio", { name: /^Direct \+ NAC orchestration /i });
+    const hybrid = screen.getByRole("radio", { name: /^Agent \+ Orchestrator /i });
     expect(hybrid.textContent).toMatch(/persistent coding agent/i);
     expect(hybrid.textContent).toMatch(/edits files and runs commands directly/i);
     expect(hybrid.textContent).toMatch(/separate NAC orchestrator sessions/i);
@@ -38,7 +38,7 @@ describe("session behavior picker", () => {
     const onChange = vi.fn();
     render(<SessionBehaviorPicker value="orchestrator" onChange={onChange} />);
 
-    fireEvent.click(screen.getByRole("radio", { name: /^Direct \+ NAC orchestration /i }));
+    fireEvent.click(screen.getByRole("radio", { name: /^Agent \+ Orchestrator /i }));
 
     expect(onChange).toHaveBeenCalledWith("direct-with-orchestrator");
   });
@@ -46,8 +46,8 @@ describe("session behavior picker", () => {
   it("supports roving keyboard selection with one tab stop", () => {
     const onChange = vi.fn();
     const view = render(<SessionBehaviorPicker value="orchestrator" onChange={onChange} />);
-    const orchestrator = screen.getByRole("radio", { name: /^NAC orchestrator /i });
-    const direct = screen.getByRole("radio", { name: /^Direct coding agent /i });
+    const orchestrator = screen.getByRole("radio", { name: /^Orchestrator /i });
+    const direct = screen.getByRole("radio", { name: /^Agent (?!\+)/i });
 
     expect(orchestrator.tabIndex).toBe(0);
     expect(direct.tabIndex).toBe(-1);

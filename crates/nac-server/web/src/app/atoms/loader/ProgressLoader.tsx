@@ -18,7 +18,7 @@ const ProgressLoader: React.FC<ProgressLoaderProps> = ({ active = false, classNa
       className,
     )}
   >
-    <div className="h-full w-full rounded-full bg-[var(--color-fill-basic-primary)] animate-progress" />
+    <div className="h-full w-1/2 rounded-pill bg-[var(--color-fill-basic-tertiary)] animate-progress motion-reduce:animate-none" />
   </div>
 );
 

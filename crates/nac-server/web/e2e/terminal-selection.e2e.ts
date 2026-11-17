@@ -7,7 +7,7 @@ import type {
   MessagesPageResponse,
   TerminalSelectionSubmissionRequest,
 } from "../packages/nac-client/dist/types.js";
-import { createDirectSession, expect, test } from "./harness";
+import { createDirectSession, expect, showRoutePanel, showSidePanel, test } from "./harness";
 import { ScriptGate } from "./scripted-provider";
 import { reviewTerminalEvidence } from "./terminal-evidence";
 
@@ -61,11 +61,7 @@ for (const mobile of [false, true]) {
     const api = createNacApi(new NacClient({ endpoint: harness.baseUrl, credentials: "omit" }));
     await api.setPermissionApprovalMode(session, "auto_approve");
     await page.goto(`${harness.baseUrl}/#/session/${session}/terminal`);
-    if (mobile) await page.getByRole("button", { name: "Open panel", exact: true }).click();
-    else {
-      const show = page.getByRole("button", { name: "Show panel", exact: true });
-      if (await show.isVisible()) await show.click();
-    }
+    await showRoutePanel(page);
     const pane = page.getByRole("region", { name: "Session terminal", exact: true });
     await pane.getByRole("button", { name: /^New shell$/i }).click();
     await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
@@ -299,8 +295,7 @@ test("real selection offers explicit busy queue and exact displayed-run steer wi
   await boundary.accepted;
   const active = (await api.getSession(session)).active_run!;
   await page.goto(`${harness.baseUrl}/#/session/${session}/terminal`);
-  const show = page.getByRole("button", { name: "Show panel", exact: true });
-  if (await show.isVisible()) await show.click();
+  await showSidePanel(page);
   const pane = page.getByRole("region", { name: "Session terminal", exact: true });
   await pane.getByRole("button", { name: /^New shell$/i }).click();
   await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
@@ -367,8 +362,7 @@ test("queued attachment waits for an exact human command outcome and follows its
   const api = createNacApi(new NacClient({ endpoint: harness.baseUrl, credentials: "omit" }));
   await api.setPermissionApprovalMode(session, "auto_approve");
   await page.goto(`${harness.baseUrl}/#/session/${session}/terminal`);
-  const show = page.getByRole("button", { name: "Show panel", exact: true });
-  if (await show.isVisible()) await show.click();
+  await showSidePanel(page);
   const pane = page.getByRole("region", { name: "Session terminal", exact: true });
   await pane.getByRole("button", { name: /^New shell$/i }).click();
   await expect(pane.getByText("Connected", { exact: true })).toBeVisible();

@@ -12,9 +12,11 @@ export interface FilesPanelLink {
     onOpenPanel: (revision: number) => void;
 }
 /**
- * What one run changed: its totals, then its files. The revision is a commit
- * nac captured on the side when the run finished, so this keeps describing that
- * run after the checkout moves on — including after the work is committed.
+ * What one run changed, as one quiet line under its answer: "Changed 3 files
+ * +12 −3", which opens the run's revision in Changes. The chevron beside it
+ * lists the files in place, each opening on its own. The revision is a commit
+ * nac captured on the side when the run finished, so this keeps describing
+ * that run after the checkout moves on — including after the work is committed.
  */
 export declare function SnapshotBadge({ revision, panel, }: {
     revision: WorkspaceRevision;

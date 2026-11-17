@@ -1,7 +1,8 @@
 # Configured-local AX companion integration
 
-This is test infrastructure. The ordinary product, its closed normal build input roster, all
-public XCUI actions and Runner sandbox remain unchanged. Canonical lifetime,
+This is test infrastructure. The ordinary product, its closed normal build input roster, the
+Runner sandbox and public keyboard actions remain unchanged. Pointer actions
+use the same explicitly checked public XCTest coordinate. Canonical lifetime,
 freshness and refusal policy lives in the exact Q supplier's
 startup_xctest/AX-WITNESS-CONTRACT.md. A private source nomination is not actual
 native acceptance or permission to run another workflow.
@@ -33,7 +34,8 @@ Parent readiness validates the helper kernel identity and initial receipt
 before XCTest starts. Cleanup stops/drains/reaps the companion before app
 settlement and profile deletion. Unknown companion ownership retains the
 profile even if app settlement is positive. The .stop file is parent-only
-cooperative termination, never a Runner request or product endpoint.
+cooperative termination. The closed .request side of the same private receipt
+port binds each Runner-selected point to a global AX proof; it is not a product endpoint.
 
 Future Root admission must explicitly count every compiler operation, including
 Foundation environment resolution, the complete helper/shared module compile,
@@ -51,7 +53,7 @@ retain_ownership flag changes receipt retention only; default launches and
 existing bounded teardown remain unchanged. A missing receipt refuses cleanup
 qualification, and a receipt sink failure preserves an original helper error.
 
-F1 repair: after the bound app loses its sole window, the companion latches a
+F1 repair: after the bound app loses its original root window, the companion latches a
 non-ready retiring state; a positively proved known-app ESRCH becomes retired.
 Neither state permits AX/ready samples or input, and reappearance/replacement
 fails. Parent custody remains live and bounded until stop. Final qualification
@@ -59,3 +61,11 @@ requires the original completed case proof plus independent exact app/engine
 retirement from OwnerWitness; empty apps alone is never positive settlement.
 F2/F3 canonical Q controls cover nonblocking special-file acquisition and sticky
 loss of an admitted port while preserving legitimate initial publication wait.
+
+The accepted interaction contract supersedes exhaustive extra-CG association.
+Initial singleton root binding and subsequent original-root membership remain.
+The exact Q actor performs global z-order hit-testing and retained target/sheet
+ancestry, not app-scoped hit testing. Eleven point proofs supplement the original
+26 guard receipts; final source/nonce/generation/freshness and same-coordinate
+checks precede dispatch. Coordinate dynamics retain an accepted last-instant
+race; no atomic or independently observed event-delivery claim is made.

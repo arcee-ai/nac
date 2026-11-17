@@ -1,8 +1,9 @@
 import type { Locator, Page, TestInfo } from "@playwright/test";
 import { createSession, expect, test } from "./harness";
-import { openCustomMcpServer } from "./mcp-library-fixture";
+import { openCustomMcpServer, phoneLayout } from "./mcp-library-fixture";
 import { captureSetup, withSetupBaselines, setupBaseline } from "./setup-visual-fixture";
 import { openNameZoom } from "./session-name-zoom";
+import { openSessionSettings, openSettingsSection } from "./settings-focus";
 
 test.use({ orchestration: "0", hasTouch: true });
 test.skip(
@@ -78,8 +79,7 @@ async function noOverflow(dialog: Locator, info: TestInfo) {
 }
 
 async function openSettings(page: Page) {
-  await page.getByRole("button", { name: "Session settings", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "Session settings", exact: true });
+  const dialog = await openSessionSettings(page);
   await expect(dialog.getByRole("textbox", { name: "Session title" })).toBeVisible();
   await expect(dialog.getByRole("button", { name: "Save", exact: true })).toBeEnabled();
   return dialog;
@@ -155,12 +155,8 @@ for (const width of [1440, 768, 390]) {
       await page.keyboard.press("Escape");
       await expect(settings).toHaveCount(0);
 
-      await openCustomMcpServer(page, width < 768);
-      const form = page.getByRole("dialog", {
-        name: width < 768 ? "Custom server" : "MCP servers",
-        exact: true,
-        includeHidden: true,
-      });
+      // Settings › MCP servers: the page manager, or the phone's pushed form sheet.
+      const form = await openCustomMcpServer(page, width < 768);
       await form.getByPlaceholder("my_server").fill("research_tools");
       await form.getByRole("button", { name: "Stdio", exact: true }).click();
       await form.getByPlaceholder("npx").fill("npx");
@@ -215,11 +211,10 @@ for (const width of [1440, 768, 390]) {
       await expect(page.getByText("MCP server saved.", { exact: true })).toBeVisible();
       if (width < 768)
         await page.getByRole("button", { name: "research_tools", exact: true }).click();
-      const savedForm = page.getByRole("dialog", {
-        name: width < 768 ? "research_tools" : "MCP servers",
-        exact: true,
-        includeHidden: true,
-      });
+      const savedForm =
+        width < 768
+          ? page.getByRole("dialog", { name: "research_tools", exact: true, includeHidden: true })
+          : form;
       await expect(savedForm.getByRole("textbox", { name: "Argument 1", exact: true })).toHaveValue(
         "--yes",
       );
@@ -272,15 +267,9 @@ test("settings and MCP controls at actual 200 percent browser zoom", async ({
         await captureSetup(page, info, width, "settings-200pct");
         await settings.getByRole("button", { name: "Cancel", exact: true }).click();
         await expect(settings).toHaveCount(0);
-        const mobile = await page
-          .getByRole("button", { name: "Open the menu", exact: true })
-          .isVisible();
-        await openCustomMcpServer(page, mobile);
-        const form = page.getByRole("dialog", {
-          name: mobile ? "Custom server" : "MCP servers",
-          exact: true,
-          includeHidden: true,
-        });
+        // Browser zoom halves the CSS viewport, so ask the app's own breakpoint.
+        const mobile = await phoneLayout(page);
+        const form = await openCustomMcpServer(page, mobile);
         await form.getByPlaceholder("my_server").fill("zoom_fixture");
         await noOverflow(form, info);
         await captureSetup(page, info, width, "mcp-200pct");
@@ -317,9 +306,9 @@ test("settings and MCP controls at actual 200 percent browser zoom", async ({
           });
         }
         await form.getByRole("button", { name: "Cancel", exact: true }).click();
-        await expect(form).toHaveCount(0);
         if (mobile) {
-          // Cancelling the phone draft returns to the picker above the server list.
+          await expect(form).toHaveCount(0);
+          // Cancelling the phone draft returns to the picker above the page's server list.
           const picker = page.getByRole("dialog", {
             name: "Add server",
             exact: true,
@@ -327,13 +316,12 @@ test("settings and MCP controls at actual 200 percent browser zoom", async ({
           });
           await picker.getByRole("button", { name: "Close", exact: true }).click();
           await expect(picker).toHaveCount(0);
-          const servers = page.getByRole("dialog", {
-            name: "MCP servers",
-            exact: true,
-            includeHidden: true,
-          });
-          await servers.getByRole("button", { name: "Close", exact: true }).click();
-          await expect(servers).toHaveCount(0);
+          await expect(
+            page.getByRole("region", { name: "MCP servers", exact: true }),
+          ).toBeVisible();
+        } else {
+          // A page has nothing to close: Cancel discards the draft in place.
+          await expect(form.getByPlaceholder("my_server")).toHaveValue("");
         }
         await expect(page.getByRole("dialog", { includeHidden: true })).toHaveCount(0);
       }
@@ -395,9 +383,8 @@ test("library selection and OAuth complete/cancel stay in the owning phone form"
       },
     );
     await page.goto(`${harness.baseUrl}/#/session/${id}/insights`);
-    await page.getByRole("button", { name: "Open the menu", exact: true }).click();
-    await page.getByRole("button", { name: /^MCP servers/ }).click();
-    await page.getByRole("button", { name: "Add server", exact: true }).click();
+    const mcpSettings = await openSettingsSection(page, "MCP servers");
+    await mcpSettings.getByRole("button", { name: "Add server", exact: true }).click();
     await page.getByPlaceholder("Search the library").fill("Research library");
     await page.getByRole("button").filter({ hasText: entry.name }).click();
     const form = page.getByRole("dialog", {
@@ -411,7 +398,8 @@ test("library selection and OAuth complete/cancel stay in the owning phone form"
     await form.getByRole("button", { name: "Save", exact: true }).click();
     await expect(page.getByText("MCP server saved.", { exact: true })).toBeVisible();
     await expect(form).toHaveCount(0);
-    const servers = page.getByRole("dialog", { name: "MCP servers", exact: true });
+    // The phone's server list is the Settings section itself.
+    const servers = mcpSettings.getByRole("region", { name: "MCP servers", exact: true });
     const savedServer = servers.getByRole("button", { name: entry.name, exact: true });
     await savedServer.click();
     const editor = page.getByRole("dialog", {

@@ -5,6 +5,7 @@ import { type Page, type Locator, type APIRequestContext } from "@playwright/tes
 import {
   createDirectSession,
   expect,
+  showPhonePanel,
   showSidePanel,
   startForegroundChild,
   test,
@@ -197,11 +198,11 @@ async function openInsights(
   await page.goto(`${baseUrl}/#/session/${parent}/insights`);
   // Hash navigation can reuse the old document; every version/width starts fresh.
   await page.reload();
-  if (width < 768) {
-    await page.getByRole("button", { name: "Open panel", exact: true }).click();
-  } else await showSidePanel(page);
+  if (width < 768) await showPhonePanel(page, "Insights");
+  else await showSidePanel(page);
   if (width >= 768 && width < 1280) {
-    await page.getByRole("button", { name: "Open list", exact: true }).click();
+    // A tablet shows one column at a time; the drawer opens a panel on its list.
+    await expect(page.getByRole("button", { name: "Close list", exact: true })).toBeVisible();
   }
   if (phoneFilterEvidence) await checkPhoneInsightsFilter(page, width, phoneFilterEvidence);
   await page
@@ -525,8 +526,10 @@ test("captures matched production inspector detail, subagents and file views", a
             info.outputPath(name),
           );
         }
-        if (width < 768) await page.getByRole("button", { name: "Open list", exact: true }).click();
-        await page.getByRole("tab", { name: "Files", exact: true }).click();
+        if (width < 768) {
+          await page.getByRole("button", { name: "Open list", exact: true }).click();
+          await showPhonePanel(page, "Files");
+        } else await page.getByRole("tab", { name: "Files", exact: true }).click();
         await readyInspectorFiles(page, width);
         await captureInspector(page, `${version}-${width}-files-list`);
       }

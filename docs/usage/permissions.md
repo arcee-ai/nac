@@ -11,7 +11,9 @@ answer modes:
 
 - **Manual** is the default. A request that reaches the approval broker pauses
   for **Allow once**, **Always allow** when NAC derived a safe reusable resource,
-  or **Reject**. Without an interactive approver it fails closed.
+  or **Reject**. While NAC is open, a request in a session you don't have open
+  waits in the Inbox's **Needs you** until you open that session and answer.
+  With no NAC window connected at all it fails closed.
 - **Approve all** answers ordinary broker requests as **Allow
   once**. Enabling it also safely drains requests already waiting at that
   broker. It never creates remembered grants and cannot override a hard or

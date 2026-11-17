@@ -84,7 +84,7 @@ const DatePicker: React.FC<DatePickerProps> = ({
         >
           <Icon iconName={IconName.Left} />
         </Button>
-        <div className="label-small text-basic-primary" aria-live="polite">
+        <div className="type-label text-basic-primary" aria-live="polite">
           {monthLabel(month)}
         </div>
         <Button
@@ -103,7 +103,7 @@ const DatePicker: React.FC<DatePickerProps> = ({
           <div
             key={weekday}
             role="columnheader"
-            className="label-micro text-basic-tertiary text-center py-1"
+            className="type-meta-strong text-basic-tertiary text-center py-1"
           >
             {weekday}
           </div>

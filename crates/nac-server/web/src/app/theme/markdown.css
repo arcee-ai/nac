@@ -14,14 +14,21 @@
   margin-bottom: 0;
 }
 
+/* Inline code: a subtle ink wash, mono a step under the prose. */
 .chat-response :not(pre) > code {
-  padding: 0.0625rem 0.25rem;
-  border-radius: 4px;
-  background: var(--color-bg-elevation-sublevel-variant-B);
+  padding: 0.1em 0.35em;
+  border-radius: 5px;
+  background: var(--f-wash-2);
   font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 0.8125rem;
+  font-size: 0.86em;
+  line-height: inherit;
   /* Inline code has no scroller of its own, so a long identifier or path has
      to break rather than push the transcript sideways on a narrow screen. */
   overflow-wrap: anywhere;
-  color: var(--color-text-basic-secondary);
+  color: var(--color-text-basic-primary);
+}
+
+/* Inline code inside a link keeps the link's colour. */
+.chat-response a > code {
+  color: inherit;
 }

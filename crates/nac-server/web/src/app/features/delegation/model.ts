@@ -11,7 +11,7 @@ export interface DelegatedSessionPresentation {
   kind: DelegatedSessionKind;
   id: string;
   description: string;
-  typeLabel: "Coding agent" | "NAC orchestrator";
+  typeLabel: "Subagent" | "Managed orchestrator";
   status: TraditionalChildStatus;
   statusLabel: string;
   statusTone: "neutral" | "active" | "success" | "danger" | "warning";
@@ -54,7 +54,7 @@ function common(
     kind,
     id,
     description: record.description,
-    typeLabel: kind === "coding-agent" ? "Coding agent" : "NAC orchestrator",
+    typeLabel: kind === "coding-agent" ? "Subagent" : "Managed orchestrator",
     status: record.status,
     statusLabel: status.label,
     statusTone: status.tone,

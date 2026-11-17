@@ -1,172 +1,74 @@
+/* Focus — mode-independent scales.
+   Colour lives per mode in `light-mode.css` / `dark-mode.css` and is mapped to
+   roles in `semantic.css`. This file holds the shape, type and motion scales
+   every surface shares, so there is exactly one of each. */
+/* Shape: one radius scale, exposed as `rounded-*` utilities. Controls and
+   chips are pills; containers step up: 14px cards, 20px sheets, 22px composer. */
+@theme {
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+  --radius-2xl: 20px;
+  --radius-3xl: 22px;
+  --radius-card: 14px;
+  --radius-sheet: 20px;
+  --radius-composer: 22px;
+  --radius-pill: 9999px;
+
+  /* Tailwind's text steps, pulled onto the Focus ramp. */
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: 1rem;
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1.125rem;
+  --text-sm: 0.8125rem;
+  --text-sm--line-height: 1.25rem;
+  --text-md: 0.875rem;
+  --text-md--line-height: 1.375rem;
+  --text-base: 0.9375rem;
+  --text-base--line-height: 1.6rem;
+  --text-lg: 1.0625rem;
+  --text-lg--line-height: 1.6rem;
+
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
 :root {
-  /* Brand */
-  --brand-50: #eafafa;
-  --brand-100: #d5f6f6;
-  --brand-200: #c0f2f2;
-  --brand-250: #abeded;
-  --brand-300: #86eaea;
-  --brand-400: #17cfcf;
-  --brand-450: #09b3b3;
-  --brand-500: #008c8c;
-  --brand-550: #037c7c;
-  --brand-600: #066f6f;
-  --brand-700: #094e4e;
-  --brand-800: #093434;
-  --brand-900: #0a1f1f;
-  --brand-950: #0b1818;
-  --brand-trans-50: #008c8c1a;
-  --brand-trans-100: #008c8c26;
-  --brand-trans-200: #008c8c33;
-  --brand-trans-300: #008c8c40;
-  --brand-trans-400: #008c8c4d;
-  --brand-trans-500: #008c8c66;
-  --brand-trans-600: #008c8c80;
-  --brand-trans-700: #008c8c99;
-  --brand-trans-800: #008c8cbf;
-  --brand-trans-900: #008c8ce5;
+  /* Type: one scale for chrome and content (px values in rem). */
+  --font-sans:
+    Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --font-mono:
+    "IBMPlexMono", ui-monospace, "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  --font-features: "cv11", "ss01";
+  --type-2xs: 0.6875rem; /* 11 — tags, counters */
+  --type-xs: 0.75rem; /* 12 — meta */
+  --type-sm: 0.8125rem; /* 13 — chrome base */
+  --type-md: 0.875rem; /* 14 — emphasized chrome, form fields */
+  --type-body: 0.9375rem; /* 15 — conversation */
+  --type-lg: 1.0625rem; /* 17 — section titles */
+  --type-xl: 1.25rem; /* 20 — page titles */
+  --type-2xl: 1.5rem; /* 24 — hero */
+  --type-3xl: 1.875rem; /* 30 — display */
+  --type-mono: 0.78125rem; /* 12.5 — code */
 
-  /* Complementary / Blue */
-  --blue-50: #f3fcff;
-  --blue-100: #e2f5ff;
-  --blue-200: #b9efff;
-  --blue-300: #6fd8f3;
-  --blue-400: #20bfe7;
-  --blue-500: #12a1d4;
-  --blue-600: #178dbc;
-  --blue-700: #236382;
-  --blue-800: #224259;
-  --blue-900: #17252e;
-  --blue-950: #11181c;
+  /* Motion: quiet and quick, never bouncy. */
+  --dur-fast: 120ms;
+  --dur-base: 160ms;
+  --dur-slow: 200ms;
 
-  /* Messages / Green */
-  --green-50: #f3fff5;
-  --green-100: #e3ffe2;
-  --green-200: #b9ffbf;
-  --green-300: #6ff374;
-  --green-400: #20e72a;
-  --green-500: #21c931;
-  --green-600: #178e1b;
-  --green-700: #1a581f;
-  --green-800: #18411c;
-  --green-900: #142916;
-  --green-950: #111b12;
+  /* Layout */
+  --sidebar-width: 256px;
+  --header-height: 52px;
+  --column-width: 720px;
+  --drawer-width: 560px;
+}
 
-  /* Messages / Red */
-  --red-50: #fff3f4;
-  --red-100: #ffe2e3;
-  --red-200: #ffb9ba;
-  --red-300: #f76f71;
-  --red-400: #f5272b;
-  --red-500: #df080c;
-  --red-600: #a11a1c;
-  --red-700: #762729;
-  --red-800: #582626;
-  --red-900: #361d1d;
-  --red-950: #221717;
-
-  /* Messages / Yellow */
-  --yellow-50: #fffbf3;
-  --yellow-100: #fff6e2;
-  --yellow-200: #ffefb9;
-  --yellow-300: #f3d46f;
-  --yellow-400: #e7b520;
-  --yellow-500: #cc9619;
-  --yellow-600: #986a19;
-  --yellow-700: #65431c;
-  --yellow-800: #442d1a;
-  --yellow-900: #33241a;
-  --yellow-950: #1f1813;
-
-  /* Neutral */
-  --gray-975: #101212;
-  --gray-950: #111313;
-  --gray-900: #161818;
-  --gray-850: #1b1d1d;
-  --gray-800: #1f2323;
-  --gray-750: #242828;
-  --gray-700: #2c3030;
-  --gray-650: #333838;
-  --gray-600: #3a4141;
-  --gray-500: #5c6565;
-  --gray-400: #7b8888;
-  --gray-300: #a6afaf;
-  --gray-200: #c1c7c7;
-  --gray-150: #d0d4d4;
-  --gray-100: #dee1e1;
-  --gray-75: #e7eaea;
-  --gray-50: #f1f2f2;
-  --gray-25: #fafafa;
-  --white: #fff;
-  --black: #050505;
-  --transparent: #fff0;
-  --transparent-dark-mode: #16161700;
-
-  /* Trans */
-  --dark-trans-25: #10191e0d;
-  --dark-trans-50: #0e171b1a;
-  --dark-trans-100: #0e171b26;
-  --dark-trans-200: #10191e33;
-  --dark-trans-300: #10191e40;
-  --dark-trans-400: #10191e4d;
-  --dark-trans-500: #10191e66;
-  --dark-trans-600: #10191e80;
-  --dark-trans-700: #10191e99;
-  --dark-trans-800: #0e161bbf;
-  --dark-trans-900: #090f11e5;
-
-  --blue-trans-50: #0591b514;
-  --blue-trans-100: #0591b526;
-  --blue-trans-200: #0591b533;
-  --blue-trans-300: #0591b540;
-  --blue-trans-400: #0591b54d;
-  --blue-trans-500: #0591b566;
-  --blue-trans-600: #0591b580;
-  --blue-trans-700: #0591b599;
-  --blue-trans-800: #0591b5bf;
-  --blue-trans-900: #0591b5e5;
-
-  --green-trans-50: #0aae121a;
-  --green-trans-100: #0aae1226;
-  --green-trans-200: #0aae1233;
-  --green-trans-300: #0aae1240;
-  --green-trans-400: #0aae124d;
-  --green-trans-500: #0aae1266;
-  --green-trans-600: #0aae1280;
-  --green-trans-700: #0aae1299;
-  --green-trans-800: #0aae12bf;
-  --green-trans-900: #0aae12e5;
-
-  --red-trans-50: #e720231a;
-  --red-trans-100: #e7202326;
-  --red-trans-200: #e7202333;
-  --red-trans-300: #e7202340;
-  --red-trans-400: #e720234d;
-  --red-trans-500: #e7202366;
-  --red-trans-600: #e7202380;
-  --red-trans-700: #e7202399;
-  --red-trans-800: #e72023bf;
-  --red-trans-900: #e72023e5;
-
-  --yellow-trans-50: #a078001a;
-  --yellow-trans-100: #a0780026;
-  --yellow-trans-200: #a0780033;
-  --yellow-trans-300: #a0780040;
-  --yellow-trans-400: #a078004d;
-  --yellow-trans-500: #a0780066;
-  --yellow-trans-600: #a0780080;
-  --yellow-trans-700: #a0780099;
-  --yellow-trans-800: #a07800bf;
-  --yellow-trans-900: #a07800e5;
-
-  --white-trans-25: #ffffff0f;
-  --white-trans-50: #ffffff14;
-  --white-trans-100: #ffffff1f;
-  --white-trans-200: #ffffff2e;
-  --white-trans-300: #ffffff40;
-  --white-trans-400: #ffffff4d;
-  --white-trans-500: #fff6;
-  --white-trans-600: #ffffff80;
-  --white-trans-700: #fff9;
-  --white-trans-800: #ffffffbf;
-  --white-trans-900: #ffffffe5;
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0ms;
+    --dur-base: 0ms;
+    --dur-slow: 0ms;
+  }
 }

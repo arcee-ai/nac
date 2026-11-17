@@ -1,0 +1,11 @@
+
+> nac-electron@0.0.0 test:e2e
+> playwright test -c playwright.config.cjs --grep bounded optimized workflow
+
+
+Running 1 test using 1 worker
+
+Electron diagnostic distributions {"typing_event_to_raf_ms":{"n":200,"p50":58.39999985694885,"p95":60.59999990463257,"p99":61.90000009536743,"max":66.59999990463257},"history_open_to_dom_raf_ms":{"n":5,"p50":274.2000000476837,"p95":706,"p99":706,"max":706},"scroll_frame_gaps_ms":{"n":120,"p50":58,"p95":60.299999952316284,"p99":95,"max":277.59999990463257},"streaming_dom_mutation_gaps_ms":{"n":30,"p50":103.59999990463257,"p95":111.70000004768372,"p99":133.90000009536743,"max":133.90000009536743}} [{"pressure_bytes_at_least":266240,"pressure_api_to_visual_dom_raf_ms":102.90000009536743,"resize_api_to_status_ms":5.599999904632568,"interrupt_api_to_visual_dom_raf_ms":41.799999952316284},{"pressure_bytes_at_least":266240,"pressure_api_to_visual_dom_raf_ms":99.90000009536743,"resize_api_to_status_ms":4.8999998569488525,"interrupt_api_to_visual_dom_raf_ms":41.700000047683716},{"pressure_bytes_at_least":266240,"pressure_api_to_visual_dom_raf_ms":116.79999995231628,"resize_api_to_status_ms":5,"interrupt_api_to_visual_dom_raf_ms":41.5}]
+  ✓  1 e2e/performance.spec.ts:48:5 › bounded optimized workflow diagnostics retain long transcript streaming and terminal pressure (27.6s)
+
+  1 passed (27.9s)

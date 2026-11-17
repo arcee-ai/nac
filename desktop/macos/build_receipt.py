@@ -2,6 +2,7 @@
 """Unsigned compiler-output provenance for the outer packaging owner."""
 import hashlib
 import json
+import plistlib
 from pathlib import Path
 import subprocess
 import sys
@@ -26,16 +27,32 @@ def main():
         separator = sys.argv.index('--', 5)
         flags, sources = sys.argv[5:separator], sys.argv[separator + 1:]
         identity = json.loads((app / 'Contents/Resources/engine-identity.json').read_text())
+        fixture_engine = identity['build_id'].startswith('native-auth-fixture-v1-')
+        fixture_mode = mode == 'auth-build'
+        if fixture_engine != fixture_mode:
+            raise SystemExit('Selected engine does not match normal/auth-fixture build mode.')
+        if fixture_mode and (identity['track'] != 'dev' or not {'LOCAL_APP', 'PREVIEW_SMOKE', 'NATIVE_AUTH_FIXTURE'} <= set(flags)):
+            raise SystemExit('Auth fixture mode requires its explicit dev engine and native test compiler flags.')
         source_head = head()
+        bundle = plistlib.loads((app / 'Contents/Info.plist').read_bytes())
+        if fixture_mode and bundle['CFBundleIdentifier'] != 'ai.arcee.nac.native-auth-fixture':
+            raise SystemExit('Auth fixture mode requires its distinct fixture bundle identifier.')
         if identity['source_revision'] != source_head:
             raise SystemExit('Bundled engine source differs from the native checkout; rebuild from this exact source.')
         receipt = {
             'version': 1, 'phase': 'unsigned-build', 'mode': mode,
             'normal_startup': 'LOCAL_APP' in flags, 'smoke_instrumentation': 'PREVIEW_SMOKE' in flags,
+            'instance_smoke_instrumentation': 'INSTANCE_SMOKE' in flags,
+            'lifecycle_smoke_instrumentation': 'LIFECYCLE_SMOKE' in flags,
+            'attention_smoke_instrumentation': 'ATTENTION_SMOKE' in flags,
+            'bundle_identifier': bundle['CFBundleIdentifier'], 'bundle_name': bundle['CFBundleName'],
             'source_head': source_head,
             'source_dirty': bool(subprocess.check_output(['git', 'status', '--porcelain'], text=True)),
             'compiler_flags': flags,
             'native_source_files': {path: digest(path) for path in sources},
+            'build_support_files': {path: digest(path) for path in
+                                    ['desktop/macos/preview.sh', 'desktop/macos/BundleIdentity.sh',
+                                     'desktop/macos/build_receipt.py']},
             'engine_identity': identity,
             'engine_sha256': digest(app / 'Contents/Resources/nac-web'),
             'info_plist_sha256': digest(app / 'Contents/Info.plist'),
@@ -48,17 +65,28 @@ def main():
         app = Path(sys.argv[3])
         if head() != receipt['source_head'] or any(digest(path) != expected for path, expected in receipt['native_source_files'].items()):
             raise SystemExit('Native source changed while building; discard this artifact and rebuild.')
+        if any(digest(path) != expected for path, expected in receipt['build_support_files'].items()):
+            raise SystemExit('Native build support changed while compiling; discard this artifact and rebuild.')
         if digest(app / 'Contents/Resources/nac-web') != receipt['engine_sha256']:
             raise SystemExit('Bundled engine changed while compiling the native owner.')
         if digest(app / 'Contents/Info.plist') != receipt['info_plist_sha256']:
             raise SystemExit('Bundle metadata changed while compiling the native owner.')
         if receipt['normal_startup']:
-            fixtures = {'PreviewProfile.swift', 'FixtureProvider.swift', 'FixtureBootstrap.swift'}
+            fixtures = {'PreviewProfile.swift', 'FixtureProvider.swift', 'FixtureBootstrap.swift',
+                        'OfflineProviderPolicy.swift', 'OfflineNetworkFence.swift',
+                        'OfflineWebProbe.swift', 'OfflineProviderSmoke.swift', 'OfflineHTTPControlTarget.swift'}
             if fixtures.intersection(Path(path).name for path in receipt['native_source_files']):
                 raise SystemExit('LOCAL_APP compiler inputs contain disposable preview definitions.')
             receipt['preview_definitions_excluded'] = True
             if not receipt['smoke_instrumentation']:
-                markers = ['preview-dummy-only', 'nac-mac-preview-', 'FixtureProvider', 'FixtureBootstrap']
+                if any(Path(path).name.endswith(('Smoke.swift', 'Tests.swift')) or
+                       Path(path).name in {'InstanceObservation.swift', 'NativeCommandInput.swift', 'QuitWebViewFixture.swift'} for path in receipt['native_source_files']):
+                    raise SystemExit('Ordinary app compiler inputs contain smoke/test instrumentation.')
+                markers = ['preview-dummy-only', 'nac-mac-preview-', 'FixtureProvider', 'FixtureBootstrap',
+                           'NativeCommandSmoke', 'NativeCommandInput', '__commandInputEvidence',
+                           'AttentionSmoke', 'LifecycleSmoke', 'QuitWebViewFixture', '__quitLifecycleObserver',
+                           'offline-dummy-local-only', 'OfflineProviderPolicy', 'OfflineNetworkFence',
+                           'OfflineWebProbe', 'OfflineProviderSmoke', 'OfflineHTTPControlTarget']
                 binary = (app / 'Contents/MacOS/NACPreview').read_bytes()
                 if any(marker.encode() in binary for marker in markers):
                     raise SystemExit('Ordinary app binary contains disposable fixture markers.')
