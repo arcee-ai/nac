@@ -125,7 +125,7 @@ def download(artifact_id, expected_digest, destination, *, read_token,
                        "sha256:" + digest.hexdigest() == expected_digest,
                        "downloaded artifact ZIP bytes or length differ from approved digest")
         return destination
-    except Exception:
+    except BaseException:
         if created:
             destination.unlink(missing_ok=True)
         raise

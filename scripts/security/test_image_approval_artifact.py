@@ -139,6 +139,35 @@ class ArtifactDownloadTests(unittest.TestCase):
                 self.download()
         self.assertFalse(self.destination.exists())
 
+    def test_interrupted_stream_removes_partial_file_and_allows_retry(self):
+        storage = []
+
+        def interrupted_open(request, *, timeout):
+            response = self.open(request, timeout=timeout)
+            if len(self.requests) == 2:
+                storage.append(response)
+                reads = 0
+
+                def interrupted_read(_amount):
+                    nonlocal reads
+                    reads += 1
+                    if reads == 1:
+                        return b"partial"
+                    raise KeyboardInterrupt
+
+                response.read = interrupted_read
+            return response
+
+        with self.assertRaises(KeyboardInterrupt):
+            artifact.download(789, DIGEST, self.destination,
+                read_token="synthetic-read-token", open_request=interrupted_open,
+                clock=lambda: NOW)
+        self.assertFalse(self.destination.exists())
+        self.assertTrue(storage[0].closed)
+        self.requests = []
+        self.assertEqual(self.download(), self.destination)
+        self.assertEqual(self.destination.read_bytes(), BODY)
+
     def test_invalid_subject_output_or_token_rejected_before_http(self):
         with self.assertRaises(ValueError):
             artifact.download(0, DIGEST, self.destination,
