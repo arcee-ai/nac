@@ -63,7 +63,7 @@ export function MobileMenu({ open, onClose }: { open: boolean; onClose: () => vo
       onClose={onClose}
       title="Menu"
       inertOnPhone
-      bodyClassName="p-0 [&>*]:shrink-0"
+      bodyClassName="scroll-py-4 p-0 [&>*]:shrink-0"
     >
       <nav aria-label="Menu" className="flex flex-col gap-px border-b border-muted px-2 py-2">
         <MenuRow

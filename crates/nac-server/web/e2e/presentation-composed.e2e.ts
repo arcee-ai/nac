@@ -442,8 +442,7 @@ async function managedComposed(j: Journey) {
       ? j.root
           .getByRole("region", { name: "Sessions and Inbox", exact: true })
           .getByRole("region", { name: /Composed qualification project/ })
-          .getByRole("button", { name: /, Agent$/ })
-          .first()
+          .getByRole("button", { name: "Composed settings saved", exact: true })
       : j.root
           .getByRole("region", { name: "Projects", exact: true })
           .getByRole("button", { name: /Composed qualification project/ })

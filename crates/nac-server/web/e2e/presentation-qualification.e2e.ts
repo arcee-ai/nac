@@ -381,7 +381,8 @@ async function qualifyInstances(page: Page, info: TestInfo, label: string, id: s
     await right
       .getByRole("region", { name: "Sessions and Inbox", exact: true })
       .getByRole("region", { name: "Embedded E2E project", exact: true })
-      .getByRole("button", { name: /, Agent$/ })
+      // The project's one session row: not its header, "New session in …" or a "… options" menu.
+      .getByRole("button", { name: /^(?!Embedded E2E project|New session in ).*(?<! options)$/ })
       .first()
       .tap();
     await expect(rightComposer).toBeVisible();

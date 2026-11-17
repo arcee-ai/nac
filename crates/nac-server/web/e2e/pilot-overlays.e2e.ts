@@ -60,7 +60,10 @@ test("rename and delete preserve the responsive pilot journey and accessibility"
     for (const theme of ["dark", "light"]) {
       for (const action of ["Rename", "Delete"]) {
         // Row actions live in the row's "⋯" menu; focus returns to that trigger.
-        const opener = page.getByRole("button", { name: `${title} options`, exact: true });
+        // On phones that is the Menu sheet's copy (Home's own list sits inert behind it).
+        const nav =
+          viewport.width < 768 ? page.getByRole("dialog", { name: "Menu", exact: true }) : page;
+        const opener = nav.getByRole("button", { name: `${title} options`, exact: true });
         if (viewport.width < 768 && !(await opener.isVisible())) await openPhoneMenu(page);
         await expect(opener).toBeVisible();
         await opener.focus();
@@ -287,7 +290,9 @@ for (const mobile of [false, true]) {
     if (mobile) await openPhoneMenu(page);
     else await showSidebar(page);
     // Keyboard: Enter on the row's "⋯" opens its menu on Rename; Enter again opens it.
-    const opener = page.getByRole("button", { name: `${title} options`, exact: true });
+    const opener = (
+      mobile ? page.getByRole("dialog", { name: "Menu", exact: true }) : page
+    ).getByRole("button", { name: `${title} options`, exact: true });
     const rename = page.getByRole("menuitem", { name: `Rename ${title}`, exact: true });
     await opener.focus();
     await page.keyboard.press("Enter");
@@ -339,7 +344,10 @@ for (const mobile of [false, true]) {
       expect((await accepted).ok()).toBe(true);
       await expect(dialog).toHaveCount(0);
       await expect(
-        page.getByRole("button", { name: "Pending title options", exact: true }),
+        (mobile ? page.getByRole("dialog", { name: "Menu", exact: true }) : page).getByRole(
+          "button",
+          { name: "Pending title options", exact: true },
+        ),
       ).toBeVisible();
       expect(writes).toHaveLength(1);
     } finally {

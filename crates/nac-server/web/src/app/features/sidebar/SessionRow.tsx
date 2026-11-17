@@ -112,7 +112,8 @@ export function SessionRow({
           onMouseLeave={forget}
           onBlur={forget}
           className={cn(
-            "flex h-full min-w-0 flex-1 items-center gap-2 text-left outline-none",
+            // Fills the row's height, so the button's own box is the hit area.
+            "flex min-w-0 flex-1 items-center gap-2 self-stretch text-left outline-none",
             // Stretched hit area: the whole row opens the session.
             "after:absolute after:inset-0 after:rounded-md",
             "focus-visible:after:ring-2 focus-visible:after:ring-inset focus-visible:after:ring-[var(--f-focus)]",
