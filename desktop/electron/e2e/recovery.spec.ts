@@ -1,4 +1,4 @@
-import { test, expect, type Candidate } from "./fixture";
+import { test, expect, showTerminalPanel, type Candidate } from "./fixture";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
@@ -34,10 +34,7 @@ test("renderer crash retires the document while approval, queue and PTY retain t
   await c.page.evaluate((id) => {
     location.hash = `/session/${id}/terminal`;
   }, session);
-  const pane = c.page.getByRole("region", { name: "Session terminal", exact: true });
-  const show = c.page.getByRole("button", { name: "Show panel", exact: true });
-  await expect(show.or(pane)).toBeVisible();
-  if (await show.isVisible()) await show.click();
+  const pane = await showTerminalPanel(c.page);
   await prepareNewShell(pane);
   await pane.getByRole("button", { name: /^New shell$/i }).click();
   await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
@@ -50,6 +47,8 @@ test("renderer crash retires the document while approval, queue and PTY retain t
   c.ownedPids.push(
     Number((await fs.readFile(path.join(c.workspace, "recovery-shell.pid"), "utf8")).trim()),
   );
+  await c.page.getByRole("button", { name: "Hide panel", exact: true }).click();
+  await expect(pane).not.toBeVisible();
   await c.page.evaluate((id) => {
     location.hash = `/session/${id}/files`;
   }, session);
@@ -347,10 +346,7 @@ test("new engine Retry permits fresh terminal input while same-engine reload sti
   await c.page.evaluate((id) => {
     location.hash = `/session/${id}/terminal`;
   }, session);
-  let pane = c.page.getByRole("region", { name: "Session terminal", exact: true });
-  const show = c.page.getByRole("button", { name: "Show panel", exact: true });
-  await expect(show.or(pane)).toBeVisible();
-  if (await show.isVisible()) await show.click();
+  let pane = await showTerminalPanel(c.page);
   await prepareNewShell(pane);
   await pane.getByRole("button", { name: /^New shell$/i }).click();
   await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
@@ -372,6 +368,7 @@ test("new engine Retry permits fresh terminal input while same-engine reload sti
   });
   await replacement(c, previousDocument);
   expect((await state(c)).receipt).toEqual(original.receipt);
+  pane = await showTerminalPanel(c.page);
   const acknowledgement = c.page.getByRole("button", {
     name: "Acknowledge failure and enable fresh input",
     exact: true,
@@ -381,7 +378,6 @@ test("new engine Retry permits fresh terminal input while same-engine reload sti
     await c.page.evaluate(() => Reflect.get(window, "__nacRequireTerminalAcknowledgement")),
   ).toBe(true);
   await acknowledgement.click();
-  pane = c.page.getByRole("region", { name: "Session terminal", exact: true });
   await pane.getByRole("region", { name: "Interactive terminal", exact: true }).click();
   await c.page.keyboard.type("printf acknowledged > retry-same-engine.txt");
   await c.page.keyboard.press("Enter");
@@ -424,7 +420,7 @@ test("new engine Retry permits fresh terminal input while same-engine reload sti
     }).trim(),
   ).toMatch(new RegExp(`^${c.app.process().pid}\\s+.*\\/engine-launcher$`));
   c.ownedPids.push(restarted.enginePid, custody);
-  pane = c.page.getByRole("region", { name: "Session terminal", exact: true });
+  pane = await showTerminalPanel(c.page);
   await expect(pane).toBeVisible();
   await prepareNewShell(pane);
   await pane.getByRole("button", { name: /^New shell$/i }).click();

@@ -57,57 +57,199 @@ async function launch(c: Candidate) {
 test("Focus preference keys cross the native bridge and survive Quit on a new serving port", async ({
   candidate: c,
 }) => {
-  // This branch owns the native bridge. The Focus React controls are integrated
-  // separately; use their existing preference keys through the same bound port.
+  await expect(c.page.locator("#home-composer")).toBeVisible();
+  const original = await c.app.evaluate(({ app }) =>
+    process
+      .getBuiltinModule("module")
+      .createRequire(app.getAppPath() + "/package.json")(app.getAppPath())
+      .getState(),
+  );
+  // Observe the real runtime's ordered ACKs. Never write to its native port or
+  // create a second sequence owner: Inbox may already have saved its baseline.
+  const bootstrap = await c.page.evaluate(async () => {
+    const port = (window as any).__nacDesktopStorage;
+    const value = await port.open();
+    if (!value.available) throw Error("Native presentation storage unavailable");
+    const proof = { document: value.document, acks: [] as any[], overflow: false };
+    (window as any).__focusPreferenceAcks = proof;
+    port.subscribe((ack: any) => {
+      if (proof.acks.length >= 100) {
+        proof.overflow = true;
+        return;
+      }
+      proof.acks.push(ack);
+    });
+    return { binding: value.binding, document: value.document };
+  });
+  const project = await c.project();
+  const session = await c.session("direct", project);
+  const unreadSession = await c.session("direct", project);
+  const title = "Cold-launch Focus preference fixture";
+  const unreadTitle = "Cold-launch unread completion fixture";
+  const sessions = await c.api("/sessions");
+  for (const [id, name] of [
+    [session, title],
+    [unreadSession, unreadTitle],
+  ]) {
+    const entry = sessions.find((value: any) => value.summary.session_id === id);
+    await c.api(
+      `/sessions/${id}/presentation`,
+      { title: name, pinned: false, expected_version: entry.summary.presentation_version ?? 0 },
+      "PUT",
+    );
+  }
+  c.provider.enqueue(
+    "focus-preference-completion",
+    { token: "FOCUS_PREFERENCE_COMPLETION" },
+    { kind: "text", text: "The cold-launch preference fixture finished.", stream: true },
+  );
+  // Keep Home open so observing this completion cannot mark it read implicitly.
+  const started = await c.api(`/sessions/${session}/runs`, {
+    prompt: "FOCUS_PREFERENCE_COMPLETION",
+  });
+  expect(started.run_id).toEqual(expect.any(String));
+  await c.provider.waitForRequestCount(1);
+  await expect
+    .poll(async () => (await c.api(`/sessions/${session}`)).active_run == null)
+    .toBe(true);
+  const outcome = { disposition: "completed", run_id: started.run_id };
+  await expect
+    .poll(
+      async () =>
+        (await c.api("/attention")).sessions.find((value: any) => value.session_id === session)
+          ?.last_outcome,
+    )
+    .toEqual(outcome);
+  await expect(c.page.locator("#home-composer")).toBeVisible();
+
+  const list = c.page.getByRole("tablist", { name: "Sidebar list", exact: true });
+  await list.getByRole("tab", { name: "Inbox", exact: true }).click();
+  const inbox = c.page.getByRole("group", { name: "Inbox", exact: true });
+  const finished = inbox.getByRole("button", { name: `${title}, Finished`, exact: true });
+  await expect(finished).toBeVisible();
+  await inbox.getByRole("button", { name: "Mark all read", exact: true }).click();
+  await expect(finished).toHaveCount(0);
+  // A separate outcome after Mark all read must remain unread across relaunch.
+  // Neither row is opened: navigation must not mask a lost durable read mark.
+  c.provider.enqueue(
+    "focus-preference-unread-completion",
+    { token: "FOCUS_PREFERENCE_UNREAD_COMPLETION" },
+    { kind: "text", text: "This outcome stays unread across cold launch.", stream: true },
+  );
+  const unreadStarted = await c.api(`/sessions/${unreadSession}/runs`, {
+    prompt: "FOCUS_PREFERENCE_UNREAD_COMPLETION",
+  });
+  expect(unreadStarted.run_id).toEqual(expect.any(String));
+  expect(unreadStarted.run_id).not.toBe(started.run_id);
+  await c.provider.waitForRequestCount(2);
+  await expect
+    .poll(async () => (await c.api(`/sessions/${unreadSession}`)).active_run == null)
+    .toBe(true);
+  const unreadOutcome = { disposition: "completed", run_id: unreadStarted.run_id };
+  await expect
+    .poll(
+      async () =>
+        (await c.api("/attention")).sessions.find(
+          (value: any) => value.session_id === unreadSession,
+        )?.last_outcome,
+    )
+    .toEqual(unreadOutcome);
+  await expect(
+    inbox.getByRole("button", { name: `${unreadTitle}, Finished`, exact: true }),
+  ).toBeVisible();
+  await list.getByRole("tab", { name: "Sessions", exact: true }).click();
+  const projectGroup = c.page
+    .getByRole("tabpanel", { name: "Sessions", exact: true })
+    .getByRole("button", { name: "Electron fixture project, 2 sessions", exact: true });
+  await expect(projectGroup).toHaveAttribute("aria-expanded", "true");
+  await projectGroup.click();
+  await expect(projectGroup).toHaveAttribute("aria-expanded", "false");
+  await list.getByRole("tab", { name: "Inbox", exact: true }).click();
+  await expect(list.getByRole("tab", { name: "Inbox", exact: true })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await c.page.getByRole("button", { name: "Settings", exact: true }).click();
+  await c.page
+    .getByRole("navigation", { name: "Settings sections", exact: true })
+    .getByRole("link", { name: "Appearance", exact: true })
+    .click();
+  const density = c.page
+    .getByRole("main", { name: "Appearance", exact: true })
+    .getByRole("radiogroup", { name: "Transcript density", exact: true });
+  await expect(density.getByRole("radio", { name: "Compact", exact: true })).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
+  await density.getByRole("radio", { name: "Detailed", exact: true }).click();
+  await expect(density.getByRole("radio", { name: "Detailed", exact: true })).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
+  const sectionsBack = c.page.getByRole("button", { name: "Settings", exact: true });
+  if (await sectionsBack.isVisible()) await sectionsBack.click();
+  await c.page.getByRole("button", { name: "Back", exact: true }).click();
+  await expect(c.page.locator("#home-composer")).toBeVisible();
+
   const preferences = {
     "nac.sidebar.view": "inbox",
-    "nac.sidebar.collapsed-projects": JSON.stringify(["fixture-project"]),
-    "nac.inbox.read.v1": JSON.stringify({ since: 123, runs: { session: "fixture-run" } }),
-    "nac.transcriptDensity": "compact",
+    "nac.sidebar.collapsed-projects": JSON.stringify([project]),
+    "nac.transcriptDensity": "detailed",
   };
-  const binding = await c.page.evaluate(async (values) => {
-    const port = (window as any).__nacDesktopStorage;
-    const bootstrap = await port.open();
-    let sequence = 0;
-    for (const [key, value] of Object.entries(values)) {
-      const id = ++sequence;
-      await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => {
-          unsubscribe();
-          reject(Error("Storage ACK missing"));
-        }, 5000);
-        const unsubscribe = port.subscribe((ack: any) => {
-          if (
-            ack.sequence !== id ||
-            !["launch", "view", "document"].every(
+  const checkpoint = path.join(
+    await fs.realpath(path.join(c.directory, "home")),
+    "Library/Application Support/NAC/Presentation",
+    original.receipt.identity.track,
+    original.storage.profile,
+    "checkpoint.json",
+  );
+  let previousSequence = -1;
+  await expect
+    .poll(async () => {
+      const proof = await c.page.evaluate(() => (window as any).__focusPreferenceAcks);
+      const current = await c.app.evaluate(({ app }) =>
+        process
+          .getBuiltinModule("module")
+          .createRequire(app.getAppPath() + "/package.json")(app.getAppPath())
+          .getState(),
+      );
+      const saved = JSON.parse(await fs.readFile(checkpoint, "utf8").catch(() => "{}"));
+      const values = saved.values?.preferences ?? {};
+      const read = JSON.parse(values["nac.inbox.read.v1"] ?? "null");
+      const acks = proof.acks as any[];
+      const sequence = acks.at(-1)?.sequence ?? -1;
+      const durable =
+        !proof.overflow &&
+        acks.length > 0 &&
+        acks.every(
+          (ack, index) =>
+            ack.durable === true &&
+            Number.isSafeInteger(ack.sequence) &&
+            ack.sequence > (index ? acks[index - 1].sequence : 0) &&
+            ["launch", "view", "document"].every(
               (field) => ack.document[field] === bootstrap.document[field],
-            )
-          )
-            return;
-          clearTimeout(timer);
-          unsubscribe();
-          if (ack.durable) resolve();
-          else reject(Error("Storage ACK was not durable"));
-        });
-        if (
-          !port.write({
-            version: 1,
-            ...bootstrap.document,
-            sequence: id,
-            kind: "write",
-            namespace: "preferences",
-            key,
-            value,
-          })
-        ) {
-          clearTimeout(timer);
-          unsubscribe();
-          reject(Error("Storage write rejected"));
-        }
-      });
-    }
-    return bootstrap.binding;
-  }, preferences);
+            ),
+        );
+      const quiescent = sequence === previousSequence;
+      previousSequence = sequence;
+      return (
+        current.storage.available &&
+        current.storage.pending === 0 &&
+        durable &&
+        quiescent &&
+        Object.entries(preferences).every(([key, value]) => values[key] === value) &&
+        Number.isFinite(read?.since) &&
+        Object.keys(read?.runs ?? {}).length === 1 &&
+        read.runs[session] === started.run_id
+      );
+    })
+    .toBe(true);
+  const savedPreferences = JSON.parse(await fs.readFile(checkpoint, "utf8")).values.preferences;
+  const exactPreferences = {
+    ...preferences,
+    "nac.inbox.read.v1": savedPreferences["nac.inbox.read.v1"],
+  };
+  expect(c.provider.requests).toHaveLength(2);
   await stop(c.app);
   const next = await launch(c);
   try {
@@ -119,6 +261,9 @@ test("Focus preference keys cross the native bridge and survive Quit on a new se
     );
     expect(successor.enginePid).toBeGreaterThan(0);
     expect(successor.storage.checkpointPid).toBeGreaterThan(0);
+    expect(successor.receipt.incarnation).not.toBe(original.receipt.incarnation);
+    expect(successor.receipt.identity.track).toBe(original.receipt.identity.track);
+    expect(successor.storage.profile).toBe(original.storage.profile);
     const custody = Number(
       execFileSync("/bin/ps", ["-p", String(successor.enginePid), "-o", "ppid="], {
         encoding: "utf8",
@@ -149,9 +294,52 @@ test("Focus preference keys cross the native bridge and survive Quit on a new se
       (window as any).__nacDesktopStorage.open(),
     );
     expect(restored.available).toBe(true);
-    expect(restored.binding).toEqual(binding);
-    for (const [key, value] of Object.entries(preferences))
+    expect(restored.binding).toEqual(bootstrap.binding);
+    for (const [key, value] of Object.entries(exactPreferences))
       expect(restored.values.preferences[key]).toBe(value);
+    // Read marks and selected Inbox must be correct before any successor click.
+    const restoredList = next.page.getByRole("tablist", { name: "Sidebar list", exact: true });
+    await expect(restoredList.getByRole("tab", { name: "Inbox", exact: true })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    const restoredInbox = next.page.getByRole("group", { name: "Inbox", exact: true });
+    await expect(
+      restoredInbox.getByRole("button", { name: `${unreadTitle}, Finished`, exact: true }),
+    ).toBeVisible();
+    await expect(
+      restoredInbox.getByRole("button", { name: `${title}, Finished`, exact: true }),
+    ).toHaveCount(0);
+    const origin = new URL(next.page.url()).origin;
+    await expect
+      .poll(async () => {
+        const response = await next.page.request.get(`${origin}/attention`);
+        expect(response.ok()).toBe(true);
+        const current = (await response.json()).sessions;
+        return [session, unreadSession].map(
+          (id) => current.find((value: any) => value.session_id === id)?.last_outcome,
+        );
+      })
+      .toEqual([outcome, unreadOutcome]);
+    await restoredList.getByRole("tab", { name: "Sessions", exact: true }).click();
+    await expect(
+      next.page
+        .getByRole("tabpanel", { name: "Sessions", exact: true })
+        .getByRole("button", { name: "Electron fixture project, 2 sessions", exact: true }),
+    ).toHaveAttribute("aria-expanded", "false");
+    await next.page.getByRole("button", { name: "Settings", exact: true }).click();
+    await next.page
+      .getByRole("navigation", { name: "Settings sections", exact: true })
+      .getByRole("link", { name: "Appearance", exact: true })
+      .click();
+    await expect(
+      next.page
+        .getByRole("main", { name: "Appearance", exact: true })
+        .getByRole("radiogroup", { name: "Transcript density", exact: true })
+        .getByRole("radio", { name: "Detailed", exact: true }),
+    ).toHaveAttribute("aria-checked", "true");
+    expect(c.provider.requests).toHaveLength(2);
+    c.provider.assertConsumed();
   } finally {
     await stop(next.app);
   }
