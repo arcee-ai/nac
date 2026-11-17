@@ -66,6 +66,36 @@ another engine, changes stores or replays input, and waits for the prior child.
 If custody cannot prove settlement, a sandboxed cleanup status remains visible,
 including before the first workspace opens. Helper exit alone never enables Retry.
 
+Renderer crashes and failed read transports retire the old document/runtime,
+streams and native capabilities, then revalidate the original retained engine
+and reload the current route. Automatic recovery is bounded; Window → Reload
+Workspace provides a bounded explicit retry. Engine death remains distinct and
+requires the original cleanup and explicit engine Retry. Suspend/resume handling
+uses the same revalidation boundary; deterministic tests do not qualify actual
+system sleep/wake. A pending manual approval can be denied by Rust when its
+interactive renderer disconnects. The restored workspace displays canonical
+state, and queued work may then run once through Rust's ordinary scheduler.
+
+Preferences and text drafts use the Swift-compatible private checkpoint owner,
+scoped to canonical HOME, build track and Rust's canonical store. New ports and
+engine incarnations do not change that scope. The native helper holds a separate
+presentation lease through accepted writes and exact acknowledgments; Quit waits
+for its actual drain and exit. Supported versioned Swift checkpoint bytes remain
+recoverable until migration acknowledgment. Unavailable/corrupt storage uses
+memory with an honest notice. Cold text appears for Review/Restore; only a
+deliberate Restore fills the composer, and no draft is automatically submitted.
+
+Background completion/decision notifications default off. Use NAC → Notifications
+to enable, mute or reset the saved state. Main consumes Rust's semantic metadata
+without keeping a hidden renderer busy. Delivery accounting waits for exact
+durable revision acknowledgments; opt-out/reset fence pending callbacks, and a
+save failure suspends delivery with status explaining that an older setting may
+return. Native clicks carry only a bounded current session target through the
+shared navigation guards; deferred or stale targets are discarded. Electron
+reports permission as system-managed; runtime support or a show callback does
+not establish a visible OS banner. Signed OS show/click/withdraw proof remains
+separate qualification when unavailable in the ad-hoc development app.
+
 Native menus use the existing React command guards and normal Edit roles. Folder
 selection returns form data for Rust to revalidate. Reveal uses the existing
 Rust endpoint. Deliberate HTTP(S) links open the system browser; scripted
@@ -148,6 +178,7 @@ npm vulnerabilities at installation. Review this lockfile when upgrading.
 
 This app is ad-hoc signed for local development. Signing credentials,
 notarization, quarantined public download/Gatekeeper acceptance, updates,
-notifications, complete recovery/draft migration, Linux acceptance and final
-hardware/performance parity remain with their broader tickets. This owner does
-not retire Swift or change release policy.
+actual system sleep/wake, signed notification show/click/withdraw, Linux acceptance
+and final hardware/performance parity remain with their broader tickets. The
+selected development behavior and disposable Swift-fixture compatibility do not
+complete those broader tickets or retire Swift/change release policy.

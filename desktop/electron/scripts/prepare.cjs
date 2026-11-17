@@ -18,26 +18,32 @@ const schema = Number(
 if (!schema) throw new Error("Cannot determine schema");
 fs.writeFileSync(path.join(resources, "engine-identity.json"), JSON.stringify(identity) + "\n");
 const engineSha256 = createHash("sha256").update(fs.readFileSync(engine)).digest("hex");
-fs.writeFileSync(
-  path.join(resources, "manifest.json"),
-  JSON.stringify({ engine_identity: identity, schema, engineSha256 }) + "\n",
-);
 buildFolderBundle(resources, identity, (file, args) =>
   execFileSync(file, args, { stdio: "inherit" }),
 );
-execFileSync(
-  "/usr/bin/xcrun",
-  [
-    "clang",
-    "-O2",
-    "-Wall",
-    "-Wextra",
-    "-Werror",
-    "-mmacosx-version-min=14.0",
-    path.join(root, "desktop/electron/src/engine-launcher.c"),
-    "-o",
-    path.join(resources, "engine-launcher"),
-  ],
-  { stdio: "inherit" },
+for (const name of ["engine-launcher", "checkpoint-helper"]) {
+  execFileSync(
+    "/usr/bin/xcrun",
+    [
+      "clang",
+      "-O2",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-mmacosx-version-min=14.0",
+      path.join(root, `desktop/electron/src/${name}.c`),
+      "-o",
+      path.join(resources, name),
+    ],
+    { stdio: "inherit" },
+  );
+}
+const checkpointHelperSha256 = createHash("sha256")
+  .update(fs.readFileSync(path.join(resources, "checkpoint-helper")))
+  .digest("hex");
+fs.writeFileSync(
+  path.join(resources, "manifest.json"),
+  JSON.stringify({ engine_identity: identity, schema, engineSha256, checkpointHelperSha256 }) +
+    "\n",
 );
 console.log(resources);

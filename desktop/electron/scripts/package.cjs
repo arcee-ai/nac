@@ -113,17 +113,19 @@ fs.writeFileSync(
 fs.copyFileSync(engine, path.join(resources, "nac-web"));
 fs.chmodSync(path.join(resources, "nac-web"), 0o755);
 const folder = buildFolderBundle(resources, identity, run);
-run("/usr/bin/xcrun", [
-  "clang",
-  "-O2",
-  "-Wall",
-  "-Wextra",
-  "-Werror",
-  "-mmacosx-version-min=14.0",
-  path.join(owner, "src/engine-launcher.c"),
-  "-o",
-  path.join(resources, "engine-launcher"),
-]);
+for (const name of ["engine-launcher", "checkpoint-helper"]) {
+  run("/usr/bin/xcrun", [
+    "clang",
+    "-O2",
+    "-Wall",
+    "-Wextra",
+    "-Werror",
+    "-mmacosx-version-min=14.0",
+    path.join(owner, `src/${name}.c`),
+    "-o",
+    path.join(resources, name),
+  ]);
+}
 fs.writeFileSync(
   path.join(resources, "engine-identity.json"),
   JSON.stringify(identity, null, 2) + "\n",
@@ -178,6 +180,7 @@ for (const file of [
   path.join(resources, "nac-web"),
   folder.executable,
   path.join(resources, "engine-launcher"),
+  path.join(resources, "checkpoint-helper"),
 ]) {
   run("/usr/bin/codesign", ["--force", "--sign", "-", file]);
 }
@@ -201,6 +204,7 @@ const manifest = {
     infoSha256: digest(folder.plist),
   },
   engineLauncherSha256: digest(path.join(resources, "engine-launcher")),
+  checkpointHelperSha256: digest(path.join(resources, "checkpoint-helper")),
   shell: inventory(path.join(owner, "src")),
   assets: inventory(path.join(root, "crates/nac-server/assets/dist")),
   packageLockSha256: digest(path.join(owner, "package-lock.json")),
