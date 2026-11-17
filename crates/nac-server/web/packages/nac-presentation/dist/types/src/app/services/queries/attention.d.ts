@@ -6,6 +6,12 @@ export interface FleetAttentionOptions {
     projectId?: string;
     pollMs?: number;
     enabled?: boolean;
+    /**
+     * Hold the shared stream (default). False polls the snapshot only, for a
+     * view whose own streams already use most of the browser's six HTTP/1.1
+     * connections per origin.
+     */
+    stream?: boolean;
     /** Test/adapter seam; defaults to the runtime's authenticated stream. */
     eventSource?: FleetEventSourceFactory;
 }

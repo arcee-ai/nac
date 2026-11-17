@@ -7011,73 +7011,73 @@ function HT(e, t) {
 // src/app/services/queries/attention.ts
 var UT = 1e3, WT = 3e4;
 function GT(e = {}) {
-	let t = r(), { api: n, client: i } = t, a = e.projectId, o = e.enabled ?? !0, [s, c] = h(HT, VT), l = `/attention/stream${a ? `?project_id=${encodeURIComponent(a)}` : ""}`, [u, d] = te({
-		path: l,
+	let t = r(), { api: n, client: i } = t, a = e.projectId, o = e.enabled ?? !0, s = o && (e.stream ?? !0), [c, l] = h(HT, VT), u = `/attention/stream${a ? `?project_id=${encodeURIComponent(a)}` : ""}`, [d, f] = te({
+		path: u,
 		status: "connecting"
-	}), f = u.path === l ? u.status : "connecting", ee = m(() => e.eventSource ?? t.openStream ?? ((e) => new EventSource(i.transport.url(e), i.transport.eventSourceInit())), [
+	}), ee = s ? d.path === u ? d.status : "connecting" : "down", ne = m(() => e.eventSource ?? t.openStream ?? ((e) => new EventSource(i.transport.url(e), i.transport.eventSourceInit())), [
 		e.eventSource,
 		t.openStream,
 		i
-	]), ne = _({
+	]), re = _({
 		queryKey: y.fleetAttention(a ?? null),
 		queryFn: ({ signal: e }) => n.fleetAttention(a, e),
 		enabled: o,
-		refetchInterval: f === "live" ? !1 : e.pollMs ?? 5e3,
+		refetchInterval: ee === "live" ? !1 : e.pollMs ?? 5e3,
 		staleTime: 0
 	});
 	p(() => {
-		ne.data && c({
+		re.data && l({
 			kind: "snapshot",
-			...ne.data,
+			...re.data,
 			scope: a ?? null
 		});
-	}, [ne.data, a]), p(() => {
-		if (!o) return;
-		let e = l, t = (t) => d({
+	}, [re.data, a]), p(() => {
+		if (!s) return;
+		let e = u, t = (t) => f({
 			path: e,
 			status: t
-		}), n = !1, r = null, i = null, s = UT, u = () => {
+		}), n = !1, r = null, i = null, o = UT, c = () => {
 			r?.close(), r = null, !(n || i !== null) && (t("down"), i = setTimeout(() => {
-				i = null, f();
-			}, s), s = Math.min(s * 2, WT));
-		}, f = async () => {
+				i = null, d();
+			}, o), o = Math.min(o * 2, WT));
+		}, d = async () => {
 			let i;
 			try {
-				i = await ee(e);
+				i = await ne(e);
 			} catch {
-				u();
+				c();
 				return;
 			}
 			n ? i.close() : (r = i, i.addEventListener("fleet_attention", (e) => {
 				if (n || r !== i || !(e instanceof MessageEvent)) return;
-				let o;
+				let s;
 				try {
-					o = JSON.parse(String(e.data));
+					s = JSON.parse(String(e.data));
 				} catch {
-					u();
+					c();
 					return;
 				}
-				o.kind === "unavailable" ? u() : (s = UT, c({
-					...o,
+				s.kind === "unavailable" ? c() : (o = UT, l({
+					...s,
 					scope: a ?? null
 				}), t("live"));
 			}), i.onerror = () => {
-				!n && r === i && u();
+				!n && r === i && c();
 			});
 		};
-		return f(), () => {
+		return d(), () => {
 			n = !0, i !== null && clearTimeout(i), r?.close(), r = null;
 		};
 	}, [
-		o,
+		s,
 		a,
-		ee,
-		l
+		ne,
+		u
 	]);
-	let re = f === "live" ? "live" : ne.isError ? "unavailable" : f === "connecting" && !ne.data ? "connecting" : "polling";
+	let g = ee === "live" ? "live" : re.isError ? "unavailable" : (ee === "connecting" || !s) && !re.data ? "connecting" : "polling";
 	return {
-		...s.scope === (a ?? null) ? s : VT,
-		status: re
+		...c.scope === (a ?? null) ? c : VT,
+		status: g
 	};
 }
 // src/app/features/managed/model.ts

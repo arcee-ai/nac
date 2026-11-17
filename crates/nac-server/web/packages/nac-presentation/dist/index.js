@@ -1,9 +1,9 @@
 import { A as e, C as t, E as n, F as r, I as i, L as a, M as o, N as s, O as c, P as l, R as u, S as d, T as f, _ as p, a as m, b as h, c as g, d as _, f as v, g as y, h as b, i as x, j as S, k as C, l as w, m as T, n as E, o as D, p as O, r as ee, s as k, t as A, u as j, v as te, w as M, x as ne, y as N, z as re } from "./chunks/RuntimeContext-D-stNYEV.js";
 import { C as ie, E as ae, S as oe, b as se, d as ce, f as le, g as ue, h as de, i as fe, l as pe, m as P, p as me, r as he, t as ge, u as _e, v as ve, w as ye, x as be, y as xe } from "./chunks/PresentationBoundary-DtRoHZkM.js";
 import { n as Se, t as Ce } from "./chunks/visibility-Cy5NeKga.js";
-import { $ as we, $n as Te, $t as Ee, A as De, An as Oe, At as ke, B as Ae, Bn as je, Bt as Me, C as Ne, Cn as Pe, Ct as Fe, D as Ie, Dn as Le, Dt as Re, E as ze, En as Be, Et as Ve, F as He, Fn as Ue, Ft as We, G as Ge, Gn as Ke, Gt as qe, H as Je, Hn as Ye, Ht as Xe, I as Ze, In as Qe, It as $e, J as et, Jn as tt, Jt as nt, K as rt, Kn as it, Kt as at, L as ot, Ln as st, Lt as ct, M as lt, Mn as ut, Mt as dt, N as ft, Nn as pt, Nt as mt, O as ht, On as gt, Ot as _t, P as vt, Pn as yt, Pt as bt, Q as xt, Qn as St, Qt as Ct, R as wt, Rn as Tt, Rt as Et, S as Dt, Sn as Ot, St as kt, T as At, Tn as jt, Tt as Mt, U as Nt, Un as Pt, Ut as Ft, V as It, Vn as Lt, Vt as Rt, W as zt, Wn as Bt, Wt as Vt, X as Ht, Xn as Ut, Xt as Wt, Y as Gt, Yn as Kt, Yt as qt, Z as Jt, Zn as Yt, Zt as Xt, _ as Zt, _n as Qt, _r as $t, _t as en, a as tn, an as nn, ar as rn, at as an, b as on, bn as sn, bt as cn, c as ln, cn as un, cr as dn, ct as fn, d as pn, dn as mn, dr as hn, dt as gn, en as _n, er as vn, et as yn, f as bn, fn as xn, fr as Sn, ft as Cn, g as wn, gn as Tn, gr as En, gt as Dn, h as On, hn as kn, hr as An, ht as jn, i as Mn, in as Nn, ir as Pn, it as Fn, j as In, jn as Ln, jt as Rn, k as zn, kn as Bn, kt as Vn, l as Hn, ln as Un, lr as Wn, lt as Gn, m as Kn, mn as qn, mr as Jn, mt as Yn, nn as Xn, nr as Zn, nt as Qn, o as $n, on as er, or as tr, ot as nr, p as rr, pn as ir, pr as ar, pt as or, q as sr, qn as cr, qt as lr, r as ur, rn as dr, rr as fr, rt as pr, s as mr, sn as hr, sr as gr, st as _r, t as vr, tn as yr, tr as br, tt as xr, u as Sr, un as Cr, ur as wr, ut as Tr, v as Er, vn as Dr, vr as F, vt as Or, w as kr, wn as Ar, wt as jr, x as Mr, xn as Nr, xt as Pr, y as Fr, yn as Ir, yr as Lr, yt as Rr, z as zr, zn as Br, zt as Vr } from "./chunks/workspaceLink-B_Ns7c1Y.js";
+import { $ as we, $n as Te, $t as Ee, A as De, An as Oe, At as ke, B as Ae, Bn as je, Bt as Me, C as Ne, Cn as Pe, Ct as Fe, D as Ie, Dn as Le, Dt as Re, E as ze, En as Be, Et as Ve, F as He, Fn as Ue, Ft as We, G as Ge, Gn as Ke, Gt as qe, H as Je, Hn as Ye, Ht as Xe, I as Ze, In as Qe, It as $e, J as et, Jn as tt, Jt as nt, K as rt, Kn as it, Kt as at, L as ot, Ln as st, Lt as ct, M as lt, Mn as ut, Mt as dt, N as ft, Nn as pt, Nt as mt, O as ht, On as gt, Ot as _t, P as vt, Pn as yt, Pt as bt, Q as xt, Qn as St, Qt as Ct, R as wt, Rn as Tt, Rt as Et, S as Dt, Sn as Ot, St as kt, T as At, Tn as jt, Tt as Mt, U as Nt, Un as Pt, Ut as Ft, V as It, Vn as Lt, Vt as Rt, W as zt, Wn as Bt, Wt as Vt, X as Ht, Xn as Ut, Xt as Wt, Y as Gt, Yn as Kt, Yt as qt, Z as Jt, Zn as Yt, Zt as Xt, _ as Zt, _n as Qt, _r as $t, _t as en, a as tn, an as nn, ar as rn, at as an, b as on, bn as sn, bt as cn, c as ln, cn as un, cr as dn, ct as fn, d as pn, dn as mn, dr as hn, dt as gn, en as _n, er as vn, et as yn, f as bn, fn as xn, fr as Sn, ft as Cn, g as wn, gn as Tn, gr as En, gt as Dn, h as On, hn as kn, hr as An, ht as jn, i as Mn, in as Nn, ir as Pn, it as Fn, j as In, jn as Ln, jt as Rn, k as zn, kn as Bn, kt as Vn, l as Hn, ln as Un, lr as Wn, lt as Gn, m as Kn, mn as qn, mr as Jn, mt as Yn, nn as Xn, nr as Zn, nt as Qn, o as $n, on as er, or as tr, ot as nr, p as rr, pn as ir, pr as ar, pt as or, q as sr, qn as cr, qt as lr, r as ur, rn as dr, rr as fr, rt as pr, s as mr, sn as hr, sr as gr, st as _r, t as vr, tn as yr, tr as br, tt as xr, u as Sr, un as Cr, ur as wr, ut as Tr, v as Er, vn as Dr, vr as F, vt as Or, w as kr, wn as Ar, wt as jr, x as Mr, xn as Nr, xt as Pr, y as Fr, yn as Ir, yr as Lr, yt as Rr, z as zr, zn as Br, zt as Vr } from "./chunks/workspaceLink-BhGlNYe9.js";
 import { $ as Hr, A as Ur, B as Wr, F as Gr, I as Kr, J as qr, K as Jr, L as Yr, M as Xr, N as Zr, O as Qr, P as $r, Q as ei, R as ti, S as ni, V as ri, X as ii, Y as ai, Z as oi, _ as I, a as si, b as ci, c as li, d as ui, et as L, f as di, g as R, h as z, j as fi, k as pi, l as mi, m as B, nt as V, o as hi, p as gi, q as H, tt as U, u as _i, x as vi, y as yi, z as bi } from "./chunks/Toast-D2KGPUD3.js";
-import { A as xi, At as Si, B as Ci, Bt as wi, C as Ti, Ct as Ei, D as Di, Dt as Oi, E as ki, Et as Ai, F as ji, Ft as Mi, G as Ni, H as Pi, Ht as Fi, I as Ii, J as Li, K as Ri, Kt as zi, L as Bi, Mt as Vi, N as Hi, Ot as Ui, P as Wi, Pt as Gi, Q as Ki, S as qi, St as Ji, T as Yi, U as Xi, V as Zi, Vt as Qi, W as $i, X as ea, Xt as ta, Y as W, Z as na, Zt as ra, _ as ia, _t as aa, a as oa, an as sa, at as ca, b as la, bt as ua, c as da, d as fa, dt as pa, en as ma, et as ha, f as ga, ft as _a, h as va, i as ya, in as ba, it as xa, kt as Sa, l as Ca, m as wa, mt as Ta, n as Ea, nn as Da, nt as Oa, o as ka, on as Aa, p as ja, pt as Ma, q as G, qt as Na, r as Pa, rn as Fa, rt as Ia, s as La, sn as Ra, st as za, t as Ba, tn as Va, tt as Ha, u as Ua, ut as Wa, v as Ga, vt as Ka, w as qa, x as Ja, xt as Ya, z as Xa, zt as Za } from "./chunks/ChatSessionActions-CSyEVK3l.js";
+import { A as xi, At as Si, B as Ci, Bt as wi, C as Ti, Ct as Ei, D as Di, Dt as Oi, E as ki, Et as Ai, F as ji, Ft as Mi, G as Ni, H as Pi, Ht as Fi, I as Ii, J as Li, K as Ri, Kt as zi, L as Bi, Mt as Vi, N as Hi, Ot as Ui, P as Wi, Pt as Gi, Q as Ki, S as qi, St as Ji, T as Yi, U as Xi, V as Zi, Vt as Qi, W as $i, X as ea, Xt as ta, Y as W, Z as na, Zt as ra, _ as ia, _t as aa, a as oa, an as sa, at as ca, b as la, bt as ua, c as da, d as fa, dt as pa, en as ma, et as ha, f as ga, ft as _a, h as va, i as ya, in as ba, it as xa, kt as Sa, l as Ca, m as wa, mt as Ta, n as Ea, nn as Da, nt as Oa, o as ka, on as Aa, p as ja, pt as Ma, q as G, qt as Na, r as Pa, rn as Fa, rt as Ia, s as La, sn as Ra, st as za, t as Ba, tn as Va, tt as Ha, u as Ua, ut as Wa, v as Ga, vt as Ka, w as qa, x as Ja, xt as Ya, z as Xa, zt as Za } from "./chunks/ChatSessionActions-ChKy7-9i.js";
 import { Activity as Qa, Fragment as $a, Suspense as eo, createContext as to, forwardRef as no, lazy as ro, memo as io, use as ao, useCallback as K, useContext as oo, useEffect as q, useEffectEvent as so, useId as co, useLayoutEffect as lo, useMemo as J, useRef as Y, useState as X, useSyncExternalStore as uo } from "react";
 import { QueryClientProvider as fo, QueryObserver as po, replaceEqualDeep as mo, useIsFetching as ho, useMutation as go, useQueries as _o, useQuery as vo, useQueryClient as yo } from "@tanstack/react-query";
 import { Fragment as Z, jsx as Q, jsxs as $ } from "react/jsx-runtime";
@@ -5118,70 +5118,70 @@ function yd({ children: e }) {
 	return t === F.designPreview() ? /* @__PURE__ */ Q(Z, { children: e }) : /* @__PURE__ */ Q(bd, { children: e });
 }
 function bd({ children: e }) {
-	let t = Oo(), { pathname: n } = Do(), r = ft(), { data: i = [] } = Dn(), { data: a } = wt(), o = Uo(), s = _d(), c = s.useReadState(), l = J(() => {
-		let e = new Map((a?.projects ?? []).map((e) => [e.project_id, e.name]));
-		return i.map((t) => ({
+	let t = Oo(), { pathname: n } = Do(), r = Lr(n) !== null, i = ft({ stream: !r }), { data: a = [] } = Dn(), { data: o } = wt(), s = Uo(), c = _d(), l = c.useReadState(), u = J(() => {
+		let e = new Map((o?.projects ?? []).map((e) => [e.project_id, e.name]));
+		return a.map((t) => ({
 			id: t.summary.session_id,
-			title: t.summary.title?.trim() || t.lineage?.description?.trim() || o(t.summary),
+			title: t.summary.title?.trim() || t.lineage?.description?.trim() || s(t.summary),
 			projectName: t.summary.project_id ? e.get(t.summary.project_id) ?? null : null,
 			parentId: t.lineage?.parent_session_id ?? null,
 			updatedAt: Date.parse(t.summary.updated_at) || 0
 		}));
-	}, [i, a]), u = r.status !== "unavailable" && r.status !== "connecting";
+	}, [a, o]), d = i.status !== "unavailable" && i.status !== "connecting";
 	q(() => {
 		let e = Date.now();
-		for (let [t, n] of r.sessions) for (let r of n.pending) {
+		for (let [t, n] of i.sessions) for (let r of n.pending) {
 			let n = id(t, r);
 			vd.has(n) || vd.set(n, e);
 		}
-	}, [r.sessions]);
-	let d = J(() => u ? ld({
-		sessions: l,
-		attention: r.sessions,
-		read: c,
+	}, [i.sessions]);
+	let f = J(() => d ? ld({
+		sessions: u,
+		attention: i.sessions,
+		read: l,
 		firstSeen: vd
 	}) : pu, [
-		u,
-		l,
-		r.sessions,
-		c
-	]), f = K((e) => {
-		e.outcomeRunId && s.markRead(e.sessionId, e.outcomeRunId), t(_u(e.target));
-	}, [t, s]), p = Lr(n), m = K(() => {
-		let e = ud(d, p ?? void 0);
-		e && f(e);
-	}, [
 		d,
-		p,
-		f
+		u,
+		i.sessions,
+		l
+	]), p = K((e) => {
+		e.outcomeRunId && c.markRead(e.sessionId, e.outcomeRunId), t(_u(e.target));
+	}, [t, c]), m = Lr(n), h = K(() => {
+		let e = ud(f, m ?? void 0);
+		e && p(e);
+	}, [
+		f,
+		m,
+		p
 	]);
 	ql([{
 		keys: Gr,
-		onTrigger: m,
-		enabled: d.badge > 0
+		onTrigger: h,
+		enabled: f.badge > 0
 	}]);
-	let h = J(() => ({
-		model: d,
-		status: r.status,
-		attention: r.sessions,
-		lastOutcomeRun: (e) => r.sessions.get(e)?.last_outcome?.run_id ?? null,
-		open: f,
-		openNext: m,
-		markRead: s.markRead,
-		markAllRead: () => s.markAllRead([...d.failed, ...d.done].flatMap((e) => e.outcomeRunId ? [{
+	let g = J(() => ({
+		model: f,
+		status: i.status,
+		attention: i.sessions,
+		lastOutcomeRun: (e) => i.sessions.get(e)?.last_outcome?.run_id ?? null,
+		open: p,
+		openNext: h,
+		markRead: c.markRead,
+		markAllRead: () => c.markAllRead([...f.failed, ...f.done].flatMap((e) => e.outcomeRunId ? [{
 			sessionId: e.sessionId,
 			runId: e.outcomeRunId
 		}] : []))
 	}), [
-		d,
-		r.status,
-		r.sessions,
 		f,
-		m,
-		s
+		i.status,
+		i.sessions,
+		p,
+		h,
+		c
 	]);
 	return /* @__PURE__ */ Q(mu.Provider, {
-		value: h,
+		value: g,
 		children: e
 	});
 }
@@ -29185,7 +29185,7 @@ function Sk({ children: e }) {
 	});
 }
 // src/App.tsx
-var Ck = ro(() => import("./chunks/DesktopSessionTargetOwner-B25uMwW2.js").then((e) => ({ default: e.DesktopSessionTargetOwner }))), wk = ro(() => import("./chunks/DesignPreviewPage-BNbGV9kG.js").catch(() => ({ default: () => /* @__PURE__ */ Q("p", {
+var Ck = ro(() => import("./chunks/DesktopSessionTargetOwner-B25uMwW2.js").then((e) => ({ default: e.DesktopSessionTargetOwner }))), wk = ro(() => import("./chunks/DesignPreviewPage-BAUppWpd.js").catch(() => ({ default: () => /* @__PURE__ */ Q("p", {
 	role: "alert",
 	children: "The design preview could not be loaded. Reload this page to try again."
 }) })));
