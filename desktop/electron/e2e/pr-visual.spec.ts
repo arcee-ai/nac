@@ -18,7 +18,6 @@ const root = path.resolve(__dirname, "../../..");
 const fixtureRequire = createRequire(path.join(root, "desktop/electron/package.json"));
 const { Engine } = fixtureRequire("./src/engine.cjs");
 const { selectConfiguration } = fixtureRequire("./src/configuration.cjs");
-const baselineRevision = "7dfe0bec86d2543cc4229049de200e75d253c8d6";
 const digest = async (file: string) =>
   createHash("sha256")
     .update(await fs.readFile(file))
@@ -39,6 +38,8 @@ test("public PR comparison captures baseline browser and actual Electron shared 
     "Explicit exact-revision visual evidence lane",
   );
   test.setTimeout(180000);
+  const baselineRevision = process.env.NAC_PR_VISUAL_BASE_REVISION || "";
+  expect(baselineRevision, "Name the exact baseline source revision").toMatch(/^[0-9a-f]{40}$/);
   const baseEngine = path.resolve(
     process.env.NAC_PR_VISUAL_BASE_ENGINE || "missing-baseline-engine",
   );

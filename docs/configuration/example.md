@@ -53,6 +53,12 @@ thread_timeout_secs = 3600
 command_output_max_bytes = 8388608           # per command/PTY; 1..=1 GiB; default 8 MiB
 command_output_session_max_bytes = 67108864  # per dispatch; >= per-command, <= 4 GiB; default 64 MiB
 
+# How long a Codex token refresh, sign-in, or logout, or an Arcee token refresh,
+# waits for another NAC process that holds the same credential lock before
+# failing. Milliseconds; must be between 100 and 600000. Default 15000.
+[auth]
+lock_timeout_ms = 15000
+
 # Global MCP budgets apply when a server does not override one. Values are
 # milliseconds and must be between 100 and 600000.
 [mcp]
