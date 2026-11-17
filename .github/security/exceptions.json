@@ -14,7 +14,7 @@
       "advisory": "GHSA-fc5q-39xc-vjpf",
       "package": "npm:picomatch",
       "context": "crates/nac-server/web/package-lock.json",
-      "reason": "PROPOSED temporary risk acceptance pending Allison review: locked picomatch 4.0.7 is development-only web build/test/glob tooling with an unpatched repeated-extglob ReDoS. No published patched release exists as of November 17, 2026. This exact advisory/package/web-lock exception would expire December 1; other findings, contexts and scanner errors remain blocking. This draft does not record approval.",
+      "reason": "Allison explicitly accepts the temporary availability risk of locked picomatch 4.0.7 in development-only web build/test/glob tooling. The repeated-extglob ReDoS has no published patched release as of November 17, 2026. This exact advisory/package/web-lock exception expires December 1; other findings, contexts and scanner errors remain blocking. No renewal is authorized.",
       "owner": "@allisoneer",
       "linked_issue": "https://github.com/arcee-ai/nac/issues/714",
       "expires": "2026-12-01T23:59:59Z"

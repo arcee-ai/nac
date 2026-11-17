@@ -1,10 +1,10 @@
-# Proposed temporary Picomatch tooling-risk acceptance
+# Temporary Picomatch tooling-risk acceptance
 
-**Proposal only: not approved, not active, and not authorized to merge.**
-Allison's November 17 delegation to merge the Chrono exception covers a different
-advisory. This new high-severity finding requires a separate explicit decision.
-Proposed accountable owner: `@allisoneer`; remediation [issue #714]. Proposed
-hard expiry: **2026-12-01T23:59:59Z**. No renewal is proposed or authorized.
+Allison separately approved this exact high-severity tooling-risk acceptance
+and delegated this PR's manual merge in the Codex chat on November 17, 2026.
+This is temporary risk acceptance, not a dependency repair. The accountable
+owner is `@allisoneer`; remediation is [issue #714]. The hard expiry remains
+**2026-12-01T23:59:59Z**. No renewal is authorized.
 
 ## Finding and exposure
 
@@ -37,9 +37,9 @@ vendored implementation, license change or reachability filter is introduced.
 A downstream patch or replacement needs a separately recorded dependency/license
 and compatibility decision under [future dependency review].
 
-## Proposed scope and approval boundary
+## Exact scope and approval boundary
 
-Only this exact tuple would be excepted:
+Only this exact tuple is excepted:
 
 - advisory: `GHSA-fc5q-39xc-vjpf`;
 - package: `npm:picomatch`;
@@ -52,18 +52,19 @@ changes. The original Chrono entry is preserved unchanged. No scanner, validator
 OSV configuration, check requirement or merge helper changes.
 
 The candidate cannot authorize its own exception. Ordinary source/image policy
-trust checks must still reject this draft's differing policy. A hypothetical
-policy evaluation is proposal testing, never a passing normal scan. Landing
-requires Allison's separately explicit reviewed risk acceptance and audited
-PR-only override under [the existing landing policy]. No agent may merge this
-proposal based on the earlier Chrono authorization.
+trust checks still reject this PR's differing policy. A hypothetical evaluation
+is proposal testing, never a passing normal scan. Allison's separate explicit
+approval permits the delegated audited PR-only merge of this exception alone
+under [the existing landing policy]. It does not authorize merging PRs #709 or
+#710, broader bypass permissions, or another exception. After actual landing,
+refresh those candidates onto reviewed policy and obtain fresh normal scans.
 
 ## Removal
 
 Review upstream progress by **November 24, 2026**. Prefer a supported patched
 release/parent graph; verify globs, lint, tests, builds and generated asset drift,
 then run a fresh full locked scan without this exception. Remove the entry when
-that passes. If the proposed expiry arrives first, the unchanged validator fails
+that passes. If the expiry arrives first, the unchanged validator fails
 closed; do not extend it silently. Publication and image security remain separate.
 
 [issue #714]: https://github.com/arcee-ai/nac/issues/714
