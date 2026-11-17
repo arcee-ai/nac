@@ -65,6 +65,7 @@ fn stored_auth_configuration_error(message: impl Into<String>) -> anyhow::Error 
 #[derive(Debug)]
 struct ArceeRefreshHttpError {
     status: u16,
+    invalid_client: bool,
     message: String,
 }
 
@@ -80,9 +81,7 @@ impl std::error::Error for ArceeRefreshHttpError {}
 pub(super) fn auth_run_failure(error: anyhow::Error) -> anyhow::Error {
     let diagnostic = truncate(&redact_credentials(&format!("{error:#}"), &[]));
     let stored = error.downcast_ref::<StoredArceeAuthConfigurationError>();
-    let refresh_status = error
-        .downcast_ref::<ArceeRefreshHttpError>()
-        .map(|refresh| refresh.status);
+    let refresh = error.downcast_ref::<ArceeRefreshHttpError>();
     let failure = if is_transient_transport(&error) {
         RunFailure::request(
             RunFailureKind::Transport,
@@ -101,12 +100,19 @@ pub(super) fn auth_run_failure(error: anyhow::Error) -> anyhow::Error {
             },
             diagnostic,
         )
-    } else if let Some(status) = refresh_status {
-        if status == 429 || status >= 500 {
+    } else if let Some(refresh) = refresh {
+        if refresh.status == 429 || refresh.status >= 500 {
             RunFailure::request(
                 RunFailureKind::Capacity,
                 true,
                 "The Arcee sign-in service is temporarily unavailable.",
+                diagnostic,
+            )
+        } else if refresh.invalid_client {
+            RunFailure::request(
+                RunFailureKind::Authentication,
+                false,
+                "The Arcee sign-in service did not recognize this client. Check the client registration and try again.",
                 diagnostic,
             )
         } else {
@@ -1057,9 +1063,10 @@ pub(super) async fn request_token_refresh(
     });
 
     match error_code.as_deref() {
-        Some("invalid_grant") | Some("invalid_client") => Ok(RefreshOutcome::Revoked),
+        Some("invalid_grant") => Ok(RefreshOutcome::Revoked),
         _ => Err(anyhow!(ArceeRefreshHttpError {
             status: status.as_u16(),
+            invalid_client: error_code.as_deref() == Some("invalid_client"),
             message: format!(
                 "Arcee token refresh failed with HTTP {}: {}",
                 status.as_u16(),
