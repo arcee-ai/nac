@@ -90,6 +90,10 @@ gcc -g -fsanitize=address -fno-omit-frame-pointer \
     -o /tmp/libssh2-regressions /recipe/libssh2-regressions.c \
     src/publickey.c src/misc.c src/sftp.c src/.libs/libssh2.a -lcrypto -lz
 /tmp/libssh2-regressions
+# The Debian 66034/58051 reversals overlap NAC's later publickey follow-ups.
+# Isolate each vulnerable seam again on the exact final source composition;
+# mutant binaries are test-only and never enter the staged package.
+python3 /recipe/test-libssh2-final-publickey-controls.py
 # Reverse only the SFTP supplier fix in a disposable source copy. All other
 # source and linked package code remains the same. The malformed NAME packet
 # must then trigger ASan in sftp_symlink, not merely a generic test failure.

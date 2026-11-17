@@ -74,7 +74,7 @@ COPY docker/managed/packages/build-curl.sh /recipe/
 RUN sh /recipe/build-curl.sh
 COPY docker/managed/packages/test-curl-patch-order.py docker/managed/packages/curl-multi-done.patch /recipe/
 RUN python3 /recipe/test-curl-patch-order.py
-COPY docker/managed/packages/build-libssh2.sh docker/managed/packages/test-libssh2-consumers.sh docker/managed/packages/test-libssh2-supplier-controls.sh docker/managed/packages/libssh2-supplier-7598.c docker/managed/packages/libssh2-supplier-55199.c docker/managed/packages/libssh2-supplier-55200.c docker/managed/packages/libssh2-regressions.c docker/managed/packages/libssh2-list-followups.patch docker/managed/packages/libssh2-pointer-followup.patch /recipe/
+COPY docker/managed/packages/build-libssh2.sh docker/managed/packages/test-libssh2-consumers.sh docker/managed/packages/test-libssh2-supplier-controls.sh docker/managed/packages/test-libssh2-final-publickey-controls.py docker/managed/packages/libssh2-supplier-7598.c docker/managed/packages/libssh2-supplier-55199.c docker/managed/packages/libssh2-supplier-55200.c docker/managed/packages/libssh2-regressions.c docker/managed/packages/libssh2-list-followups.patch docker/managed/packages/libssh2-pointer-followup.patch /recipe/
 RUN sh /recipe/build-libssh2.sh
 COPY docker/managed/packages/build-sasl.sh /recipe/
 RUN sh /recipe/build-sasl.sh
