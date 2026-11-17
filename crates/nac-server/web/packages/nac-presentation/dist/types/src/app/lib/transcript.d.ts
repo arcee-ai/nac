@@ -38,6 +38,11 @@ export type TranscriptBlock = {
     kind: "text";
     key: string;
     text: string;
+    /**
+     * Raw snapshot index of the persisted assistant message this prose came
+     * from. Absent while it is only a stream, which nobody can ask about.
+     */
+    messageIndex?: number;
 } | {
     kind: "workset";
     key: string;

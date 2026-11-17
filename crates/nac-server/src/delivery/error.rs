@@ -51,7 +51,7 @@ fn is_commit_uncertain(error: &anyhow::Error) -> bool {
 
 /// Only known precommit contention permits a conflict response. An uncertain
 /// commit/acknowledgement wrapper takes precedence over any retained SQLite cause.
-fn is_precommit_contention(error: &anyhow::Error) -> bool {
+pub(super) fn is_precommit_contention(error: &anyhow::Error) -> bool {
     use nac_core::store::PersistenceAdmissionError;
     if is_commit_uncertain(error) {
         return false;

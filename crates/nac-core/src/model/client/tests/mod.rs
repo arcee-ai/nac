@@ -29,6 +29,7 @@ fn test_model_client(
         cache_ttl: None,
         prompt_cache_key: None,
         resolved_model: catalog::resolve(backend, "test-model"),
+        stored_login_pin: None,
     }
 }
 

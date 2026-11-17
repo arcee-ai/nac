@@ -99,6 +99,7 @@ async fn arcee_sensitive_extra_header_still_fails_before_connection() {
         cache_ttl: None,
         prompt_cache_key: None,
         resolved_model: catalog::resolve(BackendKind::ArceeApi, "test-model"),
+        stored_login_pin: None,
     };
 
     let error = client

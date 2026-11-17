@@ -37,6 +37,8 @@ export interface NormalizedMath {
    * for this text, which is the whole reason the flag is reported.
    */
   hasMath: boolean;
+  /** Where each math span sits in the original source, as UTF-16 offsets. */
+  spans: Array<[number, number]>;
 }
 
 interface MathSpan {
@@ -59,6 +61,7 @@ interface MathSpan {
 export function normalizeMath(source: string): NormalizedMath {
   let out = "";
   let hasMath = false;
+  const spans: Array<[number, number]> = [];
   let index = 0;
 
   while (index < source.length) {
@@ -83,6 +86,7 @@ export function normalizeMath(source: string): NormalizedMath {
       if (span) {
         out += written(source, span);
         hasMath = true;
+        spans.push([span.start, span.end]);
         index = span.end;
         continue;
       }
@@ -107,6 +111,7 @@ export function normalizeMath(source: string): NormalizedMath {
       if (span) {
         out += written(source, span);
         hasMath = true;
+        spans.push([span.start, span.end]);
         index = span.end;
         continue;
       }
@@ -122,7 +127,7 @@ export function normalizeMath(source: string): NormalizedMath {
     index += 1;
   }
 
-  return { source: out, hasMath };
+  return { source: out, hasMath, spans };
 }
 
 /**

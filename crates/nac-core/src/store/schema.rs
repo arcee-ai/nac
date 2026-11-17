@@ -91,6 +91,7 @@ mod permission_reviewer_tests;
 
 use wal_preflight::read_schema_version_header;
 
+// 52 adds the bounded selection-question history.
 // 51 records internal completion provenance on parent inbox rows.
 // 50 extends the occurrence source format for calendar cadence.
 // 49 adds the physical completion ledger; runtime production remains separately owned.
@@ -136,7 +137,7 @@ use wal_preflight::read_schema_version_header;
 // early whenever the stored version already equals this one. (12 carries the
 // same schema as 11, which added episodes.status; 10 added the
 // ssh_configurations table; 9 the per-session ssh port and key columns.)
-const STORE_SCHEMA_VERSION: i64 = 51;
+const STORE_SCHEMA_VERSION: i64 = 52;
 const HTTP_OPT_IN_COLUMN: &str = "INTEGER NOT NULL DEFAULT 0 CHECK (allow_insecure_http IN (0, 1))";
 pub const MINIMUM_MIGRATABLE_SCHEMA_VERSION: i64 = 0;
 
@@ -815,9 +816,10 @@ fn open_connection_with_hooks(
         transaction.commit()?;
         return Ok(conn);
     }
-    // Schema 51 adds inbox provenance only. Preserve the schema 50 format fence
-    // before any older migration helper can rebuild its calendar table.
-    if schema_version == 50 {
+    // Schemas 51 and 52 add inbox provenance and selection questions only.
+    // Preserve the schema 50 format fence before any older migration helper
+    // can rebuild its calendar table.
+    if schema_version >= 50 {
         heartbeat_calendar::verify_format(&transaction)?;
     }
     let needs_session_summary_backfill = schema_version < SESSION_SUMMARY_BACKFILL_VERSION;
@@ -863,7 +865,7 @@ fn open_connection_with_hooks(
             migrate_thread_events(&transaction)?;
             transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
-        2..=50 => {}
+        2..=51 => {}
         unsupported => {
             if unsupported > STORE_SCHEMA_VERSION {
                 return Err(StoreFutureSchemaError::new(unsupported).into());
@@ -1102,6 +1104,8 @@ fn open_connection_with_hooks(
     super::task_questions::create_table(&transaction)?;
     fresh_task_tables::migrate(&transaction)?;
     completion_tables::create_tables(&transaction)?;
+    // 52: idempotent and additive; 50 and 51 stores both gain the table here.
+    super::selection_questions::create_selection_questions_table(&transaction)?;
     if schema_version < 50 {
         heartbeat_calendar::rebuild_occurrences_for_calendar(&transaction)?;
     }
@@ -1947,6 +1951,7 @@ fn verify_auxiliary_foreign_keys(conn: &Connection) -> Result<()> {
         "terminal_remote_cleanups",
         "projects",
         "session_projects",
+        "selection_questions",
     ] {
         let mut statement = conn.prepare(&format!("PRAGMA foreign_key_check({table})"))?;
         if statement.query([])?.next()?.is_some() {

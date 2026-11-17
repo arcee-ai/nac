@@ -211,7 +211,7 @@ const ModelMessageBody = memo(function ModelMessageBody({
             );
           }
           if (block.text.trim() === RUN_CANCELLED_MARKER) return null;
-          return (
+          const prose = (
             <Markdown
               key={block.key}
               streaming={active}
@@ -220,6 +220,19 @@ const ModelMessageBody = memo(function ModelMessageBody({
             >
               {block.text}
             </Markdown>
+          );
+          // Completed prose names the message it came from, so a selection
+          // inside it can be asked about without guessing its source.
+          if (active || !interactive || block.kind !== "text" || block.messageIndex == null)
+            return prose;
+          return (
+            <div
+              key={block.key}
+              className="w-full min-w-0"
+              data-selection-source={block.messageIndex}
+            >
+              {prose}
+            </div>
           );
         })}
         {/* Compaction runs between model calls, so nothing above moves while it does. */}

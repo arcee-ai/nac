@@ -216,6 +216,15 @@ async fn read_response_body(
     })
 }
 
+/// The stored login a pinned client keeps to: which workspace or account its
+/// tokens are for, not the tokens, so ordinary rotation keeps working while a
+/// different sign-in fails the request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum StoredLoginPin {
+    Arcee(arcee::ArceeLoginIdentity),
+    ChatGptCodex(String),
+}
+
 #[derive(Debug, Clone)]
 pub struct ModelClient {
     client: Client,
@@ -238,6 +247,8 @@ pub struct ModelClient {
     /// Catalog metadata resolved with the effective settings; drives
     /// per-response cost, effort wire translation, and api-axis dispatch.
     resolved_model: ModelMetadata,
+    /// Set by `pin_stored_login`; `None` follows whichever login is stored.
+    stored_login_pin: Option<StoredLoginPin>,
 }
 
 impl ModelClient {
@@ -306,7 +317,39 @@ impl ModelClient {
             cache_ttl: None,
             prompt_cache_key: None,
             resolved_model: settings.resolved,
+            stored_login_pin: None,
         })
+    }
+
+    /// Keep this client on the stored login signed in now. Arcee and ChatGPT
+    /// logins are re-read for every request and refresh; once pinned, a login
+    /// for another workspace or account fails the request instead of being
+    /// used. Other backends already hold their credential, so nothing changes.
+    pub(crate) fn pin_stored_login(&mut self) -> Result<()> {
+        self.stored_login_pin = match self.backend {
+            BackendKind::ArceeAuth => Some(StoredLoginPin::Arcee(
+                arcee::ArceeLoginIdentity::current(&self.base_url)?,
+            )),
+            BackendKind::ChatGptCodexResponses => Some(StoredLoginPin::ChatGptCodex(
+                chatgpt_codex::stored_account_id()?,
+            )),
+            _ => None,
+        };
+        Ok(())
+    }
+
+    fn arcee_pin(&self) -> Option<&arcee::ArceeLoginIdentity> {
+        match &self.stored_login_pin {
+            Some(StoredLoginPin::Arcee(pin)) => Some(pin),
+            _ => None,
+        }
+    }
+
+    fn codex_pin(&self) -> Option<&str> {
+        match &self.stored_login_pin {
+            Some(StoredLoginPin::ChatGptCodex(account)) => Some(account),
+            _ => None,
+        }
     }
 
     /// Set the Anthropic prompt-cache TTL. `Some("1h")` enables 1-hour cache
@@ -369,6 +412,7 @@ impl ModelClient {
                     tools,
                     &self.resolved_model.thinking_level_map,
                     self.prompt_cache_key.as_deref(),
+                    self.codex_pin(),
                     on_delta,
                 )
                 .await?;
@@ -758,7 +802,7 @@ impl ModelClient {
             body["stream"] = Value::Bool(true);
             body["stream_options"] = json!({"include_usage": true});
         }
-        let token = arcee::fresh_access_token(&self.client, &self.base_url)
+        let token = arcee::fresh_access_token_for(&self.client, &self.base_url, self.arcee_pin())
             .await
             .map_err(arcee::auth_run_failure)?;
         match self
@@ -767,10 +811,14 @@ impl ModelClient {
         {
             Ok(value) => Ok(value),
             Err(error) if error.status == Some(401) => {
-                let refreshed =
-                    arcee::force_refresh_access_token(&self.client, &self.base_url, &token)
-                        .await
-                        .map_err(arcee::auth_run_failure)?;
+                let refreshed = arcee::force_refresh_access_token_for(
+                    &self.client,
+                    &self.base_url,
+                    &token,
+                    self.arcee_pin(),
+                )
+                .await
+                .map_err(arcee::auth_run_failure)?;
                 self.try_post_arcee_auth(url, &body, &refreshed, reasoning_field, on_delta)
                     .await
                     .map_err(|error| match error.status {
@@ -1147,6 +1195,7 @@ impl ModelClient {
             cache_ttl: None,
             prompt_cache_key: None,
             resolved_model: catalog::resolve(BackendKind::OpenAiResponses, "gpt-5.5"),
+            stored_login_pin: None,
         }
     }
 }

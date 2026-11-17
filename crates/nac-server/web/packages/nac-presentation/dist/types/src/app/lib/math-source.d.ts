@@ -6,6 +6,8 @@ export interface NormalizedMath {
      * for this text, which is the whole reason the flag is reported.
      */
     hasMath: boolean;
+    /** Where each math span sits in the original source, as UTF-16 offsets. */
+    spans: Array<[number, number]>;
 }
 /**
  * Normalize the math in one markdown source, and say whether it has any.

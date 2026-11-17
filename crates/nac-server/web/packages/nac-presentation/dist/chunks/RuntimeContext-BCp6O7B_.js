@@ -895,7 +895,10 @@ function de(e, t) {
 			body: {},
 			headers: { "Idempotency-Key": e }
 		}),
-		generateOverview: (e) => n("POST", `/sessions/${encodeURIComponent(e)}/overview`)
+		generateOverview: (e) => n("POST", `/sessions/${encodeURIComponent(e)}/overview`),
+		askSelectionQuestion: (e, t) => n("POST", `/sessions/${encodeURIComponent(e)}/selection-questions`, { body: t }),
+		listSelectionQuestions: (e, t) => n("GET", `/sessions/${encodeURIComponent(e)}/selection-questions`, { signal: t }),
+		cancelSelectionQuestion: (e, t) => n("POST", `/sessions/${encodeURIComponent(e)}/selection-questions/${encodeURIComponent(t)}/cancel`)
 	};
 }
 var fe = de(M);

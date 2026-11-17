@@ -181,15 +181,15 @@ use chatgpt_codex::{codex_auth_login, codex_auth_logout, codex_auth_status};
 pub use client::validate_model_configuration;
 pub(crate) use client::ModelClient;
 pub(crate) use stream::{CoalescedDeltas, DeltaSink, ModelStreamDelta};
-pub(crate) use types::{
-    calculate_cost, AssistantTurn, ModelTurnResponse, TokenCostMicros, TokenUsage,
-};
+pub(crate) use types::{calculate_cost, AssistantTurn, ModelTurnResponse};
 pub use types::{
     managed_backend_base_url, resolve_model_base_url, resolve_model_base_url_with_policy,
     validate_model_base_url, validate_model_base_url_with_policy, EffectiveModelSettings,
     ARCEE_AUTH_CANONICAL_BASE_URL, CHATGPT_CODEX_CANONICAL_BASE_URL,
 };
 pub use types::{BackendKind, DispatchWeight, ReasoningEffort};
+// Usage is a public read-model value (session snapshots and question records).
+pub use types::{TokenCostMicros, TokenUsage};
 
 /// Identifies model setup failures caused by a caller-controlled configuration.
 ///

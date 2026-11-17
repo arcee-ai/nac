@@ -402,6 +402,88 @@ fn explicit_arcee_backend_binds_stored_key_to_its_origin() {
 }
 
 #[tokio::test]
+async fn a_pinned_arcee_client_keeps_its_workspace_through_rotation_and_refuses_another() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let first = "first-token-must-not-leak";
+    let rotated = "rotated-token-must-not-leak";
+    let other = "other-token-must-not-leak";
+    let env = IsolatedModelEnv::new("pinned-arcee-login", None, None, None);
+    let auth_path = env.home.join("arcee_auth.json");
+    write_test_credential(&auth_path, stored_arcee_auth(first, "https://api.arcee.ai"));
+    let mut client = ModelClient::from_effective_settings(effective_settings(
+        BackendKind::ArceeAuth,
+        "https://api.arcee.ai/api/v1",
+        None,
+    ))
+    .unwrap();
+    client.pin_stored_login().unwrap();
+    let pin = arcee::ArceeLoginIdentity::current(client.base_url()).unwrap();
+    let http = arcee::no_redirect_client().unwrap();
+
+    // Rotated tokens for the same workspace are still this login.
+    write_test_credential(
+        &auth_path,
+        stored_arcee_auth(rotated, "https://api.arcee.ai"),
+    );
+    let token = arcee::fresh_access_token_for(&http, client.base_url(), Some(&pin))
+        .await
+        .unwrap();
+    assert_eq!(token, rotated);
+
+    // Another workspace signs in on the same origin after admission.
+    write_test_credential(
+        &auth_path,
+        stored_arcee_auth(other, "https://api.arcee.ai").replace("workspace-test", "workspace-b"),
+    );
+    let fresh_error = client
+        .send_turn(Vec::new(), Vec::new())
+        .await
+        .expect_err("a pinned client must not send under another workspace");
+    let forced_error =
+        arcee::force_refresh_access_token_for(&http, client.base_url(), rotated, Some(&pin))
+            .await
+            .expect_err("a pinned refresh must not rotate another workspace's login");
+    for error in [fresh_error, forced_error] {
+        let diagnostic = format!("{error:#}");
+        assert!(
+            diagnostic.contains("different Arcee workspace"),
+            "{diagnostic}"
+        );
+        for token in [first, rotated, other] {
+            assert!(!diagnostic.contains(token), "{diagnostic}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_pinned_codex_client_refuses_another_signed_in_account() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let env = IsolatedModelEnv::new("pinned-codex-login", Some(&stored_codex_auth()), None, None);
+    let mut client = ModelClient::from_effective_settings(effective_settings(
+        BackendKind::ChatGptCodexResponses,
+        "https://chatgpt.com/backend-api",
+        None,
+    ))
+    .unwrap();
+    client.pin_stored_login().unwrap();
+
+    write_test_credential(
+        &env.home.join("auth.json"),
+        stored_codex_auth().replace("account-test", "account-b"),
+    );
+    let error = client
+        .send_turn(Vec::new(), Vec::new())
+        .await
+        .expect_err("a pinned client must not send under another account");
+    let diagnostic = format!("{error:#}");
+    assert!(
+        diagnostic.contains("different ChatGPT account"),
+        "{diagnostic}"
+    );
+    assert!(!diagnostic.contains("access-test"), "{diagnostic}");
+}
+
+#[tokio::test]
 async fn existing_arcee_client_rejects_credentials_rotated_to_another_origin() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     let initial_token = "initial-token-must-not-leak";

@@ -118,6 +118,7 @@ async fn arcee_inference_sends_expected_contract_and_parses_chat_response() {
         cache_ttl: None,
         prompt_cache_key: None,
         resolved_model: catalog::resolve(BackendKind::ArceeApi, "arcee-test-model"),
+        stored_login_pin: None,
     };
     client.resolved_model.max_tokens = 500_000;
     // The wire cap only applies to authoritative catalog values; a synthetic
@@ -625,6 +626,7 @@ async fn custom_arcee_routes_are_exact_on_wire() {
             cache_ttl: None,
             prompt_cache_key: None,
             resolved_model: catalog::resolve(BackendKind::ArceeApi, "arcee-test-model"),
+            stored_login_pin: None,
         };
 
         client
@@ -673,6 +675,7 @@ async fn arcee_cross_origin_redirects_do_not_replay_prompt_credentials_or_header
             cache_ttl: None,
             prompt_cache_key: None,
             resolved_model: catalog::resolve(BackendKind::ArceeApi, "arcee-test-model"),
+            stored_login_pin: None,
         };
 
         let error = client
@@ -937,6 +940,7 @@ async fn arcee_multibyte_error_body_does_not_panic() {
         cache_ttl: None,
         prompt_cache_key: None,
         resolved_model: catalog::resolve(BackendKind::ArceeApi, "test-model"),
+        stored_login_pin: None,
     };
 
     let error = client

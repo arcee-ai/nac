@@ -263,6 +263,13 @@ const EXPECTED_OPENAPI_OPERATIONS: &[(&str, &str)] = &[
     ("POST", "/sessions/{session_id}/questions/{request_id}/answer"),
     ("POST", "/sessions/{session_id}/questions/{request_id}/cancel"),
     ("POST", "/sessions/{session_id}/fork"),
+    ("POST", "/sessions/{session_id}/selection-questions"),
+    ("GET", "/sessions/{session_id}/selection-questions"),
+    ("GET", "/sessions/{session_id}/selection-questions/{question_id}"),
+    (
+        "POST",
+        "/sessions/{session_id}/selection-questions/{question_id}/cancel",
+    ),
     ("POST", "/sessions/{session_id}/regenerate"),
     ("POST", "/sessions/{session_id}/revert"),
     ("POST", "/sessions/{session_id}/user-commands"),

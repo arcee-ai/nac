@@ -276,7 +276,6 @@ pub(super) async fn build_resume_config_from_snapshot(
     };
     let paths = PathContext::new(&workspace_cwd);
     let stored_model = snapshot.model.clone();
-    let stored_base_url = snapshot.base_url.clone();
     let stored_reasoning_effort = snapshot.reasoning_effort;
     let metadata = resolved_metadata
         .unwrap_or_else(|| resolve_model_metadata(snapshot.backend, &stored_model));
@@ -287,27 +286,8 @@ pub(super) async fn build_resume_config_from_snapshot(
         }
     }
     let authoritative = metadata.source.is_authoritative();
-    let snapshot_settings = EffectiveModelSettings::new_with_resolved(
-        snapshot.backend,
-        stored_model.clone(),
-        stored_base_url.clone(),
-        snapshot.reasoning_effort,
-        snapshot.api_key_env.clone(),
-        snapshot.extra_headers.clone(),
-        metadata,
-        snapshot.allow_insecure_http,
-    )
-    .and_then(|settings| settings.with_trusted_api_key_file(model.trusted_api_key_file.clone()))
-    .map_err(|error| {
-        anyhow::anyhow!(
-            "stored session model settings are invalid; settings repair required: {error}"
-        )
-    })?;
-    if snapshot_settings.model != stored_model || snapshot_settings.base_url != stored_base_url {
-        anyhow::bail!(
-            "stored session model settings are invalid; settings repair required: model and base_url must be stored in normalized nonblank form"
-        );
-    }
+    let snapshot_settings =
+        stored_model_settings(&snapshot, metadata, model.trusted_api_key_file.clone())?;
     if persist_recovery && snapshot.reasoning_effort != stored_reasoning_effort && authoritative {
         let migration_lease;
         if let Some(lease) = operation_lease {
@@ -323,18 +303,7 @@ pub(super) async fn build_resume_config_from_snapshot(
             sessions::update_session_config(&store_path, &snapshot)?
         };
     }
-    let client = ModelClient::from_effective_settings(snapshot_settings.clone())
-        .map_err(|error| {
-            if error.downcast_ref::<ModelConfigurationError>().is_some() {
-                let message = format!(
-                    "stored session model settings are invalid; settings repair required: {error}"
-                );
-                error.context(message)
-            } else {
-                error
-            }
-        })?
-        .with_cache_ttl(Some("1h"));
+    let client = stored_model_client(snapshot_settings.clone())?.with_cache_ttl(Some("1h"));
     let light_client = if snapshot.behavior == sessions::SessionBehavior::Direct {
         // Keep this symmetric with fresh construction: ALL-36 owns any future
         // direct-session use. The durable selection is retained without
@@ -592,4 +561,69 @@ pub(super) fn normalize_snapshot_paths(
         }
     };
     Ok(snapshot)
+}
+
+/// Effective settings for a snapshot whose reasoning effort has already been
+/// mapped onto `metadata`. Resume and pinned one-off model calls share this
+/// exact validation so neither can accept settings the other would repair.
+fn stored_model_settings(
+    snapshot: &SessionSnapshot,
+    metadata: ModelMetadata,
+    trusted_api_key_file: Option<PathBuf>,
+) -> Result<EffectiveModelSettings> {
+    let settings = EffectiveModelSettings::new_with_resolved(
+        snapshot.backend,
+        snapshot.model.clone(),
+        snapshot.base_url.clone(),
+        snapshot.reasoning_effort,
+        snapshot.api_key_env.clone(),
+        snapshot.extra_headers.clone(),
+        metadata,
+        snapshot.allow_insecure_http,
+    )
+    .and_then(|settings| settings.with_trusted_api_key_file(trusted_api_key_file))
+    .map_err(|error| {
+        anyhow::anyhow!(
+            "stored session model settings are invalid; settings repair required: {error}"
+        )
+    })?;
+    if settings.model != snapshot.model || settings.base_url != snapshot.base_url {
+        anyhow::bail!(
+            "stored session model settings are invalid; settings repair required: model and base_url must be stored in normalized nonblank form"
+        );
+    }
+    Ok(settings)
+}
+
+fn stored_model_client(settings: EffectiveModelSettings) -> Result<ModelClient> {
+    ModelClient::from_effective_settings(settings).map_err(|error| {
+        if error.downcast_ref::<ModelConfigurationError>().is_some() {
+            let message = format!(
+                "stored session model settings are invalid; settings repair required: {error}"
+            );
+            error.context(message)
+        } else {
+            error
+        }
+    })
+}
+
+/// Build the session's primary model client from its stored snapshot exactly
+/// as resume does (catalog metadata, supported-effort mapping, credential
+/// selection), without persisting anything or touching the session lease.
+/// The returned client holds the credential resolved at this moment.
+pub(crate) fn pinned_session_model_client(
+    snapshot: &SessionSnapshot,
+    model: &ResumeModelOptions,
+) -> Result<ModelClient> {
+    let mut snapshot = snapshot.clone();
+    let metadata = resolve_model_metadata(snapshot.backend, &snapshot.model);
+    if let Some(effort) = snapshot.reasoning_effort {
+        if !metadata.thinking_level_map.is_supported(effort) {
+            snapshot.reasoning_effort =
+                metadata.thinking_level_map.closest_supported_effort(effort);
+        }
+    }
+    let settings = stored_model_settings(&snapshot, metadata, model.trusted_api_key_file.clone())?;
+    stored_model_client(settings)
 }

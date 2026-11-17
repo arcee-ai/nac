@@ -81,6 +81,7 @@ pub use model_resolution::{
 pub use prepared_session::{PreparedSessionResources, PreparedSessionRunConfig};
 pub use remote::{browse_ssh_directory, create_ssh_folder};
 use remote::{canonical_remote_session_cwd, remote_cwd_or_home, trim_ssh_host};
+pub(crate) use resume::pinned_session_model_client;
 pub use resume::{
     build_resume_config, build_resume_config_for_session,
     build_resume_config_for_session_attachment, build_resume_config_for_session_with_lease,

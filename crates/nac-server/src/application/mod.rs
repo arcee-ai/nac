@@ -11,6 +11,7 @@ pub(crate) mod persistence;
 pub(crate) mod project_folders;
 pub(crate) mod projects;
 pub(crate) mod request_validation;
+pub(crate) mod selection_questions;
 pub(crate) mod session_attachment;
 pub(crate) mod session_configuration;
 pub(crate) mod session_creation;

@@ -1092,6 +1092,8 @@ mod owned_serving;
 #[path = "tests/session_creation_overload.rs"]
 mod session_creation_overload;
 
+#[path = "tests/selection_questions.rs"]
+mod selection_questions;
 #[path = "tests/shell_commands.rs"]
 mod shell_commands;
 #[path = "tests/ssh_aliases.rs"]
