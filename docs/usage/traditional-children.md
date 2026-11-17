@@ -56,17 +56,31 @@ never sends automatically or replaces a newer draft.
 
 A foreground launch waits for the generation's structured outcome. A background
 launch returns its durable child ID immediately. When a background generation
-settles, NAC atomically queues one completion for the parent and wakes the
-parent if possible. The queue is the source of truth, so a process restart can
-reconcile an abandoned generation as interrupted and deliver its outcome once.
-Do not poll background children from the model; the completion arrives
-automatically.
+settles, NAC atomically records one completion in the parent's inbox, marked
+with the child and generation that produced it. If the parent has a run in
+progress, the completion is bound to that run and the model sees it at its next
+model boundary; the run is never interrupted. If the run ends before that
+boundary, or the parent is idle, the completion starts one follow-up run. The
+inbox is the source of truth, so a process restart can reconcile an abandoned
+generation as interrupted and deliver its outcome once. Do not poll background
+children from the model; the completion arrives automatically.
+
+Completions are not your messages: **Pending messages** lists only what you
+queued, with its steer/queue and **Cancel** controls, and shows a read-only
+count of subagent results still on their way. The inbox API reports each item's
+`origin` and refuses to change or cancel a delegated result. Text that merely
+looks like a completion is still your own editable message.
 The foreground result remains tied to that generation even if a subsequent
 generation has already started.
 
 Continuing a terminal child starts its next generation with the same immutable
 profile, description, parent, model/backend, and workspace. Sending a prompt to
-a running child steers that generation. A parent can have at most four running
+a running child steers that generation. The description is the label a child
+was launched with: a new child requires one, but continuing or steering an
+existing child may omit it (or pass `null`) and keeps the original. A
+continuation that passes a different description is rejected before the child
+runs, with a message naming the original label; repeating it exactly remains
+valid. An unknown or unowned child ID is reported only as not found. A parent can have at most four running
 children, and the nesting limit is one: children cannot launch grandchildren.
 Deleting a parent deletes its child sessions as well.
 

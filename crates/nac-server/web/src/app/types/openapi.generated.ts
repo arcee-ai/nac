@@ -297,6 +297,8 @@ export interface components {
       input_tokens_above: number;
       output: number;
     };
+    CreatedFolder: { path: string };
+    CreateFolderRequest: { name: string; parent: string };
     CreateGoalRequest: { objective: string; token_budget?: number | null };
     CreateInboxItemRequest: { delivery: components["schemas"]["InboxDelivery"]; prompt: string };
     CreateMcpServerRequest: {
@@ -369,6 +371,13 @@ export interface components {
     CreateSshConfigurationRequest: {
       name: string;
       ssh_host: string;
+      ssh_identity_file?: string | null;
+      ssh_port?: number | null;
+    };
+    CreateSshFolderRequest: {
+      name: string;
+      parent: string;
+      ssh_host?: string | null;
       ssh_identity_file?: string | null;
       ssh_port?: number | null;
     };
@@ -715,6 +724,7 @@ export interface components {
     );
     HeartbeatState: "active" | "paused" | "suspended" | "stopped" | "finished" | "deleted";
     InboxDelivery: "steer" | "queue";
+    InboxItemOrigin: "input" | "traditional_child" | "managed_orchestrator";
     InboxItemResponse: {
       cancelled_at?: string | null;
       client_id?: string | null;
@@ -723,6 +733,7 @@ export interface components {
       delivered_run_id?: string | null;
       delivery: components["schemas"]["InboxDelivery"];
       id: number;
+      origin: components["schemas"]["InboxItemOrigin"];
       prompt: string;
       session_id: string;
       status: components["schemas"]["InboxStatus"];
@@ -1761,7 +1772,7 @@ export interface components {
     StartTraditionalChildRequest: {
       background?: boolean;
       child_session_id?: string | null;
-      description: string;
+      description?: string | null;
       profile: string;
       prompt: string;
     };

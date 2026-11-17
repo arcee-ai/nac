@@ -1217,6 +1217,14 @@ test("converges concurrent required-first-chat tabs and refreshes deleted owners
     const secondSessionId = second.url().match(/\/session\/([^/]+)\//)?.[1];
     expect(firstSessionId).toBeTruthy();
     expect(secondSessionId).toBe(firstSessionId);
+    // The URL changes when the router starts its transition, before the chat
+    // screen commits. Until then the redirect page stays mounted, and returning
+    // to the project route below would reuse it without re-reading projects.
+    await showSidePanel(page);
+    await expect(page.getByRole("tab", { name: "Insights" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
 
     const sessions = await request.get(
       `${harness.baseUrl}/sessions?project_id=${encodeURIComponent(projectId)}`,
