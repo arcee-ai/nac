@@ -1,4 +1,4 @@
-/** How a goal's status reads in the header pill, the phone list and the goal drawer. */
+/** How a goal's status reads in the Session menu and the goal drawer. */
 const GOAL_STATUS: Record<string, string> = {
   active: "active",
   paused: "paused",

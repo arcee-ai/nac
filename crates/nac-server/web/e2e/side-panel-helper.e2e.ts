@@ -3,8 +3,9 @@ import { showSidePanel } from "./harness";
 
 // Exercise the helper against real locator actionability without starting NAC.
 // The fake mirrors Focus's session chrome: a closed drawer whose tabs are the
-// "Session panels" tablist, the header's "Session menu" holding an Insights
-// action, and ⌘\ (⌃\ off a Mac) docking the drawer where it fits.
+// "Session panels" tablist, the header's "Session menu" listing the panels
+// with something to say (Insights always, here also "Files +3"), and ⌘\ (⌃\
+// off a Mac) docking the drawer where it fits.
 async function closedPanel(page: Page, { opens = true, width = 1000 } = {}) {
   await page.setViewportSize({ width, height: 800 });
   await page.setContent(`
@@ -18,14 +19,21 @@ async function closedPanel(page: Page, { opens = true, width = 1000 } = {}) {
         document.querySelector('#insights-clicks').textContent++;
         ${opens ? "document.querySelector('#details').hidden = true; document.querySelector('#panels').hidden = false;" : ""}
       ">Insights</button>
+      <button id="files" onclick="
+        document.querySelector('#files-clicks').textContent++;
+        document.querySelector('#details').hidden = true;
+        document.querySelector('#panels').hidden = false;
+        document.querySelector('#files-tab').setAttribute('aria-selected', 'true');
+      "><span>Files</span> <span>+3</span></button>
     </div>
     <div id="panels" role="tablist" aria-label="Session panels" hidden>
       <button role="tab" aria-selected="true">Insights</button>
-      <button role="tab" aria-selected="false">Files</button>
+      <button id="files-tab" role="tab" aria-selected="false">Files</button>
     </div>
     <div data-testid="hydrate" hidden>Restore saved panel</div>
     <output id="menu-clicks">0</output>
     <output id="insights-clicks">0</output>
+    <output id="files-clicks">0</output>
     <output id="docks">0</output>
     <script>
       addEventListener("keydown", (event) => {
@@ -90,6 +98,16 @@ test("showSidePanel opens a closed drawer through the Session menu with ordinary
   await expect(page.locator("#menu-clicks")).toHaveText("1");
   await expect(page.locator("#insights-clicks")).toHaveText("1");
   await expect(page.locator("#docks")).toHaveText("0");
+});
+
+test("showSidePanel opens the route's panel from its own Session menu row", async ({ page }) => {
+  await closedPanel(page);
+  await page.evaluate(() => (location.hash = "#/session/s1/files"));
+  await showSidePanel(page);
+  await expect(panels(page)).toBeVisible();
+  await expect(page.locator("#files-tab")).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator("#files-clicks")).toHaveText("1");
+  await expect(page.locator("#insights-clicks")).toHaveText("0");
 });
 
 test("showSidePanel docks a closed drawer with one keystroke where it fits", async ({ page }) => {

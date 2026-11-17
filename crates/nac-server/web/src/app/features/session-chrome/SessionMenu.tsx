@@ -1,4 +1,4 @@
-import { useContext, useState, type ReactNode } from "react";
+import { useContext, useId, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { Icon, IconName, Popover, PopoverPlacement, Tooltip, TooltipPosition } from "@/app/atoms";
@@ -8,7 +8,11 @@ import { SessionUsageReadings } from "@/app/components/inspector/SessionUsage";
 import { TranscriptModelContext } from "@/app/components/inspector/transcript/TranscriptModelContext";
 import { PANEL_ICON } from "@/app/components/inspector/sessionPanelIcons";
 import { goalStatusLabel } from "@/app/features/session-chrome/goalStatus";
-import { ChangeCounts } from "@/app/features/session-chrome/HeaderPills";
+import {
+  sessionLiveFacts,
+  sessionPanelEntries,
+  type SessionPanelTarget,
+} from "@/app/features/session-chrome/sessionPanelEntries";
 import type { SessionDrawerControls } from "@/app/features/session-chrome/useSessionDrawer";
 import type { SessionFacts } from "@/app/features/session-chrome/useSessionFacts";
 import { useUsageReadings } from "@/app/features/session-chrome/useUsageReadings";
@@ -17,7 +21,7 @@ import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
-import { routes, SESSION_PANEL_LABEL, type SessionPanel } from "@/app/lib/routes";
+import { routes, SESSION_PANEL_LABEL } from "@/app/lib/routes";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
 import { useToast } from "@/app/providers/ToastProvider";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
@@ -31,17 +35,53 @@ const BEHAVIOR_LABEL: Record<NonNullable<SessionFacts["behavior"]>, string> = {
   orchestrator: "Orchestrator",
 };
 
-/** Phone panel rows, in the order the spec lists them. */
-const PHONE_ORDER: readonly (SessionPanel | "goal")[] = [
-  "files",
-  "delegated",
-  "worksets",
-  "terminal",
-  "goal",
-  "heartbeats",
-  "insights",
-  "history",
-];
+/** "+12 −3", each half only when it has something to count. */
+export function ChangeCounts({ additions, deletions }: { additions: number; deletions: number }) {
+  return (
+    <span className="tabular flex items-center gap-1">
+      {additions ? <span className="text-[var(--f-green-text)]">+{additions}</span> : null}
+      {deletions ? <span className="text-[var(--f-red-text)]">−{deletions}</span> : null}
+    </span>
+  );
+}
+
+/** A small ink dot: something in the session is live. It pulses while work runs. */
+function LiveDot({ pulse, className }: { pulse: boolean; className?: string }) {
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        "size-1.5 shrink-0 rounded-pill bg-[var(--f-ink)]",
+        pulse && "status-dot-pulse",
+        className,
+      )}
+    />
+  );
+}
+
+/** A panel row's live fact, after its name: counts, a goal's state. */
+function panelDetail(target: SessionPanelTarget, facts: SessionFacts): ReactNode {
+  if (target === "files" && (facts.additions || facts.deletions))
+    return <ChangeCounts additions={facts.additions} deletions={facts.deletions} />;
+  if ((target === "delegated" || target === "worksets") && facts.agents?.panel === target) {
+    const { count, running } = facts.agents;
+    return (
+      <span className="tabular flex items-center gap-1.5">
+        {count}
+        {running > 0 ? (
+          <>
+            <LiveDot pulse />
+            <span className="sr-only">{`, ${running} running`}</span>
+          </>
+        ) : null}
+      </span>
+    );
+  }
+  if (target === "goal" && facts.goal) return goalStatusLabel(facts.goal.status);
+  if (target === "heartbeats" && facts.schedules)
+    return <span className="tabular">{facts.schedules}</span>;
+  return null;
+}
 
 function Section({ title, children }: { title?: string; children: ReactNode }) {
   return (
@@ -104,10 +144,11 @@ function ActionRow({
 }
 
 /**
- * The session's details and actions behind one ⋯: where it runs, its branch
- * and snapshot, usage, integrations, then settings, Insights, fork, rename
- * and delete. On a phone the same sheet first lists the session's panels,
- * because the header has room for only one button.
+ * Everything the session header used to spread across pills and ⋯, in one
+ * list: the session's panels with their live facts (a row opens the drawer on
+ * it), then where it runs, its branch and snapshot, integrations and usage,
+ * then settings, fork, rename and delete. The same content is a popover on a
+ * wide screen and a bottom sheet on a phone.
  */
 function SessionMenuContent({
   sessionId,
@@ -158,19 +199,7 @@ function SessionMenuContent({
     act();
   };
 
-  const panels = facts.policy?.mobilePanels ?? [];
-  const phoneRows = PHONE_ORDER.filter((name) =>
-    name === "goal" ? facts.goal != null : panels.includes(name),
-  );
-  const panelDetail = (name: SessionPanel | "goal"): ReactNode => {
-    if (name === "files" && (facts.additions || facts.deletions))
-      return <ChangeCounts additions={facts.additions} deletions={facts.deletions} />;
-    if ((name === "delegated" || name === "worksets") && facts.agents?.panel === name)
-      return `${facts.agents.count}${facts.agents.running ? ` · ${facts.agents.running} running` : ""}`;
-    if (name === "goal" && facts.goal) return goalStatusLabel(facts.goal.status);
-    if (name === "heartbeats" && facts.schedules) return String(facts.schedules);
-    return null;
-  };
+  const entries = sessionPanelEntries(facts, phone);
 
   const kind =
     facts.lineage?.kind === "managed-orchestrator"
@@ -186,18 +215,16 @@ function SessionMenuContent({
 
   return (
     <div className="flex flex-col">
-      {phone && phoneRows.length > 0 ? (
+      {entries.length > 0 ? (
         <Section title="Panels">
-          {phoneRows.map((name) => (
+          {entries.map((target) => (
             <ActionRow
-              key={name}
-              icon={name === "goal" ? IconName.Goal : PANEL_ICON[name]}
-              label={name === "goal" ? "Goal" : SESSION_PANEL_LABEL[name]}
-              detail={panelDetail(name)}
-              selected={drawer.showing(name)}
-              onClick={run(() =>
-                name === "goal" ? drawer.toggle("goal") : drawer.openPanel(name),
-              )}
+              key={target}
+              icon={target === "goal" ? IconName.Goal : PANEL_ICON[target]}
+              label={target === "goal" ? "Goal" : SESSION_PANEL_LABEL[target]}
+              detail={panelDetail(target, facts)}
+              selected={drawer.showing(target)}
+              onClick={run(() => drawer.show(target))}
             />
           ))}
         </Section>
@@ -251,14 +278,6 @@ function SessionMenuContent({
           label="Session settings"
           onClick={run(() => actions.settings(sessionId))}
         />
-        {phone ? null : (
-          <ActionRow
-            icon={PANEL_ICON.insights}
-            label="Insights"
-            selected={drawer.showing("insights")}
-            onClick={run(() => drawer.openPanel("insights"))}
-          />
-        )}
         {facts.readOnly ? null : (
           <ActionRow
             icon={IconName.FileCopy}
@@ -288,9 +307,12 @@ function SessionMenuContent({
 }
 
 /**
- * The trigger and its panel. Desktop: a 28px ⋯ chip at the end of the pills,
- * opening a popover. Phone: the header's one "panels" button, opening the
- * same content as a bottom sheet with the panel list on top.
+ * The session header's one control. Its accessible name stays "Session menu"
+ * on a wide screen ("Open panel" on a phone) whatever it shows; a small ink
+ * dot at its corner says something in the session's background is live
+ * (running subagents, an active goal, an armed schedule), and its description
+ * says what. Desktop: a 28px ⋯ chip opening a popover. Phone: a 44px button
+ * opening the same content as a bottom sheet.
  */
 export function SessionMenu(props: {
   sessionId: string;
@@ -302,36 +324,44 @@ export function SessionMenu(props: {
   const phone = useIsMobile();
   const [open, setOpen] = useState(false);
   const close = () => setOpen(false);
-  const trigger = phone ? (
+  const live = sessionLiveFacts(props.facts);
+  const describedBy = useId();
+  const pulse = (props.facts.agents?.running ?? 0) > 0;
+  const dot =
+    live.length > 0 ? (
+      <LiveDot
+        pulse={pulse}
+        className={cn("absolute", phone ? "top-2.5 right-2.5" : "top-0.5 right-0.5")}
+      />
+    ) : null;
+  const description =
+    live.length > 0 ? (
+      <span id={describedBy} className="sr-only">
+        {live.join(", ")}
+      </span>
+    ) : null;
+  const button = (
     <button
       type="button"
-      aria-label="Open panel"
+      aria-label={phone ? "Open panel" : "Session menu"}
+      aria-describedby={live.length > 0 ? describedBy : undefined}
       aria-haspopup="dialog"
       aria-expanded={open}
       onClick={() => setOpen(!open)}
-      className="flex size-11 items-center justify-center rounded-pill text-basic-secondary outline-none hover:bg-[var(--f-wash-2)] focus-visible:ring-2 focus-visible:ring-[var(--f-focus)]"
+      className={cn(
+        "relative flex items-center justify-center rounded-pill text-basic-secondary outline-none",
+        "transition-colors duration-150 ease-out motion-reduce:transition-none",
+        "hover:bg-[var(--f-wash-2)] hover:text-basic-primary focus-visible:ring-2 focus-visible:ring-[var(--f-focus)]",
+        phone ? "size-11" : "size-7",
+        open && "bg-[var(--f-wash-3)] text-basic-primary",
+      )}
     >
-      <Icon iconName={IconName.MenuHorizontal} />
+      <Icon iconName={IconName.MenuHorizontal} size={phone ? 20 : 16} />
+      {dot}
+      {description}
     </button>
-  ) : (
-    <Tooltip title="Session details and actions" position={TooltipPosition.BottomLeft}>
-      <button
-        type="button"
-        aria-label="Session menu"
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        onClick={() => setOpen(!open)}
-        className={cn(
-          "flex size-7 items-center justify-center rounded-pill text-basic-secondary outline-none",
-          "transition-colors duration-150 ease-out hover:bg-[var(--f-wash-2)] hover:text-basic-primary",
-          "focus-visible:ring-2 focus-visible:ring-[var(--f-focus)]",
-          open && "bg-[var(--f-wash-3)] text-basic-primary",
-        )}
-      >
-        <Icon iconName={IconName.MenuHorizontal} size={16} />
-      </button>
-    </Tooltip>
   );
+  const tooltip = ["Panels, details and actions", ...live].join(" · ");
   return (
     <Popover
       open={open}
@@ -341,10 +371,17 @@ export function SessionMenu(props: {
       placement={PopoverPlacement.BottomLeft}
       size="w-[320px]"
       className="shrink-0"
+      panelClassName="max-h-(--radix-popover-content-available-height) overflow-y-auto"
       sheetClassName="px-2"
       content={<SessionMenuContent {...props} phone={phone} close={close} />}
     >
-      {trigger}
+      {phone ? (
+        button
+      ) : (
+        <Tooltip title={tooltip} position={TooltipPosition.BottomLeft}>
+          {button}
+        </Tooltip>
+      )}
     </Popover>
   );
 }

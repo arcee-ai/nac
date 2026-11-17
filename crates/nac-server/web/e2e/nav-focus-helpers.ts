@@ -18,6 +18,36 @@ export async function openPhoneMenu(page: Page): Promise<Locator> {
   return menu;
 }
 
+/**
+ * A session row's actions live in one "⋯" menu named "<title> options" (the
+ * sidebar and the phone Menu share it). Returns that trigger, scoped to the
+ * navigation surface, and the menu it opens: a panel on wider screens, a bottom
+ * sheet on phones, portalled to the overlay layer either way.
+ */
+export function sessionRowMenu(scope: Locator, page: Page | Locator, title: string) {
+  return {
+    trigger: scope.getByRole("button", { name: `${title} options`, exact: true }).first(),
+    menu: page.getByRole("menu", { name: `${title} options`, exact: true }),
+  };
+}
+
+/**
+ * Opens a session row's "⋯" menu and returns one of its items ("Rename <title>",
+ * "Pin <title>", "Delete <title>", "View full name", "Move to project").
+ */
+export async function openSessionRowAction(
+  scope: Locator,
+  page: Page | Locator,
+  title: string,
+  item: string,
+): Promise<{ trigger: Locator; menu: Locator; action: Locator }> {
+  const { trigger, menu } = sessionRowMenu(scope, page, title);
+  // A closing phone sheet stays in the DOM for its exit; ask the trigger instead.
+  if ((await trigger.getAttribute("aria-expanded")) !== "true") await trigger.click();
+  await expect(menu).toBeVisible();
+  return { trigger, menu, action: menu.getByRole("menuitem", { name: item, exact: true }) };
+}
+
 /** Shows the desktop sidebar when it is collapsed (narrow widths start hidden). */
 export async function showSidebar(page: Page): Promise<Locator> {
   const expand = page.getByRole("button", { name: "Show sidebar", exact: true });
@@ -95,26 +125,20 @@ async function isPhoneWidth(page: Page): Promise<boolean> {
 
 /**
  * Opens a session panel by its label ("Insights", "Subagents", "Files"…) and
- * returns its drawer (desktop) or sheet (phone). Desktop uses the header pill
- * that names the panel ("Subagents: 1 agent") or the session menu's entry.
+ * returns its drawer (desktop) or sheet (phone). Desktop opens the header's
+ * single Session menu and picks the panel's row ("Subagents 1", "Insights").
  */
 export async function openSessionPanel(page: Page, label: string): Promise<Locator> {
   if (await isPhoneWidth(page)) return openPhonePanel(page, label);
   const panel = page.getByRole("dialog", { name: label, exact: true });
   if (await panel.isVisible()) return panel;
-  if (label === "Insights") {
-    await page.getByRole("button", { name: "Session menu", exact: true }).click();
-    await page
-      .getByRole("dialog", { name: "Session", exact: true })
-      .getByRole("button", { name: "Insights", exact: true })
-      .click();
-  } else {
-    // Pills render once their data lands.
-    await page
-      .getByRole("button", { name: new RegExp(`^${escapeRegExp(label)}:`) })
-      .first()
-      .click();
-  }
+  await page.getByRole("button", { name: "Session menu", exact: true }).click();
+  // Rows render once their data lands; a row may carry its live fact after the name.
+  await page
+    .getByRole("dialog", { name: "Session", exact: true })
+    .getByRole("button", { name: new RegExp(`^${escapeRegExp(label)}(?![A-Za-z])`) })
+    .first()
+    .click();
   await expect(panel).toBeVisible();
   return panel;
 }

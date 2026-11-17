@@ -952,11 +952,13 @@ export async function waitForPanelSettled(surface: Locator) {
  * first re-observes the tablist. Where the drawer can dock (≥1280px) the
  * documented ⌘\ docks it beside the chat on the route's own panel — the
  * equivalent of the old column, leaving the conversation usable. Narrower, the
- * header chip for the route's panel opens the floating drawer on it; without
- * one, the Session menu's Insights action opens the floating drawer and the
- * route's panel tab is selected again. No path ever closes an open drawer.
- * `dock: false` always takes the floating drawer — for journeys that resize
- * across the docking width, where the app moves the panel between surfaces.
+ * header's one control, the Session menu, lists the panels: its row for the
+ * route's panel opens the floating drawer on it directly; a panel the menu
+ * does not list (it lists only those with something to say) is reached through
+ * its Insights row and then the drawer's tab. No path ever closes an open
+ * drawer. `dock: false` always takes the floating drawer — for journeys that
+ * resize across the docking width, where the app moves the panel between
+ * surfaces.
  */
 export async function showSidePanel(page: Page, { dock = true }: { dock?: boolean } = {}) {
   const open = page.getByRole("tablist", { name: "Session panels", exact: true });
@@ -964,7 +966,6 @@ export async function showSidePanel(page: Page, { dock = true }: { dock?: boolea
   const details = page.getByRole("dialog", { name: "Session", exact: true });
   await expect(menu.or(open).first()).toBeVisible();
   const label = routePanelLabel(page.url());
-  const pill = label ? headerPill(page, label) : null;
   await expect(async () => {
     const { state, detail } = await drawerDiagnosis(open);
     // A drawer that is sliding in or out decides nothing yet.
@@ -974,40 +975,29 @@ export async function showSidePanel(page: Page, { dock = true }: { dock?: boolea
       dock && (await page.evaluate("matchMedia('(min-width: 1280px)').matches")) === true;
     if (dockable) {
       await page.keyboard.press(`${await appModifier(page)}+Backslash`);
-    } else if (pill && (await pill.isVisible())) {
-      // The header's own chip for the route's panel opens the floating drawer
-      // on it directly, without passing through another panel.
-      await pill.click({ timeout: 1_000 });
     } else {
       // Hydrating an open preference may detach the menu between the read and
       // click; yield to the outer retry so it can observe the open drawer.
       if (!(await details.isVisible())) await menu.click({ timeout: 1_000 });
-      await details
-        .getByRole("button", { name: "Insights", exact: true })
-        .click({ timeout: 1_000 });
+      await expect(details).toBeVisible({ timeout: 1_000 });
+      const row = sessionMenuPanel(details, label ?? "Insights");
+      const direct = label != null && (await row.count()) > 0;
+      await (direct ? row : sessionMenuPanel(details, "Insights")).click({ timeout: 1_000 });
       await expect(open).toBeVisible({ timeout: 2_000 });
       const tab = open.getByRole("tab", { name: label ?? "Insights", exact: true });
-      if (label && label !== "Insights" && (await tab.count()) > 0)
+      if (!direct && label && label !== "Insights" && (await tab.count()) > 0)
         await tab.click({ timeout: 1_000 });
     }
     await expect.poll(() => drawerState(open), { timeout: 2_000 }).toBe("open");
   }).toPass();
 }
 
-/** Header chips name their panel and, after a colon, what they count. */
-const PILL_NAMES: Record<string, RegExp> = {
-  Files: /^Files: /,
-  Subagents: /^Subagents: /,
-  Worksets: /^Threads: /,
-  Terminal: /^Terminal$/,
-  Heartbeats: /^Heartbeats: /,
-};
-
-/** The session header's chip for a panel; it renders only while it has something to say. */
-function headerPill(page: Page, label: string): Locator | null {
-  const name = PILL_NAMES[label];
-  if (!name) return null;
-  return page.getByRole("button", { name }).and(page.locator("[aria-expanded]")).first();
+/**
+ * The Session menu's row for a panel. Rows are named by the panel, with its
+ * live fact after the name ("Files +12 −3", "Subagents 2, 1 running").
+ */
+function sessionMenuPanel(menu: Locator, label: string): Locator {
+  return menu.getByRole("button", { name: new RegExp(`^${label}(?![A-Za-z])`) }).first();
 }
 
 /**
@@ -1091,11 +1081,8 @@ export async function showPhonePanel(page: Page, label: string) {
   const details = page.getByRole("dialog", { name: "Session", exact: true });
   if (!(await details.isVisible()))
     await page.getByRole("button", { name: "Open panel", exact: true }).click();
-  // A row's name carries its count ("Subagents 2 · 1 running").
-  await details
-    .getByRole("button", { name: new RegExp(`^${label}(?:\\s|$)`) })
-    .first()
-    .click();
+  // A row's name carries its count ("Subagents 2, 1 running").
+  await sessionMenuPanel(details, label).click();
   await expect(sheet).toBeVisible();
   await waitForPanelSettled(sheet);
   return sheet;

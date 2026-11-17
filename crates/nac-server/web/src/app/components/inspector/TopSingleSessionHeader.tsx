@@ -5,7 +5,6 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { Icon, IconName, StatusDot } from "@/app/atoms";
-import { HeaderPills } from "@/app/features/session-chrome/HeaderPills";
 import { SessionMenu } from "@/app/features/session-chrome/SessionMenu";
 import { useSessionDrawer } from "@/app/features/session-chrome/useSessionDrawer";
 import { useSessionFacts, type SessionFacts } from "@/app/features/session-chrome/useSessionFacts";
@@ -105,9 +104,9 @@ function TitleBlock({
 
 /**
  * The session header: 52px, quiet, one row. The title with its status dot and
- * one muted line of where it runs; then only the pills that have something to
- * say, and ⋯ for the rest. On a phone it is the screen's own top bar: back,
- * title, and one button for every panel and action.
+ * one muted line of where it runs; then one control, the Session menu, for
+ * every panel, detail and action (a dot on it when something is live). On a
+ * phone it is the screen's own top bar: back, title, and that same control.
  */
 export function TopSingleSessionHeader({
   sessionId,
@@ -190,12 +189,7 @@ export function TopSingleSessionHeader({
         ) : null}
         <TitleBlock sessionId={sessionId} facts={facts} compact={false} />
       </div>
-      {/* The pills fade in as their data lands, in their own end-aligned slot,
-          so the title never moves when one appears. */}
-      <div className="flex shrink-0 items-center gap-1">
-        <HeaderPills facts={facts} drawer={drawer} />
-        {menu}
-      </div>
+      {menu}
     </header>
   );
 }
