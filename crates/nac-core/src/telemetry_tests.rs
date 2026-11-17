@@ -34,6 +34,48 @@ fn wait_for_events(exporter: &InMemoryExporter, count: usize) -> Vec<TelemetryEv
 }
 
 #[test]
+fn terminal_settlement_activity_reports_real_overlap_and_retires() {
+    let _lock = telemetry_test_lock();
+    let exporter = Arc::new(InMemoryExporter::default());
+    let recorder = TelemetryRecorder::bounded(exporter.clone(), runtime(), 256);
+    let _guard = install_test_recorder(recorder.clone());
+    let barrier = Arc::new(Barrier::new(3));
+    std::thread::scope(|scope| {
+        for _ in 0..2 {
+            let barrier = Arc::clone(&barrier);
+            scope.spawn(move || {
+                let _member = register_test_recorder_thread();
+                observe_store(
+                    StoreOperation::TerminalSettlement,
+                    Correlation::default(),
+                    || {
+                        barrier.wait();
+                        barrier.wait();
+                        Ok(())
+                    },
+                )
+                .unwrap();
+            });
+        }
+        barrier.wait();
+        barrier.wait();
+    });
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while recorder.stats().exported < recorder.stats().accepted {
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let values: Vec<_> = exporter
+        .events()
+        .into_iter()
+        .filter(|event| event.name == TelemetryName::TerminalSettlementActive)
+        .filter_map(|event| event.value)
+        .collect();
+    assert!(values.contains(&2));
+    assert!(values.contains(&0));
+}
+
+#[test]
 fn in_memory_exporter_redacts_content_and_correlates_four_orchestrators() {
     let _lock = telemetry_test_lock();
     let exporter = Arc::new(InMemoryExporter::default());

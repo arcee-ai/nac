@@ -90,6 +90,7 @@ transaction results, schema, connection limits, or shutdown budgets.
 | --- | --- | --- | --- |
 | `nac.store.operation.duration` | span | operation, outcome, engine, error codes | `nac-core::store` |
 | `nac.store.connection.active` | gauge | process/store scope, engine | `nac-core::store::schema` |
+| `nac.store.terminal_settlement.active` | gauge | engine | `nac-core::telemetry` observed in-flight terminal settlements |
 | `nac.persistence.queue.active` | gauge | engine | `nac-core::telemetry` observed in-flight persistence operations |
 | `nac.runtime.activity.active` | gauge | orchestrator/worker/direct/child-process | `nac-core::agent` and process call sites |
 | `nac.runtime.child_process` | diagnostic | started/stopped; PID as a non-series field | `nac-core` process call sites |
@@ -109,8 +110,9 @@ subprocesses, including those launched by native tools.
   `readiness` for SQLite access and probes;
 - `transcript_append`, `event_persistence`, and `worker_episode_commit` for
   durable execution history;
-- `managed_monitor_poll`, `recovery`, and `terminal_settlement` for managed
-  lifecycle attribution.
+- `managed_monitor_poll`, `recovery`, and `terminal_settlement` for lifecycle
+  attribution; terminal settlement covers both traditional children and
+  managed orchestrators.
 
 Every event includes bounded build ID, source revision, store engine, journal
 mode, and schema version. Managed server events also include the host digest.

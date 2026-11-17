@@ -43,6 +43,8 @@ pub enum TelemetryName {
     StoreConnectionActive,
     #[serde(rename = "nac.persistence.queue.active")]
     PersistenceQueueActive,
+    #[serde(rename = "nac.store.terminal_settlement.active")]
+    TerminalSettlementActive,
     #[serde(rename = "nac.persistence.queue.depth")]
     PersistenceQueueDepth,
     #[serde(rename = "nac.persistence.queue.capacity")]
@@ -71,6 +73,7 @@ impl TelemetryName {
             Self::StoreOperationDuration => "nac.store.operation.duration",
             Self::StoreConnectionActive => "nac.store.connection.active",
             Self::PersistenceQueueActive => "nac.persistence.queue.active",
+            Self::TerminalSettlementActive => "nac.store.terminal_settlement.active",
             Self::PersistenceQueueDepth => "nac.persistence.queue.depth",
             Self::PersistenceQueueCapacity => "nac.persistence.queue.capacity",
             Self::PersistenceExecutorActive => "nac.persistence.executor.active",
@@ -577,6 +580,8 @@ pub fn observe_store<T>(
     let started = Instant::now();
     let _scope = StoreCorrelationScope::push(correlation.clone());
     let _queue = PersistenceActivityGuard::start(correlation.clone());
+    let _settlement = (operation == StoreOperation::TerminalSettlement)
+        .then(|| SettlementActivityGuard::start(correlation.clone()));
     let result = action();
     let error = result
         .as_ref()
@@ -719,10 +724,38 @@ pub fn emit_connection_counts(process: usize, store: usize, correlation: Correla
 }
 
 static ACTIVE_PERSISTENCE: AtomicUsize = AtomicUsize::new(0);
+static ACTIVE_TERMINAL_SETTLEMENTS: AtomicUsize = AtomicUsize::new(0);
 static ACTIVE_ORCHESTRATORS: AtomicUsize = AtomicUsize::new(0);
 static ACTIVE_WORKERS: AtomicUsize = AtomicUsize::new(0);
 static ACTIVE_DIRECT: AtomicUsize = AtomicUsize::new(0);
 static ACTIVE_CHILD_PROCESSES: AtomicUsize = AtomicUsize::new(0);
+
+struct SettlementActivityGuard(Correlation);
+
+impl SettlementActivityGuard {
+    fn start(correlation: Correlation) -> Self {
+        let active = ACTIVE_TERMINAL_SETTLEMENTS.fetch_add(1, Ordering::Relaxed) + 1;
+        emit_active(
+            TelemetryName::TerminalSettlementActive,
+            None,
+            active,
+            &correlation,
+        );
+        Self(correlation)
+    }
+}
+
+impl Drop for SettlementActivityGuard {
+    fn drop(&mut self) {
+        let active = ACTIVE_TERMINAL_SETTLEMENTS.fetch_sub(1, Ordering::Relaxed) - 1;
+        emit_active(
+            TelemetryName::TerminalSettlementActive,
+            None,
+            active,
+            &self.0,
+        );
+    }
+}
 
 struct PersistenceActivityGuard {
     correlation: Correlation,
