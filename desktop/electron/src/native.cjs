@@ -61,6 +61,24 @@ function createNativeAdapters({
     targetFlight.resolve(outcome);
     targetFlight = null;
   };
+  const dispatchTarget = () => {
+    const flight = targetFlight;
+    if (!flight || flight.sent || !flight.state.targetReady) return;
+    if (
+      !current(flight.state) ||
+      !flight.state.uiReady ||
+      !workspaceVisible(window, app) ||
+      !window.isFocused() ||
+      picker ||
+      commandFlight
+    ) {
+      clearTarget("unavailable");
+      return;
+    }
+    flight.sent = true;
+    flight.generation = flight.state.targetGeneration;
+    send("session_target", { targetMessage: flight.message }, flight.state);
+  };
   const originMatches = (url) => {
     try {
       return new URL(url).origin === origin;
@@ -160,6 +178,8 @@ function createNativeAdapters({
         directorySequence: 0,
         externalSequence: 0,
         storageSequence: 0,
+        targetReady: false,
+        targetGeneration: 0,
         storageDocument: { launch: incarnation, view: randomUUID(), document: message.nonce },
       };
       send("challenge", { challenge: document.challenge });
@@ -212,6 +232,25 @@ function createNativeAdapters({
     }
     if (!current(state)) return;
     switch (message.kind) {
+      case "session_target_ready":
+      case "session_target_retired":
+        if (
+          !exact(message, [...common, "generation"]) ||
+          !integer(message.generation) ||
+          message.generation < state.targetGeneration ||
+          (message.kind === "session_target_ready" && message.generation === state.targetGeneration)
+        )
+          break;
+        state.targetGeneration = message.generation;
+        state.targetReady = message.kind === "session_target_ready";
+        if (
+          targetFlight?.state === state &&
+          targetFlight.sent &&
+          (!state.targetReady || targetFlight.generation !== state.targetGeneration)
+        )
+          clearTarget("stale");
+        else dispatchTarget();
+        break;
       case "storage": {
         if (!storage || !exact(message, [...common, "operation"])) break;
         const operation = message.operation;
@@ -280,6 +319,9 @@ function createNativeAdapters({
         if (
           exact(message, [...common, "request", "outcome"]) &&
           targetFlight?.state === state &&
+          targetFlight.sent &&
+          targetFlight.generation === state.targetGeneration &&
+          state.targetReady &&
           targetFlight.request === message.request &&
           ["opened", "deferred", "unavailable", "stale"].includes(message.outcome)
         )
@@ -392,21 +434,25 @@ function createNativeAdapters({
       const number = ++request;
       return new Promise((resolve) => {
         const timer = setTimeout(() => clearTarget("unavailable"), 3000);
-        targetFlight = { state, request: number, resolve, timer };
-        send(
-          "session_target",
-          {
-            targetMessage: {
-              version: 1,
-              request: number,
-              source: "notification-response",
-              profile: storage.profile.digest,
-              ...state.storageDocument,
-              target: { session_id: session, occurrence_id: occurrence },
-            },
-          },
+        // One original explicit click may wait for this document's React owner
+        // to register after reopen. No dispatched outcome is retried, and the
+        // same deadline bounds both initialization and the eventual ACK.
+        targetFlight = {
           state,
-        );
+          request: number,
+          resolve,
+          timer,
+          sent: false,
+          message: {
+            version: 1,
+            request: number,
+            source: "notification-response",
+            profile: storage.profile.digest,
+            ...state.storageDocument,
+            target: { session_id: session, occurrence_id: occurrence },
+          },
+        };
+        dispatchTarget();
       });
     },
     command(action) {
@@ -433,7 +479,10 @@ function createNativeAdapters({
       return true;
     },
     setVisible(visible) {
-      if (!visible) cancelPending();
+      if (!visible) {
+        cancelPending();
+        clearTarget("stale");
+      }
       if (document && current(document)) send("visible", { visible: visible === true });
       onPresentation(visible === true && window.isFocused());
     },

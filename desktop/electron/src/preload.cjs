@@ -14,6 +14,7 @@ if (process.isMainFrame && origin && location.origin === origin && incarnation) 
     visibility = null,
     visible = true;
   let sessionTarget = null;
+  let targetGeneration = 0;
   let externalSequence = 0,
     composing = false;
   let storageBinding = null,
@@ -87,12 +88,20 @@ if (process.isMainFrame && origin && location.origin === origin && incarnation) 
       };
     },
     connectSessionTarget(callback) {
-      if (retired || sessionTarget || typeof callback !== "function")
+      if (
+        retired ||
+        sessionTarget ||
+        typeof callback !== "function" ||
+        targetGeneration >= 2147483647
+      )
         throw new Error("Session target unavailable");
-      const connection = { callback };
+      const connection = { callback, generation: ++targetGeneration };
       sessionTarget = connection;
+      if (active) send("session_target_ready", { generation: connection.generation });
       return () => {
-        if (sessionTarget === connection) sessionTarget = null;
+        if (sessionTarget !== connection) return;
+        sessionTarget = null;
+        send("session_target_retired", { generation: connection.generation });
       };
     },
     reportConnectionLost() {
@@ -201,6 +210,7 @@ if (process.isMainFrame && origin && location.origin === origin && incarnation) 
       visible = message.visible === true;
       visibility?.callback(visible);
       if (owner) send("ui_ready");
+      if (sessionTarget) send("session_target_ready", { generation: sessionTarget.generation });
     } else if (
       message.kind === "storage_open" &&
       active &&

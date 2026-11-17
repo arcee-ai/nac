@@ -55,10 +55,11 @@ function fixture() {
   });
   const send = (kind, extra = {}, event = { sender: contents, senderFrame: frame }) =>
     ipcMain.emit("nac:native", event, { version: 1, kind, nonce, incarnation, ...extra });
-  const ready = async () => {
+  const ready = async (targetReady = true) => {
     send("ready");
     send("bound", { challenge: messages.at(-1).challenge });
     send("ui_ready");
+    if (targetReady) send("session_target_ready", { generation: 1 });
     await Promise.resolve();
   };
   return {
@@ -137,5 +138,54 @@ test("disposed WebFrameMain accessors fail closed during queued visibility and l
   assert.doesNotThrow(() => f.send("ui_ready"));
   assert.equal(f.native.command("settings"), false);
   assert.equal(await f.native.sessionTarget("fixture", "occurrence"), "unavailable");
+  f.native.dispose();
+});
+
+test("one explicit click waits for its current target owner, while a deferred result is never replayed", async () => {
+  const f = fixture();
+  await f.ready(false);
+  const target = f.native.sessionTarget("fixture-session", "fixture-occurrence");
+  assert.equal(
+    f.messages.some((message) => message.kind === "session_target"),
+    false,
+  );
+  f.send("session_target_ready", { generation: 1 });
+  const request = f.messages.at(-1).targetMessage.request;
+  f.send("target_settled", { request, outcome: "deferred" });
+  assert.equal(await target, "deferred");
+  f.send("session_target_retired", { generation: 1 });
+  f.send("session_target_ready", { generation: 1 }); // retired owner cannot return
+  f.send("session_target_ready", { generation: 2 });
+  assert.equal(f.messages.filter((message) => message.kind === "session_target").length, 1);
+  f.native.dispose();
+});
+
+test("target initialization wait expires and retirement fences later owner readiness", async () => {
+  const f = fixture();
+  await f.ready(false);
+  assert.equal(
+    await f.native.sessionTarget("fixture-session", "fixture-occurrence"),
+    "unavailable",
+  );
+  f.send("session_target_ready", { generation: 1 });
+  assert.equal(
+    f.messages.some((message) => message.kind === "session_target"),
+    false,
+  );
+  f.send("session_target_retired", { generation: 1 });
+  const pending = f.native.sessionTarget("fixture-session", "fixture-occurrence");
+  f.native.setVisible(false);
+  assert.equal(await pending, "stale");
+  const retiringTarget = f.native.sessionTarget("fixture-session", "fixture-occurrence");
+  const retirement = f.native.retire();
+  f.send("retired", { closed: true });
+  await retirement;
+  // A waiting initialization has no authority after its document retires.
+  assert.equal(await retiringTarget, "stale");
+  f.send("session_target_ready", { generation: 2 });
+  assert.equal(
+    f.messages.some((message) => message.kind === "session_target"),
+    false,
+  );
   f.native.dispose();
 });
