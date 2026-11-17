@@ -58,11 +58,9 @@ extension WorkspaceSmoke {
             _ = try await self.js("window.__wkReloading = true; return true;")
             self.app.webView.reload()
             try await self.waitJS("fresh delegated projection after fixture setup", "return !window.__wkReloading && !!document.querySelector('[role=combobox][aria-label=Message]');")
-            // Panels open in the session drawer from the header's Subagents pill;
-            // docked (1280px) it sits beside the transcripts as the side column did.
-            try await self.waitJS("Subagents panel or pill", "return [...document.querySelectorAll('[role=tab][aria-label=\"Subagents\"][aria-selected=\"true\"]')].some(t => t.getClientRects().length) || !!document.querySelector('button[aria-label^=\"Subagents:\"]');")
-            _ = try await self.js("if (![...document.querySelectorAll('[role=tab][aria-label=\"Subagents\"][aria-selected=\"true\"]')].some(t => t.getClientRects().length)) document.querySelector('button[aria-label^=\"Subagents:\"][aria-expanded=\"false\"]')?.click(); return true;")
-            try await self.waitJS("Subagents drawer", "return [...document.querySelectorAll('[role=tab][aria-label=\"Subagents\"][aria-selected=\"true\"]')].some(t => t.getClientRects().length);")
+            // Panels open in the session drawer (the Session menu, then its
+            // Subagents tab); docked (1280px) it sits beside the transcripts.
+            try await self.drawerPanel("Subagents")
             if (try? await self.js("return !!document.querySelector('button[aria-label=\"Dock drawer\"]');")) as? Bool == true { try await self.button("Dock drawer") }
             for (title, targetID, prompt) in [("WK traditional child", childID, "WK_CHILD"), ("WK managed orchestrator", managedID, "WK_MANAGED")] {
                 try await self.button(title)

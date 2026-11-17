@@ -336,7 +336,7 @@ final class PreviewSmoke {
         try await waitJS("production Home composer", "const f = document.getElementById('home-composer'); return !!f && !f.disabled && [...f.labels].some(l => l.textContent.trim() === 'What should we work on?');")
         _ = try await js("""
         const input = document.getElementById('home-composer');
-        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input, 'MAC_PREVIEW_STREAM');
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input, '\(FixtureProvider.sessionStartPrompt)');
         input.dispatchEvent(new Event('input', {bubbles:true}));
         return true;
         """)
@@ -351,6 +351,10 @@ final class PreviewSmoke {
             throw PreviewError.message("UI did not create a direct fixture session: \(snapshot)")
         }
         evidence["behavior"] = "direct"
+        // That first run starts before the session page watches it, so the
+        // engine buffers it. Streaming is observed on the watched session.
+        try await waitJS("Home first-run response", "return document.body.innerText.includes('\(FixtureProvider.sessionStartAnswer)') && ![...document.querySelectorAll('button')].some(b => b.getAttribute('aria-label') === 'Stop run');")
+        try await sendPrompt("MAC_PREVIEW_STREAM")
         try await waitJS("incremental streamed response", "return __previewEvidence.partial;")
         try await waitJS("completed response", "return document.body.innerText.includes('Hello from the isolated NAC Mac preview.') && ![...document.querySelectorAll('button')].some(b => b.getAttribute('aria-label') === 'Stop run');")
         let assets = try await js(#"""
@@ -398,7 +402,7 @@ final class PreviewSmoke {
         }
         // Close with a real active run to exercise cancellation and server settlement.
         try await sendPrompt("MAC_PREVIEW_CLOSE_ACTIVE")
-        try await wait("second provider request") { self.app.provider.responseCount == 2 }
+        try await wait("third provider request") { self.app.provider.responseCount == 3 }
         evidence["close_with_active_run"] = true
     }
 
