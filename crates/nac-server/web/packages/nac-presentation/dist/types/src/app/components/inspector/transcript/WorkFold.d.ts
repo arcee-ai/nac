@@ -8,7 +8,7 @@ import { type WorkFold } from "./foldLayout";
  * wins over both. Failed steps and steps waiting for approval are never
  * folded away: they stay listed under the line whatever the fold says.
  */
-export declare const WorkFoldView: import("react").MemoExoticComponent<({ fold, turnKey, active, turnDurationMs, selectedGroupId, interactive, }: {
+export declare const WorkFoldView: import("react").MemoExoticComponent<({ fold, turnKey, active, turnDurationMs, selectedGroupId, interactive, liveLabel, runStartedAt, }: {
     fold: WorkFold;
     turnKey: string;
     /** The turn is still producing output. */
@@ -18,4 +18,6 @@ export declare const WorkFoldView: import("react").MemoExoticComponent<({ fold, 
     /** The Insights group the panels point at, if it is one of these. */
     selectedGroupId: string | null;
     interactive: boolean;
+    liveLabel?: string | null;
+    runStartedAt?: number | null;
 }) => import("react").JSX.Element>;

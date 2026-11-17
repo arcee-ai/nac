@@ -16,6 +16,133 @@ import {
 
 test.use({ orchestration: "0" });
 
+for (const traced of [false, true]) {
+  test(`live tool activity ${traced ? "with" : "without"} reasoning stays in one disclosure`, async ({
+    harness,
+    page,
+    request,
+  }) => {
+    const prompt = `Tool activity ${traced}`;
+    const callId = `activity-glob-${traced}`;
+    const gate = new ScriptGate();
+    harness.provider.enqueue(
+      prompt,
+      { token: prompt },
+      {
+        kind: "function_call",
+        name: "glob",
+        callId,
+        arguments: { pattern: "*.txt" },
+      },
+    );
+    harness.provider.enqueue(
+      `${prompt}-answer`,
+      { functionOutputCallId: callId },
+      {
+        kind: "text",
+        text: ANSWER,
+        reasoning: traced ? REASONING : "",
+        stream: true,
+      },
+      gate,
+    );
+    const id = await createDirectSession(request, harness);
+    await page.goto(`${harness.baseUrl}/#/session/${id}/files`);
+    await page.getByRole("combobox", { name: "Message" }).fill(prompt);
+    await page.getByRole("button", { name: "Send", exact: true }).click();
+    await gate.accepted;
+    try {
+      const fold = page.locator("[data-work-fold]");
+      await expect(fold).toHaveCount(1);
+      await expect(page.getByRole("status").filter({ hasText: "Thinking" })).toHaveCount(0);
+      await fold.getByRole("button").first().click();
+      await expect(fold.getByRole("list", { name: "Steps" })).toBeVisible();
+      if (traced) {
+        await fold.getByRole("button", { name: "Thinking…", exact: true }).click();
+        await expect(fold.getByText(REASONING.split("\n\n")[0], { exact: true })).toBeVisible();
+      }
+      gate.release();
+      await waitForRunIdle(request, harness, id);
+      await expect(page.getByText(ANSWER, { exact: true })).toBeVisible();
+      if (traced)
+        await expect(fold.getByText(REASONING.split("\n\n")[0], { exact: true })).toBeVisible();
+    } finally {
+      gate.release();
+    }
+  });
+}
+
+test("live activity distinguishes a readable trace from no-trace progress", async ({
+  harness,
+  page,
+  request,
+}, info) => {
+  await page.setViewportSize({ width: 390, height: 900 });
+  for (const traced of [false, true]) {
+    const gate = new ScriptGate();
+    const prompt = traced ? "Long inline activity" : "No trace progress";
+    const reasoning = Array.from({ length: 100 }, (_, i) => `Activity paragraph ${i}.`).join(
+      "\n\n",
+    );
+    harness.provider.enqueue(
+      prompt,
+      { token: prompt },
+      {
+        kind: "text",
+        text: ANSWER,
+        reasoning: traced ? reasoning : "",
+        stream: true,
+      },
+      gate,
+    );
+    const id = await createDirectSession(request, harness);
+    await page.goto(`${harness.baseUrl}/#/session/${id}/files`);
+    await page.getByRole("combobox", { name: "Message" }).fill(prompt);
+    await page.getByRole("button", { name: "Send", exact: true }).click();
+    await gate.accepted;
+    try {
+      if (!traced) {
+        await expect(page.locator("[data-work-fold]")).toHaveCount(0);
+        await expect(page.getByRole("status").filter({ hasText: "Thinking" })).toBeVisible();
+        await info.attach("live no-trace progress", {
+          body: await page.screenshot(),
+          contentType: "image/png",
+        });
+      } else {
+        const fold = page.locator("[data-work-fold]").first();
+        const toggle = fold.getByRole("button").first();
+        await expect(toggle).toHaveAttribute("aria-expanded", "false");
+        await toggle.focus();
+        await page.keyboard.press("Enter");
+        const thought = fold.getByRole("button", {
+          name: "Thinking…",
+          exact: true,
+        });
+        await thought.focus();
+        await page.keyboard.press("Space");
+        await expect(fold.getByText("Activity paragraph 0.", { exact: true })).toBeVisible();
+        await expect(page.getByRole("status").filter({ hasText: "Thinking" })).toHaveCount(0);
+        await info.attach("live long activity", {
+          body: await page.screenshot(),
+          contentType: "image/png",
+        });
+      }
+      gate.release();
+      await waitForRunIdle(request, harness, id);
+      if (traced) {
+        await expect(page.getByText("Activity paragraph 0.", { exact: true })).toBeVisible();
+        await page.reload();
+        const fold = page.locator("[data-work-fold]").first();
+        await fold.getByRole("button").first().click();
+        await fold.getByRole("button", { name: /^Thought/ }).click();
+        await expect(fold.getByText("Activity paragraph 99.", { exact: true })).toBeVisible();
+      }
+    } finally {
+      gate.release();
+    }
+  }
+});
+
 for (const width of [1440, 768, 390]) {
   test(`reasoning canary preserves reading choice at ${width}px`, async ({
     harness,
@@ -31,15 +158,23 @@ for (const width of [1440, 768, 390]) {
     const capture = async (state: string) => {
       await page.evaluate(() =>
         (
-          globalThis as unknown as { document: { fonts: { ready: Promise<unknown> } } }
+          globalThis as unknown as {
+            document: { fonts: { ready: Promise<unknown> } };
+          }
         ).document.fonts.ready.then(() => undefined),
       );
       const name = `${baseline ? "before" : "after"}-${width}-${state}.png`;
       const file = info.outputPath(name);
-      await page.screenshot({ path: file, animations: "disabled", caret: "hide" });
+      await page.screenshot({
+        path: file,
+        animations: "disabled",
+        caret: "hide",
+      });
       await info.attach(name, { path: file, contentType: "image/png" });
       if (process.env.NAC_REASONING_CAPTURE_DIR) {
-        await fs.mkdir(process.env.NAC_REASONING_CAPTURE_DIR, { recursive: true });
+        await fs.mkdir(process.env.NAC_REASONING_CAPTURE_DIR, {
+          recursive: true,
+        });
         await fs.copyFile(file, path.join(process.env.NAC_REASONING_CAPTURE_DIR, name));
       }
     };
@@ -63,7 +198,10 @@ for (const width of [1440, 768, 390]) {
       await expect(detail.getByText(REASONING.split("\n\n")[0], { exact: true })).toBeVisible();
       await capture("live");
       if (!baseline) {
-        const disclosure = detail.getByRole("button", { name: "Thinking…", exact: true });
+        const disclosure = detail.getByRole("button", {
+          name: "Thinking…",
+          exact: true,
+        });
         await expect(disclosure).toHaveAttribute("aria-expanded", "true");
         await disclosure.focus();
         await page.keyboard.press("Enter");
@@ -81,14 +219,19 @@ for (const width of [1440, 768, 390]) {
         await expect(settled).toBeFocused();
         if (width === 390) {
           const touch = await context.newCDPSession(page);
-          await touch.send("Emulation.setTouchEmulationEnabled", { enabled: true });
+          await touch.send("Emulation.setTouchEmulationEnabled", {
+            enabled: true,
+          });
           const target = await settled.boundingBox();
           for (const expanded of ["false", "true"]) {
             await touch.send("Input.dispatchTouchEvent", {
               type: "touchStart",
               touchPoints: [{ x: target!.x + 16, y: target!.y + 22 }],
             });
-            await touch.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+            await touch.send("Input.dispatchTouchEvent", {
+              type: "touchEnd",
+              touchPoints: [],
+            });
             await expect(settled).toHaveAttribute("aria-expanded", expanded);
           }
           await touch.detach();
@@ -222,7 +365,10 @@ test("empty reasoning stays absent and settled long reasoning has one scroll own
     ).toBe(true);
     const file = info.outputPath("after-390-long.png");
     await page.screenshot({ path: file, animations: "disabled" });
-    await info.attach("settled long reasoning", { path: file, contentType: "image/png" });
+    await info.attach("settled long reasoning", {
+      path: file,
+      contentType: "image/png",
+    });
   }
 });
 
@@ -297,7 +443,10 @@ for (const reading of ["open", "focus", "selection"] as const) {
     try {
       await openWorkInInsights(page);
       const detail = page.getByRole("region", { name: "Insights detail" });
-      const toggle = detail.getByRole("button", { name: "Thinking…", exact: true });
+      const toggle = detail.getByRole("button", {
+        name: "Thinking…",
+        exact: true,
+      });
       const link = detail.getByRole("link", { name: "Cache notes" });
       await expect(link).toBeVisible();
       if (reading === "open") {
@@ -316,7 +465,11 @@ for (const reading of ["open", "focus", "selection"] as const) {
         await expect
           .poll(() =>
             page.evaluate(() =>
-              (globalThis as unknown as { getSelection: () => { toString: () => string } })
+              (
+                globalThis as unknown as {
+                  getSelection: () => { toString: () => string };
+                }
+              )
                 .getSelection()
                 .toString(),
             ),
@@ -334,7 +487,11 @@ for (const reading of ["open", "focus", "selection"] as const) {
         await expect
           .poll(() =>
             page.evaluate(() =>
-              (globalThis as unknown as { getSelection: () => { toString: () => string } })
+              (
+                globalThis as unknown as {
+                  getSelection: () => { toString: () => string };
+                }
+              )
                 .getSelection()
                 .toString(),
             ),

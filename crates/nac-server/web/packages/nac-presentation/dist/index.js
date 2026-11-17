@@ -18558,47 +18558,47 @@ function iy(e) {
 		groupIds: [],
 		steps: []
 	}, n.push(r)), r);
-	return e.forEach((r, a) => {
-		if (r.kind === "group") {
-			let e = i(r.id);
-			e.groupIds.push(r.id);
-			for (let t of r.group.segments) e.steps.push({
+	return e.forEach((a, o) => {
+		if (a.kind === "group") {
+			let e = i(a.id);
+			e.groupIds.push(a.id);
+			for (let t of a.group.segments) e.steps.push({
 				kind: "segment",
 				key: t.key,
-				groupId: r.id,
+				groupId: a.id,
 				segment: t
 			});
 			return;
 		}
-		if (r.kind === "session") {
-			let t = e[a - 1], i = n.at(-1);
-			if (r.rowKey && t?.kind === "session" && t.rowKey === r.rowKey && t.action === r.action) {
+		if (a.kind === "session") {
+			let t = e[o - 1], i = n.at(-1);
+			if (a.rowKey && t?.kind === "session" && t.rowKey === a.rowKey && t.action === a.action) {
 				if (i?.kind === "session-group") {
-					i.entries.push(r);
+					i.entries.push(a);
 					return;
 				}
 				if (i?.kind === "session") {
 					n[n.length - 1] = {
 						kind: "session-group",
 						key: i.id,
-						entries: [i, r]
+						entries: [i, a]
 					};
 					return;
 				}
 			}
-			n.push(r);
+			n.push(a), r = null;
 			return;
 		}
-		let o = ry(r);
-		o && (o.kind === "text" && a < t && o.text.trim() ? i(o.key).steps.push({
+		let s = ry(a);
+		s && (s.kind === "text" && o < t && s.text.trim() ? i(s.key).steps.push({
 			kind: "note",
-			key: o.key,
-			text: o.text
-		}) : n.push({
+			key: s.key,
+			text: s.text
+		}) : (n.push({
 			kind: "block",
-			key: o.key,
-			block: o
-		}));
+			key: s.key,
+			block: s
+		}), s.kind === "wave" && (r = null)));
 	}), n;
 }
 function ay(e) {
@@ -19119,53 +19119,53 @@ var Zy = "group/row flex w-full min-w-0 items-center gap-2.5 rounded-md px-1.5 t
 			]
 		}) : null]
 	});
-}), tb = "outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus-outline)]", nb = so(function({ fold: e, turnKey: t, active: n, turnDurationMs: r, selectedGroupId: i, interactive: a }) {
-	let o = fo(), { useTranscriptDensity: s } = E().stores.transcriptDensityStore, c = s(), l = co(By), u = Ry(), d = JSON.stringify([
-		u,
+}), tb = "outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus-outline)]", nb = so(function({ fold: e, turnKey: t, active: n, turnDurationMs: r, selectedGroupId: i, interactive: a, liveLabel: o = null, runStartedAt: s = null }) {
+	let c = fo(), { useTranscriptDensity: l } = E().stores.transcriptDensityStore, u = l(), d = co(By), f = Ry(), p = JSON.stringify([
+		f,
 		t,
 		e.key
-	]), [f, p] = X(() => l?.get(d) ?? null), { openGroup: m } = Fh(), h = f ?? c === "detailed", g = J(() => ay(e), [e]), _ = n ? yy(g) : vy(g, r), v = J(() => e.steps.filter((e) => sy(e) === "failed").length, [e]), y = J(() => h ? [] : e.steps.filter((e) => oy(sy(e))), [e, h]), b = e.steps.flatMap((e) => e.kind === "segment" && e.segment.kind === "tool" && e.segment.presentation?.launchedTask ? [{
+	]), [m, h] = X(() => d?.get(p) ?? null), { openGroup: g } = Fh(), _ = m ?? u === "detailed", v = J(() => ay(e), [e]), y = my(v), b = n ? o ? `${o}${y ? ` · ${y}` : ""}` : yy(v) : vy(v, r), x = J(() => e.steps.filter((e) => sy(e) === "failed").length, [e]), S = J(() => _ ? [] : e.steps.filter((e) => oy(sy(e))), [e, _]), C = e.steps.flatMap((e) => e.kind === "segment" && e.segment.kind === "tool" && e.segment.presentation?.launchedTask ? [{
 		key: e.key,
 		groupId: e.groupId,
 		task: e.segment.presentation.launchedTask
-	}] : []), x = i !== null && e.groupIds.includes(i), S = e.groupIds[0];
+	}] : []), w = i !== null && e.groupIds.includes(i), T = e.groupIds[0];
 	return /* @__PURE__ */ $("div", {
 		className: "flex w-full min-w-0 flex-col",
 		"data-work-fold": !0,
 		children: [
-			/* @__PURE__ */ Q("div", {
+			/* @__PURE__ */ $("div", {
 				className: "flex min-w-0 items-center gap-2",
-				children: /* @__PURE__ */ $("button", {
+				children: [/* @__PURE__ */ $("button", {
 					type: "button",
-					"aria-expanded": h,
-					"aria-current": x ? "true" : void 0,
-					"aria-controls": h || y.length > 0 ? o : void 0,
+					"aria-expanded": _,
+					"aria-current": w ? "true" : void 0,
+					"aria-controls": _ || S.length > 0 ? c : void 0,
 					onClick: () => {
-						l?.set(d, !h), p(!h);
+						d?.set(p, !_), h(!_);
 					},
-					className: H("group/fold -ml-1.5 inline-flex h-8 min-w-0 max-w-full items-center gap-1.5 rounded-md px-1.5 max-md:min-h-11", "type-body-chrome transition-colors duration-150 ease-out hover:bg-[var(--f-wash-1)] hover:text-basic-primary", x ? "text-basic-primary" : "text-basic-tertiary", tb),
+					className: H("group/fold -ml-1.5 inline-flex h-8 min-w-0 max-w-full items-center gap-1.5 rounded-md px-1.5 max-md:min-h-11", "type-body-chrome transition-colors duration-150 ease-out hover:bg-[var(--f-wash-1)] hover:text-basic-primary", w ? "text-basic-primary" : "text-basic-tertiary", tb),
 					children: [/* @__PURE__ */ Q(L, {
 						iconName: U.Right,
 						size: 16,
 						"aria-hidden": !0,
-						className: H("shrink-0 !text-current transition-transform duration-150 ease-out motion-reduce:transition-none", h && "rotate-90")
+						className: H("shrink-0 !text-current transition-transform duration-150 ease-out motion-reduce:transition-none", _ && "rotate-90")
 					}), /* @__PURE__ */ $("span", {
 						className: "min-w-0 text-left max-md:line-clamp-2 md:truncate",
-						children: [_, v > 0 && !n ? /* @__PURE__ */ $("span", {
+						children: [b, x > 0 && !n ? /* @__PURE__ */ $("span", {
 							className: "text-error-primary",
 							children: [
 								" · ",
-								v,
+								x,
 								" failed"
 							]
 						}) : null]
 					})]
-				})
+				}), n && s != null && s > 0 ? /* @__PURE__ */ Q(by, { since: s }) : null]
 			}),
-			h ? /* @__PURE__ */ $("div", {
+			_ ? /* @__PURE__ */ $("div", {
 				className: "flex min-w-0 flex-col pt-1",
 				children: [/* @__PURE__ */ Q("ol", {
-					id: o,
+					id: c,
 					"aria-label": "Steps",
 					className: "ml-[6px] flex min-w-0 flex-col border-l border-tertiary pl-2",
 					children: e.steps.map((e) => /* @__PURE__ */ Q(eb, {
@@ -19173,12 +19173,12 @@ var Zy = "group/row flex w-full min-w-0 items-center gap-2.5 rounded-md px-1.5 t
 						streaming: n,
 						interactive: a
 					}, e.key))
-				}), a && S ? /* @__PURE__ */ Q("div", {
+				}), a && T ? /* @__PURE__ */ Q("div", {
 					className: "pl-[14px] pt-1",
 					children: /* @__PURE__ */ $("button", {
 						type: "button",
 						"aria-controls": Nh,
-						onClick: (e) => m(S, void 0, Fv(e)),
+						onClick: (e) => g(T, void 0, Fv(e)),
 						className: H("inline-flex h-7 items-center gap-1 rounded-pill px-2 type-meta text-basic-tertiary hover:bg-[var(--f-wash-1)] hover:text-basic-primary max-md:min-h-11", tb),
 						children: ["Open in Insights", /* @__PURE__ */ Q(L, {
 							iconName: U.External,
@@ -19187,19 +19187,19 @@ var Zy = "group/row flex w-full min-w-0 items-center gap-2.5 rounded-md px-1.5 t
 						})]
 					})
 				}) : null]
-			}) : y.length > 0 ? /* @__PURE__ */ Q("ol", {
-				id: o,
+			}) : S.length > 0 ? /* @__PURE__ */ Q("ol", {
+				id: c,
 				"aria-label": "Steps that need attention",
 				className: "ml-[6px] flex min-w-0 flex-col border-l border-tertiary pl-2 pt-1",
-				children: y.map((e) => /* @__PURE__ */ Q(eb, {
+				children: S.map((e) => /* @__PURE__ */ Q(eb, {
 					step: e,
 					streaming: n,
 					interactive: a
 				}, e.key))
 			}) : null,
-			a && b.length > 0 ? /* @__PURE__ */ Q("div", {
+			a && C.length > 0 ? /* @__PURE__ */ Q("div", {
 				className: "flex flex-col items-start gap-1 pt-2",
-				children: /* @__PURE__ */ Q(zy, { candidates: b })
+				children: /* @__PURE__ */ Q(zy, { candidates: C })
 			}) : null
 		]
 	});
@@ -20399,19 +20399,21 @@ function rS(e) {
 }
 var iS = so(function({ turn: e, previous: t, date: n, active: r, activity: i, runStartedAt: a = null, isLast: o = !1, selectedThreadEpisode: s, selectedGroupId: l = null, onSelectThread: u, userMessageIndex: d, userText: f = "", onRefresh: p = null, onRevert: m = null, onFork: h = null, forks: g = [], onOpenFork: _, onDismissFork: v, actionsDisabled: y = !1, readOnly: b = !1, snapshotRevision: x = null, filesPanel: S = null, interactive: C = !0 }) {
 	c("ModelMessage");
-	let w = J(() => Fx(e, t), [e, t]), T = J(() => iy(w) ?? rS(w), [w]), E = r && i === tS, D = !b && p != null && d != null, O = !b && m != null && d != null, k = e.messageIndex, ee = eS(e), A = e.blocks.some((e) => e.kind === "text" && e.text.trim() === "[run cancelled by user]"), j = r ? E ? tS : ky(w) ?? "Working…" : null;
+	let w = J(() => Fx(e, t), [e, t]), T = J(() => iy(w) ?? rS(w), [w]), E = r && i === tS, D = !b && p != null && d != null, O = !b && m != null && d != null, k = e.messageIndex, ee = eS(e), A = e.blocks.some((e) => e.kind === "text" && e.text.trim() === "[run cancelled by user]"), j = r ? E ? tS : ky(w) ?? "Working…" : null, te = T.reduce((e, t, n) => t.kind === "fold" ? n : e, -1), M = te >= 0, ne = T.filter((e) => e.kind === "fold").length;
 	return /* @__PURE__ */ $("div", {
 		"data-turn": "",
 		className: H("group/turn flex w-full min-w-0 max-w-full flex-col items-start gap-4 pt-2", o && "min-h-[calc(70vh-316px)]"),
 		children: [
-			T.map((t) => {
+			T.map((t, n) => {
 				if (t.kind === "fold") return /* @__PURE__ */ Q(nb, {
 					turnKey: e.key,
 					fold: t,
-					active: r,
-					turnDurationMs: e.durationMs,
+					active: r && n === te,
+					turnDurationMs: ne === 1 ? e.durationMs : null,
 					selectedGroupId: l,
-					interactive: C
+					interactive: C,
+					liveLabel: n === te ? j : null,
+					runStartedAt: a
 				}, t.key);
 				if (t.kind === "session" || t.kind === "session-group") {
 					let e = t.kind === "session" ? [t] : t.entries;
@@ -20423,17 +20425,17 @@ var iS = so(function({ turn: e, previous: t, date: n, active: r, activity: i, ru
 						})
 					}, e[0].id);
 				}
-				let { block: n } = t;
-				return n.kind === "wave" ? /* @__PURE__ */ Q(Bv, {
-					rows: n.rows,
+				let { block: i } = t;
+				return i.kind === "wave" ? /* @__PURE__ */ Q(Bv, {
+					rows: i.rows,
 					selected: s,
 					onSelect: C ? u : void 0
-				}, n.key) : n.text.trim() === "[run cancelled by user]" ? null : /* @__PURE__ */ Q(Ka, {
+				}, i.key) : i.text.trim() === "[run cancelled by user]" ? null : /* @__PURE__ */ Q(Ka, {
 					streaming: r,
 					taskReferences: C,
 					className: "transcript-prose [&>:first-child]:!mt-0 [&>:last-child]:!mb-0",
-					children: n.text
-				}, n.key);
+					children: i.text
+				}, i.key);
 			}),
 			!r && x && S ? /* @__PURE__ */ Q(kv, {
 				revision: x,
@@ -20453,10 +20455,10 @@ var iS = so(function({ turn: e, previous: t, date: n, active: r, activity: i, ru
 					onDismiss: v && e.deleted ? () => v(e.session_id) : void 0
 				}, e.session_id))
 			}) : null,
-			j ? /* @__PURE__ */ Q(xy, {
+			j && !M ? /* @__PURE__ */ Q(xy, {
 				label: j,
 				since: a
-			}) : /* @__PURE__ */ $("div", {
+			}) : r ? null : /* @__PURE__ */ $("div", {
 				className: H("-ml-1 -mt-2 flex h-8 w-full min-w-0 items-center gap-0.5 max-md:h-11", "transition-opacity duration-150 ease-out motion-reduce:transition-none", o ? "opacity-100" : "opacity-0 group-hover/turn:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100"),
 				children: [
 					/* @__PURE__ */ Q(mi, {

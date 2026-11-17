@@ -134,8 +134,26 @@ describe("work fold layout", () => {
       { kind: "block", block: { kind: "text", key: "t", text: "Hello" } },
     ]);
     expect(layout).toEqual([
-      { kind: "block", key: "t", block: { kind: "text", key: "t", text: "Hello" } },
+      {
+        kind: "block",
+        key: "t",
+        block: { kind: "text", key: "t", text: "Hello" },
+      },
     ]);
+  });
+
+  it("keeps activity after a thread wave after that wave", () => {
+    const group = (id: string, segment: InsightSegment): ModelTurnItem => ({
+      kind: "group",
+      id,
+      group: { id, segments: [segment], status: "ready", durationMs: null },
+    });
+    const layout = layoutModelTurn([
+      group("first", read("a", "a.ts")),
+      { kind: "block", block: { kind: "wave", key: "wave", rows: [] } },
+      group("second", run("b", "npm test")),
+    ]);
+    expect(layout.map((entry) => entry.kind)).toEqual(["fold", "block", "fold"]);
   });
 });
 

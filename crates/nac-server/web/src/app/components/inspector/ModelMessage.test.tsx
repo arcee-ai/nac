@@ -1,16 +1,107 @@
 /** @vitest-environment jsdom */
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ModelMessage } from "@/app/components/inspector/ModelMessage";
 import type { ModelTurn } from "@/app/lib/transcript";
+import { standaloneTranscriptDensityStore } from "@/app/store/transcriptDensityStore";
 
 vi.mock("@/app/hooks/useMediaQuery", () => ({ useIsMobile: () => false }));
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  standaloneTranscriptDensityStore.setTranscriptDensity("compact");
+});
 
 describe("transcript topology badge navigation", () => {
+  it("uses one live disclosure for reasoning and retains reader choices as it settles", () => {
+    const turn: ModelTurn = {
+      kind: "model",
+      key: "model-1",
+      durationMs: null,
+      messageIndex: 1,
+      blocks: [
+        {
+          kind: "thoughts",
+          key: "thoughts-0",
+          text: "First thought",
+          durationMs: null,
+          streaming: true,
+        },
+      ],
+    };
+    const props = {
+      model: "model",
+      selectedThreadEpisode: null,
+      onSelectThread: vi.fn(),
+    };
+    const view = render(<ModelMessage {...props} turn={turn} active />);
+    const fold = screen.getByRole("button", { name: "Thinking…" });
+    expect(screen.queryByRole("status")).toBeNull();
+    fireEvent.click(fold);
+    fireEvent.click(screen.getByRole("button", { name: "Thinking…", expanded: false }));
+    expect(screen.getByText("First thought")).toBeTruthy();
+    view.rerender(
+      <ModelMessage
+        {...props}
+        active={false}
+        turn={{
+          ...turn,
+          durationMs: 2000,
+          blocks: [
+            {
+              ...turn.blocks[0],
+              kind: "thoughts",
+              text: "First thought extended",
+              durationMs: null,
+              streaming: false,
+            },
+          ],
+        }}
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: "Thought for 2.0s" }).getAttribute("aria-expanded"),
+    ).toBe("true");
+    expect(screen.getByText("First thought extended")).toBeTruthy();
+  });
+
+  it("shows noninteractive progress without a trace and shares density with read-only turns", () => {
+    const props = {
+      model: "model",
+      selectedThreadEpisode: null,
+      onSelectThread: vi.fn(),
+      readOnly: true,
+      interactive: false,
+    };
+    const empty: ModelTurn = {
+      kind: "model",
+      key: "model-1",
+      durationMs: null,
+      messageIndex: 1,
+      blocks: [],
+    };
+    const view = render(<ModelMessage {...props} turn={empty} active />);
+    expect(screen.getByRole("status").textContent).toContain("Thinking");
+    expect(screen.queryByRole("button", { name: /Thinking/ })).toBeNull();
+    act(() => standaloneTranscriptDensityStore.setTranscriptDensity("detailed"));
+    const turn: ModelTurn = {
+      ...empty,
+      blocks: [{ kind: "tool", key: "tool-1", name: "read_file", pending: true }],
+    };
+    view.rerender(<ModelMessage {...props} turn={turn} active />);
+    const fold = screen.getByRole("button", { name: /Using read_file/ });
+    expect(fold.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(fold);
+    expect(fold.getAttribute("aria-expanded")).toBe("false");
+    act(() => {
+      standaloneTranscriptDensityStore.setTranscriptDensity("compact");
+      standaloneTranscriptDensityStore.setTranscriptDensity("detailed");
+    });
+    view.rerender(<ModelMessage {...props} turn={{ ...turn }} active />);
+    expect(fold.getAttribute("aria-expanded")).toBe("false");
+  });
   it("names destructive replay as regeneration from the original prompt", () => {
     const refresh = vi.fn();
     render(
@@ -43,7 +134,12 @@ describe("transcript topology badge navigation", () => {
       durationMs: 25,
       messageIndex: 1,
       blocks: [
-        { kind: "workset", key: "workset-1", worksetId: "release", pending: false },
+        {
+          kind: "workset",
+          key: "workset-1",
+          worksetId: "release",
+          pending: false,
+        },
         {
           kind: "wave",
           key: "wave-1",
@@ -74,14 +170,18 @@ describe("transcript topology badge navigation", () => {
       />,
     );
 
-    const fold = screen.getByRole("button", { name: "Worked for <1s · Defined 1 workset" });
+    const fold = screen.getByRole("button", {
+      name: "Worked for <1s · Defined 1 workset",
+    });
     expect(fold.getAttribute("aria-expanded")).toBe("false");
     fireEvent.click(fold);
     expect(fold.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByText("Defined workset")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: /api/i }));
-    expect(onSelectThread).toHaveBeenCalledWith("api", "api:0", { focusDetail: true });
+    expect(onSelectThread).toHaveBeenCalledWith("api", "api:0", {
+      focusDetail: true,
+    });
   });
 
   it("keeps parent-owned transcripts free of mutation affordances", () => {

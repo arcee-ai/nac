@@ -42,7 +42,7 @@ function blockOf(item: ModelTurnItem): ModelTurnBlock | null {
 
 /**
  * Lays a partitioned model turn out as the transcript shows it. Reasoning and
- * tool groups fold into one entry at the place the first of them appeared, and
+ * tool groups fold at the place the first of them appeared, and
  * so does prose the model wrote between them ("Let me look at the tests").
  * Launched sessions, thread waves and the prose after the last group stay in
  * the open, in their order: they are what the turn has to say.
@@ -66,7 +66,12 @@ export function layoutModelTurn(items: readonly ModelTurnItem[]): TurnLayoutItem
       const target = openFold(item.id);
       target.groupIds.push(item.id);
       for (const segment of item.group.segments) {
-        target.steps.push({ kind: "segment", key: segment.key, groupId: item.id, segment });
+        target.steps.push({
+          kind: "segment",
+          key: segment.key,
+          groupId: item.id,
+          segment,
+        });
       }
       return;
     }
@@ -95,15 +100,21 @@ export function layoutModelTurn(items: readonly ModelTurnItem[]): TurnLayoutItem
         }
       }
       layout.push(item);
+      fold = null;
       return;
     }
     const block = blockOf(item);
     if (!block) return;
     if (block.kind === "text" && index < lastGroup && block.text.trim()) {
-      openFold(block.key).steps.push({ kind: "note", key: block.key, text: block.text });
+      openFold(block.key).steps.push({
+        kind: "note",
+        key: block.key,
+        text: block.text,
+      });
       return;
     }
     layout.push({ kind: "block", key: block.key, block });
+    if (block.kind === "wave") fold = null;
   });
   return layout;
 }

@@ -1,3 +1,7 @@
+/** Ticks once a second, and only itself: nothing around it re-renders. */
+export declare const ElapsedClock: import("react").MemoExoticComponent<({ since }: {
+    since: number;
+}) => import("react").JSX.Element>;
 /**
  * The one line a running turn ends with: what it is doing right now, in a
  * shimmer, and how long the run has taken. It always takes the same height,

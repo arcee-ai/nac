@@ -18,9 +18,11 @@ import {
   liveFoldLabel,
   settledFoldLabel,
   stepStatus,
+  workSentence,
   type WorkFold,
 } from "./foldLayout";
 import { WorkStepRow } from "./WorkStepRow";
+import { ElapsedClock } from "./LiveStatusLine";
 
 const FOCUS_RING =
   "outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus-outline)]";
@@ -41,6 +43,8 @@ export const WorkFoldView = memo(function WorkFoldView({
   turnDurationMs,
   selectedGroupId,
   interactive,
+  liveLabel = null,
+  runStartedAt = null,
 }: {
   fold: WorkFold;
   turnKey: string;
@@ -51,6 +55,8 @@ export const WorkFoldView = memo(function WorkFoldView({
   /** The Insights group the panels point at, if it is one of these. */
   selectedGroupId: string | null;
   interactive: boolean;
+  liveLabel?: string | null;
+  runStartedAt?: number | null;
 }) {
   const listId = useId();
   const { useTranscriptDensity } = useNativeRuntime().stores.transcriptDensityStore;
@@ -63,7 +69,12 @@ export const WorkFoldView = memo(function WorkFoldView({
   const open = toggled ?? density === "detailed";
 
   const segments = useMemo(() => foldSegments(fold), [fold]);
-  const label = active ? liveFoldLabel(segments) : settledFoldLabel(segments, turnDurationMs);
+  const summary = workSentence(segments);
+  const label = active
+    ? liveLabel
+      ? `${liveLabel}${summary ? ` · ${summary}` : ""}`
+      : liveFoldLabel(segments)
+    : settledFoldLabel(segments, turnDurationMs);
   const failedCount = useMemo(
     () => fold.steps.filter((step) => stepStatus(step) === "failed").length,
     [fold],
@@ -117,6 +128,9 @@ export const WorkFoldView = memo(function WorkFoldView({
             ) : null}
           </span>
         </button>
+        {active && runStartedAt != null && runStartedAt > 0 ? (
+          <ElapsedClock since={runStartedAt} />
+        ) : null}
       </div>
 
       {open ? (

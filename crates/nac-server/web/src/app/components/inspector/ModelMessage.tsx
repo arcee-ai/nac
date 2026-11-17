@@ -174,6 +174,12 @@ const ModelMessageBody = memo(function ModelMessageBody({
       ? COMPACTION_ACTIVITY
       : (liveTurnLabel(items) ?? "Working…")
     : null;
+  const lastFold = layout.reduce(
+    (last, entry, index) => (entry.kind === "fold" ? index : last),
+    -1,
+  );
+  const hasWorkFold = lastFold >= 0;
+  const foldCount = layout.filter((entry) => entry.kind === "fold").length;
 
   return (
     <div
@@ -183,17 +189,19 @@ const ModelMessageBody = memo(function ModelMessageBody({
         isLast && "min-h-[calc(70vh-316px)]",
       )}
     >
-      {layout.map((entry) => {
+      {layout.map((entry, index) => {
         if (entry.kind === "fold") {
           return (
             <WorkFoldView
               key={entry.key}
               turnKey={turn.key}
               fold={entry}
-              active={active}
-              turnDurationMs={turn.durationMs}
+              active={active && index === lastFold}
+              turnDurationMs={foldCount === 1 ? turn.durationMs : null}
               selectedGroupId={selectedGroupId}
               interactive={interactive}
+              liveLabel={index === lastFold ? liveLabel : null}
+              runStartedAt={runStartedAt}
             />
           );
         }
@@ -260,9 +268,9 @@ const ModelMessageBody = memo(function ModelMessageBody({
       {/* The live line and the actions take the same height, so the turn does
           not move when one gives way to the other. The actions address the
           prompt above — same resend / revert endpoints as its bubble. */}
-      {liveLabel ? (
+      {liveLabel && !hasWorkFold ? (
         <LiveStatusLine label={liveLabel} since={runStartedAt} />
-      ) : (
+      ) : !active ? (
         <div
           className={cn(
             "-ml-1 -mt-2 flex h-8 w-full min-w-0 items-center gap-0.5 max-md:h-11",
@@ -359,7 +367,7 @@ const ModelMessageBody = memo(function ModelMessageBody({
             </span>
           ) : null}
         </div>
-      )}
+      ) : null}
     </div>
   );
 });
