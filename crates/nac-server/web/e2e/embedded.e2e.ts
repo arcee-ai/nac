@@ -278,7 +278,9 @@ for (const behavior of ["direct", "direct-with-orchestrator"] as const) {
       page.getByRole("group", { name: "Awaiting approval…", exact: true }),
     ).toBeVisible();
     await page.getByRole("button", { name: "Allow once" }).click();
-    await expect(page.getByRole("status").filter({ hasText: `Running ${command}…` })).toBeVisible();
+    await expect(
+      page.locator("[data-work-fold]").getByRole("button", { name: `Running ${command}…` }),
+    ).toBeVisible();
 
     await harness.provider.waitForRequestCount(2);
     await waitForRunIdle(request, harness, sessionId);
