@@ -16,7 +16,7 @@ async function fixture() {
     "-Wall",
     "-Wextra",
     "-Werror",
-    path.resolve(__dirname, "../src/engine-launcher.c"),
+    process.env.NAC_ELECTRON_CUSTODY_SOURCE || path.resolve(__dirname, "../src/engine-launcher.c"),
     "-o",
     launcher,
   ]);
@@ -55,6 +55,7 @@ async function settled(f) {
   let records = "";
   f.helper.stdio[4].on("data", (bytes) => {
     records += bytes.toString();
+    if (records.includes('"kind":"settled"')) f.helper.stdio[4].end();
   });
   await once(f.helper, "close");
   assert.match(records, /"kind":"settled"/);
@@ -70,6 +71,85 @@ test(
     const settlement = settled(f);
     process.kill(f.engine, "SIGKILL");
     await settlement;
+  },
+);
+test(
+  "delayed Unix custody reader preserves terminal proof across a late stop",
+  { timeout: 10000 },
+  async () => {
+    const f = await fixture();
+    const custody = f.helper.stdio[4];
+    custody.pause();
+    custody.on("error", () => {});
+    const closed = once(f.helper, "close");
+    let records = "";
+    custody.on("data", (bytes) => {
+      records += bytes.toString();
+      if (records.includes('"kind":"settled"')) custody.end();
+    });
+    try {
+      process.kill(f.engine, "SIGKILL");
+      assert.equal(await gone(f.engine), true);
+      assert.equal(await gone(f.descendant), true);
+      // The leader has been reaped and settlement was written while Node's
+      // reader was paused. A late stop must not reset that unread receipt.
+      await wait(100);
+      const error = await new Promise((resolve) => custody.write("stop\n", resolve));
+      custody.resume();
+      await closed;
+      assert.equal(error, null);
+      assert.deepEqual(JSON.parse(records), { kind: "settled", pid: f.engine });
+      assert.equal(f.helper.exitCode, 0);
+    } finally {
+      custody.end();
+      custody.resume();
+      await closed;
+      fs.rmSync(f.directory, { recursive: true, force: true });
+    }
+  },
+);
+test(
+  "failed-spawn Unix terminal fact survives a delayed reader and late stop",
+  { timeout: 10000 },
+  async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "nac-electron-spawn-"));
+    const launcher = path.join(directory, "launcher");
+    execFileSync("cc", [
+      "-O2",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      process.env.NAC_ELECTRON_CUSTODY_SOURCE ||
+        path.resolve(__dirname, "../src/engine-launcher.c"),
+      "-o",
+      launcher,
+    ]);
+    const helper = spawn(launcher, [path.join(directory, "absent")], {
+      stdio: ["ignore", "ignore", "inherit", "pipe", "pipe"],
+    });
+    const custody = helper.stdio[4];
+    custody.pause();
+    custody.on("error", () => {});
+    const closed = once(helper, "close");
+    let records = "";
+    custody.on("data", (bytes) => {
+      records += bytes.toString();
+      if (records.includes('"kind":"failed"')) custody.end();
+    });
+    try {
+      await wait(100);
+      const error = await new Promise((resolve) => custody.write("stop\n", resolve));
+      custody.resume();
+      await closed;
+      assert.equal(error, null);
+      assert.deepEqual(JSON.parse(records), { kind: "failed", pid: 0 });
+      assert.equal(helper.exitCode, 70);
+    } finally {
+      custody.end();
+      custody.resume();
+      await closed;
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
   },
 );
 test(

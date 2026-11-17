@@ -63,10 +63,13 @@ class Engine extends EventEmitter {
     child.stderr.on("data", () => {});
     const channel = child.stdio[3],
       custody = child.stdio[4];
+    // Only a validated terminal fact acknowledges the helper's read half.
+    custody.allowHalfOpen = true;
     custody.on("data", (bytes) => {
       try {
         this.receiveCustody(bytes);
       } catch {
+        this.custodySettled = false;
         this.fail(
           new LaunchError(
             "custody_invalid",
@@ -74,8 +77,11 @@ class Engine extends EventEmitter {
           ),
         );
         channel.destroy();
-        custody.end();
+        custody.destroy();
       }
+    });
+    custody.on("end", () => {
+      if (!this.custodySettled) custody.destroy();
     });
     custody.on("error", () => {
       channel.destroy();
@@ -154,7 +160,9 @@ class Engine extends EventEmitter {
     return this;
   }
   receiveCustody(bytes) {
+    let terminal;
     for (const byte of bytes) {
+      if (this.custodySettled || terminal) throw new Error("trailing custody");
       if (this.custodyPending.length >= 128) throw new Error("oversized custody");
       this.custodyPending = Buffer.concat([this.custodyPending, Buffer.from([byte])]);
       if (byte !== 10) continue;
@@ -183,22 +191,29 @@ class Engine extends EventEmitter {
         value.pid === this.enginePid &&
         !this.custodySettled
       ) {
-        this.custodySettled = true;
-        this.finishSettlement();
+        terminal = "settled";
       } else if (
         value.kind === "failed" &&
         value.pid === 0 &&
         !this.enginePid &&
         !this.custodySettled
       ) {
-        this.custodySettled = true;
+        terminal = "failed";
+      } else throw new Error("invalid custody sequence");
+    }
+    // A validated terminal fact acknowledges the helper's output half-close.
+    // Keep reading until then: a late stop must never destroy unread proof.
+    if (terminal) {
+      this.custodySettled = true;
+      this.child.stdio[4].end();
+      if (terminal === "failed")
         this.fail(
           new LaunchError(
             "engine_spawn",
             "The bundled engine could not be spawned. Replace the complete app bundle, then Retry.",
           ),
         );
-      } else throw new Error("invalid custody sequence");
+      else this.finishSettlement();
     }
   }
   publishReady() {
@@ -230,7 +245,8 @@ class Engine extends EventEmitter {
       // The native owner starts its 23-second fallback exactly once, while
       // retaining the unreaped engine identity. Rust receives its ordinary
       // stop/EOF first and keeps the existing 20-second settlement watchdog.
-      if (!custody.destroyed) custody.write("stop\n", () => {});
+      if (!this.custodySettled && !custody.destroyed && !custody.writableEnded)
+        custody.write("stop\n", () => {});
       if (!channel.destroyed)
         channel.write(this.protocol.stop(), (error) => {
           if (error) channel.destroy();

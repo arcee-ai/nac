@@ -30,7 +30,30 @@ static int connected(int fd) {
 static int record(const char *kind, pid_t pid) {
     char bytes[128];
     int length = snprintf(bytes, sizeof(bytes), "{\"kind\":\"%s\",\"pid\":%d}\n", kind, pid);
-    return write(4, bytes, (size_t)length) == length;
+    size_t sent = 0;
+    while (sent < (size_t)length) {
+        ssize_t count = write(4, bytes + sent, (size_t)length - sent);
+        if (count < 0 && errno == EINTR) continue;
+        if (count <= 0) return 0;
+        sent += (size_t)count;
+    }
+    return 1;
+}
+// Terminal facts precede output EOF. Retain the read half until the parent
+// acknowledges with EOF: closing with an unread late stop can reset AF_UNIX
+// and discard the fact. No control read here can signal an already reaped group.
+static int terminal(const char *kind, pid_t pid, int status) {
+    int sent = record(kind, pid);
+    shutdown(4, SHUT_WR);
+    char bytes[64];
+    for (;;) {
+        ssize_t count = read(4, bytes, sizeof(bytes));
+        if (count < 0 && errno == EINTR) continue;
+        if (count <= 0) break;
+        // Drain only; the one stop has no meaning after terminal settlement.
+        // Storage stays bounded even if the peer violates the control contract.
+    }
+    return sent ? status : 70;
 }
 // Darwin can return EPERM when the only group members are zombies. Prove
 // that exact case while the unreaped leader still reserves the identifier.
@@ -74,7 +97,7 @@ int main(int argc, char **argv) {
     // Only Rust retains this endpoint. Actual Node death now closes its peer
     // immediately, independently of this helper's 23-second fallback timer.
     close(3);
-    if (launched != 0) { record("failed", 0); return 70; }
+    if (launched != 0) return terminal("failed", 0, 70);
     int parent_open = record("spawned", engine);
     double deadline = parent_open ? 0 : now() + 23;
     char control[5]; size_t used = 0;
@@ -108,8 +131,7 @@ int main(int argc, char **argv) {
                 if (kill(-engine, 0) != 0 && errno == ESRCH) break;
                 struct timespec delay = {0, 20000000}; nanosleep(&delay, NULL);
             }
-            record("settled", engine);
-            return 0;
+            return terminal("settled", engine, 0);
         }
         struct pollfd input = { .fd = parent_open ? 4 : -1, .events = POLLIN | POLLHUP };
         int result = poll(&input, 1, 20);

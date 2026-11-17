@@ -13,6 +13,10 @@ store, automatically retry a failed launch, replay input, or kill another owner.
 helper; the helper retains the unreaped Rust leader, stops its reserved process
 group before reap and emits settlement only after the group is absent. fd 4
 carries bounded custody facts and one literal stop; Rust never inherits it.
+Terminal facts are half-closed output, followed by the parent's EOF acknowledgment.
+The helper retains its read half to drain a late stop before exiting; that terminal
+path cannot signal any process group. Node acknowledges only validated terminal
+proof, and missing proof remains pending even after helper reap.
 The helper closes its fd 3 copy immediately after spawn, so actual Node parent
 death still closes Rust’s launch peer immediately. Never infer descendant
 settlement from Node’s automatic helper reap or signal a group after engine reap.

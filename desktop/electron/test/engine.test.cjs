@@ -109,29 +109,85 @@ test(
   },
 );
 test(
+  "failed Rust spawn terminal fact is acknowledged before helper reap",
+  { timeout: 10000 },
+  async () => {
+    const f = await fixture();
+    const { engine, ready } = start({ ...f, executable: path.join(f.directory, "absent") });
+    try {
+      await assert.rejects(ready, (error) => error.code === "engine_spawn");
+      await engine.stop();
+      assert.equal(engine.custodySettled, true);
+      assert.equal(engine.helperClosed, true);
+      assert.equal(engine.exited, true);
+      assert.equal(engine.child.stdio[4].writableEnded, true);
+      assert.equal(engine.child.exitCode, 70);
+      assert.equal(engine.enginePid, 0);
+    } finally {
+      await engine.stop();
+      fs.rmSync(f.directory, { recursive: true, force: true });
+    }
+  },
+);
+for (const invalid of [false, true])
+  test(
+    `helper reap with ${invalid ? "invalid" : "missing"} terminal proof never proves settlement`,
+    { timeout: 10000 },
+    async () => {
+      const f = await fixture();
+      let launcher = "/usr/bin/true";
+      if (invalid) {
+        launcher = path.join(f.directory, "invalid-helper");
+        const receipt = '{"kind":"failed","pid":0}\n{"extra":true}\n';
+        execFileSync("cc", ["-x", "c", "-", "-o", launcher], {
+          input: `#include <unistd.h>\nint main(void){write(4,${JSON.stringify(receipt)},${Buffer.byteLength(receipt)});return 0;}`,
+        });
+      }
+      const { engine, ready } = start({ ...f, launcher });
+      try {
+        await assert.rejects(ready);
+        await once(engine.child, "close");
+        let resolved = false;
+        void engine.stop().then(() => {
+          resolved = true;
+        });
+        await wait(50);
+        assert.equal(engine.helperClosed, true);
+        assert.equal(engine.custodySettled, false);
+        assert.equal(engine.exited, false);
+        assert.equal(resolved, false);
+        assert.equal(engine.child.stdio[4].writableEnded, false);
+      } finally {
+        fs.rmSync(f.directory, { recursive: true, force: true });
+      }
+    },
+  );
+test(
   "actual Node parent death retires real Rust engine without another PID signal",
   { timeout: 15000 },
   async () => {
     const f = await fixture();
-    let parent, pid;
+    let parent, pid, helperPid;
     try {
       const modulePath = path.resolve(__dirname, "../src/engine.cjs");
-      const script = `const{Engine}=require(${JSON.stringify(modulePath)});const engine=new Engine(${JSON.stringify(f)});engine.once('ready',()=>process.stdout.write(JSON.stringify({pid:engine.pid})+'\\n'));engine.once('failure',()=>engine.stop());engine.launch();`;
+      const script = `const{Engine}=require(${JSON.stringify(modulePath)});const engine=new Engine(${JSON.stringify(f)});engine.once('ready',()=>process.stdout.write(JSON.stringify({pid:engine.pid,helperPid:engine.child.pid})+'\\n'));engine.once('failure',()=>engine.stop());engine.launch();`;
       parent = spawn(process.execPath, ["-e", script], { stdio: ["ignore", "pipe", "ignore"] });
       const [bytes] = await once(parent.stdout, "data");
-      pid = JSON.parse(bytes).pid;
+      ({ pid, helperPid } = JSON.parse(bytes));
       parent.kill("SIGKILL");
       await once(parent, "exit");
-      let alive = true;
-      for (let i = 0; i < 200 && alive; i++) {
-        try {
-          process.kill(pid, 0);
-          await wait(25);
-        } catch {
-          alive = false;
+      for (const owned of [pid, helperPid]) {
+        let alive = true;
+        for (let i = 0; i < 200 && alive; i++) {
+          try {
+            process.kill(owned, 0);
+            await wait(25);
+          } catch {
+            alive = false;
+          }
         }
+        assert.equal(alive, false, "engine and custody helper must exit from private parent EOF");
       }
-      assert.equal(alive, false, "engine must exit from private connected socket EOF");
     } finally {
       parent?.kill("SIGKILL");
       if (pid) {
