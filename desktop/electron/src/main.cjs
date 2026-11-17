@@ -1,5 +1,13 @@
 "use strict";
-const { app, BrowserWindow, dialog, Menu, session } = require("electron");
+const {
+  app,
+  BrowserWindow,
+  dialog,
+  Menu,
+  session,
+  powerMonitor,
+  Notification,
+} = require("electron");
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
@@ -11,6 +19,10 @@ const { createNativeAdapters } = require("./native.cjs");
 const { installMenus } = require("./menus.cjs");
 const { installWindowVisibility } = require("./window-visibility.cjs");
 const { createStatusWindow, statusURL } = require("./status-window.cjs");
+const { PresentationStorage, storageProfile } = require("./storage.cjs");
+const { checkReadiness, routeFragment } = require("./recovery.cjs");
+const { AttentionCoordinator } = require("./attention-coordinator.cjs");
+const { ElectronNotificationDelivery } = require("./notification-delivery.cjs");
 
 app.enableSandbox();
 // Test/developer-selected shell storage must be bound before Chromium helpers
@@ -31,6 +43,66 @@ if (process.env.NAC_ELECTRON_DATA_HOME !== undefined) {
 }
 const lifecycle = new Lifecycle();
 let window, native, windowVisibility, engine, configuration, launchOptions, identity, schema;
+let storage = null,
+  partition = null,
+  savedRoute = "",
+  recovered = false;
+let recoveryPromise = null,
+  recoveryPending = false,
+  recoveryAttempts = 0,
+  recoveryGeneration = 0;
+let recoveryAgain = false;
+let suspended = false;
+let attention = null,
+  attentionDrain = Promise.resolve();
+function attentionBinding() {
+  const receipt = engine?.receipt;
+  return receipt && storage && !suspended && lifecycle.phase === "running"
+    ? { profile: storage.profile.digest, engine: receipt.incarnation, endpoint: receipt.endpoint }
+    : null;
+}
+function retireAttention() {
+  attention?.documentRetiring();
+  if (attention) attentionDrain = Promise.allSettled([attentionDrain, attention.fence().drain]);
+}
+async function prepareAttention() {
+  await attentionDrain;
+  if (!attentionBinding()) return;
+  if (attention) await attention.rebind();
+  else {
+    attention = new AttentionCoordinator({
+      storage,
+      getBinding: attentionBinding,
+      delivery: new ElectronNotificationDelivery({ Notification }),
+      navigate: async ({ session }) => {
+        if (!attentionBinding() || !native || recoveryPending) return "unavailable";
+        reopen();
+        return native.sessionTarget(session, crypto.randomUUID());
+      },
+      onStatus: updateAttentionMenus,
+    });
+    await attention.load();
+  }
+}
+function updateAttentionMenus(snapshot) {
+  const menu = Menu.getApplicationMenu();
+  const item = (id) => menu?.getMenuItemById(id);
+  if (item("notifications-enable")) {
+    item("notifications-enable").checked = snapshot.enabled;
+    item("notifications-enable").enabled =
+      snapshot.loaded &&
+      (!snapshot.saving || snapshot.enabled) &&
+      !suspended &&
+      lifecycle.phase === "running";
+    item("notifications-mute").checked = snapshot.muted;
+    item("notifications-mute").enabled =
+      snapshot.loaded && !snapshot.saving && !suspended && lifecycle.phase === "running";
+    item("notifications-reset").enabled =
+      snapshot.loaded && !suspended && lifecycle.phase === "running";
+    item("notifications-status").label =
+      `Notifications: ${snapshot.message}${snapshot.unreadCompletions ? ` · ${snapshot.unreadCompletions} unread` : ""}`;
+  }
+}
 let profileInitialized = false,
   bundleVerified = false;
 const securedSessions = new WeakSet();
@@ -100,6 +172,7 @@ function createWindow(partition) {
       additionalArguments: [
         "--nac-origin=" + engine.receipt.endpoint,
         "--nac-incarnation=" + engine.receipt.incarnation,
+        ...(recovered ? ["--nac-recovered"] : []),
       ],
     },
   });
@@ -108,8 +181,10 @@ function createWindow(partition) {
     window,
     endpoint: engine.receipt.endpoint,
     incarnation: engine.receipt.incarnation,
-    onConnectionLost: () =>
-      fail(new Error("The engine connection was lost. Choose Retry after shutdown completes.")),
+    storage,
+    onUIReady: () => attention?.navigationReady(),
+    onPresentation: (focused) => attention?.presentation(focused),
+    onConnectionLost: () => void recoverWorkspace(true),
   });
   const ownedNative = native;
   const visibility = installWindowVisibility({
@@ -131,26 +206,22 @@ function createWindow(partition) {
     }
   });
   window.webContents.on("render-process-gone", () => {
-    if (window === ownedWindow && lifecycle.phase === "running")
-      fail(
-        new Error(
-          "The workspace renderer exited. Choose Retry after the original engine has stopped.",
-        ),
-      );
+    if (window === ownedWindow) void recoverWorkspace(true);
   });
   window.webContents.on("did-fail-load", (_event, code, _description, _url, isMainFrame) => {
     if (
       window === ownedWindow &&
       isMainFrame === true &&
       code !== -3 &&
-      lifecycle.phase === "running"
+      ["running", "confirming"].includes(lifecycle.phase)
     )
-      fail(
-        new Error(
-          "The bundled workspace could not load. Choose Retry after its engine has stopped.",
-        ),
-      );
+      void recoverWorkspace(true);
   });
+  const rememberRoute = (_event, url, isMainFrame) => {
+    if (window === ownedWindow && isMainFrame)
+      savedRoute = routeFragment(url, engine?.receipt?.endpoint);
+  };
+  window.webContents.on("did-navigate-in-page", rememberRoute);
   window.on("closed", () => {
     visibility.dispose();
     if (windowVisibility === visibility) windowVisibility = null;
@@ -165,9 +236,99 @@ function createWindow(partition) {
   });
   return window;
 }
+async function recoverWorkspace(automatic = false, wake = false) {
+  if (failure || !engine?.receipt || !["running", "confirming"].includes(lifecycle.phase)) return;
+  recoveryPending = true;
+  if (recoveryPromise) {
+    recoveryAgain = true;
+    return;
+  }
+  recoveryAgain = false;
+  retireAttention();
+  const owned = engine,
+    pinned = owned.receipt,
+    previousWindow = window,
+    retiring = native;
+  const generation = ++recoveryGeneration;
+  const current = () =>
+    generation === recoveryGeneration &&
+    engine === owned &&
+    owned.receipt === pinned &&
+    !failure &&
+    !suspended &&
+    lifecycle.phase === "running";
+  native = null;
+  recoveryPromise = (async () => {
+    try {
+      try {
+        await retiring?.retire();
+      } finally {
+        retiring?.dispose();
+      }
+      if (
+        suspended &&
+        generation === recoveryGeneration &&
+        lifecycle.phase === "running" &&
+        !failure
+      )
+        status(
+          "NAC is suspended. Its original engine remains owned. The workspace will be revalidated on resume; input will not be resent.",
+        );
+      if (!current()) return;
+      if (previousWindow && !previousWindow.isDestroyed()) {
+        approvedExit = true;
+        previousWindow.destroy();
+        approvedExit = false;
+      }
+      status("Recovering the workspace on its original engine… Previous input will not be resent.");
+      if (!wake && recoveryAttempts >= (automatic ? 1 : 3))
+        throw new Error(
+          "Automatic recovery stopped. Choose Reload Workspace explicitly, or Stop and Quit.",
+        );
+      if (!wake) recoveryAttempts++;
+      await checkReadiness(owned, pinned);
+      await storage?.snapshot();
+      if (!current()) return;
+      await prepareAttention();
+      if (!current()) return;
+      approvedExit = true;
+      window?.destroy();
+      approvedExit = false;
+      recovered = true;
+      recoveryPending = false;
+      createWindow(partition);
+      await window.loadURL(pinned.endpoint + savedRoute);
+    } catch {
+      const failedNative = native;
+      native = null;
+      try {
+        await failedNative?.retire();
+      } finally {
+        failedNative?.dispose();
+      }
+      if (current()) {
+        recoveryPending = true;
+        status(
+          "Workspace recovery could not finish. The original engine may still be running. Choose Reload Workspace to try again, or Stop and Quit. No input was replayed.",
+        );
+      }
+    }
+  })().finally(() => {
+    recoveryPromise = null;
+    if (recoveryAgain && !suspended && !failure && lifecycle.phase === "running") {
+      recoveryAgain = false;
+      setImmediate(() => void recoverWorkspace(true));
+    }
+  });
+  await recoveryPromise;
+}
 async function fail(error) {
   if (failure || !["running", "confirming"].includes(lifecycle.phase)) return;
   failure = error;
+  recovered = true;
+  retireAttention();
+  recoveryGeneration++;
+  recoveryPending = false;
   pendingWorkspace = null;
   const episode = { error, window, engine, retired: false, settled: false, settlement: null };
   failureEpisode = episode;
@@ -181,6 +342,7 @@ async function fail(error) {
       retiring?.dispose();
       episode.retired = true;
     }
+    await recoveryPromise;
     if (
       failureEpisode === episode &&
       lifecycle.phase === "running" &&
@@ -195,7 +357,7 @@ async function fail(error) {
   if (failureEpisode === episode && failure === error) await presentFailure();
 }
 async function presentFailure() {
-  if (failureDialog || !failure || lifecycle.phase !== "running") return;
+  if (failureDialog || !failure || suspended || lifecycle.phase !== "running") return;
   const error = failure,
     episode = failureEpisode;
   failureDialog = true;
@@ -278,27 +440,41 @@ async function retry() {
       next.once("ready", (receipt) => {
         if (engine !== next || failure || !["running", "confirming"].includes(lifecycle.phase))
           return;
-        const present = () => {
+        recoveryAttempts = 0;
+        let presenting = false;
+        const present = async () => {
           if (
             pendingWorkspace !== present ||
             engine !== next ||
             next.receipt !== receipt ||
             failure ||
-            lifecycle.phase !== "running"
+            lifecycle.phase !== "running" ||
+            suspended ||
+            presenting
           )
             return;
+          presenting = true;
+          storage ??= await PresentationStorage.open({
+            receipt,
+            configuration,
+            executable: path.join(resources, "checkpoint-helper"),
+          });
+          if (engine !== next || failure || suspended || lifecycle.phase !== "running") {
+            presenting = false;
+            return;
+          }
+          await prepareAttention();
+          if (engine !== next || failure || suspended || lifecycle.phase !== "running") {
+            presenting = false;
+            return;
+          }
           pendingWorkspace = null;
           if (window && !window.isDestroyed()) {
             approvedExit = true;
             window.destroy();
             approvedExit = false;
           }
-          const partition =
-            "persist:nac-" +
-            crypto
-              .createHash("sha256")
-              .update(configuration.store + "\0" + identity.track)
-              .digest("hex");
+          partition = "persist:nac-" + storage.profile.digest;
           const ses = session.fromPartition(partition);
           if (!securedSessions.has(ses)) {
             securedSessions.add(ses);
@@ -308,7 +484,7 @@ async function retry() {
             ses.on("will-download", (event) => event.preventDefault());
           }
           createWindow(partition);
-          void window.loadURL(receipt.endpoint);
+          void window.loadURL(receipt.endpoint + savedRoute);
         };
         pendingWorkspace = present;
         present();
@@ -340,6 +516,9 @@ function waitForCleanup(token) {
   cleanupPromise?.then(() => clearTimeout(timer));
 }
 async function beginStop(token) {
+  retireAttention();
+  recoveryGeneration++;
+  recoveryPending = false;
   pendingWorkspace = null;
   const failed = failureEpisode;
   cleanupPromise = (async () => {
@@ -350,6 +529,7 @@ async function beginStop(token) {
     } finally {
       retiring?.dispose();
     }
+    await recoveryPromise;
     if (window && !window.isDestroyed())
       status("Stopping the owned engine and waiting for cleanup…");
     // A concurrent failure already captured the native adapter before it
@@ -358,6 +538,11 @@ async function beginStop(token) {
     await startupPromise;
     const owned = engine;
     await owned?.stop();
+    await attention?.retire();
+    // Lease release belongs to completed writes, even after a bounded barrier
+    // reports unavailable. Do not make an uncertain flush look durable.
+    await storage?.flush();
+    await storage?.close();
     const decision = lifecycle.stopped(token, !owned || owned.exited);
     if (decision === "terminate") {
       approvedExit = true;
@@ -382,6 +567,7 @@ async function requestQuit() {
     return;
   }
   if (decision.kind !== "confirm") return;
+  retireAttention();
   if (!window || window.isDestroyed()) {
     await app.whenReady();
     if (lifecycle.phase !== "confirming" || lifecycle.transaction !== decision.transaction) return;
@@ -413,7 +599,10 @@ async function requestQuit() {
   if (answer.kind === "stop") void beginStop(answer.token);
   else if (answer.kind === "cancel") {
     if (failure) void presentFailure();
-    else pendingWorkspace?.();
+    else if (recoveryPending)
+      void Promise.resolve(recoveryPromise).then(() => recoverWorkspace(false));
+    else if (pendingWorkspace) pendingWorkspace();
+    else if (!suspended) void prepareAttention();
   }
 }
 app.on("before-quit", (event) => {
@@ -434,10 +623,7 @@ app.on("second-instance", () => {
 function configureProfile() {
   if (profileInitialized) return true;
   // Stable per-profile shell identity complements, and never replaces, Rust's lease.
-  const profile = crypto
-    .createHash("sha256")
-    .update(configuration.store + "\0" + identity.track)
-    .digest("hex");
+  const profile = storageProfile({ store: configuration.store, identity }, configuration).digest;
   const dataRoot =
     process.env.NAC_ELECTRON_DATA_HOME ??
     path.join(app.getPath("appData"), "NAC Electron", profile);
@@ -455,11 +641,24 @@ function configureProfile() {
     show: reopen,
     requestQuit,
     retry: () => void retry(),
+    reload: () => void recoverWorkspace(false),
+    getAttention: () => (attentionBinding() ? attention : null),
   });
   profileInitialized = true;
   return true;
 }
 app.whenReady().then(async () => {
+  powerMonitor.on("suspend", () => {
+    suspended = true;
+    if (!failure) void recoverWorkspace(true);
+  });
+  powerMonitor.on("resume", () => {
+    suspended = false;
+    if (failure) void presentFailure();
+    else if (pendingWorkspace) pendingWorkspace();
+    else if (recoveryPending)
+      void Promise.resolve(recoveryPromise).then(() => recoverWorkspace(false, true));
+  });
   try {
     if (earlyProfileError) throw earlyProfileError;
     const args = app.isPackaged ? process.argv.slice(1) : process.argv.slice(2);
@@ -472,7 +671,11 @@ app.whenReady().then(async () => {
       !require("node:util").isDeepStrictEqual(identity, manifest.engine_identity) ||
       !Number.isSafeInteger(schema) ||
       crypto.createHash("sha256").update(fs.readFileSync(executable)).digest("hex") !==
-        manifest.engineSha256
+        manifest.engineSha256 ||
+      crypto
+        .createHash("sha256")
+        .update(fs.readFileSync(path.join(resources, "checkpoint-helper")))
+        .digest("hex") !== manifest.checkpointHelperSha256
     )
       throw new Error(
         "The app manifest does not match its bundled engine identity. Replace the complete app bundle.",
@@ -492,8 +695,19 @@ module.exports = {
     enginePid: engine?.pid ?? 0,
     receipt: engine?.receipt ?? null,
     failure: failure?.message ?? null,
+    recovery: { pending: recoveryPending, attempts: recoveryAttempts, suspended },
+    storage: storage
+      ? {
+          available: storage.available,
+          profile: storage.profile.digest,
+          checkpointPid: storage.checkpoint?.child?.pid ?? 0,
+          pending: storage.pendingCount,
+        }
+      : null,
+    notifications: attention?.snapshot() ?? null,
   }),
   requestQuit,
   reopen,
   retry,
+  reload: () => recoverWorkspace(false),
 };
