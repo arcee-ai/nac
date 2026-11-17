@@ -34,7 +34,11 @@ test("keeps the parent conversation while selecting siblings, closing and focusi
     ["E2E_PANEL_FIRST", "First child conversation"],
     ["E2E_PANEL_SECOND", "Second child conversation"],
   ] as const) {
-    harness.provider.enqueue(token, { token }, { kind: "text", text });
+    harness.provider.enqueue(
+      token,
+      { token },
+      { kind: "text", text, reasoning: `${text} reasoning` },
+    );
   }
   const parentId = await createSession(request, harness, "direct");
   const run = await request.post(`${harness.baseUrl}/sessions/${parentId}/runs`, {
@@ -73,7 +77,18 @@ test("keeps the parent conversation while selecting siblings, closing and focusi
     await expect(parent).toBeVisible();
     await expect(parentDraft).toHaveValue("Parent draft stays here");
     await expect(page).toHaveURL(new RegExp(`/session/${parentId}/delegated$`));
+    const fold = panel.locator("[data-work-fold]").first().getByRole("button").first();
+    await expect(fold).toHaveAttribute("aria-expanded", "false");
+    if (title === "First child") await fold.click();
   }
+  await panel.getByRole("button", { name: "First child", exact: true }).click();
+  const firstFold = panel.locator("[data-work-fold]").first();
+  await expect(firstFold.getByRole("button").first()).toHaveAttribute("aria-expanded", "true");
+  await firstFold.getByRole("list", { name: "Steps" }).getByRole("button").first().click();
+  await expect(
+    panel.getByText("First child conversation reasoning", { exact: true }),
+  ).toBeVisible();
+  await panel.getByRole("button", { name: "Second child", exact: true }).click();
   await testInfo.attach("parent-and-selected-sibling", {
     body: await page.screenshot({ animations: "disabled" }),
     contentType: "image/png",
