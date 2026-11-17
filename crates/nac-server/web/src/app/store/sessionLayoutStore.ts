@@ -240,6 +240,11 @@ export function createSessionLayoutStore(
     setState(expanded ? { expanded, panelList: false } : { expanded });
   }
 
+  /** Put a full-width drawer back in its column; nothing when it is not full width. */
+  function leaveFocusedSidePanel(): void {
+    if (getState().expanded) setState({ expanded: false });
+  }
+
   /** Open the drawer on its panel's list of rows (a phone shows lists first). */
   function openSidePanelList(): void {
     setState({ drawerContent: "panel", panelList: true });
@@ -533,6 +538,7 @@ export function createSessionLayoutStore(
     bindSidePanelProject,
     unbindSidePanelProject,
     toggleSidePanelExpanded,
+    leaveFocusedSidePanel,
     openSidePanelList,
     toggleSidePanelCollapsed,
     openDrawer,
@@ -586,6 +592,7 @@ export const {
   bindSidePanelProject,
   unbindSidePanelProject,
   toggleSidePanelExpanded,
+  leaveFocusedSidePanel,
   openSidePanelList,
   toggleSidePanelCollapsed,
   openDrawer,

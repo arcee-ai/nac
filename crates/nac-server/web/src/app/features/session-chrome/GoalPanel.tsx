@@ -9,6 +9,11 @@ import {
   TextArea,
   TextAreaSize,
 } from "@/app/atoms";
+import {
+  GOAL_BUDGET_INPUT_RULE,
+  parseGoalBudget,
+  sameGoalEditableFields,
+} from "@/app/features/goals/budget";
 import { goalStatusLabel } from "@/app/features/session-chrome/goalStatus";
 import { cn } from "@/app/lib/cn";
 import { formatClock, formatTokensCompact } from "@/app/lib/format";
@@ -21,12 +26,13 @@ function budgetValue(goal: SessionGoalRecord | null): string {
   return goal?.token_budget == null ? "" : String(goal.token_budget);
 }
 
-/** Blank is no limit; anything else must be a positive whole number. */
+/**
+ * Blank is no limit; anything else must be a whole number the field can send
+ * exactly (undefined when it is not). The server owns which amounts it allows.
+ */
 function parsedBudget(value: string): number | null | undefined {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  const parsed = Number(trimmed);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+  if (!value.trim()) return null;
+  return parseGoalBudget(value) ?? undefined;
 }
 
 const STATUS_TONE: Partial<Record<GoalStatus, string>> = {
@@ -51,37 +57,47 @@ export function GoalPanel({ sessionId, enabled }: { sessionId: string; enabled: 
   const [editing, setEditing] = useState(false);
   const [objective, setObjective] = useState("");
   const [budget, setBudget] = useState("");
+  /** The goal this edit started from: a stale edit is refused, not overwritten. */
+  const [base, setBase] = useState<SessionGoalRecord | null>(null);
   const busy = createGoal.isPending || updateGoal.isPending || clearGoal.isPending;
 
   const fail = (prefix: string, error: unknown) =>
     toast.error(`${prefix}: ${errorMessage(toRunError(error))}`);
 
   const edit = () => {
+    setBase(goal);
     setObjective(goal?.objective ?? "");
     setBudget(budgetValue(goal));
     setEditing(true);
   };
 
   const save = async () => {
-    const tokenBudget = parsedBudget(budget);
+    const replacing = goal == null || goal.status === "complete";
+    // An update leaves a budget the user has not touched alone, so a stored
+    // amount the field cannot send exactly survives an objective-only edit.
+    const budgetEdited = replacing || base == null || budget !== budgetValue(base);
+    const tokenBudget = budgetEdited ? parsedBudget(budget) : null;
     if (!objective.trim()) {
       toast.error("Goal objective is required.");
       return;
     }
     if (tokenBudget === undefined) {
-      toast.error("Token budget must be a positive whole number or blank.");
+      toast.error(`Enter the token budget as ${GOAL_BUDGET_INPUT_RULE}, or leave it blank.`);
       return;
     }
-    const replacing = goal == null || goal.status === "complete";
+    // Run accounting bumps the version on its own, so the current version is
+    // used only while the objective and budget are still what the edit
+    // started from; otherwise the loaded version lets the server refuse it.
+    const target = goal == null || base == null || sameGoalEditableFields(goal, base) ? goal : base;
     try {
-      if (!replacing) {
+      if (!replacing && target != null) {
         await updateGoal.mutateAsync({
           sessionId,
-          goalId: goal.goal_id,
+          goalId: target.goal_id,
           payload: {
-            expected_version: goal.version,
+            expected_version: target.version,
             objective: objective.trim(),
-            token_budget: tokenBudget,
+            ...(budgetEdited ? { token_budget: tokenBudget } : {}),
           },
         });
       } else {

@@ -13,6 +13,10 @@ const DROP_OURS: &str = "DROP TABLE session_completion_marks;
     DROP TABLE task_followups; DROP TABLE task_followup_delegations;
     DROP TABLE native_task_launches; DROP TABLE peer_goal_starts;
     DROP TABLE session_mcp_refresh; DROP TABLE task_questions;";
+// Schema 51 installs the same origin columns; rebuild them from Ada's DDL.
+const DROP_ORIGINS: &str = "ALTER TABLE session_inbox DROP COLUMN completion_generation;
+    ALTER TABLE session_inbox DROP COLUMN completion_session_id;
+    ALTER TABLE session_inbox DROP COLUMN completion_source;";
 const ORIGINS: &str = "ALTER TABLE session_inbox ADD COLUMN completion_source
     TEXT CHECK(completion_source IN ('traditional_child','managed_orchestrator'));
     ALTER TABLE session_inbox ADD COLUMN completion_session_id
@@ -110,6 +114,7 @@ fn ada41_42_and_mixed43_keep_origins_nulls_questions_receipts_and_atomicity() {
         let conn = open_runtime_connection(&path).unwrap();
         conn.execute("UPDATE sessions SET behavior='direct'", [])
             .unwrap();
+        conn.execute_batch(DROP_ORIGINS).unwrap();
         conn.execute_batch(ORIGINS).unwrap();
         drop(conn);
         let explicit = seed_child(&path, "explicit");
@@ -134,6 +139,13 @@ fn ada41_42_and_mixed43_keep_origins_nulls_questions_receipts_and_atomicity() {
         // origin columns are present. Its exact receipt proves no unique intent.
         let unknown = seed_child(&path, "old-producer");
         let conn = open_runtime_connection(&path).unwrap();
+        // Schema 51's producer records origins itself; restore the old row.
+        conn.execute(
+            "UPDATE session_inbox SET completion_source=NULL,
+            completion_session_id=NULL,completion_generation=NULL WHERE id=?1",
+            [unknown],
+        )
+        .unwrap();
         conn.execute_batch(DROP_OURS).unwrap();
         if version == 43 {
             task_followups::create_tables(&conn).unwrap();

@@ -1,10 +1,8 @@
-import type { GoalStatus, SessionGoalRecord } from "@/app/types/api";
+import { goalStatusLabel } from "@/app/features/goals/status";
+import type { SessionGoalRecord } from "@/app/types/api";
 
 /** A goal status as a label: `budget_limited` reads "Budget limited". */
-export function statusLabel(status: GoalStatus): string {
-  const label = status.replaceAll("_", " ");
-  return label.charAt(0).toUpperCase() + label.slice(1);
-}
+export const statusLabel = goalStatusLabel;
 
 /** The accessible name of the control that opens the goal editor. */
 export function goalActionLabel(goal: SessionGoalRecord | null | undefined): string {

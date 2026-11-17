@@ -83,6 +83,7 @@ export default function SessionPage() {
     useSidePanelCollapsed,
     useSelectedThread,
     selectInsight,
+    leaveFocusedSidePanel,
     revealSidePanel,
     activateSessionSelection,
     unbindSidePanelProject,
@@ -157,6 +158,11 @@ export default function SessionPage() {
   useEffect(() => {
     activateSessionSelection(id);
   }, [id, activateSessionSelection]);
+
+  // Full width belongs to the session it was chosen on: another session, or
+  // leaving the page, finds the drawer back in its column. An exact child→parent
+  // return still restores what the parent had, after this runs.
+  useEffect(() => () => leaveFocusedSidePanel(), [id, leaveFocusedSidePanel]);
 
   const projectKey = entry ? (entry.summary.project_id ?? "") : null;
   useLayoutEffect(() => {

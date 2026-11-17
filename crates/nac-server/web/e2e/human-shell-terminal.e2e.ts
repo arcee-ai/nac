@@ -194,7 +194,9 @@ for (const replaceDocument of [false, true]) {
     await page.keyboard.press("Enter");
     const file = path.join(harness.runRoot, "workspace/uncertain-effects.txt");
     await expect.poll(() => fs.readFile(file, "utf8").catch(() => "")).toBe("accepted");
-    expect(injectedReceiptLoss).toBe(true);
+    // The shell can write the file before the route handler resumes from
+    // route.fetch() and records the injected loss, so wait for the handler.
+    await expect.poll(() => injectedReceiptLoss).toBe(true);
     const acknowledge = pane.getByRole("button", {
       name: "Acknowledge failure and enable fresh input",
       exact: true,

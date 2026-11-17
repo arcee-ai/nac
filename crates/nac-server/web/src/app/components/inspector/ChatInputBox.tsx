@@ -23,6 +23,7 @@ import {
 import type { ComposerToken } from "@/app/components/inspector/composer/ComposerMenu";
 import { useCoarsePointer } from "@/app/components/inspector/composer/useCoarsePointer";
 import { deliverPrompt, runCommand } from "@/app/features/direct-session/commandWorkflow";
+import { isGoalContinuationEnvelope } from "@/app/features/goals/continuation";
 import { withPromptRecovery } from "@/app/features/direct-session/promptRecovery";
 import { PromptRecoveryMessage } from "./PromptRecoveryMessage";
 import { GoalComposer } from "@/app/components/inspector/GoalComposer";
@@ -310,7 +311,11 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
     clearGoal.isPending;
   const busy = mutationPending || stopping || (running && !runningInteractive);
   const canSend = Boolean(value.trim()) && !busy;
-  const pendingInbox = (inboxQuery.data ?? []).filter((item) => item.status === "pending");
+  const pendingItems = (inboxQuery.data ?? []).filter((item) => item.status === "pending");
+  // Only submitted input is editable here. Delegated results are consumed by
+  // delivery and the server refuses to change them, so only a count is shown.
+  const pendingInbox = pendingItems.filter((item) => item.origin === "input");
+  const pendingDelegatedResults = pendingItems.length - pendingInbox.length;
   const changeInboxDelivery = async (
     itemId: number,
     expectedVersion: number,
@@ -372,7 +377,8 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   const sentPrompts = useMemo(() => {
     const prompts: string[] = [];
     for (const message of snapshot?.messages ?? []) {
-      if (message.role !== "user") continue;
+      // A goal continuation is NAC's control message, not something typed.
+      if (message.role !== "user" || isGoalContinuationEnvelope(message.content)) continue;
       prompts.push(displayPromptFromMessageText(message.content));
     }
     return prompts.reverse();
@@ -1302,6 +1308,19 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
                 </span>
               </div>
             ))}
+          </div>
+        ) : null}
+        {/* Delegated results are consumed by delivery and cannot be edited, so
+            only their count shows beside the editable pending input. */}
+        {pendingDelegatedResults ? (
+          <div
+            role="status"
+            aria-label="Pending subagent results"
+            className="type-meta relative px-3 text-basic-tertiary"
+          >
+            {pendingDelegatedResults === 1
+              ? "1 subagent result pending"
+              : `${pendingDelegatedResults} subagent results pending`}
           </div>
         ) : null}
 

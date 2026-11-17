@@ -14,7 +14,11 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock("@/app/services/queries", () => ({
-  useSessionGoal: () => ({ data: state.goal, isPending: false, isError: false }),
+  useSessionGoal: () => ({
+    data: state.goal,
+    isPending: false,
+    isError: false,
+  }),
   useUpdateGoal: () => ({ mutateAsync: state.update, isPending: false }),
   useClearGoal: () => ({ mutateAsync: state.clear, isPending: false }),
   useCreateGoal: () => ({ mutateAsync: state.create, isPending: false }),
@@ -71,7 +75,9 @@ describe("goal drawer", () => {
     fireEvent.click(screen.getByRole("button", { name: "Resume" }));
     await waitFor(() =>
       expect(state.update).toHaveBeenCalledWith(
-        expect.objectContaining({ payload: { expected_version: 4, status: "active" } }),
+        expect.objectContaining({
+          payload: { expected_version: 4, status: "active" },
+        }),
       ),
     );
     fireEvent.click(screen.getByRole("button", { name: "Clear" }));
@@ -87,7 +93,9 @@ describe("goal drawer", () => {
   it("edits the objective and budget in place", async () => {
     render(<GoalPanel sessionId="s1" enabled />);
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-    fireEvent.change(screen.getByLabelText("Objective"), { target: { value: "Ship it all" } });
+    fireEvent.change(screen.getByLabelText("Objective"), {
+      target: { value: "Ship it all" },
+    });
     fireEvent.change(screen.getByLabelText("Token budget (optional)"), {
       target: { value: "" },
     });
@@ -96,7 +104,51 @@ describe("goal drawer", () => {
       expect(state.update).toHaveBeenCalledWith({
         sessionId: "s1",
         goalId: "g1",
-        payload: { expected_version: 4, objective: "Ship it all", token_budget: null },
+        payload: {
+          expected_version: 4,
+          objective: "Ship it all",
+          token_budget: null,
+        },
+      }),
+    );
+  });
+
+  it("keeps an untouched stored budget the field cannot send on an objective-only edit", async () => {
+    state.goal = { ...goal, token_budget: 2 ** 53 } as SessionGoalRecord;
+    render(<GoalPanel sessionId="s1" enabled />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByLabelText("Objective"), {
+      target: { value: "Ship it all" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save goal" }));
+    await waitFor(() =>
+      expect(state.update).toHaveBeenCalledWith({
+        sessionId: "s1",
+        goalId: "g1",
+        payload: { expected_version: 4, objective: "Ship it all" },
+      }),
+    );
+  });
+
+  it("edits the goal it loaded, so a goal changed elsewhere refuses the stale edit", async () => {
+    const view = render(<GoalPanel sessionId="s1" enabled />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    // Another tab rewrites the objective while this edit is open.
+    state.goal = {
+      ...goal,
+      version: 6,
+      objective: "Something else",
+    } as SessionGoalRecord;
+    view.rerender(<GoalPanel sessionId="s1" enabled />);
+    fireEvent.change(screen.getByLabelText("Objective"), {
+      target: { value: "Ship it all" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save goal" }));
+    await waitFor(() =>
+      expect(state.update).toHaveBeenCalledWith({
+        sessionId: "s1",
+        goalId: "g1",
+        payload: { expected_version: 4, objective: "Ship it all" },
       }),
     );
   });

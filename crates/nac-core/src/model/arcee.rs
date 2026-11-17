@@ -21,7 +21,6 @@ const DEFAULT_DEVICE_EXPIRES_IN_SECS: u64 = 900;
 const DEFAULT_TOKEN_EXPIRES_IN_SECS: u64 = 43200;
 const REFRESH_SKEW_MS: u64 = 10_800_000;
 const REFRESH_LOCK_POLL_INTERVAL_MS: u64 = 50;
-const REFRESH_LOCK_TIMEOUT_MS: u64 = 15_000;
 const SLOW_DOWN_BACKOFF_SECS: u64 = 5;
 
 pub(super) fn no_redirect_client() -> Result<Client> {
@@ -864,18 +863,20 @@ fn refresh_gate() -> &'static tokio::sync::Mutex<()> {
 }
 
 /// Acquires the cross-process refresh lock without ever blocking a Tokio worker:
-/// it polls the non-blocking file lock and yields between attempts. The server
-/// rotates the refresh token on every call, so two nac processes refreshing at
-/// once could invalidate each other's tokens; this serializes them.
-async fn acquire_refresh_lock(lock_path: &Path) -> Result<FileLock> {
+/// it polls the non-blocking file lock and yields between attempts, giving up
+/// after `timeout`. The server rotates the refresh token on every call, so two
+/// nac processes refreshing at once could invalidate each other's tokens; this
+/// serializes them.
+async fn acquire_refresh_lock(lock_path: &Path, timeout: Duration) -> Result<FileLock> {
     let started = now_ms();
     loop {
         if let Some(lock) = nac_credential_store::try_acquire_credential_lock(lock_path)? {
             return Ok(lock);
         }
-        if now_ms().saturating_sub(started) >= REFRESH_LOCK_TIMEOUT_MS {
+        if u128::from(now_ms().saturating_sub(started)) >= timeout.as_millis() {
             return Err(anyhow!(
-                "timed out waiting for the Arcee auth refresh lock; another nac process may be refreshing"
+                "timed out waiting for the Arcee auth refresh lock; another nac process may be refreshing (waited {} ms; raise [auth] lock_timeout_ms in config.toml to wait longer)",
+                timeout.as_millis()
             ));
         }
         sleep(Duration::from_millis(REFRESH_LOCK_POLL_INTERVAL_MS)).await;
@@ -919,12 +920,16 @@ async fn refresh_locked(
 ) -> Result<String> {
     let auth_path = arcee_auth_file_path()?;
     let lock_path = arcee_auth_lock_path()?;
+    // Resolved here, not inside the lock wait, so tests that drive
+    // `refresh_locked_with` directly never read the process-global config.toml.
+    let lock_timeout = super::auth_store::credential_lock_timeout().await?;
     refresh_locked_with(
         client,
         expected_base_url,
         should_refresh,
         &auth_path,
         &lock_path,
+        lock_timeout,
         ArceeAuthService::approved,
     )
     .await
@@ -936,10 +941,11 @@ async fn refresh_locked_with(
     should_refresh: impl Fn(&StoredArceeAuth) -> bool,
     auth_path: &Path,
     lock_path: &Path,
+    lock_timeout: Duration,
     resolve_service: impl Fn(&str) -> Result<ArceeAuthService>,
 ) -> Result<String> {
     let _gate = refresh_gate().lock().await;
-    let _lock = acquire_refresh_lock(lock_path).await?;
+    let _lock = acquire_refresh_lock(lock_path, lock_timeout).await?;
     let auth = read_stored_auth_for_base_url_at(auth_path, expected_base_url)?;
     if !should_refresh(&auth) {
         return Ok(auth.access_token);

@@ -25,6 +25,8 @@ import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { localDirectoryCapability } from "@/app/features/setup/localFolder";
 import { NativeFolderPicker } from "@/app/features/setup/NativeFolderPicker";
 
+import { PathPickerNewFolder } from "./PathPickerNewFolder";
+import { useNewFolder } from "./useNewFolder";
 import { usePathPicker } from "./usePathPicker";
 
 /**
@@ -105,6 +107,16 @@ function PathPicker({
   const { pickingFile, draft, hidden, chosen, checking, failure } = picker;
   const { data, error, isFetching } = picker.listing;
   const selectDisabled = !chosen || checking !== null;
+  // Only a working-folder picker offers to make one. The folder goes in the
+  // listed directory, and leaving that directory abandons the form.
+  const creating = kind === "directory";
+  const newFolder = useNewFolder({
+    source: ssh ?? null,
+    parent: data?.path ?? null,
+    binding: `${picker.binding}:${data?.path ?? ""}`,
+    fence: picker.fence,
+    onCreated: picker.goTo,
+  });
 
   return (
     <Modal
@@ -247,7 +259,28 @@ function PathPicker({
           >
             <Icon iconName={hidden ? IconName.Eye : IconName.EyeStrikethrough} />
           </Button>
+          {creating ? (
+            <Button
+              variant={
+                newFolder.open ? ButtonVariant.SecondaryHighlighted : ButtonVariant.Secondary
+              }
+              size={ButtonSize.Medium}
+              content={isMobile ? ButtonContent.Icon : ButtonContent.IconLeft}
+              disabled={!data?.path}
+              onClick={newFolder.open ? newFolder.cancel : newFolder.start}
+              aria-expanded={newFolder.open}
+              aria-label="New folder"
+              title={data?.path ? `New folder in ${data.path}` : "New folder"}
+            >
+              <Icon iconName={IconName.Add} />
+              {isMobile ? null : "New folder"}
+            </Button>
+          ) : null}
         </div>
+
+        {creating && newFolder.open ? (
+          <PathPickerNewFolder folder={newFolder} onOpen={picker.goTo} />
+        ) : null}
 
         {failure ? (
           <p role="alert" className="type-body-chrome shrink-0 text-error-primary">

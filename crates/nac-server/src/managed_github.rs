@@ -669,7 +669,7 @@ pub(crate) async fn disconnect_handler(
     State(manager): State<SessionManager>,
 ) -> Result<Json<GitHubStatusResponse>, ApiError> {
     let auth = manager.managed_github_auth()?;
-    auth.disconnect()?;
+    auth.disconnect().await?;
     Ok(Json(auth.status()?.into()))
 }
 

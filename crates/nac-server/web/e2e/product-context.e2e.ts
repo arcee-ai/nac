@@ -108,6 +108,8 @@ for (const mobile of [false, true]) {
       await expect(context).toBeHidden();
       // The panel opens inside the session the capabilities described.
       await expect(page).toHaveURL(new RegExp(`/session/${id}/${panel}$`));
+      // A phone opens the panel as its bottom sheet; wider, the floating
+      // drawer. Either is a dialog that Escape closes.
       const panelDialog = mobile
         ? page.getByRole("dialog", { name: label, exact: true })
         : page.getByRole("dialog");

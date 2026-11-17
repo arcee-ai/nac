@@ -1208,6 +1208,13 @@
     overflow: hidden;
   }
 
+[data-nac-runtime]:is(.line-clamp-4), [data-nac-runtime] .line-clamp-4 {
+    -webkit-line-clamp: 4;
+    -webkit-box-orient: vertical;
+    display: -webkit-box;
+    overflow: hidden;
+  }
+
 [data-nac-runtime]:is(.block), [data-nac-runtime] .block {
     display: block;
   }
@@ -1841,6 +1848,10 @@
 
 [data-nac-runtime]:is(.w-32), [data-nac-runtime] .w-32 {
     width: calc(var(--spacing) * 32);
+  }
+
+[data-nac-runtime]:is(.w-40), [data-nac-runtime] .w-40 {
+    width: calc(var(--spacing) * 40);
   }
 
 [data-nac-runtime]:is(.w-\[3px\]), [data-nac-runtime] .w-\[3px\] {
@@ -4684,6 +4695,11 @@
 [data-nac-runtime]:is(.outline-none), [data-nac-runtime] .outline-none {
     --nac-presentation-tw-outline-style: none;
     outline-style: none;
+  }
+
+[data-nac-runtime]:is(.select-all), [data-nac-runtime] .select-all {
+    -webkit-user-select: all;
+    user-select: all;
   }
 
 [data-nac-runtime]:is(.select-none), [data-nac-runtime] .select-none {
@@ -8372,8 +8388,8 @@
 }
 
 [data-nac-runtime]:is(.chat-response.streaming :is(p, li, h1, h2, h3, h4, h5, h6) .streaming-chunk), [data-nac-runtime] .chat-response.streaming :is(p, li, h1, h2, h3, h4, h5, h6) .streaming-chunk {
-  opacity: 0;
-  animation: .15s ease-out forwards nac-presentation-fadeInOut;
+  opacity: 1;
+  animation: .15s ease-out nac-presentation-fadeInOut;
 }
 
 @keyframes nac-presentation-fadeInOut {

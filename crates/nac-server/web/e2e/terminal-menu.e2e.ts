@@ -2,7 +2,7 @@ import { createDirectSession, expandSidePanel, expect, showRoutePanel, test } fr
 import { reviewTerminalEvidence } from "./terminal-evidence";
 
 for (const mobile of [false, true]) {
-  test(`terminal options keep keyboard focus ${mobile ? "on a phone" : "in an expanded panel"}`, async ({
+  test(`terminal options keep keyboard focus ${mobile ? "on a phone" : "in a full-width drawer"}`, async ({
     harness,
     page,
     request,

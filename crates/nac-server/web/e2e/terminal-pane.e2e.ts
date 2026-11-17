@@ -62,9 +62,11 @@ for (const mobile of [false, true]) {
     await page.keyboard.press("Enter");
     await expect(accessible).toContainText("CTRL-OK");
     if (!mobile) {
-      // Full width is the floating drawer's; closing it never ends the shell.
+      // Full width is the floating drawer's; the terminal stays attached and
+      // painted there, and closing the drawer never ends the shell.
       await expandSidePanel(page);
       await expect(page.getByRole("dialog", { name: "Terminal", exact: true })).toBeVisible();
+      await expect(accessible).toContainText("CTRL-OK");
       await page.getByRole("button", { name: "Hide panel", exact: true }).click();
       await expect(pane).toHaveCount(0);
       expect((await api.getUserTerminal(session, shell.terminal_id)).alive).toBe(true);
