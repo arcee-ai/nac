@@ -211,6 +211,37 @@ test("actual Swift writer and Electron share flock and versioned v1/v2 bytes in 
     await reopened.close();
   }
 });
+test("Focus preferences survive a new origin while HOME, store and track remain isolated", async () => {
+  const f = fixture();
+  const preferences = {
+    "nac.sidebar.view": "inbox",
+    "nac.sidebar.collapsed-projects": JSON.stringify(["fixture-project"]),
+    "nac.inbox.read.v1": JSON.stringify({ since: 123, runs: { session: "fixture-run" } }),
+    "nac.transcriptDensity": "compact",
+  };
+  const owner = await f.open();
+  for (const [key, value] of Object.entries(preferences))
+    assert.equal((await owner.write("preferences", key, value)).durable, true);
+  assert.equal(owner.write("preferences", "nac.unadmitted", "value"), null);
+  await owner.close();
+  const reopened = await PresentationStorage.open({
+    receipt: { ...f.receipt, endpoint: "http://127.0.0.1:52002", incarnation: "new-engine" },
+    configuration: f.configuration,
+    executable,
+  });
+  assert.deepEqual(reopened.values.preferences, preferences);
+  for (const [receipt, configuration] of [
+    [{ ...f.receipt, store: path.join(f.home, "other.db") }, f.configuration],
+    [{ ...f.receipt, identity: { track: "stable" } }, f.configuration],
+    [f.receipt, { env: { HOME: fs.mkdtempSync(path.join(root, "other-home-")) } }],
+  ]) {
+    const isolated = await PresentationStorage.open({ receipt, configuration, executable });
+    assert.equal(isolated.available, true);
+    assert.deepEqual(isolated.values.preferences, {});
+    await isolated.close();
+  }
+  await reopened.close();
+});
 test("each distinct Swift import remains recoverable after parent EOF before exact ACK", async () => {
   const f = fixture();
   for (const text of ["first Swift source", "distinct second Swift source"]) {

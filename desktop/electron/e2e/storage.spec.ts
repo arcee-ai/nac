@@ -54,6 +54,76 @@ async function launch(c: Candidate) {
   return { app, page };
 }
 
+test("Focus preference keys cross the native bridge and survive Quit on a new serving port", async ({
+  candidate: c,
+}) => {
+  // This branch owns the native bridge. The Focus React controls are integrated
+  // separately; use their existing preference keys through the same bound port.
+  const preferences = {
+    "nac.sidebar.view": "inbox",
+    "nac.sidebar.collapsed-projects": JSON.stringify(["fixture-project"]),
+    "nac.inbox.read.v1": JSON.stringify({ since: 123, runs: { session: "fixture-run" } }),
+    "nac.transcriptDensity": "compact",
+  };
+  const binding = await c.page.evaluate(async (values) => {
+    const port = (window as any).__nacDesktopStorage;
+    const bootstrap = await port.open();
+    let sequence = 0;
+    for (const [key, value] of Object.entries(values)) {
+      const id = ++sequence;
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          unsubscribe();
+          reject(Error("Storage ACK missing"));
+        }, 5000);
+        const unsubscribe = port.subscribe((ack: any) => {
+          if (
+            ack.sequence !== id ||
+            !["launch", "view", "document"].every(
+              (field) => ack.document[field] === bootstrap.document[field],
+            )
+          )
+            return;
+          clearTimeout(timer);
+          unsubscribe();
+          if (ack.durable) resolve();
+          else reject(Error("Storage ACK was not durable"));
+        });
+        if (
+          !port.write({
+            version: 1,
+            ...bootstrap.document,
+            sequence: id,
+            kind: "write",
+            namespace: "preferences",
+            key,
+            value,
+          })
+        ) {
+          clearTimeout(timer);
+          unsubscribe();
+          reject(Error("Storage write rejected"));
+        }
+      });
+    }
+    return bootstrap.binding;
+  }, preferences);
+  await stop(c.app);
+  const next = await launch(c);
+  try {
+    expect(new URL(next.page.url()).origin).not.toBe(c.endpoint);
+    const restored = await next.page.evaluate(async () =>
+      (window as any).__nacDesktopStorage.open(),
+    );
+    expect(restored.available).toBe(true);
+    expect(restored.binding).toEqual(binding);
+    for (const [key, value] of Object.entries(preferences))
+      expect(restored.values.preferences[key]).toBe(value);
+  } finally {
+    await stop(next.app);
+  }
+});
+
 test("cross-Quit/new-port text requires review and deliberate Restore; acknowledged clear stays cleared", async ({
   candidate: c,
 }, info) => {

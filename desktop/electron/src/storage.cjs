@@ -52,6 +52,10 @@ function validKey(profile, namespace, key) {
       "nac.chatTabs",
       "nac.sessionNavigation",
       "nac.sidebar.open",
+      "nac.sidebar.view",
+      "nac.sidebar.collapsed-projects",
+      "nac.inbox.read.v1",
+      "nac.transcriptDensity",
     ].includes(key) ||
       key.startsWith("nac.rightSidebar.collapsed."))
   );
