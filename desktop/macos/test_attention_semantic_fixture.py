@@ -22,11 +22,13 @@ def body(token, outputs=()):
 
 
 def goal_prompt(token):
-    owner = (HERE.parent.parent / 'crates/nac-core/src/session_service.rs').read_text()
-    literal = re.search(r'format!\(\s*("(?:\\.|[^"\\])*"),\s*goal\.goal_id, goal\.objective, budget',
-                        owner).group(1)
-    return json.loads(literal).format('fixture-goal', token + ': read semantic-marker.txt before completing.',
-                                      'No token budget was set.')
+    owner = (HERE.parent.parent / 'crates/nac-core/src/commands/goal_continuation.rs').read_text()
+    constants = {name: json.loads(literal) for name, literal in
+                 re.findall(r'const (\w+): &str = ("(?:\\.|[^"\\])*");', owner)}
+    template = json.loads(re.search(r'format!\(("(?:\\.|[^"\\])*")\)', owner).group(1))
+    return template.format(**constants, goal_id='fixture-goal',
+                           objective=token + ': read semantic-marker.txt before completing.',
+                           budget=constants['NO_BUDGET'])
 
 
 class ProtocolControls(unittest.TestCase):
