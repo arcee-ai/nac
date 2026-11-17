@@ -56,11 +56,12 @@ directories, tools, readiness and signal/persistence contracts.
   all four coupled glibc packages to 2.44-r16. Keep these exact identities
   visible; qualify GNU ABI, compiler execution, Python venv/SSL, locale and
   mounted HOME/read-only-root behavior against the actual image.
-- Own temporary APK revisions for upstream Kerberos 1.22.2 with accepted commits
+- Package MIT Kerberos 1.22.3 as NAC-owned `1.22.3-r0`. The official release
+  includes the NegoEx and KRB-CRED corrections from commits
   `2e75f0d9362fb979f5fc92829431a590a130929f` and
-  `62196e2b269159a5465f5b8d0ed7cf6f29c3282a`. Version 1.22.3 is not a published
-  release. Preserve the source NOTICE and library/plugin scope; distinguish the
-  actual upstream version from the NAC downstream package revision.
+  `62196e2b269159a5465f5b8d0ed7cf6f29c3282a`; do not reapply those
+  patches. Preserve the source NOTICE and library/plugin scope, and distinguish
+  the actual upstream version from the NAC downstream package revision.
 - Apply accepted GCC commit `aaa8351f4d2e636f9680a1f0a8ebc2f0a60611e6` to the
   exact shipped template header, preserving the rest of the signed dev payload
   and COPYING3/COPYING.RUNTIME. The aligned-new report is inapplicable to the
