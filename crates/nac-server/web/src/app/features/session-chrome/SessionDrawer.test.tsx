@@ -28,6 +28,14 @@ beforeEach(() => {
   controls.pinned = false;
   controls.expanded = false;
   vi.clearAllMocks();
+  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1400);
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      disconnect() {}
+    },
+  );
   vi.stubGlobal("matchMedia", (query: string) => ({
     matches: query === "(min-width: 1280px)",
     addEventListener() {},
@@ -36,6 +44,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 function mount() {
@@ -67,5 +76,109 @@ it("leaves full width through the shared Escape owner while keeping the drawer m
   fireEvent.keyDown(screen.getByRole("textbox", { name: "Panel draft" }), { key: "Escape" });
   expect(controls.toggleExpanded).toHaveBeenCalledOnce();
   expect(controls.close).not.toHaveBeenCalled();
+  expect(screen.getByRole("dialog", { name: "Insights" })).toBeTruthy();
+});
+
+it("resizes the outer dock with keyboard and restores the preference after remount", async () => {
+  controls.pinned = true;
+  const { setDockWidth } = await import("@/app/hooks/useDockWidth");
+  setDockWidth(560);
+  const view = mount();
+  const separator = screen.getByRole("separator", { name: "Resize session panel" });
+  expect(separator.getAttribute("aria-valuenow")).toBe("560");
+  fireEvent.keyDown(separator, { key: "ArrowLeft", shiftKey: true });
+  expect(separator.getAttribute("aria-valuenow")).toBe("610");
+  view.unmount();
+  mount();
+  expect(
+    screen.getByRole("separator", { name: "Resize session panel" }).getAttribute("aria-valuenow"),
+  ).toBe("610");
+});
+
+it("keeps the split preference while focused and restores it", async () => {
+  controls.pinned = true;
+  const { setDockWidth } = await import("@/app/hooks/useDockWidth");
+  setDockWidth(620);
+  const view = mount();
+  controls.expanded = true;
+  view.rerender(
+    <SessionDrawer
+      sessionId="other"
+      snapshot={null}
+      behavior="direct"
+      panel="insights"
+      goalEnabled={false}
+    />,
+  );
+  expect(screen.queryByRole("separator", { name: "Resize session panel" })).toBeNull();
+  fireEvent.keyDown(screen.getByRole("textbox", { name: "Panel draft" }), { key: "Escape" });
+  expect(controls.toggleExpanded).toHaveBeenCalledOnce();
+  controls.expanded = false;
+  view.rerender(
+    <SessionDrawer
+      sessionId="other"
+      snapshot={null}
+      behavior="direct"
+      panel="insights"
+      goalEnabled={false}
+    />,
+  );
+  expect(
+    screen.getByRole("separator", { name: "Resize session panel" }).getAttribute("aria-valuenow"),
+  ).toBe("620");
+});
+
+it("falls back to a floating drawer when an embedded container is too narrow", () => {
+  controls.pinned = true;
+  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(800);
+  mount();
+  expect(screen.queryByRole("separator", { name: "Resize session panel" })).toBeNull();
+  expect(screen.getByRole("dialog", { name: "Insights" })).toBeTruthy();
+});
+
+it("clamps keyboard resizing to useful panel and conversation widths", async () => {
+  controls.pinned = true;
+  const { setDockWidth } = await import("@/app/hooks/useDockWidth");
+  setDockWidth(560);
+  mount();
+  const separator = screen.getByRole("separator", { name: "Resize session panel" });
+  fireEvent.keyDown(separator, { key: "End" });
+  expect(separator.getAttribute("aria-valuenow")).toBe("940");
+  fireEvent.keyDown(separator, { key: "Home" });
+  expect(separator.getAttribute("aria-valuenow")).toBe("480");
+});
+
+it("resizes by pointer and stops at the container limit", async () => {
+  controls.pinned = true;
+  const { setDockWidth } = await import("@/app/hooks/useDockWidth");
+  setDockWidth(560);
+  vi.stubGlobal(
+    "PointerEvent",
+    class extends MouseEvent {
+      pointerId: number;
+      constructor(type: string, init: PointerEventInit = {}) {
+        super(type, init);
+        this.pointerId = init.pointerId ?? 0;
+      }
+    },
+  );
+  const view = mount();
+  const separator = screen.getByRole("separator", { name: "Resize session panel" });
+  separator.setPointerCapture = vi.fn();
+  separator.releasePointerCapture = vi.fn();
+  fireEvent.pointerDown(separator, { button: 0, pointerId: 1, clientX: 800 });
+  fireEvent.pointerMove(window, { pointerId: 1, clientX: 200 });
+  expect(separator.getAttribute("aria-valuenow")).toBe("940");
+  fireEvent.pointerUp(window, { pointerId: 1 });
+  fireEvent.pointerMove(window, { pointerId: 1, clientX: 900 });
+  expect(separator.getAttribute("aria-valuenow")).toBe("940");
+  view.unmount();
+});
+
+it("uses the floating fallback when container observation is unavailable", () => {
+  controls.pinned = true;
+  vi.stubGlobal("ResizeObserver", undefined);
+  mount();
+  expect(screen.queryByRole("separator", { name: "Resize session panel" })).toBeNull();
   expect(screen.getByRole("dialog", { name: "Insights" })).toBeTruthy();
 });

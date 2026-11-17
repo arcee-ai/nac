@@ -272,7 +272,7 @@ export function SessionSideBox({
             </Button>
           </Tooltip>
         ) : null}
-        {pinned ? null : (
+        {
           <Tooltip
             title={expanded ? "Exit full width" : "Full width"}
             position={TooltipPosition.BottomLeft}
@@ -289,7 +289,7 @@ export function SessionSideBox({
               <Icon iconName={expanded ? IconName.FullScreenExit : IconName.FullScreen} />
             </Button>
           </Tooltip>
-        )}
+        }
         {onClose ? (
           <Tooltip title="Close (Esc)" position={TooltipPosition.BottomLeft} className="shrink-0">
             <Button

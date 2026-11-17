@@ -1535,3 +1535,62 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
     "Unsent follow-up for the orchestrator",
   );
 });
+
+test("resizes and restores the dock beside the conversation", async ({
+  harness,
+  page,
+  request,
+}) => {
+  await fs.writeFile(path.join(harness.runRoot, "workspace", "dock-fixture.txt"), "dock fixture\n");
+  await page.setViewportSize({ width: 1600, height: 900 });
+  const sessionId = await createDirectSession(request, harness);
+  const otherId = await createDirectSession(request, harness);
+  await page.goto(`${harness.baseUrl}/#/session/${sessionId}/insights`);
+  await dockSessionDrawer(page);
+  const separator = page.getByRole("separator", { name: "Resize session panel" });
+  const dock = page.getByRole("complementary").filter({ has: sessionPanelTabs(page) });
+  await expect(separator).toBeVisible();
+  await separator.focus();
+  await page.keyboard.press("Shift+ArrowLeft");
+  const chosen = Number(await separator.getAttribute("aria-valuenow"));
+  expect(chosen).toBeGreaterThan(560);
+  await separator.hover(); // Wait for the width transition before targeting the handle.
+  const box = await separator.boundingBox();
+  expect(box).not.toBeNull();
+  await page.mouse.move(box!.x + 3, box!.y + box!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box!.x - 40, box!.y + box!.height / 2);
+  await page.mouse.up();
+  const resized = Number(await separator.getAttribute("aria-valuenow"));
+  expect(resized).toBeGreaterThan(chosen);
+  await openSessionPanel(page, "Files");
+  const inner = dock.getByRole("separator", { name: "Resize list panel" });
+  await expect(inner).toBeVisible();
+  const innerBefore = Number(await inner.getAttribute("aria-valuenow"));
+  await inner.focus();
+  await page.keyboard.press("ArrowLeft");
+  expect(Number(await inner.getAttribute("aria-valuenow"))).toBeGreaterThan(innerBefore);
+  await expect(separator).toHaveAttribute("aria-valuenow", String(resized));
+  await dock.getByRole("button", { name: "Full width", exact: true }).click();
+  await expect(dock.getByRole("button", { name: "Exit full width" })).toBeVisible();
+  await dock.getByRole("button", { name: "Exit full width" }).click();
+  await expect(separator).toHaveAttribute("aria-valuenow", String(resized));
+  await hideSessionDrawer(page);
+  await openSessionDrawer(page);
+  await expect(separator).toHaveAttribute("aria-valuenow", String(resized));
+  await page.goto(`${harness.baseUrl}/#/session/${otherId}/insights`);
+  await dockSessionDrawer(page);
+  await expect(separator).toHaveAttribute("aria-valuenow", String(resized));
+  await page.reload();
+  await dockSessionDrawer(page);
+  await expect(separator).toHaveAttribute("aria-valuenow", String(resized));
+  await page.setViewportSize({ width: 900, height: 700 });
+  await expect(page.getByRole("dialog", { name: "Insights" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Hide panel" })).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page
+    .getByRole("dialog", { name: "Insights" })
+    .getByRole("button", { name: "Close", exact: true })
+    .click();
+  await expect(page.getByRole("combobox", { name: "Message" })).toBeVisible();
+});

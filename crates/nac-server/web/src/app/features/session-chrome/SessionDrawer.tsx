@@ -1,4 +1,11 @@
-import { useEffect, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 
 import {
   Button,
@@ -12,6 +19,8 @@ import {
 import { SessionSideBox } from "@/app/components/inspector/SessionSideBox";
 import { GoalPanel } from "@/app/features/session-chrome/GoalPanel";
 import { useSessionDrawer } from "@/app/features/session-chrome/useSessionDrawer";
+import { CHAT_MIN_WIDTH, DOCK_DEFAULT_WIDTH, DOCK_MIN_WIDTH } from "@/app/hooks/useDockWidth";
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useKeyboardShortcuts } from "@/app/hooks/useKeyboardShortcuts";
 import { useIsMobile, useMediaQuery } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
@@ -56,10 +65,14 @@ function GoalHeader({
   pinned,
   onTogglePinned,
   onClose,
+  expanded,
+  onToggleExpanded,
 }: {
   pinned: boolean;
   onTogglePinned?: () => void;
   onClose: () => void;
+  expanded: boolean;
+  onToggleExpanded: () => void;
 }) {
   return (
     <header className="flex h-[52px] shrink-0 items-center gap-1 border-b border-muted pr-2 pl-5">
@@ -77,6 +90,16 @@ function GoalHeader({
           <Icon iconName={IconName.ShowSidePanel} />
         </Button>
       ) : null}
+      <Button
+        size={ButtonSize.Medium}
+        variant={ButtonVariant.Ghost}
+        content={ButtonContent.Icon}
+        aria-label={expanded ? "Exit full width" : "Full width"}
+        aria-pressed={expanded}
+        onClick={onToggleExpanded}
+      >
+        <Icon iconName={expanded ? IconName.FullScreenExit : IconName.FullScreen} />
+      </Button>
       <Button
         size={ButtonSize.Medium}
         variant={ButtonVariant.Ghost}
@@ -113,9 +136,67 @@ export function SessionDrawer({
 }) {
   const drawer = useSessionDrawer(sessionId, panel);
   const isMobile = useIsMobile();
-  const canDock = useMediaQuery(DOCK_QUERY) && !isMobile;
+  const wideViewport = useMediaQuery(DOCK_QUERY) && !isMobile;
+  const { useDockWidth, setDockWidth } = useNativeRuntime().stores.dockWidth;
+  const preferredWidth = useDockWidth();
+  const measureRef = useRef<HTMLSpanElement>(null);
+  const cleanupDrag = useRef<(() => void) | null>(null);
+  const [availableWidth, setAvailableWidth] = useState(DOCK_MIN_WIDTH + CHAT_MIN_WIDTH);
+  const [dragging, setDragging] = useState(false);
+  useEffect(() => () => cleanupDrag.current?.(), []);
+  useLayoutEffect(() => {
+    const parent = measureRef.current?.parentElement;
+    if (!parent) return undefined;
+    if (typeof ResizeObserver === "undefined") return undefined;
+    const measure = () => setAvailableWidth(parent.clientWidth);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(parent);
+    return () => observer.disconnect();
+  }, []);
+  // Without container observation, a host can shrink without a window resize.
+  // Keep the floating fallback rather than risk an unusable split.
+  const canDock =
+    typeof ResizeObserver !== "undefined" &&
+    wideViewport &&
+    availableWidth >= DOCK_MIN_WIDTH + CHAT_MIN_WIDTH;
   const docked = drawer.open && drawer.pinned && canDock;
   const presence = useDockPresence(docked);
+  const maxWidth = Math.max(DOCK_MIN_WIDTH, availableWidth - CHAT_MIN_WIDTH);
+  const width = Math.min(preferredWidth, maxWidth);
+  const panelWidth = drawer.expanded && availableWidth ? availableWidth : width;
+  const resize = (next: number) => setDockWidth(Math.min(maxWidth, Math.max(DOCK_MIN_WIDTH, next)));
+  const onResizeStart = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    cleanupDrag.current?.();
+    const startX = event.clientX;
+    const startWidth = width;
+    const pointerId = event.pointerId;
+    const handle = event.currentTarget;
+    handle.setPointerCapture(pointerId);
+    setDragging(true);
+    const move = (next: PointerEvent) => {
+      if (next.pointerId === pointerId) resize(startWidth + startX - next.clientX);
+    };
+    const stop = (next?: PointerEvent) => {
+      if (next && next.pointerId !== pointerId) return;
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+      window.removeEventListener("pointercancel", stop);
+      try {
+        handle.releasePointerCapture(pointerId);
+      } catch {
+        /* Already released. */
+      }
+      cleanupDrag.current = null;
+      setDragging(false);
+    };
+    cleanupDrag.current = () => stop();
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", stop);
+    window.addEventListener("pointercancel", stop);
+  };
   const goal = drawer.content === "goal" && goalEnabled;
 
   useKeyboardShortcuts([
@@ -127,7 +208,13 @@ export function SessionDrawer({
     goal ? (
       <div className="flex min-h-0 flex-1 flex-col">
         {isMobile ? null : (
-          <GoalHeader pinned={pinned} onTogglePinned={onTogglePinned} onClose={drawer.close} />
+          <GoalHeader
+            pinned={pinned}
+            onTogglePinned={onTogglePinned}
+            onClose={drawer.close}
+            expanded={drawer.expanded}
+            onToggleExpanded={drawer.toggleExpanded}
+          />
         )}
         <div className="min-h-0 flex-1 overflow-y-auto">
           <GoalPanel sessionId={sessionId} enabled={goalEnabled} />
@@ -150,6 +237,7 @@ export function SessionDrawer({
 
   return (
     <>
+      <span ref={measureRef} aria-hidden="true" className="absolute hidden" />
       {presence.mounted ? (
         <aside
           aria-label={title}
@@ -157,21 +245,54 @@ export function SessionDrawer({
           inert={!docked}
           className={cn(
             "relative h-full shrink-0 overflow-hidden border-l border-tertiary bg-elevation-ground",
-            "transition-[width] duration-200 ease-[var(--ease-drawer)] motion-reduce:transition-none",
-            presence.shown ? "w-[var(--drawer-width)]" : "w-0",
+            !dragging &&
+              "transition-[width] duration-200 ease-[var(--ease-drawer)] motion-reduce:transition-none",
           )}
+          style={{ width: presence.shown ? panelWidth : 0 }}
           onKeyDown={(event) => {
             if (event.key !== "Escape" || event.defaultPrevented || event.nativeEvent.isComposing)
               return;
             if (event.target instanceof Element && event.target.closest(".xterm")) return;
             event.preventDefault();
-            drawer.close();
+            if (drawer.expanded) drawer.toggleExpanded();
+            else drawer.close();
           }}
         >
           {/* Fixed width inside the tween, so the panel slides rather than reflows. */}
-          <div className="absolute inset-y-0 left-0 flex w-[var(--drawer-width)] flex-col">
+          <div
+            className="absolute inset-y-0 left-0 flex flex-col"
+            style={{ width: panelWidth || DOCK_DEFAULT_WIDTH }}
+          >
             {body(true)}
           </div>
+          {!drawer.expanded && docked ? (
+            <div
+              role="separator"
+              aria-label="Resize session panel"
+              aria-orientation="vertical"
+              aria-valuemin={DOCK_MIN_WIDTH}
+              aria-valuemax={maxWidth}
+              aria-valuenow={width}
+              tabIndex={0}
+              title="Resize session panel"
+              className="absolute inset-y-0 left-0 z-10 w-3 cursor-col-resize touch-none hover:bg-basic-primary/10 focus-visible:bg-basic-primary/10 focus-visible:outline focus-visible:outline-2"
+              onPointerDown={onResizeStart}
+              onKeyDown={(event) => {
+                const step = event.shiftKey ? 50 : 10;
+                if (event.key === "ArrowLeft") resize(width + step);
+                else if (event.key === "ArrowRight") resize(width - step);
+                else if (event.key === "Home") resize(DOCK_MIN_WIDTH);
+                else if (event.key === "End") resize(maxWidth);
+                else return;
+                event.preventDefault();
+              }}
+            >
+              <span
+                aria-hidden="true"
+                className="absolute top-1/2 left-1 h-8 w-1 -translate-y-1/2 rounded-full bg-basic-tertiary"
+              />
+            </div>
+          ) : null}
         </aside>
       ) : null}
       <Drawer
