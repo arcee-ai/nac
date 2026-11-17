@@ -29,7 +29,7 @@ export function SessionBehaviorPicker({
               className={cn(
                 "flex cursor-pointer flex-col gap-1.5 rounded-card border p-3.5 text-left outline-none md:min-h-[188px]",
                 "transition-[border-color,background-color] duration-150 ease-out motion-reduce:transition-none",
-                "focus-visible:ring-2 focus-visible:ring-[var(--f-ring)]",
+                "focus-visible:ring-2 focus-visible:ring-[var(--f-focus)]",
                 selected
                   ? "border-[var(--f-line-ink)] bg-[var(--f-wash-1)]"
                   : "border-tertiary bg-elevation-level-1 hover:border-secondary",

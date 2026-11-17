@@ -236,7 +236,7 @@ export function HomeComposer({
                 "inline-flex size-8 shrink-0 items-center justify-center rounded-pill max-md:size-11",
                 "bg-[var(--f-ink)] text-[var(--f-on-ink)] outline-none",
                 "transition-[opacity,background-color] duration-150 ease-out",
-                "hover:bg-[var(--f-ink-hover)] focus-visible:ring-2 focus-visible:ring-[var(--f-ring)] focus-visible:ring-offset-2",
+                "hover:bg-[var(--f-ink-hover)] focus-visible:ring-2 focus-visible:ring-[var(--f-focus)] focus-visible:ring-offset-2",
                 "disabled:cursor-default disabled:bg-[var(--f-ink-disabled)] disabled:opacity-60",
               )}
             >

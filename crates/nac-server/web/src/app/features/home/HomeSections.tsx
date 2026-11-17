@@ -74,7 +74,7 @@ function LiveCard({
       className={cn(
         "group flex min-w-0 flex-col gap-2 rounded-card border p-4 text-left outline-none",
         "transition-colors duration-150 ease-out motion-reduce:transition-none",
-        "focus-visible:ring-2 focus-visible:ring-[var(--f-ring)]",
+        "focus-visible:ring-2 focus-visible:ring-[var(--f-focus)]",
         urgent
           ? "border-[var(--f-amber-line)] bg-[var(--f-amber-wash)] hover:bg-[var(--f-amber-wash-2)]"
           : "border-tertiary bg-elevation-level-1 hover:border-secondary",
@@ -198,7 +198,7 @@ export function HomeActivity({
                     className={cn(
                       "flex h-10 w-full min-w-0 items-center gap-3 rounded-md px-3 text-left outline-none max-md:h-12",
                       "transition-colors duration-150 ease-out hover:bg-[var(--f-wash-1)]",
-                      "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--f-ring)]",
+                      "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--f-focus)]",
                     )}
                   >
                     <span className="flex size-3 shrink-0 items-center justify-center">

@@ -27,7 +27,7 @@ export const Chip = forwardRef<
         "border border-transparent text-basic-secondary outline-none",
         "transition-colors duration-150 ease-out motion-reduce:transition-none",
         "hover:bg-[var(--f-wash-1)] hover:text-basic-primary",
-        "focus-visible:ring-2 focus-visible:ring-[var(--f-ring)]",
+        "focus-visible:ring-2 focus-visible:ring-[var(--f-focus)]",
         "disabled:pointer-events-none disabled:opacity-50",
         pressed && "border-tertiary bg-[var(--f-wash-1)] text-basic-primary",
         className,

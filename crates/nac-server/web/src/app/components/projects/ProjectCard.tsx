@@ -224,7 +224,7 @@ export function ProjectCard({
       className={cn(
         "group/tile relative flex min-w-0 cursor-default flex-col gap-3 rounded-card border p-4 pl-5 outline-none",
         "bg-elevation-level-1 transition-[border-color,background-color] duration-150 ease-out motion-reduce:transition-none",
-        "border-tertiary hover:border-secondary focus-visible:ring-2 focus-visible:ring-[var(--f-ring)]",
+        "border-tertiary hover:border-secondary focus-visible:ring-2 focus-visible:ring-[var(--f-focus)]",
         dragging && "shadow-lg",
         selected && "border-secondary",
       )}
@@ -247,7 +247,7 @@ export function ProjectCard({
               type="button"
               aria-label={facts.title}
               aria-pressed={selected}
-              className="absolute inset-0 rounded-[inherit] outline-none focus-visible:ring-2 focus-visible:ring-[var(--f-ring)]"
+              className="absolute inset-0 rounded-[inherit] outline-none focus-visible:ring-2 focus-visible:ring-[var(--f-focus)]"
               onClick={activate}
             />,
           )

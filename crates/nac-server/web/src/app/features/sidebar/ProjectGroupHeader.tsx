@@ -71,7 +71,7 @@ export function ProjectGroupHeader({
         onClick={onToggle}
         className={cn(
           "flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-md pl-1.5 text-left outline-none",
-          "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--f-ring)]",
+          "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--f-focus)]",
         )}
       >
         <Icon

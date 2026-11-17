@@ -16,7 +16,7 @@ function titleFor(pathname: string): string {
 const TARGET = cn(
   "inline-flex size-11 shrink-0 items-center justify-center rounded-pill text-basic-secondary outline-none",
   "transition-colors duration-150 ease-out active:bg-[var(--f-wash-2)] hover:bg-[var(--f-wash-1)]",
-  "focus-visible:ring-2 focus-visible:ring-[var(--f-ring)]",
+  "focus-visible:ring-2 focus-visible:ring-[var(--f-focus)]",
 );
 
 /**

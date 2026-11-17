@@ -55,7 +55,7 @@ function NavRow({
       className={cn(
         "group/nav flex h-8 w-full items-center gap-2.5 rounded-md px-2.5 text-left outline-none",
         "type-label transition-colors duration-150 ease-out motion-reduce:transition-none",
-        "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--f-ring)]",
+        "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--f-focus)]",
         active
           ? "bg-[var(--f-wash-2)] text-basic-primary"
           : "text-basic-secondary hover:bg-[var(--f-wash-1)] hover:text-basic-primary",
@@ -176,7 +176,7 @@ function SidebarBody({ onHide }: { onHide: () => void }) {
             "my-1 flex h-8 w-full items-center gap-2 rounded-pill border border-tertiary px-3 text-left",
             "bg-elevation-level-1 text-basic-muted outline-none",
             "transition-colors duration-150 ease-out hover:border-secondary hover:text-basic-tertiary",
-            "focus-visible:ring-2 focus-visible:ring-[var(--f-ring)]",
+            "focus-visible:ring-2 focus-visible:ring-[var(--f-focus)]",
           )}
         >
           <Icon iconName={IconName.Search} size={14} className="shrink-0" />

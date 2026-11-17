@@ -30,7 +30,7 @@ function MenuRow({
       className={cn(
         "type-label flex min-h-11 w-full items-center gap-3 rounded-md px-3 text-left !text-md outline-none",
         "transition-colors duration-150 ease-out active:bg-[var(--f-wash-2)]",
-        "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--f-ring)]",
+        "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--f-focus)]",
         active ? "bg-[var(--f-wash-2)] text-basic-primary" : "text-basic-primary",
       )}
     >
