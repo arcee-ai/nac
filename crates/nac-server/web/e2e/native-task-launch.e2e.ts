@@ -184,6 +184,7 @@ test("native saved-project launches open independent named-skill tasks across Gi
       { token: `NATIVE_LAUNCH_${kind}` },
       { kind: "function_call", stream: "request", name: "launch_task", callId, arguments: input },
     );
+    const readyGate = new ScriptGate();
     harness.provider.enqueue(
       `launch-ack-${kind}`,
       { functionOutputCallId: callId },
@@ -194,6 +195,7 @@ test("native saved-project launches open independent named-skill tasks across Gi
         callId: `native-status-${kind}`,
         arguments: { request_id: input.request_id },
       },
+      readyGate,
     );
     harness.provider.enqueue(
       `launch-status-repeat-${kind}`,
@@ -238,13 +240,31 @@ test("native saved-project launches open independent named-skill tasks across Gi
     try {
       for (let attempt = 0; attempt < 4; attempt += 1) {
         const settled = await Promise.race([
-          settlementGate.accepted.then(() => true),
+          readyGate.accepted.then(() => true),
           allow.waitFor({ state: "visible" }).then(() => false),
         ]);
         if (settled) break;
         await allow.click();
       }
+      await readyGate.accepted;
+      // The launched task reaches its own scripted model before the caller asks for status.
+      await expect
+        .poll(() => harness.provider.requests.some((r) => r.matchedStep === `child-done-${kind}`))
+        .toBe(true);
+      readyGate.release();
       await settlementGate.accepted;
+      // Check the actual tool outputs, not just the existence of task links.
+      for (const [step, id] of [
+        [`launch-status-repeat-${kind}`, `native-status-${kind}`],
+        [`launch-status-ack-${kind}`, `native-status-repeat-${kind}`],
+      ]) {
+        const statusOutput = functionOutput(
+          harness.provider.requests.find((r) => r.matchedStep === step)?.body,
+          id,
+        );
+        if (!statusOutput) throw new Error(`No status receipt reached the caller: ${id}`);
+        expect((JSON.parse(statusOutput) as Receipt).launch.phase).toBe("ready");
+      }
       // Both status responses have arrived, but the assistant turn is still live.
       const liveLink = page.getByRole("link", {
         name: `Open separate task: ${title}`,
@@ -253,6 +273,7 @@ test("native saved-project launches open independent named-skill tasks across Gi
       await expect(liveLink).toHaveCount(1);
       await expect(liveLink).toBeVisible();
     } finally {
+      readyGate.release();
       settlementGate.release();
     }
     await expect(acknowledgement).toBeVisible();
