@@ -7,6 +7,7 @@ export * from "@/app/services/queries/configuration";
 export * from "@/app/services/queries/session";
 export * from "@/app/services/queries/workspace";
 export * from "@/app/services/queries/projects";
+export * from "@/app/services/queries/attention";
 
 export {
   useDeleteManagedSecret,

@@ -859,6 +859,7 @@ function de(e, t) {
 	let n = e.transport.request.bind(e.transport);
 	return {
 		...ue(e, { productContextBinding: t }),
+		fleetAttention: (e, t) => n("GET", `/attention${e ? `?project_id=${encodeURIComponent(e)}` : ""}`, { signal: t }),
 		taskQuestions: (e, t) => n("GET", `/sessions/${encodeURIComponent(e)}/questions`, { signal: t }),
 		answerTaskQuestion: (e, t) => n("POST", `/sessions/${encodeURIComponent(e)}/questions/${encodeURIComponent(t.request_id)}/answer`, { body: t }),
 		cancelTaskQuestion: (e, t, r) => n("POST", `/sessions/${encodeURIComponent(e)}/questions/${encodeURIComponent(t)}/cancel`, { body: { expected_revision: r } }),
@@ -3477,6 +3478,13 @@ var Sa = /* @__PURE__ */ new WeakMap(), Ca = 0, wa = class {
 			n(), this.disposers.delete(r);
 		};
 		return this.disposers.add(r), r;
+	};
+	openStream = async (e) => {
+		this.controller.signal.throwIfAborted();
+		let t = this.client.transport.url(e);
+		if (!this.eventSource) return new EventSource(t, this.client.transport.eventSourceInit());
+		let n = await this.client.transport.streamContext();
+		return this.controller.signal.throwIfAborted(), this.eventSource(t, { withCredentials: n.credentials === "include" }, n);
 	};
 	retain = () => (this.attachments += 1, this.detachVersion += 1, () => {
 		--this.attachments;

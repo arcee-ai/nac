@@ -109,7 +109,7 @@ const client = createNacClient({
   requestId: () => "artifact-contract-request",
 });
 const api = createNacApi(client);
-assert.equal(Object.keys(NAC_API_SURFACE).length, 177);
+assert.equal(Object.keys(NAC_API_SURFACE).length, 179);
 assert.deepEqual(Object.keys(NAC_API_SURFACE).sort(), ${JSON.stringify(operationKeys)});
 assert.equal(NAC_API_SURFACE["GET /attention/events"], "private:native opt-in metadata attention stream");
 assert.equal(NAC_API_SURFACE["GET /attention"], "private:standalone passive fleet attention snapshot");
