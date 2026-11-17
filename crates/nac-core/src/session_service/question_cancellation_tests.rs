@@ -395,7 +395,7 @@ async fn question_cancellation_keeps_active_guidance_and_lets_its_settlement_wak
         )
         .unwrap();
     messages.push(message);
-    service.agent.lock().await.messages = messages;
+    service.agent.lock().await.messages = messages.into();
     service
         .run_prompt_commit(&guidance.run_id)
         .unwrap()

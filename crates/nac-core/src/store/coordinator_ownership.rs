@@ -22,6 +22,11 @@ std::thread_local! {
 /// Serving application services can await the explicit typed owner methods.
 /// The executor itself calls the unchanged transaction without re-enqueueing.
 pub(crate) fn owner_for(path: &Path) -> Result<Option<Arc<StoreCoordinator>>> {
+    // The executor's commands carry its canonical path; resolve them inline
+    // without a global lock or a filesystem lookup.
+    if EXECUTION_STORE.with(|active| active.borrow().as_deref() == Some(path)) {
+        return Ok(None);
+    }
     if OWNERS
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -101,6 +106,9 @@ impl ExecutionStore {
 }
 impl Drop for ExecutionStore {
     fn drop(&mut self) {
+        // The reused connection belongs to this execution; close it before the
+        // executor releases the store's process lease.
+        super::super::schema::release_executor_connection();
         EXECUTION_STORE.with(|active| {
             active.replace(self.0.take());
         });
