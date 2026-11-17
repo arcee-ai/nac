@@ -157,6 +157,26 @@ class Lane:
         facts = require_console(console, os.getuid(), quartz)
         self.report['console_' + suffix] = facts
 
+    def toolchain(self):
+        def observe(args):
+            try:
+                result = subprocess.run(args, cwd=ROOT, env=self.env, stdout=subprocess.PIPE,
+                                        stderr=subprocess.STDOUT, text=True, timeout=30)
+                return dict(code=result.returncode, output=result.stdout.strip()[:8192])
+            except (OSError, subprocess.TimeoutExpired) as error:
+                return dict(code=None, failure=type(error).__name__)
+        # The workflow pins Mac/Xcode/Rust/Node. Record their actual values;
+        # Electron's bundled Chromium is not the Swift WK supplier envelope.
+        self.report['toolchain'] = dict(
+            developer_directory_configured=self.env.get('DEVELOPER_DIR'),
+            developer_directory_selected=observe(['xcode-select', '-p']),
+            xcode=observe(['xcodebuild', '-version']),
+            sdk=observe(['xcrun', '--sdk', 'macosx', '--show-sdk-version']),
+            swift=observe(['xcrun', 'swiftc', '--version']),
+            clang=observe(['xcrun', 'clang', '--version']),
+            rustc=observe(['rustc', '-Vv']), node=observe(['node', '--version']),
+            os_build=observe(['sw_vers', '-buildVersion']))
+
     def audit(self, app):
         # Select only exact private candidate command paths and fixture root.
         # Retain PID numbers, never the all-process listing or other owners.
@@ -172,6 +192,7 @@ class Lane:
             raise RuntimeError('Actual-app CI requires Apple Silicon macOS; unsupported is failure')
         self.report.update(os_version=platform.mac_ver()[0], architecture=platform.machine(),
                            runner_image=os.environ.get('ImageVersion'), engine_mode='normal-release')
+        self.toolchain()
         self.gui('before')
         self.run('setup', ['make', 'setup'], 300)
         self.run('electron-install', ['npm', '--prefix', 'desktop/electron', 'ci'], 180)

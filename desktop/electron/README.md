@@ -143,7 +143,10 @@ also covers `desktop/electron/package-lock.json`.
 
 The upload contains bounded sanitized phase logs, package/source/engine/asset
 hashes, selected scenario verdicts and positive fixture/owned-child cleanup
-receipts. Raw Playwright attachments, profiles/stores, screenshots, videos,
+receipts, plus observed image/OS/Xcode/SDK/compiler/runtime identities. Tool
+observations retain unavailable/nonzero results; required build and GUI phases
+must still succeed. This lane does not inherit Swift's WK supplier envelope.
+Raw Playwright attachments, profiles/stores, screenshots, videos,
 traces and all-process lists are excluded. Selected CI cases cannot pass by
 skipping or retrying. The [versioned feature inventory](e2e/FEATURE-INVENTORY.md)
 distinguishes covered/added scenarios, manual observations and deferred workflow

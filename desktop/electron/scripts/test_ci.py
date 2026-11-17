@@ -4,6 +4,8 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
+import subprocess
 
 sys.path.insert(0, str(Path(__file__).parent))
 from ci import Lane, LIMIT, require_verdict, sanitized, source_identity, summary
@@ -61,6 +63,15 @@ class EvidenceTests(unittest.TestCase):
                 (passed, settled, [123])):
             with self.assertRaises(RuntimeError):
                 require_verdict(scenarios, records, remaining)
+
+    def test_toolchain_observation_preserves_unavailable_tool_result(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            lane = Lane(Path(temporary) / 'export', 'a' * 40)
+            with patch('ci.subprocess.run', return_value=subprocess.CompletedProcess([], 1, 'unavailable')):
+                lane.toolchain()
+            self.assertEqual(lane.report['toolchain']['xcode'], dict(code=1, output='unavailable'))
+            import shutil
+            shutil.rmtree(lane.raw)
 
 
 if __name__ == '__main__':
