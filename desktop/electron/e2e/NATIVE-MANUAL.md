@@ -56,9 +56,12 @@ app only:
    `ai.arcee.nac.electron.folder-picker.dev` for this dev candidate. Independently
    bind its executable, parent PID and birth before CUA attachment. Do not launch
    that helper bundle yourself or inspect it after cancellation/selection exit.
-3. Open the seeded **Native acceptance workspace** chat, select Files, choose
-   **All** (accessible name **All files**) and the exact `revealLeaf`. The file
-   is committed, so it does not appear in the **Diff** list. Use its normal
+3. Open the seeded **Native acceptance workspace** chat and select Files. If
+   the **Files source** status describes a captured revision, select **Back to
+   working tree** first and wait for the working-tree source to finish loading.
+   Choose **All** (accessible name **All files**) and the exact `revealLeaf`.
+   The file is committed, so it does not appear in **Diff** (accessible name
+   **Diff of changed files**). Use its normal
    **Reveal in Finder** button. Independently
    observe Finder showing that unique selected leaf. The controller never calls
    `showItemInFolder` or the reveal API. This observation must be recorded by the
