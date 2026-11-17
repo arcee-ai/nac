@@ -685,6 +685,9 @@ test("applies parent auto-approval to child agents and identifies manual child r
   await page.getByRole("button", { name: "Auto-approve on — open permissions" }).click();
   await selectApprovalMode(page, sessionId, "manual");
   await page.keyboard.press("Escape");
+  // The drawer slides out before it unmounts; a request arriving meanwhile
+  // would retitle it "Permission required" beside the attention card.
+  await expect(page.getByRole("dialog", { name: "Permissions", exact: true })).toHaveCount(0);
 
   const manualStart = startForegroundChild(
     request,
