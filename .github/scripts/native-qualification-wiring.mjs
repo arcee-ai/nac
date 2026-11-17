@@ -66,6 +66,12 @@ export function reverseNativeQualification(workflow) {
 }
 
 export function reverseNativeApp(workflow) {
+  if (workflow.jobs.electron) {
+    // Only the reviewed additive ordinary Electron lane may be projected away;
+    // predecessor admission/cache/security fingerprints remain authoritative.
+    assert.equal(digest(workflow.jobs.electron), 'e6bdbc597dc41c46d2aa2ac10d908915f3417b1df9c0c70655398172e2e94582', 'exact required normal Electron job');
+    delete workflow.jobs.electron;
+  }
   if (workflow.jobs['startup-panel-policy']) {
     assert.equal(digest(workflow.jobs['startup-panel-policy']), '1f5773c75a395738d65e4d768fbe8427bea8f0e48b1978fbb9a8265c59cf383e', 'exact required immutable Mac policy job');
     delete workflow.jobs['startup-panel-policy'];

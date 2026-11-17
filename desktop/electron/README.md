@@ -86,6 +86,42 @@ the Electron input boundary; it does not certify physical keyboard, IME,
 VoiceOver or actual paint. The performance owner documents separate proxies and
 whole-application accounting in [performance](performance/README.md).
 
+For the dedicated Mac CI lane, commit the runtime/test inputs, then run from a
+clean Apple Silicon checkout with an available unlocked Aqua console:
+
+```sh
+python3 -B desktop/electron/scripts/ci.py --expected-sha "$(git rev-parse HEAD)" \
+  --output "$PWD/target/electron-ci-evidence"
+```
+
+Choose a new output path for each run. This runs locked setup/install, builds the
+normal optimized engine, prepares resources, runs owner tests, packages the exact
+source through the existing writer, then launches actual main/preload/renderer
+tests with private profiles. The runner uses the existing Swift lane's read-only
+GUI prerequisite; unavailable/locked console is an explicit failure. It never
+requests OS permission changes. Credentials and build-flag overrides are absent
+from the app environment. Renderer sandboxing and throttling remain enabled.
+
+Ordinary admitted PRs invoke `macos-native / ARM Electron actual app`
+automatically through the existing mandatory Mac workflow/aggregate. Electron
+checks out `pull_request.head.sha`; other events use the admitted source SHA.
+Both are recorded, so merge-candidate checks are not represented as head-app
+evidence. Existing metadata-only admission and native-supplier selection remain
+unchanged. Rust compiler caches are read on PRs and written only on dev/main
+pushes; explicit cold-cache mode is preserved. The full source-security scan
+also covers `desktop/electron/package-lock.json`.
+
+The upload contains bounded sanitized phase logs, package/source/engine/asset
+hashes, selected scenario verdicts and positive fixture/owned-child cleanup
+receipts. Raw Playwright attachments, profiles/stores, screenshots, videos,
+traces and all-process lists are excluded. Selected CI cases cannot pass by
+skipping or retrying. The [versioned feature inventory](e2e/FEATURE-INVENTORY.md)
+distinguishes covered/added scenarios, manual observations and deferred workflow
+coverage, including peer-owned recovery/notification specs discovered on join.
+Hosted execution is proven by that exact-head Actions run and packet, not by
+workflow YAML or a local pass. Linux, physical keyboard/IME/AX, real sleep/wake,
+signed notification delivery and release qualification remain separate.
+
 The packaged test controller pauses its exact child in the Node inspector before
 application startup and removes Playwright's three injected debugger arguments
 from JavaScript argv. The shipped argument parser and renderer bridge are
