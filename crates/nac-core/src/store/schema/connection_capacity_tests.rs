@@ -1,4 +1,5 @@
 use super::*;
+use crate::store::{initialize, TranscriptLogWriter};
 
 fn temp_store_path(label: &str) -> PathBuf {
     let unique = std::time::SystemTime::now()
