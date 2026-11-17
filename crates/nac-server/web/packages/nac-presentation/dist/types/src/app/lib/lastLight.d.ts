@@ -1,4 +1,4 @@
-import type { LightModelSettings } from "@/app/types/api";
+import type { LightModelSettings } from "../types/api";
 export declare function createLastLight(storage?: Pick<Storage, "getItem" | "setItem">): {
     release: () => void;
     loadLastLight: () => LightModelSettings | null;
