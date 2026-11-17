@@ -11,7 +11,8 @@ import { isActiveRun, parseStoreTime } from "@/app/lib/format";
 import { projectIdFromPath, routes, sessionIdFromPath, type SessionPanel } from "@/app/lib/routes";
 import { sessionPanelPolicy } from "@/app/lib/sessionBehavior";
 import { sessionStatus, type SessionStatus } from "@/app/lib/sessionStatus";
-import { NEW_SESSION_KEYS, TOGGLE_SIDEBAR_KEYS } from "@/app/lib/shortcuts";
+import { NEW_SESSION_KEYS, NEXT_NEEDS_YOU_KEYS, TOGGLE_SIDEBAR_KEYS } from "@/app/lib/shortcuts";
+import { useInbox } from "@/app/features/inbox/inboxContext";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
 import { THEMES, useTheme, type Theme } from "@/app/providers/ThemeProvider";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
@@ -107,6 +108,9 @@ export function usePaletteCommands(): PaletteItem[] {
   const title = useSessionTitle();
   const managed = useManagedHost();
   const projectActions = useProjectActions();
+  const inbox = useInbox();
+  const needsYouCount = inbox.model.badge;
+  const openNextNeedsYou = inbox.openNext;
   const settings = useProductNavigationOwner();
   const { theme = "system", setTheme } = useTheme();
   const density = useTranscriptDensity();
@@ -182,6 +186,18 @@ export function usePaletteCommands(): PaletteItem[] {
     }
 
     const here = projectId ? projectName.get(projectId) : undefined;
+    if (needsYouCount > 0) {
+      items.push({
+        id: "action:next-needs-you",
+        group: "Actions",
+        label: "Next session that needs you",
+        detail: `${needsYouCount} waiting`,
+        keywords: "inbox approval question attention waiting",
+        icon: IconName.Flag,
+        shortcut: NEXT_NEEDS_YOU_KEYS,
+        run: openNextNeedsYou,
+      });
+    }
     items.push({
       id: "action:new-session",
       group: "Actions",
@@ -290,6 +306,8 @@ export function usePaletteCommands(): PaletteItem[] {
     isMobile,
     managed,
     navigate,
+    needsYouCount,
+    openNextNeedsYou,
     projectActions,
     projectId,
     projectList,

@@ -13,6 +13,7 @@ import { Transcript } from "@/app/components/inspector/Transcript";
 import { TranscriptModelProvider } from "@/app/components/inspector/transcript/TranscriptModelProvider";
 import { TopSingleSessionHeader } from "@/app/components/inspector/TopSingleSessionHeader";
 import { SessionDrawer } from "@/app/features/session-chrome/SessionDrawer";
+import { InboxReadMarker } from "@/app/features/inbox/InboxProvider";
 import { useRunStateSync, useSessionStream } from "@/app/hooks/useSessionStream";
 import { perfRender } from "@/app/lib/perfDebug";
 import { sessionPanelPolicy } from "@/app/lib/sessionBehavior";
@@ -250,6 +251,8 @@ export default function SessionPage() {
         panel={effectivePanel}
         goalEnabled={direct && lineage == null}
       />
+      {/* Looking at a session reads its latest outcome off the Inbox. */}
+      {desktopVisible ? <InboxReadMarker sessionId={id} /> : null}
     </section>
   );
 

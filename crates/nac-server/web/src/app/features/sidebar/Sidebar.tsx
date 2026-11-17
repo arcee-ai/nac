@@ -1,5 +1,5 @@
 import { useSidebarToggleRequests } from "@/app/features/command-palette/paletteSignal";
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
 import {
@@ -11,15 +11,13 @@ import {
   IconName,
   KeyboardShortcut,
   Logo,
-  Popover,
-  PopoverPlacement,
-  PopoverSize,
   Tooltip,
 } from "@/app/atoms";
 import { TooltipPosition } from "@/app/atoms/tooltip";
 import { useSidebarCommands } from "@/app/components/LeftSidebar/useSidebarCommands";
 import { ThemeToggle } from "@/app/components/ThemeToggle";
 import { openCommandPalette } from "@/app/features/command-palette/paletteSignal";
+import { SessionListBody, SessionListSwitch } from "@/app/features/inbox/SessionLists";
 import { useKeyboardShortcuts } from "@/app/hooks/useKeyboardShortcuts";
 import { cn } from "@/app/lib/cn";
 import { routes } from "@/app/lib/routes";
@@ -27,8 +25,6 @@ import { MOD, NEW_CHAT_KEYS } from "@/app/lib/shortcuts";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useProjects, useVisibleSessions } from "@/app/services/queries";
 
-import { Menu, MenuItem } from "./MenuItem";
-import { SessionTree } from "./SessionTree";
 import { SIDEBAR_TOGGLE_KEYS, SIDEBAR_WIDTH, useSidebar } from "./useSidebar";
 
 const SEARCH_KEYS = [MOD, "k"];
@@ -72,57 +68,6 @@ function NavRow({
         </span>
       ) : null}
     </button>
-  );
-}
-
-function OrganizeMenu() {
-  const { useOrganize, setOrganize } = useNativeRuntime().stores.sidebarLayoutStore;
-  const organize = useOrganize();
-  const [open, setOpen] = useState(false);
-  return (
-    <Popover
-      open={open}
-      onClose={() => setOpen(false)}
-      sticky
-      placement={PopoverPlacement.BottomLeft}
-      size={PopoverSize.Small}
-      content={
-        <Menu label="Organize sessions">
-          <MenuItem
-            icon={IconName.Folders}
-            label="By project"
-            checked={organize === "project"}
-            onSelect={() => {
-              setOrganize("project");
-              setOpen(false);
-            }}
-          />
-          <MenuItem
-            icon={IconName.Activity}
-            label="By status"
-            checked={organize === "status"}
-            onSelect={() => {
-              setOrganize("status");
-              setOpen(false);
-            }}
-          />
-        </Menu>
-      }
-    >
-      <Tooltip title="Organize" sticky disabled={open}>
-        <Button
-          variant={ButtonVariant.Ghost}
-          size={ButtonSize.Small}
-          content={ButtonContent.Icon}
-          aria-label="Organize sessions"
-          aria-haspopup="menu"
-          aria-expanded={open}
-          onClick={() => setOpen((value) => !value)}
-        >
-          <Icon iconName={IconName.Filter} />
-        </Button>
-      </Tooltip>
-    </Popover>
   );
 }
 
@@ -193,12 +138,11 @@ function SidebarBody({ onHide }: { onHide: () => void }) {
         />
       </nav>
 
-      <div className="flex shrink-0 items-center justify-between pt-2 pr-2 pl-4.5">
-        <h2 className="type-meta-strong text-basic-tertiary">Sessions</h2>
-        <OrganizeMenu />
+      <div className="shrink-0 px-2 pt-2 pb-1">
+        <SessionListSwitch />
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-3 [scrollbar-gutter:stable]">
-        <SessionTree
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pt-1 pb-3 [scrollbar-gutter:stable]">
+        <SessionListBody
           projects={projectList?.projects ?? []}
           sessions={sessions}
           activeSessionId={commands.sessionId}

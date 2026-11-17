@@ -1,11 +1,11 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { Link } from "react-router-dom";
 
 import { Button, ButtonContent, ButtonSize, ButtonVariant, Icon, IconName } from "@/app/atoms";
 import { LeftSidebar } from "@/app/components/LeftSidebar";
 import { ProjectsEmptyState } from "@/app/components/projects/ProjectsEmptyState";
 import { useManagedHost } from "@/app/features/managed/controller/useManagedHost";
-import { useSessionStatuses } from "@/app/features/sidebar/sessionStatuses";
+import { SessionListBody, SessionListSwitch } from "@/app/features/inbox/SessionLists";
 import { SidebarToggle } from "@/app/features/sidebar/SidebarToggle";
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { visibleSessions } from "@/app/features/ui-policy/policy";
@@ -18,8 +18,8 @@ import { errorMessage } from "@/app/providers/ToastProvider";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useProjects, useSessions } from "@/app/services/queries";
 
-import { HomeActivity } from "./HomeSections";
 import { HomeComposer } from "./HomeComposer";
+import { NeedsYouLine } from "./NeedsYouLine";
 import { ProjectTiles } from "./ProjectTiles";
 
 function LoadingHome() {
@@ -50,7 +50,7 @@ export function HomePage() {
   );
   const projects = useMemo(() => projectsQuery.data?.projects ?? [], [projectsQuery.data]);
   const items = useMemo(() => projectListItems(projects, sessions), [projects, sessions]);
-  const statuses = useSessionStatuses(sessions);
+  const listRef = useRef<HTMLElement>(null);
 
   const data = sessionsQuery.data;
   useEffect(() => {
@@ -123,6 +123,13 @@ export function HomePage() {
               ) : (
                 <HomeComposer projects={projects} sessions={sessions} compact={isMobile} />
               )}
+              <NeedsYouLine
+                onShowList={
+                  isMobile
+                    ? () => listRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
+                    : undefined
+                }
+              />
             </section>
             {error ? (
               <div
@@ -142,16 +149,29 @@ export function HomePage() {
                 </Button>
               </div>
             ) : null}
-            {loading ? null : (
-              <>
-                <HomeActivity sessions={sessions} projects={projects} statuses={statuses} />
-                <ProjectTiles
-                  items={items}
+            {loading ? null : isMobile ? (
+              // A phone has no sidebar: its list is here, under the same switch.
+              <section
+                ref={listRef}
+                aria-label="Sessions and Inbox"
+                className="flex flex-col gap-3"
+              >
+                <SessionListSwitch touch />
+                <SessionListBody
+                  touch
                   projects={projects}
                   sessions={sessions}
-                  headingTrailing={intervalTasks}
+                  activeSessionId={null}
                 />
-              </>
+                {intervalTasks ? <div className="self-start">{intervalTasks}</div> : null}
+              </section>
+            ) : (
+              <ProjectTiles
+                items={items}
+                projects={projects}
+                sessions={sessions}
+                headingTrailing={intervalTasks}
+              />
             )}
           </main>
         )}

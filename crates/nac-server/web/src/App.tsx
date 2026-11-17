@@ -4,6 +4,7 @@ import { DesktopCommandOwner } from "@/app/features/desktop-commands/DesktopComm
 import type { DesktopCommandPort } from "@/app/features/desktop-commands/adapter";
 import { ProductNavigationProvider } from "@/app/features/product-context/ProductNavigationProvider";
 import { CommandSurfaces } from "@/app/features/command-palette/CommandSurfaces";
+import { InboxProvider } from "@/app/features/inbox/InboxProvider";
 import { SettingsPage } from "@/app/features/settings/SettingsPage";
 import { SettingsReturnProvider } from "@/app/features/settings/SettingsReturnProvider";
 import { Navigate, Route, Routes, useParams } from "react-router-dom";
@@ -76,33 +77,38 @@ export default function App({ desktopCommands }: { desktopCommands?: DesktopComm
             <ProjectActionsProvider>
               <ManagedHostProvider>
                 <ProductNavigationProvider>
-                  {desktopCommands && <DesktopCommandOwner port={desktopCommands} />}
-                  {desktopCommands?.connectSessionTarget && (
-                    <Suspense fallback={null}>
-                      <DesktopSessionTargetOwner port={desktopCommands} />
-                    </Suspense>
-                  )}
-                  {/* ⌘K palette and ⌘/ sheet: one owner, on every route. */}
-                  <CommandSurfaces />
-                  <SettingsReturnProvider>
-                    <Routes>
-                      <Route element={<AppShell />}>
-                        <Route path="/" element={<ProjectsListPage />} />
-                        <Route path="/project/:projectId" element={<ProjectRedirectPage />} />
-                        <Route
-                          path="/project/:projectId/task-schedules"
-                          element={<ProjectTaskSchedulesPage />}
-                        />
-                        <Route path="/task-schedules" element={<ProjectTaskSchedulesPage />} />
-                        <Route path="/session/:sessionId/:panel?" element={<KeyedSessionPage />} />
-                      </Route>
-                      {/* Settings take over the window: outside the shell and sidebar. */}
-                      <Route path="/settings" element={<SettingsPage />} />
-                      <Route path="/settings/:section" element={<SettingsPage />} />
-                      <Route path="/design" element={<DesignRoute />} />
-                      <Route path="*" element={<Navigate to={routes.list()} replace />} />
-                    </Routes>
-                  </SettingsReturnProvider>
+                  <InboxProvider>
+                    {desktopCommands && <DesktopCommandOwner port={desktopCommands} />}
+                    {desktopCommands?.connectSessionTarget && (
+                      <Suspense fallback={null}>
+                        <DesktopSessionTargetOwner port={desktopCommands} />
+                      </Suspense>
+                    )}
+                    {/* ⌘K palette and ⌘/ sheet: one owner, on every route. */}
+                    <CommandSurfaces />
+                    <SettingsReturnProvider>
+                      <Routes>
+                        <Route element={<AppShell />}>
+                          <Route path="/" element={<ProjectsListPage />} />
+                          <Route path="/project/:projectId" element={<ProjectRedirectPage />} />
+                          <Route
+                            path="/project/:projectId/task-schedules"
+                            element={<ProjectTaskSchedulesPage />}
+                          />
+                          <Route path="/task-schedules" element={<ProjectTaskSchedulesPage />} />
+                          <Route
+                            path="/session/:sessionId/:panel?"
+                            element={<KeyedSessionPage />}
+                          />
+                        </Route>
+                        {/* Settings take over the window: outside the shell and sidebar. */}
+                        <Route path="/settings" element={<SettingsPage />} />
+                        <Route path="/settings/:section" element={<SettingsPage />} />
+                        <Route path="/design" element={<DesignRoute />} />
+                        <Route path="*" element={<Navigate to={routes.list()} replace />} />
+                      </Routes>
+                    </SettingsReturnProvider>
+                  </InboxProvider>
                 </ProductNavigationProvider>
               </ManagedHostProvider>
             </ProjectActionsProvider>

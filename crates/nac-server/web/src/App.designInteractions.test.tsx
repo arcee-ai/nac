@@ -23,6 +23,10 @@ const state = vi.hoisted(() => ({
 vi.mock("./app/features/heartbeats/HeartbeatAttentionController", () => ({
   HeartbeatAttentionController: () => null,
 }));
+// The fleet Inbox reads the server; these presentations must not.
+vi.mock("./app/features/inbox/InboxProvider", () => ({
+  InboxProvider: ({ children }: { children: ReactNode }) => children,
+}));
 vi.mock("./app/providers/ThemeProvider", () => ({
   ThemeProvider: ({ children }: { children: ReactNode }) => children,
   useTheme: () => ({ resolved: "dark" }),

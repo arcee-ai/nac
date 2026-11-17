@@ -93,6 +93,8 @@ export const NEW_SESSION_KEYS = [MOD, "n"];
 export const TOGGLE_SIDEBAR_KEYS = [MOD, "b"];
 /** Pin the open drawer as a side column, or float it again. */
 export const DOCK_DRAWER_KEYS = [MOD, "\\"];
+/** Opens the session that has waited longest for you (Inbox › Needs you). */
+export const NEXT_NEEDS_YOU_KEYS = [MOD, "shift", "e"];
 
 export type ShortcutGroup = "General" | "Navigation" | "Session" | "Attention card";
 
@@ -139,6 +141,19 @@ export const SHORTCUTS: readonly ShortcutEntry[] = [
     group: "Navigation",
   },
   { id: "sidebar", keys: TOGGLE_SIDEBAR_KEYS, label: "Toggle the sidebar", group: "Navigation" },
+  {
+    id: "next-needs-you",
+    keys: NEXT_NEEDS_YOU_KEYS,
+    label: "Next session that needs you",
+    group: "Navigation",
+  },
+  {
+    id: "inbox-move",
+    keys: ["j / k"],
+    label: "Move through the Inbox (Enter opens)",
+    group: "Navigation",
+    spelled: true,
+  },
   { id: "dock", keys: DOCK_DRAWER_KEYS, label: "Dock or float the drawer", group: "Session" },
   { id: "approve", keys: ["enter"], label: "Approve the request", group: "Attention card" },
   { id: "deny", keys: ["d"], label: "Deny the request", group: "Attention card" },

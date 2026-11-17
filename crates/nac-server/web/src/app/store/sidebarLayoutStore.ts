@@ -2,6 +2,8 @@ import { createStore, standalonePreferenceStorage } from "@/app/lib/store";
 
 /** How the sidebar groups sessions. */
 export type SidebarOrganize = "project" | "status";
+/** The sidebar list: the Inbox (what needs you) or the project tree. */
+export type SidebarView = "inbox" | "sessions";
 
 interface SidebarLayoutState {
   /** Pixels the session sidebar reserves. Zero when that sidebar is not mounted. */
@@ -14,6 +16,7 @@ interface SidebarLayoutState {
   /** The narrow (768–1023px) slide-over. Never persisted; closed by default. */
   overlayOpen: boolean;
   organize: SidebarOrganize;
+  view: SidebarView;
   /** Project groups the user folded away (persisted). */
   collapsedProjects: readonly string[];
   /** Parents whose subagent rows are shown (this presentation only). */
@@ -24,6 +27,7 @@ interface SidebarLayoutState {
 
 const OPEN_KEY = "nac.sidebar.open";
 const ORGANIZE_KEY = "nac.sidebar.organize";
+const VIEW_KEY = "nac.sidebar.view";
 const COLLAPSED_KEY = "nac.sidebar.collapsed-projects";
 
 type PreferenceStorage = Pick<Storage, "getItem" | "setItem">;
@@ -71,12 +75,14 @@ function toggled(list: readonly string[], id: string): string[] {
  */
 export function createSidebarLayoutStore(storage?: PreferenceStorage) {
   const storedColumn = read(storage, OPEN_KEY);
-  const storedOrganize = read(storage, ORGANIZE_KEY);
+  const storedView = read(storage, VIEW_KEY);
   const initial: SidebarLayoutState = {
     offset: 0,
     columnOpen: storedColumn === "1" ? true : storedColumn === "0" ? false : null,
     overlayOpen: false,
-    organize: storedOrganize === "status" ? "status" : "project",
+    // The Inbox replaced "By status"; the tree is always by project now.
+    organize: "project",
+    view: storedView === "inbox" ? "inbox" : "sessions",
     collapsedProjects: readCollapsed(storage),
     expandedParents: [],
     revealedGroups: [],
@@ -112,6 +118,12 @@ export function createSidebarLayoutStore(storage?: PreferenceStorage) {
   }
   const useOrganize = () => useStore((state) => state.organize);
 
+  function setView(value: SidebarView) {
+    setState({ view: value });
+    write(storage, VIEW_KEY, value);
+  }
+  const useView = () => useStore((state) => state.view);
+
   function toggleProjectCollapsed(projectId: string) {
     const next = toggled(getState().collapsedProjects, projectId);
     setState({ collapsedProjects: next });
@@ -142,6 +154,8 @@ export function createSidebarLayoutStore(storage?: PreferenceStorage) {
     useOverlayOpen,
     setOrganize,
     useOrganize,
+    setView,
+    useView,
     toggleProjectCollapsed,
     useCollapsedProjects,
     toggleParentExpanded,
@@ -163,6 +177,8 @@ export const {
   useOverlayOpen,
   setOrganize,
   useOrganize,
+  setView,
+  useView,
   toggleProjectCollapsed,
   useCollapsedProjects,
   toggleParentExpanded,

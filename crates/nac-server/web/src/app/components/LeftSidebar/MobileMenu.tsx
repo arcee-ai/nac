@@ -4,7 +4,7 @@ import { Icon, IconName, Modal } from "@/app/atoms";
 import { ThemeSegmented } from "@/app/components/ThemeToggle";
 import { openCommandPalette } from "@/app/features/command-palette/paletteSignal";
 import { useManagedHost } from "@/app/features/managed/controller/useManagedHost";
-import { SessionTree } from "@/app/features/sidebar/SessionTree";
+import { SessionListBody, SessionListSwitch } from "@/app/features/inbox/SessionLists";
 import { cn } from "@/app/lib/cn";
 import { routes } from "@/app/lib/routes";
 import { useProjects, useVisibleSessions } from "@/app/services/queries";
@@ -95,7 +95,10 @@ export function MobileMenu({ open, onClose }: { open: boolean; onClose: () => vo
         </div>
       </nav>
       <div className="px-2 pt-2 pb-[calc(16px+env(safe-area-inset-bottom))]">
-        <SessionTree
+        <div className="pb-2">
+          <SessionListSwitch touch />
+        </div>
+        <SessionListBody
           touch
           projects={projectList?.projects ?? []}
           sessions={sessions}

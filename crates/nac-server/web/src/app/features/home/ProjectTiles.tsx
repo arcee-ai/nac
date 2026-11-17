@@ -10,7 +10,7 @@ import { useSessionActions } from "@/app/providers/SessionActionsProvider";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import type { ManagedSessionSummary, ProjectRecord } from "@/app/types/api";
 
-import { SectionHeading } from "./HomeSections";
+import { SectionHeading } from "./SectionHeading";
 import { useProjectReorder } from "./useProjectReorder";
 
 /** Sessions a tile answers for: its own, or every one inside the project. */
