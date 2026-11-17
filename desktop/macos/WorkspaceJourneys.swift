@@ -148,10 +148,7 @@ extension WorkspaceSmoke {
             // Panels open in the session drawer: the Session menu opens it on
             // Insights, then its Files tab. Docking (1280px) lays it beside the
             // chat as the old side column was, outside any dialog layer.
-            if (try? await self.js("return ![...document.querySelectorAll('[role=tab][aria-label=\"Files\"][aria-selected=\"true\"]')].some(t => t.getClientRects().length);")) as? Bool == true {
-                try await self.sessionAction("Insights")
-                try await self.button("Files")
-            }
+            try await self.drawerPanel("Files")
             if (try? await self.js("return !!document.querySelector('button[aria-label=\"Dock drawer\"]');")) as? Bool == true {
                 try await self.button("Dock drawer")
                 try await self.waitJS("docked Files panel", "return !!document.querySelector('aside[aria-label=\"Files\"] [role=tab][aria-label=\"Files\"][aria-selected=\"true\"]') && ![...document.querySelectorAll('[role=dialog]')].some(d => d.querySelector('[role=tablist][aria-label=\"Session panels\"]'));")
@@ -202,10 +199,7 @@ extension WorkspaceSmoke {
             try await self.require("Git branch unavailable", branch)
             try await self.require("Git changed-file receipt missing", "const r=await fetch('/sessions/' + \(self.quote(self.sessionID)) + '/workspace/diff?path=workspace.ts&stage=all&context=3'); if(!r.ok)return false; return JSON.stringify(await r.json()).includes('workspaceFileFixture');")
             try await self.navigate("files")
-            if (try? await self.js("return ![...document.querySelectorAll('[role=tab][aria-label=\"Files\"][aria-selected=\"true\"]')].some(t => t.getClientRects().length);")) as? Bool == true {
-                try await self.sessionAction("Insights")
-                try await self.button("Files")
-            }
+            try await self.drawerPanel("Files")
             try await self.button("Diff of changed files")
             let gitRow = """
             if (location.hash !== '#/session/' + \(self.quote(self.sessionID)) + '/files') return [];
@@ -343,6 +337,20 @@ extension WorkspaceSmoke {
 
     /// Opens one action of the session header's Session menu (⋯) popover.
     /// A pressed trigger toggles, so it is pressed only while the menu is shut.
+    /// Shows a panel in the session drawer: when the drawer is shut, the Session
+    /// menu opens it on Insights; then the drawer's own tab selects the panel.
+    /// The tab is looked up only inside the drawer's tab strip, so a closing
+    /// Session menu row with the same name can never take the click.
+    func drawerPanel(_ label: String) async throws {
+        let tab = "[...document.querySelectorAll('[role=tablist][aria-label=\"Session panels\"] [role=tab]')].find(t => t.getAttribute('aria-label') === \(quote(label)) && t.getClientRects().length && !t.closest('[inert]'))"
+        if (try? await js("return (\(tab))?.getAttribute('aria-selected') === 'true';")) as? Bool != true {
+            if (try? await js("return !(\(tab));")) as? Bool == true { try await sessionAction("Insights") }
+            try await waitJS("drawer \(label) tab", "return !!(\(tab));")
+            _ = try await js("(\(tab)).click(); return true;")
+        }
+        try await waitJS("drawer on \(label)", "return (\(tab))?.getAttribute('aria-selected') === 'true';")
+    }
+
     func sessionAction(_ item: String, rememberAs: String? = nil) async throws {
         try await waitJS("Session menu trigger", "return !!document.querySelector('button[aria-label=\"Session menu\"]:not(:disabled)');")
         let remember = rememberAs.map { "window[\(quote($0))]=b;" } ?? ""

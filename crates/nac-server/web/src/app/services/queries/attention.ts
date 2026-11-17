@@ -85,6 +85,8 @@ export function useFleetAttention(options: FleetAttentionOptions = {}): FleetAtt
     staleTime: 0,
   });
 
+  const refetchPoll = poll.refetch;
+
   useEffect(() => {
     if (poll.data) dispatch({ kind: "snapshot", ...poll.data, scope: projectId ?? null });
   }, [poll.data, projectId]);
@@ -137,7 +139,7 @@ export function useFleetAttention(options: FleetAttentionOptions = {}): FleetAtt
           // current health. Only a fresh successful read or stream can do so.
           setOutage({ scope: projectId ?? null, version: pollStarts.current });
           reconnect();
-          void poll.refetch();
+          void refetchPoll();
           return;
         }
         delay = INITIAL_RETRY_MS;
@@ -157,7 +159,7 @@ export function useFleetAttention(options: FleetAttentionOptions = {}): FleetAtt
       source?.close();
       source = null;
     };
-  }, [streaming, projectId, open, streamPath, poll.refetch]);
+  }, [streaming, projectId, open, streamPath, refetchPoll]);
 
   const unconfirmedOutage =
     outage?.scope === (projectId ?? null) &&

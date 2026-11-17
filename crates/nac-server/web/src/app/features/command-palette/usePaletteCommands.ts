@@ -319,6 +319,8 @@ export function usePaletteCommands(): PaletteItem[] {
     sessions,
     settings,
     setTheme,
+    setTranscriptDensity,
+    requestSidebarToggle,
     sidebarAvailable,
     snapshot?.lineage?.kind,
     theme,

@@ -23,6 +23,7 @@ class FileCaptureControls(unittest.TestCase):
     func navigate(_ path: String) async throws {}
     func button(_ title: String) async throws {}
     func sessionAction(_ item: String) async throws {}
+    func drawerPanel(_ label: String) async throws {}
     func quote(_ value: String) -> String { String(data: try! JSONSerialization.data(withJSONObject: [value]), encoding: .utf8)!.dropFirst().dropLast().description }
     func js(_ script: String) async throws -> Any { true }
     func waitJS(_ detail: String, _ script: String) async throws {}
@@ -133,11 +134,10 @@ struct Engine { let pid = 351 }
             func navigate(_ panel: String) async throws { events.append("navigate:" + panel) }
             func button(_ title: String) async throws { events.append("button:" + title) }
             func sessionAction(_ item: String) async throws { events.append("session:" + item) }
+            func drawerPanel(_ label: String) async throws { events.append("drawer:" + label) }
             func require(_ title: String, _ script: String) async throws { events.append(title) }
             func waitJS(_ title: String, _ script: String) async throws { events.append(title) }
             func js(_ script: String) async throws -> Any {
-                // The drawer already shows Files: no Session menu/tab presses.
-                if script.contains("[role=tab][aria-label=\"Files\"]") { return false }
                 precondition(script.contains("rows[0].click()")); events.append("one-row-click"); return true
             }
             func captureReadiness(_ target: CaptureTarget) async throws -> [String: Any] {
@@ -153,7 +153,7 @@ struct Engine { let pid = 351 }
             @MainActor static func main() async {
                 let smoke = WorkspaceSmoke(); await smoke.run()
                 precondition(smoke.events == ["Git branch unavailable", "Git changed-file receipt missing",
-                    "navigate:files", "button:Diff of changed files", "owned Git workspace.ts row",
+                    "navigate:files", "drawer:Files", "button:Diff of changed files", "owned Git workspace.ts row",
                     "one-row-click", "owned rendered Git diff", "file-readiness",
                     "Owned Git diff changed during file readback"])
             }

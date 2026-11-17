@@ -176,7 +176,7 @@ final class FixtureProvider {
         }
         responseCount += 1
         #if PREVIEW_SMOKE
-        if let response = WorkspaceFixture.wireResponse(request) {
+        if let response = WorkspaceFixture.wireResponse(request) ?? Self.sessionStartResponse(request) {
             send(connection, response, final: true)
             return
         }
@@ -220,4 +220,33 @@ final class FixtureProvider {
             if final || error != nil { connection.cancel() }
         })
     }
+
+    #if PREVIEW_SMOKE
+    /// The smoke's Home prompt gets its own short reply, supporting the exact
+    /// request's buffered or streaming mode. The incremental streamed answer
+    /// stays unique to the later session-composer journey.
+    static let sessionStartPrompt = "MAC_PREVIEW_START"
+    static let sessionStartAnswer = "Preview session started."
+    private static func sessionStartResponse(_ request: [String: Any]) -> String? {
+        guard let input = request["input"] as? [[String: Any]],
+              let user = input.last(where: { $0["role"] as? String == "user" }),
+              String(decoding: try! JSONSerialization.data(withJSONObject: user), as: UTF8.self)
+                  .contains(sessionStartPrompt) else { return nil }
+        func encode(_ object: [String: Any]) -> String {
+            String(decoding: try! JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]), as: UTF8.self)
+        }
+        let item: [String: Any] = ["id": "msg-preview-start", "type": "message", "status": "completed",
+            "role": "assistant", "content": [["type": "output_text", "text": sessionStartAnswer, "annotations": []]]]
+        let response: [String: Any] = ["id": "resp-preview-start", "object": "response", "status": "completed",
+            "model": "gpt-5.6-sol", "output": [item],
+            "usage": ["input_tokens": 7, "output_tokens": 4, "total_tokens": 11]]
+        if request["stream"] as? Bool == true {
+            return "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n" +
+                "data: \(encode(["type": "response.output_item.done", "output_index": 0, "item": item]))\n\n" +
+                "data: \(encode(["type": "response.completed", "response": response]))\n\n"
+        }
+        let body = encode(response)
+        return "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n\(body)"
+    }
+    #endif
 }
