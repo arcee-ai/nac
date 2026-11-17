@@ -1,5 +1,5 @@
 import { test, expect, root, type Candidate } from './fixture';
-import { openSettingsSection } from '../../../crates/nac-server/web/e2e/settings-focus';
+import { openSettingsSection } from './focus-helpers';
 import { execFileSync, spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import path from 'node:path';
@@ -52,6 +52,9 @@ test('native menu commands enter existing React flows and retain editor/modal gu
   await c.page.evaluate(() => document.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true })));
   await focusWorkspace(c);
   await menu(c, 'New Chat');
+  // Unified creation lands on Home; an empty profile chooses its first project there.
+  await expect(c.page.getByRole('heading', { name: 'Add a project', exact: true })).toBeVisible();
+  await c.page.getByRole('button', { name: 'Get Started', exact: true }).click();
   const projectForm = c.page.getByRole('dialog', { name: 'New Project', exact: true });
   await expect(projectForm).toBeVisible();
   await projectForm.locator('input').first().focus();

@@ -126,8 +126,19 @@ async function nacWorkspaceProbe(config) {
   const terminalSession = await create();
   await navigate(terminalSession, 'terminal');
   const region = () => document.querySelector('[aria-label="Session terminal"]');
-  await wait(() => region() || document.querySelector('button[aria-label="Show panel"]'), 'terminal panel entry');
-  document.querySelector('button[aria-label="Show panel"]')?.click();
+  if (!region()) {
+    // The same probe also supports the retained baseline's side-column entry.
+    const oldEntry = document.querySelector('button[aria-label="Show panel"]');
+    if (oldEntry) oldEntry.click();
+    else {
+      (await wait(() => document.querySelector('button[aria-label="Session menu"]'), 'Session menu')).click();
+      const panelRow = () => [...document.querySelectorAll('[role="dialog"][aria-label="Session"] button')]
+        .find(button => button.textContent.trim() === 'Insights');
+      (await wait(panelRow, 'Insights drawer entry')).click();
+      const terminalTab = () => document.querySelector('[role="tablist"][aria-label="Session panels"] [role="tab"][aria-label="Terminal"]');
+      (await wait(terminalTab, 'Terminal drawer tab')).click();
+    }
+  }
   await wait(region, 'terminal panel');
   const newShell = () => [...region().querySelectorAll('button')].find(button =>
     button.textContent.trim().toLowerCase() === 'new shell' && !button.disabled);

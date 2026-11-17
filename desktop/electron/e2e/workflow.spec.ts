@@ -1,7 +1,7 @@
 import { test, expect } from "./fixture";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { showSidePanel } from "../../../crates/nac-server/web/e2e/harness";
+import { showSessionPanel } from "./focus-helpers";
 
 test("production workspace streams, asks permission and a question, and keeps Mac document on close", async ({
   candidate: c,
@@ -206,7 +206,7 @@ test("trusted Chromium terminal input reaches Rust PTY and protected Stop reaps 
   await c.page.evaluate((id) => {
     location.hash = `/session/${id}/terminal`;
   }, session);
-  await showSidePanel(c.page);
+  await showSessionPanel(c.page, "Terminal");
   const pane = c.page.getByRole("region", { name: "Session terminal", exact: true });
   await pane.getByRole("button", { name: /^New shell$/i }).click();
   await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
@@ -248,7 +248,7 @@ test("actual Electron parent death closes its engine channel and settles an open
   await c.page.evaluate((id) => {
     location.hash = `/session/${id}/terminal`;
   }, session);
-  await showSidePanel(c.page);
+  await showSessionPanel(c.page, "Terminal");
   const pane = c.page.getByRole("region", { name: "Session terminal", exact: true });
   await pane.getByRole("button", { name: /^New shell$/i }).click();
   await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
