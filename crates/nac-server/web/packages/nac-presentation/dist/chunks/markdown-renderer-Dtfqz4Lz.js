@@ -1,8 +1,8 @@
 import { n as e, r as t, t as n } from "./rolldown-runtime-QGRDbDUS.js";
-import { A as r, D as i, k as a, n as o } from "./RuntimeContext-98eXEr8x.js";
+import { A as r, D as i, k as a, n as o } from "./RuntimeContext-C9ko5F2U.js";
 import { a as s } from "./PresentationBoundary-DgJz1GXw.js";
-import { n as c, o as l, or as u, r as d, t as f, vr as p, yr as m } from "./PerfProfiler-BOezqa80.js";
-import { N as h, i as g, r as _ } from "./Toast-y4mFgUIo.js";
+import { br as c, n as l, o as u, r as d, sr as f, t as p, yr as m } from "./PerfProfiler-BUxVgFXU.js";
+import { N as h, i as g, r as _ } from "./Toast-C1R55pFn.js";
 import { a as v, c as y, l as b, o as x, r as S, s as C, t as w } from "./lib-rX7C_D5H.js";
 import { Suspense as T, isValidElement as E, memo as D, use as O, useState as k } from "react";
 import { useQueryClient as ee } from "@tanstack/react-query";
@@ -6524,7 +6524,7 @@ function fl(e, t) {
 var pl = /* @__PURE__ */ e({ default: () => Al }), ml = [Uc], hl = /* @__PURE__ */ new Map();
 function gl(e) {
 	let t = hl.get(e);
-	return t || (t = import("./markdown-mathjax-Ikje4Nco.js").then(({ createMathjaxPlugin: t, remarkMathPlugin: n }) => ({
+	return t || (t = import("./markdown-mathjax-CWWcdbrm.js").then(({ createMathjaxPlugin: t, remarkMathPlugin: n }) => ({
 		remark: [...ml, n],
 		rehype: [t(e)]
 	})), hl.set(e, t)), t;
@@ -6561,12 +6561,12 @@ function bl(e) {
 	return `${e.length.toString(36)}-${(t >>> 0).toString(36)}`;
 }
 function xl({ href: e, children: t, ...n }) {
-	let { selectRevision: r, selectFileListing: i, selectFile: a, revealSidePanel: s } = o().stores.sessionLayoutStore, { api: d } = o(), f = re(), g = ne(), _ = h(), v = l(), y = ee(), b = m(g.pathname), x = b ? y.getQueryData(u.sessionSnapshot(b)) : void 0, S = c(e, [
+	let { selectRevision: r, selectFileListing: i, selectFile: a, revealSidePanel: s } = o().stores.sessionLayoutStore, { api: d } = o(), p = re(), g = ne(), _ = h(), v = u(), y = ee(), b = c(g.pathname), x = b ? y.getQueryData(f.sessionSnapshot(b)) : void 0, S = l(e, [
 		x?.workspace?.host_root,
 		x?.metadata.workspace_host_path,
 		x?.metadata.cwd
 	]), C = (e) => {
-		b && (r(null), i("tree"), a(e), s(_), f(p.session(b, "files")));
+		b && (r(null), i("tree"), a(e), s(_), p(m.session(b, "files")));
 	};
 	return S.kind === "workspace" && b ? /* @__PURE__ */ A("a", {
 		...n,
@@ -6697,7 +6697,7 @@ var Al = D(function({ children: e, streaming: t = !1 }) {
 	let [n, r] = k(t);
 	t && !n && r(!0);
 	let a = t || n && !kl(e);
-	return /* @__PURE__ */ A(f, {
+	return /* @__PURE__ */ A(p, {
 		id: "markdown",
 		children: a ? el(e).map((e, t) => /* @__PURE__ */ A(Dl, { source: e }, t)) : /* @__PURE__ */ A(Tl, {
 			source: e,
