@@ -25,6 +25,12 @@ async fn start_candidate(
     let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let address = listener.local_addr().unwrap();
     drop(listener);
+    let stderr = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .mode(0o600)
+        .open(home.join("private-candidate.stderr"))
+        .unwrap();
     let mut command = tokio::process::Command::new(binary);
     command
         .env_clear()
@@ -48,7 +54,7 @@ async fn start_candidate(
         ])
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
+        .stderr(std::process::Stdio::from(stderr));
     let (mut process, guard) =
         nac_process::ProcessTreeGuard::spawn_supervised(&mut command).unwrap();
     tokio::time::timeout(PHASE_TIMEOUT, async {
@@ -164,6 +170,38 @@ async fn private_candidate_child_read_fault_reconciles_once() {
     assert_eq!(reached["generation"], child.generation);
     assert_eq!(reached["process_id"], original_pid);
     assert_eq!(reached["after_successful_sqlite_commit"], false);
+    let stderr_path = home.join("private-candidate.stderr");
+    tokio::time::timeout(PHASE_TIMEOUT, async {
+        loop {
+            if std::fs::read_to_string(&stderr_path)
+                .unwrap_or_default()
+                .contains("nac: private fixture injected traditional child settlement read failure")
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("private candidate did not return the injected child-read failure");
+    let path = store.clone();
+    let child_id = child.child_session_id.clone();
+    let generation = child.generation;
+    nac_core::store::spawn_blocking_store_caller(move || {
+        let current = nac_core::store::load_traditional_child(&path, &child_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(current.generation, generation);
+        assert_eq!(
+            current.status,
+            nac_core::store::TraditionalChildStatus::Running
+        );
+        assert!(nac_core::store::list_session_inbox(&path, parent)
+            .unwrap()
+            .is_empty());
+    })
+    .await
+    .unwrap();
     stop_candidate(&mut process, &mut guard).await;
     let (mut rebuilt, mut rebuilt_guard, address) =
         start_candidate(&binary, &root, &home, &fault).await;
@@ -258,7 +296,7 @@ async fn private_candidate_child_read_fault_reconciles_once() {
     .unwrap();
     SqliteLoadStore.assert_integrity(&store);
     let identity = build_identity::current();
-    let evidence = serde_json::json!({"schema_version":2,"topology":"direct_sessions_with_traditional_children","mode":"private_candidate_child_read","outcome":"reconciled","source_revision":identity.source_revision,"build_id":identity.build_id,"nonce":nonce,"child_session_id":evidence_child_id,"run_id":evidence_run_id,"generation":generation,"fault_process_id":original_pid,"terminal_receipts":1,"parent_inbox_items":1,"recovery_obligations":0,"owned_process_cleanup":"verified","probes":probes,"model_requests":requests});
+    let evidence = serde_json::json!({"schema_version":2,"topology":"direct_sessions_with_traditional_children","mode":"private_candidate_child_read","outcome":"reconciled","source_revision":identity.source_revision,"build_id":identity.build_id,"nonce":nonce,"child_session_id":evidence_child_id,"run_id":evidence_run_id,"generation":generation,"fault_process_id":original_pid,"fault_observed":true,"pre_restart_child_status":"running","pre_restart_inbox_items":0,"terminal_receipts":1,"parent_inbox_items":1,"recovery_obligations":0,"owned_process_cleanup":"verified","probes":probes,"model_requests":requests});
     std::fs::remove_dir_all(root).unwrap();
     write_secret_safe_artifact(&artifact, &evidence);
 }
