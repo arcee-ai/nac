@@ -29,14 +29,15 @@ def session_lock_state():
     """Observe published lock bits only; this does not prove captured paint."""
     try:
         tree = plistlib.loads(subprocess.check_output(['/usr/sbin/ioreg', '-n', 'Root', '-d1', '-a']))
-        nodes = list(tree) if isinstance(tree, list) else [tree]
+        roots = list(tree) if isinstance(tree, list) else [tree]
+        nodes = [(node, True) for node in roots]
         values, malformed = [], False
         while nodes:
-            node = nodes.pop()
+            node, is_root = nodes.pop()
             if not isinstance(node, dict):
                 malformed = True
                 continue
-            if 'IOConsoleLocked' in node:
+            if is_root and 'IOConsoleLocked' in node:
                 value = node['IOConsoleLocked']
                 if type(value) is bool:
                     values.append(value)
@@ -57,7 +58,7 @@ def session_lock_state():
                         malformed = True
             children = node.get('IORegistryEntryChildren', [])
             if isinstance(children, list):
-                nodes.extend(children)
+                nodes.extend((child, False) for child in children)
             else:
                 malformed = True
         # Hosted Aqua may omit the optional CGS flags while explicitly publishing

@@ -32,6 +32,15 @@ class ConsoleLockTests(unittest.TestCase):
         self.assertEqual(self.observe(dict(IOConsoleUsers=[dict(CGSSessionScreenIsLocked=False)])),
                          dict(observed=True, locked=False))
 
+    def test_child_only_root_named_fact_cannot_qualify_the_console(self):
+        record = [dict(IORegistryEntryChildren=[dict(IOConsoleLocked=False)])]
+        self.assertEqual(self.observe(record), dict(observed=False, locked=None))
+
+    def test_nested_explicit_cgs_lock_overrides_the_actual_root(self):
+        record = [dict(IOConsoleLocked=False, IORegistryEntryChildren=[
+            dict(IOConsoleUsers=[dict(CGSSessionScreenIsLocked=True)])])]
+        self.assertEqual(self.observe(record), dict(observed=True, locked=True))
+
     def test_absent_or_malformed_facts_remain_unknown(self):
         for record in [[], {}, [dict(IOConsoleUsers=[{}])], [dict(IOConsoleLocked=0)],
                        [dict(IOConsoleLocked='false')], [dict(IOConsoleLocked=False, IOConsoleUsers={})],
