@@ -196,9 +196,22 @@ test("native saved-project launches open independent named-skill tasks across Gi
       },
     );
     harness.provider.enqueue(
-      `launch-status-ack-${kind}`,
+      `launch-status-repeat-${kind}`,
       { functionOutputCallId: `native-status-${kind}` },
+      {
+        kind: "function_call",
+        stream: "request",
+        name: "task_launch_status",
+        callId: `native-status-repeat-${kind}`,
+        arguments: { request_id: input.request_id },
+      },
+    );
+    const settlementGate = new ScriptGate();
+    harness.provider.enqueue(
+      `launch-status-ack-${kind}`,
+      { functionOutputCallId: `native-status-repeat-${kind}` },
       { kind: "text", stream: "request", text: `Separate ${kind} launch accepted` },
+      settlementGate,
     );
     harness.provider.enqueue(
       `skill-${kind}`,
@@ -222,13 +235,25 @@ test("native saved-project launches open independent named-skill tasks across Gi
       .getByRole("button", { name: "Allow once", exact: true })
       .and(page.locator(":enabled"));
     // Ordinary agent authorization can ask separately for the destination and pinned Git effects.
-    for (let attempt = 0; attempt < 4; attempt += 1) {
-      await Promise.race([
-        acknowledgement.waitFor({ state: "visible" }),
-        allow.waitFor({ state: "visible" }),
-      ]);
-      if (await acknowledgement.isVisible()) break;
-      await allow.click();
+    try {
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        const settled = await Promise.race([
+          settlementGate.accepted.then(() => true),
+          allow.waitFor({ state: "visible" }).then(() => false),
+        ]);
+        if (settled) break;
+        await allow.click();
+      }
+      await settlementGate.accepted;
+      // Both status responses have arrived, but the assistant turn is still live.
+      const liveLink = page.getByRole("link", {
+        name: `Open separate task: ${title}`,
+        exact: true,
+      });
+      await expect(liveLink).toHaveCount(1);
+      await expect(liveLink).toBeVisible();
+    } finally {
+      settlementGate.release();
     }
     await expect(acknowledgement).toBeVisible();
     const output = functionOutput(
@@ -246,6 +271,21 @@ test("native saved-project launches open independent named-skill tasks across Gi
     await page.reload();
     await expect(link).toHaveCount(1);
     await expect(link).toBeVisible();
+    // Replayed durable work still exposes all three original tool receipts.
+    const fold = page.locator("[data-work-fold]").filter({ has: link });
+    await fold.getByRole("button", { expanded: false }).first().click();
+    const launchRow = fold.getByRole("button", { name: /Used Start separate task/ });
+    const statusRows = fold.getByRole("button", { name: /Used Read task preparation/ });
+    await expect(launchRow).toHaveCount(1);
+    await expect(statusRows).toHaveCount(2);
+    await launchRow.click();
+    await statusRows.nth(0).click();
+    await statusRows.nth(1).click();
+    for (const id of [callId, `native-status-${kind}`, `native-status-repeat-${kind}`]) {
+      const detail = fold.locator(`[data-tool-call-id="${id}"]`);
+      await expect(detail).toBeVisible();
+      await expect(detail.locator("pre")).not.toBeEmpty();
+    }
     await link.click();
     await expect(page).toHaveURL(new RegExp(`${receipt.launch.session_id}/insights`));
     await page.goto(`${harness.baseUrl}/#${receipt.navigation}`);
@@ -275,6 +315,7 @@ test("native saved-project launches open independent named-skill tasks across Gi
   expect(await fs.readFile(path.join(source, "seed"), "utf8")).toBe("unstaged source");
   expect(await fs.readFile(path.join(source, "source-only"), "utf8")).toBe("untracked source");
   const baselineAssets = process.env.NAC_NATIVE_BASELINE_ASSETS;
+  await page.setViewportSize({ width: 390, height: 844 });
   if (baselineAssets) {
     await page.route("**/assets/dist/**", (route) => {
       const relative = new URL(route.request().url()).pathname.split("/assets/dist/")[1];
@@ -317,6 +358,7 @@ test("native saved-project launches open independent named-skill tasks across Gi
     ).document.fonts.ready.then(() => undefined),
   );
   await page.screenshot({ path: info.outputPath("native-task-after.png"), animations: "disabled" });
+  await page.setViewportSize({ width: 1280, height: 720 });
   await harness.restart("1", undefined, true);
   await page.reload();
   harness.provider.enqueue(
