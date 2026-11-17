@@ -94,10 +94,12 @@ int main(int argc, char **argv) {
     int launched = posix_spawn(&engine, argv[1], &actions, &attributes, argv + 1, environ);
     posix_spawn_file_actions_destroy(&actions);
     posix_spawnattr_destroy(&attributes);
-    // Only Rust retains this endpoint. Actual Node death now closes its peer
-    // immediately, independently of this helper's 23-second fallback timer.
-    close(3);
+    // With no Rust child, retain the launch peer until Node acknowledges the
+    // typed failed fact. Otherwise independent fd 3 EOF can win that receipt.
     if (launched != 0) return terminal("failed", 0, 70);
+    // Only Rust retains this endpoint after a successful spawn. Actual Node
+    // death closes its peer immediately, independently of the fallback timer.
+    close(3);
     int parent_open = record("spawned", engine);
     double deadline = parent_open ? 0 : now() + 23;
     char control[5]; size_t used = 0;
