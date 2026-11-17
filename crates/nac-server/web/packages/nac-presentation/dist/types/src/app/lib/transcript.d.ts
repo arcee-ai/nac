@@ -95,7 +95,24 @@ export interface DelegatedCompletionTurn {
     messageIndex: number;
     createdAt: string | null;
 }
-export type TranscriptTurn = UserTurn | ModelTurn | DelegatedCompletionTurn;
+/**
+ * A run NAC admitted for a durable goal. Its stored message is the control
+ * prompt the model reads; the transcript shows only the goal and objective.
+ */
+export interface GoalContinuationTurn {
+    kind: "goal-continuation";
+    key: string;
+    goalId: string;
+    objective: string;
+    /**
+     * The goal's first run in a fully loaded transcript. Unknown, and so false,
+     * while older messages are still unloaded.
+     */
+    first: boolean;
+    messageIndex: number;
+    createdAt: string | null;
+}
+export type TranscriptTurn = UserTurn | ModelTurn | DelegatedCompletionTurn | GoalContinuationTurn;
 /**
  * Key of a model turn that exists only as a stream, with nothing persisted to
  * key it by. Committed turns are keyed by their message index, so this one is

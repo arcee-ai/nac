@@ -50,34 +50,59 @@ function p(e) {
 		return null;
 	}
 }
+// src/app/features/goals/continuation.ts
+var m = "<nac_goal_continuation goal_id=\"", h = "\">\nContinue autonomously pursuing this durable goal:\n", g = "\nUse get_goal when you need current accounting. Mark it complete only when the objective is genuinely achieved with no required work remaining. Mark it blocked only at a genuine impasse; otherwise finish this turn with a concise progress update and NAC will continue it.\n</nac_goal_continuation>", _ = "\n</nac_goal_continuation>", v = "No token budget was set.", y = /^Token budget: \d+; used: \d+; remaining: \d+\.$/;
+function b(e) {
+	if (typeof e != "string") return null;
+	let t = e.replaceAll("\r\n", "\n");
+	if (!t.startsWith(m) || !t.endsWith(g)) return null;
+	let n = t.indexOf(h, 32);
+	if (n === -1) return null;
+	let r = t.slice(32, n);
+	if (!r || r.includes("\"") || r.includes("\n")) return null;
+	let i = n + 53, a = t.length - 295;
+	if (a < i) return null;
+	let o = t.slice(i, a), s = o.lastIndexOf("\n");
+	if (s === -1) return null;
+	let c = o.slice(0, s), l = o.slice(s + 1);
+	return !c.trim() || l !== v && !y.test(l) ? null : {
+		goalId: r,
+		objective: c
+	};
+}
+function x(e) {
+	if (typeof e != "string") return !1;
+	let t = e.replaceAll("\r\n", "\n");
+	return t.startsWith(m) && t.endsWith(_);
+}
 // src/app/lib/format.ts
-function m(e) {
+function S(e) {
 	return e ? e.length > 13 ? `${e.slice(0, 8)}:${e.slice(-4)}` : e : "--";
 }
-var h = "\n\n<invoked_skills>\n", g = "\n\n<invoked_mcp_prompt>\n", _ = "<skill_content name=\"", v = "</skill_content>";
-function y(e) {
-	if (!e.startsWith(_)) return null;
+var C = "\n\n<invoked_skills>\n", ee = "\n\n<invoked_mcp_prompt>\n", w = "<skill_content name=\"", T = "</skill_content>";
+function E(e) {
+	if (!e.startsWith(w)) return null;
 	let t = e.slice(21), n = t.indexOf("\"");
 	if (n === -1) return null;
 	let r = t.slice(0, n);
 	if (r === "" || r.includes("<") || r.includes(">")) return null;
 	let i = t.slice(n + 1);
 	if (!i.startsWith(">")) return null;
-	let a = i.slice(1), o = a.indexOf(v);
+	let a = i.slice(1), o = a.indexOf(T);
 	return o === -1 ? null : {
 		name: r,
 		rest: a.slice(o + 16)
 	};
 }
-function b(e) {
+function D(e) {
 	if (!e.endsWith("</invoked_skills>")) return null;
 	let t = e.slice(0, e.length - 17);
 	if (!t.endsWith("\n")) return null;
-	let n = t.slice(0, -1), r = n.lastIndexOf(h);
+	let n = t.slice(0, -1), r = n.lastIndexOf(C);
 	if (r === -1) return null;
 	let i = n.slice(0, r), a = n.slice(r + 19), o = [];
 	for (;;) {
-		let e = y(a);
+		let e = E(a);
 		if (e == null) return null;
 		if (o.push(e.name), a = e.rest, a === "") return {
 			head: i,
@@ -86,13 +111,13 @@ function b(e) {
 		if (!a.startsWith("\n") || (a = a.slice(1), a === "")) return null;
 	}
 }
-function x(e) {
-	let t = b(e);
+function O(e) {
+	let t = D(e);
 	return t ? t.head : null;
 }
-function S(e) {
+function k(e) {
 	if (!e.endsWith("\n</invoked_mcp_prompt>")) return null;
-	let t = e.slice(0, -22), n = t.lastIndexOf(g);
+	let t = e.slice(0, -22), n = t.lastIndexOf(ee);
 	if (n === -1) return null;
 	try {
 		let e = JSON.parse(t.slice(n + 23));
@@ -101,56 +126,57 @@ function S(e) {
 		return null;
 	}
 }
-function C(e) {
+function A(e) {
 	if (e == null) return null;
-	let t = b(String(e));
+	let t = D(String(e));
 	return t ? t.names : null;
 }
-function w(e) {
+function j(e) {
 	let t = String(e ?? ""), n = /^Heartbeat check: ("[^\n]*")\n<nac_heartbeat>\n[\s\S]*\n<\/nac_heartbeat>$/.exec(t);
 	if (n) try {
 		let e = JSON.parse(n[1]);
 		if (typeof e == "string") return `Heartbeat check: ${e}`;
 	} catch {}
-	let r = x(t);
+	let r = O(t);
 	if (r != null) return r;
-	let i = S(t);
+	let i = k(t);
 	if (i != null) return i;
-	let a = t.replaceAll("\r\n", "\n");
-	if (a.startsWith("<nac_goal_continuation goal_id=\"") && a.endsWith("\n</nac_goal_continuation>")) return "[durable goal continuation]";
-	let o = p(a);
-	if (o) return `[${o.kind === "coding-agent" ? "traditional child" : "managed orchestrator"} ${o.status}: ${o.description}]`;
-	let s = a.split("\n", 1)[0] ?? "", c = /^# \/(plan|run)\s*:/.exec(s);
-	if (!c) return t;
-	let l = c[1], u = l === "run" ? "Workset id:\n" : "User instruction:\n", d = a.indexOf(u);
-	if (d === -1) return t;
-	let f = d + u.length, m = a.indexOf("\n\n", f);
-	if (m === -1) return t;
-	let h = a.slice(f, m).trim();
-	return h ? `/${l} ${h}` : t;
+	let a = t.replaceAll("\r\n", "\n"), o = b(a);
+	if (o) return `[goal: ${o.objective}]`;
+	if (x(a)) return "[durable goal continuation]";
+	let s = p(a);
+	if (s) return `[${s.kind === "coding-agent" ? "traditional child" : "managed orchestrator"} ${s.status}: ${s.description}]`;
+	let c = a.split("\n", 1)[0] ?? "", l = /^# \/(plan|run)\s*:/.exec(c);
+	if (!l) return t;
+	let u = l[1], d = u === "run" ? "Workset id:\n" : "User instruction:\n", f = a.indexOf(d);
+	if (f === -1) return t;
+	let m = f + d.length, h = a.indexOf("\n\n", m);
+	if (h === -1) return t;
+	let g = a.slice(m, h).trim();
+	return g ? `/${u} ${g}` : t;
 }
-function T(e) {
+function M(e) {
 	return e == null || !Number.isFinite(e) ? "" : `${(Math.round(e / 10) / 100).toFixed(2)}s`;
 }
-var E = "New Session";
-function D(e) {
+var N = "New Session";
+function te(e) {
 	return !e || e.title != null && e.title.trim() ? !1 : !(e.last_user_prompt ?? "").trim();
 }
-function O(e) {
-	return e ? e.title != null && e.title.trim() ? e.title.trim() : w(e.last_user_prompt).trim() || E : "";
+function ne(e) {
+	return e ? e.title != null && e.title.trim() ? e.title.trim() : j(e.last_user_prompt).trim() || N : "";
 }
-function k(e, t) {
-	return e ? t.get(e.session_id) ?? O(e) : "";
+function re(e, t) {
+	return e ? t.get(e.session_id) ?? ne(e) : "";
 }
-function A(e) {
-	let t = /* @__PURE__ */ new Map(), n = /* @__PURE__ */ new Map(), r = e.filter((e) => D(e.summary)).sort((e, t) => e.summary.created_at.localeCompare(t.summary.created_at));
+function ie(e) {
+	let t = /* @__PURE__ */ new Map(), n = /* @__PURE__ */ new Map(), r = e.filter((e) => te(e.summary)).sort((e, t) => e.summary.created_at.localeCompare(t.summary.created_at));
 	for (let { summary: e } of r) {
 		let r = e.project_id ?? "", i = n.get(r) ?? 0;
-		n.set(r, i + 1), t.set(e.session_id, i === 0 ? E : `${E} ${i}`);
+		n.set(r, i + 1), t.set(e.session_id, i === 0 ? N : `${N} ${i}`);
 	}
 	return t;
 }
-function j(e) {
+function P(e) {
 	if (e == null) return "--";
 	let t = Number(e);
 	if (!Number.isFinite(t)) return "--";
@@ -160,25 +186,25 @@ function j(e) {
 	};
 	return Math.abs(t) >= 1e6 ? n(1e6, "M") : Math.abs(t) >= 1e3 ? n(1e3, "K") : String(t);
 }
-function M(e) {
+function F(e) {
 	if (e == null) return "--";
 	let t = Math.round(Number(e));
 	if (!Number.isFinite(t) || t <= 0) return "--";
 	let n = t / 1e6;
 	return n < .01 ? "<\xA0$0.01" : `$${n.toFixed(2)}`;
 }
-function N(e) {
+function I(e) {
 	if (e == null || !Number.isFinite(e)) return "--:--";
 	let t = Math.max(0, Math.floor(e / 1e3)), n = Math.floor(t % 3600 / 60), r = String(t % 60).padStart(2, "0"), i = Math.floor(t / 3600);
 	return i > 0 ? `${i}:${String(n).padStart(2, "0")}:${r}` : `${String(n).padStart(2, "0")}:${r}`;
 }
-function P(e) {
+function L(e) {
 	if (!e) return NaN;
 	let t = e.replace(" ", "T");
 	return Date.parse(/(?:Z|[+-]\d\d:?\d\d)$/.test(t) ? t : `${t}Z`);
 }
-function F(e) {
-	let t = new Date(P(e));
+function R(e) {
+	let t = new Date(L(e));
 	return Number.isNaN(t.getTime()) ? e : t.toLocaleString([], {
 		month: "short",
 		day: "numeric",
@@ -186,15 +212,15 @@ function F(e) {
 		minute: "2-digit"
 	});
 }
-var I = "Local", L = "Sandbox", R = [
-	I,
+var z = "Local", B = "Sandbox", V = [
+	z,
 	"SSH",
-	L
+	B
 ];
-function z(e) {
-	return e ? e.sandboxed ? L : e.ssh_host ? "SSH" : I : I;
+function H(e) {
+	return e ? e.sandboxed ? B : e.ssh_host ? "SSH" : z : z;
 }
-var B = [
+var U = [
 	"done",
 	"completed",
 	"cancelled",
@@ -202,16 +228,16 @@ var B = [
 	"failed",
 	"error"
 ];
-function V(e) {
+function W(e) {
 	if (!e) return !1;
 	let t = (e.state ?? e.status ?? "").toLowerCase();
-	return !B.includes(t);
+	return !U.includes(t);
 }
-function H(e) {
+function G(e) {
 	let t = e?.response_timing;
 	return t ? t.cumulative_token_usage ?? t.last_token_usage ?? null : null;
 }
-function U(e, t, n) {
+function K(e, t, n) {
 	return {
 		input_tokens: (e?.input_tokens ?? 0) + t.input_tokens,
 		output_tokens: (e?.output_tokens ?? 0) + t.output_tokens,
@@ -228,11 +254,11 @@ function U(e, t, n) {
 		} : void 0
 	};
 }
-function W(e) {
+function q(e) {
 	return e ? e.input_tokens + e.output_tokens + e.cache_read_tokens + e.cache_write_tokens + (e.cost?.total ?? 0) > 0 : !1;
 }
-function G(e, t) {
-	return W(e) ? !e || !W(t) || !t ? e ?? null : {
+function J(e, t) {
+	return q(e) ? !e || !q(t) || !t ? e ?? null : {
 		input_tokens: Math.max(e.input_tokens, t.input_tokens),
 		output_tokens: Math.max(e.output_tokens, t.output_tokens),
 		cache_read_tokens: Math.max(e.cache_read_tokens, t.cache_read_tokens),
@@ -246,25 +272,25 @@ function G(e, t) {
 			cache_write: Math.max(e.cost?.cache_write ?? 0, t.cost?.cache_write ?? 0),
 			total: Math.max(e.cost?.total ?? 0, t.cost?.total ?? 0)
 		} : void 0
-	} : W(t) ? t ?? null : null;
+	} : q(t) ? t ?? null : null;
 }
-function K(e, t, n, r) {
-	let i = e?.metadata, a = t?.summary, o = e?.active_run ?? t?.active_run ?? null, s = V(o), c = H(e), l = n ? U(c, n, n.total_tokens || (c?.total_tokens ?? 0)) : c;
+function ae(e, t, n, r) {
+	let i = e?.metadata, a = t?.summary, o = e?.active_run ?? t?.active_run ?? null, s = W(o), c = G(e), l = n ? K(c, n, n.total_tokens || (c?.total_tokens ?? 0)) : c;
 	return {
 		model: i?.model ?? a?.model ?? "--",
-		env: z(a).toUpperCase(),
+		env: H(a).toUpperCase(),
 		active: s,
 		startedAt: s && o ? o.started_at_epoch_ms : null,
 		lastResponseMs: e?.response_timing.last_response_duration_ms ?? null,
-		usage: G(l, r)
+		usage: J(l, r)
 	};
 }
 // src/app/ui/layer-stack.ts
-var q = "a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex=\"-1\"])";
-function J(e) {
+var oe = "a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex=\"-1\"])";
+function Y(e) {
 	return !e || e === e.ownerDocument.body || !e.isConnected;
 }
-function Y() {
+function X() {
 	let e = [], t = /* @__PURE__ */ new Set(), n = null, r = null, i = (e) => e.handlers.current, a = (e) => i(e)?.kind, o = () => t.forEach((e) => e()), s = (t) => {
 		for (let n = e.length - 1; n >= 0; --n) if (t(e[n])) return e[n];
 	}, c = () => {
@@ -308,7 +334,7 @@ function Y() {
 			let a = null;
 			if (n.current?.kind !== "hint") {
 				let e = n.current?.content.current;
-				a = i instanceof HTMLElement && !J(i) && !e?.contains(i) && !r?.content?.contains(i) ? i : r?.target ?? null, r && window.clearTimeout(r.timer), r = null;
+				a = i instanceof HTMLElement && !Y(i) && !e?.contains(i) && !r?.content?.contains(i) ? i : r?.target ?? null, r && window.clearTimeout(r.timer), r = null;
 			}
 			e = [...e, {
 				token: t,
@@ -325,7 +351,7 @@ function Y() {
 			let a = i(n);
 			if (!n.restoreFocus || !a || a.kind === "hint") return;
 			let s = a.content.current, l = document.activeElement;
-			if (!J(l) && !s?.contains(l)) return;
+			if (!Y(l) && !s?.contains(l)) return;
 			let u = n.returnFocus?.isConnected ? n.returnFocus : a.anchor?.current?.querySelector("a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex=\"-1\"])") ?? null;
 			if (!u) return;
 			r && window.clearTimeout(r.timer);
@@ -338,7 +364,7 @@ function Y() {
 				if (r !== d) return;
 				r = null;
 				let e = document.activeElement;
-				(J(e) || s?.contains(e)) && u.focus({ preventScroll: !0 });
+				(Y(e) || s?.contains(e)) && u.focus({ preventScroll: !0 });
 			}, 0), r = d;
 		},
 		skipFocusRestore: (e) => {
@@ -353,9 +379,9 @@ function Y() {
 	};
 }
 // src/app/providers/PresentationBoundary.tsx
-var X = e(null), Z = e(null), Q = Y();
-function $({ children: e, globalKeyboard: t = !1 }) {
-	let [n, s] = r(null), [c, l] = r(null), [u] = r(Y);
+var Z = e(null), Q = e(null), se = X();
+function ce({ children: e, globalKeyboard: t = !1 }) {
+	let [n, s] = r(null), [c, l] = r(null), [u] = r(X);
 	return /* @__PURE__ */ o(i, { children: [/* @__PURE__ */ a("div", {
 		ref: s,
 		"data-nac-overlays": ""
@@ -363,34 +389,34 @@ function $({ children: e, globalKeyboard: t = !1 }) {
 		ref: l,
 		className: "h-full min-h-0",
 		"data-nac-content": "",
-		children: n && c ? /* @__PURE__ */ a(X.Provider, {
+		children: n && c ? /* @__PURE__ */ a(Z.Provider, {
 			value: {
 				portal: n,
 				content: c,
 				globalKeyboard: t
 			},
-			children: /* @__PURE__ */ a(Z.Provider, {
+			children: /* @__PURE__ */ a(Q.Provider, {
 				value: u,
 				children: e
 			})
 		}) : null
 	})] });
 }
-function ee() {
-	return n(X)?.portal ?? document.body;
+function le() {
+	return n(Z)?.portal ?? document.body;
 }
-function te() {
-	return n(X)?.content ?? document.getElementById("root");
+function $() {
+	return n(Z)?.content ?? document.getElementById("root");
 }
-function ne() {
-	return n(Z) ?? Q;
+function ue() {
+	return n(Q) ?? se;
 }
-function re() {
-	let e = n(X), r = e?.portal, i = e?.content, a = e?.globalKeyboard ?? !0;
+function de() {
+	let e = n(Z), r = e?.portal, i = e?.content, a = e?.globalKeyboard ?? !0;
 	return t((e) => a || e instanceof Node && (!!r?.contains(e) || !!i?.contains(e)), [
 		a,
 		r,
 		i
 	]);
 }
-export { m as C, p as E, k as S, W as T, G as _, ee as a, K as b, U as c, M as d, T as f, V as g, C as h, ne as i, w as l, j as m, te as n, q as o, F as p, re as r, R as s, $ as t, N as u, A as v, H as w, z as x, P as y };
+export { S as C, b as D, x as E, p as O, re as S, q as T, J as _, le as a, ae as b, K as c, F as d, M as f, W as g, A as h, ue as i, j as l, P as m, $ as n, oe as o, R as p, de as r, V as s, ce as t, I as u, ie as v, G as w, H as x, L as y };
