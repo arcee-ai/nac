@@ -158,7 +158,6 @@ test("public PR comparison captures baseline browser and actual Electron shared 
         NAC_ELECTRON_DATA_HOME: path.join(profile, "electron-data"),
         NAC_E2E_API_KEY: "visual-fixture-only",
         MODELS_DEV_URL: `${provider.baseUrl}/models-dev`,
-        NAC_ORCHESTRATION: "1",
         BROWSER: "none",
       };
       let owner: any,
@@ -311,10 +310,13 @@ test("public PR comparison captures baseline browser and actual Electron shared 
         });
         await page.reload();
         await expect(page.getByText("No projects yet", { exact: true })).toBeVisible();
+        // Focus shows the store under Settings › About, not on Home; read the
+        // same Rust store fact both arms present instead of a page location.
         await expect
-          .poll(() => page!.locator("body").innerText())
-          .toContain(path.join(profile, "store.db"));
-        await page.getByRole("button", { name: "New Project", exact: true }).click();
+          .poll(async () => (await api("/store")).store_path)
+          .toBe(path.join(profile, "store.db"));
+        // Empty Home's Get Started opens New Project in both arms.
+        await page.getByRole("button", { name: "Get Started", exact: true }).click();
         const form = page.getByRole("dialog", { name: "New Project", exact: true });
         await expect(
           form.getByRole("button", { name: `Choose Working Folder: ${workspace}`, exact: true }),

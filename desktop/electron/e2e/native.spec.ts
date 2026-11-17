@@ -39,37 +39,57 @@ test('native menu commands enter existing React flows and retain editor/modal gu
     paths: Object.keys((window as any).__nacLocalPaths ?? {}),
   }))).toEqual({ require: 'undefined', process: 'undefined',
     desktop: ['connect', 'connectLifetime', 'connectVisibility', 'reportConnectionLost'], paths: ['chooseDirectory'] });
+  const hash = () => c.page.evaluate(() => location.hash);
+  // Settings is a full page in Focus: the command opens Models & providers.
+  const models = c.page.getByRole('main', { name: 'Models & providers', exact: true });
   await focusWorkspace(c);
   await menu(c, 'Settings…');
-  await expect(c.page.getByRole('dialog', { name: 'Configurations', exact: true })).toBeVisible();
+  await expect(models).toBeVisible();
+  await expect.poll(hash).toBe('#/settings/models');
   await c.page.keyboard.press('Escape');
-  await expect(c.page.getByRole('dialog')).toHaveCount(0);
+  await expect(models).toHaveCount(0);
+  await expect.poll(hash).toBe('#/');
   await focusWorkspace(c);
   await c.page.evaluate(() => document.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true })));
   await menu(c, 'Settings…');
-  await expect(c.page.getByRole('dialog')).toHaveCount(0);
+  await expect(models).toHaveCount(0);
+  expect(await hash()).toBe('#/');
   await c.page.evaluate(() => document.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true })));
+  // Empty Home's Get Started opens New Project; an open modal refuses commands.
   await focusWorkspace(c);
-  await menu(c, 'New Chat');
+  await c.page.getByRole('button', { name: 'Get Started', exact: true }).click();
   const projectForm = c.page.getByRole('dialog', { name: 'New Project', exact: true });
   await expect(projectForm).toBeVisible();
   await projectForm.locator('input').first().focus();
   await menu(c, 'Settings…');
-  await expect(c.page.getByRole('dialog', { name: 'Configurations', exact: true })).toHaveCount(0);
+  await menu(c, 'New Chat');
+  await expect(models).toHaveCount(0);
   await expect(projectForm).toBeVisible();
+  expect(await hash()).toBe('#/');
   await c.page.keyboard.press('Escape');
+  await expect(projectForm).toHaveCount(0);
   const project = await c.project();
   const session = await c.session('direct', project);
   await c.page.evaluate(id => { location.hash = `/session/${id}/files`; }, session);
+  // Fixture API writes bypass the UI's query invalidation; load them fresh.
+  await c.page.reload();
   const composer = c.page.getByRole('combobox', { name: 'Message' });
   await expect(composer).toBeVisible();
   await composer.fill('Retained editor draft');
   await menu(c, 'Settings…');
-  await expect(c.page.getByRole('dialog')).toHaveCount(0);
+  await expect(models).toHaveCount(0);
   await expect(composer).toHaveValue('Retained editor draft');
+  expect(await hash()).toBe(`#/session/${session}/files`);
+  // New Chat in a project opens Home's composer preset to it; nothing is sent.
+  await focusWorkspace(c);
+  await menu(c, 'New Chat');
+  await expect.poll(hash).toBe(`#/?project=${project}`);
+  await expect(c.page.getByRole('textbox', { name: 'What should we work on?', exact: true })).toBeFocused();
+  expect(await c.api('/sessions')).toHaveLength(1);
   await focusWorkspace(c);
   await menu(c, 'Projects…');
-  await expect.poll(() => c.page.evaluate(() => location.hash)).toBe('#/');
+  await expect.poll(hash).toBe('#/');
+  await expect(c.page.getByRole('heading', { name: 'What should we work on?', exact: true })).toBeVisible();
 });
 
 test('actual preload admits trusted external anchors while rejecting wrong frames and stale documents', async ({ candidate: c }) => {
@@ -149,7 +169,9 @@ test('shared provider device sign-in requires a deliberate native browser handof
   await expect(c.page.getByText('No projects yet', { exact: true })).toBeVisible();
   await focusWorkspace(c);
   await menu(c, 'Settings…');
-  const dialog = c.page.getByRole('dialog', { name: 'Configurations', exact: true });
+  // Settings › Models & providers holds the saved-configuration manager.
+  const dialog = c.page.getByRole('main', { name: 'Models & providers', exact: true })
+    .getByRole('region', { name: 'Configurations', exact: true });
   await expect(dialog).toBeVisible();
   const draft = dialog.getByRole('textbox', { name: 'Configuration name', exact: true });
   await draft.fill('Electron draft survives sign-in');
@@ -209,6 +231,30 @@ test('actual native folder panel cancels on hide and AbortSignal and reaps its e
   await expect.poll(() => c.page.evaluate(() => (window as any).__folderTest.settled)).toBe(true);
   expect(await c.page.evaluate(() => (window as any).__folderTest.selected)).toBeNull();
   await expect.poll(helperPids).toHaveLength(0);
+});
+
+test('Focus New Project folder button drives the actual native panel and Cancel reaps its helper', async ({ candidate: c }) => {
+  const helperPids = () => execFileSync('/bin/ps', ['-axo', 'pid=,ppid=,comm='], { encoding: 'utf8' }).split('\n')
+    .map(line => line.trim().split(/\s+/)).filter(parts => Number(parts[1]) === c.app.process().pid && parts.slice(2).join(' ').endsWith('/native-folder-picker'))
+    .map(parts => Number(parts[0]));
+  await focusWorkspace(c);
+  await c.page.getByRole('button', { name: 'Get Started', exact: true }).click();
+  const form = c.page.getByRole('dialog', { name: 'New Project', exact: true });
+  await expect(form).toBeVisible();
+  const folder = form.getByRole('button', { name: /^Choose Working Folder: / });
+  const before = await folder.getAttribute('aria-label');
+  await folder.click();
+  // The shared path picker hands a local folder to the bridge's native panel.
+  const waiting = c.page.getByRole('dialog', { name: 'Select Working Folder', exact: true });
+  await expect(waiting).toBeVisible();
+  await expect.poll(helperPids).toHaveLength(1);
+  c.ownedPids.push(...helperPids());
+  await waiting.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(waiting).toHaveCount(0);
+  await expect.poll(helperPids).toHaveLength(0);
+  await expect(form).toBeVisible();
+  await expect(folder).toHaveAttribute('aria-label', before!);
+  expect((await c.api('/projects')).projects).toEqual([]);
 });
 
 test('shared MCP OAuth UI preserves Rust PKCE success denial wrong-state and cancellation through the native handoff', async ({ candidate: c }) => {
@@ -272,9 +318,12 @@ test('shared MCP OAuth UI preserves Rust PKCE success denial wrong-state and can
           issuer: auth, response_types_supported: ['code'], code_challenge_methods_supported: ['S256'],
         },
       });
+      // Settings › MCP servers is a page in Focus; its manager is a region.
+      // Reload so the manager reads this round's OAuth configuration.
+      await c.page.evaluate(() => { location.hash = '/settings/mcp'; });
       await c.page.reload();
-      await c.page.getByRole('button', { name: /^MCP servers/ }).first().click();
-      const dialog = c.page.getByRole('dialog', { name: 'MCP servers', exact: true });
+      const dialog = c.page.getByRole('main', { name: 'MCP servers', exact: true })
+        .getByRole('region', { name: 'MCP servers', exact: true });
       await dialog.getByRole('button', { name: 'external-auth-fixture', exact: true }).click();
       await dialog.getByRole('button', { name: 'Authenticate', exact: true }).click();
       await expect(dialog.getByRole('status')).toHaveText('Waiting for authorization');
