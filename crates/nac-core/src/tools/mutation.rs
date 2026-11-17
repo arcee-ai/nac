@@ -1209,30 +1209,71 @@ fn build_result(
         .set_modified_filename(format!("b/{path}"));
     let patch = diff_options.create_patch(&old_text, &new_text);
     let diff = patch.to_string();
-    let mut range_options = DiffOptions::new();
-    range_options.set_context_len(0);
-    let range_patch = range_options.create_patch(&old_text, &new_text);
-    let changed_ranges = range_patch
-        .hunks()
-        .iter()
-        .map(|hunk| {
-            let old = hunk.old_range();
-            let new = hunk.new_range();
-            ChangedRange {
-                old_start: old.start(),
-                old_end: old.start().saturating_add(old.len()).saturating_sub(1),
-                new_start: new.start(),
-                new_end: new.start().saturating_add(new.len()).saturating_sub(1),
-            }
-        })
-        .collect();
     MutationResult {
         path: path.to_string(),
         old_revision,
         new_revision: revision(new_bytes),
-        changed_ranges,
+        changed_ranges: changed_ranges(&patch),
         diff,
     }
+}
+
+/// Changed line ranges without context, recovered from a context patch so the
+/// texts are diffed once. Hunks hold the same edit script at any context
+/// length: entries are separated by at least one equal line, which appears as
+/// context inside a merged hunk, and context zero never merges entries. Each
+/// maximal delete/insert run is therefore exactly one context-zero hunk.
+fn changed_ranges(patch: &diffy::Patch<'_, str>) -> Vec<ChangedRange> {
+    // Unified-diff starts are 1-based, except that an empty side names the
+    // line before it (0 at the start of the file).
+    fn zero_based(range: diffy::HunkRange) -> usize {
+        if range.is_empty() {
+            range.start()
+        } else {
+            range.start() - 1
+        }
+    }
+    fn changed_range(start: (usize, usize), end: (usize, usize)) -> ChangedRange {
+        let side = |start: usize, end: usize| {
+            let first = if end > start { start + 1 } else { start };
+            (first, first.saturating_add(end - start).saturating_sub(1))
+        };
+        let (old_start, old_end) = side(start.0, end.0);
+        let (new_start, new_end) = side(start.1, end.1);
+        ChangedRange {
+            old_start,
+            old_end,
+            new_start,
+            new_end,
+        }
+    }
+    let mut ranges = Vec::new();
+    for hunk in patch.hunks() {
+        let mut line = (zero_based(hunk.old_range()), zero_based(hunk.new_range()));
+        let mut change_start = None;
+        for hunk_line in hunk.lines() {
+            match hunk_line {
+                diffy::Line::Context(_) => {
+                    if let Some(start) = change_start.take() {
+                        ranges.push(changed_range(start, line));
+                    }
+                    line = (line.0 + 1, line.1 + 1);
+                }
+                diffy::Line::Delete(_) => {
+                    change_start = change_start.or(Some(line));
+                    line.0 += 1;
+                }
+                diffy::Line::Insert(_) => {
+                    change_start = change_start.or(Some(line));
+                    line.1 += 1;
+                }
+            }
+        }
+        if let Some(start) = change_start {
+            ranges.push(changed_range(start, line));
+        }
+    }
+    ranges
 }
 
 #[cfg(test)]
