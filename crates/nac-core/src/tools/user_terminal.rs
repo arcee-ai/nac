@@ -174,7 +174,7 @@ mod tests {
     #[tokio::test]
     async fn launch_without_service_authority_is_headless_fail_closed_and_absent_from_model_registry(
     ) {
-        let model_registry = super::super::worker_tool_registry(true).unwrap();
+        let model_registry = super::super::native_tool_registry(true).unwrap();
         assert!(model_registry.snapshot([OPEN_USER_TERMINAL]).is_err());
         let runtime = crate::tools::test_runtime();
         let name = runtime

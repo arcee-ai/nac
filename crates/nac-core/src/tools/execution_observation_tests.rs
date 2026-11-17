@@ -731,7 +731,7 @@ async fn durable_child_and_copied_fork_provenance_never_supply_a_terminal_read_c
 async fn legacy_worker_read_accepts_schema_valid_decimal_offsets_without_changing_page_shape() {
     let mut runtime = crate::tools::test_runtime();
     runtime.allowed_tools = Some(Arc::new(
-        crate::tools::WORKER_TOOL_NAMES
+        crate::tools::CODING_TOOL_NAMES
             .iter()
             .map(|name| (*name).into())
             .collect(),
