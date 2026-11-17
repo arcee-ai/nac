@@ -334,3 +334,136 @@ fn invalid_wal_cannot_mask_future_main_schema_or_mutate_any_file() {
         }
     }
 }
+
+fn write_main_header(path: &Path, page_size: u16, user_version: u32) {
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let mut main = [0_u8; SQLITE_HEADER_LENGTH];
+    main[..SQLITE_MAGIC.len()].copy_from_slice(SQLITE_MAGIC);
+    main[SQLITE_PAGE_SIZE_OFFSET..SQLITE_PAGE_SIZE_OFFSET + 2]
+        .copy_from_slice(&page_size.to_be_bytes());
+    main[USER_VERSION_OFFSET..USER_VERSION_OFFSET + 4].copy_from_slice(&user_version.to_be_bytes());
+    std::fs::write(path, main).unwrap();
+}
+
+/// One WAL generation built frame by frame, as SQLite appends it.
+struct WalImage {
+    bytes: Vec<u8>,
+    salts: [u8; 8],
+    rolling: [u32; 2],
+    page_size: u32,
+}
+
+impl WalImage {
+    fn new(page_size: u32, salts: [u8; 8]) -> Self {
+        let (bytes, rolling) = wal_header(page_size, salts, ChecksumByteOrder::Little);
+        Self {
+            bytes,
+            salts,
+            rolling,
+            page_size,
+        }
+    }
+
+    fn push(&mut self, page_number: u32, commit: bool, user_version: Option<u32>) {
+        let mut page = vec![0_u8; self.page_size as usize];
+        if let Some(version) = user_version {
+            page[USER_VERSION_OFFSET..USER_VERSION_OFFSET + 4]
+                .copy_from_slice(&version.to_be_bytes());
+        }
+        let (frame, rolling) = wal_frame(
+            page_number,
+            u32::from(commit),
+            self.salts,
+            &page,
+            self.rolling,
+            ChecksumByteOrder::Little,
+        );
+        self.bytes.extend_from_slice(&frame);
+        self.rolling = rolling;
+    }
+
+    fn write(&self, path: &Path) {
+        std::fs::write(sidecar_path(path, "-wal"), &self.bytes).unwrap();
+    }
+}
+
+fn verified_end(path: &Path) -> Option<u64> {
+    verified_wals()
+        .get(&sidecar_path(path, "-wal"))
+        .map(|verified| verified.end)
+}
+
+fn full_scan(path: &Path) -> Option<i64> {
+    verified_wals().remove(&sidecar_path(path, "-wal"));
+    read_schema_version_header(path).unwrap()
+}
+
+#[test]
+fn preflight_resumes_after_verified_commits_and_agrees_with_a_full_scan() {
+    let path = temp_store_path("resume");
+    write_main_header(&path, 4096, 7);
+    let frame = (FRAME_HEADER_LENGTH + 4096) as u64;
+    let header = WAL_HEADER_LENGTH as u64;
+    let mut wal = WalImage::new(4096, [9, 8, 7, 6, 5, 4, 3, 2]);
+    assert_eq!(read_schema_version_header(&path).unwrap(), Some(7));
+
+    wal.push(1, true, Some(10));
+    wal.write(&path);
+    assert_eq!(read_schema_version_header(&path).unwrap(), Some(10));
+    assert_eq!(verified_end(&path), Some(header + frame));
+
+    // A commit without page one keeps it; an uncommitted page one is pending.
+    wal.push(2, true, None);
+    wal.push(1, false, Some(11));
+    wal.write(&path);
+    assert_eq!(read_schema_version_header(&path).unwrap(), Some(10));
+    assert_eq!(verified_end(&path), Some(header + 2 * frame));
+
+    // Its commit lands later; the resumed scan starts before the pending frame.
+    wal.push(3, true, None);
+    wal.write(&path);
+    assert_eq!(read_schema_version_header(&path).unwrap(), Some(11));
+    assert_eq!(verified_end(&path), Some(header + 4 * frame));
+
+    // A torn frame after the verified prefix ends the scan exactly as before.
+    let mut torn = wal.bytes.clone();
+    let mut extra = WalImage::new(4096, [9, 8, 7, 6, 5, 4, 3, 2]);
+    extra.rolling = wal.rolling;
+    extra.bytes.clear();
+    extra.push(1, true, Some(99));
+    extra.bytes[FRAME_HEADER_LENGTH + 100] ^= 0x01;
+    torn.extend_from_slice(&extra.bytes);
+    std::fs::write(sidecar_path(&path, "-wal"), torn).unwrap();
+    assert_eq!(read_schema_version_header(&path).unwrap(), Some(11));
+    assert_eq!(full_scan(&path), Some(11));
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}
+
+#[test]
+fn a_restarted_or_truncated_wal_is_scanned_from_its_new_header() {
+    let path = temp_store_path("restart");
+    write_main_header(&path, 4096, 7);
+    let mut first = WalImage::new(4096, [1, 1, 1, 1, 1, 1, 1, 1]);
+    for _ in 0..3 {
+        first.push(2, true, None);
+    }
+    first.push(1, true, Some(20));
+    first.write(&path);
+    assert_eq!(read_schema_version_header(&path).unwrap(), Some(20));
+
+    // A restart rewrites the header with new salts over the old frames.
+    let mut restarted = WalImage::new(4096, [2, 1, 1, 1, 9, 9, 9, 9]);
+    restarted.push(1, true, Some(21));
+    let mut bytes = restarted.bytes.clone();
+    bytes.extend_from_slice(&first.bytes[bytes.len()..]);
+    std::fs::write(sidecar_path(&path, "-wal"), &bytes).unwrap();
+    assert_eq!(read_schema_version_header(&path).unwrap(), Some(21));
+    assert_eq!(full_scan(&path), Some(21));
+
+    // A shorter log with no commits of its own falls back to the main file.
+    WalImage::new(4096, [3, 1, 1, 1, 9, 9, 9, 9]).write(&path);
+    assert_eq!(read_schema_version_header(&path).unwrap(), Some(7));
+    std::fs::write(sidecar_path(&path, "-wal"), b"").unwrap();
+    assert_eq!(read_schema_version_header(&path).unwrap(), Some(7));
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}
