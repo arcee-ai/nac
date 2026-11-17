@@ -435,17 +435,16 @@ impl OutputRegistry {
             drop_from_artifact(&mut inner, output_id, excess.max(1));
         }
         while inner.retained_bytes > self.limits.per_session_bytes {
+            // Chunk sequences are unique, so the oldest front chunk is the
+            // same in any map order. Clone only that artifact's id.
             let Some(oldest_id) = inner
                 .artifacts
                 .iter()
                 .filter_map(|(id, artifact)| {
-                    artifact
-                        .chunks
-                        .front()
-                        .map(|chunk| (id.clone(), chunk.sequence))
+                    artifact.chunks.front().map(|chunk| (id, chunk.sequence))
                 })
                 .min_by_key(|(_, sequence)| *sequence)
-                .map(|(id, _)| id)
+                .map(|(id, _)| id.clone())
             else {
                 break;
             };
@@ -737,6 +736,9 @@ fn validate_page_limit(limit: usize) -> Result<()> {
 #[cfg(test)]
 #[path = "output_bytes_tests.rs"]
 mod byte_tests;
+#[cfg(test)]
+#[path = "output_eviction_tests.rs"]
+mod eviction_tests;
 
 fn preview_budgets(total: usize, stdout_bytes: usize, stderr_bytes: usize) -> (usize, usize) {
     if stdout_bytes == 0 {
@@ -871,6 +873,10 @@ fn prefix_to_unaligned_stream_boundary(artifact: &Artifact) -> Option<usize> {
     let mut saw_stdout = false;
     let mut saw_stderr = false;
     for chunk in &artifact.chunks {
+        // Only the first retained chunk of each stream can be unaligned.
+        if saw_stdout && saw_stderr {
+            break;
+        }
         let retained = &chunk.bytes[chunk.consumed..];
         if retained.is_empty() {
             continue;
