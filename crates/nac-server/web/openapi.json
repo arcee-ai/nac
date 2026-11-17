@@ -13933,6 +13933,16 @@
             "format": "int64",
             "minimum": 0
           },
+          "limits": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ResolvedLimits"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "max_tokens": {
             "type": "integer",
             "format": "int64",
@@ -16536,6 +16546,17 @@
           }
         }
       },
+      "LimitOrigin": {
+        "type": "string",
+        "description": "Provenance of a specific limit, independent of the model's catalog layer.",
+        "enum": [
+          "observed",
+          "profile",
+          "inherited",
+          "customized",
+          "estimated"
+        ]
+      },
       "ManagedAcceptedIdentity": {
         "type": "object",
         "required": [
@@ -18297,6 +18318,16 @@
           },
           "id": {
             "type": "string"
+          },
+          "limits": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ResolvedLimits"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "max_tokens": {
             "type": "integer",
@@ -20259,6 +20290,69 @@
           }
         },
         "additionalProperties": false
+      },
+      "ResolvedLimits": {
+        "type": "object",
+        "required": [
+          "context_window",
+          "max_output_tokens",
+          "effective_input_tokens",
+          "context_origin",
+          "input_origin",
+          "output_origin"
+        ],
+        "properties": {
+          "automatic_compaction_origin": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/LimitOrigin"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "automatic_compaction_threshold": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "context_origin": {
+            "$ref": "#/components/schemas/LimitOrigin"
+          },
+          "context_window": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "effective_input_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "input_origin": {
+            "$ref": "#/components/schemas/LimitOrigin"
+          },
+          "max_input_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "max_output_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "output_origin": {
+            "$ref": "#/components/schemas/LimitOrigin"
+          }
+        }
       },
       "ResolvedModelConfiguration": {
         "type": "object",

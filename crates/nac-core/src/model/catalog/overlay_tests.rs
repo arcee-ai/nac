@@ -835,7 +835,7 @@ fn runtime_mapper_matches_the_checked_in_baseline() {
     let baseline_catalog = baseline_catalog();
     let (providers, warnings, count) =
         map_models_dev(MODELS_DEV_FIXTURE, &baseline_catalog).expect("fixture maps");
-    assert_eq!(count, 108, "fixture agent-compatible model count drifted");
+    assert_eq!(count, 143, "fixture agent-compatible model count drifted");
     assert!(warnings.is_empty(), "{warnings:?}");
 
     let baseline: data::GeneratedCatalog =

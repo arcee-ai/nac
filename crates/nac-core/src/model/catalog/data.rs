@@ -64,6 +64,12 @@ pub(super) struct GeneratedModel {
     pub(super) display_name: Option<String>,
     pub(super) context_window: u64,
     pub(super) max_tokens: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) max_input_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) context_origin: Option<super::LimitOrigin>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) output_origin: Option<super::LimitOrigin>,
     #[serde(default)]
     pub(super) cost: super::ModelCostRates,
     #[serde(default)]
@@ -126,6 +132,18 @@ pub(super) fn hydrate_entry(
         display_name: entry.display_name,
         context_window: entry.context_window,
         max_tokens: entry.max_tokens,
+        max_input_tokens: entry.max_input_tokens,
+        auto_compact_token_limit: None,
+        context_origin: entry
+            .context_origin
+            .unwrap_or(super::LimitOrigin::Estimated),
+        input_origin: if entry.max_input_tokens.is_some() {
+            super::LimitOrigin::Inherited
+        } else {
+            super::LimitOrigin::Estimated
+        },
+        output_origin: entry.output_origin.unwrap_or(super::LimitOrigin::Estimated),
+        codex_account_fingerprint: None,
         cost: entry.cost,
         cache_write_1h: None,
         reasoning: entry.reasoning,
@@ -151,6 +169,13 @@ pub(super) fn merge_entries(
     generated: GeneratedProvider,
     source: ModelSource,
 ) {
+    let codex_seed_ids = (provider == BackendKind::ChatGptCodexResponses).then(|| {
+        super::seed::seed_catalog().providers[&provider]
+            .models
+            .keys()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>()
+    });
     let Some(provider_catalog) = catalog.providers.get_mut(&provider) else {
         debug_assert!(
             false,
@@ -169,7 +194,7 @@ pub(super) fn merge_entries(
     } else {
         provider_catalog.default.compat.clone()
     };
-    if source == ModelSource::Overlay {
+    if source == ModelSource::Overlay && provider != BackendKind::ChatGptCodexResponses {
         let ids = generated
             .models
             .keys()
@@ -180,6 +205,12 @@ pub(super) fn merge_entries(
             .retain(|id, metadata| metadata.source != ModelSource::Baseline || ids.contains(id));
     }
     for (id, entry) in generated.models {
+        if codex_seed_ids.as_ref().is_some_and(|ids| ids.contains(&id)) {
+            if let Some(existing) = provider_catalog.models.get_mut(&id) {
+                existing.image_input = entry.image_input;
+            }
+            continue;
+        }
         let metadata = hydrate_entry(provider, id, entry, &compat, source);
         provider_catalog
             .models

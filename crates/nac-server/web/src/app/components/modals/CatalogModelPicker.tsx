@@ -80,8 +80,11 @@ function pricing(cost: ModelCostRates): string {
 }
 
 function modelMeta(model: CatalogModel): string {
+  const budget = model.limits?.effective_input_tokens ?? model.context_window;
   const context =
-    model.context_window > 0 ? `${formatTokensCompact(model.context_window)} ctx` : "";
+    budget > 0
+      ? `${formatTokensCompact(budget)} input${model.limits?.input_origin === "estimated" ? " (est.)" : ""}`
+      : "";
   return [context, pricing(model.cost)].filter(Boolean).join(" · ");
 }
 

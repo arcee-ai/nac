@@ -206,6 +206,34 @@ impl ModelSource {
     }
 }
 
+/// Provenance of a specific limit, independent of the model's catalog layer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub enum LimitOrigin {
+    Observed,
+    Profile,
+    Inherited,
+    Customized,
+    Estimated,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ResolvedLimits {
+    pub context_window: u64,
+    pub max_input_tokens: Option<u64>,
+    pub max_output_tokens: u64,
+    pub effective_input_tokens: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub automatic_compaction_threshold: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub automatic_compaction_origin: Option<LimitOrigin>,
+    pub context_origin: LimitOrigin,
+    pub input_origin: LimitOrigin,
+    pub output_origin: LimitOrigin,
+}
+
 /// Central model metadata record resolved from the catalog.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModelMetadata {
@@ -217,6 +245,12 @@ pub struct ModelMetadata {
     pub display_name: Option<String>,
     pub context_window: u64,
     pub max_tokens: u64,
+    pub max_input_tokens: Option<u64>,
+    pub auto_compact_token_limit: Option<u64>,
+    pub context_origin: LimitOrigin,
+    pub input_origin: LimitOrigin,
+    pub output_origin: LimitOrigin,
+    pub(crate) codex_account_fingerprint: Option<String>,
     pub cost: ModelCostRates,
     /// Anthropic 1-hour-TTL cache-write rate; defaults to 2x input at cost
     /// computation time (S3).
@@ -251,6 +285,68 @@ pub struct ModelMetadata {
 }
 
 impl ModelMetadata {
+    /// Use an explicit input limit as-is. When it is absent, reserve headroom
+    /// once from the total window and identify the result as a profile or an
+    /// estimate rather than pretending it was observed.
+    pub fn resolved_limits(&self) -> ResolvedLimits {
+        let (input, origin) = if let Some(input) = self.max_input_tokens {
+            (
+                if self.context_origin == LimitOrigin::Estimated {
+                    input
+                } else {
+                    input.min(self.context_window)
+                },
+                self.input_origin,
+            )
+        } else if matches!(
+            self.provider,
+            BackendKind::AnthropicMessages | BackendKind::ArceeAuth | BackendKind::ArceeApi
+        ) {
+            // These adapters have historically treated their reported window
+            // as the input planning budget. Preserve that behavior when the
+            // provider has not supplied a separate input limit.
+            (self.context_window, self.context_origin)
+        } else if self.provider == BackendKind::ChatGptCodexResponses {
+            (
+                (self.context_window.saturating_mul(95) / 100).max(1),
+                if self.context_origin == LimitOrigin::Estimated {
+                    LimitOrigin::Estimated
+                } else {
+                    LimitOrigin::Profile
+                },
+            )
+        } else {
+            (
+                self.context_window.saturating_sub(self.max_tokens).max(1),
+                LimitOrigin::Estimated,
+            )
+        };
+        ResolvedLimits {
+            context_window: self.context_window,
+            max_input_tokens: self.max_input_tokens,
+            max_output_tokens: self.max_tokens,
+            effective_input_tokens: input,
+            automatic_compaction_threshold: Some(
+                self.auto_compact_token_limit
+                    .map_or((input as f64 * 0.7).round() as u64, |limit| {
+                        limit.min((input as f64 * 0.7).round() as u64)
+                    }),
+            ),
+            automatic_compaction_origin: Some(
+                if self
+                    .auto_compact_token_limit
+                    .is_some_and(|limit| limit < (input as f64 * 0.7).round() as u64)
+                {
+                    LimitOrigin::Observed
+                } else {
+                    origin
+                },
+            ),
+            context_origin: self.context_origin,
+            input_origin: origin,
+            output_origin: self.output_origin,
+        }
+    }
     /// 1-hour-TTL cache-write rate ($/1M tokens); defaults to 2x the input
     /// rate (pi's rule) when the catalog carries no explicit value.
     pub fn cache_write_1h_rate(&self) -> f64 {
@@ -272,6 +368,12 @@ impl ModelMetadata {
             display_name: None,
             context_window: FALLBACK_CONTEXT_WINDOW,
             max_tokens: FALLBACK_MAX_TOKENS,
+            max_input_tokens: None,
+            auto_compact_token_limit: None,
+            context_origin: LimitOrigin::Estimated,
+            input_origin: LimitOrigin::Estimated,
+            output_origin: LimitOrigin::Estimated,
+            codex_account_fingerprint: None,
             cost: ModelCostRates::default(),
             cache_write_1h: None,
             reasoning: false,
@@ -327,6 +429,8 @@ pub struct DefaultLimits {
     pub context_window: u64,
     pub max_tokens: u64,
     pub supported_efforts: Vec<ReasoningEffort>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limits: Option<ResolvedLimits>,
 }
 
 /// One real catalog entry as served by `GET /models` (never a
@@ -343,6 +447,8 @@ pub struct ModelEntry {
     pub reasoning: bool,
     pub supported_efforts: Vec<ReasoningEffort>,
     pub source: ModelSource,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limits: Option<ResolvedLimits>,
 }
 
 /// The server-owned account a unified picker can use for this provider.

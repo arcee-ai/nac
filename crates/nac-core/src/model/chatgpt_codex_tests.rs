@@ -1,5 +1,16 @@
 use super::*;
 
+#[test]
+fn resolved_account_binding_fails_closed_after_account_switch() {
+    let account_a = account_fingerprint("account-a");
+    assert!(ensure_account_binding(Some(&account_a), "account-a").is_ok());
+    assert!(ensure_account_binding(Some(&account_a), "account-b")
+        .unwrap_err()
+        .to_string()
+        .contains("account changed"));
+    assert!(ensure_account_binding(None, "account-a").is_err());
+}
+
 #[tokio::test]
 async fn codex_wire_preserves_native_and_imported_mcp_schemas_without_strict_normalization() {
     use crate::model::test_http::{ScriptedResponse, ScriptedServer};

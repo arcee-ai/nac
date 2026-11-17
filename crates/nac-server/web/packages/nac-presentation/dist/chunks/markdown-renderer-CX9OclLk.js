@@ -1,7 +1,7 @@
 import { n as e, r as t, t as n } from "./rolldown-runtime-QGRDbDUS.js";
 import { A as r, O as i, j as a, n as o } from "./RuntimeContext-DzO0SGcs.js";
 import { a as s } from "./PresentationBoundary-BAUfAcJZ.js";
-import { br as c, n as l, o as u, pr as d, r as f, t as p, yr as m } from "./workspaceLink-BhskQIQp.js";
+import { br as c, n as l, o as u, pr as d, r as f, t as p, yr as m } from "./workspaceLink-ISI7z8AI.js";
 import { i as h, q as g, r as _ } from "./Toast-phk3tngI.js";
 import { a as v, c as y, l as b, o as x, r as S, s as C, t as w } from "./lib-rX7C_D5H.js";
 import { Suspense as T, isValidElement as E, memo as D, use as O, useState as k } from "react";
@@ -6524,7 +6524,7 @@ function fl(e, t) {
 var pl = /* @__PURE__ */ e({ default: () => Al }), ml = [Uc], hl = /* @__PURE__ */ new Map();
 function gl(e) {
 	let t = hl.get(e);
-	return t || (t = import("./markdown-mathjax-D2fOeYLo.js").then(({ createMathjaxPlugin: t, remarkMathPlugin: n }) => ({
+	return t || (t = import("./markdown-mathjax-BVBG11z3.js").then(({ createMathjaxPlugin: t, remarkMathPlugin: n }) => ({
 		remark: [...ml, n],
 		rehype: [t(e)]
 	})), hl.set(e, t)), t;

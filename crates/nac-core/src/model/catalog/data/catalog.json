@@ -8,6 +8,8 @@
           "display_name": "Claude Fable 5",
           "context_window": 1000000,
           "max_tokens": 128000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 10.0,
             "output": 50.0,
@@ -24,6 +26,8 @@
           "display_name": "Claude Haiku 4.5 (latest)",
           "context_window": 200000,
           "max_tokens": 64000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 1.0,
             "output": 5.0,
@@ -40,6 +44,8 @@
           "display_name": "Claude Haiku 4.5",
           "context_window": 200000,
           "max_tokens": 64000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 1.0,
             "output": 5.0,
@@ -56,6 +62,8 @@
           "display_name": "Claude Opus 4.5 (latest)",
           "context_window": 200000,
           "max_tokens": 64000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 5.0,
             "output": 25.0,
@@ -72,6 +80,8 @@
           "display_name": "Claude Opus 4.5",
           "context_window": 200000,
           "max_tokens": 64000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 5.0,
             "output": 25.0,
@@ -88,6 +98,8 @@
           "display_name": "Claude Opus 4.6",
           "context_window": 1000000,
           "max_tokens": 128000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 5.0,
             "output": 25.0,
@@ -108,6 +120,8 @@
           "display_name": "Claude Opus 4.7",
           "context_window": 1000000,
           "max_tokens": 128000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 5.0,
             "output": 25.0,
@@ -124,6 +138,8 @@
           "display_name": "Claude Opus 4.8",
           "context_window": 1000000,
           "max_tokens": 128000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 5.0,
             "output": 25.0,
@@ -140,6 +156,8 @@
           "display_name": "Claude Opus 5",
           "context_window": 1000000,
           "max_tokens": 128000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 5.0,
             "output": 25.0,
@@ -156,6 +174,8 @@
           "display_name": "Claude Sonnet 4.5 (latest)",
           "context_window": 1000000,
           "max_tokens": 64000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 3.0,
             "output": 15.0,
@@ -172,6 +192,8 @@
           "display_name": "Claude Sonnet 4.5",
           "context_window": 1000000,
           "max_tokens": 64000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 3.0,
             "output": 15.0,
@@ -188,6 +210,8 @@
           "display_name": "Claude Sonnet 4.6",
           "context_window": 1000000,
           "max_tokens": 128000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 3.0,
             "output": 15.0,
@@ -207,6 +231,8 @@
           "display_name": "Claude Sonnet 5",
           "context_window": 1000000,
           "max_tokens": 128000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 2.0,
             "output": 10.0,
@@ -221,6 +247,813 @@
         }
       }
     },
+    "chatgpt-codex-responses": {
+      "models": {
+        "gpt-4.1": {
+          "display_name": "GPT-4.1",
+          "context_window": 128000,
+          "max_tokens": 16384,
+          "context_origin": "estimated",
+          "output_origin": "estimated",
+          "cost": {
+            "input": 2.0,
+            "output": 8.0,
+            "cache_read": 0.5,
+            "cache_write": 0.0
+          },
+          "reasoning": false,
+          "image_input": true,
+          "thinking_level_map": {
+            "high": "high",
+            "low": "low",
+            "medium": "medium",
+            "minimal": "minimal",
+            "none": "none",
+            "xhigh": "xhigh"
+          }
+        },
+        "gpt-4.1-mini": {
+          "display_name": "GPT-4.1 mini",
+          "context_window": 128000,
+          "max_tokens": 16384,
+          "context_origin": "estimated",
+          "output_origin": "estimated",
+          "cost": {
+            "input": 0.4,
+            "output": 1.6,
+            "cache_read": 0.1,
+            "cache_write": 0.0
+          },
+          "reasoning": false,
+          "image_input": true,
+          "thinking_level_map": {
+            "high": "high",
+            "low": "low",
+            "medium": "medium",
+            "minimal": "minimal",
+            "none": "none",
+            "xhigh": "xhigh"
+          }
+        },
+        "gpt-4o": {
+          "display_name": "GPT-4o",
+          "context_window": 128000,
+          "max_tokens": 16384,
+          "context_origin": "estimated",
+          "output_origin": "estimated",
+          "cost": {
+            "input": 2.5,
+            "output": 10.0,
+            "cache_read": 1.25,
+            "cache_write": 0.0
+          },
+          "reasoning": false,
+          "image_input": true,
+          "thinking_level_map": {
+            "high": "high",
+            "low": "low",
+            "medium": "medium",
+            "minimal": "minimal",
+            "none": "none",
+            "xhigh": "xhigh"
+          }
+        },
+        "gpt-4o-2024-08-06": {
+          "display_name": "GPT-4o (2024-08-06)",
+          "context_window": 128000,
+          "max_tokens": 16384,
+          "context_origin": "estimated",
+          "output_origin": "estimated",
+          "cost": {
+            "input": 2.5,
+            "output": 10.0,
+            "cache_read": 1.25,
+            "cache_write": 0.0
+          },
+          "reasoning": false,
+          "image_input": true,
+          "thinking_level_map": {
+            "high": "high",
+            "low": "low",
+            "medium": "medium",
+            "minimal": "minimal",
+            "none": "none",
+            "xhigh": "xhigh"
+          }
+        },
+        "gpt-4o-2024-11-20": {
+          "display_name": "GPT-4o (2024-11-20)",
+          "context_window": 128000,
+          "max_tokens": 16384,
+          "context_origin": "estimated",
+          "output_origin": "estimated",
+          "cost": {
+            "input": 2.5,
+            "output": 10.0,
+            "cache_read": 1.25,
+            "cache_write": 0.0
+          },
+          "reasoning": false,
+          "image_input": true,
+          "thinking_level_map": {
+            "high": "high",
+            "low": "low",
+            "medium": "medium",
+            "minimal": "minimal",
+            "none": "none",
+            "xhigh": "xhigh"
+          }
+        },
+        "gpt-4o-mini": {
+          "display_name": "GPT-4o mini",
+          "context_window": 128000,
+          "max_tokens": 16384,
+          "context_origin": "estimated",
+          "output_origin": "estimated",
+          "cost": {
+            "input": 0.15,
+            "output": 0.6,
+            "cache_read": 0.075,
+            "cache_write": 0.0
+          },
+          "reasoning": false,
+          "image_input": true,
+          "thinking_level_map": {
+            "high": "high",
+            "low": "low",
+            "medium": "medium",
+            "minimal": "minimal",
+            "none": "none",
+            "xhigh": "xhigh"
+          }
+        },
+        "gpt-5": {
+          "display_name": "GPT-5",
+          "context_window": 128000,
+          "max_tokens": 16384,
+          "context_origin": "estimated",
+          "output_origin": "estimated",
+          "cost": {
+            "input": 1.25,
+            "output": 10.0,
+            "cache_read": 0.125,
+            "cache_write": 0.0
+          },
+          "reasoning": true,
+          "image_input": true,
+          "thinking_level_map": {
+            "high": "high",
+            "low": "low",
+            "medium": "medium",
+            "minimal": "minimal",
+            "none": "none",
+            "xhigh": "xhigh"
+          }
+        },
+        "gpt-5-mini": {
+          "display_name": "GPT-5 Mini",
+          "context_window": 128000,
+          "max_tokens": 16384,
+          "context_origin": "estimated",
+          "output_origin": "estimated",
+          "cost": {
+            "input": 0.25,
+            "output": 2.0,
+            "cache_read": 0.025,
+            "cache_write": 0.0
+          },
+          "reasoning": true,
+          "image_input": true,
+          "thinking_level_map": {
+            "high": "high",
+            "low": "low",
+            "medium": "medium",
+            "minimal": "minimal",
+            "none": "none",
+            "xhigh": "xhigh"
+          }
+        },
+        "gpt-5-nano": {
+          "display_name": "GPT-5 Nano",
+          "context_window": 128000,
+          "max_tokens": 16384,
+          "context_origin": "estimated",
+          "output_origin": "estimated",
+          "cost": {
+            "input": 0.05,
+            "output": 0.4,
+            "cache_read": 0.005,
+            "cache_write": 0.0
+          },
+          "reasoning": true,
+          "image_input": true,
+          "thinking_level_map": {
+            "high": "high",
+            "low": "low",
+            "medium": "medium",
+            "minimal": "minimal",
+            "none": "none",
+            "xhigh": "xhigh"
+          }
+        },
+        "gpt-5-pro": {
+          "display_name": "GPT-5 Pro",
+          "context_window": 128000,
+          "max_tokens": 16384,
+          "context_origin": "estimated",
+          "output_origin": "estimated",
+          "cost": {
+            "input": 15.0,
+            "output": 120.0,
+            "cache_read": 0.0,
+            "cache_write": 0.0
+          },
+          "reasoning": true,
+          "image_input": true,
+          "thinking_level_map": {
+            "high": "high",
+            "low": "low",
+            "medium": "medium",
+            "minimal": "minimal",
+            "none": "none",
+            "xhigh": "xhigh"
+          }
+        },
+        "gpt-5.1": {
+          "display_name": "GPT-5.1",
+          "context_window": 128000,
+          "max_tokens": 16384,
+          "context_origin": "estimated",
+          "output_origin": "estimated",
+          "cost": {
+            "input": 1.25,
+            "output": 10.0,
+            "cache_read": 0.125,
+            "cache_write": 0.0
+          },
+          "reasoning": true,
+          "image_input": true,
+          "thinking_level_map": {
+            "high": "high",
+            "low": "low",
+            "medium": "medium",
+            "minimal": "minimal",
+            "none": "none",
+            "xhigh": "xhigh"
+          }
+        },
+        "gpt-5.2": {
+          "display_name": "GPT-5.2",
+          "context_window": 128000,
+          "max_tokens": 16384,
+          "context_origin": "estimated",
+          "output_origin": "estimated",
+          "cost": {
+            "input": 1.75,
+            "output": 14.0,
+            "cache_read": 0.175,
+            "cache_write": 0.0
+          },
+          "reasoning": true,
+          "image_input": true,
+          "thinking_level_map": {
+            "high": "high",
+            "low": "low",
+            "medium": "medium",
+            "minimal": "minimal",
+            "none": "none",
+            "xhigh": "xhigh"
+          }
+        },
+        "gpt-5.2-chat-latest": {
+          "display_name": "GPT-5.2 Chat",
+          "context_window": 128000,
+          "max_tokens": 16384,
+          "context_origin": "estimated",
+          "output_origin": "estimated",
+          "cost": {
+            "input": 1.75,
+            "output": 14.0,
+            "cache_read": 0.175,
+            "cache_write": 0.0
+          },
+          "reasoning": true,
+          "image_input": true,
+          "thinking_level_map": {
+            "high": "high",
+            "low": "low",
+            "medium": "medium",
+            "minimal": "minimal",
+            "none": "none",
+            "xhigh": "xhigh"
+          }
+        },
+        "gpt-5.2-pro": {
+          "display_name": "GPT-5.2 Pro",
+          "context_window": 128000,
+          "max_tokens": 16384,
+          "context_origin": "estimated",
+          "output_origin": "estimated",
+          "cost": {
+            "input": 21.0,
+            "output": 168.0,
+            "cache_read": 0.0,
+            "cache_write": 0.0
+          },
+          "reasoning": true,
+          "image_input": true,
+          "thinking_level_map": {
+            "high": "high",
+            "low": "low",
+            "medium": "medium",
+            "minimal": "minimal",
+            "none": "none",
+            "xhigh": "xhigh"
+          }
+        },
+        "gpt-5.3-chat-latest": {
+          "display_name": "GPT-5.3 Chat (latest)",
+          "context_window": 128000,
+          "max_tokens": 16384,
+          "context_origin": "estimated",
+          "output_origin": "estimated",
+          "cost": {
+            "input": 1.75,
+            "output": 14.0,
+            "cache_read": 0.175,
+            "cache_write": 0.0
+          },
+          "reasoning": false,
+          "image_input": true,
+          "thinking_level_map": {
+            "high": "high",
+            "low": "low",
+            "medium": "medium",
+            "minimal": "minimal",
+            "none": "none",
+            "xhigh": "xhigh"
+          }
+        },
+        "gpt-5.3-codex": {
+          "display_name": "GPT-5.3 Codex",
+          "context_window": 128000,
+          "max_tokens": 16384,
+          "context_origin": "estimated",
+          "output_origin": "estimated",
+          "cost": {
+            "input": 1.75,
+            "output": 14.0,
+            "cache_read": 0.175,
+            "cache_write": 0.0
+          },
+          "reasoning": true,
+          "image_input": true,
+          "thinking_level_map": {
+            "high": "high",
+            "low": "low",
+            "medium": "medium",
+            "minimal": "minimal",
+            "none": "none",
+            "xhigh": "xhigh"
+          }
+        },
+        "gpt-5.3-codex-spark": {
+          "display_name": "GPT-5.3 Codex Spark",
+          "context_window": 128000,
+          "max_tokens": 16384,
+          "context_origin": "estimated",
+          "output_origin": "estimated",
+          "cost": {
+            "input": 1.75,
+            "output": 14.0,
+            "cache_read": 0.175,
+            "cache_write": 0.0
+          },
+          "reasoning": true,
+          "image_input": true,
+          "thinking_level_map": {
+            "high": "high",
+            "low": "low",
+            "medium": "medium",
+            "minimal": "minimal",
+            "none": "none",
+            "xhigh": "xhigh"
+          }
+        },
+        "gpt-5.4": {
+          "display_name": "GPT-5.4",
+          "context_window": 128000,
+          "max_tokens": 16384,
+          "context_origin": "estimated",
+          "output_origin": "estimated",
+          "cost": {
+            "input": 2.5,
+            "output": 15.0,
+            "cache_read": 0.25,
+            "cache_write": 0.0,
+            "tiers": [
+              {
+                "input_tokens_above": 272000,
+                "input": 5.0,
+                "output": 22.5,
+                "cache_read": 0.5,
+                "cache_write": 0.0
+              }
+            ]
+          },
+          "reasoning": true,
+          "image_input": true,
+          "thinking_level_map": {
+            "high": "high",
+            "low": "low",
+            "medium": "medium",
+            "minimal": "minimal",
+            "none": "none",
+            "xhigh": "xhigh"
+          }
+        },
+        "gpt-5.4-mini": {
+          "display_name": "GPT-5.4 mini",
+          "context_window": 128000,
+          "max_tokens": 16384,
+          "context_origin": "estimated",
+          "output_origin": "estimated",
+          "cost": {
+            "input": 0.75,
+            "output": 4.5,
+            "cache_read": 0.075,
+            "cache_write": 0.0
+          },
+          "reasoning": true,
+          "image_input": true,
+          "thinking_level_map": {
+            "high": "high",
+            "low": "low",
+            "medium": "medium",
+            "minimal": "minimal",
+            "none": "none",
+            "xhigh": "xhigh"
+          }
+        },
+        "gpt-5.4-nano": {
+          "display_name": "GPT-5.4 nano",
+          "context_window": 128000,
+          "max_tokens": 16384,
+          "context_origin": "estimated",
+          "output_origin": "estimated",
+          "cost": {
+            "input": 0.2,
+            "output": 1.25,
+            "cache_read": 0.02,
+            "cache_write": 0.0
+          },
+          "reasoning": true,
+          "image_input": true,
+          "thinking_level_map": {
+            "high": "high",
+            "low": "low",
+            "medium": "medium",
+            "minimal": "minimal",
+            "none": "none",
+            "xhigh": "xhigh"
+          }
+        },
+        "gpt-5.4-pro": {
+          "display_name": "GPT-5.4 Pro",
+          "context_window": 128000,
+          "max_tokens": 16384,
+          "context_origin": "estimated",
+          "output_origin": "estimated",
+          "cost": {
+            "input": 30.0,
+            "output": 180.0,
+            "cache_read": 0.0,
+            "cache_write": 0.0,
+            "tiers": [
+              {
+                "input_tokens_above": 272000,
+                "input": 60.0,
+                "output": 270.0,
+                "cache_read": 0.0,
+                "cache_write": 0.0
+              }
+            ]
+          },
+          "reasoning": true,
+          "image_input": true,
+          "thinking_level_map": {
+            "high": "high",
+            "low": "low",
+            "medium": "medium",
+            "minimal": "minimal",
+            "none": "none",
+            "xhigh": "xhigh"
+          }
+        },
+        "gpt-5.5": {
+          "display_name": "GPT-5.5",
+          "context_window": 128000,
+          "max_tokens": 16384,
+          "context_origin": "estimated",
+          "output_origin": "estimated",
+          "cost": {
+            "input": 5.0,
+            "output": 30.0,
+            "cache_read": 0.5,
+            "cache_write": 0.0,
+            "tiers": [
+              {
+                "input_tokens_above": 272000,
+                "input": 10.0,
+                "output": 45.0,
+                "cache_read": 1.0,
+                "cache_write": 0.0
+              }
+            ]
+          },
+          "reasoning": true,
+          "image_input": true,
+          "thinking_level_map": {
+            "high": "high",
+            "low": "low",
+            "medium": "medium",
+            "minimal": "minimal",
+            "none": "none",
+            "xhigh": "xhigh"
+          }
+        },
+        "gpt-5.5-pro": {
+          "display_name": "GPT-5.5 Pro",
+          "context_window": 128000,
+          "max_tokens": 16384,
+          "context_origin": "estimated",
+          "output_origin": "estimated",
+          "cost": {
+            "input": 30.0,
+            "output": 180.0,
+            "cache_read": 0.0,
+            "cache_write": 0.0,
+            "tiers": [
+              {
+                "input_tokens_above": 272000,
+                "input": 60.0,
+                "output": 270.0,
+                "cache_read": 0.0,
+                "cache_write": 0.0
+              }
+            ]
+          },
+          "reasoning": true,
+          "image_input": true,
+          "thinking_level_map": {
+            "high": "high",
+            "low": "low",
+            "medium": "medium",
+            "minimal": "minimal",
+            "none": "none",
+            "xhigh": "xhigh"
+          }
+        },
+        "gpt-5.6": {
+          "display_name": "GPT-5.6",
+          "context_window": 128000,
+          "max_tokens": 16384,
+          "context_origin": "estimated",
+          "output_origin": "estimated",
+          "cost": {
+            "input": 5.0,
+            "output": 30.0,
+            "cache_read": 0.5,
+            "cache_write": 6.25,
+            "tiers": [
+              {
+                "input_tokens_above": 272000,
+                "input": 10.0,
+                "output": 45.0,
+                "cache_read": 1.0,
+                "cache_write": 12.5
+              }
+            ]
+          },
+          "reasoning": true,
+          "image_input": true,
+          "thinking_level_map": {
+            "high": "high",
+            "low": "low",
+            "medium": "medium",
+            "minimal": "minimal",
+            "none": "none",
+            "xhigh": "xhigh"
+          }
+        },
+        "gpt-5.6-luna": {
+          "display_name": "GPT-5.6 Luna",
+          "context_window": 128000,
+          "max_tokens": 16384,
+          "context_origin": "estimated",
+          "output_origin": "estimated",
+          "cost": {
+            "input": 0.2,
+            "output": 1.2,
+            "cache_read": 0.02,
+            "cache_write": 0.25,
+            "tiers": [
+              {
+                "input_tokens_above": 272000,
+                "input": 0.4,
+                "output": 1.8,
+                "cache_read": 0.04,
+                "cache_write": 0.5
+              }
+            ]
+          },
+          "reasoning": true,
+          "image_input": true,
+          "thinking_level_map": {
+            "high": "high",
+            "low": "low",
+            "medium": "medium",
+            "minimal": "minimal",
+            "none": "none",
+            "xhigh": "xhigh"
+          }
+        },
+        "gpt-5.6-sol": {
+          "display_name": "GPT-5.6 Sol",
+          "context_window": 128000,
+          "max_tokens": 16384,
+          "context_origin": "estimated",
+          "output_origin": "estimated",
+          "cost": {
+            "input": 5.0,
+            "output": 30.0,
+            "cache_read": 0.5,
+            "cache_write": 6.25,
+            "tiers": [
+              {
+                "input_tokens_above": 272000,
+                "input": 10.0,
+                "output": 45.0,
+                "cache_read": 1.0,
+                "cache_write": 12.5
+              }
+            ]
+          },
+          "reasoning": true,
+          "image_input": true,
+          "thinking_level_map": {
+            "high": "high",
+            "low": "low",
+            "medium": "medium",
+            "minimal": "minimal",
+            "none": "none",
+            "xhigh": "xhigh"
+          }
+        },
+        "gpt-5.6-terra": {
+          "display_name": "GPT-5.6 Terra",
+          "context_window": 128000,
+          "max_tokens": 16384,
+          "context_origin": "estimated",
+          "output_origin": "estimated",
+          "cost": {
+            "input": 2.0,
+            "output": 12.0,
+            "cache_read": 0.2,
+            "cache_write": 2.5,
+            "tiers": [
+              {
+                "input_tokens_above": 272000,
+                "input": 4.0,
+                "output": 18.0,
+                "cache_read": 0.4,
+                "cache_write": 5.0
+              }
+            ]
+          },
+          "reasoning": true,
+          "image_input": true,
+          "thinking_level_map": {
+            "high": "high",
+            "low": "low",
+            "medium": "medium",
+            "minimal": "minimal",
+            "none": "none",
+            "xhigh": "xhigh"
+          }
+        },
+        "gpt-6-astra": {
+          "display_name": "GPT-6 Astra",
+          "context_window": 128000,
+          "max_tokens": 16384,
+          "context_origin": "estimated",
+          "output_origin": "estimated",
+          "cost": {
+            "input": 10.0,
+            "output": 50.0,
+            "cache_read": 1.0,
+            "cache_write": 12.5,
+            "tiers": [
+              {
+                "input_tokens_above": 272000,
+                "input": 20.0,
+                "output": 75.0,
+                "cache_read": 2.0,
+                "cache_write": 25.0
+              }
+            ]
+          },
+          "reasoning": true,
+          "image_input": true,
+          "thinking_level_map": {
+            "high": "high",
+            "low": "low",
+            "medium": "medium",
+            "minimal": "minimal",
+            "none": "none",
+            "xhigh": "xhigh"
+          }
+        },
+        "gpt-6.1-sol": {
+          "display_name": "GPT-6.1 Sol",
+          "context_window": 128000,
+          "max_tokens": 16384,
+          "context_origin": "estimated",
+          "output_origin": "estimated",
+          "cost": {
+            "input": 2.0,
+            "output": 10.0,
+            "cache_read": 0.1,
+            "cache_write": 2.5,
+            "tiers": [
+              {
+                "input_tokens_above": 272000,
+                "input": 4.0,
+                "output": 15.0,
+                "cache_read": 0.2,
+                "cache_write": 5.0
+              }
+            ]
+          },
+          "reasoning": true,
+          "image_input": true,
+          "thinking_level_map": {
+            "high": "high",
+            "low": "low",
+            "medium": "medium",
+            "minimal": "minimal",
+            "none": "none",
+            "xhigh": "xhigh"
+          }
+        },
+        "o3": {
+          "display_name": "o3",
+          "context_window": 128000,
+          "max_tokens": 16384,
+          "context_origin": "estimated",
+          "output_origin": "estimated",
+          "cost": {
+            "input": 2.0,
+            "output": 8.0,
+            "cache_read": 0.5,
+            "cache_write": 0.0
+          },
+          "reasoning": true,
+          "image_input": true,
+          "thinking_level_map": {
+            "high": "high",
+            "low": "low",
+            "medium": "medium",
+            "minimal": "minimal",
+            "none": "none",
+            "xhigh": "xhigh"
+          }
+        },
+        "o3-pro": {
+          "display_name": "o3-pro",
+          "context_window": 128000,
+          "max_tokens": 16384,
+          "context_origin": "estimated",
+          "output_origin": "estimated",
+          "cost": {
+            "input": 20.0,
+            "output": 80.0,
+            "cache_read": 0.0,
+            "cache_write": 0.0
+          },
+          "reasoning": true,
+          "image_input": true,
+          "thinking_level_map": {
+            "high": "high",
+            "low": "low",
+            "medium": "medium",
+            "minimal": "minimal",
+            "none": "none",
+            "xhigh": "xhigh"
+          }
+        }
+      }
+    },
     "deepseek-chat": {
       "credential_env_var": "DEEPSEEK_API_KEY",
       "default_base_url": "https://api.deepseek.com",
@@ -229,6 +1062,8 @@
           "display_name": "DeepSeek V4 Flash",
           "context_window": 1000000,
           "max_tokens": 384000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 0.14,
             "output": 0.28,
@@ -248,6 +1083,8 @@
           "display_name": "DeepSeek V4 Pro",
           "context_window": 1000000,
           "max_tokens": 384000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 0.435,
             "output": 0.87,
@@ -273,6 +1110,8 @@
           "display_name": "DeepSeek V4 Flash",
           "context_window": 1000000,
           "max_tokens": 384000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 0.14,
             "output": 0.28,
@@ -292,6 +1131,8 @@
           "display_name": "DeepSeek V4 Flash 0731",
           "context_window": 1000000,
           "max_tokens": 384000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 0.14,
             "output": 0.28,
@@ -311,6 +1152,8 @@
           "display_name": "DeepSeek V4 Pro",
           "context_window": 1000000,
           "max_tokens": 384000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 1.74,
             "output": 3.48,
@@ -330,6 +1173,8 @@
           "display_name": "GLM 5.2",
           "context_window": 1048575,
           "max_tokens": 131072,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 1.4,
             "output": 4.4,
@@ -348,6 +1193,8 @@
           "display_name": "GPT OSS 120B",
           "context_window": 131072,
           "max_tokens": 32768,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 0.15,
             "output": 0.6,
@@ -366,6 +1213,8 @@
           "display_name": "GPT OSS 20B",
           "context_window": 131072,
           "max_tokens": 32768,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 0.07,
             "output": 0.3,
@@ -384,6 +1233,8 @@
           "display_name": "Kimi K2.6",
           "context_window": 262000,
           "max_tokens": 262000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 0.95,
             "output": 4.0,
@@ -403,6 +1254,8 @@
           "display_name": "Kimi K2.7 Code",
           "context_window": 262000,
           "max_tokens": 262000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 0.95,
             "output": 4.0,
@@ -422,6 +1275,8 @@
           "display_name": "Kimi K3",
           "context_window": 1048576,
           "max_tokens": 131072,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 3.0,
             "output": 15.0,
@@ -440,6 +1295,8 @@
           "display_name": "MiniMax-M2.7",
           "context_window": 196608,
           "max_tokens": 196608,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 0.3,
             "output": 1.2,
@@ -458,6 +1315,8 @@
           "display_name": "MiniMax-M3",
           "context_window": 512000,
           "max_tokens": 512000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 0.3,
             "output": 1.2,
@@ -475,6 +1334,8 @@
           "display_name": "Qwen 3.7 Plus",
           "context_window": 262144,
           "max_tokens": 65536,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 0.4,
             "output": 1.6,
@@ -494,6 +1355,8 @@
           "display_name": "GLM 5.2 Fast",
           "context_window": 1048575,
           "max_tokens": 131072,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 2.1,
             "output": 6.6,
@@ -512,6 +1375,8 @@
           "display_name": "Kimi K2.6 Fast",
           "context_window": 262000,
           "max_tokens": 262000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 2.0,
             "output": 8.0,
@@ -531,6 +1396,8 @@
           "display_name": "Kimi K2.6 Turbo",
           "context_window": 262000,
           "max_tokens": 262000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 2.0,
             "output": 8.0,
@@ -550,6 +1417,8 @@
           "display_name": "Kimi K2.7 Code Fast",
           "context_window": 262000,
           "max_tokens": 262000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 1.9,
             "output": 8.0,
@@ -569,6 +1438,8 @@
           "display_name": "Kimi K3 Fast",
           "context_window": 1048576,
           "max_tokens": 131072,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 4.5,
             "output": 22.5,
@@ -593,6 +1464,8 @@
           "display_name": "GPT-4.1",
           "context_window": 1047576,
           "max_tokens": 32768,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 2.0,
             "output": 8.0,
@@ -614,6 +1487,8 @@
           "display_name": "GPT-4.1 mini",
           "context_window": 1047576,
           "max_tokens": 32768,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 0.4,
             "output": 1.6,
@@ -635,6 +1510,8 @@
           "display_name": "GPT-4o",
           "context_window": 128000,
           "max_tokens": 16384,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 2.5,
             "output": 10.0,
@@ -656,6 +1533,8 @@
           "display_name": "GPT-4o (2024-08-06)",
           "context_window": 128000,
           "max_tokens": 16384,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 2.5,
             "output": 10.0,
@@ -677,6 +1556,8 @@
           "display_name": "GPT-4o (2024-11-20)",
           "context_window": 128000,
           "max_tokens": 16384,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 2.5,
             "output": 10.0,
@@ -698,6 +1579,8 @@
           "display_name": "GPT-4o mini",
           "context_window": 128000,
           "max_tokens": 16384,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 0.15,
             "output": 0.6,
@@ -719,6 +1602,9 @@
           "display_name": "GPT-5",
           "context_window": 400000,
           "max_tokens": 128000,
+          "max_input_tokens": 272000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 1.25,
             "output": 10.0,
@@ -740,6 +1626,9 @@
           "display_name": "GPT-5 Mini",
           "context_window": 400000,
           "max_tokens": 128000,
+          "max_input_tokens": 272000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 0.25,
             "output": 2.0,
@@ -761,6 +1650,9 @@
           "display_name": "GPT-5 Nano",
           "context_window": 400000,
           "max_tokens": 128000,
+          "max_input_tokens": 272000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 0.05,
             "output": 0.4,
@@ -782,6 +1674,9 @@
           "display_name": "GPT-5 Pro",
           "context_window": 400000,
           "max_tokens": 272000,
+          "max_input_tokens": 272000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 15.0,
             "output": 120.0,
@@ -803,6 +1698,9 @@
           "display_name": "GPT-5.1",
           "context_window": 400000,
           "max_tokens": 128000,
+          "max_input_tokens": 272000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 1.25,
             "output": 10.0,
@@ -824,6 +1722,9 @@
           "display_name": "GPT-5.2",
           "context_window": 400000,
           "max_tokens": 128000,
+          "max_input_tokens": 272000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 1.75,
             "output": 14.0,
@@ -845,6 +1746,8 @@
           "display_name": "GPT-5.2 Chat",
           "context_window": 128000,
           "max_tokens": 16384,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 1.75,
             "output": 14.0,
@@ -866,6 +1769,9 @@
           "display_name": "GPT-5.2 Pro",
           "context_window": 400000,
           "max_tokens": 128000,
+          "max_input_tokens": 272000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 21.0,
             "output": 168.0,
@@ -887,6 +1793,8 @@
           "display_name": "GPT-5.3 Chat (latest)",
           "context_window": 128000,
           "max_tokens": 16384,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 1.75,
             "output": 14.0,
@@ -908,6 +1816,9 @@
           "display_name": "GPT-5.3 Codex",
           "context_window": 400000,
           "max_tokens": 128000,
+          "max_input_tokens": 272000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 1.75,
             "output": 14.0,
@@ -929,6 +1840,9 @@
           "display_name": "GPT-5.3 Codex Spark",
           "context_window": 128000,
           "max_tokens": 32000,
+          "max_input_tokens": 100000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 1.75,
             "output": 14.0,
@@ -950,6 +1864,9 @@
           "display_name": "GPT-5.4",
           "context_window": 1050000,
           "max_tokens": 128000,
+          "max_input_tokens": 922000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 2.5,
             "output": 15.0,
@@ -980,6 +1897,9 @@
           "display_name": "GPT-5.4 mini",
           "context_window": 400000,
           "max_tokens": 128000,
+          "max_input_tokens": 272000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 0.75,
             "output": 4.5,
@@ -1001,6 +1921,9 @@
           "display_name": "GPT-5.4 nano",
           "context_window": 400000,
           "max_tokens": 128000,
+          "max_input_tokens": 272000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 0.2,
             "output": 1.25,
@@ -1022,6 +1945,9 @@
           "display_name": "GPT-5.4 Pro",
           "context_window": 1050000,
           "max_tokens": 128000,
+          "max_input_tokens": 922000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 30.0,
             "output": 180.0,
@@ -1052,6 +1978,9 @@
           "display_name": "GPT-5.5",
           "context_window": 1050000,
           "max_tokens": 128000,
+          "max_input_tokens": 922000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 5.0,
             "output": 30.0,
@@ -1082,6 +2011,9 @@
           "display_name": "GPT-5.5 Pro",
           "context_window": 1050000,
           "max_tokens": 128000,
+          "max_input_tokens": 922000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 30.0,
             "output": 180.0,
@@ -1112,6 +2044,9 @@
           "display_name": "GPT-5.6",
           "context_window": 1050000,
           "max_tokens": 128000,
+          "max_input_tokens": 922000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 5.0,
             "output": 30.0,
@@ -1143,6 +2078,9 @@
           "display_name": "GPT-5.6 Luna",
           "context_window": 1050000,
           "max_tokens": 128000,
+          "max_input_tokens": 922000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 0.2,
             "output": 1.2,
@@ -1174,6 +2112,9 @@
           "display_name": "GPT-5.6 Sol",
           "context_window": 1050000,
           "max_tokens": 128000,
+          "max_input_tokens": 922000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 5.0,
             "output": 30.0,
@@ -1205,6 +2146,9 @@
           "display_name": "GPT-5.6 Terra",
           "context_window": 1050000,
           "max_tokens": 128000,
+          "max_input_tokens": 922000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 2.0,
             "output": 12.0,
@@ -1232,10 +2176,78 @@
             "xhigh": "xhigh"
           }
         },
+        "gpt-6-astra": {
+          "display_name": "GPT-6 Astra",
+          "context_window": 1050000,
+          "max_tokens": 128000,
+          "max_input_tokens": 922000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
+          "cost": {
+            "input": 10.0,
+            "output": 50.0,
+            "cache_read": 1.0,
+            "cache_write": 12.5,
+            "tiers": [
+              {
+                "input_tokens_above": 272000,
+                "input": 20.0,
+                "output": 75.0,
+                "cache_read": 2.0,
+                "cache_write": 25.0
+              }
+            ]
+          },
+          "reasoning": true,
+          "image_input": true,
+          "thinking_level_map": {
+            "high": "high",
+            "low": "low",
+            "medium": "medium",
+            "minimal": "minimal",
+            "none": "none",
+            "xhigh": "xhigh"
+          }
+        },
+        "gpt-6.1-sol": {
+          "display_name": "GPT-6.1 Sol",
+          "context_window": 1050000,
+          "max_tokens": 128000,
+          "max_input_tokens": 922000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
+          "cost": {
+            "input": 2.0,
+            "output": 10.0,
+            "cache_read": 0.1,
+            "cache_write": 2.5,
+            "tiers": [
+              {
+                "input_tokens_above": 272000,
+                "input": 4.0,
+                "output": 15.0,
+                "cache_read": 0.2,
+                "cache_write": 5.0
+              }
+            ]
+          },
+          "reasoning": true,
+          "image_input": true,
+          "thinking_level_map": {
+            "high": "high",
+            "low": "low",
+            "medium": "medium",
+            "minimal": "minimal",
+            "none": "none",
+            "xhigh": "xhigh"
+          }
+        },
         "o3": {
           "display_name": "o3",
           "context_window": 200000,
           "max_tokens": 100000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 2.0,
             "output": 8.0,
@@ -1257,6 +2269,8 @@
           "display_name": "o3-pro",
           "context_window": 200000,
           "max_tokens": 100000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 20.0,
             "output": 80.0,
@@ -1284,6 +2298,8 @@
           "display_name": "GPT-4.1",
           "context_window": 1047576,
           "max_tokens": 32768,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 2.0,
             "output": 8.0,
@@ -1305,6 +2321,8 @@
           "display_name": "GPT-4.1 mini",
           "context_window": 1047576,
           "max_tokens": 32768,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 0.4,
             "output": 1.6,
@@ -1326,6 +2344,8 @@
           "display_name": "GPT-4o",
           "context_window": 128000,
           "max_tokens": 16384,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 2.5,
             "output": 10.0,
@@ -1347,6 +2367,8 @@
           "display_name": "GPT-4o (2024-08-06)",
           "context_window": 128000,
           "max_tokens": 16384,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 2.5,
             "output": 10.0,
@@ -1368,6 +2390,8 @@
           "display_name": "GPT-4o (2024-11-20)",
           "context_window": 128000,
           "max_tokens": 16384,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 2.5,
             "output": 10.0,
@@ -1389,6 +2413,8 @@
           "display_name": "GPT-4o mini",
           "context_window": 128000,
           "max_tokens": 16384,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 0.15,
             "output": 0.6,
@@ -1410,6 +2436,9 @@
           "display_name": "GPT-5",
           "context_window": 400000,
           "max_tokens": 128000,
+          "max_input_tokens": 272000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 1.25,
             "output": 10.0,
@@ -1431,6 +2460,9 @@
           "display_name": "GPT-5 Mini",
           "context_window": 400000,
           "max_tokens": 128000,
+          "max_input_tokens": 272000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 0.25,
             "output": 2.0,
@@ -1452,6 +2484,9 @@
           "display_name": "GPT-5 Nano",
           "context_window": 400000,
           "max_tokens": 128000,
+          "max_input_tokens": 272000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 0.05,
             "output": 0.4,
@@ -1473,6 +2508,9 @@
           "display_name": "GPT-5 Pro",
           "context_window": 400000,
           "max_tokens": 272000,
+          "max_input_tokens": 272000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 15.0,
             "output": 120.0,
@@ -1494,6 +2532,9 @@
           "display_name": "GPT-5.1",
           "context_window": 400000,
           "max_tokens": 128000,
+          "max_input_tokens": 272000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 1.25,
             "output": 10.0,
@@ -1515,6 +2556,9 @@
           "display_name": "GPT-5.2",
           "context_window": 400000,
           "max_tokens": 128000,
+          "max_input_tokens": 272000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 1.75,
             "output": 14.0,
@@ -1536,6 +2580,8 @@
           "display_name": "GPT-5.2 Chat",
           "context_window": 128000,
           "max_tokens": 16384,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 1.75,
             "output": 14.0,
@@ -1557,6 +2603,9 @@
           "display_name": "GPT-5.2 Pro",
           "context_window": 400000,
           "max_tokens": 128000,
+          "max_input_tokens": 272000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 21.0,
             "output": 168.0,
@@ -1578,6 +2627,8 @@
           "display_name": "GPT-5.3 Chat (latest)",
           "context_window": 128000,
           "max_tokens": 16384,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 1.75,
             "output": 14.0,
@@ -1599,6 +2650,9 @@
           "display_name": "GPT-5.3 Codex",
           "context_window": 400000,
           "max_tokens": 128000,
+          "max_input_tokens": 272000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 1.75,
             "output": 14.0,
@@ -1620,6 +2674,9 @@
           "display_name": "GPT-5.3 Codex Spark",
           "context_window": 128000,
           "max_tokens": 32000,
+          "max_input_tokens": 100000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 1.75,
             "output": 14.0,
@@ -1641,6 +2698,9 @@
           "display_name": "GPT-5.4",
           "context_window": 1050000,
           "max_tokens": 128000,
+          "max_input_tokens": 922000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 2.5,
             "output": 15.0,
@@ -1671,6 +2731,9 @@
           "display_name": "GPT-5.4 mini",
           "context_window": 400000,
           "max_tokens": 128000,
+          "max_input_tokens": 272000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 0.75,
             "output": 4.5,
@@ -1692,6 +2755,9 @@
           "display_name": "GPT-5.4 nano",
           "context_window": 400000,
           "max_tokens": 128000,
+          "max_input_tokens": 272000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 0.2,
             "output": 1.25,
@@ -1713,6 +2779,9 @@
           "display_name": "GPT-5.4 Pro",
           "context_window": 1050000,
           "max_tokens": 128000,
+          "max_input_tokens": 922000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 30.0,
             "output": 180.0,
@@ -1743,6 +2812,9 @@
           "display_name": "GPT-5.5",
           "context_window": 1050000,
           "max_tokens": 128000,
+          "max_input_tokens": 922000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 5.0,
             "output": 30.0,
@@ -1773,6 +2845,9 @@
           "display_name": "GPT-5.5 Pro",
           "context_window": 1050000,
           "max_tokens": 128000,
+          "max_input_tokens": 922000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 30.0,
             "output": 180.0,
@@ -1803,6 +2878,9 @@
           "display_name": "GPT-5.6",
           "context_window": 1050000,
           "max_tokens": 128000,
+          "max_input_tokens": 922000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 5.0,
             "output": 30.0,
@@ -1834,6 +2912,9 @@
           "display_name": "GPT-5.6 Luna",
           "context_window": 1050000,
           "max_tokens": 128000,
+          "max_input_tokens": 922000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 0.2,
             "output": 1.2,
@@ -1865,6 +2946,9 @@
           "display_name": "GPT-5.6 Sol",
           "context_window": 1050000,
           "max_tokens": 128000,
+          "max_input_tokens": 922000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 5.0,
             "output": 30.0,
@@ -1896,6 +2980,9 @@
           "display_name": "GPT-5.6 Terra",
           "context_window": 1050000,
           "max_tokens": 128000,
+          "max_input_tokens": 922000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 2.0,
             "output": 12.0,
@@ -1923,10 +3010,78 @@
             "xhigh": "xhigh"
           }
         },
+        "gpt-6-astra": {
+          "display_name": "GPT-6 Astra",
+          "context_window": 1050000,
+          "max_tokens": 128000,
+          "max_input_tokens": 922000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
+          "cost": {
+            "input": 10.0,
+            "output": 50.0,
+            "cache_read": 1.0,
+            "cache_write": 12.5,
+            "tiers": [
+              {
+                "input_tokens_above": 272000,
+                "input": 20.0,
+                "output": 75.0,
+                "cache_read": 2.0,
+                "cache_write": 25.0
+              }
+            ]
+          },
+          "reasoning": true,
+          "image_input": true,
+          "thinking_level_map": {
+            "high": "high",
+            "low": "low",
+            "medium": "medium",
+            "minimal": "minimal",
+            "none": "none",
+            "xhigh": "xhigh"
+          }
+        },
+        "gpt-6.1-sol": {
+          "display_name": "GPT-6.1 Sol",
+          "context_window": 1050000,
+          "max_tokens": 128000,
+          "max_input_tokens": 922000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
+          "cost": {
+            "input": 2.0,
+            "output": 10.0,
+            "cache_read": 0.1,
+            "cache_write": 2.5,
+            "tiers": [
+              {
+                "input_tokens_above": 272000,
+                "input": 4.0,
+                "output": 15.0,
+                "cache_read": 0.2,
+                "cache_write": 5.0
+              }
+            ]
+          },
+          "reasoning": true,
+          "image_input": true,
+          "thinking_level_map": {
+            "high": "high",
+            "low": "low",
+            "medium": "medium",
+            "minimal": "minimal",
+            "none": "none",
+            "xhigh": "xhigh"
+          }
+        },
         "o3": {
           "display_name": "o3",
           "context_window": 200000,
           "max_tokens": 100000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 2.0,
             "output": 8.0,
@@ -1948,6 +3103,8 @@
           "display_name": "o3-pro",
           "context_window": 200000,
           "max_tokens": 100000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 20.0,
             "output": 80.0,
@@ -1975,6 +3132,8 @@
           "display_name": "MiniMax-M2.7",
           "context_window": 202752,
           "max_tokens": 131072,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 0.3,
             "output": 1.2,
@@ -1994,6 +3153,8 @@
           "display_name": "MiniMax-M3",
           "context_window": 524288,
           "max_tokens": 250000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 0.3,
             "output": 1.2,
@@ -2011,6 +3172,8 @@
           "display_name": "Qwen 2.5 7B Instruct Turbo",
           "context_window": 32768,
           "max_tokens": 32768,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 0.3,
             "output": 0.3,
@@ -2025,6 +3188,8 @@
           "display_name": "Qwen3.5 9B",
           "context_window": 262144,
           "max_tokens": 65536,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 0.17,
             "output": 0.25,
@@ -2044,6 +3209,8 @@
           "display_name": "Qwen3.6 Plus",
           "context_window": 1000000,
           "max_tokens": 500000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 0.5,
             "output": 3.0,
@@ -2063,6 +3230,8 @@
           "display_name": "Qwen3.7 Max",
           "context_window": 1000000,
           "max_tokens": 500000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 1.25,
             "output": 3.75,
@@ -2077,6 +3246,8 @@
           "display_name": "DeepSeek V4 Flash 0731",
           "context_window": 1000000,
           "max_tokens": 384000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 0.14,
             "output": 0.28,
@@ -2096,6 +3267,8 @@
           "display_name": "DeepSeek V4 Pro",
           "context_window": 512000,
           "max_tokens": 384000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 1.74,
             "output": 3.48,
@@ -2115,6 +3288,8 @@
           "display_name": "Gemma 4 31B Instruct",
           "context_window": 262144,
           "max_tokens": 131072,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 0.39,
             "output": 0.97,
@@ -2134,6 +3309,8 @@
           "display_name": "Llama 3.3 70B",
           "context_window": 131072,
           "max_tokens": 131072,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 1.04,
             "output": 1.04,
@@ -2148,6 +3325,8 @@
           "display_name": "Kimi K2.6",
           "context_window": 262144,
           "max_tokens": 131000,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 1.2,
             "output": 4.5,
@@ -2167,6 +3346,8 @@
           "display_name": "Kimi K2.7 Code",
           "context_window": 262144,
           "max_tokens": 131072,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 0.95,
             "output": 4.0,
@@ -2186,6 +3367,8 @@
           "display_name": "Kimi K3",
           "context_window": 1048576,
           "max_tokens": 131072,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 3.0,
             "output": 15.0,
@@ -2204,6 +3387,8 @@
           "display_name": "Nemotron 3 Ultra 550B A55B",
           "context_window": 512300,
           "max_tokens": 512300,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 0.6,
             "output": 3.6,
@@ -2223,6 +3408,8 @@
           "display_name": "GPT OSS 120B",
           "context_window": 131072,
           "max_tokens": 131072,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 0.15,
             "output": 0.6,
@@ -2242,6 +3429,8 @@
           "display_name": "GPT OSS 20B",
           "context_window": 131072,
           "max_tokens": 131072,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 0.05,
             "output": 0.2,
@@ -2261,6 +3450,8 @@
           "display_name": "Inkling",
           "context_window": 524288,
           "max_tokens": 131072,
+          "context_origin": "inherited",
+          "output_origin": "inherited",
           "cost": {
             "input": 1.0,
             "output": 4.05,
@@ -2280,6 +3471,8 @@
           "display_name": "GLM-5.2",
           "context_window": 524288,
           "max_tokens": 164000,
+          "context_origin": "profile",
+          "output_origin": "inherited",
           "cost": {
             "input": 1.4,
             "output": 4.4,

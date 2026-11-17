@@ -31,6 +31,78 @@ const ALL_EFFORTS: [ReasoningEffort; 7] = [
 ];
 
 #[test]
+fn input_limit_is_not_reduced_by_output_a_second_time() {
+    let mut model = ModelMetadata::sparse(
+        BackendKind::OpenAiResponses,
+        ApiKind::OpenAiResponses,
+        "example",
+        ModelSource::Fallback,
+    );
+    model.context_window = 400_000;
+    model.context_origin = LimitOrigin::Inherited;
+    model.max_input_tokens = Some(272_000);
+    model.input_origin = LimitOrigin::Inherited;
+    model.max_tokens = 128_000;
+    assert_eq!(model.resolved_limits().effective_input_tokens, 272_000);
+    assert_eq!(
+        crate::runtime::effective_orchestrator_compaction_threshold(
+            None,
+            model.resolved_limits().effective_input_tokens
+        )
+        .unwrap(),
+        Some(190_400)
+    );
+    model.max_input_tokens = None;
+    assert_eq!(model.resolved_limits().effective_input_tokens, 272_000);
+    assert_eq!(model.resolved_limits().input_origin, LimitOrigin::Estimated);
+}
+
+#[test]
+fn anthropic_and_arcee_keep_existing_input_planning_without_separate_caps() {
+    for provider in [
+        BackendKind::AnthropicMessages,
+        BackendKind::ArceeApi,
+        BackendKind::ArceeAuth,
+    ] {
+        let mut model = ModelMetadata::sparse(
+            provider,
+            api_kind_for(provider),
+            "example",
+            ModelSource::Fallback,
+        );
+        model.context_window = 200_000;
+        model.max_tokens = 32_000;
+        assert_eq!(
+            model.resolved_limits().effective_input_tokens,
+            200_000,
+            "{provider}"
+        );
+    }
+}
+
+#[test]
+fn discovered_codex_model_has_shared_image_capability_with_estimated_offline_limit() {
+    let index: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/codex-index-2026-11-17.json")).unwrap();
+    let observed = index["models"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|model| model["slug"] == "gpt-6.1-sol")
+        .unwrap();
+    assert!(observed["input_modalities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|modality| modality == "image"));
+
+    let catalog = ModelCatalog::load_from_home(None).0;
+    let resolved = catalog.resolve(BackendKind::ChatGptCodexResponses, "gpt-6.1-sol");
+    assert!(resolved.image_input);
+    assert_eq!(resolved.context_origin, LimitOrigin::Estimated);
+}
+
+#[test]
 fn every_provider_ships_a_default_entry_with_its_wire_api() {
     let cases = [
         (BackendKind::DeepSeekChat, ApiKind::OpenAiCompletions),
@@ -722,10 +794,10 @@ fn generated_entries_satisfy_catalog_invariants() {
             }
         }
     }
-    // Snapshot pin: 108 agent-compatible generated projections plus 15
-    // hand-seeded-only entries. Drift fails loudly here at regen/seed-edit
+    // Snapshot pin: 143 generated projections plus 10 Arcee seed entries.
+    // Drift fails loudly here at regen/seed-edit
     // time, forcing a deliberate review.
-    assert_eq!(entry_count, 123, "catalog model count drifted");
+    assert_eq!(entry_count, 153, "catalog model count drifted");
 }
 
 /// The S4 guard: every generated catalog entry — not just the S0 spot-check
@@ -1116,7 +1188,12 @@ fn api_listing_serializes_the_designed_field_names() {
     assert!(anthropic["managed_base_url"].is_null());
     assert_eq!(
         keys(&anthropic["default_limits"]),
-        ["context_window", "max_tokens", "supported_efforts"]
+        [
+            "context_window",
+            "limits",
+            "max_tokens",
+            "supported_efforts"
+        ]
     );
 
     let opus = anthropic["models"]
@@ -1132,6 +1209,7 @@ fn api_listing_serializes_the_designed_field_names() {
             "cost",
             "display_name",
             "id",
+            "limits",
             "max_tokens",
             "reasoning",
             "source",
@@ -1231,7 +1309,7 @@ fn api_listing_lists_only_real_entries_with_defaults_in_default_limits() {
         total += provider.models.len();
     }
     // Same snapshot pin as `generated_entries_satisfy_catalog_invariants`.
-    assert_eq!(total, 123, "catalog model count drifted");
+    assert_eq!(total, 153, "catalog model count drifted");
 
     // The hand-seeded providers serve their maintained entries (the picker's
     // model lists) while their `_default` limits stay conservative fallbacks
@@ -1272,7 +1350,7 @@ fn api_listing_lists_only_real_entries_with_defaults_in_default_limits() {
         .iter()
         .find(|provider| provider.id == BackendKind::ChatGptCodexResponses)
         .unwrap();
-    assert_eq!(codex.models.len(), 5);
+    assert_eq!(codex.models.len(), 31);
     assert!(codex.models.iter().any(|model| model.id == "gpt-5.6-sol"));
 }
 

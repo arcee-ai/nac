@@ -57,6 +57,7 @@ struct UserOverrideEntry {
 struct UserOverrideSet {
     display_name: Option<String>,
     context_window: Option<u64>,
+    max_input_tokens: Option<u64>,
     max_tokens: Option<u64>,
     /// Explicit modern Chat Completions generation cap. This is request
     /// policy, separate from the `max_tokens` catalog metadata above.
@@ -152,9 +153,15 @@ fn apply_one(catalog: &mut ModelCatalog, value: serde_json::Value) -> Result<(),
     }
     if let Some(context_window) = set.context_window {
         metadata.context_window = context_window;
+        metadata.context_origin = super::LimitOrigin::Customized;
     }
     if let Some(max_tokens) = set.max_tokens {
         metadata.max_tokens = max_tokens;
+        metadata.output_origin = super::LimitOrigin::Customized;
+    }
+    if let Some(max_input_tokens) = set.max_input_tokens {
+        metadata.max_input_tokens = Some(max_input_tokens);
+        metadata.input_origin = super::LimitOrigin::Customized;
     }
     if provider != BackendKind::OpenAiChatCompletions
         && (set.max_completion_tokens.is_some() || set.legacy_max_tokens.is_some())
@@ -242,6 +249,15 @@ fn validate(metadata: &ModelMetadata) -> Result<(), String> {
     }
     if metadata.max_tokens == 0 {
         return Err("max_tokens must be greater than zero".to_string());
+    }
+    if metadata.max_input_tokens.is_some_and(|input| {
+        input == 0
+            || (metadata.context_origin != super::LimitOrigin::Estimated
+                && input > metadata.context_window)
+    }) {
+        return Err(
+            "max_input_tokens must be positive and no greater than context_window".to_string(),
+        );
     }
     if metadata.max_tokens > metadata.context_window {
         return Err(format!(

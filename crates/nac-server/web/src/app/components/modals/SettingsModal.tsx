@@ -363,11 +363,11 @@ function SettingsForm({
 
   const compactionPlaceholder = useMemo(() => {
     const resolved = resolveCatalogModel(catalog.data, backend, model);
-    const contextWindow = resolved.contextWindow;
-    return contextWindow ? String(Math.round(contextWindow * 0.7)) : "auto";
+    const threshold = resolved.automaticThreshold;
+    return threshold != null ? String(threshold) : "auto";
   }, [catalog.data, backend, model]);
 
-  // Auto-suggest 70% of the selected model's context window as the compaction
+  // Auto-suggest 70% of the selected model's effective input budget as the compaction
   // threshold. A manually entered value is preserved across model changes —
   // the suggestion only fills the field when it is empty or was itself last
   // auto-suggested.
@@ -749,7 +749,7 @@ function SettingsForm({
                 <ConfigRow
                   presentation="form"
                   label="Context Limit"
-                  hint="Context size that triggers compaction. Defaults to 70% of the model's context length."
+                  hint="Context size that triggers compaction. Defaults to 70% of the model's effective input budget, subject to provider limits."
                   control={
                     <div className="flex min-w-0 items-center gap-2">
                       <Input

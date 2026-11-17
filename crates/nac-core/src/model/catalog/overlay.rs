@@ -55,12 +55,13 @@ pub(super) const OVERLAY_SCHEMA_VERSION: u32 = 1;
 /// models.dev provider id → nac provider; mirrors nac-catalog-gen's
 /// `PROVIDER_MAP` (arcee and chatgpt-codex-responses are not models.dev
 /// providers; their catalog data stays hand-written in the seed).
-const MODELS_DEV_PROVIDERS: [(&str, BackendKind); 6] = [
+const MODELS_DEV_PROVIDERS: [(&str, BackendKind); 7] = [
     ("deepseek", BackendKind::DeepSeekChat),
     ("fireworks-ai", BackendKind::FireworksChat),
     ("togetherai", BackendKind::TogetherChat),
     ("openai", BackendKind::OpenAiResponses),
     ("openai", BackendKind::OpenAiChatCompletions),
+    ("openai", BackendKind::ChatGptCodexResponses),
     ("anthropic", BackendKind::AnthropicMessages),
 ];
 
@@ -407,19 +408,24 @@ pub fn spawn_overlay_refresh() {
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| DEFAULT_MODELS_DEV_URL.to_string());
     handle.spawn(async move {
-        match refresh_overlay_once(&url, REFRESH_TIMEOUT).await {
-            RefreshOutcome::Updated { models, warnings } => {
-                eprintln!("nac: model catalog overlay updated from models.dev ({models} models)");
-                for warning in warnings {
-                    eprintln!("nac: model catalog: {warning}");
+        loop {
+            match refresh_overlay_once(&url, REFRESH_TIMEOUT).await {
+                RefreshOutcome::Updated { models, warnings } => {
+                    eprintln!(
+                        "nac: model catalog overlay updated from models.dev ({models} models)"
+                    );
+                    for warning in warnings {
+                        eprintln!("nac: model catalog: {warning}");
+                    }
                 }
+                RefreshOutcome::Failed { error } => {
+                    eprintln!("nac: model catalog overlay refresh failed: {error}");
+                }
+                RefreshOutcome::SkippedNoHome
+                | RefreshOutcome::SkippedCadence
+                | RefreshOutcome::NotModified => {}
             }
-            RefreshOutcome::Failed { error } => {
-                eprintln!("nac: model catalog overlay refresh failed: {error}");
-            }
-            RefreshOutcome::SkippedNoHome
-            | RefreshOutcome::SkippedCadence
-            | RefreshOutcome::NotModified => {}
+            tokio::time::sleep(Duration::from_secs(60 * 60)).await;
         }
     });
 }
@@ -460,6 +466,7 @@ struct ModelsDevModalities {
 #[derive(Debug, Deserialize)]
 struct ModelsDevLimit {
     context: Option<u64>,
+    input: Option<u64>,
     output: Option<u64>,
 }
 
@@ -524,14 +531,23 @@ pub(super) fn map_models_dev(
             ));
             continue;
         };
-        let credential_env_var = map_credential_env_var(models_dev_id, raw_provider, &mut warnings);
-        let default_base_url = map_default_base_url(
-            raw_provider,
-            baseline,
-            provider,
-            models_dev_id,
-            &mut warnings,
-        );
+        let is_codex = provider == BackendKind::ChatGptCodexResponses;
+        let credential_env_var = if is_codex {
+            None
+        } else {
+            map_credential_env_var(models_dev_id, raw_provider, &mut warnings)
+        };
+        let default_base_url = if is_codex {
+            None
+        } else {
+            map_default_base_url(
+                raw_provider,
+                baseline,
+                provider,
+                models_dev_id,
+                &mut warnings,
+            )
+        };
         let raw_models: BTreeMap<String, serde_json::Value> = match raw_provider
             .get("models")
             .cloned()
@@ -763,19 +779,70 @@ fn map_model(
         .modalities
         .as_ref()
         .and_then(|modalities| modalities.input.as_ref())
-        .is_some_and(|inputs| inputs.iter().any(|input| input == "image"));
+        .filter(|inputs| !inputs.is_empty())
+        .map(|inputs| inputs.iter().any(|input| input == "image"));
     if let Some(mut entry) = seed_model(baseline, provider, id) {
-        entry.image_input = image_input;
+        if let Some(image_input) = image_input {
+            entry.image_input = image_input;
+        }
         return Ok(entry);
     }
-    let (context_window, max_tokens) = map_limits(model.limit.as_ref());
+    let is_codex = provider == BackendKind::ChatGptCodexResponses;
+    let (context_window, max_tokens) = if is_codex {
+        (super::FALLBACK_CONTEXT_WINDOW, super::FALLBACK_MAX_TOKENS)
+    } else {
+        map_limits(model.limit.as_ref())
+    };
     Ok(GeneratedModel {
         display_name: model.name.clone(),
         context_window,
         max_tokens,
+        max_input_tokens: (!is_codex)
+            .then(|| {
+                model
+                    .limit
+                    .as_ref()
+                    .and_then(|limit| limit.input)
+                    .filter(|&v| {
+                        v > 0
+                            && model
+                                .limit
+                                .as_ref()
+                                .and_then(|limit| limit.context)
+                                .filter(|&context| context > 0)
+                                .is_none_or(|context| v <= context)
+                    })
+            })
+            .flatten(),
+        context_origin: Some(
+            if !is_codex
+                && model
+                    .limit
+                    .as_ref()
+                    .and_then(|limit| limit.context)
+                    .is_some_and(|v| v > 0)
+            {
+                super::LimitOrigin::Inherited
+            } else {
+                super::LimitOrigin::Estimated
+            },
+        ),
+        output_origin: Some(
+            if !is_codex
+                && model
+                    .limit
+                    .as_ref()
+                    .and_then(|limit| limit.output)
+                    .is_some_and(|v| v > 0)
+            {
+                super::LimitOrigin::Inherited
+            } else {
+                super::LimitOrigin::Estimated
+            },
+        ),
         cost: map_cost(model.cost.as_ref())?,
         reasoning: model.reasoning.unwrap_or(false),
-        image_input,
+        image_input: image_input.unwrap_or(false),
         thinking_level_map: seed_thinking_map(baseline, provider, id),
         adaptive_thinking: false,
         enabled_thinking: false,
@@ -789,6 +856,21 @@ fn map_model(
 /// max_tokens, cost, reasoning, display_name, thinking_level_map). Returns
 /// `None` for unknown models so the caller maps them from models.dev data.
 fn seed_model(baseline: &ModelCatalog, provider: BackendKind, id: &str) -> Option<GeneratedModel> {
+    if provider == BackendKind::ChatGptCodexResponses {
+        // Compare and refresh the generated projection itself. The separate
+        // seed profile is composed at load time and must not leak its limits
+        // into the models.dev mapping.
+        static GENERATED: std::sync::OnceLock<Option<super::data::GeneratedCatalog>> =
+            std::sync::OnceLock::new();
+        let catalog = GENERATED
+            .get_or_init(|| serde_json::from_str(super::data::GENERATED_CATALOG_JSON).ok())
+            .as_ref()?;
+        let models = &catalog.providers.get(&provider)?.models;
+        return models
+            .get(id)
+            .or_else(|| super::dated_snapshot_family(id).and_then(|family| models.get(family)))
+            .cloned();
+    }
     let catalog = baseline.providers.get(&provider)?;
     let metadata = catalog.resolve_entry(id);
     if metadata.source != ModelSource::Baseline {
@@ -798,6 +880,9 @@ fn seed_model(baseline: &ModelCatalog, provider: BackendKind, id: &str) -> Optio
         display_name: metadata.display_name.clone(),
         context_window: metadata.context_window,
         max_tokens: metadata.max_tokens,
+        max_input_tokens: metadata.max_input_tokens,
+        context_origin: Some(metadata.context_origin),
+        output_origin: Some(metadata.output_origin),
         cost: metadata.cost,
         reasoning: metadata.reasoning,
         image_input: metadata.image_input,

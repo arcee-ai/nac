@@ -166,9 +166,12 @@ async fn prepare_run_config_inner(
         .clone()
         .unwrap_or_else(|| default_config_cwd(&options.workspace_cwd, ssh_host.as_deref()));
     let settings = effective_model_settings(&options.model, config)?;
+    let limits = settings.resolved.resolved_limits();
     let orchestrator_compaction_threshold = effective_orchestrator_compaction_threshold(
-        options.orchestrator_compaction_threshold,
-        settings.resolved.context_window,
+        options
+            .orchestrator_compaction_threshold
+            .or(limits.automatic_compaction_threshold),
+        limits.effective_input_tokens,
     )?;
     let client = ModelClient::from_effective_settings(settings.clone())?.with_cache_ttl(Some("1h"));
     let light_model = options.model.light_model.clone();

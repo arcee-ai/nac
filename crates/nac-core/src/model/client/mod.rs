@@ -360,6 +360,22 @@ impl ModelClient {
                     .await
             }
             catalog::ApiKind::ChatGptCodexResponses => {
+                #[cfg(test)]
+                if let Some(url) = self.base_url.strip_prefix("test-codex:") {
+                    let response = chatgpt_codex::send_test_responses(
+                        &self.client,
+                        url,
+                        &self.model,
+                        self.reasoning_effort,
+                        messages,
+                        tools,
+                        &self.resolved_model.thinking_level_map,
+                        self.prompt_cache_key.as_deref(),
+                        on_delta,
+                    )
+                    .await?;
+                    return Ok(self.with_usage_cost(response));
+                }
                 let response = chatgpt_codex::send_responses(
                     &self.client,
                     &self.base_url,
@@ -368,6 +384,7 @@ impl ModelClient {
                     messages,
                     tools,
                     &self.resolved_model.thinking_level_map,
+                    self.resolved_model.codex_account_fingerprint.as_deref(),
                     self.prompt_cache_key.as_deref(),
                     on_delta,
                 )
@@ -393,6 +410,13 @@ impl ModelClient {
 
     pub fn backend(&self) -> BackendKind {
         self.backend
+    }
+
+    /// Refresh only between admitted operations, never between turns of a run.
+    pub(crate) fn refresh_codex_metadata_at_boundary(&mut self) {
+        if self.backend == BackendKind::ChatGptCodexResponses {
+            self.resolved_model = catalog::resolve(self.backend, &self.model);
+        }
     }
     pub(crate) fn supports_image_tool_results(&self) -> bool {
         self.resolved_model.image_input
@@ -1111,6 +1135,15 @@ fn arcee_api_user_agent(product_version: &str) -> String {
 
 #[cfg(test)]
 impl ModelClient {
+    pub(crate) fn new_for_codex_test_server(base_url: String, model: &str) -> Self {
+        let mut client = Self::new_for_test_settings(
+            BackendKind::ChatGptCodexResponses,
+            model,
+            ReasoningEffort::Medium,
+        );
+        client.base_url = format!("test-codex:{base_url}");
+        client
+    }
     pub(crate) fn new_for_test_server(base_url: String) -> Self {
         let mut client = Self::new_for_test();
         client.base_url = base_url;

@@ -9,7 +9,7 @@ Model selection is config-first, not environment-driven:
 
 Persisted session settings remain editable. In `nac-web`, open a session's **Settings** dialog; the equivalent API is `GET /sessions/{session_id}/config` and `PATCH /sessions/{session_id}/config`. PATCH validates the complete prospective model settings and current credentials before committing and leaves the previous snapshot unchanged on failure. Omitted fields are preserved; `null` clears `reasoning_effort` or `api_key_env`, `null` or `{}` clears `extra_headers`, `null` or `false` disables `allow_insecure_http`, and `null` or `0` disables `orchestrator_compaction_threshold`. Required `backend`, `model`, and `base_url` cannot be cleared. Settings can be opened and repaired even when an invalid or incomplete persisted snapshot cannot resume. A session with an active run must be cancelled before editing its settings; an active manual compaction must be allowed to finish.
 
-The new-session form and `POST /sessions` share one tri-state rule: omitting a model field inherits its new-session config value, and `null` clears it. So `api_key_env: null` removes a configured selector and `reasoning_effort: null` omits the effort, while `"none"` is a concrete effort value rather than a way to clear it; `extra_headers: {}` replaces configured headers with an empty map. `orchestrator_compaction_threshold` defaults to 70% of the resolved model's context window when omitted and is disabled by `null` or `0`. Resume always uses the value persisted with the session.
+The new-session form and `POST /sessions` share one tri-state rule: omitting a model field inherits its new-session config value, and `null` clears it. So `api_key_env: null` removes a configured selector and `reasoning_effort: null` omits the effort, while `"none"` is a concrete effort value rather than a way to clear it; `extra_headers: {}` replaces configured headers with an empty map. `orchestrator_compaction_threshold` defaults to 70% of the resolved model's effective input budget when omitted, capped by any lower provider auto-compaction limit and is disabled by `null` or `0`. Resume always uses the value persisted with the session.
 
 ## Project defaults
 
@@ -37,7 +37,7 @@ reference.
 
 The current API spelling `orchestrator_compaction_threshold` also controls
 checkpoint creation for direct sessions. It is an optional absolute token count;
-omission defaults to 70% of the resolved context window, while `null` or `0`
+omission defaults to 70% of the resolved effective input budget, capped by any lower provider auto-compaction limit, while `null` or `0`
 disables new checkpoints. GET returns the persisted value; PATCH omission
 preserves it and `null` or `0` disables it. Existing valid checkpoints remain
 active on resume. The neutral-contract retirement slice (ALL-615) owns renaming

@@ -30,6 +30,7 @@ export function modelsForProvider(
       display_name: entry.display_name,
       context_window: provider.default_limits.context_window,
       max_tokens: provider.default_limits.max_tokens,
+      limits: provider.default_limits.limits,
       cost: EMPTY_COST,
       reasoning: false,
       supported_efforts: provider.default_limits.supported_efforts,

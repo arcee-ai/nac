@@ -611,6 +611,22 @@ impl Agent {
         self.tool_defs.extend(web_definitions);
     }
 
+    fn refresh_model_at_operation_boundary(&mut self) {
+        let previous = self.client.supports_image_tool_results();
+        self.client.refresh_codex_metadata_at_boundary();
+        let current = self.client.supports_image_tool_results();
+        if previous != current {
+            for definitions in [&mut self.base_tool_defs, &mut self.fallback_tool_defs] {
+                if let Some(read) = definitions
+                    .iter_mut()
+                    .find(|tool| tool.function.name == "read")
+                {
+                    *read = tools::read::definition(current);
+                }
+            }
+        }
+    }
+
     #[cfg(test)]
     fn model_request_capabilities_for_test(
         &mut self,
@@ -757,6 +773,7 @@ impl Agent {
         prompt: &str,
         session_run: Option<SessionRunPrompt<'_>>,
     ) -> Result<String> {
+        self.refresh_model_at_operation_boundary();
         if session_run.is_none() {
             self.tool_runtime.heartbeat_human_request = None;
             self.bind_heartbeat_execution(None);

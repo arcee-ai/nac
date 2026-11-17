@@ -13,7 +13,7 @@ import {
 import { ModelPicker } from "@/app/components/inspector/ModelPicker";
 import { PermissionControls } from "@/app/components/inspector/PermissionControls";
 import { SshBadge } from "@/app/components/SshBadge";
-import { resolveCatalogModel } from "@/app/lib/catalog";
+import { contextShare, resolveCatalogModel } from "@/app/lib/catalog";
 import { cn } from "@/app/lib/cn";
 import { formatTokensCompact } from "@/app/lib/format";
 import { useModelCatalog } from "@/app/services/queries";
@@ -83,11 +83,12 @@ export function ComposerFooter({
   submit,
 }: ComposerFooterProps) {
   const catalog = useModelCatalog();
-  const contextWindow = resolveCatalogModel(
+  const resolved = resolveCatalogModel(
     catalog.data,
     metadata?.backend,
     metadata?.model ?? modelLabel,
-  ).contextWindow;
+  );
+  const contextWindow = resolved.contextWindow;
   const share =
     contextWindow && contextTokens != null ? Math.min(contextTokens / contextWindow, 1) : null;
   const nearlyFull = share !== null && share >= COMPACT_FROM;
@@ -172,6 +173,7 @@ export function ComposerFooter({
           share={share}
           tokens={contextTokens}
           contextWindow={contextWindow}
+          budgetDescription={contextShare(contextTokens, resolved)}
           compact={compact}
         >
           <SubmitButton submit={submit} compact={compact} />
@@ -219,12 +221,14 @@ function ContextRing({
   share,
   tokens,
   contextWindow,
+  budgetDescription,
   compact,
   children,
 }: {
   share: number | null;
   tokens: number | null;
   contextWindow: number | null;
+  budgetDescription: string | null;
   compact: boolean;
   children: ReactNode;
 }) {
@@ -238,7 +242,7 @@ function ContextRing({
   return (
     <Tooltip
       title={`Context ${percent}% full`}
-      description={`${formatTokensCompact(tokens)} of ${formatTokensCompact(contextWindow)} tokens.${
+      description={`${formatTokensCompact(tokens)} of ${formatTokensCompact(contextWindow)} input tokens. ${budgetDescription ?? ""}${
         amber ? " Compact to summarize earlier turns and free room." : ""
       }`}
       position={TooltipPosition.TopLeft}

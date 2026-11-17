@@ -78,7 +78,8 @@ pub use backend::{validate_backend_api_key_env, validate_model_reasoning_effort}
 pub(crate) use catalog::resolve as resolve_model_metadata;
 pub use catalog::{
     api_listing, api_listing_for_invocation, provider_for_model, spawn_anthropic_model_refresh,
-    spawn_arcee_model_refresh, spawn_overlay_refresh, AuthStatus, ModelListing, ProviderConnection,
+    spawn_arcee_model_refresh, spawn_codex_model_refresh, spawn_overlay_refresh, AuthStatus,
+    ModelListing, ProviderConnection,
 };
 pub(crate) use catalog::{
     Compat, CompletionsThinkingFormat, CompletionsTokenLimit, ModelMetadata, ThinkingLevelMap,

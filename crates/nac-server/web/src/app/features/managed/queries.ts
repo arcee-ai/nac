@@ -1,4 +1,6 @@
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
+import { queryKeys } from "@/app/services/queries/keys";
+import { useModelCatalog } from "@/app/services/queries/configuration";
 // Managed-host server state. These keys remain byte-for-byte compatible with
 // the historical shared query module so polling, invalidation and cache resume
 // behavior survive the feature extraction.
@@ -157,6 +159,10 @@ export function useProviderReachAfterRefusal(
   credential: string | null,
 ) {
   const { api } = useNativeRuntime();
+  const client = useQueryClient();
+  const catalog = useModelCatalog(
+    backend === "chatgpt-codex-responses" && refusal !== null && credential !== null,
+  );
 
   return useQuery<ProviderModelList>({
     queryKey: [
@@ -164,9 +170,19 @@ export function useProviderReachAfterRefusal(
       "after-refusal",
       refusal,
       credential,
+      ...(backend === "chatgpt-codex-responses" ? [catalog.data?.catalog_version] : []),
     ],
-    queryFn: ({ signal }) => api.listProviderModels({ backend: backend! }, signal),
-    enabled: backend !== null && refusal !== null && credential !== null,
+    queryFn: async ({ signal }) => {
+      const result = await api.listProviderModels({ backend: backend! }, signal);
+      if (backend === "chatgpt-codex-responses")
+        await client.invalidateQueries({ queryKey: queryKeys.modelCatalog });
+      return result;
+    },
+    enabled:
+      backend !== null &&
+      refusal !== null &&
+      credential !== null &&
+      (backend !== "chatgpt-codex-responses" || catalog.data !== undefined),
     retry: false,
     staleTime: Infinity,
   });
@@ -178,15 +194,31 @@ export function useManagedProviderModels(
   baseUrl: string | null = null,
 ) {
   const { api } = useNativeRuntime();
+  const client = useQueryClient();
+  const catalog = useModelCatalog(enabled && backend === "chatgpt-codex-responses");
 
   return useQuery<ProviderModelList>({
-    queryKey: managedQueryKeys.providerModels(backend ?? "", baseUrl),
-    queryFn: ({ signal }) =>
-      api.listProviderModels(
+    queryKey:
+      backend === "chatgpt-codex-responses"
+        ? [
+            ...managedQueryKeys.providerModels(backend, baseUrl),
+            "catalog",
+            catalog.data?.catalog_version,
+          ]
+        : managedQueryKeys.providerModels(backend ?? "", baseUrl),
+    queryFn: async ({ signal }) => {
+      const result = await api.listProviderModels(
         baseUrl ? { backend: backend!, base_url: baseUrl } : { backend: backend! },
         signal,
-      ),
-    enabled: enabled && backend !== null,
+      );
+      if (backend === "chatgpt-codex-responses")
+        await client.invalidateQueries({ queryKey: queryKeys.modelCatalog });
+      return result;
+    },
+    enabled:
+      enabled &&
+      backend !== null &&
+      (backend !== "chatgpt-codex-responses" || catalog.data !== undefined),
     retry: false,
     staleTime: 5 * 60_000,
   });
@@ -194,13 +226,26 @@ export function useManagedProviderModels(
 
 export function useReadyProviderModels(catalog: ModelCatalog | undefined) {
   const { api } = useNativeRuntime();
+  const client = useQueryClient();
 
   const status = useManagedHostStatus().data ?? null;
   const ready = useMemo(() => readyProviderModelRequests(catalog, status), [catalog, status]);
   const results = useQueries({
     queries: ready.map((request) => ({
-      queryKey: managedQueryKeys.providerModels(request.backend, request.base_url),
-      queryFn: ({ signal }: { signal: AbortSignal }) => api.listProviderModels(request, signal),
+      queryKey:
+        request.backend === "chatgpt-codex-responses"
+          ? [
+              ...managedQueryKeys.providerModels(request.backend, request.base_url),
+              "catalog",
+              catalog?.catalog_version,
+            ]
+          : managedQueryKeys.providerModels(request.backend, request.base_url),
+      queryFn: async ({ signal }: { signal: AbortSignal }) => {
+        const result = await api.listProviderModels(request, signal);
+        if (request.backend === "chatgpt-codex-responses")
+          await client.invalidateQueries({ queryKey: queryKeys.modelCatalog });
+        return result;
+      },
       retry: false,
       staleTime: 5 * 60_000,
     })),

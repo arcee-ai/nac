@@ -1,9 +1,9 @@
 import { A as e, C as t, D as n, F as r, I as i, L as a, M as o, N as s, O as c, P as l, R as u, S as d, T as f, _ as p, a as m, b as h, c as g, d as _, f as v, g as y, h as b, i as x, j as S, k as C, l as w, m as T, n as E, o as D, p as O, r as k, s as A, t as j, u as M, v as ee, w as te, x as ne, y as N } from "./chunks/RuntimeContext-DzO0SGcs.js";
 import { C as re, D as ie, E as ae, O as oe, S as se, b as ce, d as le, f as ue, g as de, h as fe, i as pe, l as me, m as he, n as ge, p as _e, r as ve, t as ye, u as be, v as xe, w as Se, x as Ce, y as P } from "./chunks/PresentationBoundary-BAUfAcJZ.js";
 import { n as we, t as Te } from "./chunks/visibility-Cy5NeKga.js";
-import { $ as Ee, $n as De, $t as Oe, A as ke, An as Ae, At as je, B as Me, Bn as Ne, Bt as Pe, C as Fe, Cn as Ie, Ct as Le, D as Re, Dn as ze, Dt as Be, E as Ve, En as He, Et as Ue, F as We, Fn as Ge, Ft as Ke, G as qe, Gn as Je, Gt as Ye, H as Xe, Hn as Ze, Ht as Qe, I as $e, In as et, It as tt, J as nt, Jn as rt, Jt as it, K as at, Kn as ot, Kt as st, L as ct, Ln as lt, Lt as ut, M as dt, Mn as ft, Mt as pt, N as mt, Nn as ht, Nt as gt, O as _t, On as vt, Ot as yt, P as bt, Pn as xt, Pt as St, Q as Ct, Qn as wt, Qt as Tt, R as Et, Rn as Dt, Rt as Ot, S as kt, Sn as At, St as jt, T as Mt, Tn as Nt, Tt as Pt, U as Ft, Un as It, Ut as Lt, V as Rt, Vn as zt, Vt as Bt, W as Vt, Wn as Ht, Wt as Ut, X as Wt, Xn as Gt, Xt as Kt, Y as qt, Yn as Jt, Yt, Z as Xt, Zn as Zt, Zt as Qt, _ as $t, _n as en, _r as tn, _t as nn, a as rn, an, ar as on, at as sn, b as cn, bn as ln, br as un, bt as dn, c as fn, cn as pn, cr as mn, ct as hn, d as gn, dn as _n, dr as vn, dt as yn, en as bn, er as xn, et as Sn, f as Cn, fn as wn, fr as Tn, ft as En, g as Dn, gn as On, gr as kn, gt as An, h as jn, hn as Mn, hr as Nn, ht as Pn, i as Fn, in as In, ir as Ln, it as Rn, j as zn, jn as Bn, jt as Vn, k as Hn, kn as Un, kt as Wn, l as Gn, ln as Kn, lr as qn, lt as Jn, m as Yn, mn as Xn, mr as Zn, mt as Qn, nn as $n, nr as er, nt as tr, o as nr, on as rr, or as ir, ot as ar, p as or, pn as sr, pr as cr, pt as lr, q as ur, qn as dr, qt as fr, r as pr, rn as mr, rr as hr, rt as gr, s as _r, sn as vr, sr as yr, st as br, t as xr, tn as Sr, tr as Cr, tt as wr, u as Tr, un as Er, ur as Dr, ut as Or, v as kr, vn as Ar, vr as jr, vt as Mr, w as Nr, wn as Pr, wt as Fr, x as Ir, xn as Lr, xt as Rr, y as zr, yn as Br, yr as F, yt as Vr, z as Hr, zn as Ur, zt as Wr } from "./chunks/workspaceLink-BhskQIQp.js";
+import { $ as Ee, $n as De, $t as Oe, A as ke, An as Ae, At as je, B as Me, Bn as Ne, Bt as Pe, C as Fe, Cn as Ie, Ct as Le, D as Re, Dn as ze, Dt as Be, E as Ve, En as He, Et as Ue, F as We, Fn as Ge, Ft as Ke, G as qe, Gn as Je, Gt as Ye, H as Xe, Hn as Ze, Ht as Qe, I as $e, In as et, It as tt, J as nt, Jn as rt, Jt as it, K as at, Kn as ot, Kt as st, L as ct, Ln as lt, Lt as ut, M as dt, Mn as ft, Mt as pt, N as mt, Nn as ht, Nt as gt, O as _t, On as vt, Ot as yt, P as bt, Pn as xt, Pt as St, Q as Ct, Qn as wt, Qt as Tt, R as Et, Rn as Dt, Rt as Ot, S as kt, Sn as At, St as jt, T as Mt, Tn as Nt, Tt as Pt, U as Ft, Un as It, Ut as Lt, V as Rt, Vn as zt, Vt as Bt, W as Vt, Wn as Ht, Wt as Ut, X as Wt, Xn as Gt, Xt as Kt, Y as qt, Yn as Jt, Yt, Z as Xt, Zn as Zt, Zt as Qt, _ as $t, _n as en, _r as tn, _t as nn, a as rn, an, ar as on, at as sn, b as cn, bn as ln, br as un, bt as dn, c as fn, cn as pn, cr as mn, ct as hn, d as gn, dn as _n, dr as vn, dt as yn, en as bn, er as xn, et as Sn, f as Cn, fn as wn, fr as Tn, ft as En, g as Dn, gn as On, gr as kn, gt as An, h as jn, hn as Mn, hr as Nn, ht as Pn, i as Fn, in as In, ir as Ln, it as Rn, j as zn, jn as Bn, jt as Vn, k as Hn, kn as Un, kt as Wn, l as Gn, ln as Kn, lr as qn, lt as Jn, m as Yn, mn as Xn, mr as Zn, mt as Qn, nn as $n, nr as er, nt as tr, o as nr, on as rr, or as ir, ot as ar, p as or, pn as sr, pr as cr, pt as lr, q as ur, qn as dr, qt as fr, r as pr, rn as mr, rr as hr, rt as gr, s as _r, sn as vr, sr as yr, st as br, t as xr, tn as Sr, tr as Cr, tt as wr, u as Tr, un as Er, ur as Dr, ut as Or, v as kr, vn as Ar, vr as jr, vt as Mr, w as Nr, wn as Pr, wt as Fr, x as Ir, xn as Lr, xt as Rr, y as zr, yn as Br, yr as F, yt as Vr, z as Hr, zn as Ur, zt as Wr } from "./chunks/workspaceLink-ISI7z8AI.js";
 import { $ as Gr, A as Kr, B as qr, F as Jr, I as Yr, J as Xr, K as Zr, L as Qr, M as $r, N as ei, O as ti, P as ni, Q as ri, R as ii, S as ai, V as oi, X as si, Y as ci, Z as li, _ as I, a as ui, b as di, c as fi, d as pi, et as L, f as mi, g as R, h as z, j as hi, k as gi, l as _i, m as B, nt as V, o as vi, p as yi, q as H, tt as U, u as bi, x as xi, y as Si, z as Ci } from "./chunks/Toast-phk3tngI.js";
-import { A as wi, At as Ti, B as Ei, Bt as Di, C as Oi, Ct as ki, D as Ai, Dt as ji, E as Mi, Et as Ni, F as Pi, Ft as Fi, G as Ii, H as Li, Ht as Ri, I as zi, J as Bi, K as Vi, Kt as Hi, L as Ui, Mt as Wi, N as Gi, Ot as Ki, P as qi, Pt as Ji, Q as Yi, S as Xi, St as Zi, T as Qi, U as $i, V as ea, Vt as ta, W as na, X as ra, Xt as ia, Y as W, Z as aa, Zt as oa, _ as sa, _t as ca, a as la, an as ua, at as da, b as fa, bt as pa, c as ma, d as ha, dt as ga, en as _a, et as va, f as ya, ft as ba, h as xa, i as Sa, in as Ca, it as wa, kt as Ta, l as Ea, m as Da, mt as Oa, n as ka, nn as Aa, nt as ja, o as Ma, on as Na, p as Pa, pt as Fa, q as G, qt as Ia, r as La, rn as Ra, rt as za, s as Ba, sn as Va, st as Ha, t as Ua, tn as Wa, tt as Ga, u as Ka, ut as qa, v as Ja, vt as Ya, w as Xa, x as Za, xt as Qa, z as $a, zt as eo } from "./chunks/ChatSessionActions-CSASV1fk.js";
+import { A as wi, At as Ti, B as Ei, Bt as Di, C as Oi, Ct as ki, D as Ai, Dt as ji, E as Mi, Et as Ni, F as Pi, Ft as Fi, G as Ii, H as Li, Ht as Ri, I as zi, J as Bi, K as Vi, Kt as Hi, L as Ui, Mt as Wi, N as Gi, Ot as Ki, P as qi, Pt as Ji, Q as Yi, S as Xi, St as Zi, T as Qi, U as $i, V as ea, Vt as ta, W as na, X as ra, Xt as ia, Y as W, Z as aa, Zt as oa, _ as sa, _t as ca, a as la, an as ua, at as da, b as fa, bt as pa, c as ma, d as ha, dt as ga, en as _a, et as va, f as ya, ft as ba, h as xa, i as Sa, in as Ca, it as wa, kt as Ta, l as Ea, m as Da, mt as Oa, n as ka, nn as Aa, nt as ja, o as Ma, on as Na, p as Pa, pt as Fa, q as G, qt as Ia, r as La, rn as Ra, rt as za, s as Ba, sn as Va, st as Ha, t as Ua, tn as Wa, tt as Ga, u as Ka, ut as qa, v as Ja, vt as Ya, w as Xa, x as Za, xt as Qa, z as $a, zt as eo } from "./chunks/ChatSessionActions-C8iFrNtg.js";
 import { Activity as to, Fragment as no, Suspense as ro, createContext as io, forwardRef as ao, lazy as oo, memo as so, use as co, useCallback as K, useContext as lo, useEffect as q, useEffectEvent as uo, useId as fo, useLayoutEffect as po, useMemo as J, useRef as Y, useState as X, useSyncExternalStore as mo } from "react";
 import { QueryClientProvider as ho, QueryObserver as go, replaceEqualDeep as _o, useIsFetching as vo, useMutation as yo, useQueries as bo, useQuery as xo, useQueryClient as So } from "@tanstack/react-query";
 import { Fragment as Z, jsx as Q, jsxs as $ } from "react/jsx-runtime";
@@ -561,8 +561,10 @@ var Rs = {
 	provider: null,
 	model: null,
 	contextWindow: null,
+	automaticThreshold: null,
 	supportedEfforts: [],
-	estimated: !1
+	estimated: !1,
+	inputOrigin: null
 };
 function zs(e) {
 	let t = e.lastIndexOf("-");
@@ -583,25 +585,34 @@ function Hs(e, t, n) {
 	let r = (n ?? "").trim(), i = Bs(e, (t ?? "").trim());
 	if (!i || !r) return Rs;
 	let a = Vs(i, r);
-	return a ? {
-		provider: i,
-		model: a,
-		contextWindow: a.context_window || null,
-		supportedEfforts: a.supported_efforts,
-		estimated: !1
-	} : {
+	if (a) {
+		let e = a.limits?.effective_input_tokens ?? (a.context_window || null);
+		return {
+			provider: i,
+			model: a,
+			contextWindow: e,
+			automaticThreshold: a.limits?.automatic_compaction_threshold ?? (e ? Math.round(e * .7) : null),
+			supportedEfforts: a.supported_efforts,
+			estimated: a.limits?.input_origin === "estimated",
+			inputOrigin: a.limits?.input_origin ?? null
+		};
+	}
+	let o = i.default_limits.limits?.effective_input_tokens ?? (i.default_limits.context_window || null);
+	return {
 		provider: i,
 		model: null,
-		contextWindow: i.default_limits.context_window || null,
+		contextWindow: o,
+		automaticThreshold: i.default_limits.limits?.automatic_compaction_threshold ?? (o ? Math.round(o * .7) : null),
 		supportedEfforts: i.default_limits.supported_efforts,
-		estimated: !0
+		estimated: !0,
+		inputOrigin: "estimated"
 	};
 }
 function Us(e, t) {
 	let n = t.contextWindow;
 	if (!n || e == null) return null;
 	let r = `${Math.round(e / n * 100)}%`;
-	return t.estimated ? `${r} of ${t.provider?.id ?? "the provider"}'s default window. The catalog does not know this model, so the limit is an estimate.` : `${r} of the model's context window`;
+	return t.estimated ? t.model ? `${r} of the estimated input budget for this model.` : `${r} of ${t.provider?.id ?? "the provider"}'s default input budget. The catalog does not know this model, so the limit is an estimate.` : `${r} of the model's effective input budget${t.inputOrigin === "profile" ? " (provider profile)" : t.inputOrigin === "customized" ? " (customized)" : t.inputOrigin === "inherited" ? " (inherited metadata)" : ""}`;
 }
 function Ws(e, t) {
 	let n = t.trim();
@@ -632,6 +643,7 @@ function Ks(e, t) {
 			display_name: t.display_name,
 			context_window: e.default_limits.context_window,
 			max_tokens: e.default_limits.max_tokens,
+			limits: e.default_limits.limits,
 			cost: Gs,
 			reasoning: !1,
 			supported_efforts: e.default_limits.supported_efforts,
@@ -659,7 +671,8 @@ function Ys(e) {
 	return t && n ? `${t}/${n} per 1M` : "pricing unknown";
 }
 function Xs(e) {
-	return [e.context_window > 0 ? `${he(e.context_window)} ctx` : "", Ys(e.cost)].filter(Boolean).join(" · ");
+	let t = e.limits?.effective_input_tokens ?? e.context_window;
+	return [t > 0 ? `${he(t)} input${e.limits?.input_origin === "estimated" ? " (est.)" : ""}` : "", Ys(e.cost)].filter(Boolean).join(" · ");
 }
 var Zs = (e) => e.display_name || e.id;
 function Qs({ provider: e }) {
@@ -3598,8 +3611,8 @@ function Xl({ open: e, defaultCwd: t, onClose: n }) {
 	}, []), Pe = K((e) => {
 		ae(e), se((e) => e?.field === "config" ? null : e);
 	}, []), Fe = J(() => r(), [r]), Ie = N?.kind === "resolved" && N.light_model !== void 0 ? N.light_model : Fe, Le = JSON.stringify(Ie), Re = J(() => {
-		let e = Hs(he.data, ge?.backend, ge?.model).contextWindow;
-		return e ? String(Math.round(e * .7)) : "auto";
+		let e = Hs(he.data, ge?.backend, ge?.model).automaticThreshold;
+		return e == null ? "auto" : String(e);
 	}, [
 		he.data,
 		ge?.backend,
@@ -3877,7 +3890,7 @@ function Xl({ open: e, defaultCwd: t, onClose: n }) {
 							/* @__PURE__ */ Q(Ns, {
 								presentation: "form",
 								label: "Context Limit",
-								hint: "Context size that triggers compaction. Defaults to 70% of the model's context length.",
+								hint: "Context size that triggers compaction. Defaults to 70% of the model's effective input budget, subject to provider limits.",
 								control: /* @__PURE__ */ $("div", {
 									className: "flex items-center gap-2",
 									children: [/* @__PURE__ */ Q(G, {
@@ -5538,8 +5551,8 @@ function gd({ record: e, takenNames: t, onClose: n, onSaved: r, onDeleted: i, se
 	let fe = K((e) => {
 		re(e), (e.mode === "single" || e.light) && ae((e) => e?.field === "light" ? null : e);
 	}, []), pe = h ?? _d(p, t), me = y(p), he = en(), ge = Ac(Hs(he.data, p, w).supportedEfforts, E, dd), _e = J(() => {
-		let e = Hs(he.data, p, w).contextWindow;
-		return e ? String(Math.round(e * .7)) : "auto";
+		let e = Hs(he.data, p, w).automaticThreshold;
+		return e == null ? "auto" : String(e);
 	}, [
 		he.data,
 		p,
@@ -5882,7 +5895,7 @@ function gd({ record: e, takenNames: t, onClose: n, onSaved: r, onDeleted: i, se
 							invalid: !!ue("compaction"),
 							verticalOnMobile: !0,
 							labelClassName: "max-w-none",
-							hint: "Context size that triggers compaction. Defaults to 70% of the model's context length.",
+							hint: "Context size that triggers compaction. Defaults to 70% of the model's effective input budget, subject to provider limits.",
 							control: /* @__PURE__ */ $("div", {
 								"data-configuration-field": "compaction",
 								className: "w-full md:w-[280px]",
@@ -9742,8 +9755,8 @@ function vp({ open: e, id: t, initial: n, initialLight: r, initialVersion: i, su
 			}));
 		}
 	}, []), Ee = en(), De = Ac(Hs(Ee.data, te, M).supportedEfforts, N), Oe = J(() => {
-		let e = Hs(Ee.data, te, M).contextWindow;
-		return e ? String(Math.round(e * .7)) : "auto";
+		let e = Hs(Ee.data, te, M).automaticThreshold;
+		return e == null ? "auto" : String(e);
 	}, [
 		Ee.data,
 		te,
@@ -10020,7 +10033,7 @@ function vp({ open: e, id: t, initial: n, initialLight: r, initialVersion: i, su
 									/* @__PURE__ */ Q(Ns, {
 										presentation: "form",
 										label: "Context Limit",
-										hint: "Context size that triggers compaction. Defaults to 70% of the model's context length.",
+										hint: "Context size that triggers compaction. Defaults to 70% of the model's effective input budget, subject to provider limits.",
 										control: /* @__PURE__ */ $("div", {
 											className: "flex min-w-0 items-center gap-2",
 											children: [/* @__PURE__ */ Q(G, {
@@ -16120,7 +16133,7 @@ function i_({ sessionId: e, compact: t, direct: n, fieldEmpty: r, disabled: i, o
 // src/app/components/inspector/composer/ComposerFooter.tsx
 var a_ = .6, o_ = .8;
 function s_({ sessionId: e, behavior: t, compact: n, menu: r, metadata: i, modelLabel: a, modelDisabled: o, ssh: s, permissionSheet: c, onSettings: l, contextTokens: u, onCompact: d, compacting: f, submit: p }) {
-	let m = Hs(en().data, i?.backend, i?.model ?? a).contextWindow, h = m && u != null ? Math.min(u / m, 1) : null, g = h !== null && h >= o_;
+	let m = Hs(en().data, i?.backend, i?.model ?? a), h = m.contextWindow, g = h && u != null ? Math.min(u / h, 1) : null, _ = g !== null && g >= o_;
 	return /* @__PURE__ */ $("div", {
 		className: "flex min-h-10 flex-wrap items-center gap-x-1 gap-y-1",
 		children: [
@@ -16171,7 +16184,7 @@ function s_({ sessionId: e, behavior: t, compact: n, menu: r, metadata: i, model
 			/* @__PURE__ */ $("div", {
 				className: "ml-auto flex shrink-0 items-center gap-1.5",
 				children: [
-					g && d ? /* @__PURE__ */ Q(B, {
+					_ && d ? /* @__PURE__ */ Q(B, {
 						type: "button",
 						size: n ? R.Large : R.Small,
 						variant: I.Ghost,
@@ -16194,9 +16207,10 @@ function s_({ sessionId: e, behavior: t, compact: n, menu: r, metadata: i, model
 						children: "Queue"
 					}) : null,
 					/* @__PURE__ */ Q(l_, {
-						share: h,
+						share: g,
 						tokens: u,
-						contextWindow: m,
+						contextWindow: h,
+						budgetDescription: Us(u, m),
 						compact: n,
 						children: /* @__PURE__ */ Q(c_, {
 							submit: p,
@@ -16231,50 +16245,50 @@ function c_({ submit: e, compact: t }) {
 		})]
 	});
 }
-function l_({ share: e, tokens: t, contextWindow: n, compact: r, children: i }) {
-	if (e === null || e < a_) return /* @__PURE__ */ Q(Z, { children: i });
-	let a = r ? 52 : 40, o = a / 2 - 2, s = 2 * Math.PI * o, c = e >= o_, l = Math.round(e * 100);
+function l_({ share: e, tokens: t, contextWindow: n, budgetDescription: r, compact: i, children: a }) {
+	if (e === null || e < a_) return /* @__PURE__ */ Q(Z, { children: a });
+	let o = i ? 52 : 40, s = o / 2 - 2, c = 2 * Math.PI * s, l = e >= o_, u = Math.round(e * 100);
 	return /* @__PURE__ */ Q(Si, {
-		title: `Context ${l}% full`,
-		description: `${he(t)} of ${he(n)} tokens.${c ? " Compact to summarize earlier turns and free room." : ""}`,
+		title: `Context ${u}% full`,
+		description: `${he(t)} of ${he(n)} input tokens. ${r ?? ""}${l ? " Compact to summarize earlier turns and free room." : ""}`,
 		position: si.TopLeft,
 		children: /* @__PURE__ */ $("span", {
 			className: "relative inline-flex shrink-0 items-center justify-center",
 			children: [
 				/* @__PURE__ */ $("svg", {
 					"aria-hidden": !0,
-					width: a,
-					height: a,
-					viewBox: `0 0 ${a} ${a}`,
+					width: o,
+					height: o,
+					viewBox: `0 0 ${o} ${o}`,
 					className: "pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 -rotate-90",
 					children: [/* @__PURE__ */ Q("circle", {
-						cx: a / 2,
-						cy: a / 2,
-						r: o,
+						cx: o / 2,
+						cy: o / 2,
+						r: s,
 						fill: "none",
 						strokeWidth: 2,
 						className: "stroke-[var(--f-wash-3)]"
 					}), /* @__PURE__ */ Q("circle", {
-						cx: a / 2,
-						cy: a / 2,
-						r: o,
+						cx: o / 2,
+						cy: o / 2,
+						r: s,
 						fill: "none",
 						strokeWidth: 2,
 						strokeLinecap: "round",
-						strokeDasharray: s,
-						strokeDashoffset: s * (1 - e),
-						className: V("transition-[stroke-dashoffset] duration-200 ease-out motion-reduce:transition-none", c ? "stroke-[var(--f-amber)]" : "stroke-[var(--f-ink-4)]")
+						strokeDasharray: c,
+						strokeDashoffset: c * (1 - e),
+						className: V("transition-[stroke-dashoffset] duration-200 ease-out motion-reduce:transition-none", l ? "stroke-[var(--f-amber)]" : "stroke-[var(--f-ink-4)]")
 					})]
 				}),
 				/* @__PURE__ */ $("span", {
 					className: "sr-only",
 					children: [
 						"Context ",
-						l,
+						u,
 						"% full"
 					]
 				}),
-				i
+				a
 			]
 		})
 	});
@@ -29778,7 +29792,7 @@ function Dk({ children: e }) {
 	});
 }
 // src/App.tsx
-var Ok = oo(() => import("./chunks/DesktopSessionTargetOwner-C5Jbx8OU.js").then((e) => ({ default: e.DesktopSessionTargetOwner }))), kk = oo(() => import("./chunks/DesignPreviewPage-HFwFdSfS.js").catch(() => ({ default: () => /* @__PURE__ */ Q("p", {
+var Ok = oo(() => import("./chunks/DesktopSessionTargetOwner-C5Jbx8OU.js").then((e) => ({ default: e.DesktopSessionTargetOwner }))), kk = oo(() => import("./chunks/DesignPreviewPage-C_nMacfB.js").catch(() => ({ default: () => /* @__PURE__ */ Q("p", {
 	role: "alert",
 	children: "The design preview could not be loaded. Reload this page to try again."
 }) })));
