@@ -13846,7 +13846,7 @@ function Xm({ sessionId: e, snapshot: t, entry: r }) {
 	q(() => {
 		_(ye(t));
 	}, [_, t]);
-	let nt = oe(t, r, ue || de ? et : null, tt), rt = r?.summary.backend ?? t?.metadata.backend ?? null, at = mn(), ot = ye(t), st = nt.usage?.total_tokens || ot?.total_tokens || null, ct = p(), lt = m(), ut = s(r?.summary), dt = o(ut), ft = Pr(), mt = be(r?.summary) === "SSH", ht = ue && Te && !De, _t = ue && we === "orchestrator" && !De, vt = ht || _t, bt = E || ge.isPending || _e.isPending || ve.isPending || F.isPending || xe.isPending || Se.isPending || Ce.isPending || Pe.isPending || Fe.isPending || Ie.isPending, xt = bt || de || ue && !vt, St = !!C.trim() && !xt, Ct = (Ae.data ?? []).filter((e) => e.status === "pending"), wt = async (t, n, r) => {
+	let nt = oe(t, r, ue || de ? et : null, tt), rt = r?.summary.backend ?? t?.metadata.backend ?? null, at = mn(), ot = ye(t), st = nt.usage?.total_tokens || ot?.total_tokens || null, ct = p(), lt = m(), ut = s(r?.summary), dt = o(ut), ft = Pr(), mt = be(r?.summary) === "SSH", ht = ue && Te && !De, _t = ue && we === "orchestrator" && !De, vt = ht || _t, bt = E || ge.isPending || _e.isPending || ve.isPending || F.isPending || xe.isPending || Se.isPending || Ce.isPending || Pe.isPending || Fe.isPending || Ie.isPending, xt = bt || de || ue && !vt, St = !!C.trim() && !xt, Ct = (Ae.data ?? []).filter((e) => e.status === "pending"), wt = Ct.filter((e) => e.origin === "input"), Tt = Ct.length - wt.length, Et = async (t, n, r) => {
 		try {
 			await Se.mutateAsync({
 				sessionId: e,
@@ -13857,7 +13857,7 @@ function Xm({ sessionId: e, snapshot: t, entry: r }) {
 		} catch (e) {
 			me.error(`Unable to change pending message: ${en(rs(e))}`);
 		}
-	}, Tt = async (t, n) => {
+	}, Dt = async (t, n) => {
 		try {
 			await Ce.mutateAsync({
 				sessionId: e,
@@ -13867,10 +13867,10 @@ function Xm({ sessionId: e, snapshot: t, entry: r }) {
 		} catch (e) {
 			me.error(`Unable to cancel pending message: ${en(rs(e))}`);
 		}
-	}, Et = K(() => {
+	}, Ot = K(() => {
 		let e = Ye.current;
 		e && (e.style.height = `${ce}px`, !le && (e.style.height = `${Math.min(e.scrollHeight, Wm)}px`));
-	}, [le, ce]), Dt = K(() => {
+	}, [le, ce]), kt = K(() => {
 		let e = Ye.current;
 		e && (e.focus(), requestAnimationFrame(() => {
 			let e = Ye.current;
@@ -13884,9 +13884,9 @@ function Xm({ sessionId: e, snapshot: t, entry: r }) {
 	}, []);
 	ro(() => {
 		let e = Ze.current, t = Ye.current;
-		e !== null && t && (Ze.current = null, Et(), t.focus(), t.setSelectionRange(e, e));
-	}, [Et, C]);
-	let Ot = Fm({
+		e !== null && t && (Ze.current = null, Ot(), t.focus(), t.setSelectionRange(e, e));
+	}, [Ot, C]);
+	let At = Fm({
 		prompts: J(() => {
 			let e = [];
 			for (let n of t?.messages ?? []) n.role !== "user" || re(n.content) || e.push(fe(n.content));
@@ -13896,87 +13896,87 @@ function Xm({ sessionId: e, snapshot: t, entry: r }) {
 		enabled: !k,
 		setValue: O,
 		textareaRef: Ye,
-		afterCommit: Et
-	}), kt = Ot.reset, At = no();
-	q(() => kt(), [e, kt]);
-	let jt = J(() => Gm(C), [C]), Mt = J(() => {
-		if (!jt || !We) return [];
-		let e = jt.prefix.toLocaleLowerCase();
+		afterCommit: Ot
+	}), jt = At.reset, Mt = no();
+	q(() => jt(), [e, jt]);
+	let Nt = J(() => Gm(C), [C]), Pt = J(() => {
+		if (!Nt || !We) return [];
+		let e = Nt.prefix.toLocaleLowerCase();
 		return We.filter((t) => (t.name !== "goal" || Te) && t.name.toLocaleLowerCase().startsWith(e));
 	}, [
 		We,
-		jt,
+		Nt,
 		Te
-	]), Nt = J(() => Vm(C, M.start, M.end, qe ?? []), [
+	]), Ft = J(() => Vm(C, M.start, M.end, qe ?? []), [
 		M,
 		qe,
 		C
-	]), Pt = J(() => {
-		if (jt !== null || qe !== void 0 || M.start === 0 || M.start !== M.end) return null;
+	]), It = J(() => {
+		if (Nt !== null || qe !== void 0 || M.start === 0 || M.start !== M.end) return null;
 		let e = C.lastIndexOf("$", M.start - 1);
 		return e === -1 ? null : {
 			start: e,
 			end: M.end
 		};
 	}, [
-		jt,
+		Nt,
 		M,
 		qe,
 		C
-	]), Ft = jt ? "slash" : Nt || Pt ? "skill" : null, It = J(() => Ft === "slash" ? Mt.map((e) => ({
+	]), Lt = Nt ? "slash" : Ft || It ? "skill" : null, Rt = J(() => Lt === "slash" ? Pt.map((e) => ({
 		kind: "slash",
 		key: e.command,
 		name: `/${e.name}`,
 		description: e.description,
 		definition: e
-	})) : Ft === "skill" && Nt ? Nt.entries.map((e) => ({
+	})) : Lt === "skill" && Ft ? Ft.entries.map((e) => ({
 		kind: "skill",
 		key: e.name,
 		name: `$${e.name}`,
 		description: e.description,
 		definition: e
 	})) : [], [
-		Mt,
-		Nt,
-		Ft
-	]), Lt = Ft === "slash" ? qm("slash", C, 0, C.length) : Ft === "skill" ? qm("skill", C, Nt?.start ?? Pt?.start ?? M.start, Nt?.end ?? Pt?.end ?? M.end) : null, Rt = A && Ft !== null && Lt !== P, zt = Math.min(te, Math.max(It.length - 1, 0)), Bt = ie !== null && ie < It.length ? ie : zt, Vt = Rt ? It[Bt] : void 0, Ht = Vt ? `${$e}-option-${Bt}` : void 0, Ut = K((e) => {
-		Vt && e.preventDefault();
-	}, [Vt]);
+		Pt,
+		Ft,
+		Lt
+	]), zt = Lt === "slash" ? qm("slash", C, 0, C.length) : Lt === "skill" ? qm("skill", C, Ft?.start ?? It?.start ?? M.start, Ft?.end ?? It?.end ?? M.end) : null, Bt = A && Lt !== null && zt !== P, Vt = Math.min(te, Math.max(Rt.length - 1, 0)), Ht = ie !== null && ie < Rt.length ? ie : Vt, Ut = Bt ? Rt[Ht] : void 0, Gt = Ut ? `${$e}-option-${Ht}` : void 0, Kt = K((e) => {
+		Ut && e.preventDefault();
+	}, [Ut]);
 	q(() => {
-		Rt && Qe.current[zt]?.scrollIntoView({ block: "nearest" });
+		Bt && Qe.current[Vt]?.scrollIntoView({ block: "nearest" });
 	}, [
-		zt,
-		Rt,
-		It
+		Vt,
+		Bt,
+		Rt
 	]);
-	let Gt = K(() => {
-		ee(Lt), ae(null);
-	}, [Lt]), Kt = K((e) => {
+	let qt = K(() => {
+		ee(zt), ae(null);
+	}, [zt]), Jt = K((e) => {
 		let t, n, r;
 		if (e.kind === "slash") {
-			if (!jt) return;
-			t = `${jt.leadingWhitespace}/${e.definition.name}${e.definition.accepts_arguments ? " " : ""}`, n = t.length, r = qm("slash", t, 0, t.length);
-		} else {
 			if (!Nt) return;
+			t = `${Nt.leadingWhitespace}/${e.definition.name}${e.definition.accepts_arguments ? " " : ""}`, n = t.length, r = qm("slash", t, 0, t.length);
+		} else {
+			if (!Ft) return;
 			let i = `$${e.definition.name}`;
-			t = `${C.slice(0, Nt.start)}${i}${C.slice(Nt.end)}`, n = Nt.start + i.length, r = qm("skill", t, Nt.start, n);
+			t = `${C.slice(0, Ft.start)}${i}${C.slice(Ft.end)}`, n = Ft.start + i.length, r = qm("skill", t, Ft.start, n);
 		}
-		t === C ? (Ze.current = null, Et(), Ye.current?.focus(), Ye.current?.setSelectionRange(n, n)) : (Ze.current = n, O(t)), N({
+		t === C ? (Ze.current = null, Ot(), Ye.current?.focus(), Ye.current?.setSelectionRange(n, n)) : (Ze.current = n, O(t)), N({
 			start: n,
 			end: n
 		}), ee(r), ae(null);
 	}, [
-		jt,
-		Et,
-		O,
 		Nt,
+		Ot,
+		O,
+		Ft,
 		C
-	]), qt = J(() => Bm(C, qe ?? []), [qe, C]), Jt = !Ot.active && qt.some((e) => e.skillName !== null), Yt = Jt && !le;
-	ro(() => Et(), [Et, C]), ro(() => {
+	]), Yt = J(() => Bm(C, qe ?? []), [qe, C]), Xt = !At.active && Yt.some((e) => e.skillName !== null), Qt = Xt && !le;
+	ro(() => Ot(), [Ot, C]), ro(() => {
 		let e = Ye.current, t = Xe.current;
-		Yt && e && t && (t.scrollTop = e.scrollTop, t.scrollLeft = e.scrollLeft);
-	}, [Yt, C]);
-	let Xt = K(async () => {
+		Qt && e && t && (t.scrollTop = e.scrollTop, t.scrollLeft = e.scrollLeft);
+	}, [Qt, C]);
+	let $t = K(async () => {
 		if (ut && !ft.isPending) try {
 			await ft.mutateAsync(ut), l(ut);
 		} catch (e) {
@@ -13988,7 +13988,7 @@ function Xm({ sessionId: e, snapshot: t, entry: r }) {
 		l,
 		c,
 		me
-	]), Qt = K(async (t) => {
+	]), tn = K(async (t) => {
 		if (!Te) throw Error("Durable goals are available only in direct chats");
 		let n = v(e), r = Me;
 		if (r === void 0) {
@@ -14033,14 +14033,14 @@ function Xm({ sessionId: e, snapshot: t, entry: r }) {
 		Ne,
 		e,
 		Fe
-	]), $t = K(async (n, r) => {
+	]), nn = K(async (n, r) => {
 		let i = n ?? C, o = hp(i), s = o.kind === "prompt" ? o.prompt.trim() : i.trim();
 		if (!s || xt) return;
 		let c = n === void 0 || r !== void 0, l = S.get(e), u = v(e), d = () => {
 			c && S.acknowledge(e, l) && u() && (N({
 				start: 0,
 				end: 0
-			}), kt(), Ye.current && (Ye.current.style.height = `${ce}px`));
+			}), jt(), Ye.current && (Ye.current.style.height = `${ce}px`));
 		}, f = S.claimSubmission(e);
 		if (f) try {
 			if (o.kind === "command") {
@@ -14082,7 +14082,7 @@ function Xm({ sessionId: e, snapshot: t, entry: r }) {
 			}
 			if (f?.command === "goal") {
 				try {
-					await Qt(s) !== !1 && d();
+					await tn(s) !== !1 && d();
 				} catch (e) {
 					if (!u()) return;
 					me.error(`Goal command failed: ${gs(rs(e))}`);
@@ -14126,7 +14126,7 @@ function Xm({ sessionId: e, snapshot: t, entry: r }) {
 		xt,
 		v,
 		e,
-		kt,
+		jt,
 		ce,
 		We,
 		Ke,
@@ -14141,14 +14141,14 @@ function Xm({ sessionId: e, snapshot: t, entry: r }) {
 		F,
 		g,
 		rt,
-		Qt,
+		tn,
 		ht,
 		_t,
 		xe,
 		ve,
 		ge
 	]);
-	q(() => y((e) => void $t(e)), [y, $t]), q(() => {
+	q(() => y((e) => void nn(e)), [y, nn]), q(() => {
 		let t, n = b(e, (e) => {
 			O(e), t !== void 0 && cancelAnimationFrame(t), t = requestAnimationFrame(() => Ye.current?.focus());
 		});
@@ -14160,20 +14160,20 @@ function Xm({ sessionId: e, snapshot: t, entry: r }) {
 		b,
 		O
 	]);
-	let tn = K(async () => {
+	let rn = K(async () => {
 		await he.stopRun(e);
-	}, [he, e]), nn = !!C.trim(), rn = (ue || de) && !nn, an = /* @__PURE__ */ Q(kp, {
+	}, [he, e]), an = !!C.trim(), on = (ue || de) && !an, sn = /* @__PURE__ */ Q(kp, {
 		compact: k,
 		className: k ? "!size-11 !min-h-11 !min-w-11" : void 0,
 		variant: B.Primary,
-		type: rn ? "button" : "submit",
-		disabled: de || !rn && !St,
+		type: on ? "button" : "submit",
+		disabled: de || !on && !St,
 		loading: de,
-		"aria-label": de ? "Stopping run" : ue && !nn ? "Stop run" : vt ? "Steer active run" : "Send",
-		onPointerDown: Ut,
-		onClick: ue && !nn && !de ? () => void tn() : void 0,
-		children: /* @__PURE__ */ Q(I, { iconName: rn ? z.Stop : z.ArrowTop })
-	}), on = Te && !A, sn = k ? "py-2 pr-2 pl-3" : "py-3 pr-2 pl-4", cn = Rt ? Ft === "slash" ? We === void 0 ? Ge ? "Slash commands unavailable" : "Loading slash commands" : It.length ? `${It.length} slash ${It.length === 1 ? "command" : "commands"} available` : "No matching commands" : qe === void 0 ? Je ? "Skills unavailable" : "Loading skills" : `${It.length} ${It.length === 1 ? "skill" : "skills"} available` : "", ln = /* @__PURE__ */ $("div", {
+		"aria-label": de ? "Stopping run" : ue && !an ? "Stop run" : vt ? "Steer active run" : "Send",
+		onPointerDown: Kt,
+		onClick: ue && !an && !de ? () => void rn() : void 0,
+		children: /* @__PURE__ */ Q(I, { iconName: on ? z.Stop : z.ArrowTop })
+	}), cn = Te && !A, ln = k ? "py-2 pr-2 pl-3" : "py-3 pr-2 pl-4", un = Bt ? Lt === "slash" ? We === void 0 ? Ge ? "Slash commands unavailable" : "Loading slash commands" : Rt.length ? `${Rt.length} slash ${Rt.length === 1 ? "command" : "commands"} available` : "No matching commands" : qe === void 0 ? Je ? "Skills unavailable" : "Loading skills" : `${Rt.length} ${Rt.length === 1 ? "skill" : "skills"} available` : "", dn = /* @__PURE__ */ $("div", {
 		className: "flex min-w-0 items-end",
 		children: [/* @__PURE__ */ $("div", {
 			className: "relative flex-1 min-w-0",
@@ -14183,42 +14183,42 @@ function Xm({ sessionId: e, snapshot: t, entry: r }) {
 					role: "status",
 					"aria-live": "polite",
 					"aria-atomic": "true",
-					children: cn
+					children: un
 				}),
-				Yt ? /* @__PURE__ */ $("div", {
+				Qt ? /* @__PURE__ */ $("div", {
 					ref: Xe,
 					"aria-hidden": "true",
-					className: L("pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words text-medium text-input [scrollbar-gutter:stable]", sn),
-					children: [Ym(qt), C.endsWith("\n") ? " " : null]
+					className: L("pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words text-medium text-input [scrollbar-gutter:stable]", ln),
+					children: [Ym(Yt), C.endsWith("\n") ? " " : null]
 				}) : null,
 				/* @__PURE__ */ Q("textarea", {
 					ref: Ye,
 					"data-nac-retained-draft": "",
-					className: L("relative block w-full bg-transparent resize-none border-none outline-none text-medium text-input placeholder:text-input-placeholder placeholder:whitespace-nowrap focus:placeholder:text-transparent [scrollbar-gutter:stable]", sn, le && "pointer-events-none overflow-hidden opacity-0"),
+					className: L("relative block w-full bg-transparent resize-none border-none outline-none text-medium text-input placeholder:text-input-placeholder placeholder:whitespace-nowrap focus:placeholder:text-transparent [scrollbar-gutter:stable]", ln, le && "pointer-events-none overflow-hidden opacity-0"),
 					rows: 1,
 					role: "combobox",
 					"aria-label": "Message",
 					"aria-autocomplete": "list",
 					"aria-haspopup": "listbox",
-					"aria-expanded": Rt,
-					"aria-controls": Rt ? $e : void 0,
-					"aria-activedescendant": Ht,
-					"aria-describedby": Ot.active ? At : void 0,
+					"aria-expanded": Bt,
+					"aria-controls": Bt ? $e : void 0,
+					"aria-activedescendant": Gt,
+					"aria-describedby": At.active ? Mt : void 0,
 					enterKeyHint: k ? "enter" : void 0,
-					placeholder: Ot.active ? "" : Hm,
+					placeholder: At.active ? "" : Hm,
 					spellCheck: !1,
 					value: C,
 					style: {
 						minHeight: `${ce}px`,
 						maxHeight: `${Wm}px`,
-						color: Jt ? "transparent" : void 0,
-						caretColor: Jt ? "var(--color-text-input)" : void 0
+						color: Xt ? "transparent" : void 0,
+						caretColor: Xt ? "var(--color-text-input)" : void 0
 					},
 					onChange: (e) => {
-						e.target.value !== C && ee(null), ne(0), ae(null), Ot.onValueChange(e.target.value), O(e.target.value), N({
+						e.target.value !== C && ee(null), ne(0), ae(null), At.onValueChange(e.target.value), O(e.target.value), N({
 							start: e.target.selectionStart,
 							end: e.target.selectionEnd
-						}), Et();
+						}), Ot();
 					},
 					onSelect: (e) => {
 						let t = {
@@ -14237,41 +14237,41 @@ function Xm({ sessionId: e, snapshot: t, entry: r }) {
 						});
 					},
 					onBlur: () => {
-						j(!1), ae(null), kt();
+						j(!1), ae(null), jt();
 					},
 					onKeyDown: (e) => {
 						if (!e.nativeEvent.isComposing && (e.key !== "Enter" || !k || e.metaKey || e.ctrlKey)) {
-							if (Rt && !e.shiftKey) {
+							if (Bt && !e.shiftKey) {
 								if (e.key === "Escape") {
-									e.preventDefault(), Gt();
+									e.preventDefault(), qt();
 									return;
 								}
-								if ((e.key === "ArrowDown" || e.key === "ArrowUp") && It.length) {
-									e.preventDefault(), ne(e.key === "ArrowDown" ? Math.min(Bt + 1, It.length - 1) : Math.max(Bt - 1, 0)), ae(null);
+								if ((e.key === "ArrowDown" || e.key === "ArrowUp") && Rt.length) {
+									e.preventDefault(), ne(e.key === "ArrowDown" ? Math.min(Ht + 1, Rt.length - 1) : Math.max(Ht - 1, 0)), ae(null);
 									return;
 								}
-								if (e.key === "Tab" && Vt) {
-									e.preventDefault(), Kt(Vt);
+								if (e.key === "Tab" && Ut) {
+									e.preventDefault(), Jt(Ut);
 									return;
 								}
-								if (e.key === "Enter" && (Vt || Ft === "slash")) {
-									e.preventDefault(), Vt && Kt(Vt);
+								if (e.key === "Enter" && (Ut || Lt === "slash")) {
+									e.preventDefault(), Ut && Jt(Ut);
 									return;
 								}
 							}
-							Ot.onKeyDown(e) || e.key === "Enter" && (e.shiftKey || (e.preventDefault(), $t()));
+							At.onKeyDown(e) || e.key === "Enter" && (e.shiftKey || (e.preventDefault(), nn()));
 						}
 					}
 				}),
-				Ot.active ? /* @__PURE__ */ $(Z, { children: [/* @__PURE__ */ Q("span", {
-					id: At,
+				At.active ? /* @__PURE__ */ $(Z, { children: [/* @__PURE__ */ Q("span", {
+					id: Mt,
 					className: "sr-only",
 					children: "Press Tab to take this prompt, Escape to leave it, or start typing to dismiss it"
 				}), /* @__PURE__ */ $("div", {
-					className: L("pointer-events-none absolute inset-0 flex items-center gap-2", sn),
+					className: L("pointer-events-none absolute inset-0 flex items-center gap-2", ln),
 					children: [/* @__PURE__ */ Q("span", {
 						className: "min-w-0 truncate text-medium text-input-placeholder",
-						children: Ot.previewText
+						children: At.previewText
 					}), /* @__PURE__ */ Q(Qr, {
 						keys: ["tab"],
 						spelled: !0,
@@ -14280,43 +14280,43 @@ function Xm({ sessionId: e, snapshot: t, entry: r }) {
 				})] }) : null,
 				le ? /* @__PURE__ */ Q("div", {
 					"aria-hidden": "true",
-					className: L("absolute inset-0 flex cursor-text items-center", sn),
-					onClick: Dt,
+					className: L("absolute inset-0 flex cursor-text items-center", ln),
+					onClick: kt,
 					children: /* @__PURE__ */ Q("span", {
 						className: "w-full truncate text-medium text-input",
-						children: Ym(qt)
+						children: Ym(Yt)
 					})
 				}) : null
 			]
-		}), on ? /* @__PURE__ */ Q(vm, {
+		}), cn ? /* @__PURE__ */ Q(vm, {
 			compact: k,
 			sessionId: e,
 			onOpen: He
 		}) : null]
-	}), un = /* @__PURE__ */ Q("div", {
+	}), fn = /* @__PURE__ */ Q("div", {
 		id: $e,
 		role: "listbox",
-		"aria-label": Ft === "skill" ? "Skills" : "Slash commands",
-		children: Ft === "slash" && We === void 0 ? /* @__PURE__ */ Q("div", {
+		"aria-label": Lt === "skill" ? "Skills" : "Slash commands",
+		children: Lt === "slash" && We === void 0 ? /* @__PURE__ */ Q("div", {
 			className: "px-3 py-2 text-small text-basic-secondary",
 			children: Ge ? "Slash commands unavailable" : "Loading commands…"
-		}) : Ft === "skill" && qe === void 0 ? /* @__PURE__ */ Q("div", {
+		}) : Lt === "skill" && qe === void 0 ? /* @__PURE__ */ Q("div", {
 			className: "px-3 py-2 text-small text-basic-secondary",
 			children: Je ? "Skills unavailable" : "Loading skills…"
-		}) : It.length ? It.map((e, t) => /* @__PURE__ */ $("button", {
+		}) : Rt.length ? Rt.map((e, t) => /* @__PURE__ */ $("button", {
 			id: `${$e}-option-${t}`,
 			ref: (e) => {
 				Qe.current[t] = e;
 			},
 			type: "button",
 			role: "option",
-			"aria-selected": t === Bt,
+			"aria-selected": t === Ht,
 			tabIndex: -1,
-			className: L("flex min-h-10 w-full items-center gap-3 rounded-[4px] px-3 py-2 text-left", t === Bt ? "btn-ghost-highlighted" : "btn-ghost"),
+			className: L("flex min-h-10 w-full items-center gap-3 rounded-[4px] px-3 py-2 text-left", t === Ht ? "btn-ghost-highlighted" : "btn-ghost"),
 			onPointerDown: (e) => e.preventDefault(),
 			onPointerMove: () => ae(t),
 			onPointerLeave: () => ae((e) => e === t ? null : e),
-			onClick: () => Kt(e),
+			onClick: () => Jt(e),
 			children: [/* @__PURE__ */ Q("span", {
 				className: "code code-small shrink-0 text-basic-primary",
 				children: e.name
@@ -14328,10 +14328,10 @@ function Xm({ sessionId: e, snapshot: t, entry: r }) {
 			className: "px-3 py-2 text-small text-basic-secondary",
 			children: "No matching commands"
 		})
-	}), dn = /* @__PURE__ */ Q(ti, {
-		open: Rt,
-		onClose: Gt,
-		content: un,
+	}), pn = /* @__PURE__ */ Q(ti, {
+		open: Bt,
+		onClose: qt,
+		content: fn,
 		placement: qr.TopRight,
 		sticky: !0,
 		closeOnEscape: !1,
@@ -14339,7 +14339,7 @@ function Xm({ sessionId: e, snapshot: t, entry: r }) {
 		className: "min-w-0 flex-1",
 		size: "w-[min(400px,calc(100vw-16px))]",
 		panelClassName: "max-h-[min(40vh,320px)] overflow-y-auto",
-		children: ln
+		children: dn
 	});
 	if (!ke) return /* @__PURE__ */ Q(Tp, {
 		compact: k,
@@ -14355,7 +14355,7 @@ function Xm({ sessionId: e, snapshot: t, entry: r }) {
 				variant: B.GhostDestructive,
 				content: H.Text,
 				"aria-label": "Stop run",
-				onClick: () => void tn(),
+				onClick: () => void rn(),
 				children: "Stop"
 			})]
 		})
@@ -14367,18 +14367,18 @@ function Xm({ sessionId: e, snapshot: t, entry: r }) {
 		description: Ee.description,
 		behavior: we
 	});
-	let fn = Re && Te && !k;
+	let hn = Re && Te && !k;
 	return /* @__PURE__ */ $(Tp, {
 		compact: k,
 		onSubmit: (e) => {
-			e.preventDefault(), !fn && (Vt ? Kt(Vt) : $t());
+			e.preventDefault(), !hn && (Ut ? Jt(Ut) : nn());
 		},
 		children: [/* @__PURE__ */ Q(pp, {
 			sessionId: e,
 			enabled: we === "direct"
 		}), /* @__PURE__ */ $(Ep, {
 			compact: k,
-			surface: fn ? "goal" : A ? "focus" : void 0,
+			surface: hn ? "goal" : A ? "focus" : void 0,
 			children: [
 				w ? /* @__PURE__ */ Q("p", {
 					role: "status",
@@ -14403,18 +14403,18 @@ function Xm({ sessionId: e, snapshot: t, entry: r }) {
 						open: Re,
 						mobile: k,
 						onClose: () => ze(!1)
-					}, e) : null, fn ? null : /* @__PURE__ */ $("div", {
+					}, e) : null, hn ? null : /* @__PURE__ */ $("div", {
 						className: "flex items-end",
-						children: [dn, an]
+						children: [pn, sn]
 					})]
 				}),
-				Ct.length ? /* @__PURE__ */ $("div", {
+				wt.length ? /* @__PURE__ */ $("div", {
 					className: "relative flex flex-col gap-2 px-2",
 					"aria-label": "Pending messages",
 					children: [/* @__PURE__ */ Q("div", {
 						className: "tag-label uppercase text-basic-secondary",
 						children: "Pending messages"
-					}), Ct.map((t) => /* @__PURE__ */ $("div", {
+					}), wt.map((t) => /* @__PURE__ */ $("div", {
 						className: "flex flex-wrap items-center gap-2 rounded-[4px] border border-border-primary px-3 py-2",
 						children: [
 							/* @__PURE__ */ Q("span", {
@@ -14434,7 +14434,7 @@ function Xm({ sessionId: e, snapshot: t, entry: r }) {
 								size: V.Small,
 								variant: B.Ghost,
 								disabled: bt,
-								onClick: () => void wt(t.id, t.version, t.delivery === "steer" ? "queue" : "steer"),
+								onClick: () => void Et(t.id, t.version, t.delivery === "steer" ? "queue" : "steer"),
 								children: ["Change to ", t.delivery === "steer" ? "queue" : "steer"]
 							}),
 							/* @__PURE__ */ Q(U, {
@@ -14442,11 +14442,17 @@ function Xm({ sessionId: e, snapshot: t, entry: r }) {
 								size: V.Small,
 								variant: B.GhostDestructive,
 								disabled: bt,
-								onClick: () => void Tt(t.id, t.version),
+								onClick: () => void Dt(t.id, t.version),
 								children: "Cancel"
 							})
 						]
 					}, t.id))]
+				}) : null,
+				Tt ? /* @__PURE__ */ Q("div", {
+					role: "status",
+					"aria-label": "Pending subagent results",
+					className: "relative px-2 text-small text-basic-secondary",
+					children: Tt === 1 ? "1 subagent result pending" : `${Tt} subagent results pending`
 				}) : null,
 				/* @__PURE__ */ $("div", {
 					className: "relative flex min-h-6 flex-wrap items-center gap-x-2.5 gap-y-1 px-2",
@@ -14458,7 +14464,7 @@ function Xm({ sessionId: e, snapshot: t, entry: r }) {
 								size: V.Small,
 								variant: B.Secondary,
 								disabled: !St,
-								onClick: () => void $t(C, "queue"),
+								onClick: () => void nn(C, "queue"),
 								children: "Queue Next"
 							}) : null,
 							/* @__PURE__ */ Q("div", {
@@ -14472,7 +14478,7 @@ function Xm({ sessionId: e, snapshot: t, entry: r }) {
 							}),
 							mt ? /* @__PURE__ */ Q(ld, {
 								state: dt === "connected" ? "connected" : "reconnect",
-								onReconnect: () => void Xt()
+								onReconnect: () => void $t()
 							}) : null
 						]
 					}), /* @__PURE__ */ $("div", {
