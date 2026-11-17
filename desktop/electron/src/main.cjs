@@ -36,6 +36,7 @@ let profileInitialized = false,
 const securedSessions = new WeakSet();
 let approvedExit = false,
   startupPromise = null,
+  pendingWorkspace = null,
   failure = null,
   failureEpisode = null,
   failureDialog = false,
@@ -137,8 +138,13 @@ function createWindow(partition) {
         ),
       );
   });
-  window.webContents.on("did-fail-load", (_event, code) => {
-    if (window === ownedWindow && code !== -3 && lifecycle.phase === "running")
+  window.webContents.on("did-fail-load", (_event, code, _description, _url, isMainFrame) => {
+    if (
+      window === ownedWindow &&
+      isMainFrame === true &&
+      code !== -3 &&
+      lifecycle.phase === "running"
+    )
       fail(
         new Error(
           "The bundled workspace could not load. Choose Retry after its engine has stopped.",
@@ -162,6 +168,7 @@ function createWindow(partition) {
 async function fail(error) {
   if (failure || !["running", "confirming"].includes(lifecycle.phase)) return;
   failure = error;
+  pendingWorkspace = null;
   const episode = { error, window, engine, retired: false, settled: false, settlement: null };
   failureEpisode = episode;
   const retiring = native;
@@ -246,6 +253,7 @@ async function retry() {
     return;
   failure = null;
   failureEpisode = null;
+  pendingWorkspace = null;
   const launch = lifecycle.beginLaunch();
   if (!launch) return;
   startupPromise = (async () => {
@@ -270,22 +278,40 @@ async function retry() {
       next.once("ready", (receipt) => {
         if (engine !== next || failure || !["running", "confirming"].includes(lifecycle.phase))
           return;
-        const partition =
-          "persist:nac-" +
-          crypto
-            .createHash("sha256")
-            .update(configuration.store + "\0" + identity.track)
-            .digest("hex");
-        const ses = session.fromPartition(partition);
-        if (!securedSessions.has(ses)) {
-          securedSessions.add(ses);
-          ses.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
-          ses.setPermissionCheckHandler(() => false);
-          ses.setDevicePermissionHandler(() => false);
-          ses.on("will-download", (event) => event.preventDefault());
-        }
-        createWindow(partition);
-        void window.loadURL(receipt.endpoint);
+        const present = () => {
+          if (
+            pendingWorkspace !== present ||
+            engine !== next ||
+            next.receipt !== receipt ||
+            failure ||
+            lifecycle.phase !== "running"
+          )
+            return;
+          pendingWorkspace = null;
+          if (window && !window.isDestroyed()) {
+            approvedExit = true;
+            window.destroy();
+            approvedExit = false;
+          }
+          const partition =
+            "persist:nac-" +
+            crypto
+              .createHash("sha256")
+              .update(configuration.store + "\0" + identity.track)
+              .digest("hex");
+          const ses = session.fromPartition(partition);
+          if (!securedSessions.has(ses)) {
+            securedSessions.add(ses);
+            ses.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
+            ses.setPermissionCheckHandler(() => false);
+            ses.setDevicePermissionHandler(() => false);
+            ses.on("will-download", (event) => event.preventDefault());
+          }
+          createWindow(partition);
+          void window.loadURL(receipt.endpoint);
+        };
+        pendingWorkspace = present;
+        present();
       });
       next.once("failure", (error) => {
         if (engine === next) void fail(error);
@@ -314,6 +340,7 @@ function waitForCleanup(token) {
   cleanupPromise?.then(() => clearTimeout(timer));
 }
 async function beginStop(token) {
+  pendingWorkspace = null;
   const failed = failureEpisode;
   cleanupPromise = (async () => {
     const retiring = native;
@@ -355,6 +382,14 @@ async function requestQuit() {
     return;
   }
   if (decision.kind !== "confirm") return;
+  if (!window || window.isDestroyed()) {
+    await app.whenReady();
+    if (lifecycle.phase !== "confirming" || lifecycle.transaction !== decision.transaction) return;
+    if (!window || window.isDestroyed())
+      status(
+        "NAC has not opened the workspace. Cancel keeps this app open; Stop and Quit waits for owned engine cleanup.",
+      );
+  }
   reopen();
   let result;
   try {
@@ -376,7 +411,10 @@ async function requestQuit() {
   }
   const answer = lifecycle.answer(decision.transaction, result.response === 1);
   if (answer.kind === "stop") void beginStop(answer.token);
-  else if (answer.kind === "cancel" && failure) void presentFailure();
+  else if (answer.kind === "cancel") {
+    if (failure) void presentFailure();
+    else pendingWorkspace?.();
+  }
 }
 app.on("before-quit", (event) => {
   if (!approvedExit) {
