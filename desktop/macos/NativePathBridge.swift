@@ -74,6 +74,12 @@ final class NativePathBridge: NSObject, WKScriptMessageHandler {
 
     /// Closing/hiding an intact workspace cancels its sheet without retiring
     /// the document/menu bridge that the lifecycle owner keeps for reopening.
+    #if PREVIEW_SMOKE
+    /// Startup smoke only: completes this bridge's pending folder request as
+    /// the panel's own selection; see NativeFolderPanel.smokeChoose.
+    func smokeChooseFolder(_ path: String) -> Bool { pending != nil && panel.smokeChoose(path) }
+    #endif
+
     func cancelPending() {
         let id = pending?.id
         pending = nil

@@ -26,6 +26,9 @@ directories return cancellation, and server admission revalidates again later.
 Cancellation, supersession, runtime closure, navigation and actual bridge
 retirement fence late callbacks. Source correlation is checked at choose and
 completion. Ordinary hidden-window lifetime does not retire the menu bridge.
+Smoke builds alone add `smokeChoose`, which settles the real open sheet with a
+fixture folder through the same completion checks; the local startup smoke uses
+it, and the CI XCTest journeys drive the panel itself.
 
 The shell composition owner must construct this bridge after `commands.bind()`
 and before the first load, forward the same navigation-start/finish callbacks,
