@@ -863,11 +863,11 @@ fn refresh_gate() -> &'static tokio::sync::Mutex<()> {
 }
 
 /// Acquires the cross-process refresh lock without ever blocking a Tokio worker:
-/// it polls the non-blocking file lock and yields between attempts. The server
-/// rotates the refresh token on every call, so two nac processes refreshing at
-/// once could invalidate each other's tokens; this serializes them.
-async fn acquire_refresh_lock(lock_path: &Path) -> Result<FileLock> {
-    let timeout = super::auth_store::credential_lock_timeout().await?;
+/// it polls the non-blocking file lock and yields between attempts, giving up
+/// after `timeout`. The server rotates the refresh token on every call, so two
+/// nac processes refreshing at once could invalidate each other's tokens; this
+/// serializes them.
+async fn acquire_refresh_lock(lock_path: &Path, timeout: Duration) -> Result<FileLock> {
     let started = now_ms();
     loop {
         if let Some(lock) = nac_credential_store::try_acquire_credential_lock(lock_path)? {
@@ -920,12 +920,16 @@ async fn refresh_locked(
 ) -> Result<String> {
     let auth_path = arcee_auth_file_path()?;
     let lock_path = arcee_auth_lock_path()?;
+    // Resolved here, not inside the lock wait, so tests that drive
+    // `refresh_locked_with` directly never read the process-global config.toml.
+    let lock_timeout = super::auth_store::credential_lock_timeout().await?;
     refresh_locked_with(
         client,
         expected_base_url,
         should_refresh,
         &auth_path,
         &lock_path,
+        lock_timeout,
         ArceeAuthService::approved,
     )
     .await
@@ -937,10 +941,11 @@ async fn refresh_locked_with(
     should_refresh: impl Fn(&StoredArceeAuth) -> bool,
     auth_path: &Path,
     lock_path: &Path,
+    lock_timeout: Duration,
     resolve_service: impl Fn(&str) -> Result<ArceeAuthService>,
 ) -> Result<String> {
     let _gate = refresh_gate().lock().await;
-    let _lock = acquire_refresh_lock(lock_path).await?;
+    let _lock = acquire_refresh_lock(lock_path, lock_timeout).await?;
     let auth = read_stored_auth_for_base_url_at(auth_path, expected_base_url)?;
     if !should_refresh(&auth) {
         return Ok(auth.access_token);
