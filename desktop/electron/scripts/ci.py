@@ -72,6 +72,16 @@ def summary(document):
     return rows
 
 
+def require_verdict(scenarios, records, remaining):
+    if not scenarios:
+        raise RuntimeError('Actual-app scenario report missing')
+    if any(row['status'] != 'expected' or not row['results']
+           or any(result['status'] != 'passed' for result in row['results']) for row in scenarios):
+        raise RuntimeError('Actual-app report contains failed/skipped/unsupported scenarios')
+    if not records or any(record['settled'] is not True for record in records) or remaining:
+        raise RuntimeError('Positive fixture/owned-child cleanup proof missing')
+
+
 class Lane:
     def __init__(self, output, expected):
         self.output = output
@@ -187,6 +197,7 @@ class Lane:
                         NAC_ELECTRON_CI_SHA=expected, NAC_ELECTRON_CI_REPORT=str(self.raw / 'tests.json'),
                         NAC_ELECTRON_CI_RESULTS=str(self.raw / 'results'),
                         NAC_ELECTRON_CI_RECORDS=str(self.raw / 'cleanup.jsonl'))
+        scenarios = None
         try:
             self.report['hosted_gui_attempted'] = os.environ.get('GITHUB_ACTIONS') == 'true'
             self.run('actual-app', ['npm', '--prefix', 'desktop/electron', 'run', 'test:e2e'], 600, test_env)
@@ -195,17 +206,14 @@ class Lane:
             records_file = self.raw / 'cleanup.jsonl'
             records = [json.loads(row) for row in records_file.read_text().splitlines()] if records_file.exists() else []
             self.write('cleanup.json', records)
-            self.report['hosted_gui_executed'] = bool(records) and os.environ.get('GITHUB_ACTIONS') == 'true'
+            self.report['hosted_gui_executed'] = any(record['enginePid'] > 0 for record in records) and os.environ.get('GITHUB_ACTIONS') == 'true'
             self.report['cleanup'] = 'proven' if (records and all(r['settled'] for r in records)
                                                   and not self.report['remaining_candidate_pids']) else 'unproven'
             tests_file = self.raw / 'tests.json'
             if tests_file.exists():
                 scenarios = summary(json.loads(tests_file.read_text()))
                 self.write('scenarios.json', scenarios)
-                if any(r['status'] != 'expected' or any(t['status'] != 'passed' for t in r['results']) for r in scenarios):
-                    raise RuntimeError('Actual-app report contains failed/skipped/unsupported scenarios')
-        if self.report['cleanup'] != 'proven':
-            raise RuntimeError('Positive fixture/owned-child cleanup proof missing')
+        require_verdict(scenarios, records, self.report['remaining_candidate_pids'])
         self.gui('after')
         source_identity(expected)
         self.report['result'] = 'passed'

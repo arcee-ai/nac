@@ -6,7 +6,7 @@ import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).parent))
-from ci import Lane, LIMIT, sanitized, source_identity, summary
+from ci import Lane, LIMIT, require_verdict, sanitized, source_identity, summary
 
 
 class EvidenceTests(unittest.TestCase):
@@ -47,6 +47,20 @@ class EvidenceTests(unittest.TestCase):
         for invalid in ('dev', 'HEAD', 'a' * 39, 'A' * 40, '../source'):
             with self.assertRaisesRegex(RuntimeError, 'immutable'):
                 source_identity(invalid)
+
+    def test_pass_requires_scenarios_and_positive_cleanup_without_skips(self):
+        passed = [dict(status='expected', results=[dict(status='passed')])]
+        settled = [dict(settled=True)]
+        require_verdict(passed, settled, [])
+        for scenarios, records, remaining in (
+                (None, settled, []), ([], settled, []),
+                ([dict(status='expected', results=[])], settled, []),
+                ([dict(status='skipped', results=[dict(status='skipped')])], settled, []),
+                ([dict(status='unexpected', results=[dict(status='failed')])], settled, []),
+                (passed, [], []), (passed, [dict(settled=False)], []),
+                (passed, settled, [123])):
+            with self.assertRaises(RuntimeError):
+                require_verdict(scenarios, records, remaining)
 
 
 if __name__ == '__main__':

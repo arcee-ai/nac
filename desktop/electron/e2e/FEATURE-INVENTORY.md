@@ -53,7 +53,10 @@ workflow claim, even when browser tests exist. Browser scenarios below are in
 `NAC_ELECTRON_CI=1` discovers every `*.spec.ts`, including newly integrated peer
 specs. The explicit excluded files are development defaults, manual startup Quit,
 manual relocated native acceptance, PR visual capture, windowless native Quit,
-and the two opt-in frame/CPU diagnostics. `performance.spec.ts`'s ordinary bounded
+the two opt-in frame/CPU diagnostics, and `notification-adapter.spec.ts`'s opt-in
+OS authorization/delivery probe. Regular integrated notification journey specs
+remain selected; native delivery is not implied by those actors.
+`performance.spec.ts`'s ordinary bounded
 workflow remains included. Its opt-in Swift comparison requires a separately
 qualified comparator. The windowless file's installed-API arity control remains
 available locally; excluding that file does not claim its manual sheet passed.

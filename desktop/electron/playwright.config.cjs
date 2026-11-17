@@ -20,6 +20,7 @@ module.exports = defineConfig({
         "**/windowless-quit.spec.ts",
         "**/frame-diagnostic.spec.ts",
         "**/performance-attribution.spec.ts",
+        "**/notification-adapter.spec.ts",
       ]
     : [],
   reporter: ci ? [["list"], ["json", { outputFile: process.env.NAC_ELECTRON_CI_REPORT }]] : "list",
