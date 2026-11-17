@@ -14,7 +14,13 @@ const fakes = vi.hoisted(() => ({
 }));
 
 vi.mock("@/app/features/managed/controller/useManagedSignIn", () => ({
-  useManagedSignIn: () => ({ provider: fakes.provider, signedIn: fakes.signedIn }),
+  useManagedSignIn: () => ({
+    provider: fakes.provider,
+    signedIn: fakes.signedIn,
+    status: fakes.signedIn ? "signed-in" : "signed-out",
+    error: null,
+    retry: vi.fn(),
+  }),
 }));
 vi.mock("@/app/features/managed/controller/useDeviceLogin", () => ({
   useDeviceLogin: () => ({

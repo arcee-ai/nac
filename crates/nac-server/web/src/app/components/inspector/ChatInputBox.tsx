@@ -24,6 +24,7 @@ import {
   ComposerIconButton,
 } from "@/app/components/inspector/composer/ComposerFrame";
 import { deliverPrompt, runCommand } from "@/app/features/direct-session/commandWorkflow";
+import { isGoalContinuationEnvelope } from "@/app/features/goals/continuation";
 import { withPromptRecovery } from "@/app/features/direct-session/promptRecovery";
 import { PromptRecoveryMessage } from "./PromptRecoveryMessage";
 import { ModelPicker } from "@/app/components/inspector/ModelPicker";
@@ -311,7 +312,11 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
     clearGoal.isPending;
   const busy = mutationPending || stopping || (running && !runningInteractive);
   const canSend = Boolean(value.trim()) && !busy;
-  const pendingInbox = (inboxQuery.data ?? []).filter((item) => item.status === "pending");
+  const pendingItems = (inboxQuery.data ?? []).filter((item) => item.status === "pending");
+  // Only submitted input is editable here. Delegated results are consumed by
+  // delivery and the server refuses to change them, so only a count is shown.
+  const pendingInbox = pendingItems.filter((item) => item.origin === "input");
+  const pendingDelegatedResults = pendingItems.length - pendingInbox.length;
   const changeInboxDelivery = async (
     itemId: number,
     expectedVersion: number,
@@ -373,7 +378,8 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   const sentPrompts = useMemo(() => {
     const prompts: string[] = [];
     for (const message of snapshot?.messages ?? []) {
-      if (message.role !== "user") continue;
+      // A goal continuation is NAC's control message, not something typed.
+      if (message.role !== "user" || isGoalContinuationEnvelope(message.content)) continue;
       prompts.push(displayPromptFromMessageText(message.content));
     }
     return prompts.reverse();
@@ -1242,6 +1248,17 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
                 </Button>
               </div>
             ))}
+          </div>
+        ) : null}
+        {pendingDelegatedResults ? (
+          <div
+            role="status"
+            aria-label="Pending subagent results"
+            className="relative px-2 text-small text-basic-secondary"
+          >
+            {pendingDelegatedResults === 1
+              ? "1 subagent result pending"
+              : `${pendingDelegatedResults} subagent results pending`}
           </div>
         ) : null}
 
