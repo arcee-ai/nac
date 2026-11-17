@@ -69,7 +69,10 @@ export function layoutModelTurn(items: readonly ModelTurnItem[]): TurnLayoutItem
   };
   items.forEach((item, index) => {
     if (item.kind === "group") {
-      const target = openFold(item.id);
+      // Group IDs include the prompt anchor, which can change as a streamed
+      // child prompt reaches its snapshot. Step keys are stable within the
+      // turn and keep the reader's fold choice across that transition.
+      const target = openFold(item.group.segments[0]?.key ?? item.id);
       target.groupIds.push(item.id);
       for (const segment of item.group.segments) {
         target.steps.push({

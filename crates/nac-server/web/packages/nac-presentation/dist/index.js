@@ -18561,7 +18561,7 @@ function iy(e) {
 	}, r.push(i)), i);
 	return e.forEach((n, o) => {
 		if (n.kind === "group") {
-			let e = a(n.id);
+			let e = a(n.group.segments[0]?.key ?? n.id);
 			e.groupIds.push(n.id);
 			for (let t of n.group.segments) e.steps.push({
 				kind: "segment",
@@ -19037,8 +19037,8 @@ var Zy = "group/row flex w-full min-w-0 items-center gap-2.5 rounded-md px-1.5 t
 	pending: "Waiting for approval",
 	running: null,
 	ready: null
-}, eb = so(function({ step: e, streaming: t, interactive: n }) {
-	let r = fo(), [i, a] = X(!1), { openGroup: o } = Fh();
+}, eb = so(function({ step: e, streaming: t, interactive: n, choiceKey: r }) {
+	let i = fo(), a = co(By), [o, s] = X(() => r ? a?.get(r) ?? !1 : !1), { openGroup: c } = Fh();
 	if (e.kind === "note") return /* @__PURE__ */ Q("li", {
 		className: "py-1.5 pl-[34px] pr-1.5",
 		children: /* @__PURE__ */ Q(Ka, {
@@ -19046,37 +19046,37 @@ var Zy = "group/row flex w-full min-w-0 items-center gap-2.5 rounded-md px-1.5 t
 			children: e.text
 		})
 	});
-	let { segment: s } = e, c = Oy(s), l = Wv(s), u = s.kind === "tool" ? s.presentation : null, d = s.kind === "reasoning" ? s.text : null, f = !!(u || d), p = $y[c.status], m = c.status === "failed", h = c.status === "pending", g = c.status === "running", _ = /* @__PURE__ */ $(Z, { children: [
+	let { segment: l } = e, u = Oy(l), d = Wv(l), f = l.kind === "tool" ? l.presentation : null, p = l.kind === "reasoning" ? l.text : null, m = !!(f || p), h = $y[u.status], g = u.status === "failed", _ = u.status === "pending", v = u.status === "running", y = /* @__PURE__ */ $(Z, { children: [
 		/* @__PURE__ */ Q(L, {
-			iconName: m ? U.Danger : qy(l),
+			iconName: g ? U.Danger : qy(d),
 			size: 16,
 			"aria-hidden": !0,
-			className: H("shrink-0", m ? "!text-fill-error-primary" : h ? "!text-[var(--f-amber)]" : "!text-fill-basic-tertiary")
+			className: H("shrink-0", g ? "!text-fill-error-primary" : _ ? "!text-[var(--f-amber)]" : "!text-fill-basic-tertiary")
 		}),
 		/* @__PURE__ */ $("span", {
 			className: "flex min-w-0 flex-1 items-baseline gap-1.5 type-body-chrome",
-			title: c.title ?? void 0,
+			title: u.title ?? void 0,
 			children: [/* @__PURE__ */ Q("span", {
-				className: H("shrink-0", g ? "focus-shimmer" : m ? "text-error-primary" : "text-basic-secondary"),
-				children: c.verb
-			}), c.argument ? /* @__PURE__ */ Q("span", {
+				className: H("shrink-0", v ? "focus-shimmer" : g ? "text-error-primary" : "text-basic-secondary"),
+				children: u.verb
+			}), u.argument ? /* @__PURE__ */ Q("span", {
 				className: "min-w-0 truncate code code-small text-basic-tertiary",
-				children: c.argument
+				children: u.argument
 			}) : null]
 		}),
-		p ? /* @__PURE__ */ Q("span", {
-			className: H("shrink-0 type-meta", m ? "text-error-primary" : "text-[var(--f-amber-text)]"),
-			children: p
+		h ? /* @__PURE__ */ Q("span", {
+			className: H("shrink-0 type-meta", g ? "text-error-primary" : "text-[var(--f-amber-text)]"),
+			children: h
 		}) : null,
-		c.duration ? /* @__PURE__ */ Q("span", {
+		u.duration ? /* @__PURE__ */ Q("span", {
 			className: "shrink-0 type-meta tabular text-basic-muted",
-			children: c.duration
+			children: u.duration
 		}) : null,
-		f ? /* @__PURE__ */ Q(L, {
+		m ? /* @__PURE__ */ Q(L, {
 			iconName: U.Right,
 			size: 14,
 			"aria-hidden": !0,
-			className: H("shrink-0 !text-fill-basic-muted transition-transform duration-150 ease-out motion-reduce:transition-none", i && "rotate-90")
+			className: H("shrink-0 !text-fill-basic-muted transition-transform duration-150 ease-out motion-reduce:transition-none", o && "rotate-90")
 		}) : /* @__PURE__ */ Q("span", {
 			"aria-hidden": !0,
 			className: "w-3.5 shrink-0"
@@ -19084,32 +19084,34 @@ var Zy = "group/row flex w-full min-w-0 items-center gap-2.5 rounded-md px-1.5 t
 	] });
 	return /* @__PURE__ */ $("li", {
 		className: "flex min-w-0 flex-col",
-		children: [f ? /* @__PURE__ */ Q("button", {
+		children: [m ? /* @__PURE__ */ Q("button", {
 			type: "button",
-			"aria-expanded": i,
-			"aria-controls": r,
-			onClick: () => a((e) => !e),
+			"aria-expanded": o,
+			"aria-controls": i,
+			onClick: () => {
+				r && a?.set(r, !o), s(!o);
+			},
 			className: H(Zy, Qy, "hover:bg-[var(--f-wash-1)]"),
-			children: _
+			children: y
 		}) : /* @__PURE__ */ Q("div", {
 			className: Zy,
-			children: _
-		}), i ? /* @__PURE__ */ $("div", {
-			id: r,
+			children: y
+		}), o ? /* @__PURE__ */ $("div", {
+			id: i,
 			className: "flex min-w-0 flex-col items-start gap-2 pt-1 pb-3 pl-[34px]",
 			children: [
-				u ? /* @__PURE__ */ Q(Hy, { tool: u }) : null,
-				d ? /* @__PURE__ */ Q("div", {
+				f ? /* @__PURE__ */ Q(Hy, { tool: f }) : null,
+				p ? /* @__PURE__ */ Q("div", {
 					className: "reasoning-prose w-full min-w-0 text-basic-secondary",
 					children: /* @__PURE__ */ Q(Ka, {
 						streaming: t,
-						children: d
+						children: p
 					})
 				}) : null,
 				n ? /* @__PURE__ */ $("button", {
 					type: "button",
 					"aria-controls": Nh,
-					onClick: (t) => o(e.groupId, e.key, Fv(t)),
+					onClick: (t) => c(e.groupId, e.key, Fv(t)),
 					className: H("inline-flex h-7 items-center gap-1 rounded-pill px-2 -ml-2 type-meta text-basic-tertiary hover:bg-[var(--f-wash-1)] hover:text-basic-primary max-md:min-h-11", Qy),
 					children: ["Details in Insights", /* @__PURE__ */ Q(L, {
 						iconName: U.External,
@@ -19169,11 +19171,17 @@ var Zy = "group/row flex w-full min-w-0 items-center gap-2.5 rounded-md px-1.5 t
 					id: c,
 					"aria-label": "Steps",
 					className: "ml-[6px] flex min-w-0 flex-col border-l border-tertiary pl-2",
-					children: e.steps.map((e) => /* @__PURE__ */ Q(eb, {
-						step: e,
+					children: e.steps.map((r) => /* @__PURE__ */ Q(eb, {
+						step: r,
 						streaming: n,
-						interactive: a
-					}, e.key))
+						interactive: a,
+						choiceKey: JSON.stringify([
+							f,
+							t,
+							e.key,
+							r.key
+						])
+					}, r.key))
 				}), a && T ? /* @__PURE__ */ Q("div", {
 					className: "pl-[14px] pt-1",
 					children: /* @__PURE__ */ $("button", {
@@ -19192,11 +19200,17 @@ var Zy = "group/row flex w-full min-w-0 items-center gap-2.5 rounded-md px-1.5 t
 				id: c,
 				"aria-label": "Steps that need attention",
 				className: "ml-[6px] flex min-w-0 flex-col border-l border-tertiary pl-2 pt-1",
-				children: S.map((e) => /* @__PURE__ */ Q(eb, {
-					step: e,
+				children: S.map((r) => /* @__PURE__ */ Q(eb, {
+					step: r,
 					streaming: n,
-					interactive: a
-				}, e.key))
+					interactive: a,
+					choiceKey: JSON.stringify([
+						f,
+						t,
+						e.key,
+						r.key
+					])
+				}, r.key))
 			}) : null,
 			a && C.length > 0 ? /* @__PURE__ */ Q("div", {
 				className: "flex flex-col items-start gap-1 pt-2",

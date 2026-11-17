@@ -1,4 +1,4 @@
-import { memo, useId, useState } from "react";
+import { memo, use, useId, useState } from "react";
 
 import { Icon, IconName } from "@/app/atoms";
 import { ToolCallDetail } from "@/app/components/inspector/ToolCallDetail";
@@ -14,6 +14,7 @@ import { Markdown } from "@/app/lib/markdown";
 
 import { stepLabel } from "./stepLabels";
 import type { WorkStep } from "./foldLayout";
+import { FoldChoicesContext } from "./foldChoices";
 
 const ROW =
   "group/row flex w-full min-w-0 items-center gap-2.5 rounded-md px-1.5 text-left h-8 max-md:min-h-11 max-md:h-auto";
@@ -37,14 +38,17 @@ export const WorkStepRow = memo(function WorkStepRow({
   step,
   streaming,
   interactive,
+  choiceKey,
 }: {
   step: WorkStep;
   /** The turn is live, so reasoning may still be arriving. */
   streaming: boolean;
   interactive: boolean;
+  choiceKey?: string;
 }) {
   const detailId = useId();
-  const [open, setOpen] = useState(false);
+  const choices = use(FoldChoicesContext);
+  const [open, setOpen] = useState(() => (choiceKey ? (choices?.get(choiceKey) ?? false) : false));
   const { openGroup } = useInsightsNavigation();
 
   if (step.kind === "note") {
@@ -137,7 +141,10 @@ export const WorkStepRow = memo(function WorkStepRow({
           type="button"
           aria-expanded={open}
           aria-controls={detailId}
-          onClick={() => setOpen((value) => !value)}
+          onClick={() => {
+            if (choiceKey) choices?.set(choiceKey, !open);
+            setOpen(!open);
+          }}
           className={cn(ROW, FOCUS_RING, "hover:bg-[var(--f-wash-1)]")}
         >
           {content}

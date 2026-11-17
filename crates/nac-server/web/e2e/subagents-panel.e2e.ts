@@ -124,6 +124,92 @@ test("keeps the parent conversation while selecting siblings, closing and focusi
   await expect(detailedFirst).toHaveAttribute("aria-expanded", "false");
 });
 
+test("keeps a child activity choice through streaming, sibling switches and settlement", async ({
+  harness,
+  page,
+  request,
+}) => {
+  harness.provider.enqueue(
+    "sibling",
+    { token: "E2E_ACTIVITY_SIBLING" },
+    {
+      kind: "text",
+      text: "Sibling completed",
+      reasoning: "Sibling reasoning",
+    },
+  );
+  const gate = new ScriptGate();
+  harness.provider.enqueue(
+    "initial-child",
+    { token: "E2E_ACTIVITY_INITIAL" },
+    { kind: "text", text: "Initial child answer" },
+  );
+  harness.provider.enqueue(
+    "stream-child",
+    { token: "E2E_ACTIVITY_STREAM" },
+    {
+      kind: "text",
+      text: "Child answer",
+      reasoning: "Child streaming reasoning",
+      stream: true,
+    },
+    gate,
+  );
+  const parentId = await createSession(request, harness, "direct");
+  expect(
+    (
+      await startForegroundChild(request, harness, parentId, "Sibling", "E2E_ACTIVITY_SIBLING")
+    ).ok(),
+  ).toBe(true);
+  const started = await startForegroundChild(
+    request,
+    harness,
+    parentId,
+    "Streaming child",
+    "E2E_ACTIVITY_INITIAL",
+  );
+  expect(started.ok()).toBe(true);
+  const childId = ((await started.json()) as { child_session_id: string }).child_session_id;
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(`${harness.baseUrl}/#/session/${parentId}/delegated`);
+  await showSubagents(page, false);
+  const panel = page
+    .getByRole("complementary")
+    .filter({ has: page.getByRole("tablist", { name: "Session panels" }) });
+  await panel.getByRole("button", { name: "Streaming child", exact: true }).click();
+  await expect(panel.getByText("Initial child answer", { exact: true })).toBeVisible();
+  const running = request.post(`${harness.baseUrl}/sessions/${parentId}/children`, {
+    data: {
+      child_session_id: childId,
+      profile: "general",
+      prompt: "E2E_ACTIVITY_STREAM",
+      background: false,
+    },
+  });
+  try {
+    await gate.accepted;
+    const fold = panel.locator("[data-work-fold]").last();
+    const toggle = fold.getByRole("button").first();
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await toggle.click();
+    await fold.getByRole("list", { name: "Steps" }).getByRole("button").first().click();
+    await expect(panel.getByText("Child streaming reasoning", { exact: true })).toBeVisible();
+    await panel.getByRole("button", { name: "Sibling", exact: true }).click();
+    await expect(
+      panel.locator("[data-work-fold]").first().getByRole("button").first(),
+    ).toHaveAttribute("aria-expanded", "false");
+    await panel.getByRole("button", { name: "Streaming child", exact: true }).click();
+    gate.release();
+    expect((await running).ok()).toBe(true);
+    await expect(panel.getByText("Child answer", { exact: true })).toBeVisible();
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await expect(panel.getByText("Child streaming reasoning", { exact: true })).toBeVisible();
+  } finally {
+    gate.release();
+    await running.catch(() => undefined);
+  }
+});
+
 for (const [name, viewport, mobile] of [
   ["tablet", { width: 1024, height: 900 }, false],
   ["phone", { width: 390, height: 844 }, true],

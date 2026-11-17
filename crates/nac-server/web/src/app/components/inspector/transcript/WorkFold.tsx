@@ -146,6 +146,7 @@ export const WorkFoldView = memo(function WorkFoldView({
                 step={step}
                 streaming={active}
                 interactive={interactive}
+                choiceKey={JSON.stringify([sessionId, turnKey, fold.key, step.key])}
               />
             ))}
           </ol>
@@ -173,7 +174,13 @@ export const WorkFoldView = memo(function WorkFoldView({
           className="ml-[6px] flex min-w-0 flex-col border-l border-tertiary pl-2 pt-1"
         >
           {pinned.map((step) => (
-            <WorkStepRow key={step.key} step={step} streaming={active} interactive={interactive} />
+            <WorkStepRow
+              key={step.key}
+              step={step}
+              streaming={active}
+              interactive={interactive}
+              choiceKey={JSON.stringify([sessionId, turnKey, fold.key, step.key])}
+            />
           ))}
         </ol>
       ) : null}

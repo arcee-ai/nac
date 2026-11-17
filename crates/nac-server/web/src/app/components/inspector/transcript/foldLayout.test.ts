@@ -106,6 +106,19 @@ describe("work fold layout", () => {
     expect(layout[2]).toEqual(c);
   });
 
+  it("keeps the fold key when an Insights group receives its canonical prompt anchor", () => {
+    const group = (id: string): ModelTurnItem => ({
+      kind: "group",
+      id,
+      group: { id, segments: [read("read-0", "a.ts")], status: "ready", durationMs: null },
+    });
+    const live = layoutModelTurn([group("insights-leading:read-0")])[0];
+    const settled = layoutModelTurn([group("user-2:read-0")])[0];
+    expect(live.kind).toBe("fold");
+    expect(settled.kind).toBe("fold");
+    if (live.kind === "fold" && settled.kind === "fold") expect(live.key).toBe(settled.key);
+  });
+
   it("folds groups and the prose between them, keeping the answer and sessions in the open", () => {
     const group = (id: string, segment: InsightSegment): ModelTurnItem => ({
       kind: "group",
