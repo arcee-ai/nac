@@ -16,6 +16,13 @@ function script(name: string): string {
 const ready = new Function("expectedRoute", script("sessionReadyScript")) as (
   route: string,
 ) => boolean;
+// Route changes may close the palette between separate browser calls. Sample
+// dialog presence and the unchanged native readiness predicate in one turn.
+const arrivalReadiness = new Function(
+  "expectedRoute",
+  `return { hasDialog: !!document.querySelector('[role=dialog]'),
+    ready: (() => { ${script("sessionReadyScript")} })() };`,
+) as (route: string) => { hasDialog: boolean; ready: boolean };
 
 test("native auth setup settles session navigation and refreshes the real MCP cache before OAuth", async ({
   page,
@@ -82,8 +89,9 @@ test("native auth setup settles session navigation and refreshes the real MCP ca
     await expect(page).toHaveURL(new RegExp(`#/session/${session}(?:/|$)`));
     // The actor must not advance through an open dialog. Whether this
     // presentation retains that dialog on navigation is not this contract.
-    if (await palette.isVisible()) {
-      expect(await page.evaluate(ready, "")).toBe(false);
+    const arrival = await page.evaluate(arrivalReadiness, "");
+    if (arrival.hasDialog) {
+      expect(arrival.ready).toBe(false);
       await page.keyboard.press("Escape");
       await expect(palette).toHaveCount(0);
     }
