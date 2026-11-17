@@ -1187,6 +1187,7 @@ async fn unknown_refresh_client_preserves_durable_credentials() {
             |_| true,
             &auth_path,
             &lock_path,
+            crate::model::auth_store::DEFAULT_CREDENTIAL_LOCK_TIMEOUT,
             |_| Ok(ArceeAuthService::for_test(&server.base_url)),
         )
         .await
@@ -1200,6 +1201,7 @@ async fn unknown_refresh_client_preserves_durable_credentials() {
             |_| true,
             &auth_path,
             &lock_path,
+            crate::model::auth_store::DEFAULT_CREDENTIAL_LOCK_TIMEOUT,
             |_| Ok(ArceeAuthService::for_test(&server.base_url)),
         )
         .await
