@@ -166,7 +166,12 @@ pub(super) fn hard_shell_denial_inner(
         // An unknown operation can be a repository-defined alias. Preserve the
         // prior hard boundary when its arguments contain a protected verb; the
         // alias expansion cannot be classified from these tokens alone.
+        let simple_branch_creation = operation == "branch"
+            && args.len() == 1
+            && !args[0].is_empty()
+            && !args[0].starts_with('-');
         if !git_known_operation(operation)
+            && !simple_branch_creation
             && args
                 .iter()
                 .any(|arg| matches!(arg.as_str(), "clean" | "reset" | "restore" | "checkout"))

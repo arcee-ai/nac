@@ -48,6 +48,7 @@ fn git_operands_and_safe_settings_do_not_look_like_destructive_operations() {
             "env git -C repo log --grep checkout",
             "git checkout -b topic",
             "git checkout -b reset",
+            "git branch reset",
             "git -c core.quotepath=false status",
         ] {
             let resources = shell_resources(command, cwd, backend);
