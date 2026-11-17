@@ -47,7 +47,8 @@ image = "python:3.13-bookworm"  # default
 # without deleting retained bytes. Nonempty input requires a separate once-only
 # approval that displays the exact input and binds it to the terminal handle.
 # Oldest bytes roll over; reads report overflowed and the retained range.
-# Output IDs expire when the producing run ends (including error or cancel).
+# Output is process-local and bounded; retained output can survive run settlement.
+# Cleanup, eviction, or process restart can make an output ID unavailable.
 # Short commands fit in their previews and need no follow-up read.
 command_output_max_bytes = 8388608           # per command/PTY; 1..=1 GiB; default 8 MiB
 command_output_session_max_bytes = 67108864  # per session; >= per-command, <= 4 GiB; default 64 MiB
