@@ -39,6 +39,9 @@ jobs:
           APPROVAL_MERGE: ${{ inputs.merge_sha }}
           APPROVAL_IMAGE: ${{ inputs.image }}
         run: |
+          # The caller requires the workspace parent to be owned and mode 0700.
+          # A pre-existing path fails closed; the hosted runner is fresh per job.
+          mkdir -m 700 -- "$RUNNER_TEMP/nac-image-approval-private"
           python3 scripts/security/image_approval_entrypoint.py \
             "$APPROVAL_PR" "$APPROVAL_MERGE" "$APPROVAL_IMAGE" \
-            "$RUNNER_TEMP/nac-image-approval-replay"
+            "$RUNNER_TEMP/nac-image-approval-private/replay"

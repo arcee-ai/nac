@@ -106,6 +106,8 @@ class EntrypointTests(unittest.TestCase):
         self.assertNotIn("secrets.", content)
         self.assertIn("on:\n  workflow_dispatch:", content)
         self.assertNotIn("on:\n  pull_request:", content)
+        self.assertIn('mkdir -m 700 -- "$RUNNER_TEMP/nac-image-approval-private"', content)
+        self.assertIn('"$RUNNER_TEMP/nac-image-approval-private/replay"', content)
 
 
 if __name__ == "__main__":
