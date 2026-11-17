@@ -217,7 +217,7 @@ async fn switched_codex_model_replays_image_in_normal_run_and_compaction() {
         AgentMode::Direct,
     );
     agent.restore_messages(history);
-    agent.steering_dispatch_id = Some(uuid::Uuid::new_v4().to_string());
+    agent.set_current_run_id(Some(uuid::Uuid::new_v4().to_string()));
     assert_eq!(agent.send("continue").await.unwrap(), "normal");
     let before = serde_json::to_vec(&agent.messages).unwrap();
     let stored_before: Vec<Message> = writer
