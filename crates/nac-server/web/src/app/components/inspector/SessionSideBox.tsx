@@ -282,7 +282,7 @@ export function SessionSideBox({
               size={ButtonSize.Medium}
               variant={ButtonVariant.Ghost}
               content={ButtonContent.Icon}
-              aria-label={expanded ? "Exit full width" : "Expand panel"}
+              aria-label={expanded ? "Exit full width" : "Full width"}
               aria-pressed={expanded}
               onClick={toggleSidePanelExpanded}
             >

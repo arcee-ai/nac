@@ -28633,7 +28633,7 @@ function dk({ sessionId: e, snapshot: t, behavior: n, panel: r, onPanelChange: i
 						size: R.Medium,
 						variant: I.Ghost,
 						content: z.Icon,
-						"aria-label": h ? "Exit full width" : "Expand panel",
+						"aria-label": h ? "Exit full width" : "Full width",
 						"aria-pressed": h,
 						onClick: d,
 						children: /* @__PURE__ */ Q(L, { iconName: h ? U.FullScreenExit : U.FullScreen })

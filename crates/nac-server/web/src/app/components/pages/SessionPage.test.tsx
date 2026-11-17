@@ -145,7 +145,7 @@ describe("full-width session drawer", () => {
     const list = selectInDrawer();
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
 
-    fireEvent.click(screen.getByRole("button", { name: "Expand panel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Full width" }));
     const exit = screen.getByRole("button", { name: "Exit full width" });
     expect(exit.getAttribute("aria-pressed")).toBe("true");
     expect(sessionLayoutStore.getState()).toMatchObject({ expanded: true, collapsed: false });
@@ -154,7 +154,7 @@ describe("full-width session drawer", () => {
     expectSamePanel(list);
 
     fireEvent.click(exit);
-    expect(screen.getByRole("button", { name: "Expand panel" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Full width" })).toBeTruthy();
     expect(sessionLayoutStore.getState()).toMatchObject({ expanded: false, collapsed: false });
     expectSamePanel(list);
   });
@@ -164,13 +164,13 @@ describe("full-width session drawer", () => {
     sessionLayoutStore.setState({ pinned: true });
     mount();
     expect(screen.getByRole("button", { name: "Float drawer" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Expand panel" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Full width" })).toBeNull();
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("leaves full width when the session page goes away", () => {
     const { unmount } = mount();
-    fireEvent.click(screen.getByRole("button", { name: "Expand panel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Full width" }));
     expect(sessionLayoutStore.getState().expanded).toBe(true);
     unmount();
     expect(sessionLayoutStore.getState().expanded).toBe(false);

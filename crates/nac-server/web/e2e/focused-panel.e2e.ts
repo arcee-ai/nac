@@ -88,7 +88,7 @@ test("retains orchestrator Insights selection and drafts through full width and 
     .getByRole("group", { name: "Thread detail view" })
     .getByRole("button", { name: "Overview" });
   await overview.click();
-  const expand = drawer.getByRole("button", { name: "Expand panel", exact: true });
+  const expand = drawer.getByRole("button", { name: "Full width", exact: true });
   await expand.click();
   const exit = drawer.getByRole("button", { name: "Exit full width", exact: true });
   await expect(exit).toHaveAttribute("aria-pressed", "true");
@@ -159,7 +159,7 @@ for (const [name, viewport] of [
     const childDraft = drawer.getByRole("textbox", { name: "Send a message" });
     await childDraft.fill("E2E child draft kept");
 
-    const expand = drawer.getByRole("button", { name: "Expand panel", exact: true });
+    const expand = drawer.getByRole("button", { name: "Full width", exact: true });
     const exit = drawer.getByRole("button", { name: "Exit full width", exact: true });
     await expand.click();
     await expect(exit).toHaveAttribute("aria-pressed", "true");
@@ -191,7 +191,7 @@ for (const [name, viewport] of [
     await page.reload();
     await expect(page).toHaveURL(delegatedUrl);
     await showSidePanel(page, { dock: false });
-    await expect(drawer.getByRole("button", { name: "Expand panel", exact: true })).toBeVisible();
+    await expect(drawer.getByRole("button", { name: "Full width", exact: true })).toBeVisible();
     await expect(drawer.getByRole("button", { name: "Exit full width", exact: true })).toHaveCount(
       0,
     );

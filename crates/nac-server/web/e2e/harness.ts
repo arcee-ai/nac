@@ -1059,7 +1059,7 @@ export async function expandSidePanel(page: Page) {
   await showSidePanel(page);
   const float = page.getByRole("button", { name: "Float drawer", exact: true });
   if (await float.isVisible()) await float.click();
-  await page.getByRole("button", { name: "Expand panel", exact: true }).click();
+  await page.getByRole("button", { name: "Full width", exact: true }).click();
   await expect(page.getByRole("button", { name: "Exit full width", exact: true })).toBeVisible();
   await waitForPanelSettled(page.getByRole("tablist", { name: "Session panels", exact: true }));
 }
