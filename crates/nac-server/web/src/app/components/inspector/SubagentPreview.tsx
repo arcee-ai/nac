@@ -13,6 +13,7 @@ import {
 import { ModelMessage } from "@/app/components/inspector/ModelMessage";
 import { UserMessage } from "@/app/components/inspector/UserMessage";
 import { DelegatedCompletionCard } from "@/app/features/delegation/presentation/DelegatedCompletionCard";
+import { GoalContinuationCard } from "@/app/features/goals/presentation/GoalContinuationCard";
 import { ChildTranscriptScope } from "@/app/features/insights/transcript/ChildTranscriptScope";
 import { useSessionBehaviorIconVisible } from "@/app/features/ui-policy/useSessionBehaviorIconVisible";
 import { useDelegatedPreviewStream } from "@/app/hooks/useDelegatedPreviewStream";
@@ -35,7 +36,7 @@ function ignoreThread(): void {}
 function lastUserText(turns: TranscriptTurn[]): string | null {
   for (let index = turns.length - 1; index >= 0; index -= 1) {
     const turn = turns[index];
-    if (turn.kind === "delegated-completion") return null;
+    if (turn.kind === "delegated-completion" || turn.kind === "goal-continuation") return null;
     if (turn.kind === "user") return turn.text;
   }
   return null;
@@ -161,7 +162,7 @@ export function SubagentPreview({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {header ? (
-        <div className="flex h-14 shrink-0 items-center gap-2 border-b border-muted bg-elevation-ground px-4">
+        <div className="flex h-14 shrink-0 items-center gap-2 border-b border-muted px-4">
           {showBehaviorIcon ? (
             <Icon iconName={icon} size={20} className="shrink-0 text-basic-secondary" />
           ) : null}
@@ -169,7 +170,7 @@ export function SubagentPreview({
             key={sessionId}
             name={title}
             running={running}
-            className={cn("label-small min-w-0 flex-1 truncate text-left", "text-basic-primary")}
+            className={cn("header-sm min-w-0 flex-1 truncate text-left", "text-basic-primary")}
           />
           <Button
             size={ButtonSize.Small}
@@ -245,6 +246,9 @@ export function SubagentPreview({
               {turns.map((turn, index) => {
                 if (turn.kind === "delegated-completion") {
                   return <DelegatedCompletionCard key={turn.key} turn={turn} interactive={false} />;
+                }
+                if (turn.kind === "goal-continuation") {
+                  return <GoalContinuationCard key={turn.key} sessionId={sessionId} turn={turn} />;
                 }
                 if (turn.kind === "user") {
                   return (
