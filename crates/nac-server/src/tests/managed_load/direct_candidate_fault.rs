@@ -296,7 +296,7 @@ async fn private_candidate_child_read_fault_reconciles_once() {
     .unwrap();
     SqliteLoadStore.assert_integrity(&store);
     let identity = build_identity::current();
-    let evidence = serde_json::json!({"schema_version":2,"topology":"direct_sessions_with_traditional_children","mode":"private_candidate_child_read","outcome":"reconciled","source_revision":identity.source_revision,"build_id":identity.build_id,"nonce":nonce,"child_session_id":evidence_child_id,"run_id":evidence_run_id,"generation":generation,"fault_process_id":original_pid,"fault_observed":true,"pre_restart_child_status":"running","pre_restart_inbox_items":0,"terminal_receipts":1,"parent_inbox_items":1,"recovery_obligations":0,"owned_process_cleanup":"verified","probes":probes,"model_requests":requests});
+    let evidence = serde_json::json!({"schema_version":2,"topology":"direct_sessions_with_traditional_children","mode":"private_candidate_child_read","phase":"child-read","seed":DEFAULT_SEED,"outcome":"reconciled","source_revision":identity.source_revision,"build_id":identity.build_id,"nonce":nonce,"child_session_id":evidence_child_id,"run_id":evidence_run_id,"generation":generation,"fault_process_id":original_pid,"fault_observed":true,"pre_restart_child_status":"running","pre_restart_inbox_items":0,"terminal_receipts":1,"parent_inbox_items":1,"recovery_obligations":0,"owned_process_cleanup":"verified","probes":probes,"model_requests":requests});
     std::fs::remove_dir_all(root).unwrap();
     write_secret_safe_artifact(&artifact, &evidence);
 }
