@@ -9,6 +9,55 @@ use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::thread;
 
+#[tokio::test]
+async fn responses_wire_preserves_native_and_imported_mcp_schemas_without_strict_normalization() {
+    let mut definitions = crate::tools::direct_tool_definitions(false);
+    // Representative imported MCP schema: deliberately outside the strict
+    // subset, with optional fields, refs, unions and open nested properties.
+    definitions.push(ToolDefinition {
+        def_type: "function".into(),
+        function: FunctionDef {
+            name: "mcp__example__lookup".into(),
+            description: "Imported lookup".into(),
+            parameters: json!({
+                "type":"object", "required":["key"],
+                "$defs":{"key":{"oneOf":[{"type":"string"},{"type":"integer"}]}},
+                "properties":{
+                    "key":{"$ref":"#/$defs/key"},
+                    "options":{"type":"object","additionalProperties":{"type":"string"}},
+                    "page":{"anyOf":[{"type":"integer","minimum":1},{"type":"null"}],"default":null}
+                }
+            }),
+        },
+    });
+    let server = ScriptedServer::start(vec![s5_openai_response()]);
+    let client = test_model_client(
+        BackendKind::OpenAiResponses,
+        server.base_url.clone(),
+        Default::default(),
+    );
+    client
+        .send_turn(
+            vec![Message::User {
+                content: "Find tasks".into(),
+            }],
+            definitions.clone(),
+        )
+        .await
+        .unwrap();
+    let requests = server.finish();
+    assert_eq!(requests[0].path, "/responses");
+    let body: Value = serde_json::from_slice(&requests[0].body).unwrap();
+    let tools = body["tools"].as_array().unwrap();
+    assert_eq!(tools.len(), definitions.len());
+    for (wire, native) in tools.iter().zip(&definitions) {
+        assert_eq!(wire["name"], native.function.name);
+        assert_eq!(wire["description"], native.function.description);
+        assert_eq!(wire["parameters"], native.function.parameters);
+        assert_eq!(wire["strict"], false);
+    }
+}
+
 #[test]
 fn both_arcee_backends_preserve_summary_system_order_and_omit_empty_tools() {
     let messages = [

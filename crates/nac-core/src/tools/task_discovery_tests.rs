@@ -5,6 +5,9 @@ use crate::tools::{execute_tool, ToolRuntime};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+#[path = "task_discovery_contract_tests.rs"]
+mod contracts;
+
 const CALLER: &str = "caller";
 
 pub(crate) fn session(path: &Path, session_id: &str, project_id: Option<&str>, title: &str) {
