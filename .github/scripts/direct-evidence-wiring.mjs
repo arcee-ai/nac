@@ -27,7 +27,7 @@ export function reverseDirectEvidence(workflow, name) {
       name: 'Retain managed and direct load evidence', if: 'always()', uses: upload,
       with: { name: 'load-evidence-${{ needs.prepare.outputs.sha }}-${{ github.run_id }}-${{ github.run_attempt }}', path: 'target/managed-load\ntarget/direct-load\n', 'retention-days': 14, 'if-no-files-found': 'warn' },
     });
-    assert.ok(removed > steps.indexOf(lane));
+    assert.equal(removed, steps.indexOf(lane) + 1);
     lane.run = lane.run.replace('rm -rf target/managed-load target/direct-load\n', '');
     return;
   }
@@ -39,16 +39,18 @@ export function reverseDirectEvidence(workflow, name) {
     ? { name: 'Clear cached private candidate evidence', run: `rm -f ${path}` }
     : { name: 'Clear cached private candidate evidence', if: full, run: `rm -f ${path}` };
   const clearIndex = removeExact(steps, clear);
-  assert.ok(clearIndex <= steps.indexOf(fixture));
+  assert.equal(clearIndex, steps.indexOf(fixture));
   const artifact = name === 'managed-fault'
     ? { name: 'Retain private candidate fault evidence', if: 'always()', uses: upload,
         with: { name: 'private-fault-${{ inputs.source_sha }}-${{ github.run_id }}-${{ github.run_attempt }}', path, 'if-no-files-found': 'warn', 'retention-days': 14 } }
     : { name: 'Retain standalone private candidate evidence', if: `always() && (${full})`, uses: upload,
         with: { name: 'standalone-private-fault-${{ inputs.source_sha }}-${{ github.run_id }}-${{ github.run_attempt }}', path, 'if-no-files-found': 'warn', 'retention-days': 14 } };
   const artifactIndex = removeExact(steps, artifact);
-  assert.ok(artifactIndex > steps.indexOf(fixture));
   if (name === 'managed-fault') {
     const receiptIndex = steps.findIndex(step => step.id === 'receipt');
-    assert.ok(receiptIndex > steps.indexOf(fixture) && artifactIndex > receiptIndex);
+    assert.ok(receiptIndex > steps.indexOf(fixture));
+    assert.equal(artifactIndex, receiptIndex + 1);
+  } else {
+    assert.equal(artifactIndex, steps.indexOf(fixture) + 1);
   }
 }

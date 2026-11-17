@@ -44,3 +44,24 @@ test('cleanup cannot disappear or move after the fixture', () => {
     assert.throws(() => reverseDirectEvidence(value, name), name);
   }
 });
+
+test('private cleanup cannot run before cache restoration', () => {
+  for (const [name, job] of cases.slice(1)) {
+    const value = read(name);
+    const steps = value.jobs[job].steps;
+    const index = steps.findIndex(s => s.name === 'Clear cached private candidate evidence');
+    const [clear] = steps.splice(index, 1);
+    const cache = steps.findIndex(s => s.uses?.startsWith('Swatinem/rust-cache@'));
+    assert.ok(cache >= 0);
+    steps.splice(cache, 0, clear);
+    assert.throws(() => reverseDirectEvidence(value, name), name);
+  }
+});
+
+test('fault artifact cannot precede the reusable receipt', () => {
+  const value = read('managed-fault');
+  const steps = value.jobs.fault.steps;
+  const [artifact] = steps.splice(steps.findIndex(s => s.name === 'Retain private candidate fault evidence'), 1);
+  steps.splice(steps.findIndex(s => s.id === 'receipt'), 0, artifact);
+  assert.throws(() => reverseDirectEvidence(value, 'managed-fault'));
+});
