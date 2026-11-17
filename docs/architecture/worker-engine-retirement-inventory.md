@@ -26,6 +26,19 @@ any of the following:
   transcript heads. It must remain until equivalent durable inheritance is
   available, including old transcripts.
 
+The shared matches moved or renamed by this preparation are:
+
+| Before | Shared owner after preparation |
+| --- | --- |
+| `OrchestratorRunConfig`, `OrchestratorSession`, `RunState::Orchestrator`, `from_orchestrator_run_config` | `SessionRunConfig`, `RuntimeSession`, `RunState::Session`, `from_session_run_config` |
+| `worker_tool_definitions`, `worker_tool_registry`, `WORKER_TOOL_NAMES` | `coding_tool_definitions`, `native_tool_registry`, `CODING_TOOL_NAMES` |
+| DAG `partition_tool_calls`, `collect_parse_errors`, `sort_and_strip_index`, `spawn_non_thread_into` | `agent/tool_exec.rs` |
+| `ThreadCancellation` and its state | `tools/run_cancellation.rs` as `RunCancellation` |
+| `ActiveThreadRegistry` run identity, acceptance and cancellation | `tools/run_admission.rs`; worker entries remain in `WorkerDispatchRegistry` |
+| `steering_dispatch_id`, `steering_append_pending` | `current_run_id`, `prompt_commit_pending` |
+| `restrict_same_uid_inspection`, `capture_managed_native_credentials_from_environment`, `managed_exa_api_key`, `captured_managed_native_redactions`, and the native credential value | `managed_native_credentials.rs` |
+| Rendered parent prompt suffix parsing | `InheritedProjectInstructions` in `traditional_children.rs`; retained for historical transcript heads |
+
 Direct runtime constructs the shared run gate independently. It still attaches an
 inert worker registry for compatibility with current service and tool composition;
 cutover must remove that attachment and the worker-only recovery/cleanup calls.
