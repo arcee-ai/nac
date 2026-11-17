@@ -21488,7 +21488,6 @@
         "type": "object",
         "required": [
           "profile",
-          "description",
           "prompt"
         ],
         "properties": {
@@ -21502,7 +21501,11 @@
             ]
           },
           "description": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Short task label. Required when `child_session_id` is omitted or null;\ncontinuing an existing child may omit it, and a provided label must\nmatch that child's immutable label exactly."
           },
           "profile": {
             "type": "string"
