@@ -151,8 +151,22 @@ test("Swift profile digest ignores port/build/incarnation; HOME, stores and trac
   );
   const a = await f.open(),
     b = await f.open();
+  const otherStore = await PresentationStorage.open({
+    receipt: { ...f.receipt, store: path.join(f.home, "two.db") },
+    configuration: f.configuration,
+    executable,
+  });
+  const otherTrack = await PresentationStorage.open({
+    receipt: { ...f.receipt, identity: { track: "stable" } },
+    configuration: f.configuration,
+    executable,
+  });
   assert.equal(a.available, true);
   assert.equal(b.available, false);
+  assert.equal(otherStore.available, true);
+  assert.equal(otherTrack.available, true);
+  await otherStore.close();
+  await otherTrack.close();
   assert.deepEqual(await b.snapshot(), {
     available: false,
     values: { preferences: {}, drafts: {} },
