@@ -111,7 +111,7 @@ async fn successor_without_receipt(suppress_success: bool) {
                             "command:[curl][private.example]",
                         )],
                         &crate::tools::kernel::ToolCallContext::default(),
-                        &crate::tools::ThreadCancellation::default(),
+                        &crate::tools::RunCancellation::default(),
                     )
                     .await
             }

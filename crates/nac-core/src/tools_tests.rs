@@ -1,12 +1,12 @@
 use super::{
-    direct_tool_definitions, kernel, worker_tool_definitions, worker_tool_registry, ReadTool,
+    coding_tool_definitions, direct_tool_definitions, kernel, native_tool_registry, ReadTool,
 };
 use std::collections::HashSet;
 use std::sync::Arc;
 
 #[test]
 fn every_worker_receives_complete_glob_and_grep_definitions_once() {
-    let definitions = worker_tool_definitions(false);
+    let definitions = coding_tool_definitions(false);
     for name in ["glob", "grep"] {
         let matches: Vec<_> = definitions
             .iter()
@@ -105,7 +105,7 @@ async fn model_execution_cannot_invoke_a_tool_outside_its_capability_snapshot() 
 #[test]
 fn read_description_advertises_images_only_when_supported() {
     let description = |image_read| {
-        worker_tool_definitions(image_read)
+        coding_tool_definitions(image_read)
             .into_iter()
             .find(|definition| definition.function.name == "read")
             .unwrap()
@@ -118,9 +118,9 @@ fn read_description_advertises_images_only_when_supported() {
 
 #[test]
 fn worker_registry_preserves_definition_order_and_declares_admission() {
-    let registry = worker_tool_registry(false).unwrap();
+    let registry = native_tool_registry(false).unwrap();
     let snapshot = registry
-        .snapshot(super::WORKER_TOOL_NAMES)
+        .snapshot(super::CODING_TOOL_NAMES)
         .expect("complete worker capabilities");
     assert_eq!(
         snapshot
@@ -128,7 +128,7 @@ fn worker_registry_preserves_definition_order_and_declares_admission() {
             .into_iter()
             .map(|definition| definition.function.name)
             .collect::<Vec<_>>(),
-        super::WORKER_TOOL_NAMES
+        super::CODING_TOOL_NAMES
     );
     let admissions = snapshot
         .descriptors_for_test()
@@ -162,7 +162,7 @@ fn exec_binding_rewrites_authorized_paths_and_workdir_into_the_invocation() {
 
 #[test]
 fn direct_registries_preserve_exact_topology_capabilities() {
-    let worker = worker_tool_definitions(false)
+    let worker = coding_tool_definitions(false)
         .into_iter()
         .map(|definition| definition.function.name)
         .collect::<Vec<_>>();
@@ -190,7 +190,7 @@ fn direct_registries_preserve_exact_topology_capabilities() {
         );
         assert!(!worker.iter().any(|n| n == name));
     }
-    assert_eq!(worker, super::WORKER_TOOL_NAMES);
+    assert_eq!(worker, super::CODING_TOOL_NAMES);
     assert_eq!(direct, super::DIRECT_TOOL_NAMES);
     assert_eq!(delegating, super::DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES);
     let shared = direct
@@ -270,7 +270,7 @@ async fn registered_read_supports_native_and_model_boundary_calls() {
     runtime.workspace_cwd = directory.clone();
     runtime.backend = crate::sandbox::execution_backend_from_sandbox(None, &directory);
     let client = crate::model::ModelClient::new_for_test();
-    let registry = worker_tool_registry(false).unwrap();
+    let registry = native_tool_registry(false).unwrap();
     let handle = registry.native_handle::<ReadTool>().unwrap();
     let context = kernel::ToolCallContext::default();
     let services = kernel::ToolServices {
@@ -476,8 +476,8 @@ fn prepared_builtin_calls_project_validated_correlated_permission_resources() {
         runtime: &runtime,
         client: &client,
     };
-    let registry = worker_tool_registry(false).unwrap();
-    let snapshot = registry.snapshot(super::WORKER_TOOL_NAMES).unwrap();
+    let registry = native_tool_registry(false).unwrap();
+    let snapshot = registry.snapshot(super::CODING_TOOL_NAMES).unwrap();
 
     let write = snapshot
         .prepare(
@@ -657,8 +657,8 @@ async fn brokerless_worker_model_calls_still_enforce_native_hard_denials() {
         runtime: &runtime,
         client: &client,
     };
-    let registry = worker_tool_registry(false).unwrap();
-    let snapshot = registry.snapshot(super::WORKER_TOOL_NAMES).unwrap();
+    let registry = native_tool_registry(false).unwrap();
+    let snapshot = registry.snapshot(super::CODING_TOOL_NAMES).unwrap();
     let context = kernel::ToolCallContext {
         call_id: Some("call-worker-denied".to_string()),
         thread_name: Some("worker".to_string()),
@@ -692,8 +692,8 @@ async fn brokerless_worker_model_calls_still_enforce_native_hard_denials() {
 fn terminal_timeout_envelope_rejects_conflicting_yield_alias() {
     let runtime = crate::tools::test_runtime();
     let client = crate::model::ModelClient::new_for_test();
-    let registry = worker_tool_registry(false).unwrap();
-    let snapshot = registry.snapshot(super::WORKER_TOOL_NAMES).unwrap();
+    let registry = native_tool_registry(false).unwrap();
+    let snapshot = registry.snapshot(super::CODING_TOOL_NAMES).unwrap();
     let error = snapshot
         .prepare(
             "exec_command",
@@ -720,8 +720,8 @@ fn terminal_timeout_envelope_rejects_conflicting_yield_alias() {
 fn terminal_timeout_envelope_does_not_hide_a_malformed_yield_alias() {
     let runtime = crate::tools::test_runtime();
     let client = crate::model::ModelClient::new_for_test();
-    let registry = worker_tool_registry(false).unwrap();
-    let snapshot = registry.snapshot(super::WORKER_TOOL_NAMES).unwrap();
+    let registry = native_tool_registry(false).unwrap();
+    let snapshot = registry.snapshot(super::CODING_TOOL_NAMES).unwrap();
     for (name, args) in [
         (
             "exec_command",
@@ -829,8 +829,8 @@ async fn direct_terminal_input_requires_once_only_approval_for_the_exact_handle(
         runtime: &runtime,
         client: &client,
     };
-    let registry = worker_tool_registry(false).unwrap();
-    let snapshot = registry.snapshot(super::WORKER_TOOL_NAMES).unwrap();
+    let registry = native_tool_registry(false).unwrap();
+    let snapshot = registry.snapshot(super::CODING_TOOL_NAMES).unwrap();
     let context = kernel::ToolCallContext {
         call_id: Some("call-terminal-input".to_string()),
         thread_name: None,
@@ -911,8 +911,8 @@ async fn brokerless_opaque_redirect_cannot_mutate_git_through_a_symlink() {
         runtime: &runtime,
         client: &client,
     };
-    let registry = worker_tool_registry(false).unwrap();
-    let snapshot = registry.snapshot(super::WORKER_TOOL_NAMES).unwrap();
+    let registry = native_tool_registry(false).unwrap();
+    let snapshot = registry.snapshot(super::CODING_TOOL_NAMES).unwrap();
     let result = snapshot
         .invoke(
             "exec_command",
@@ -948,9 +948,9 @@ async fn brokerless_direct_shell_path_fails_before_process_side_effects() {
         runtime: &runtime,
         client: &client,
     };
-    let registry = worker_tool_registry(false).unwrap();
+    let registry = native_tool_registry(false).unwrap();
     let result = registry
-        .snapshot(super::WORKER_TOOL_NAMES)
+        .snapshot(super::CODING_TOOL_NAMES)
         .unwrap()
         .invoke(
             "exec_command",

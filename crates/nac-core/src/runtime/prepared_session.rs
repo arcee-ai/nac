@@ -3,7 +3,7 @@ use super::*;
 
 #[must_use = "fresh runtime resources need a creation commit or rollback"]
 pub struct PreparedSessionRunConfig {
-    run_config: OrchestratorRunConfig,
+    run_config: SessionRunConfig,
     resources: PreparedSessionResources,
 }
 
@@ -18,7 +18,7 @@ pub struct PreparedSessionResources {
 
 impl PreparedSessionRunConfig {
     pub(super) fn new(
-        run_config: OrchestratorRunConfig,
+        run_config: SessionRunConfig,
         worktree: crate::sandbox::session_worktree::RollbackGuard,
     ) -> Self {
         let sandbox = run_config.agent.sandbox_session();
@@ -28,7 +28,7 @@ impl PreparedSessionRunConfig {
         }
     }
 
-    pub fn run_config_mut(&mut self) -> &mut OrchestratorRunConfig {
+    pub fn run_config_mut(&mut self) -> &mut SessionRunConfig {
         &mut self.run_config
     }
 
@@ -36,12 +36,12 @@ impl PreparedSessionRunConfig {
     /// before publication, while resources still have rollback ownership.
     pub fn snapshot(&self) -> Option<&sessions::SessionSnapshot> {
         match &self.run_config.session {
-            OrchestratorSession::Active { snapshot, .. } => Some(snapshot),
-            OrchestratorSession::Picker { .. } => None,
+            RuntimeSession::Active { snapshot, .. } => Some(snapshot),
+            RuntimeSession::Picker { .. } => None,
         }
     }
 
-    pub fn into_parts(self) -> (OrchestratorRunConfig, PreparedSessionResources) {
+    pub fn into_parts(self) -> (SessionRunConfig, PreparedSessionResources) {
         (self.run_config, self.resources)
     }
 
@@ -49,15 +49,15 @@ impl PreparedSessionRunConfig {
         self.resources.rollback().await
     }
 
-    pub(super) async fn persist(self) -> Result<OrchestratorRunConfig> {
+    pub(super) async fn persist(self) -> Result<SessionRunConfig> {
         let (run_config, resources) = self.into_parts();
         let result = match &run_config.session {
-            OrchestratorSession::Active {
+            RuntimeSession::Active {
                 snapshot,
                 store_path,
                 ..
             } => sessions::create_session(store_path, snapshot),
-            OrchestratorSession::Picker { .. } => {
+            RuntimeSession::Picker { .. } => {
                 unreachable!("fresh construction creates a session")
             }
         };

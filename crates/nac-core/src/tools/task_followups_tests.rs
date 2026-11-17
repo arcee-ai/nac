@@ -68,7 +68,7 @@ fn followup_capability_surface_is_plain_direct_only() {
     let dwo = names(crate::tools::direct_with_orchestrator_tool_definitions(
         false,
     ));
-    let child = names(crate::tools::worker_tool_definitions(false));
+    let child = names(crate::tools::coding_tool_definitions(false));
     for name in ["send_task_followup", "read_task_followup"] {
         assert!(direct.iter().any(|value| value == name));
         assert!(!dwo.iter().any(|value| value == name));

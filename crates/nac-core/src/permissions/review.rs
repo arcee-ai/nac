@@ -697,7 +697,7 @@ pub fn retry_authorization_message(review: &PermissionReview) -> String {
 /// A successor receives a new capability; old futures cannot adopt it.
 #[derive(Clone, Default)]
 pub(crate) struct ReviewRunPermit {
-    wake: crate::tools::ThreadCancellation,
+    wake: crate::tools::RunCancellation,
     grants: Arc<crate::store::PermissionGrantCommitFence>,
 }
 

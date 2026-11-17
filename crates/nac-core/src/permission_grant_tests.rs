@@ -35,7 +35,7 @@ async fn claimed_always_reply_wins_over_later_cancellation() {
     let bus = crate::events::SessionEventBus::new(Some("session-a".to_string()));
     let _interactive = bus.subscribe_assistant_deltas();
     broker.attach_event_bus(bus);
-    let cancellation = crate::tools::ThreadCancellation::default();
+    let cancellation = crate::tools::RunCancellation::default();
     let resources = vec![
         PermissionResource::new("execute", "command:[curl][example.com]")
             .with_save_resource("command:[curl][example.com]*"),
@@ -102,7 +102,7 @@ async fn abort_after_reply_claim_rolls_back_blocked_always_grant() {
                             .with_save_resource("command:[curl]*"),
                     ],
                     &crate::tools::kernel::ToolCallContext::default(),
-                    &crate::tools::ThreadCancellation::default(),
+                    &crate::tools::RunCancellation::default(),
                 )
                 .await
         })
@@ -139,7 +139,7 @@ async fn always_saves_harness_candidate_and_authorizes_headless_retry() {
                     "exec_command",
                     &[resource],
                     &crate::tools::kernel::ToolCallContext::default(),
-                    &crate::tools::ThreadCancellation::default(),
+                    &crate::tools::RunCancellation::default(),
                 )
                 .await
         })
@@ -155,7 +155,7 @@ async fn always_saves_harness_candidate_and_authorizes_headless_retry() {
                 "exec_command",
                 &[resource],
                 &crate::tools::kernel::ToolCallContext::default(),
-                &crate::tools::ThreadCancellation::default(),
+                &crate::tools::RunCancellation::default(),
             )
             .await,
         AuthorizationOutcome::Allowed

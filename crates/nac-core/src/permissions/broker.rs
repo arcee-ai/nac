@@ -403,7 +403,7 @@ impl PermissionBroker {
         tool: &str,
         resources: &[PermissionResource],
         context: &crate::tools::kernel::ToolCallContext,
-        cancellation: &crate::tools::ThreadCancellation,
+        cancellation: &crate::tools::RunCancellation,
     ) -> AuthorizationOutcome {
         self.authorize_invocation(tool, resources, context, cancellation, false, false)
             .await
@@ -416,7 +416,7 @@ impl PermissionBroker {
         self: &Arc<Self>,
         resources: &[PermissionResource],
         context: &crate::tools::kernel::ToolCallContext,
-        cancellation: &crate::tools::ThreadCancellation,
+        cancellation: &crate::tools::RunCancellation,
     ) -> AuthorizationOutcome {
         self.authorize_invocation("task_goal", resources, context, cancellation, false, true)
             .await
@@ -426,7 +426,7 @@ impl PermissionBroker {
         self: &Arc<Self>,
         resources: &[PermissionResource],
         context: &crate::tools::kernel::ToolCallContext,
-        cancellation: &crate::tools::ThreadCancellation,
+        cancellation: &crate::tools::RunCancellation,
         _submission: &crate::session_service::SubmittedShell,
     ) -> AuthorizationOutcome {
         self.authorize_invocation(
@@ -444,7 +444,7 @@ impl PermissionBroker {
         self: &Arc<Self>,
         resources: &[PermissionResource],
         context: &crate::tools::kernel::ToolCallContext,
-        cancellation: &crate::tools::ThreadCancellation,
+        cancellation: &crate::tools::RunCancellation,
         _submission: &crate::session_service::SubmittedUserTerminal,
     ) -> AuthorizationOutcome {
         self.authorize_invocation(
@@ -462,7 +462,7 @@ impl PermissionBroker {
         self: &Arc<Self>,
         resources: &[PermissionResource],
         context: &crate::tools::kernel::ToolCallContext,
-        cancellation: &crate::tools::ThreadCancellation,
+        cancellation: &crate::tools::RunCancellation,
         _submission: &crate::session_service::SubmittedHeartbeat,
     ) -> AuthorizationOutcome {
         self.authorize_invocation(
@@ -523,7 +523,7 @@ impl PermissionBroker {
         tool: &str,
         resources: &[PermissionResource],
         context: &crate::tools::kernel::ToolCallContext,
-        cancellation: &crate::tools::ThreadCancellation,
+        cancellation: &crate::tools::RunCancellation,
         human_submitted: bool,
         explicit_human: bool,
     ) -> AuthorizationOutcome {

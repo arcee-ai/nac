@@ -2,7 +2,7 @@
 //! fails closed once no client remains.
 use super::*;
 use crate::events::SessionEventBus;
-use crate::tools::{kernel::ToolCallContext, ThreadCancellation};
+use crate::tools::{kernel::ToolCallContext, RunCancellation};
 
 fn ask(broker: &Arc<PermissionBroker>) -> tokio::task::JoinHandle<AuthorizationOutcome> {
     let broker = Arc::clone(broker);
@@ -15,7 +15,7 @@ fn ask(broker: &Arc<PermissionBroker>) -> tokio::task::JoinHandle<AuthorizationO
                     "command:[curl][example.com]",
                 )],
                 &ToolCallContext::default(),
-                &ThreadCancellation::default(),
+                &RunCancellation::default(),
             )
             .await
     })

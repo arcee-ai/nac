@@ -79,7 +79,7 @@ impl ApprovalFixture {
                     "read",
                     &[PermissionResource::new("read", resource)],
                     &ToolCallContext::default(),
-                    &crate::tools::ThreadCancellation::default(),
+                    &crate::tools::RunCancellation::default(),
                 )
                 .await
         }));

@@ -132,7 +132,7 @@ async fn search_uses_exa_shape_bounds_results_and_never_returns_the_key() {
         },
         &key,
         endpoint(&server, "search"),
-        &ThreadCancellation::default(),
+        &RunCancellation::default(),
     )
     .await
     .unwrap();
@@ -181,7 +181,7 @@ async fn fetch_uses_exa_contents_and_bounds_decoded_content() {
         },
         &credential(),
         endpoint(&server, "contents"),
-        &ThreadCancellation::default(),
+        &RunCancellation::default(),
     )
     .await
     .unwrap();
@@ -204,7 +204,7 @@ async fn retry_backoff_is_cancellable_and_does_not_start_another_request() {
         "500 Internal Server Error",
         r#"{"message":"retry"}"#,
     )]);
-    let cancellation = ThreadCancellation::default();
+    let cancellation = RunCancellation::default();
     let cancel = cancellation.clone();
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_millis(40)).await;
@@ -234,7 +234,7 @@ async fn cross_origin_provider_redirect_never_receives_the_credential() {
         endpoint(&redirect, "search"),
         json!({"query":"redirect"}),
         &credential(),
-        &ThreadCancellation::default(),
+        &RunCancellation::default(),
     )
     .await
     .unwrap_err();
@@ -254,7 +254,7 @@ async fn provider_errors_and_oversized_bodies_are_bounded_and_redacted() {
         endpoint(&auth_error, "search"),
         json!({"query":"error"}),
         &key,
-        &ThreadCancellation::default(),
+        &RunCancellation::default(),
     )
     .await
     .unwrap_err();
@@ -271,7 +271,7 @@ async fn provider_errors_and_oversized_bodies_are_bounded_and_redacted() {
         endpoint(&oversized, "search"),
         json!({"query":"large"}),
         &key,
-        &ThreadCancellation::default(),
+        &RunCancellation::default(),
     )
     .await
     .unwrap_err();

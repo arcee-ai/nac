@@ -841,7 +841,7 @@ impl SessionManager {
 
     fn attach_managed_command_environment(
         &self,
-        run_config: &mut runtime::OrchestratorRunConfig,
+        run_config: &mut runtime::SessionRunConfig,
     ) -> Result<()> {
         let Some(managed) = self.inner.managed_host.as_ref() else {
             run_config.set_command_environment_provider(None);

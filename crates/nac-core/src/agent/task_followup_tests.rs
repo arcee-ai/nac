@@ -98,7 +98,7 @@ async fn native_agent_followup_lost_tool_ack_replay_and_passive_receipt_deliver_
     .unwrap();
     drop(conn);
     coordinator.configure_permission_broker(0);
-    coordinator.set_steering_dispatch_id(Some(uuid::Uuid::new_v4().to_string()));
+    coordinator.set_current_run_id(Some(uuid::Uuid::new_v4().to_string()));
     assert_eq!(coordinator.send("Send this authorized guidance to target, retry with the same key after a lost acknowledgement, then inspect its receipt.").await.unwrap(),"coordinator done");
     tokio::time::timeout(Duration::from_secs(5), async {
         while target.service.has_active_operation() {

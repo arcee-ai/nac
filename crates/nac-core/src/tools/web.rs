@@ -19,7 +19,7 @@ use sha2::{Digest, Sha256};
 use crate::tools::kernel::{
     NativeTool, PermissionResource, ToolAdmission, ToolCallContext, ToolServices, ToolTimeout,
 };
-use crate::tools::{ThreadCancellation, ToolResult};
+use crate::tools::{RunCancellation, ToolResult};
 use crate::types::{FunctionDef, ToolDefinition};
 
 const EXA_API_BASE: &str = "https://api.exa.ai/";
@@ -451,7 +451,7 @@ async fn execute_search(
     input: WebSearchInput,
     credential: &ExaCredential,
     endpoint: Url,
-    cancellation: &ThreadCancellation,
+    cancellation: &RunCancellation,
 ) -> Result<WebSearchOutput> {
     let body = json!({
         "query": input.query,
@@ -514,7 +514,7 @@ async fn execute_fetch(
     input: WebFetchInput,
     credential: &ExaCredential,
     endpoint: Url,
-    cancellation: &ThreadCancellation,
+    cancellation: &RunCancellation,
 ) -> Result<WebFetchOutput> {
     let requested_url = input.target.to_string();
     let provider_char_limit = u32::try_from(input.max_chars)
@@ -565,7 +565,7 @@ async fn request_json<T: serde::de::DeserializeOwned>(
     endpoint: Url,
     body: Value,
     credential: &ExaCredential,
-    cancellation: &ThreadCancellation,
+    cancellation: &RunCancellation,
 ) -> Result<T> {
     let origin = provider_origin(&endpoint)?;
     let redirect_origin = origin.clone();
@@ -643,7 +643,7 @@ async fn request_json<T: serde::de::DeserializeOwned>(
 
 async fn read_bounded_body(
     response: reqwest::Response,
-    cancellation: &ThreadCancellation,
+    cancellation: &RunCancellation,
 ) -> Result<Vec<u8>> {
     let mut stream = response.bytes_stream();
     let mut bytes = Vec::new();

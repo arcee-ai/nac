@@ -79,7 +79,7 @@ async fn direct_primary_uses_the_direct_compaction_prompt() {
         EventSink::none(),
         AgentMode::Direct,
     );
-    agent.set_steering_dispatch_id(Some("run".to_string()));
+    agent.set_current_run_id(Some("run".to_string()));
     agent.messages = compactable_messages().into();
     store_agent_snapshot(&store_path, &agent);
 
@@ -132,7 +132,7 @@ async fn threshold_not_reached_sends_one_ordinary_canonical_request() {
             threshold,
             EventSink::channel(events_tx),
         );
-        agent.set_steering_dispatch_id(Some("run".to_string()));
+        agent.set_current_run_id(Some("run".to_string()));
         agent.messages = compactable_messages().into();
         store_agent_snapshot(&store_path, &agent);
 
@@ -192,7 +192,7 @@ async fn rejected_summary_accounts_cost_and_falls_back_to_canonical_request() {
         Some(1),
         EventSink::channel(events_tx),
     );
-    agent.set_steering_dispatch_id(Some("run".to_string()));
+    agent.set_current_run_id(Some("run".to_string()));
     agent.messages = vec![
         Message::System {
             content: "system".to_string(),
@@ -319,7 +319,7 @@ async fn complete_tool_result_batch_reenters_threshold_hook_before_next_ordinary
         Some(400),
         EventSink::none(),
     );
-    agent.set_steering_dispatch_id(Some("run".to_string()));
+    agent.set_current_run_id(Some("run".to_string()));
     agent.messages = vec![
         Message::System {
             content: "system".to_string(),
@@ -419,7 +419,7 @@ async fn one_user_automatic_compaction_uses_end_boundary() {
         Some(1),
         EventSink::channel(events_tx),
     );
-    agent.set_steering_dispatch_id(Some("run".to_string()));
+    agent.set_current_run_id(Some("run".to_string()));
     store_agent_snapshot(&store_path, &agent);
 
     assert_eq!(agent.send("only user").await.unwrap(), "ordinary");
@@ -516,7 +516,7 @@ async fn automatic_summary_request_failure_emits_failed_and_falls_back_to_ordina
         Some(1),
         EventSink::channel(events_tx),
     );
-    agent.set_steering_dispatch_id(Some("run".to_string()));
+    agent.set_current_run_id(Some("run".to_string()));
     agent.messages = compactable_messages().into();
     store_agent_snapshot(&store_path, &agent);
 
@@ -614,7 +614,7 @@ async fn failed_summary_attempt_retries_at_the_next_tool_hook_without_dedup() {
         Some(1),
         EventSink::channel(events_tx),
     );
-    agent.set_steering_dispatch_id(Some("run".to_string()));
+    agent.set_current_run_id(Some("run".to_string()));
     agent.messages = compactable_messages().into();
     store_agent_snapshot(&store_path, &agent);
 

@@ -1,4 +1,192 @@
+use super::dag::ParsedThreadDispatch;
 use super::*;
+use crate::tools::thread;
+use futures_util::FutureExt;
+use std::panic::AssertUnwindSafe;
+use tokio::task::JoinSet;
+
+/// Partition a batch of tool calls into:
+///
+/// 1. `Vec<ParsedThreadDispatch>` — successfully parsed `thread` calls
+/// 2. `Vec<(usize, String, String, String)>` — non-thread calls as
+///    `(original_index, tool_call_id, tool_name, args_str)`
+/// 3. `Vec<(usize, String, String, ToolResult)>` — parse errors for malformed
+///    thread calls as `(original_index, tool_call_id, args_str, error_result)`
+#[expect(
+    clippy::type_complexity,
+    reason = "the tuple preserves the three semantic partitions without a public wrapper type"
+)]
+pub(crate) fn partition_tool_calls(
+    tool_calls: Vec<ToolCall>,
+    runtime: &ToolRuntime,
+) -> (
+    Vec<ParsedThreadDispatch>,
+    Vec<(usize, String, String, String)>,
+    Vec<(usize, String, String, ToolResult)>,
+) {
+    let mut thread_dispatches = Vec::new();
+    let mut other_calls = Vec::new();
+    let mut parse_errors = Vec::new();
+
+    for (index, tool_call) in tool_calls.into_iter().enumerate() {
+        let id = tool_call.id;
+        let name = tool_call.function.name;
+        let args_str = tool_call.function.arguments;
+
+        if name == "thread" && runtime.allows_tool("thread") {
+            let args: serde_json::Value = match serde_json::from_str(&args_str) {
+                Ok(value) => value,
+                Err(error) => {
+                    parse_errors.push((
+                        index,
+                        id,
+                        args_str,
+                        ToolResult {
+                            content: (format!(
+                                "Error: failed to parse tool arguments for '{name}': {error}"
+                            ))
+                            .into(),
+                            is_error: true,
+                            execution_duration_ms: None,
+                            execution_duration_excludes_authorization: false,
+                        },
+                    ));
+                    continue;
+                }
+            };
+
+            match thread::parse_dispatch_args(&args, runtime) {
+                Ok(params) => {
+                    thread_dispatches.push(ParsedThreadDispatch {
+                        original_index: index,
+                        tool_call_id: id,
+                        args_str,
+                        params,
+                    });
+                }
+                Err(error_result) => {
+                    parse_errors.push((index, id, args_str, error_result));
+                }
+            }
+        } else {
+            other_calls.push((index, id, name, args_str));
+        }
+    }
+
+    (thread_dispatches, other_calls, parse_errors)
+}
+
+/// Emit `ToolCallStarted` + `ToolCallFinished` for each parse error and return
+/// them as `(original_index, tool_call_id, tool_name, result)` tuples.
+pub(crate) async fn collect_parse_errors(
+    parse_errors: Vec<(usize, String, String, ToolResult)>,
+    event_sink: &EventSink,
+    thread_name: &Option<String>,
+) -> Vec<(usize, String, String, ToolResult)> {
+    let mut results = Vec::new();
+    for (index, tool_call_id, args_str, error_result) in parse_errors {
+        event_sink
+            .emit_async(AgentEvent::ToolCallStarted {
+                thread_name: thread_name.clone(),
+                call_id: tool_call_id.clone(),
+                name: "thread".to_string(),
+                args_preview: preview_tool_args("thread", &args_str),
+                key_arg_preview: None,
+                args_detail: Some(tool_args_detail(&args_str)),
+            })
+            .await;
+        event_sink
+            .emit_async(AgentEvent::tool_call_finished(
+                thread_name.clone(),
+                tool_call_id.clone(),
+                "thread".to_string(),
+                &error_result,
+            ))
+            .await;
+        results.push((index, tool_call_id, "thread".to_string(), error_result));
+    }
+    results
+}
+
+/// Sort results by original index, strip the index, and return as
+/// `Vec<(tool_call_id, tool_name, ToolResult)>`.
+pub(crate) fn sort_and_strip_index(
+    mut results: Vec<(usize, String, String, ToolResult)>,
+) -> Vec<(String, String, ToolResult)> {
+    results.sort_by_key(|(index, ..)| *index);
+    results
+        .into_iter()
+        .map(|(_, tool_call_id, tool_name, result)| (tool_call_id, tool_name, result))
+        .collect()
+}
+
+/// Spawn non-thread tool calls into a `JoinSet`, emitting `ToolCallStarted`
+/// for each.  Each spawned task returns
+/// `(original_index, None, tool_call_id, tool_name, result)`.
+pub(crate) async fn spawn_non_thread_into(
+    join_set: &mut JoinSet<(usize, Option<usize>, String, String, ToolResult)>,
+    other_calls: Vec<(usize, String, String, String)>,
+    runtime: &ToolRuntime,
+    client: &ModelClient,
+    event_sink: &EventSink,
+    thread_name: &Option<String>,
+) {
+    for (index, tool_call_id, tool_name, args_str) in other_calls {
+        let runtime = runtime.clone();
+        let client = client.clone();
+        event_sink
+            .emit_async(AgentEvent::ToolCallStarted {
+                thread_name: thread_name.clone(),
+                call_id: tool_call_id.clone(),
+                name: tool_name.clone(),
+                args_preview: preview_tool_args(&tool_name, &args_str),
+                key_arg_preview: None,
+                args_detail: Some(tool_args_detail(&args_str)),
+            })
+            .await;
+        let call_context = tools::kernel::ToolCallContext {
+            call_id: Some(tool_call_id.clone()),
+            thread_name: thread_name.clone(),
+            ..Default::default()
+        };
+
+        join_set.spawn(async move {
+            let parsed_args = match serde_json::from_str::<serde_json::Value>(&args_str) {
+                Ok(value) => value,
+                Err(error) => {
+                    return (
+                        index,
+                        None,
+                        tool_call_id,
+                        tool_name.clone(),
+                        ToolResult {
+                            content: (format!(
+                                "Error: failed to parse tool arguments for '{tool_name}': {error}"
+                            ))
+                            .into(),
+                            is_error: true,
+                            execution_duration_ms: None,
+                            execution_duration_excludes_authorization: false,
+                        },
+                    );
+                }
+            };
+            let result = AssertUnwindSafe(tools::execute_tool_with_context(
+                &tool_name,
+                parsed_args,
+                &runtime,
+                &client,
+                &call_context,
+            ))
+            .catch_unwind()
+            .await
+            .unwrap_or_else(|_| {
+                ToolResult::text(format!("Error: tool '{tool_name}' panicked"), true)
+            });
+            (index, None, tool_call_id, tool_name, result)
+        });
+    }
+}
 
 pub(super) async fn execute_tools_parallel(
     tool_calls: Vec<ToolCall>,
@@ -10,8 +198,7 @@ pub(super) async fn execute_tools_parallel(
 ) -> Vec<(String, String, ToolResult)> {
     // 1. Partition tool calls into thread dispatches, non-thread calls, and
     //    parse errors.
-    let (thread_dispatches, other_calls, parse_errors) =
-        dag::partition_tool_calls(tool_calls, &runtime);
+    let (thread_dispatches, other_calls, parse_errors) = partition_tool_calls(tool_calls, &runtime);
 
     if admission_controlled && thread_dispatches.is_empty() {
         return execute_admission_controlled(
@@ -157,7 +344,7 @@ async fn execute_admission_controlled(
     event_sink: EventSink,
     thread_name: Option<String>,
 ) -> Vec<(String, String, ToolResult)> {
-    let mut all_results = dag::collect_parse_errors(parse_errors, &event_sink, &thread_name).await;
+    let mut all_results = collect_parse_errors(parse_errors, &event_sink, &thread_name).await;
     // Consecutive read/discovery calls may overlap. Every exclusive call is a
     // barrier for all earlier and later calls, preserving model response order
     // while preventing shell and mutation overlap.
@@ -166,7 +353,7 @@ async fn execute_admission_controlled(
             spawn_and_collect_non_thread(group, &runtime, &client, &event_sink, &thread_name).await,
         );
     }
-    dag::sort_and_strip_index(all_results)
+    sort_and_strip_index(all_results)
 }
 
 /// Execute a batch of non-thread tool calls, emitting start/finish events for
@@ -181,7 +368,7 @@ async fn spawn_and_collect_non_thread(
 ) -> Vec<(usize, String, String, ToolResult)> {
     let mut join_set: JoinSet<(usize, Option<usize>, String, String, ToolResult)> = JoinSet::new();
 
-    dag::spawn_non_thread_into(
+    spawn_non_thread_into(
         &mut join_set,
         other_calls,
         runtime,
@@ -239,7 +426,7 @@ async fn execute_simple(
     let mut all_results: Vec<(usize, String, String, ToolResult)> = Vec::new();
 
     // Collect parse errors immediately (emit start + finish events for each).
-    all_results.extend(dag::collect_parse_errors(parse_errors, &event_sink, &thread_name).await);
+    all_results.extend(collect_parse_errors(parse_errors, &event_sink, &thread_name).await);
 
     // Execute non-thread calls.
     let non_thread_results =
@@ -247,7 +434,7 @@ async fn execute_simple(
             .await;
     all_results.extend(non_thread_results);
 
-    dag::sort_and_strip_index(all_results)
+    sort_and_strip_index(all_results)
 }
 
 /// Fallback when DAG construction fails (cycle or duplicate thread names).
@@ -272,7 +459,7 @@ async fn execute_with_dag_error(
     let mut all_results: Vec<(usize, String, String, ToolResult)> = Vec::new();
 
     // Collect parse errors immediately.
-    all_results.extend(dag::collect_parse_errors(parse_errors, &event_sink, &thread_name).await);
+    all_results.extend(collect_parse_errors(parse_errors, &event_sink, &thread_name).await);
 
     // Produce error ToolResults for all thread dispatches.
     let error_message = match &dag_err {
@@ -323,381 +510,9 @@ async fn execute_with_dag_error(
             .await;
     all_results.extend(non_thread_results);
 
-    dag::sort_and_strip_index(all_results)
+    sort_and_strip_index(all_results)
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::tools::test_runtime;
-    use crate::types::FunctionCall;
-    use serde_json::json;
-
-    // ------------------------------------------------------------------
-    // Test helpers
-    // ------------------------------------------------------------------
-
-    fn make_tool_call(id: &str, name: &str, args: serde_json::Value) -> ToolCall {
-        ToolCall {
-            id: id.to_string(),
-            call_type: "function".to_string(),
-            function: FunctionCall {
-                name: name.to_string(),
-                arguments: serde_json::to_string(&args).unwrap(),
-            },
-        }
-    }
-
-    fn indexed(index: usize, name: &str) -> IndexedToolCall {
-        (
-            index,
-            format!("call-{index}"),
-            name.to_string(),
-            "{}".to_string(),
-        )
-    }
-
-    #[test]
-    fn direct_admission_groups_reads_and_barriers_mutations_shell_and_unknowns() {
-        let groups = admission_groups(vec![
-            indexed(0, "read"),
-            indexed(1, "grep"),
-            indexed(2, "write"),
-            indexed(3, "glob"),
-            indexed(4, "exec_command"),
-            indexed(5, "future_tool"),
-            indexed(6, "read_command_output"),
-        ]);
-        let names = groups
-            .iter()
-            .map(|group| group.iter().map(|call| call.2.as_str()).collect::<Vec<_>>())
-            .collect::<Vec<_>>();
-        assert_eq!(
-            names,
-            vec![
-                vec!["read", "grep"],
-                vec!["write"],
-                vec!["glob"],
-                vec!["exec_command"],
-                vec!["future_tool"],
-                vec!["read_command_output"],
-            ]
-        );
-    }
-
-    #[tokio::test]
-    async fn timed_out_exclusive_call_releases_the_following_admission_group() {
-        let root = std::env::temp_dir().join(format!(
-            "nac-tool-deadline-admission-{}",
-            uuid::Uuid::new_v4()
-        ));
-        std::fs::create_dir_all(&root).unwrap();
-        std::fs::write(root.join("ready.txt"), "ready").unwrap();
-        let mut runtime = test_runtime();
-        runtime.workspace_cwd = root.clone();
-        runtime.backend = crate::sandbox::execution_backend_from_sandbox(None, &root);
-        let results = execute_tools_parallel(
-            vec![
-                make_tool_call(
-                    "slow",
-                    "exec_command",
-                    json!({"cmd":"sleep 30","_nac":{"timeout_ms":10}}),
-                ),
-                make_tool_call("fast", "read", json!({"path":"ready.txt"})),
-            ],
-            runtime,
-            ModelClient::new_for_test(),
-            EventSink::none(),
-            None,
-            true,
-        )
-        .await;
-
-        assert_eq!(results.len(), 2);
-        assert!(
-            results[0].2.content.to_string().contains("timed_out"),
-            "{}",
-            results[0].2.content
-        );
-        assert!(!results[1].2.is_error, "{}", results[1].2.content);
-        let _ = std::fs::remove_dir_all(root);
-    }
-
-    // ------------------------------------------------------------------
-    // Integration tests
-    // ------------------------------------------------------------------
-
-    /// When there are no thread calls, the simple path executes non-thread
-    /// tools and returns results sorted by original index.
-    #[tokio::test]
-    async fn test_simple_path_no_thread_calls() {
-        let tool_calls = vec![
-            make_tool_call("call_0", "nonexistent_tool", json!({})),
-            make_tool_call("call_1", "nonexistent_tool", json!({})),
-        ];
-
-        let runtime = test_runtime();
-        let client = ModelClient::new_for_test();
-        let event_sink = EventSink::none();
-
-        let results =
-            execute_tools_parallel(tool_calls, runtime, client, event_sink, None, false).await;
-
-        assert_eq!(results.len(), 2);
-        // Results should be sorted by original index.
-        assert_eq!(results[0].0, "call_0");
-        assert_eq!(results[1].0, "call_1");
-        // Unknown tool → error result.
-        assert!(results[0].2.is_error);
-        assert!(results[1].2.is_error);
-    }
-
-    /// Results from a mix of thread and non-thread calls should come back
-    /// sorted by original index, even when the DAG fails (cycle path).
-    #[tokio::test]
-    async fn test_results_sorted_by_original_index() {
-        // Thread calls with a cycle at indices 1 and 3, non-thread at 0 and 2.
-        let tool_calls = vec![
-            make_tool_call("call_0", "nonexistent_tool", json!({})),
-            make_tool_call(
-                "call_1",
-                "thread",
-                json!({"name": "A", "action": "work", "threads": ["B"]}),
-            ),
-            make_tool_call("call_2", "nonexistent_tool", json!({})),
-            make_tool_call(
-                "call_3",
-                "thread",
-                json!({"name": "B", "action": "work", "threads": ["A"]}),
-            ),
-        ];
-
-        let runtime = test_runtime();
-        let client = ModelClient::new_for_test();
-        let event_sink = EventSink::none();
-
-        let results =
-            execute_tools_parallel(tool_calls, runtime, client, event_sink, None, false).await;
-
-        assert_eq!(results.len(), 4);
-        // Sorted by original index.
-        assert_eq!(results[0].0, "call_0");
-        assert_eq!(results[1].0, "call_1");
-        assert_eq!(results[2].0, "call_2");
-        assert_eq!(results[3].0, "call_3");
-    }
-
-    /// When DAG construction fails due to a cycle, all thread calls should
-    /// receive error results describing the cycle, while non-thread tools
-    /// still execute normally.
-    #[tokio::test]
-    async fn test_dag_error_returns_errors_for_all_thread_calls() {
-        // A → B, B → A (cycle)
-        let tool_calls = vec![
-            make_tool_call(
-                "call_0",
-                "thread",
-                json!({"name": "A", "action": "work", "threads": ["B"]}),
-            ),
-            make_tool_call(
-                "call_1",
-                "thread",
-                json!({"name": "B", "action": "work", "threads": ["A"]}),
-            ),
-            make_tool_call("call_2", "nonexistent_tool", json!({})),
-        ];
-
-        let runtime = test_runtime();
-        let client = ModelClient::new_for_test();
-        let event_sink = EventSink::none();
-
-        let results =
-            execute_tools_parallel(tool_calls, runtime, client, event_sink, None, false).await;
-
-        assert_eq!(results.len(), 3);
-
-        // Thread calls should have error results mentioning circular dependency.
-        let a_result = results.iter().find(|(id, _, _)| id == "call_0").unwrap();
-        let b_result = results.iter().find(|(id, _, _)| id == "call_1").unwrap();
-        assert!(a_result.2.is_error);
-        assert!(b_result.2.is_error);
-        assert!(
-            a_result.2.content.contains("Circular dependency"),
-            "expected cycle message, got: {}",
-            a_result.2.content
-        );
-        assert!(
-            b_result.2.content.contains("Circular dependency"),
-            "expected cycle message, got: {}",
-            b_result.2.content
-        );
-
-        // Non-thread call should still have a result (error for unknown tool,
-        // but it executed).
-        let non_thread = results.iter().find(|(id, _, _)| id == "call_2").unwrap();
-        assert!(non_thread.2.is_error);
-        assert!(
-            non_thread.2.content.contains("unknown tool"),
-            "non-thread tool should have executed, got: {}",
-            non_thread.2.content
-        );
-    }
-
-    /// When DAG construction fails due to duplicate thread names, all thread
-    /// calls should receive error results mentioning the duplicate.
-    #[tokio::test]
-    async fn test_dag_error_duplicate_name() {
-        let tool_calls = vec![
-            make_tool_call("call_0", "thread", json!({"name": "X", "action": "work"})),
-            make_tool_call("call_1", "thread", json!({"name": "X", "action": "work"})),
-        ];
-
-        let runtime = test_runtime();
-        let client = ModelClient::new_for_test();
-        let event_sink = EventSink::none();
-
-        let results =
-            execute_tools_parallel(tool_calls, runtime, client, event_sink, None, false).await;
-
-        assert_eq!(results.len(), 2);
-        assert!(results.iter().all(|(_, _, r)| r.is_error));
-        assert!(
-            results
-                .iter()
-                .all(|(_, _, r)| r.content.contains("Duplicate thread name 'X'")),
-            "expected duplicate name message"
-        );
-    }
-
-    /// Non-thread tools should still execute when mixed with thread calls that
-    /// trigger the DAG error path.  This verifies the `execute_with_dag_error`
-    /// fallback runs non-thread tools concurrently.
-    #[tokio::test]
-    async fn test_non_thread_tools_work_with_dag_error_path() {
-        let tool_calls = vec![
-            make_tool_call(
-                "call_0",
-                "thread",
-                json!({"name": "A", "action": "work", "threads": ["B"]}),
-            ),
-            make_tool_call(
-                "call_1",
-                "thread",
-                json!({"name": "B", "action": "work", "threads": ["A"]}),
-            ),
-            make_tool_call("call_2", "nonexistent_tool", json!({})),
-            make_tool_call("call_3", "nonexistent_tool", json!({})),
-        ];
-
-        let runtime = test_runtime();
-        let client = ModelClient::new_for_test();
-        let event_sink = EventSink::none();
-
-        let results =
-            execute_tools_parallel(tool_calls, runtime, client, event_sink, None, false).await;
-
-        assert_eq!(results.len(), 4);
-
-        // Thread calls → cycle errors.
-        let thread_results: Vec<_> = results
-            .iter()
-            .filter(|(id, _, _)| id == "call_0" || id == "call_1")
-            .collect();
-        assert_eq!(thread_results.len(), 2);
-        assert!(thread_results.iter().all(|(_, _, r)| r.is_error));
-
-        // Non-thread calls → executed (error for unknown tool, but not a DAG error).
-        for id in &["call_2", "call_3"] {
-            let result = results.iter().find(|(rid, _, _)| rid == id).unwrap();
-            assert!(
-                result.2.content.contains("unknown tool"),
-                "non-thread tool {} should have executed, got: {}",
-                id,
-                result.2.content
-            );
-        }
-    }
-
-    /// Parse errors for malformed thread calls should be included in results
-    /// alongside non-thread tool results, sorted by original index.
-    #[tokio::test]
-    async fn test_parse_error_included_in_results() {
-        // Thread call missing "name" → parse error at index 0.
-        // Non-thread call at index 1.
-        let tool_calls = vec![
-            make_tool_call("call_0", "thread", json!({"action": "work"})),
-            make_tool_call("call_1", "nonexistent_tool", json!({})),
-        ];
-
-        let runtime = test_runtime();
-        let client = ModelClient::new_for_test();
-        let event_sink = EventSink::none();
-
-        let results =
-            execute_tools_parallel(tool_calls, runtime, client, event_sink, None, false).await;
-
-        assert_eq!(results.len(), 2);
-        assert_eq!(results[0].0, "call_0");
-        assert_eq!(results[1].0, "call_1");
-
-        // Parse error for the malformed thread call.
-        assert!(results[0].2.is_error);
-        assert!(
-            results[0].2.content.contains("'name'"),
-            "expected missing 'name' error, got: {}",
-            results[0].2.content
-        );
-
-        // Non-thread tool executed.
-        assert!(results[1].2.is_error);
-        assert!(results[1].2.content.contains("unknown tool"));
-    }
-
-    #[tokio::test]
-    async fn control_tools_report_duration_only_when_they_ran() {
-        let root = std::env::temp_dir().join(format!(
-            "nac-control-tool-duration-{}",
-            uuid::Uuid::new_v4()
-        ));
-        let mut runtime = test_runtime();
-        runtime.store_path = root.join("store.db");
-        crate::store::initialize(&runtime.store_path).unwrap();
-        crate::store::insert_test_session(&runtime.store_path, "test-session");
-        let (events_tx, mut events_rx) = tokio::sync::mpsc::unbounded_channel();
-
-        execute_tools_parallel(
-            vec![
-                make_tool_call("listed", "workset_list", json!({})),
-                make_tool_call("rejected", "workset_read", json!({})),
-            ],
-            runtime,
-            ModelClient::new_for_test(),
-            EventSink::channel(events_tx),
-            None,
-            false,
-        )
-        .await;
-
-        let mut finished = Vec::new();
-        while let Ok(event) = events_rx.try_recv() {
-            if let AgentEvent::ToolCallFinished {
-                call_id,
-                is_error,
-                execution_duration_ms,
-                ..
-            } = event
-            {
-                finished.push((call_id, is_error, execution_duration_ms.is_some()));
-            }
-        }
-        finished.sort();
-        assert_eq!(
-            finished,
-            vec![
-                ("listed".to_string(), false, true),
-                ("rejected".to_string(), true, false),
-            ]
-        );
-        let _ = std::fs::remove_dir_all(root);
-    }
-}
+#[path = "tool_exec_tests.rs"]
+mod tests;

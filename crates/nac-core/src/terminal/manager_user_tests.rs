@@ -23,7 +23,7 @@ async fn launch(manager: &TerminalManager, id: uuid::Uuid, command: &str) -> Str
                 vec!["secret-value".into()],
             ),
             None,
-            &ThreadCancellation::default(),
+            &RunCancellation::default(),
         )
         .await
         .unwrap();
@@ -150,11 +150,11 @@ async fn user_input_is_literal_and_resize_reaches_the_actual_pty() {
     let name = launch(&manager, uuid::Uuid::new_v4(), "stty -echo -icanon; printf READY; dd bs=1 count=6 2>/dev/null | od -An -tx1; stty size; sleep 30").await;
     wait_for(&manager, &name, b"READY").await;
     manager
-        .resize_user_terminal(&name, 91, 31, &ThreadCancellation::default())
+        .resize_user_terminal(&name, 91, 31, &RunCancellation::default())
         .await
         .unwrap();
     manager
-        .write_user_input(&name, b"CTRL-C", &ThreadCancellation::default())
+        .write_user_input(&name, b"CTRL-C", &RunCancellation::default())
         .await
         .unwrap();
     let bytes = wait_for(&manager, &name, b"31 91").await;
@@ -169,18 +169,14 @@ async fn user_input_is_literal_and_resize_reaches_the_actual_pty() {
     let status = manager.user_terminal_status(&name).await.unwrap();
     assert_eq!((status.cols, status.rows), (91, 31));
     assert!(manager
-        .resize_user_terminal(&name, 0, 31, &ThreadCancellation::default())
+        .resize_user_terminal(&name, 0, 31, &RunCancellation::default())
         .await
         .is_err());
     assert!(manager
-        .write_user_input(
-            &name,
-            &vec![0; 16 * 1024 + 1],
-            &ThreadCancellation::default()
-        )
+        .write_user_input(&name, &vec![0; 16 * 1024 + 1], &RunCancellation::default())
         .await
         .is_err());
-    let cancelled = ThreadCancellation::default();
+    let cancelled = RunCancellation::default();
     cancelled.cancel();
     assert!(manager
         .resize_user_terminal(&name, 80, 24, &cancelled)
@@ -212,7 +208,7 @@ async fn capacity_retries_and_wrong_owner_do_not_replace_or_expose_processes() {
             &backend(),
             nac_contracts::CommandEnvironmentSnapshot::empty(),
             None,
-            &ThreadCancellation::default()
+            &RunCancellation::default()
         )
         .await
         .is_err());
@@ -220,7 +216,7 @@ async fn capacity_retries_and_wrong_owner_do_not_replace_or_expose_processes() {
     let foreign = TerminalManager::for_direct();
     assert!(foreign.read_user_output(&name, 0, 1024).await.is_err());
     assert!(foreign
-        .write_user_input(&name, b"x", &ThreadCancellation::default())
+        .write_user_input(&name, b"x", &RunCancellation::default())
         .await
         .is_err());
     assert!(foreign.terminate_user_terminal(&name).await.is_err());
@@ -268,11 +264,11 @@ async fn expired_launch_history_never_reuses_the_old_process_handle() {
     let current = launch(&manager, launch_id, "sleep 30").await;
     assert_ne!(old, current);
     assert!(manager
-        .write_user_input(&old, b"exit\r", &ThreadCancellation::default())
+        .write_user_input(&old, b"exit\r", &RunCancellation::default())
         .await
         .is_err());
     assert!(manager
-        .resize_user_terminal(&old, 91, 31, &ThreadCancellation::default())
+        .resize_user_terminal(&old, 91, 31, &RunCancellation::default())
         .await
         .is_err());
     manager.terminate_user_terminal(&old).await.unwrap();
@@ -296,14 +292,14 @@ async fn unread_paste_cannot_block_resize_or_process_cleanup() {
         let id = name.clone();
         writes.push(tokio::spawn(async move {
             owner
-                .write_user_input(&id, &vec![b'x'; 16 * 1024], &ThreadCancellation::default())
+                .write_user_input(&id, &vec![b'x'; 16 * 1024], &RunCancellation::default())
                 .await
         }));
     }
     tokio::time::sleep(Duration::from_millis(50)).await;
     tokio::time::timeout(
         Duration::from_secs(1),
-        manager.resize_user_terminal(&name, 91, 31, &ThreadCancellation::default()),
+        manager.resize_user_terminal(&name, 91, 31, &RunCancellation::default()),
     )
     .await
     .unwrap()
@@ -345,7 +341,7 @@ async fn unqualified_remote_human_terminals_fail_before_spawn_without_local_fall
                 &selected,
                 nac_contracts::CommandEnvironmentSnapshot::empty(),
                 None,
-                &ThreadCancellation::default(),
+                &RunCancellation::default(),
             )
             .await
             .unwrap_err();

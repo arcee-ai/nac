@@ -13,6 +13,9 @@ use crate::light_model::{
     resolve_light_client_with_http_policy, LightModelError, LightModelSettings,
     TrustedLightCredential,
 };
+pub use crate::managed_native_credentials::{
+    capture_managed_native_credentials_from_environment, restrict_same_uid_inspection,
+};
 use crate::mcp::{McpRegistry, McpRootPolicy, McpTransportPolicy};
 use crate::model::{
     managed_backend_base_url, resolve_model_metadata, BackendKind, EffectiveModelSettings,
@@ -37,10 +40,7 @@ use crate::skills::{self, SkillPathVisibility, SkillRegistry};
 use crate::store;
 use crate::worker::{build_preloaded_skill_messages, build_worker_context_messages};
 pub use crate::worker::{run_managed_worker, ManagedWorkerRunConfig};
-pub use crate::worker_credentials::{
-    capture_managed_native_credentials_from_environment, restrict_same_uid_inspection,
-    ManagedWorkerCredentialReceiver,
-};
+pub use crate::worker_credentials::ManagedWorkerCredentialReceiver;
 use crate::workspace::GitTarget;
 
 mod builders;
@@ -64,11 +64,11 @@ pub use configuration::{
     CompactionConfig, ConfiguredModelIdentity, ModelConfig, NacConfig, PermissionConfig,
     SandboxConfig, StorageConfig, WorkerConfig,
 };
-pub(crate) use contracts::OrchestratorSession;
+pub(crate) use contracts::RuntimeSession;
 pub use contracts::{
     EffectiveSandboxOptions, ManagedWorkerOptions, ModelOptions, OptionalModelOption,
-    OrchestratorRunConfig, ResumeModelOptions, ResumeOptions, ResumePickerRunConfig, RunOptions,
-    RunState, SandboxOptions, SshOptions, StoreOptions, WorkerDispatchOptions,
+    ResumeModelOptions, ResumeOptions, ResumePickerRunConfig, RunOptions, RunState, SandboxOptions,
+    SessionRunConfig, SshOptions, StoreOptions, WorkerDispatchOptions,
 };
 use model_resolution::{
     default_config_cwd, managed_worker_effective_model_settings, worker_command_output_limits,

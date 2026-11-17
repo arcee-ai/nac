@@ -150,7 +150,7 @@ async fn resumed_direct_guide_uses_fresh_system_head_without_rewriting_history()
     assert!(
         matches!(&agent.messages[0], Message::System { content } if content.contains("NAC product self-help") && !content.contains("direct-with-orchestrator") && !content.contains("worker dispatch"))
     );
-    agent.set_steering_dispatch_id(Some("guide-resume-run".into()));
+    agent.set_current_run_id(Some("guide-resume-run".into()));
     assert_eq!(agent.send("How do I use NAC?").await.unwrap(), "answer");
     let requests = server.finish();
     assert_eq!(requests.len(), 1);

@@ -115,7 +115,7 @@ impl PermissionResource {
 pub struct ToolCallContext {
     pub call_id: Option<String>,
     pub thread_name: Option<String>,
-    pub(crate) cancellation: Option<super::ThreadCancellation>,
+    pub(crate) cancellation: Option<super::RunCancellation>,
     pub(crate) execution_timing: Option<Arc<Mutex<InvocationTiming>>>,
 }
 
@@ -181,7 +181,7 @@ impl ToolCallContext {
     pub(crate) fn cancellation<'a>(
         &'a self,
         runtime: &'a ToolRuntime,
-    ) -> &'a super::ThreadCancellation {
+    ) -> &'a super::RunCancellation {
         self.cancellation
             .as_ref()
             .unwrap_or(&runtime.command_cancellation)

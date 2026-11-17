@@ -157,7 +157,7 @@ async fn launch_in(
                 Vec::new(),
             ),
             None,
-            &ThreadCancellation::default(),
+            &RunCancellation::default(),
         )
         .await
         .unwrap();
@@ -179,10 +179,10 @@ async fn separate_jobs(manager: &TerminalManager, name: &str) -> Jobs {
         leader as libc::pid_t
     );
     manager
-        .write_user_input(name, b"set +H\r", &ThreadCancellation::default())
+        .write_user_input(name, b"set +H\r", &RunCancellation::default())
         .await
         .unwrap();
-    manager.write_user_input(name, b"/bin/sleep 120 & ordinary=$!; (trap '' HUP; exec /bin/sleep 120) & detached=$!; disown %2; printf 'JOBS:%s:%s\\n' $ordinary $detached\r", &ThreadCancellation::default()).await.unwrap();
+    manager.write_user_input(name, b"/bin/sleep 120 & ordinary=$!; (trap '' HUP; exec /bin/sleep 120) & detached=$!; disown %2; printf 'JOBS:%s:%s\\n' $ordinary $detached\r", &RunCancellation::default()).await.unwrap();
     let pids = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             let page = manager.read_user_output(name, 0, 65536).await.unwrap();
@@ -253,7 +253,7 @@ async fn natural_exit_settles_ordinary_and_disowned_separate_groups() {
     let name = launch_in(&manager, &directory, "exec /bin/bash --noprofile --norc -i").await;
     let jobs = separate_jobs(&manager, &name).await;
     manager
-        .write_user_input(&name, b"exit 7\r", &ThreadCancellation::default())
+        .write_user_input(&name, b"exit 7\r", &RunCancellation::default())
         .await
         .unwrap();
     assert_eq!(settled(&manager, &name, &jobs).await.exit_code, Some(7));
@@ -362,11 +362,11 @@ async fn failed_cleanup_preserves_capacity_leases_and_responsive_cached_observat
     });
     tokio::time::sleep(Duration::from_millis(50)).await;
     assert!(manager
-        .write_user_input(&name, b"echo forbidden\r", &ThreadCancellation::default())
+        .write_user_input(&name, b"echo forbidden\r", &RunCancellation::default())
         .await
         .is_err());
     assert!(manager
-        .resize_user_terminal(&name, 91, 31, &ThreadCancellation::default())
+        .resize_user_terminal(&name, 91, 31, &RunCancellation::default())
         .await
         .is_err());
     tokio::time::timeout(Duration::from_millis(500), async {
@@ -396,7 +396,7 @@ async fn failed_cleanup_preserves_capacity_leases_and_responsive_cached_observat
             &backend(),
             nac_contracts::CommandEnvironmentSnapshot::empty(),
             None,
-            &ThreadCancellation::default(),
+            &RunCancellation::default(),
         )
         .await
         .is_err());
@@ -485,7 +485,7 @@ async fn close_is_prompt_but_output_drain_retains_entry_and_leases_until_final_a
     tokio::time::timeout(Duration::from_millis(500), async {
         wait_for(&manager, &other, b"OTHER").await;
         manager
-            .resize_user_terminal(&other, 91, 31, &ThreadCancellation::default())
+            .resize_user_terminal(&other, 91, 31, &RunCancellation::default())
             .await
             .unwrap();
         manager.read_user_output(&name, 0, 1024).await.unwrap();
@@ -541,7 +541,7 @@ async fn concurrent_admission_never_holds_observation_map_while_waiting_for_hist
     let first = launch_in(&manager, &directory, "sleep 120").await;
     let history = manager.completed_sessions.lock().await;
     let backend = backend();
-    let cancellation = ThreadCancellation::default();
+    let cancellation = RunCancellation::default();
     let next = manager.user_terminal_name(uuid::Uuid::new_v4());
     let admission = manager.create_user_terminal(
         next.clone(),

@@ -9,7 +9,7 @@ use anyhow::{anyhow, Context, Result};
 use tokio::sync::oneshot;
 
 use super::controller::{InputControl, InputController, InputTicket};
-use crate::tools::ThreadCancellation;
+use crate::tools::RunCancellation;
 
 pub(super) type InputReceipt = oneshot::Receiver<Result<(), InputWriteError>>;
 #[derive(Debug)]
@@ -20,7 +20,7 @@ pub(super) enum InputWriteError {
 struct InputPacket {
     bytes: Vec<u8>,
     ticket: InputTicket,
-    agent_cancellation: Option<ThreadCancellation>,
+    agent_cancellation: Option<RunCancellation>,
     receipt: oneshot::Sender<Result<(), InputWriteError>>,
 }
 
@@ -101,7 +101,7 @@ impl PtyInput {
     pub(super) fn enqueue_user(
         &self,
         bytes: &[u8],
-        cancellation: &ThreadCancellation,
+        cancellation: &RunCancellation,
     ) -> Result<InputReceipt> {
         let ticket = self.control.ticket("", InputController::Human)?;
         self.enqueue(bytes, ticket, cancellation)
@@ -111,7 +111,7 @@ impl PtyInput {
         &self,
         bytes: &[u8],
         ticket: InputTicket,
-        cancellation: &ThreadCancellation,
+        cancellation: &RunCancellation,
     ) -> Result<InputReceipt> {
         self.control.validate(&ticket)?;
         let input = &self.input;

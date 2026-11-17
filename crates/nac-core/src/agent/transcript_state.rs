@@ -168,7 +168,7 @@ impl Agent {
         // Failed reads or validation must leave recovery tokens available
         // for another reload rather than letting cleanup delete unseen rows.
         self.direct_inbox_append_start = None;
-        self.steering_append_pending = false;
+        self.prompt_commit_pending = false;
         Ok(())
     }
 

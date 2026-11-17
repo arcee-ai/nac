@@ -149,7 +149,7 @@ impl TerminalManager {
         name: &str,
         expected: u64,
         bytes: &[u8],
-        cancellation: &ThreadCancellation,
+        cancellation: &RunCancellation,
     ) -> Result<()> {
         self.write_controlled_human_input_receipt(name, expected, bytes, cancellation)
             .await?
@@ -161,7 +161,7 @@ impl TerminalManager {
         name: &str,
         expected: u64,
         bytes: &[u8],
-        cancellation: &ThreadCancellation,
+        cancellation: &RunCancellation,
     ) -> Result<super::super::InputDeliveryReceipt> {
         self.write_human_input_receipt(name, expected, bytes, cancellation, true)
             .await
@@ -171,7 +171,7 @@ impl TerminalManager {
         &self,
         name: &str,
         bytes: &[u8],
-        cancellation: &ThreadCancellation,
+        cancellation: &RunCancellation,
     ) -> Result<()> {
         // The original protocol has browser-owned explicit recovery and no
         // server acknowledgement route. Preserve that initial-only contract;
@@ -186,7 +186,7 @@ impl TerminalManager {
         name: &str,
         expected: u64,
         bytes: &[u8],
-        cancellation: &ThreadCancellation,
+        cancellation: &RunCancellation,
         freeze_on_unconfirmed: bool,
     ) -> Result<super::super::InputDeliveryReceipt> {
         let mut sessions = self.sessions.lock().await;
