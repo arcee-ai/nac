@@ -78,18 +78,55 @@ async function installNativeDouble(app: ElectronApplication) {
   // Native-only deterministic double installed by the trusted controller.
   // Real Notification instances, MAIN coordinator, preload, Rust and shared
   // React navigation remain in use; no OS banner or permission claim is made.
-  await app.evaluate(({ Notification, ipcMain }) => {
+  await app.evaluate(({ Notification, ipcMain, app, BrowserWindow }) => {
     const probe = {
       submissions: [] as { id: string; title: string; body: string }[],
       handles: new Map<string, any>(),
       closed: [] as string[],
       targetAcks: [] as { request: number; outcome: string }[],
+      trace: [] as Record<string, unknown>[],
+      traceOverflow: false,
     };
     (globalThis as any).__notificationProbe = probe;
+    const facts = () => {
+      const window = BrowserWindow.getAllWindows()[0];
+      return {
+        visible: window?.isVisible(),
+        focused: window?.isFocused(),
+        minimized: window?.isMinimized(),
+        appHidden: app.isHidden(),
+      };
+    };
+    const record = (kind: string, values: Record<string, unknown> = {}) => {
+      if (probe.trace.length >= 64) {
+        probe.traceOverflow = true;
+        return;
+      }
+      probe.trace.push({
+        order: probe.trace.length,
+        kind,
+        ...facts(),
+        ...values,
+      });
+    };
     ipcMain.on("nac:native", (_event, value) => {
       if (value?.kind === "target_settled")
         probe.targetAcks.push({
           request: value.request,
+          outcome: value.outcome,
+        });
+      if (
+        [
+          "ui_ready",
+          "ui_retired",
+          "session_target_ready",
+          "session_target_retired",
+          "target_settled",
+        ].includes(value?.kind)
+      )
+        record(value.kind, {
+          request: value.request,
+          generation: value.generation,
           outcome: value.outcome,
         });
     });
@@ -104,13 +141,54 @@ async function installNativeDouble(app: ElectronApplication) {
         title: this.title,
         body: this.body,
       });
+      record("native-show", { index: probe.submissions.length - 1 });
+      this.prependListener("click", () =>
+        record("native-click", {
+          index: probe.submissions.findIndex((value) => value.id === this.id),
+          previouslyClosed: probe.closed.includes(this.id),
+        }),
+      );
       this.emit("show");
     };
     Notification.prototype.close = function () {
       probe.closed.push(this.id);
+      record("native-close", {
+        index: probe.submissions.findIndex((value) => value.id === this.id),
+      });
       this.emit("close");
     };
   });
+}
+
+async function clickTarget(c: Candidate, index: number, session: string) {
+  await c.app.evaluate((_electron, index) => {
+    const probe = (globalThis as any).__notificationProbe;
+    probe.handles.get(probe.submissions[index].id).emit("click");
+  }, index);
+  try {
+    await expect
+      .poll(() => c.page.evaluate(() => location.hash))
+      .toContain(`/session/${session}`);
+  } catch (error) {
+    console.log(
+      "Notification target diagnostic",
+      JSON.stringify(
+        await c.app.evaluate((_electron, index) => {
+          const probe = (globalThis as any).__notificationProbe;
+          return {
+            index,
+            acknowledgments: probe.targetAcks,
+            previouslyClosed: probe.closed.includes(
+              probe.submissions[index].id,
+            ),
+            trace: probe.trace,
+            traceOverflow: probe.traceOverflow,
+          };
+        }, index),
+      ),
+    );
+    throw error;
+  }
 }
 
 async function stop(app: ElectronApplication) {
@@ -266,24 +344,7 @@ test("main semantic observer stays off by default and delivers bounded hidden co
 
   // A single native callback routes only its retained session. It cannot
   // submit another prompt, answer a question or create a remembered grant.
-  await c.app.evaluate(() => {
-    const probe = (globalThis as any).__notificationProbe;
-    probe.handles.get(probe.submissions[0].id).emit("click");
-  });
-  try {
-    await expect
-      .poll(() => c.page.evaluate(() => location.hash))
-      .toContain(`/session/${completedSession}`);
-  } catch (error) {
-    console.log(
-      "Notification target diagnostic",
-      await c.app.evaluate(() => {
-        const probe = (globalThis as any).__notificationProbe;
-        return { acknowledgments: probe.targetAcks };
-      }),
-    );
-    throw error;
-  }
+  await clickTarget(c, 0, completedSession);
   await expect
     .poll(() =>
       c.app.evaluate(({ BrowserWindow }) =>
@@ -299,6 +360,12 @@ test("main semantic observer stays off by default and delivers bounded hidden co
   expect(c.provider.requests).toHaveLength(1);
 
   await closeWorkspace(c);
+  // Exercise ordinary application Hide as well as a closed workspace. The
+  // original click must handle native focus ordering; do not pre-focus it.
+  await c.app.evaluate(({ app }) => app.hide());
+  await expect
+    .poll(() => c.app.evaluate(({ app }) => app.isHidden()))
+    .toBe(true);
   c.provider.enqueue(
     "notification-question",
     { token: "NOTIFICATION_DECISION" },
@@ -329,13 +396,7 @@ test("main semantic observer stays off by default and delivers bounded hidden co
       (await nativeSubmissions(c)).map((value: any) => value.title),
     )
     .toEqual(["Request completed", "Decision needed"]);
-  await c.app.evaluate(() => {
-    const probe = (globalThis as any).__notificationProbe;
-    probe.handles.get(probe.submissions[1].id).emit("click");
-  });
-  await expect
-    .poll(() => c.page.evaluate(() => location.hash))
-    .toContain(`/session/${decisionSession}`);
+  await clickTarget(c, 1, decisionSession);
   expect(
     (await c.api(`/sessions/${decisionSession}/questions`))[0].status,
   ).toBe("pending");
