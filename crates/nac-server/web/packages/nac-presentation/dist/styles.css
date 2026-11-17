@@ -1080,6 +1080,13 @@
     overflow: hidden;
   }
 
+[data-nac-runtime]:is(.line-clamp-4), [data-nac-runtime] .line-clamp-4 {
+    -webkit-line-clamp: 4;
+    -webkit-box-orient: vertical;
+    display: -webkit-box;
+    overflow: hidden;
+  }
+
 [data-nac-runtime]:is(.block), [data-nac-runtime] .block {
     display: block;
   }
@@ -1419,6 +1426,10 @@
     max-height: calc(var(--spacing) * 72);
   }
 
+[data-nac-runtime]:is(.max-h-96), [data-nac-runtime] .max-h-96 {
+    max-height: calc(var(--spacing) * 96);
+  }
+
 [data-nac-runtime]:is(.max-h-\[1px\]), [data-nac-runtime] .max-h-\[1px\] {
     max-height: 1px;
   }
@@ -1627,8 +1638,16 @@
     width: calc(var(--spacing) * 32);
   }
 
+[data-nac-runtime]:is(.w-40), [data-nac-runtime] .w-40 {
+    width: calc(var(--spacing) * 40);
+  }
+
 [data-nac-runtime]:is(.w-\[52px\]), [data-nac-runtime] .w-\[52px\] {
     width: 52px;
+  }
+
+[data-nac-runtime]:is(.w-\[132px\]), [data-nac-runtime] .w-\[132px\] {
+    width: 132px;
   }
 
 [data-nac-runtime]:is(.w-\[180px\]), [data-nac-runtime] .w-\[180px\] {
@@ -3825,6 +3844,10 @@
     text-decoration-line: underline;
   }
 
+[data-nac-runtime]:is(.underline-offset-2), [data-nac-runtime] .underline-offset-2 {
+    text-underline-offset: 2px;
+  }
+
 [data-nac-runtime]:is(.accent-\[var\(--color-fill-accent-primary\)\]), [data-nac-runtime] .accent-\[var\(--color-fill-accent-primary\)\] {
     accent-color: var(--color-fill-accent-primary);
   }
@@ -4017,6 +4040,11 @@
 [data-nac-runtime]:is(.outline-none), [data-nac-runtime] .outline-none {
     --nac-presentation-tw-outline-style: none;
     outline-style: none;
+  }
+
+[data-nac-runtime]:is(.select-all), [data-nac-runtime] .select-all {
+    -webkit-user-select: all;
+    user-select: all;
   }
 
 [data-nac-runtime]:is(.select-none), [data-nac-runtime] .select-none {
@@ -7459,8 +7487,8 @@
 }
 
 [data-nac-runtime]:is(.chat-response.streaming p .streaming-chunk), [data-nac-runtime] .chat-response.streaming p .streaming-chunk, [data-nac-runtime]:is(.chat-response.streaming li .streaming-chunk), [data-nac-runtime] .chat-response.streaming li .streaming-chunk, [data-nac-runtime]:is(.chat-response.streaming h1 .streaming-chunk), [data-nac-runtime] .chat-response.streaming h1 .streaming-chunk, [data-nac-runtime]:is(.chat-response.streaming h2 .streaming-chunk), [data-nac-runtime] .chat-response.streaming h2 .streaming-chunk, [data-nac-runtime]:is(.chat-response.streaming h3 .streaming-chunk), [data-nac-runtime] .chat-response.streaming h3 .streaming-chunk, [data-nac-runtime]:is(.chat-response.streaming h4 .streaming-chunk), [data-nac-runtime] .chat-response.streaming h4 .streaming-chunk, [data-nac-runtime]:is(.chat-response.streaming h5 .streaming-chunk), [data-nac-runtime] .chat-response.streaming h5 .streaming-chunk, [data-nac-runtime]:is(.chat-response.streaming h6 .streaming-chunk), [data-nac-runtime] .chat-response.streaming h6 .streaming-chunk {
-  opacity: 0;
-  animation: .15s ease-out forwards nac-presentation-fadeInOut;
+  opacity: 1;
+  animation: .15s ease-out nac-presentation-fadeInOut;
 }
 
 @keyframes nac-presentation-fadeInOut {

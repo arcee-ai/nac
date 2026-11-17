@@ -18,6 +18,9 @@ import type {
   AssignSessionRequest,
   BranchList,
   BrowseListing,
+  CreateFolderRequest,
+  CreateSshFolderRequest,
+  CreatedFolder,
   CommitOutcome,
   CommitWorkspaceRequest,
   CompactSessionResponse,
@@ -90,6 +93,7 @@ import type {
   SlashCommandDefinition,
   SshBrowseRequest,
   SshConfigurationList,
+  OpenSshAliasList,
   SshConfigurationRecord,
   CreateSshConfigurationRequest,
   UpdateSshConfigurationRequest,
@@ -361,6 +365,22 @@ export function createNacApi(
         signal,
       }),
 
+    /**
+     * Creates one named folder inside a listed local directory. Never retried
+     * here: a lost answer leaves the outcome unknown, so the caller looks
+     * before it offers to try again.
+     */
+    createFolder: (parent: string, name: string) =>
+      request<CreatedFolder>("POST", "/fs/folders", {
+        body: { parent, name } satisfies CreateFolderRequest,
+      }),
+
+    /** The same on the SSH host the picker is browsing, never on this machine. */
+    createSshFolder: (target: SshTarget, parent: string, name: string) =>
+      request<CreatedFolder>("POST", "/ssh/folders", {
+        body: { ...target, parent, name } satisfies CreateSshFolderRequest,
+      }),
+
     /** Validates the key as a side effect: a bad key cannot list models. */
     listProviderModels: (payload: ProviderModelsRequest, signal?: AbortSignal) =>
       request<ProviderModelList>("POST", "/providers/models", { body: payload, signal }),
@@ -414,6 +434,13 @@ export function createNacApi(
 
     deleteSshConfig: (configId: string) =>
       request<void>("DELETE", `/ssh-configs/${encodeURIComponent(configId)}`),
+
+    /**
+     * Literal OpenSSH `Host` aliases from the NAC server's own `~/.ssh/config`
+     * (not the browser's machine). Names only; problems arrive as warnings.
+     */
+    listSshAliases: (signal?: AbortSignal) =>
+      request<OpenSshAliasList>("GET", "/ssh/aliases", { signal }),
 
     // The MCP library is a curated catalog served by the binary; servers are
     // saved into config.toml, keyed by name, and parsed when a session starts.

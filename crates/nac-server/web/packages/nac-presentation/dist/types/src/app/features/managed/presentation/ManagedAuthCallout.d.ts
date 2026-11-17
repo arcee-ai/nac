@@ -8,6 +8,10 @@ import type { BackendKind } from "../../../types/api";
  * The login belongs to the provider rather than to any one configuration — one
  * file in NAC home backs every session using that backend — which is why this
  * reports being signed in even when the sign-in happened elsewhere.
+ *
+ * Sign in is offered only once the server has said there is no login. Until it
+ * answers the callout says it is checking, and a check that fails says so with
+ * a retry rather than guessing either way.
  */
 export declare function ManagedAuthCallout({ backend, className, rejected, }: {
     backend: BackendKind;

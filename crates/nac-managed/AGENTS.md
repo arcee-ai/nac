@@ -42,7 +42,7 @@ harness.
 - `readiness.rs` — provider-independent readiness facts.
 - `lib.rs` — intentionally small explicit facade over private modules.
 
-`github.rs` is a deliberate 851-line exception: one auditable provider client
+`github.rs` is a deliberate 870-line exception: one auditable provider client
 keeps OAuth/device/refresh retry policy, authenticated pagination, SAML/revoked-
 credential handling, and provider wire decoding together. Credential files are
 still isolated behind `github_credential_store.rs`; do not add clone, HTTP

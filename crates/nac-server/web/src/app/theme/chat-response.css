@@ -27,8 +27,10 @@
 .chat-response.streaming h4 .streaming-chunk,
 .chat-response.streaming h5 .streaming-chunk,
 .chat-response.streaming h6 .streaming-chunk {
-  opacity: 0;
-  animation: fadeInOut 150ms ease-out forwards;
+  /* Keep the settled text visible without retaining a finished opacity
+     animation and its full-height transcript compositor layer. */
+  opacity: 1;
+  animation: fadeInOut 150ms ease-out;
 }
 
 @keyframes fadeInOut {

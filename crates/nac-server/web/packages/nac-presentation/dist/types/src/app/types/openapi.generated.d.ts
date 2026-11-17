@@ -346,6 +346,13 @@ export interface components {
             input_tokens_above: number;
             output: number;
         };
+        CreatedFolder: {
+            path: string;
+        };
+        CreateFolderRequest: {
+            name: string;
+            parent: string;
+        };
         CreateGoalRequest: {
             objective: string;
             token_budget?: number | null;
@@ -424,6 +431,13 @@ export interface components {
         CreateSshConfigurationRequest: {
             name: string;
             ssh_host: string;
+            ssh_identity_file?: string | null;
+            ssh_port?: number | null;
+        };
+        CreateSshFolderRequest: {
+            name: string;
+            parent: string;
+            ssh_host?: string | null;
             ssh_identity_file?: string | null;
             ssh_port?: number | null;
         };
@@ -817,6 +831,7 @@ export interface components {
         });
         HeartbeatState: "active" | "paused" | "suspended" | "stopped" | "finished" | "deleted";
         InboxDelivery: "steer" | "queue";
+        InboxItemOrigin: "input" | "traditional_child" | "managed_orchestrator";
         InboxItemResponse: {
             cancelled_at?: string | null;
             client_id?: string | null;
@@ -825,6 +840,7 @@ export interface components {
             delivered_run_id?: string | null;
             delivery: components["schemas"]["InboxDelivery"];
             id: number;
+            origin: components["schemas"]["InboxItemOrigin"];
             prompt: string;
             session_id: string;
             status: components["schemas"]["InboxStatus"];
@@ -1212,6 +1228,12 @@ export interface components {
             fell_back_to_parent: boolean;
             opened: string;
         };
+        OpenSshAliasList: {
+            aliases: string[];
+            undiscoverable_patterns: number;
+            warnings: components["schemas"]["OpenSshAliasWarning"][];
+        };
+        OpenSshAliasWarning: "home_unavailable" | "unreadable_file" | "oversized_file" | "missing_include" | "include_cycle" | "include_depth_exceeded" | "file_limit_reached" | "alias_limit_reached" | "unsupported_include" | "conditional_include_skipped" | "malformed_line";
         OpenUserTerminalRequest: {
             cols: number;
             launch_id: string;
@@ -1881,7 +1903,7 @@ export interface components {
         StartTraditionalChildRequest: {
             background?: boolean;
             child_session_id?: string | null;
-            description: string;
+            description?: string | null;
             profile: string;
             prompt: string;
         };

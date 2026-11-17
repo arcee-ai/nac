@@ -10,6 +10,8 @@ const browse = vi.hoisted(() => ({ local: vi.fn(), ssh: vi.fn() }));
 vi.mock("@/app/services/queries", () => ({
   useBrowsePath: browse.local,
   useSshBrowsePath: browse.ssh,
+  useResolveBrowsePath: () => vi.fn(),
+  useCreateFolder: () => ({ mutateAsync: vi.fn() }),
 }));
 beforeEach(() => {
   vi.stubGlobal("matchMedia", () => ({

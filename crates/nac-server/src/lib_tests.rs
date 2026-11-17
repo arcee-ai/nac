@@ -1026,6 +1026,8 @@ fn stalled_then_scripted_direct_response() -> (
 
 #[path = "tests/catalog.rs"]
 mod catalog;
+#[path = "tests/child_description_continuation.rs"]
+mod child_description_continuation;
 #[path = "tests/child_input_origin.rs"]
 mod child_input_origin;
 #[path = "tests/child_review_retry.rs"]
@@ -1040,6 +1042,8 @@ mod configuration;
 mod contract;
 #[path = "tests/direct_qa.rs"]
 mod direct_qa;
+#[path = "tests/internal_completions.rs"]
+mod internal_completions;
 #[path = "tests/lifecycle.rs"]
 mod lifecycle;
 #[path = "tests/managed_delivery.rs"]
@@ -1047,6 +1051,8 @@ mod managed_delivery;
 #[cfg(feature = "managed-fault-fixture")]
 #[path = "tests/managed_fault_fixture.rs"]
 mod managed_fault_fixture;
+#[path = "tests/managed_gate_order.rs"]
+mod managed_gate_order;
 #[path = "tests/managed_load.rs"]
 mod managed_load;
 #[path = "tests/managed_topology.rs"]
@@ -1062,6 +1068,8 @@ mod mcp_oauth;
 mod persistence_load;
 #[path = "tests/presentation.rs"]
 mod presentation;
+#[path = "tests/project_folders.rs"]
+mod project_folder_routes;
 #[path = "tests/projects.rs"]
 mod project_routes;
 #[path = "tests/recovery.rs"]
@@ -1088,6 +1096,8 @@ mod session_creation_overload;
 
 #[path = "tests/shell_commands.rs"]
 mod shell_commands;
+#[path = "tests/ssh_aliases.rs"]
+mod ssh_aliases;
 #[path = "tests/terminal_selection.rs"]
 mod terminal_selection;
 

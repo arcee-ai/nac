@@ -17,6 +17,7 @@ import {
   LoaderSize,
 } from "@/app/atoms";
 import { FilesBranchRow, FilesListToolbar } from "@/app/components/inspector/FilesListControls";
+import { FilesSourceLabel } from "@/app/components/inspector/FilesSource";
 import {
   PanelEmptyState,
   PanelFailure,
@@ -27,6 +28,7 @@ import { useLiveWorkspace } from "@/app/hooks/useLiveWorkspace";
 import { useIsDesktop, useIsMobile } from "@/app/hooks/useMediaQuery";
 import { usePanelListMarksOpen } from "@/app/hooks/usePanelListMarksOpen";
 import { cn } from "@/app/lib/cn";
+import { describeFilesSource, filesSourceState } from "@/app/lib/filesSource";
 import {
   buildFileTree,
   changedDirPaths,
@@ -42,6 +44,7 @@ import {
   useWorkspaceFile,
   useWorkspaceFiles,
   useWorkspaceRevisionChanges,
+  useWorkspaceRevisions,
 } from "@/app/services/queries";
 import type {
   ChangedFileStat,
@@ -508,6 +511,11 @@ function FilePane({
  *
  * With a revision selected the same lists describe the checkout as it stood at
  * the end of that run, and "changed" means what that run changed.
+ *
+ * Which of the two is on screen is always labelled above the list. The label
+ * follows the rows actually drawn, not the selection: while a switch is still
+ * fetching, the other source's rows are held back rather than shown under the
+ * new name, and a capture that cannot be read says so instead of looking empty.
  */
 export function FilesView({
   sessionId,
@@ -520,7 +528,7 @@ export function FilesView({
   revision?: number | null;
   readOnly?: boolean;
 }) {
-  const { useToggledFolders, useSelectedFile, useFileListing, toggleFolder } =
+  const { useToggledFolders, useSelectedFile, useFileListing, toggleFolder, selectRevision } =
     useNativeRuntime().stores.sessionLayoutStore;
 
   const client = useQueryClient();
@@ -532,8 +540,13 @@ export function FilesView({
   const toggled = useToggledFolders();
   const fileListing = useFileListing();
 
-  const { data: listing, error, isPlaceholderData } = useWorkspaceFiles(sessionId, revision);
+  const {
+    data: listing,
+    error,
+    isPlaceholderData: listingHeldOver,
+  } = useWorkspaceFiles(sessionId, revision);
   const revisionChanges = useWorkspaceRevisionChanges(sessionId, revision);
+  const revisions = useWorkspaceRevisions(revision == null ? null : sessionId);
 
   // Workspace stats are computed when the snapshot is built, so entering the
   // panel has to refetch it to show changes made since the last event. A
@@ -588,24 +601,55 @@ export function FilesView({
     listing,
     selected,
     current,
-    active: revision == null && !readOnly && !isPlaceholderData,
+    active: revision == null && !readOnly && !listingHeldOver,
   });
   const currentChange = current ? changedByPath.get(current) : undefined;
   const counts = useChangeCounts(sessionId, currentChange, revision);
   const marked = marksOpen ? current : null;
 
   const failure = error ?? (revision != null ? revisionChanges.error : null);
+  const source = useMemo(
+    () => describeFilesSource(revision, revisions.data),
+    [revision, revisions.data],
+  );
+  const state = filesSourceState({
+    revision,
+    listing,
+    listingHeldOver,
+    error: revision != null && failure ? errorMessage(failure) : null,
+    snapshotLoaded: snapshot != null,
+    changes: revisionChanges.data,
+    changesHeldOver: revisionChanges.isPlaceholderData,
+    captureMissing: source.kind === "revision" && revisions.isSuccess && !source.capture,
+  });
+  const sourceLabel = (
+    <FilesSourceLabel
+      source={source}
+      state={state}
+      autoSelected={marksOpen && selected == null && current != null}
+      onReturn={() => selectRevision(null)}
+    />
+  );
+
   if (revision == null && workspace?.error) {
     return <PanelFailure listTitle="Files">{workspace.error}</PanelFailure>;
   }
-  if (failure) {
-    return <PanelFailure listTitle="Files">{errorMessage(failure)}</PanelFailure>;
+  if (revision == null && error) {
+    return <PanelFailure listTitle="Files">{errorMessage(error)}</PanelFailure>;
   }
-  // Only when there is nothing to show at all. A listing already on screen —
-  // this revision's, or the one before it while the switch is fetched — stays
-  // put, and the bar above the panel carries the news that a fetch is running.
-  if (!listing) {
-    return <PanelLoading listTitle="Files" />;
+  if (state.status === "unavailable") {
+    return (
+      <PanelSplit listTitle="Files" listHeader={sourceLabel} list={null}>
+        <PanelEmpty title="This capture cannot be shown.">{state.reason}</PanelEmpty>
+      </PanelSplit>
+    );
+  }
+  // Rows held over from the other source while this one is fetched would sit
+  // under this source's name, so nothing is drawn until its own rows arrive.
+  // A refetch of the same source keeps its rows, and the bar above the panel
+  // carries the news that it is running.
+  if (state.status === "pending" || !listing) {
+    return <PanelLoading listTitle="Files" listHeader={sourceLabel} />;
   }
 
   const branch = workspace?.branch;
@@ -615,6 +659,14 @@ export function FilesView({
       <FilesBranchRow sessionId={sessionId} branch={branch} readOnly={readOnly} />
     ) : null;
   if (nodes.length === 0) {
+    // An empty capture still says which run it is and leads back from it.
+    if (revision != null) {
+      return (
+        <PanelSplit listTitle="Files" listHeader={sourceLabel} list={branchRow}>
+          <PanelEmpty title="No Files">This capture holds no files.</PanelEmpty>
+        </PanelSplit>
+      );
+    }
     return <PanelEmptyState listTitle="Files" title="No Files" phoneLead={branchRow} />;
   }
 
@@ -632,6 +684,7 @@ export function FilesView({
           />
         ) : null
       }
+      listHeader={sourceLabel}
       listToolbar={
         <FilesListToolbar
           sessionId={sessionId}
@@ -657,18 +710,18 @@ export function FilesView({
           {fileListing === "changed" ? (
             <ChangedList files={changedNodes} selected={marked} onSelect={selectFile} />
           ) : (
-            <>
-              <Tree
-                dir={tree}
-                depth={0}
-                open={open}
-                selected={marked}
-                onToggle={toggleFolder}
-                onSelect={selectFile}
-              />
-              {listing.truncated ? <PanelListNote>Listing truncated.</PanelListNote> : null}
-            </>
+            <Tree
+              dir={tree}
+              depth={0}
+              open={open}
+              selected={marked}
+              onToggle={toggleFolder}
+              onSelect={selectFile}
+            />
           )}
+          {/* Either list leans on the listing: an untracked folder's files are
+              only known through it, so a cut-off listing can drop them here too. */}
+          {listing.truncated ? <PanelListNote>Listing truncated.</PanelListNote> : null}
         </>
       }
     >
@@ -676,14 +729,21 @@ export function FilesView({
         <PanelEmpty>Select a file to see it.</PanelEmpty>
       ) : currentChange ? (
         <DiffPane
-          key={current}
+          // Keyed by source as well as path: a pane kept across a switch would
+          // show the other source's diff while this one's loads.
+          key={`${revision ?? "working-tree"}:${current}`}
           sessionId={sessionId}
           file={currentChange}
           counts={counts}
           revision={revision}
         />
       ) : (
-        <FilePane key={current} sessionId={sessionId} path={current} revision={revision} />
+        <FilePane
+          key={`${revision ?? "working-tree"}:${current}`}
+          sessionId={sessionId}
+          path={current}
+          revision={revision}
+        />
       )}
     </PanelSplit>
   );

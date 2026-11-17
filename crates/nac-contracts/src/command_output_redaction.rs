@@ -48,6 +48,30 @@ impl Pattern {
     }
 }
 
+/// Marks every byte that begins at least one (non-empty) pattern.
+pub(super) fn pattern_starts(patterns: &[Pattern]) -> [bool; 256] {
+    let mut starts = [false; 256];
+    for pattern in patterns {
+        starts[usize::from(pattern.bytes[0])] = true;
+    }
+    starts
+}
+
+/// Length of the leading run of `bytes` that cannot begin any pattern.
+/// With every pattern at prefix zero, such a byte leaves all match state
+/// unchanged, so the run can be copied through in bulk.
+pub(super) fn inert_prefix_len(starts: &[bool; 256], bytes: &[u8]) -> usize {
+    bytes
+        .iter()
+        .position(|byte| starts[usize::from(*byte)])
+        .unwrap_or(bytes.len())
+}
+
+/// Consumed and emitted counts, open redaction run, pending bytes, masked
+/// ranges and pattern prefixes.
+#[cfg(test)]
+pub(crate) type OutputStateForTest = (u64, u64, bool, Vec<u8>, Vec<Range<u64>>, Vec<usize>);
+
 /// A single process output stream bound to its launch-time secret snapshot.
 ///
 /// Non-secret bytes, including invalid UTF-8 and terminal controls, pass through
@@ -62,6 +86,8 @@ impl Pattern {
 /// This type intentionally implements neither Debug nor serialization.
 pub struct CommandOutputRedactor {
     patterns: Vec<Pattern>,
+    /// Bytes that begin at least one pattern.
+    starts: [bool; 256],
     pending: VecDeque<u8>,
     masked: VecDeque<Range<u64>>,
     consumed: u64,
@@ -143,6 +169,7 @@ impl CommandOutputRedactor {
                     prefix: 0,
                 })
                 .collect(),
+            starts: self.starts,
             pending: VecDeque::new(),
             masked: VecDeque::new(),
             consumed: 0,
@@ -158,11 +185,13 @@ impl CommandOutputRedactor {
             .collect::<Vec<_>>();
         values.sort_unstable();
         values.dedup();
+        let patterns = values
+            .into_iter()
+            .map(|value| Pattern::new(value))
+            .collect::<Vec<_>>();
         Self {
-            patterns: values
-                .into_iter()
-                .map(|value| Pattern::new(value))
-                .collect(),
+            starts: pattern_starts(&patterns),
+            patterns,
             pending: VecDeque::new(),
             masked: VecDeque::new(),
             consumed: 0,
@@ -174,30 +203,81 @@ impl CommandOutputRedactor {
     /// Returns only bytes whose masking can no longer change with future input.
     /// A processing acknowledgement may cover these bytes after rendering.
     pub fn push(&mut self, bytes: &[u8]) -> Vec<u8> {
-        let mut output = Vec::new();
-        for &byte in bytes {
-            self.pending.push_back(byte);
-            self.consumed += 1;
-            let mut longest_match = 0;
-            let mut held = 0;
-            for pattern in &mut self.patterns {
-                if pattern.advance(byte) {
-                    longest_match = longest_match.max(pattern.bytes.len());
+        let mut output = Vec::with_capacity(bytes.len());
+        if self.patterns.is_empty() {
+            // Without patterns nothing is withheld or masked.
+            self.emit(self.pending.len(), &mut output);
+            self.copy_through(bytes, &mut output);
+            return output;
+        }
+        let mut index = 0;
+        while index < bytes.len() {
+            // Only a live pattern prefix withholds bytes, so an empty queue
+            // means no pattern is mid-match. A byte that cannot begin a
+            // pattern then changes no match state and is emitted unmasked,
+            // exactly as the per-byte path below would.
+            if self.pending.is_empty() {
+                let run = inert_prefix_len(&self.starts, &bytes[index..]);
+                if run > 0 {
+                    self.copy_through(&bytes[index..index + run], &mut output);
+                    index += run;
+                    continue;
                 }
-                held = held.max(pattern.prefix);
             }
-            if longest_match > 0 {
-                let mut start = self.consumed - longest_match as u64;
-                while self.masked.back().is_some_and(|range| range.end >= start) {
-                    if let Some(range) = self.masked.pop_back() {
-                        start = start.min(range.start);
-                    }
-                }
-                self.masked.push_back(start..self.consumed);
-            }
-            self.emit(self.pending.len() - held, &mut output);
+            self.push_byte(bytes[index], &mut output);
+            index += 1;
         }
         output
+    }
+
+    fn push_byte(&mut self, byte: u8, output: &mut Vec<u8>) {
+        self.pending.push_back(byte);
+        self.consumed += 1;
+        let mut longest_match = 0;
+        let mut held = 0;
+        for pattern in &mut self.patterns {
+            if pattern.advance(byte) {
+                longest_match = longest_match.max(pattern.bytes.len());
+            }
+            held = held.max(pattern.prefix);
+        }
+        if longest_match > 0 {
+            let mut start = self.consumed - longest_match as u64;
+            while self.masked.back().is_some_and(|range| range.end >= start) {
+                if let Some(range) = self.masked.pop_back() {
+                    start = start.min(range.start);
+                }
+            }
+            self.masked.push_back(start..self.consumed);
+        }
+        self.emit(self.pending.len() - held, output);
+    }
+
+    /// Emits bytes that cannot begin a match while nothing is withheld. Every
+    /// recorded range ends at or before these positions, so per-byte emission
+    /// would discard them all and leave the redaction run closed.
+    fn copy_through(&mut self, run: &[u8], output: &mut Vec<u8>) {
+        if run.is_empty() {
+            return;
+        }
+        self.masked.clear();
+        self.consumed += run.len() as u64;
+        self.emitted += run.len() as u64;
+        self.in_redaction = false;
+        output.extend_from_slice(run);
+    }
+
+    /// Complete matching state, compared against the per-byte oracle.
+    #[cfg(test)]
+    pub(crate) fn state_for_test(&self) -> OutputStateForTest {
+        (
+            self.consumed,
+            self.emitted,
+            self.in_redaction,
+            Vec::from(self.pending.clone()),
+            Vec::from(self.masked.clone()),
+            self.patterns.iter().map(|pattern| pattern.prefix).collect(),
+        )
     }
 
     /// Consumes the stream at confirmed EOF, flushing any incomplete prefix.
