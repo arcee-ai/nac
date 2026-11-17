@@ -350,5 +350,7 @@ impl From<anyhow::Error> for SessionPresentationError {
 }
 
 #[cfg(test)]
+mod automatic_compaction_tests;
+#[cfg(test)]
 #[path = "facade_tests.rs"]
 mod tests;
