@@ -838,6 +838,8 @@ fn assert_run_started_event(
 
 #[path = "session_service_tests/direct_interaction.rs"]
 mod direct_interaction;
+#[path = "session_service_tests/internal_completions.rs"]
+mod internal_completions;
 #[path = "session_service_tests/projection.rs"]
 mod projection;
 #[path = "session_service_tests/recovery.rs"]
