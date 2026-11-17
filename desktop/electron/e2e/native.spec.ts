@@ -38,7 +38,7 @@ test('native menu commands enter existing React flows and retain editor/modal gu
     desktop: Object.keys((window as any).__nacDesktop ?? {}).sort(),
     paths: Object.keys((window as any).__nacLocalPaths ?? {}),
   }))).toEqual({ require: 'undefined', process: 'undefined',
-    desktop: ['connect', 'connectLifetime', 'connectVisibility', 'reportConnectionLost'], paths: ['chooseDirectory'] });
+    desktop: ['connect', 'connectLifetime', 'connectSessionTarget', 'connectVisibility', 'reportConnectionLost'], paths: ['chooseDirectory'] });
   await focusWorkspace(c);
   await menu(c, 'Settings…');
   await expect(c.page.getByRole('dialog', { name: 'Configurations', exact: true })).toBeVisible();
