@@ -13,7 +13,7 @@ export interface SessionRowProps {
     childCount?: number;
     expanded?: boolean;
     onToggleChildren?: () => void;
-    /** Phone menu rows: 44px targets and always-visible actions. */
+    /** Phone menu rows: 44px targets and an always-visible "⋯". */
     touch?: boolean;
     onOpen: () => void;
     onPin?: () => void;
@@ -22,8 +22,9 @@ export interface SessionRowProps {
     onAssign?: () => void;
 }
 /**
- * One 32px session row: status dot, title, tabular age. Row actions take the
- * age's place on hover or keyboard focus, and stay visible on coarse pointers.
- * The title button stretches over the whole row; the controls sit above it.
+ * One 32px session row: status dot, title, tabular age. Its actions live in one
+ * "⋯" menu that takes the age's place on hover or keyboard focus, and stays
+ * visible on touch. The title button stretches over the whole row; the
+ * controls sit above it.
  */
 export declare function SessionRow({ title, label, status, updatedAt, now, active, depth, pinned, childCount, expanded, onToggleChildren, touch, onOpen, onPin, onRename, onDelete, onAssign, }: SessionRowProps): import("react").JSX.Element;

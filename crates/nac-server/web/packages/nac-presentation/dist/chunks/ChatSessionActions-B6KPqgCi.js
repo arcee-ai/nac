@@ -4613,70 +4613,17 @@ function cs() {
 	if (!e) throw Error("useTheme must be used within a ThemeProvider");
 	return e;
 }
-// src/app/components/projects/RowActionButton.tsx
-function ls({ icon: e, label: n, title: r, isMobile: i = !1, destructive: a = !1, onClick: o }) {
-	return /* @__PURE__ */ B(k, {
-		title: r ?? n,
-		sticky: !0,
-		children: /* @__PURE__ */ B(C, {
-			variant: h.Ghost,
-			size: i ? x.Medium : x.Small,
-			content: S.Icon,
-			"aria-label": n,
-			className: T(i && "!size-11 !rounded-lg !p-0", a && "hover:!text-error-primary focus-visible:!text-error-primary"),
-			onClick: o,
-			children: /* @__PURE__ */ B(t, { iconName: e })
-		})
-	});
-}
-// src/app/components/projects/ChatSessionActions.tsx
-function us({ title: e, pinned: t = !1, isMobile: n = !1, onPin: r, onRename: i, onDelete: a, onAssign: o }) {
-	return /* @__PURE__ */ V("div", {
-		className: n ? "nac-session-actions flex items-center gap-0" : "contents",
-		children: [
-			r ? /* @__PURE__ */ B(ls, {
-				icon: t ? y.Unpin : y.Pin,
-				title: t ? "Unpin chat" : "Pin chat",
-				label: `${t ? "Unpin" : "Pin"} ${e}`,
-				isMobile: n,
-				onClick: r
-			}) : null,
-			o ? /* @__PURE__ */ B(ls, {
-				icon: y.Folder,
-				title: "Assign to project",
-				label: `Assign ${e} to a project`,
-				isMobile: n,
-				onClick: o
-			}) : null,
-			i ? /* @__PURE__ */ B(ls, {
-				icon: y.Edit,
-				title: "Rename chat",
-				label: `Rename ${e}`,
-				isMobile: n,
-				onClick: i
-			}) : null,
-			a ? /* @__PURE__ */ B(ls, {
-				icon: y.Trash,
-				title: "Delete chat",
-				label: `Delete ${e}`,
-				isMobile: n,
-				destructive: !0,
-				onClick: a
-			}) : null
-		]
-	});
-}
 // src/app/lib/markdownChunk.ts
-var ds = null, fs = !1;
-function ps() {
-	return ds ??= import("./markdown-renderer-vnbCu4W0.js").then((e) => e.t).then((e) => (fs = !0, e)), ds;
+var ls = null, us = !1;
+function ds() {
+	return ls ??= import("./markdown-renderer-vnbCu4W0.js").then((e) => e.t).then((e) => (us = !0, e)), ls;
 }
-function ms() {
-	return fs;
+function fs() {
+	return us;
 }
 // src/app/lib/markdown.tsx
-var hs = ee(ps);
-function gs({ children: e, streaming: t = !1, className: n }) {
+var ps = ee(ds);
+function ms({ children: e, streaming: t = !1, className: n }) {
 	return /* @__PURE__ */ B("div", {
 		className: T("chat-response markdown markdown-content text-basic-primary w-full", t && "streaming", n),
 		children: /* @__PURE__ */ B(N, {
@@ -4684,7 +4631,7 @@ function gs({ children: e, streaming: t = !1, className: n }) {
 				className: "whitespace-pre-wrap font-sans",
 				children: e
 			}),
-			children: /* @__PURE__ */ B(hs, {
+			children: /* @__PURE__ */ B(ps, {
 				streaming: t,
 				children: e
 			})
@@ -4692,42 +4639,42 @@ function gs({ children: e, streaming: t = !1, className: n }) {
 	});
 }
 // src/app/features/insights/presentation/items/itemContent.ts
-var _s = (e) => e === Ha.Default;
-function vs(e) {
+var hs = (e) => e === Ha.Default;
+function gs(e) {
 	let t = e.presentation?.callId;
 	return t ? {
 		id: t,
 		blockKey: e.key
 	} : null;
 }
-var ys = (e) => e !== Ha.Loading;
-function bs(t, n) {
+var _s = (e) => e !== Ha.Loading;
+function vs(t, n) {
 	return n == null ? t : `${t}, ${e(n)}`;
 }
 // src/app/features/insights/presentation/items/ItemParts.tsx
-function xs({ children: e }) {
+function ys({ children: e }) {
 	return /* @__PURE__ */ B("p", {
 		className: "whitespace-pre-wrap break-words",
 		children: e
 	});
 }
-function Ss({ children: e }) {
+function bs({ children: e }) {
 	return /* @__PURE__ */ B("p", {
 		className: "type-body-chrome text-success-primary",
 		children: e
 	});
 }
-function Cs({ link: e, context: t }) {
+function xs({ link: e, context: t }) {
 	return e ? /* @__PURE__ */ B(Va, {
 		label: e.title || "Open session",
 		className: "!h-auto !min-h-9 !px-2 !py-2 max-md:!min-h-11",
 		onClick: () => t.openSubagent(e.rowKey)
 	}) : null;
 }
-function ws({ text: e, streaming: t }) {
+function Ss({ text: e, streaming: t }) {
 	return /* @__PURE__ */ B("div", {
 		className: "reasoning-prose",
-		children: /* @__PURE__ */ B(gs, {
+		children: /* @__PURE__ */ B(ms, {
 			className: "text-basic-secondary",
 			streaming: t,
 			children: e
@@ -4735,14 +4682,14 @@ function ws({ text: e, streaming: t }) {
 	});
 }
 // src/app/features/insights/presentation/items/ReasoningItem.tsx
-function Ts({ segment: e, active: n }) {
+function Cs({ segment: e, active: n }) {
 	let r = L(), i = R(null), a = R(void 0), [o, s] = z(e.streaming);
 	if (re(() => {
 		if (a.current !== void 0) return;
 		let t = i.current, n = t?.ownerDocument.getSelection();
 		t && (t.contains(t.ownerDocument.activeElement) || n && !n.isCollapsed && (t.contains(n.anchorNode) || t.contains(n.focusNode))) || s(e.streaming);
 	}, [e.streaming]), !e.text.trim()) return null;
-	let c = e.streaming ? "Thinking…" : bs("Reasoning", e.durationMs);
+	let c = e.streaming ? "Thinking…" : vs("Reasoning", e.durationMs);
 	return /* @__PURE__ */ V("div", {
 		ref: i,
 		role: "group",
@@ -4781,11 +4728,64 @@ function Ts({ segment: e, active: n }) {
 			id: `${r}-body`,
 			hidden: !o,
 			className: T("min-w-0 border-l border-tertiary pl-4 py-1", !o && "hidden"),
-			children: /* @__PURE__ */ B(ws, {
+			children: /* @__PURE__ */ B(Ss, {
 				text: e.text,
 				streaming: e.streaming
 			})
 		})]
 	});
 }
-export { ba as $, Te as $t, xo as A, Pt as At, Ha as B, et as Bt, Lo as C, pn as Ct, wo as D, Ft as Dt, Eo as E, Qt as Et, Xa as F, bt as Ft, Ia as G, G as Gt, Ba as H, tt as Ht, Ya as I, ht as It, wa as J, W as Jt, Fa as K, Le as Kt, Ka as L, mt as Lt, co as M, Tt as Mt, ao as N, wt as Nt, Co as O, Dt as Ot, Za as P, Ct as Pt, xa as Q, Ee as Qt, Ga as R, ft as Rt, Mo as S, hn as St, Oo as T, cn as Tt, Ra as U, lt as Ut, Va as V, nt as Vt, La as W, K as Wt, Ta as X, ke as Xt, Z as Y, je as Yt, Sa as Z, Oe as Zt, Jo as _, vn as _t, _s as a, U as an, aa as at, Ho as b, dn as bt, bs as c, de as cn, ia as ct, ms as d, X as dt, Ce as en, ya as et, us as f, Xi as ft, Qo as g, yn as gt, cs as h, bn as ht, Ss as i, Se as in, da as it, lo as j, Et as jt, So as k, Ot as kt, gs as l, ra as lt, ss as m, Wi as mt, xs as n, he as nn, ga as nt, vs as o, H as on, la as ot, $ as p, Gi as pt, Pa as q, Ne as qt, Cs as r, me as rn, ua as rt, ys as s, fe as sn, ca as st, Ts as t, xe as tn, va as tt, ps as u, ta as ut, Wo as v, _n as vt, jo as w, un as wt, Ro as x, mn as xt, Uo as y, fn as yt, Ua as z, ut as zt };
+// src/app/components/projects/RowActionButton.tsx
+function ws({ icon: e, label: n, title: r, isMobile: i = !1, destructive: a = !1, onClick: o }) {
+	return /* @__PURE__ */ B(k, {
+		title: r ?? n,
+		sticky: !0,
+		children: /* @__PURE__ */ B(C, {
+			variant: h.Ghost,
+			size: i ? x.Medium : x.Small,
+			content: S.Icon,
+			"aria-label": n,
+			className: T(i && "!size-11 !rounded-lg !p-0", a && "hover:!text-error-primary focus-visible:!text-error-primary"),
+			onClick: o,
+			children: /* @__PURE__ */ B(t, { iconName: e })
+		})
+	});
+}
+// src/app/components/projects/ChatSessionActions.tsx
+function Ts({ title: e, pinned: t = !1, isMobile: n = !1, onPin: r, onRename: i, onDelete: a, onAssign: o }) {
+	return /* @__PURE__ */ V("div", {
+		className: n ? "nac-session-actions flex items-center gap-0" : "contents",
+		children: [
+			r ? /* @__PURE__ */ B(ws, {
+				icon: t ? y.Unpin : y.Pin,
+				title: t ? "Unpin chat" : "Pin chat",
+				label: `${t ? "Unpin" : "Pin"} ${e}`,
+				isMobile: n,
+				onClick: r
+			}) : null,
+			o ? /* @__PURE__ */ B(ws, {
+				icon: y.Folder,
+				title: "Assign to project",
+				label: `Assign ${e} to a project`,
+				isMobile: n,
+				onClick: o
+			}) : null,
+			i ? /* @__PURE__ */ B(ws, {
+				icon: y.Edit,
+				title: "Rename chat",
+				label: `Rename ${e}`,
+				isMobile: n,
+				onClick: i
+			}) : null,
+			a ? /* @__PURE__ */ B(ws, {
+				icon: y.Trash,
+				title: "Delete chat",
+				label: `Delete ${e}`,
+				isMobile: n,
+				destructive: !0,
+				onClick: a
+			}) : null
+		]
+	});
+}
+export { ba as $, Te as $t, xo as A, Pt as At, Ha as B, et as Bt, Lo as C, pn as Ct, wo as D, Ft as Dt, Eo as E, Qt as Et, Xa as F, bt as Ft, Ia as G, G as Gt, Ba as H, tt as Ht, Ya as I, ht as It, wa as J, W as Jt, Fa as K, Le as Kt, Ka as L, mt as Lt, co as M, Tt as Mt, ao as N, wt as Nt, Co as O, Dt as Ot, Za as P, Ct as Pt, xa as Q, Ee as Qt, Ga as R, ft as Rt, Mo as S, hn as St, Oo as T, cn as Tt, Ra as U, lt as Ut, Va as V, nt as Vt, La as W, K as Wt, Ta as X, ke as Xt, Z as Y, je as Yt, Sa as Z, Oe as Zt, Jo as _, vn as _t, bs as a, U as an, aa as at, Ho as b, dn as bt, _s as c, de as cn, ia as ct, ds as d, X as dt, Ce as en, ya as et, fs as f, Xi as ft, Qo as g, yn as gt, cs as h, bn as ht, xs as i, Se as in, da as it, lo as j, Et as jt, So as k, Ot as kt, vs as l, ra as lt, ss as m, Wi as mt, Cs as n, he as nn, ga as nt, hs as o, H as on, la as ot, $ as p, Gi as pt, Pa as q, Ne as qt, ys as r, me as rn, ua as rt, gs as s, fe as sn, ca as st, Ts as t, xe as tn, va as tt, ms as u, ta as ut, Wo as v, _n as vt, jo as w, un as wt, Ro as x, mn as xt, Uo as y, fn as yt, Ua as z, ut as zt };

@@ -5,16 +5,15 @@ import type { ManagedSessionSummary, SessionBehavior, SessionGoalRecord, Session
 export interface SessionAgents {
     count: number;
     running: number;
-    /** The panel the pill opens: Subagents for a direct agent, Worksets/Insights for threads. */
+    /** The panel the Session menu's row opens: Subagents for a direct agent, Worksets/Insights for threads. */
     panel: SessionPanel;
     /** "agent"/"agents" for children, "thread"/"threads" for an orchestrator's workers. */
     noun: "agent" | "thread";
 }
 /**
  * Everything the session header shows, read once: the title and where the
- * session runs, its status on the shared ladder, and what each contextual
- * pill has to say. A pill with nothing to say is null or zero, and the header
- * leaves it out.
+ * session runs, its status on the shared ladder, and what each panel has to
+ * say in the Session menu. A panel with nothing to say is null or zero.
  */
 export interface SessionFacts {
     title: string;
@@ -40,5 +39,7 @@ export interface SessionFacts {
     goal: SessionGoalRecord | null;
     terminal: boolean;
     schedules: number;
+    /** Whether any of those schedules is armed (not paused or suspended). */
+    schedulesActive: boolean;
 }
 export declare function useSessionFacts(sessionId: string, snapshot: SessionSnapshotResponse | null, entry: ManagedSessionSummary | null): SessionFacts;
