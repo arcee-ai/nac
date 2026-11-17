@@ -50,3 +50,26 @@ single writer under `scripts/package.cjs`; resources and manifest must bind the
 exact engine/assets/source. Build artifacts, disposable profiles and recordings
 remain untracked. This is a local ad-hoc development candidate, not Linux or
 public release qualification.
+
+Presentation state uses canonical HOME, build track and Rust's canonical store
+identity, never the serving port/incarnation. `checkpoint-helper.c` is a narrow
+native adapter for descriptor-relative private/no-follow access, Swift-compatible
+`flock` ownership and ordered atomic replacement. Its fixed binary protocol
+accepts bounded checkpoint bytes only. Retain source bytes through the exact
+parent acknowledgment; EOF is not a migration acknowledgment. Close drains
+accepted writes and reaps this exact child before presentation ownership ends.
+Rust's database lease release cannot prove that this separate owner drained.
+
+Renderer/transport recovery retires the old document and native capabilities,
+then checks the retained exact engine before a bounded replacement. Engine death
+keeps the original cleanup and explicit Retry path. Cold drafts remain review
+evidence until deliberate Restore; never replay input or approval intent.
+Suspend/resume event tests are deterministic boundary tests, not OS sleep proof.
+
+The main-process attention observer consumes Rust's passive semantic metadata.
+Notifications default off and share the presentation owner's exact revision ACKs.
+Opt-out/reset fence synchronously; storage failure suspends delivery. Session
+clicks use the existing guarded React target port and discard deferred targets.
+Electron's system-managed permission/support and show callbacks are not proof
+of an authorized visible OS banner. Keep native doubles and real OS evidence
+separate, and preserve background throttling.

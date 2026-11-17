@@ -20,7 +20,7 @@ function fixture() {
     mainFrame: frame, session, getURL: () => origin + '/', isDestroyed: () => false,
     setWindowOpenHandler(value) { this.popup = value; },
   });
-  const window = { webContents: contents, isVisible: () => true, isMinimized: () => false, isFocused: () => true };
+  const window = Object.assign(new EventEmitter(), { webContents: contents, isVisible: () => true, isMinimized: () => false, isFocused: () => true });
   const ipcMain = new EventEmitter();
   const app = { isPackaged: false, isHidden: () => false };
   const electron = { ipcMain, app, shell: { openExternal: value => { opened.push(value); return Promise.resolve(); } }, dialog: {} };

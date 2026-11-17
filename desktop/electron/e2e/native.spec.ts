@@ -38,7 +38,7 @@ test('native menu commands enter existing React flows and retain editor/modal gu
     desktop: Object.keys((window as any).__nacDesktop ?? {}).sort(),
     paths: Object.keys((window as any).__nacLocalPaths ?? {}),
   }))).toEqual({ require: 'undefined', process: 'undefined',
-    desktop: ['connect', 'connectLifetime', 'connectVisibility', 'reportConnectionLost'], paths: ['chooseDirectory'] });
+    desktop: ['connect', 'connectLifetime', 'connectSessionTarget', 'connectVisibility', 'reportConnectionLost'], paths: ['chooseDirectory'] });
   const hash = () => c.page.evaluate(() => location.hash);
   // Settings is a full page in Focus: the command opens Models & providers.
   const models = c.page.getByRole('main', { name: 'Models & providers', exact: true });

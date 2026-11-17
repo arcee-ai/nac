@@ -137,6 +137,20 @@ export const test = base.extend<{ candidate: Candidate; developmentPathOverrides
       }).trim();
       expect(custody).toMatch(new RegExp(`^${applicationProcess.pid}\\s+.*\\/engine-launcher$`));
       ownedPids.push(custodyPid);
+      const checkpointPath = packaged
+        ? path.join(packaged, "Contents/Resources/checkpoint-helper")
+        : path.join(root, "target/electron-resources/checkpoint-helper");
+      const checkpoints = execFileSync("/bin/ps", ["-axo", "pid=,ppid=,comm="], {
+        encoding: "utf8",
+      })
+        .split("\n")
+        .map((row) => row.match(/^\s*(\d+)\s+(\d+)\s+(.*)$/))
+        .filter(
+          (row) => row && Number(row[2]) === applicationProcess.pid && row[3] === checkpointPath,
+        )
+        .map((row) => Number(row![1]));
+      expect(checkpoints).toHaveLength(1);
+      ownedPids.push(...checkpoints);
       const api = async (
         route: string,
         data?: unknown,
@@ -202,92 +216,110 @@ export const test = base.extend<{ candidate: Candidate; developmentPathOverrides
       };
       await use(candidate);
     } finally {
-      if (info.status !== info.expectedStatus) {
-        const windowFacts = await app
-          .evaluate(({ BrowserWindow }) =>
-            BrowserWindow.getAllWindows().map((window) => ({
-              visible: window.isVisible(),
-              focused: window.isFocused(),
-              bounds: window.getBounds(),
-            })),
-          )
-          .catch(() => []);
-        const documentFacts = await page
-          ?.evaluate(() => ({
-            focused: document.hasFocus(),
-            visibility: document.visibilityState,
-            viewport: [innerWidth, innerHeight],
-            hash: location.hash,
-            hiddenSections: document.querySelectorAll('section[style*="display: none"]').length,
-          }))
-          .catch(() => null);
-        console.log("Window/document facts", JSON.stringify({ windowFacts, documentFacts }));
-        const state = await app
-          .evaluate(({ app }) =>
-            process
-              .getBuiltinModule("module")
-              .createRequire(app.getAppPath() + "/package.json")(app.getAppPath())
-              .getState(),
-          )
-          .catch(() => null);
-        await info.attach("bounded-desktop-diagnostics", {
-          body: JSON.stringify({ state, diagnostics }, null, 2),
-          contentType: "application/json",
-        });
-        console.log("Desktop failure state", JSON.stringify({ state, diagnostics }));
+      let settled = false;
+      try {
+        if (info.status !== info.expectedStatus) {
+          const windowFacts = await app
+            .evaluate(({ BrowserWindow }) =>
+              BrowserWindow.getAllWindows().map((window) => ({
+                visible: window.isVisible(),
+                focused: window.isFocused(),
+                bounds: window.getBounds(),
+              })),
+            )
+            .catch(() => []);
+          const documentFacts = await page
+            ?.evaluate(() => ({
+              focused: document.hasFocus(),
+              visibility: document.visibilityState,
+              viewport: [innerWidth, innerHeight],
+              hash: location.hash,
+              hiddenSections: document.querySelectorAll('section[style*="display: none"]').length,
+            }))
+            .catch(() => null);
+          console.log("Window/document facts", JSON.stringify({ windowFacts, documentFacts }));
+          const state = await app
+            .evaluate(({ app }) =>
+              process
+                .getBuiltinModule("module")
+                .createRequire(app.getAppPath() + "/package.json")(app.getAppPath())
+                .getState(),
+            )
+            .catch(() => null);
+          await info.attach("bounded-desktop-diagnostics", {
+            body: JSON.stringify({ state, diagnostics }, null, 2),
+            contentType: "application/json",
+          });
+          console.log("Desktop failure state", JSON.stringify({ state, diagnostics }));
+        }
+        // Test controller chooses the ordinary Stop and Quit dialog outcome. It
+        // neither bypasses lifecycle nor introduces a production control bridge.
+        if (applicationProcess.exitCode === null && applicationProcess.signalCode === null) {
+          await app
+            .evaluate(({ app, dialog }) => {
+              dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false });
+              app.quit();
+            })
+            .catch(() => {});
+          await expect
+            .poll(
+              () => applicationProcess.exitCode !== null || applicationProcess.signalCode !== null,
+              { timeout: 30000 },
+            )
+            .toBe(true);
+        }
+        if (enginePid)
+          await expect
+            .poll(
+              () => {
+                try {
+                  process.kill(enginePid, 0);
+                  return true;
+                } catch {
+                  return false;
+                }
+              },
+              { timeout: 30000 },
+            )
+            .toBe(false);
+        for (const pid of ownedPids)
+          await expect
+            .poll(
+              () => {
+                try {
+                  process.kill(pid, 0);
+                  return true;
+                } catch {
+                  return false;
+                }
+              },
+              { timeout: 5000 },
+            )
+            .toBe(false);
+        if (info.status === info.expectedStatus && process.env.NAC_ELECTRON_KEEP_FIXTURES !== "1")
+          await fs.rm(directory, { recursive: true });
+        else
+          await info.attach("disposable-profile-location", {
+            body: directory,
+            contentType: "text/plain",
+          });
+        settled = true;
+      } finally {
+        await provider.stop();
+        // Controller-only evidence; no paths, launch secrets or raw attachments.
+        // Missing/failed cleanup never becomes a successful receipt.
+        if (process.env.NAC_ELECTRON_CI_RECORDS)
+          await fs.appendFile(
+            process.env.NAC_ELECTRON_CI_RECORDS,
+            JSON.stringify({
+              test: info.titlePath,
+              mainPid: applicationProcess.pid,
+              enginePid,
+              ownedPids,
+              settled,
+            }) + "\n",
+          );
       }
-      // Test controller chooses the ordinary Stop and Quit dialog outcome. It
-      // neither bypasses lifecycle nor introduces a production control bridge.
-      if (applicationProcess.exitCode === null && applicationProcess.signalCode === null) {
-        await app
-          .evaluate(({ app, dialog }) => {
-            dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false });
-            app.quit();
-          })
-          .catch(() => {});
-        await expect
-          .poll(
-            () => applicationProcess.exitCode !== null || applicationProcess.signalCode !== null,
-            { timeout: 30000 },
-          )
-          .toBe(true);
-      }
-      if (enginePid)
-        await expect
-          .poll(
-            () => {
-              try {
-                process.kill(enginePid, 0);
-                return true;
-              } catch {
-                return false;
-              }
-            },
-            { timeout: 30000 },
-          )
-          .toBe(false);
-      for (const pid of ownedPids)
-        await expect
-          .poll(
-            () => {
-              try {
-                process.kill(pid, 0);
-                return true;
-              } catch {
-                return false;
-              }
-            },
-            { timeout: 5000 },
-          )
-          .toBe(false);
-      await provider.stop();
-      if (info.status === info.expectedStatus && process.env.NAC_ELECTRON_KEEP_FIXTURES !== "1")
-        await fs.rm(directory, { recursive: true });
-      else
-        await info.attach("disposable-profile-location", {
-          body: directory,
-          contentType: "text/plain",
-        });
     }
   },
 });

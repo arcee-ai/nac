@@ -20,7 +20,7 @@ test("startup without custody settlement keeps a visible protected cleanup statu
   await fs.mkdir(resources);
   for (const folder of ["home", "nac-home", "xdg", "workspace", "tmp"])
     await fs.mkdir(path.join(directory, folder));
-  for (const file of ["manifest.json", "engine-identity.json"])
+  for (const file of ["manifest.json", "engine-identity.json", "checkpoint-helper"])
     await fs.copyFile(
       path.join(root, "target/electron-resources", file),
       path.join(resources, file),
