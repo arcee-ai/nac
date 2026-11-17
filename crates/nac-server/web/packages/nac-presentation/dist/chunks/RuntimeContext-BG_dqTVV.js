@@ -2737,51 +2737,52 @@ function xr(e) {
 	};
 }
 var { release: Sr, SORT_ITEMS: Cr, RANGE_ITEMS: wr, sessionFiltersStore: Tr, setQuery: Er, setSort: Dr, setCreatedRange: Or, setModifiedRange: kr, toggleEnv: Ar, toggleProvider: jr, resetFilters: Mr, hasActiveFilters: Nr, useVisibleSessions: Pr, useVisibleProjectItems: Fr, useSessionProviders: Ir, useSessionEnvs: Lr, pruneUnavailableFacets: Rr, useFilterQuery: zr, useSort: Br, useCreatedRange: Vr, useModifiedRange: Hr, useSelectedEnvs: Ur, useSelectedProviders: Wr, useIsDefaultSort: Gr } = xr(K), Kr = /* @__PURE__ */ e({
-	activateSessionSelection: () => gi,
+	activateSessionSelection: () => _i,
 	bindSidePanelProject: () => Xr,
 	createSessionLayoutStore: () => qr,
-	openSidePanelList: () => $r,
+	leaveFocusedSidePanel: () => $r,
+	openSidePanelList: () => ei,
 	release: () => Jr,
-	rememberInsightListPosition: () => yi,
-	rememberInsightsReturn: () => _i,
-	rememberSubagentPage: () => bi,
-	resetSessionSelection: () => hi,
-	restoreInsightsReturn: () => vi,
-	revealSidePanel: () => ri,
-	selectFile: () => di,
-	selectFileListing: () => pi,
-	selectInsight: () => ai,
-	selectInsightsFilter: () => si,
-	selectRevision: () => ui,
-	selectSubagent: () => li,
-	selectThread: () => ii,
-	selectWorkset: () => ci,
+	rememberInsightListPosition: () => bi,
+	rememberInsightsReturn: () => vi,
+	rememberSubagentPage: () => xi,
+	resetSessionSelection: () => gi,
+	restoreInsightsReturn: () => yi,
+	revealSidePanel: () => ii,
+	selectFile: () => fi,
+	selectFileListing: () => mi,
+	selectInsight: () => oi,
+	selectInsightsFilter: () => ci,
+	selectRevision: () => di,
+	selectSubagent: () => ui,
+	selectThread: () => ai,
+	selectWorkset: () => li,
 	sessionLayoutStore: () => Yr,
-	setSidePanelAnimate: () => mi,
-	showSidePanelList: () => ti,
-	toggleFolder: () => fi,
-	toggleInsightGroup: () => oi,
-	toggleSidePanelCollapsed: () => ei,
+	setSidePanelAnimate: () => hi,
+	showSidePanelList: () => ni,
+	toggleFolder: () => pi,
+	toggleInsightGroup: () => si,
+	toggleSidePanelCollapsed: () => ti,
 	toggleSidePanelExpanded: () => Qr,
-	toggleSidePanelList: () => ni,
+	toggleSidePanelList: () => ri,
 	unbindSidePanelProject: () => Zr,
-	useExpandedInsightGroups: () => Ai,
-	useFileListing: () => Li,
-	useInsightFocusNonce: () => ki,
-	useInsightsFilter: () => ji,
-	useInsightsReturn: () => xi,
-	useSelectedFile: () => Fi,
-	useSelectedInsight: () => Oi,
-	useSelectedRevision: () => Pi,
-	useSelectedSubagent: () => Ni,
-	useSelectedThread: () => Ei,
-	useSelectedThreadEpisode: () => Di,
-	useSelectedWorkset: () => Mi,
-	useSidePanelAnimate: () => Ci,
-	useSidePanelCollapsed: () => Si,
-	useSidePanelExpanded: () => wi,
-	useSidePanelList: () => Ti,
-	useToggledFolders: () => Ii
+	useExpandedInsightGroups: () => ji,
+	useFileListing: () => Ri,
+	useInsightFocusNonce: () => Ai,
+	useInsightsFilter: () => Mi,
+	useInsightsReturn: () => Si,
+	useSelectedFile: () => Ii,
+	useSelectedInsight: () => ki,
+	useSelectedRevision: () => Fi,
+	useSelectedSubagent: () => Pi,
+	useSelectedThread: () => Di,
+	useSelectedThreadEpisode: () => Oi,
+	useSelectedWorkset: () => Ni,
+	useSidePanelAnimate: () => wi,
+	useSidePanelCollapsed: () => Ci,
+	useSidePanelExpanded: () => Ti,
+	useSidePanelList: () => Ei,
+	useToggledFolders: () => Li
 });
 function qr(e) {
 	let t = G({
@@ -2856,36 +2857,39 @@ function qr(e) {
 		} : { expanded: e });
 	}
 	function h() {
+		i().expanded && a({ expanded: !1 });
+	}
+	function g() {
 		a({
 			expanded: !0,
 			panelList: !0
 		});
 	}
-	function g() {
+	function _() {
 		d(!i().collapsed);
 	}
-	function _(e) {
+	function v(e) {
 		i().panelList !== e && a({ panelList: e });
 	}
-	function v() {
+	function y() {
 		a({ panelList: !i().panelList });
 	}
-	function y(e = !1) {
+	function b(e = !1) {
 		a({ panelList: !1 }), e ? i().expanded || a({ expanded: !0 }) : d(!1);
 	}
-	function b(e, t = null) {
+	function x(e, t = null) {
 		a({
 			selectedThread: e,
 			selectedThreadEpisode: t
-		}), e && _(!1);
+		}), e && v(!1);
 	}
-	function x(e) {
+	function S(e) {
 		a((t) => e == null ? { selectedInsight: e } : {
 			selectedInsight: e,
 			insightFocusNonce: t.insightFocusNonce + 1
 		});
 	}
-	function S(e, t) {
+	function C(e, t) {
 		a((n) => {
 			let r = n.expandedInsightGroups.has(e);
 			if (t === r) return null;
@@ -2893,10 +2897,10 @@ function qr(e) {
 			return r ? i.delete(e) : i.add(e), { expandedInsightGroups: i };
 		});
 	}
-	function C(e) {
+	function w(e) {
 		i().insightsFilter !== e && a({ insightsFilter: e });
 	}
-	function w() {
+	function T() {
 		let e = i();
 		return {
 			insightSelectionEpoch: e.insightSelectionEpoch,
@@ -2909,9 +2913,9 @@ function qr(e) {
 			panelList: e.panelList
 		};
 	}
-	function T(e, t, n) {
+	function E(e, t, n) {
 		let r = {
-			...w(),
+			...T(),
 			selectedInsight: t,
 			...n ? {
 				selectedThread: n.name,
@@ -2920,7 +2924,7 @@ function qr(e) {
 		};
 		a((t) => ({ insightsReturns: new Map(t.insightsReturns).set(e, r) }));
 	}
-	function E(e) {
+	function D(e) {
 		let t = i().insightsReturns.get(e);
 		if (!t) return !1;
 		let n = new Map(i().insightsReturns);
@@ -2929,7 +2933,7 @@ function qr(e) {
 			insightsReturns: n
 		}), !0;
 	}
-	function D(e, t, n = null, r) {
+	function O(e, t, n = null, r) {
 		a((i) => ({ insightListPositions: new Map(i.insightListPositions).set(e, {
 			top: t,
 			focusNonce: r?.focusNonce ?? i.insightFocusNonce,
@@ -2937,50 +2941,50 @@ function qr(e) {
 			anchor: n
 		}) }));
 	}
-	function O(e, t) {
+	function k(e, t) {
 		let { expanded: n, collapsed: r } = i();
 		a((i) => ({ subagentPageReturns: new Map(i.subagentPageReturns).set(t, {
 			parentSessionId: e,
-			context: w(),
+			context: T(),
 			expanded: n,
 			collapsed: r
 		}) }));
 	}
-	function k(e) {
+	function A(e) {
 		let t = i();
 		if (t.activeSessionId === e) return;
 		let n = t.activeSessionId ? t.subagentPageReturns.get(t.activeSessionId) : null;
-		L(), a({ activeSessionId: e }), n && n.parentSessionId === e && a({
+		R(), a({ activeSessionId: e }), n && n.parentSessionId === e && a({
 			...n.context,
 			expanded: n.expanded,
 			collapsed: n.collapsed
 		});
 	}
-	function A(e) {
-		a({ selectedWorkset: e }), e && _(!1);
+	function j(e) {
+		a({ selectedWorkset: e }), e && v(!1);
 	}
-	function j(e, t) {
+	function M(e, t) {
 		i().selectedSubagents.get(e) !== t && a((n) => ({ selectedSubagents: new Map(n.selectedSubagents).set(e, t) }));
 	}
-	function M(e) {
+	function N(e) {
 		a({ selectedRevision: e });
 	}
-	function N(e) {
-		a({ selectedFile: e }), e && _(!1);
-	}
 	function P(e) {
+		a({ selectedFile: e }), e && v(!1);
+	}
+	function F(e) {
 		a((t) => {
 			let n = new Set(t.toggledFolders);
 			return n.delete(e) || n.add(e), { toggledFolders: n };
 		});
 	}
-	function F(e) {
+	function I(e) {
 		a({ fileListing: e });
 	}
-	function I(e) {
+	function L(e) {
 		i().sidePanelAnimate !== e && a({ sidePanelAnimate: e });
 	}
-	function L() {
+	function R() {
 		a({
 			insightSelectionEpoch: ++r,
 			selectedThread: null,
@@ -3004,28 +3008,29 @@ function qr(e) {
 		bindSidePanelProject: f,
 		unbindSidePanelProject: p,
 		toggleSidePanelExpanded: m,
-		openSidePanelList: h,
-		toggleSidePanelCollapsed: g,
-		showSidePanelList: _,
-		toggleSidePanelList: v,
-		revealSidePanel: y,
-		selectThread: b,
-		selectInsight: x,
-		toggleInsightGroup: S,
-		selectInsightsFilter: C,
-		selectWorkset: A,
-		selectSubagent: j,
-		selectRevision: M,
-		selectFile: N,
-		toggleFolder: P,
-		selectFileListing: F,
-		setSidePanelAnimate: I,
-		resetSessionSelection: L,
-		activateSessionSelection: k,
-		rememberInsightsReturn: T,
-		restoreInsightsReturn: E,
-		rememberInsightListPosition: D,
-		rememberSubagentPage: O,
+		leaveFocusedSidePanel: h,
+		openSidePanelList: g,
+		toggleSidePanelCollapsed: _,
+		showSidePanelList: v,
+		toggleSidePanelList: y,
+		revealSidePanel: b,
+		selectThread: x,
+		selectInsight: S,
+		toggleInsightGroup: C,
+		selectInsightsFilter: w,
+		selectWorkset: j,
+		selectSubagent: M,
+		selectRevision: N,
+		selectFile: P,
+		toggleFolder: F,
+		selectFileListing: I,
+		setSidePanelAnimate: L,
+		resetSessionSelection: R,
+		activateSessionSelection: A,
+		rememberInsightsReturn: E,
+		restoreInsightsReturn: D,
+		rememberInsightListPosition: O,
+		rememberSubagentPage: k,
 		useInsightsReturn: (e) => o((t) => t.insightsReturns.has(e)),
 		useSidePanelCollapsed: () => o((e) => e.collapsed),
 		useSidePanelAnimate: () => o((e) => e.sidePanelAnimate),
@@ -3045,19 +3050,19 @@ function qr(e) {
 		useFileListing: () => o((e) => e.fileListing)
 	};
 }
-var { release: Jr, sessionLayoutStore: Yr, bindSidePanelProject: Xr, unbindSidePanelProject: Zr, toggleSidePanelExpanded: Qr, openSidePanelList: $r, toggleSidePanelCollapsed: ei, showSidePanelList: ti, toggleSidePanelList: ni, revealSidePanel: ri, selectThread: ii, selectInsight: ai, toggleInsightGroup: oi, selectInsightsFilter: si, selectWorkset: ci, selectSubagent: li, selectRevision: ui, selectFile: di, toggleFolder: fi, selectFileListing: pi, setSidePanelAnimate: mi, resetSessionSelection: hi, activateSessionSelection: gi, rememberInsightsReturn: _i, restoreInsightsReturn: vi, rememberInsightListPosition: yi, rememberSubagentPage: bi, useInsightsReturn: xi, useSidePanelCollapsed: Si, useSidePanelAnimate: Ci, useSidePanelExpanded: wi, useSidePanelList: Ti, useSelectedThread: Ei, useSelectedThreadEpisode: Di, useSelectedInsight: Oi, useInsightFocusNonce: ki, useExpandedInsightGroups: Ai, useInsightsFilter: ji, useSelectedWorkset: Mi, useSelectedSubagent: Ni, useSelectedRevision: Pi, useSelectedFile: Fi, useToggledFolders: Ii, useFileListing: Li } = qr(K), Ri = /* @__PURE__ */ e({
-	createSessionNavigationStore: () => zi,
-	markSessionViewed: () => Gi,
-	pruneSessionNavigation: () => Ki,
-	release: () => Bi,
-	restoreSessionNavigation: () => Vi,
-	serializeSessionNavigation: () => Hi,
-	sessionNavigationStore: () => Ui,
-	toggleSessionNavigationPin: () => Wi,
-	useSessionNavigationPins: () => qi,
-	useSessionViewedAt: () => Ji
+var { release: Jr, sessionLayoutStore: Yr, bindSidePanelProject: Xr, unbindSidePanelProject: Zr, toggleSidePanelExpanded: Qr, leaveFocusedSidePanel: $r, openSidePanelList: ei, toggleSidePanelCollapsed: ti, showSidePanelList: ni, toggleSidePanelList: ri, revealSidePanel: ii, selectThread: ai, selectInsight: oi, toggleInsightGroup: si, selectInsightsFilter: ci, selectWorkset: li, selectSubagent: ui, selectRevision: di, selectFile: fi, toggleFolder: pi, selectFileListing: mi, setSidePanelAnimate: hi, resetSessionSelection: gi, activateSessionSelection: _i, rememberInsightsReturn: vi, restoreInsightsReturn: yi, rememberInsightListPosition: bi, rememberSubagentPage: xi, useInsightsReturn: Si, useSidePanelCollapsed: Ci, useSidePanelAnimate: wi, useSidePanelExpanded: Ti, useSidePanelList: Ei, useSelectedThread: Di, useSelectedThreadEpisode: Oi, useSelectedInsight: ki, useInsightFocusNonce: Ai, useExpandedInsightGroups: ji, useInsightsFilter: Mi, useSelectedWorkset: Ni, useSelectedSubagent: Pi, useSelectedRevision: Fi, useSelectedFile: Ii, useToggledFolders: Li, useFileListing: Ri } = qr(K), zi = /* @__PURE__ */ e({
+	createSessionNavigationStore: () => Bi,
+	markSessionViewed: () => Ki,
+	pruneSessionNavigation: () => qi,
+	release: () => Vi,
+	restoreSessionNavigation: () => Hi,
+	serializeSessionNavigation: () => Ui,
+	sessionNavigationStore: () => Wi,
+	toggleSessionNavigationPin: () => Gi,
+	useSessionNavigationPins: () => Ji,
+	useSessionViewedAt: () => Yi
 });
-function zi(e) {
+function Bi(e) {
 	let t = "nac.sessionNavigation", n = () => ({
 		pinned: /* @__PURE__ */ new Set(),
 		lastViewedAt: {}
@@ -3135,15 +3140,15 @@ function zi(e) {
 		useSessionViewedAt: (e) => p((t) => t.lastViewedAt[e])
 	};
 }
-var { release: Bi, restoreSessionNavigation: Vi, serializeSessionNavigation: Hi, sessionNavigationStore: Ui, toggleSessionNavigationPin: Wi, markSessionViewed: Gi, pruneSessionNavigation: Ki, useSessionNavigationPins: qi, useSessionViewedAt: Ji } = zi(K), Yi = /* @__PURE__ */ e({
-	createSidebarLayoutStore: () => Xi,
-	release: () => Zi,
-	setSidebarOffset: () => ea,
-	storeOpen: () => $i,
-	storedOpen: () => Qi,
-	useSidebarOffset: () => ta
+var { release: Vi, restoreSessionNavigation: Hi, serializeSessionNavigation: Ui, sessionNavigationStore: Wi, toggleSessionNavigationPin: Gi, markSessionViewed: Ki, pruneSessionNavigation: qi, useSessionNavigationPins: Ji, useSessionViewedAt: Yi } = Bi(K), Xi = /* @__PURE__ */ e({
+	createSidebarLayoutStore: () => Zi,
+	release: () => Qi,
+	setSidebarOffset: () => ta,
+	storeOpen: () => ea,
+	storedOpen: () => $i,
+	useSidebarOffset: () => na
 });
-function Xi(e) {
+function Zi(e) {
 	let t = G({ offset: 0 }, "sidebar-layout"), n = t.getState();
 	function r(e) {
 		t.setState({ offset: e });
@@ -3176,16 +3181,16 @@ function Xi(e) {
 		useSidebarOffset: i
 	};
 }
-var { release: Zi, storedOpen: Qi, storeOpen: $i, setSidebarOffset: ea, useSidebarOffset: ta } = Xi(K), na = /* @__PURE__ */ e({
-	createSshConnectionStore: () => ra,
-	markSshConnected: () => oa,
-	markSshDisconnected: () => sa,
-	release: () => ia,
-	sshTargetFromSummary: () => la,
-	sshTargetKey: () => aa,
-	useSshConnectionStatus: () => ca
+var { release: Qi, storedOpen: $i, storeOpen: ea, setSidebarOffset: ta, useSidebarOffset: na } = Zi(K), ra = /* @__PURE__ */ e({
+	createSshConnectionStore: () => ia,
+	markSshConnected: () => sa,
+	markSshDisconnected: () => ca,
+	release: () => aa,
+	sshTargetFromSummary: () => ua,
+	sshTargetKey: () => oa,
+	useSshConnectionStatus: () => la
 });
-function ra(e) {
+function ia(e) {
 	function t(e) {
 		return [
 			e.ssh_host.trim(),
@@ -3229,9 +3234,9 @@ function ra(e) {
 		sshTargetFromSummary: s
 	};
 }
-var { release: ia, sshTargetKey: aa, markSshConnected: oa, markSshDisconnected: sa, useSshConnectionStatus: ca, sshTargetFromSummary: la } = ra(K);
+var { release: aa, sshTargetKey: oa, markSshConnected: sa, markSshDisconnected: ca, useSshConnectionStatus: la, sshTargetFromSummary: ua } = ia(K);
 // src/app/runtime/presentationStores.ts
-function ua(e, t, n, r) {
+function da(e, t, n, r) {
 	return {
 		promptDraftStore: Et(t, n, r),
 		panelWidth: Ne(e),
@@ -3243,12 +3248,12 @@ function ua(e, t, n, r) {
 		runtimeStore: bn(e),
 		sessionFiltersStore: xr(e),
 		sessionLayoutStore: qr(e),
-		sessionNavigationStore: zi(e),
-		sidebarLayoutStore: Xi(e),
-		sshConnectionStore: ra(e)
+		sessionNavigationStore: Bi(e),
+		sidebarLayoutStore: Zi(e),
+		sshConnectionStore: ia(e)
 	};
 }
-var da = {
+var fa = {
 	promptDraftStore: yt,
 	panelWidth: Oe,
 	threadLogHeight: Re,
@@ -3259,16 +3264,16 @@ var da = {
 	runtimeStore: yn,
 	sessionFiltersStore: br,
 	sessionLayoutStore: Kr,
-	sessionNavigationStore: Ri,
-	sidebarLayoutStore: Yi,
-	sshConnectionStore: na
+	sessionNavigationStore: zi,
+	sidebarLayoutStore: Xi,
+	sshConnectionStore: ra
 };
-function fa(e) {
+function pa(e) {
 	e.runtimeStore.resetRuntime(null);
 	for (let t of Object.values(e)) t.release();
 }
 // src/app/runtime/requestLifetime.ts
-function pa(e, t) {
+function ma(e, t) {
 	return e.throwIfAborted(), new Promise((n, r) => {
 		let i = () => r(e.reason);
 		e.addEventListener("abort", i, { once: !0 }), Promise.resolve().then(() => (e.throwIfAborted(), t())).then((t) => {
@@ -3278,7 +3283,7 @@ function pa(e, t) {
 		});
 	});
 }
-function ma(e) {
+function ha(e) {
 	if (e instanceof y) return e;
 	if (e instanceof Error && e.name === "ApiError" && "status" in e && typeof e.status == "number" && "method" in e && typeof e.method == "string" && "path" in e && typeof e.path == "string" && "requestId" in e && typeof e.requestId == "string") {
 		let t = new y(e.status, e.method, e.path, "", e.requestId);
@@ -3286,7 +3291,7 @@ function ma(e) {
 	}
 	return e;
 }
-var ha = class extends D {
+var ga = class extends D {
 	source;
 	lifetime;
 	constructor(e, t) {
@@ -3307,7 +3312,7 @@ var ha = class extends D {
 		return this.source.newRequestId();
 	}
 	streamContext() {
-		return pa(this.lifetime, () => this.source.streamContext());
+		return ma(this.lifetime, () => this.source.streamContext());
 	}
 	async admit(e, t, n = {}) {
 		let r = n.signal ? AbortSignal.any([this.lifetime, n.signal]) : this.lifetime, i = n.requestId ?? this.source.newRequestId();
@@ -3317,7 +3322,7 @@ var ha = class extends D {
 			reason: "aborted"
 		};
 		try {
-			return await pa(r, () => this.source.admit(e, t, {
+			return await ma(r, () => this.source.admit(e, t, {
 				...n,
 				requestId: i,
 				signal: r
@@ -3328,19 +3333,19 @@ var ha = class extends D {
 				requestId: i,
 				error: e
 			};
-			throw ma(e);
+			throw ha(e);
 		}
 	}
 	request(e, t, n = {}) {
 		let r = n.signal ? AbortSignal.any([this.lifetime, n.signal]) : this.lifetime;
-		return pa(r, () => this.source.request(e, t, {
+		return ma(r, () => this.source.request(e, t, {
 			...n,
 			signal: r
 		})).catch((e) => {
-			throw ma(e);
+			throw ha(e);
 		});
 	}
-}, ga = class {
+}, _a = class {
 	limit;
 	requireAcknowledgement;
 	entries = /* @__PURE__ */ new Map();
@@ -3406,14 +3411,14 @@ var ha = class extends D {
 			t.listeners.clear();
 		}
 	}
-}, _a = /* @__PURE__ */ new WeakMap();
-function va(e) {
+}, va = /* @__PURE__ */ new WeakMap();
+function ya(e) {
 	if (e.terminalInputRecovery) return e.terminalInputRecovery;
-	let t = _a.get(e);
-	return t || (t = new ga(), _a.set(e, t)), t;
+	let t = va.get(e);
+	return t || (t = new _a(), va.set(e, t)), t;
 }
 // src/app/features/setup/localFolder.ts
-function ya(e, t) {
+function ba(e, t) {
 	if (e) return { async chooseDirectory(n, r) {
 		let i = new AbortController(), a = () => i.abort();
 		(r.aborted || t.aborted) && a(), r.addEventListener("abort", a, { once: !0 }), t.addEventListener("abort", a, { once: !0 });
@@ -3426,10 +3431,10 @@ function ya(e, t) {
 		}
 	} };
 }
-function ba(e, t, n, r) {
+function xa(e, t, n, r) {
 	return t && n === "directory" && !r ? e : void 0;
 }
-function xa(e, t, n) {
+function Sa(e, t, n) {
 	let r = new AbortController();
 	return {
 		cancel: () => r.abort(),
@@ -3441,8 +3446,8 @@ function xa(e, t, n) {
 	};
 }
 // src/app/runtime/nativeRuntime.ts
-var Sa = /* @__PURE__ */ new WeakMap(), Ca = 0, wa = class {
-	id = ++Ca;
+var Ca = /* @__PURE__ */ new WeakMap(), wa = 0, Ta = class {
+	id = ++wa;
 	scope;
 	client;
 	assets;
@@ -3460,7 +3465,7 @@ var Sa = /* @__PURE__ */ new WeakMap(), Ca = 0, wa = class {
 	eventSource;
 	constructor(e) {
 		if (e.scope.endpoint !== e.client.transport.endpoint) throw Error("Runtime scope must name the supplied client's endpoint.");
-		if (this.terminalInputRecovery = new ga(128, e.requireTerminalAcknowledgement ?? !1), this.queryClient = new h({ defaultOptions: {
+		if (this.terminalInputRecovery = new _a(128, e.requireTerminalAcknowledgement ?? !1), this.queryClient = new h({ defaultOptions: {
 			queries: {
 				queryKeyHashFn: (e) => g([this.id, ...e]),
 				staleTime: 3e4,
@@ -3469,8 +3474,8 @@ var Sa = /* @__PURE__ */ new WeakMap(), Ca = 0, wa = class {
 				refetchOnWindowFocus: !1
 			},
 			mutations: { retry: !1 }
-		} }), this.assets = e.assets ? Object.freeze({ ...e.assets }) : void 0, this.nativeDirectory = ya(e.nativeDirectory, this.controller.signal), this.stores = ua(e.storage, e.scope, e.draftStorage, e.draftPersistenceBinding), this.scope = Object.freeze({ ...e.scope }), this.client = new A(new ha(e.client.transport, this.controller.signal)), e.standaloneServingIncarnation !== void 0 && (this.scope.profile !== "standalone" || e.standaloneServingIncarnation !== this.scope.incarnation)) throw Error("Product serving binding must match the standalone runtime scope.");
-		this.api = de(this.client, e.standaloneServingIncarnation), this.productNavigation = new _(this.api.resolveProductDestination, this.isClosed, this.api.getProductContext), this.eventSource = e.eventSource, Sa.set(this.queryClient, this);
+		} }), this.assets = e.assets ? Object.freeze({ ...e.assets }) : void 0, this.nativeDirectory = ba(e.nativeDirectory, this.controller.signal), this.stores = da(e.storage, e.scope, e.draftStorage, e.draftPersistenceBinding), this.scope = Object.freeze({ ...e.scope }), this.client = new A(new ga(e.client.transport, this.controller.signal)), e.standaloneServingIncarnation !== void 0 && (this.scope.profile !== "standalone" || e.standaloneServingIncarnation !== this.scope.incarnation)) throw Error("Product serving binding must match the standalone runtime scope.");
+		this.api = de(this.client, e.standaloneServingIncarnation), this.productNavigation = new _(this.api.resolveProductDestination, this.isClosed, this.api.getProductContext), this.eventSource = e.eventSource, Ca.set(this.queryClient, this);
 	}
 	isClosed = () => this.controller.signal.aborted;
 	subscribe = (e) => (this.listeners.add(e), () => {
@@ -3498,26 +3503,26 @@ var Sa = /* @__PURE__ */ new WeakMap(), Ca = 0, wa = class {
 		if (!this.isClosed()) {
 			this.controller.abort(new DOMException("Native runtime was closed.", "AbortError")), this.terminalInputRecovery.close(), this.productNavigation.close();
 			for (let e of this.disposers) e();
-			this.disposers.clear(), this.queryClient.cancelQueries(), this.queryClient.clear(), fa(this.stores);
+			this.disposers.clear(), this.queryClient.cancelQueries(), this.queryClient.clear(), pa(this.stores);
 			for (let e of this.listeners) e();
 		}
 	}
 };
-function Ta(e) {
-	return new wa(e);
+function Ea(e) {
+	return new Ta(e);
 }
-var Ea = {
+var Da = {
 	api: fe,
 	client: M,
-	stores: da,
+	stores: fa,
 	events: (e, t) => De(e, t)
 };
-function Da(e) {
-	return Sa.get(e) ?? Ea;
+function Oa(e) {
+	return Ca.get(e) ?? Da;
 }
 // src/app/runtime/RuntimeContext.ts
-var Oa = u(null);
-function ka() {
-	return f(Oa) ?? Ea;
+var ka = u(null);
+function Aa() {
+	return f(ka) ?? Da;
 }
-export { pe as A, Fe as C, ve as D, _e as E, ne as F, y as I, x as L, oe as M, L as N, ye as O, R as P, je as S, ge as T, _n as _, Da as a, mn as b, va as c, gr as d, mr as f, cr as g, fr as h, Ta as i, se as j, me as k, Q as l, ur as m, ka as n, ba as o, vr as p, wa as r, xa as s, Oa as t, _r as u, gn as v, Me as w, vn as x, hn as y };
+export { pe as A, Fe as C, ve as D, _e as E, ne as F, y as I, x as L, oe as M, L as N, ye as O, R as P, je as S, ge as T, _n as _, Oa as a, mn as b, ya as c, gr as d, mr as f, cr as g, fr as h, Ea as i, se as j, me as k, Q as l, ur as m, Aa as n, xa as o, vr as p, Ta as r, Sa as s, ka as t, _r as u, gn as v, Me as w, vn as x, hn as y };
