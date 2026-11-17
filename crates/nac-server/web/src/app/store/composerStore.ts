@@ -4,18 +4,24 @@
 // events — so the card only names the prompt and the composer sends it.
 
 import { createShellIntents } from "@/app/features/human-shell/intents";
+import type { PromptDraft } from "./promptDraftStore";
 import { createStore, standalonePreferenceStorage } from "@/app/lib/store";
 
 interface ComposerState {
   /** Prompt waiting to be sent, or null once the composer has taken it. */
   pending: string | null;
   draft: { sessionId: string; text: string } | null;
+  firstPrompt: { sessionId: string; draft: PromptDraft } | null;
 }
 /** One presentation lifetime; hosted preferences are ephemeral. */
 export function createComposerStore(_storage?: Pick<Storage, "getItem" | "setItem">) {
-  const composerStore = createStore<ComposerState>({ pending: null, draft: null }, "composer");
+  const composerStore = createStore<ComposerState>(
+    { pending: null, draft: null, firstPrompt: null },
+    "composer",
+  );
   const initial_composerStore = composerStore.getState();
   const shellIntents = createShellIntents();
+  let closed = false;
 
   function sendPrompt(pending: string): void {
     composerStore.setState({ pending });
@@ -49,10 +55,29 @@ export function createComposerStore(_storage?: Pick<Storage, "getItem" | "setIte
   }
   return {
     release: () => {
+      closed = true;
       shellIntents.release();
       composerStore.setState(initial_composerStore);
     },
     shellIntents,
+    scheduleFirstPrompt(sessionId: string, draft: PromptDraft) {
+      if (closed) return;
+      composerStore.setState({ firstPrompt: { sessionId, draft } });
+    },
+    useFirstPrompt: (sessionId: string) =>
+      composerStore.useStore((state) =>
+        state.firstPrompt?.sessionId === sessionId ? state.firstPrompt.draft : null,
+      ),
+    takeFirstPrompt(sessionId: string, draft: PromptDraft) {
+      const pending = composerStore.getState().firstPrompt;
+      if (closed || pending?.sessionId !== sessionId || pending.draft !== draft) return false;
+      composerStore.setState({ firstPrompt: null });
+      return true;
+    },
+    cancelFirstPrompt(sessionId: string) {
+      if (composerStore.getState().firstPrompt?.sessionId === sessionId)
+        composerStore.setState({ firstPrompt: null });
+    },
     sendPrompt,
     consumePromptRequests,
     draftPrompt,
@@ -67,4 +92,8 @@ export const {
   draftPrompt,
   consumeDraftRequests,
   shellIntents,
+  scheduleFirstPrompt,
+  useFirstPrompt,
+  takeFirstPrompt,
+  cancelFirstPrompt,
 } = createComposerStore(standalonePreferenceStorage);

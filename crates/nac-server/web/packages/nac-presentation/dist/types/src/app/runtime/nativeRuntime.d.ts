@@ -61,6 +61,8 @@ export declare class NativeRuntime {
     readonly isClosed: () => boolean;
     readonly subscribe: (listener: () => void) => () => void;
     readonly events: (id: string, handlers: SessionStreamHandlers) => (() => void);
+    /** Authenticated EventSource for a passive, non-session stream path. */
+    readonly openStream: (path: string) => Promise<EventSource>;
     /** StrictMode may release/reacquire a view in the same commit. */
     readonly retain: () => () => void;
     /** Replacement requires a new instance, even when endpoint and session IDs match. */
@@ -68,5 +70,5 @@ export declare class NativeRuntime {
 }
 export declare function createNativeRuntime(options: NativeRuntimeOptions): NativeRuntime;
 export declare const standaloneRuntime: RuntimeDependencies;
-export type RuntimeDependencies = Pick<NativeRuntime, "api" | "client" | "stores" | "events"> & Partial<Pick<NativeRuntime, "id" | "assets" | "terminalInputRecovery" | "productNavigation" | "nativeDirectory">>;
+export type RuntimeDependencies = Pick<NativeRuntime, "api" | "client" | "stores" | "events"> & Partial<Pick<NativeRuntime, "id" | "assets" | "terminalInputRecovery" | "productNavigation" | "nativeDirectory" | "openStream">>;
 export declare function runtimeForQueryClient(client: QueryClient): RuntimeDependencies;

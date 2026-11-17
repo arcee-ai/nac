@@ -41,7 +41,10 @@ export async function auditSetupTargets(root: Locator, info: TestInfo, state: st
       const document = node.ownerDocument;
       const window = document.defaultView!;
       const box = node.getBoundingClientRect();
-      const owner = node.closest('[data-slot="dialog-content"], [data-slot="sheet-content"]');
+      // Dialogs, sheets and Settings page surfaces each own one footer.
+      const owner = node.closest(
+        '[data-slot="dialog-content"], [data-slot="sheet-content"], [data-settings-surface]',
+      );
       const footer = owner?.querySelector("footer")?.getBoundingClientRect();
       const role = node.getAttribute("role");
       const pseudo = window.getComputedStyle(node, "::before");

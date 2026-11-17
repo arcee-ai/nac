@@ -34,10 +34,10 @@ export function ResourceCard({
       id={`occurrence-${receipt.occurrence_id}`}
       data-occurrence={receipt.occurrence_id}
       tabIndex={-1}
-      className="rounded-xl border border-muted p-4 flex flex-col gap-2 min-w-0"
+      className="type-body-chrome flex min-w-0 flex-col gap-2 rounded-card border border-tertiary bg-elevation-level-1 p-4 text-basic-secondary outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus-outline)]"
     >
-      <h3 className="header-sm">{receipt.request.title}</h3>
-      <p role="status">
+      <h4 className="type-strong break-words text-basic-primary">{receipt.request.title}</h4>
+      <p role="status" className="text-basic-primary">
         {outcome
           ? `Initial occurrence settled: ${outcome.outcome ?? outcome.state}`
           : receipt.initial_run_id
@@ -58,7 +58,7 @@ export function ResourceCard({
         </p>
       )}
       {initial.error && (
-        <p className="text-basic-muted">
+        <p className="text-basic-tertiary">
           Live initial-input receipt is unavailable. Retained occurrence evidence remains below.
         </p>
       )}
@@ -67,35 +67,45 @@ export function ResourceCard({
       )}
       {launch && (
         <>
-          <p className="break-all text-small">
+          <p className="type-meta break-all text-basic-tertiary">
             {launch.source.selected_ref} → {launch.source.commit}
           </p>
-          <p className="break-all text-small">
+          <p className="type-meta break-all text-basic-tertiary">
             Workspace: {launch.workspace_path}
             {launch.source.subdirectory ? `/${launch.source.subdirectory}` : ""}
           </p>
-          <p className="text-basic-muted text-small">
+          <p className="type-meta text-basic-tertiary">
             Source edits excluded. Checkout retained after completion, cancellation, and task
             deletion.
           </p>
           {launch.error && (
-            <p role="alert" className="break-words">
+            <p role="alert" className="break-words text-error-primary">
               {launch.error}
             </p>
           )}
         </>
       )}
-      <p className="break-all text-small">Local · Source: {receipt.binding.cwd}</p>
+      <p className="type-meta break-all text-basic-tertiary">
+        Local · Source: {receipt.binding.cwd}
+      </p>
       {!launch && receipt.binding.execution_cwd && (
-        <p className="break-all text-small">Directory: {receipt.binding.execution_cwd}</p>
+        <p className="type-meta break-all text-basic-tertiary">
+          Directory: {receipt.binding.execution_cwd}
+        </p>
       )}
-      <p className="text-small">Request: {receipt.request.request_id}</p>
+      <p className="type-meta break-all text-basic-tertiary">
+        Request: {receipt.request.request_id}
+      </p>
       {receipt.initial_run_id && (
-        <p className="break-all text-small">Initial run: {receipt.initial_run_id}</p>
+        <p className="type-meta break-all text-basic-tertiary">
+          Initial run: {receipt.initial_run_id}
+        </p>
       )}
-      {outcome?.evidence && <p className="whitespace-pre-wrap">{outcome.evidence}</p>}
+      {outcome?.evidence && (
+        <p className="whitespace-pre-wrap text-basic-primary">{outcome.evidence}</p>
+      )}
       {outcome && (
-        <p className="text-small text-basic-muted">
+        <p className="type-meta tabular text-basic-tertiary">
           {outcome.tokens_used == null
             ? "Initial usage unknown"
             : `${outcome.tokens_used} initial-run tokens`}
@@ -107,7 +117,10 @@ export function ResourceCard({
         <p>Task removed; its retained launch and workspace remain owned.</p>
       )}
       {receipt.first_input_id != null && exists === true && (
-        <Link className="text-info-primary underline" to={routes.session(receipt.session_id)}>
+        <Link
+          className="type-label w-fit text-info-primary underline-offset-2 hover:underline"
+          to={routes.session(receipt.session_id)}
+        >
           Open task
         </Link>
       )}

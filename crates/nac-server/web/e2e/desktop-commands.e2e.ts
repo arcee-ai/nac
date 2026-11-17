@@ -1,6 +1,6 @@
 import { createProject, createSession, expect, test } from "./harness";
 
-test("browser without a desktop bridge retains shared New Chat and focus", async ({
+test("browser without a desktop bridge retains the shared new-session chord and focus", async ({
   harness,
   page,
   request,
@@ -16,11 +16,15 @@ test("browser without a desktop bridge retains shared New Chat and focus", async
   await composer.focus();
   const mac = await page.evaluate("/Mac|iPhone|iPad|iPod/.test(navigator.userAgent)");
   await page.keyboard.press(mac ? "Meta+Shift+O" : "Control+Shift+O");
-  const dialog = page.getByRole("dialog", { name: "New Chat", exact: true });
-  await expect(dialog).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(dialog).toBeHidden();
-  await expect(composer).toBeFocused();
+  // The one new-session flow is Home's composer, preset to this session's
+  // project and focused; nothing is created until the user sends.
+  await expect(page).toHaveURL(`${harness.baseUrl}/#/?project=${project}`);
+  const start = page.getByRole("textbox", { name: "What should we work on?", exact: true });
+  await expect(start).toBeFocused();
+  await page.goBack();
+  await expect(composer).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`#/session/${id}`));
+  expect((await (await request.get(`${harness.baseUrl}/sessions`)).json()).length).toBe(1);
 });
 
 test("injected UI capability opens shared owners once without submitting a session", async ({
@@ -74,21 +78,35 @@ test("injected UI capability opens shared owners once without submitting a sessi
       },
       { request, action },
     );
+  // Settings is a full page now: the command navigates to Models & providers.
   expect(await dispatch(1, "settings")).toBe(true);
-  const settings = page.getByRole("dialog", { name: "Configurations", exact: true });
+  const settings = page.getByRole("main", { name: "Models & providers", exact: true }).first();
   await expect(settings).toBeVisible();
-  expect(await dispatch(1, "settings")).toBe(false);
+  await expect(page).toHaveURL(`${harness.baseUrl}/#/settings/models`);
+  expect(await dispatch(1, "settings")).toBe(false); // A replayed request never reruns.
+  await page.goBack();
+  await expect(composer).toBeVisible();
+  // A modal that owns focus still refuses a command.
+  await page.getByRole("button", { name: "Session menu", exact: true }).click();
+  await page
+    .getByRole("dialog", { name: "Session", exact: true })
+    .getByRole("button", { name: "Session settings", exact: true })
+    .click();
+  const modal = page.getByRole("dialog", { name: "Session settings", exact: true });
+  await expect(modal).toBeVisible();
   expect(await dispatch(2, "newSession")).toBe(false); // Current modal owns focus.
-  await expect(settings).toHaveCount(1);
+  await expect(modal).toHaveCount(1);
+  await expect(page).toHaveURL(new RegExp(`#/session/${id}`));
   await page.keyboard.press("Escape");
-  await expect(composer).toBeFocused();
+  await expect(modal).toHaveCount(0);
+  await composer.focus();
   expect(await dispatch(3, "newSession")).toBe(true);
-  const chat = page.getByRole("dialog", { name: "New Chat", exact: true });
-  await expect(chat).toBeVisible();
+  // New session opens Home's composer for this project; it submits nothing.
+  await expect(page).toHaveURL(`${harness.baseUrl}/#/?project=${project}`);
+  const start = page.getByRole("textbox", { name: "What should we work on?", exact: true });
+  await expect(start).toBeFocused();
   expect(await dispatch(3, "newSession")).toBe(false);
-  await expect(chat).toHaveCount(1);
-  await page.keyboard.press("Escape");
-  await expect(composer).toBeFocused();
+  await expect(page).toHaveURL(`${harness.baseUrl}/#/?project=${project}`);
   expect(mutations).toEqual([]);
   // Scripted browser delivery qualifies only this optional UI adapter. Actual
   // AppKit menus, WK frame provenance and trusted Edit input have native tests.

@@ -34,7 +34,7 @@ describe("session name disclosure", () => {
     [
       "tab",
       (name: string, navigate: () => void) => (
-        <ChatSessionTab title={name} behaviorLabel="Direct coding agent" onClick={navigate} />
+        <ChatSessionTab title={name} behaviorLabel="Agent" onClick={navigate} />
       ),
     ],
     [

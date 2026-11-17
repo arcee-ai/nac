@@ -120,3 +120,8 @@ export declare function usePermissionQueue(sessionId: string, enabled: boolean, 
     }[];
     includeChildren: boolean;
 };
+export type PermissionQueue = ReturnType<typeof usePermissionQueue>;
+/** One pending request with the broker scope that owns it. */
+export type PermissionQueueEntry = PermissionQueue["requests"][number];
+/** One retained automatic review with the broker scope that owns it. */
+export type PermissionReviewEntry = PermissionQueue["reviews"][number];

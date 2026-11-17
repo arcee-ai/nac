@@ -85,8 +85,10 @@ coverage. Delegate deltas and a subsequent main-link control establish whether
 that page-owned attempt escaped; elapsed time alone establishes nothing. A
 rendered shared MCP catalog Docs anchor supplies the target-blank positive
 control: the existing embedded `exa` entry in `nac-core::mcp::library` has
-`docs_url=https://docs.exa.ai/reference/exa-mcp`. The fixture opens the real MCP
-picker and selects that template to render `EntryDetails`; it never saves,
+`docs_url=https://docs.exa.ai/reference/exa-mcp`. The fixture stays on Home's
+composer (Start session would send a first run, and this recording proves zero
+inference), opens the real MCP picker under Settings › MCP servers and selects
+that template to render `EntryDetails`; it never saves,
 connects or authenticates the template. The recording-only document observer
 stubs only same-origin GET `/mcp_library/library` without a query. It mirrors
 that embedded entry exactly, except `icon_url=null` suppresses its remote

@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import {
   Button,
@@ -13,6 +13,7 @@ import {
 } from "@/app/atoms";
 import { ConfigListNav } from "@/app/components/modals/ConfigListNav";
 import { SshConnectionBox } from "@/app/components/modals/SshConnectionBox";
+import { SettingsSurface } from "@/app/features/settings/SettingsSurface";
 import { useExitTransition } from "@/app/hooks/useExitTransition";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
@@ -42,14 +43,67 @@ export function SshConfigsModal({ open, onClose }: { open: boolean; onClose: () 
   return <SshConfigsManager open={open} onClose={onClose} />;
 }
 
-function SshConfigsManager({ open, onClose }: { open: boolean; onClose: () => void }) {
+/** The same manager as the Settings › SSH hosts section. Saving stays explicit. */
+export function SshConfigsSettings() {
+  return <SshConfigsManager presentation="page" />;
+}
+
+function SshConfigsManager({
+  open = true,
+  onClose,
+  presentation = "modal",
+}: {
+  open?: boolean;
+  onClose?: () => void;
+  presentation?: "modal" | "page";
+}) {
   const isMobile = useIsMobile();
   const { data, isLoading } = useSshConfigs();
   const configurations = useMemo(() => data?.configurations ?? [], [data]);
   const [picked, setPicked] = useState<string | null>(null);
   const [footer, setFooter] = useState<ReactNode>(null);
+  // A page has nothing to close; Cancel remounts the form on what is stored.
+  const [revision, setRevision] = useState(0);
+  const discard = useCallback(() => setRevision((value) => value + 1), []);
+  const cancel = presentation === "page" ? discard : (onClose ?? discard);
   const selected = picked ?? configurations.at(-1)?.config_id ?? DRAFT;
   const record = configurations.find((entry) => entry.config_id === selected) ?? null;
+
+  const body = (
+    <>
+      <ConfigListNav
+        draftLabel="Create New"
+        draftSelected={selected === DRAFT}
+        onSelectDraft={() => setPicked(DRAFT)}
+        entries={configurations.map((entry) => ({
+          id: entry.config_id,
+          name: entry.name,
+        }))}
+        selectedId={selected}
+        onSelect={setPicked}
+        isLoading={isLoading}
+      />
+
+      <SshConfigForm
+        key={`${selected}:${revision}`}
+        record={record}
+        defaultName={nextDefaultName(configurations)}
+        onClose={cancel}
+        onSaved={setPicked}
+        onDeleted={() => setPicked(DRAFT)}
+        setFooter={setFooter}
+        isMobile={isMobile}
+      />
+    </>
+  );
+
+  if (presentation === "page") {
+    return (
+      <SettingsSurface label="SSH configs" footer={footer} className="md:h-[520px]">
+        {body}
+      </SettingsSurface>
+    );
+  }
 
   return (
     <Modal
@@ -67,31 +121,7 @@ function SshConfigsManager({ open, onClose }: { open: boolean; onClose: () => vo
       bodyClassName="p-0 overflow-hidden"
       footer={footer}
     >
-      <div className="flex flex-col md:flex-row items-stretch h-full min-h-0">
-        <ConfigListNav
-          draftLabel="Create New"
-          draftSelected={selected === DRAFT}
-          onSelectDraft={() => setPicked(DRAFT)}
-          entries={configurations.map((entry) => ({
-            id: entry.config_id,
-            name: entry.name,
-          }))}
-          selectedId={selected}
-          onSelect={setPicked}
-          isLoading={isLoading}
-        />
-
-        <SshConfigForm
-          key={selected}
-          record={record}
-          defaultName={nextDefaultName(configurations)}
-          onClose={onClose}
-          onSaved={setPicked}
-          onDeleted={() => setPicked(DRAFT)}
-          setFooter={setFooter}
-          isMobile={isMobile}
-        />
-      </div>
+      <div className="flex flex-col md:flex-row items-stretch h-full min-h-0">{body}</div>
     </Modal>
   );
 }

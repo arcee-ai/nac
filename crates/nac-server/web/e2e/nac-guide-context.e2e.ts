@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createSession, expect, test, waitForRunIdle } from "./harness";
+import { leaveSettings, openCapabilities, settingsSection } from "./settings-focus";
 
 test.skip(!!process.env.NAC_E2E_REMOTE, "Uses only the isolated scripted provider");
 test.use({ managedNativeWeb: false });
@@ -163,31 +164,25 @@ for (const mobile of [false, true]) {
     expect(staleGuide.fingerprint).toBe(index.fingerprint);
     expect(staleBuild).toContain("Product context or destination unavailable");
     await expect(page.getByText(answer, { exact: true })).toBeVisible();
-    const mcpDialog = page.getByRole("dialog", { name: "MCP servers", exact: true });
-    await expect(mcpDialog).toHaveCount(0);
+    const mcpSection = settingsSection(page, "MCP servers");
+    await expect(mcpSection).toHaveCount(0);
     await expect(page).toHaveURL(originalUrl);
     await page.evaluate("document.fonts.ready.then(() => true)");
     await page.screenshot({ path: info.outputPath("cited-help.png"), animations: "disabled" });
-    if (mobile) await page.getByRole("button", { name: "Open the menu", exact: true }).click();
-    await page.getByRole("button", { name: "NAC capabilities", exact: true }).click();
-    const capabilities = page.getByRole("dialog", { name: "NAC capabilities", exact: true });
-    await expect(capabilities).toBeVisible();
+    // Settings › Capabilities for this session, then its explicit MCP destination.
+    const capabilities = await openCapabilities(page);
+    await expect(page).toHaveURL(`${harness.baseUrl}/#/settings/capabilities?session=${id}`);
     await expect(capabilities.getByText(context.build.build_id, { exact: true })).toBeVisible();
     const openMcp = capabilities.getByRole("button", { name: "Open MCP settings", exact: true });
     await openMcp.focus();
     await page.keyboard.press("Enter");
-    await expect(mcpDialog).toBeVisible();
+    await expect(mcpSection).toBeVisible();
     await page.screenshot({ path: info.outputPath("explicit-mcp.png"), animations: "disabled" });
-    await page.keyboard.press("Escape");
-    await expect(mcpDialog).toBeHidden();
-    await expect
-      .poll(() =>
-        page.evaluate(
-          "!!document.activeElement && document.activeElement !== document.body && !document.activeElement.closest('[inert]')",
-        ),
-      )
-      .toBe(true);
+    // Leaving Settings returns to the cited answer in the session it came from.
+    await leaveSettings(page);
+    await expect(mcpSection).toHaveCount(0);
     await expect(page).toHaveURL(originalUrl);
+    await expect(page.getByText(answer, { exact: true })).toBeVisible();
     expect(await get(`/sessions/${id}/config`)).toEqual(initialConfig);
     expect(await get("/mcp_library/servers")).toEqual(initialMcp);
     expect(

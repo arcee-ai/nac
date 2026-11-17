@@ -1,6 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Button, ButtonSize, ButtonVariant } from "@/app/atoms";
+import {
+  Button,
+  ButtonContent,
+  ButtonSize,
+  ButtonVariant,
+  Icon,
+  IconName,
+  Tooltip,
+  TooltipPosition,
+} from "@/app/atoms";
+import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { queryKeys } from "@/app/services/queries";
 import type { ManagedSessionSummary, SessionSnapshotResponse } from "@/app/types/api";
@@ -58,6 +68,7 @@ function RevealRequest({
   pathRoot: string;
 }) {
   const { api } = useNativeRuntime();
+  const isMobile = useIsMobile();
   const pending = useRef<AbortController | null>(null);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState("");
@@ -86,17 +97,26 @@ function RevealRequest({
     }
   };
   return (
-    <div className="flex min-w-0 items-center gap-2">
-      <Button
-        size={ButtonSize.Small}
-        variant={ButtonVariant.Ghost}
-        disabled={busy}
-        onClick={reveal}
-      >
-        Reveal in Finder
-      </Button>
+    <div className="flex min-w-0 shrink-0 items-center gap-1.5">
+      {/* An icon beside the listing pills: the panel's toolbar is narrow. */}
+      <Tooltip title="Reveal in Finder" position={TooltipPosition.BottomCenter}>
+        <Button
+          size={isMobile ? ButtonSize.Large : ButtonSize.Small}
+          variant={ButtonVariant.Ghost}
+          content={ButtonContent.Icon}
+          aria-label="Reveal in Finder"
+          disabled={busy}
+          onClick={reveal}
+        >
+          <Icon iconName={IconName.FolderOpen} size={isMobile ? 20 : 16} />
+        </Button>
+      </Tooltip>
       {failure ? (
-        <span role="status" className="text-micro text-error-primary" title={failure}>
+        <span
+          role="status"
+          className="max-w-40 truncate type-meta text-error-primary"
+          title={failure}
+        >
           {failure}
         </span>
       ) : null}

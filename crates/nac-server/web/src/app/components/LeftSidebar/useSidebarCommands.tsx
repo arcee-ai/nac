@@ -4,11 +4,13 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { projectIdFromPath, routes, sessionIdFromPath } from "@/app/lib/routes";
 import { useManagedHost } from "@/app/features/managed/controller/useManagedHost";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
-import { useMcpServers, useSessions, useSshConfigs } from "@/app/services/queries";
+import { useMcpServers, useProjects, useSessions, useSshConfigs } from "@/app/services/queries";
 
 /**
- * The sidebar's destinations: the same dialogs the header already opens, plus
- * a new session in the project on screen (or a new project when none is).
+ * The desktop command contract (and the sidebar's "New session"): settings
+ * destinations plus a new session in the project on screen, or Home's
+ * composer when no project is on screen. With no projects at all, Home has
+ * no composer, so the gesture starts New Project instead.
  */
 export function useSidebarCommands() {
   const navigation = useProductNavigationOwner();
@@ -19,6 +21,7 @@ export function useSidebarCommands() {
   // Route identity survives presentation filtering; navigation lists still
   // use useVisibleSessions. This command always opens the central chat flow.
   const { data: sessions = [] } = useSessions();
+  const projects = useProjects().data?.projects;
   const { data: mcpServers } = useMcpServers();
   const { data: sshConfigs } = useSshConfigs();
 
@@ -37,17 +40,24 @@ export function useSidebarCommands() {
       void actions.newChat(projectId);
       return true;
     }
-    // A session route's project id arrives with the list. Opening New Project
-    // before that lands sends the click to the wrong dialog.
+    // A session route's project id arrives with the list. Choosing a
+    // destination before that lands sends the gesture to the wrong place.
     if (sessionId && !sessionKnown) return false;
-    actions.create();
+    // Until the project list lands, Home's empty state cannot be ruled out.
+    if (projects === undefined) return false;
+    if (projects.length === 0) {
+      newProject();
+      return true;
+    }
+    // Home's composer is the one new-session flow; it picks the project.
+    navigate(routes.newSession(), { state: { focusComposer: Date.now() } });
     return true;
   };
 
-  const newProject = () => {
+  function newProject() {
     if (managed.isManaged) managed.addRepository();
     else actions.create();
-  };
+  }
 
   return {
     projectId,

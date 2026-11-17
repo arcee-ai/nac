@@ -43,10 +43,13 @@ spaces), then open it in Finder or with `open`. The bundle requires no Vite,
 Node, Python, Cargo or Rust build process to run. System Git is used only to
 initialize the disposable workspace repository. No second frontend is built.
 
-The window opens the production New Chat dialog for a seeded fixture project.
-Click **Create chat**, enter any message, and click **Send**. The direct session
-streams “Hello from the isolated NAC Mac preview.” Reloading the document reads
-the persisted transcript. The provider never calls a real model or tools.
+The window opens Home's composer ("What should we work on?") for a seeded
+fixture project. Enter any message and click **Start session**; it creates the
+session and sends that message as its first run. The direct session
+streams “Hello from the isolated NAC Mac preview.” The first message waits for
+the session's interactive stream before admission, so an immediate approval
+request can reach its human. Reloading the document reads the persisted
+transcript. The provider never calls a real model or tools.
 
 The app creates a unique mode-0700 temporary directory containing a separate
 HOME, NAC_HOME, XDG configuration, TMPDIR, workspace Git repository and explicit
@@ -146,7 +149,8 @@ This builds `NAC Development Preview Smoke.app` with a separate instrumented
 native executable, checks the runner's process-ownership cleanup, relocates the
 whole app into a temporary path with spaces and runs real AppKit/WKWebView. It
 opens the bundle through macOS LaunchServices (`open -n -W -a`). It
-drives the production Create chat/Send controls, observes partial streamed text,
+drives the production Home composer/Start session for the first run, then the session's
+Send control, where it observes partial streamed text,
 checks local production font/chunk loads and JavaScript errors, reloads the
 persisted transcript, then closes the window during another active run. Missing
 engine, startup exit, runtime engine exit, close during startup and a hung
@@ -437,8 +441,10 @@ Run the adjacent fixture contracts with
 
 ## Native command qualification (ALL-346)
 
-The `commands` smoke scenario opens Settings and New Session through native
-menus once, checks shared focus return and Projects routing, rejects a foreign
+The `commands` smoke scenario opens Settings through native menus at its initial and
+compact widths (one dispatch per gesture), and New Session (Home's composer).
+It records actual WebView/media-query dimensions and checks the return to the session
+and its composer focus and Projects routing, rejects a foreign
 key window, exercises malformed/stale/duplicate/iframe/foreign-WebView receipts,
 blocks navigation/popups, and verifies document replacement and retirement.
 The `commands-input` scenario additionally uses paired OS events targeted only

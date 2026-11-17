@@ -77,6 +77,21 @@ pending decisions. Exact goal-backed completion, goal-free `Unknown`, unsupporte
 topologies and every native consumer/OS acceptance gap below remain unchanged.
 The isolated Swift fixture is still not a consumer of this feed.
 
+## Traditional child decision addendum
+
+The shared `attention_runtime::classify` now also reports live permission and
+actionable-review decisions for direct traditional children (sessions with a
+durable `traditional_children` relationship). Each child decision is a record
+on the child's own source with the child's session id; a child request is never
+also published on its parent, so one request yields one new-attention record.
+Children report `topology` and decision facets as available when their broker
+is cached, `unknown` otherwise. They never settle work or own structured
+questions, so `work` and `questions` stay `unsupported`. Orchestrator and
+managed-orchestrator topologies remain `unsupported` (ALL-609). The browser
+fleet routes `/attention` and `/attention/stream` reuse the same
+classification passively; they are not native consumers and take no native
+seat.
+
 ## Foundation HTTP consumer milestone
 
 The separate `NativeAttentionObserver` consumes the actual metadata wire contract

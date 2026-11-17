@@ -4,22 +4,23 @@ import path from "node:path";
 import { promisify } from "node:util";
 import type { Page } from "@playwright/test";
 
-import { createProject, createSession, expect, test, waitForRunIdle } from "./harness";
+import {
+  createProject,
+  createSession,
+  expect,
+  showPhonePanel,
+  showSessionPanel,
+  test,
+  waitForRunIdle,
+} from "./harness";
 
 const execute = promisify(execFile);
 
 const WORKING_TREE = "Working tree — all checkout changes";
 
-async function showFiles(page: Page, mobile: boolean) {
-  const files = page.getByRole("tab", { name: "Files", exact: true });
-  if (mobile) {
-    if (!(await files.first().isVisible()))
-      await page.getByRole("button", { name: "Open panel", exact: true }).click();
-    await files.last().click();
-  } else if (!(await files.isVisible())) {
-    await page.getByRole("button", { name: "Show panel", exact: true }).click();
-  }
-  await expect(files.last()).toBeVisible();
+/** The Files panel: the session drawer's tab, or a phone's Files sheet. */
+async function showFiles(page: Page) {
+  await showSessionPanel(page, "Files");
 }
 
 /** A phone's panel shows one screen at a time: an open file goes back to the list. */
@@ -28,12 +29,25 @@ async function openFileList(page: Page, mobile: boolean) {
   if (mobile && (await back.isVisible())) await back.click();
 }
 
+/**
+ * A phone keeps snapshots in its History panel, one sheet at a time; a wide
+ * layout picks them in the header's Session menu.
+ */
 async function selectRevision(page: Page, name: RegExp, mobile: boolean) {
   await openFileList(page, mobile);
-  if (mobile) await page.getByRole("tab", { name: "History", exact: true }).last().click();
-  else await page.getByRole("button", { name: /^Snapshot:/ }).click();
+  if (mobile) {
+    await showPhonePanel(page, "History");
+    await page.getByRole("button", { name }).click();
+    await showPhonePanel(page, "Files");
+    return;
+  }
+  const details = page.getByRole("dialog", { name: "Session", exact: true });
+  if (!(await details.isVisible()))
+    await page.getByRole("button", { name: "Session menu", exact: true }).click();
+  await details.getByRole("button", { name: /^Snapshot:/ }).click();
   await page.getByRole("button", { name }).click();
-  if (mobile) await page.getByRole("tab", { name: "Files", exact: true }).last().click();
+  if (await details.isVisible()) await page.keyboard.press("Escape");
+  await expect(details).toHaveCount(0);
 }
 
 /** A changed file's row in the list, named by its file name and git status. */
@@ -144,7 +158,7 @@ for (const mobile of [false, true]) {
 
     await page.goto(`${harness.baseUrl}/#/session/${id}/files`);
     await expect(page.getByRole("combobox", { name: "Message" })).toBeVisible();
-    await showFiles(page, mobile);
+    await showFiles(page);
     await showChanged(page, mobile);
 
     // The working tree lists every change in the checkout, whoever made it.
@@ -191,7 +205,7 @@ for (const mobile of [false, true]) {
 
     await page.reload();
     await expect(page.getByRole("combobox", { name: "Message" })).toBeVisible();
-    await showFiles(page, mobile);
+    await showFiles(page);
     await showChanged(page, mobile);
     for (const name of [...everything, "after-run.txt"])
       await expect(fileRow(page, name)).toBeVisible();

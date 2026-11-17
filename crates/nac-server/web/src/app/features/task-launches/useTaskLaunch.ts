@@ -5,6 +5,21 @@ import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { queryKeys } from "@/app/services/queries/keys";
 import type { TaskLaunchRequest } from "@/app/types/api";
 
+/**
+ * Whether a project can start an isolated task (a committed Local Git source),
+ * and its saved default branch. Only asked for while it can matter.
+ */
+export function useTaskLaunchSource(projectId: string | null, enabled: boolean) {
+  const { api } = useNativeRuntime();
+  return useQuery({
+    queryKey: ["task-launch-source", projectId],
+    queryFn: ({ signal }) => api.taskLaunchSource(projectId ?? "", signal),
+    enabled: enabled && projectId != null,
+    staleTime: 30_000,
+    retry: false,
+  });
+}
+
 export function useTaskLaunch(projectId: string) {
   const { api } = useNativeRuntime();
   const client = useQueryClient();

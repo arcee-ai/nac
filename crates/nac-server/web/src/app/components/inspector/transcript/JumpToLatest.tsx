@@ -1,10 +1,12 @@
 import { memo } from "react";
 
-import { Button, ButtonContent, ButtonSize, ButtonVariant, Icon, IconName } from "@/app/atoms";
+import { Icon, IconName } from "@/app/atoms";
+import { cn } from "@/app/lib/cn";
 
 /**
- * Always mounted so show/hide can animate opacity + translate like ArceeFM's
- * "Last messages" control — unmounting would skip the exit.
+ * A small round button floating just above the composer that brings the
+ * newest message back into view. Always mounted, so showing and hiding can
+ * fade and lift instead of blinking in and out.
  */
 export const JumpToLatest = memo(function JumpToLatest({
   visible,
@@ -15,22 +17,26 @@ export const JumpToLatest = memo(function JumpToLatest({
 }) {
   return (
     <div
-      className={`absolute z-[2] left-1/2 bottom-0 -translate-x-1/2 rounded-full  transition-all duration-150 ease-out ${
-        visible
-          ? "translate-y-0 scale-100 opacity-100"
-          : "translate-y-3 scale-75 opacity-0 pointer-events-none"
-      }`}
+      className={cn(
+        "absolute left-1/2 z-[2] -translate-x-1/2 transition-[opacity,transform] duration-150 ease-out motion-reduce:transition-none",
+        "bottom-[calc(var(--composer-height,0px)_+_12px)]",
+        visible ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-2 opacity-0",
+      )}
     >
-      <Button
-        variant={ButtonVariant.Primary}
-        size={ButtonSize.Small}
-        content={ButtonContent.IconRight}
-        className="!rounded-b-none !shadow-3xl"
+      <button
+        type="button"
+        aria-label="Last messages"
+        title="Last messages"
+        tabIndex={visible ? undefined : -1}
         onClick={onJump}
+        className={cn(
+          "flex size-8 items-center justify-center rounded-pill border border-tertiary bg-elevation-level-3 text-basic-secondary shadow-md",
+          "transition-colors duration-150 ease-out hover:text-basic-primary max-md:size-11",
+          "outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus-outline)]",
+        )}
       >
-        Last messages
-        <Icon iconName={IconName.Down} />
-      </Button>
+        <Icon iconName={IconName.ArrowDown} size={16} aria-hidden className="!text-current" />
+      </button>
     </div>
   );
 });

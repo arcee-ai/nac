@@ -126,8 +126,21 @@ async function nacWorkspaceProbe(config) {
   const terminalSession = await create();
   await navigate(terminalSession, 'terminal');
   const region = () => document.querySelector('[aria-label="Session terminal"]');
-  await wait(() => region() || document.querySelector('button[aria-label="Show panel"]'), 'terminal panel entry');
-  document.querySelector('button[aria-label="Show panel"]')?.click();
+  // The session drawer starts closed; the header's Session menu opens it on a
+  // panel. Its rows carry a live fact after the name ("Terminal 1 running").
+  const sessionMenu = () => document.querySelector('button[aria-label="Session menu"]');
+  const oldEntry = () => document.querySelector('button[aria-label="Show panel"]');
+  await wait(() => region() || sessionMenu() || oldEntry(), 'terminal panel entry');
+  if (!region()) {
+    // Keep the same probe usable against the retained pre-Focus baseline.
+    if (oldEntry()) oldEntry().click();
+    else {
+      if (sessionMenu().getAttribute('aria-expanded') !== 'true') sessionMenu().click();
+      (await wait(() => [...document.querySelectorAll('[role=dialog] button')].find(button =>
+        /^Terminal(?![A-Za-z])/.test(button.textContent.trim()) && !button.disabled),
+      'Session menu Terminal row')).click();
+    }
+  }
   await wait(region, 'terminal panel');
   const newShell = () => [...region().querySelectorAll('button')].find(button =>
     button.textContent.trim().toLowerCase() === 'new shell' && !button.disabled);

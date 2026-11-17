@@ -13,9 +13,8 @@ interface InitialPromptBoxProps {
 }
 
 /**
- * Card offering one ready-made prompt. The elevation sits on the card while the
- * ghost tokens paint hover and press on a layer above it, which is how the
- * design stacks them — a single background could not carry both.
+ * Card offering one ready-made prompt: a hairline card whose hover and press
+ * washes sit on a layer above its surface, so both read in light and dark.
  */
 const InitialPromptBox: React.FC<InitialPromptBoxProps> = ({
   icon,
@@ -28,22 +27,23 @@ const InitialPromptBox: React.FC<InitialPromptBoxProps> = ({
     type="button"
     onClick={onClick}
     className={cn(
-      "group relative flex h-[100px] w-full flex-col items-start overflow-hidden",
-      "rounded-[16px] bg-elevation-level-1 text-left",
-      "focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--blue-500)]",
+      "group relative flex min-h-[88px] w-full flex-col items-start gap-1 overflow-hidden px-4 py-3.5",
+      "rounded-card border border-tertiary bg-elevation-level-1 text-left",
+      "transition-colors duration-150 ease-out hover:border-secondary motion-reduce:transition-none",
+      "outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus-outline)]",
       className,
     )}
   >
     <span
       aria-hidden
-      className="absolute inset-0 bg-btn-ghost transition-colors duration-200 ease-out group-hover:bg-btn-ghost-hovered group-active:bg-btn-ghost-pressed"
+      className="absolute inset-0 bg-transparent transition-colors duration-150 ease-out group-hover:bg-[var(--f-wash-1)] group-active:bg-[var(--f-wash-2)]"
     />
-    <span className="relative flex w-full items-center gap-2 px-4 pb-2 pt-4">
-      <Icon iconName={icon} size={20} className="shrink-0 text-fill-basic-tertiary" />
-      <span className="flex-1 min-w-0 truncate label-small text-basic-primary">{title}</span>
+    <span className="relative flex w-full items-center gap-2">
+      <Icon iconName={icon} size={16} className="shrink-0 text-fill-basic-tertiary" />
+      <span className="min-w-0 flex-1 truncate type-label text-basic-primary">{title}</span>
     </span>
-    <span className="relative flex w-full flex-col justify-end px-4 pb-4 pt-2">
-      <span className="text-micro text-basic-muted line-clamp-2">{description}</span>
+    <span className="relative line-clamp-2 w-full type-meta text-basic-tertiary">
+      {description}
     </span>
   </button>
 );

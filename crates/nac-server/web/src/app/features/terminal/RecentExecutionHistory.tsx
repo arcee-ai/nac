@@ -37,13 +37,13 @@ export function RecentExecutions({
     <section aria-label="Recent terminal activity" className="flex flex-col [&>*]:shrink-0">
       <h3
         className={cn(
-          "truncate text-basic-muted",
-          large ? "px-2 pt-6 pb-2 text-micro" : "px-1 pt-4 pb-1 text-[11px] leading-[14px]",
+          "truncate type-meta text-basic-muted",
+          large ? "px-3 pt-6 pb-1.5" : "px-2.5 pt-4 pb-1",
         )}
       >
         Recent
       </h3>
-      <div className="flex flex-col gap-1 [&>*]:shrink-0">
+      <div className="flex flex-col gap-0.5 [&>*]:shrink-0">
         {pending ? <PanelListNote>Loading recent activity…</PanelListNote> : null}
         {failed ? (
           <TerminalNotice
@@ -131,7 +131,7 @@ export function HistoryDetail({
         <article
           aria-label="Recorded terminal activity"
           className={cn(
-            "flex flex-col flex-1 min-h-0 gap-4 overflow-auto px-4 pb-4 font-[family-name:IBMPlexMono] text-sm font-medium [&>*]:shrink-0",
+            "flex flex-col flex-1 min-h-0 gap-4 overflow-auto px-4 pb-4 code text-[length:var(--type-mono)] !leading-5 [&>*]:shrink-0",
             top,
           )}
         >
@@ -160,11 +160,13 @@ export function HistoryDetail({
                 </pre>
               ) : null}
               {entry.command.diagnostic ? (
-                <p className="text-basic-muted">{entry.command.diagnostic}</p>
+                <p className="font-sans type-meta text-basic-tertiary">
+                  {entry.command.diagnostic}
+                </p>
               ) : null}
             </>
           ) : null}
-          <p className="text-basic-muted">{historyOutcome(entry)}</p>
+          <p className="font-sans type-meta text-basic-tertiary">{historyOutcome(entry)}</p>
         </article>
       )}
     </TerminalFrame>

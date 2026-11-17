@@ -1,18 +1,23 @@
 /** @vitest-environment jsdom */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ChatInputBox } from "@/app/components/inspector/ChatInputBox";
 import { SessionActionsProvider } from "@/app/providers/SessionActionsProvider";
 import { ToastProvider } from "@/app/providers/ToastProvider";
-import { draftPrompt, sendPrompt } from "@/app/store/composerStore";
-import { purgeAll, get as getDraft } from "@/app/store/promptDraftStore";
+import {
+  draftPrompt,
+  sendPrompt,
+  scheduleFirstPrompt,
+  cancelFirstPrompt,
+} from "@/app/store/composerStore";
+import { purgeAll, get as getDraft, update as updateDraft } from "@/app/store/promptDraftStore";
 import { api } from "@/app/services/api";
 import { queryKeys } from "@/app/services/queries";
-import { resetRuntime, syncRunFromSnapshot } from "@/app/store/runtimeStore";
+import { resetRuntime, syncRunFromSnapshot, setStreamStatus } from "@/app/store/runtimeStore";
 import type {
   InboxItem,
   ManagedSessionSummary,
@@ -248,12 +253,19 @@ function type(textarea: HTMLTextAreaElement, value: string) {
   fireEvent.change(textarea, { target: { value } });
 }
 
+/** The goal editor opens from the composer's `+` menu. */
+function openGoalFromMenu(name: string) {
+  fireEvent.click(screen.getByRole("button", { name: "Add to message" }));
+  fireEvent.click(screen.getByRole("button", { name }));
+}
+
 function pending<T>(): Promise<T> {
   return Promise.withResolvers<T>().promise;
 }
 
 beforeEach(() => {
   purgeAll();
+  cancelFirstPrompt("session");
   resetRuntime("session");
   mobile = false;
   mediaListeners.clear();
@@ -362,57 +374,15 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("responsive Session settings target", () => {
-  it.each([false, true])("keeps the settings action and draft on mobile=%s", async (phone) => {
+describe("Session settings placement", () => {
+  // Focus keeps the composer row to + · model · permissions · send: Session
+  // settings lives in the session header's ⋯ menu (and the phone panel sheet).
+  it.each([false, true])("leaves Session settings out of the composer on mobile=%s", (phone) => {
     mobile = phone;
-    const readConfig = vi.spyOn(api, "getConfig").mockImplementation(() => pending());
-    try {
-      const textarea = composer({ behavior: "direct" });
-      type(textarea, "Unsent draft before opening settings");
-      const button = screen.getByRole("button", { name: "Session settings" });
-      for (const token of ["!size-11", "!min-h-11", "!min-w-11"])
-        expect(button.classList.contains(token)).toBe(phone);
-      expect(button.classList.contains("btn-small")).toBe(true);
-      expect(button.querySelector("svg")?.getAttribute("width")).toBe("16");
-      fireEvent.click(button);
-      const dialog = await screen.findByRole("dialog", { name: "Session settings" });
-      await waitFor(() => expect(readConfig).toHaveBeenCalled());
-      expect(readConfig.mock.calls[0]?.[0]).toBe("session");
-      fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
-      await waitFor(() =>
-        expect(screen.queryByRole("dialog", { name: "Session settings" })).toBeNull(),
-      );
-      expect(textarea.value).toBe("Unsent draft before opening settings");
-      expect(fakes.submitRun).not.toHaveBeenCalled();
-    } finally {
-      readConfig.mockRestore();
-    }
-  });
-
-  it("preserves the focused action and draft through mobile and desktop resize", async () => {
-    const readConfig = vi.spyOn(api, "getConfig").mockImplementation(() => pending());
-    try {
-      const textarea = composer({ behavior: "direct" });
-      type(textarea, "Unsent draft survives responsive target changes");
-      const button = screen.getByRole("button", { name: "Session settings" });
-      act(() => button.focus());
-      resizeComposer(true);
-      expect(screen.getByRole("button", { name: "Session settings" })).toBe(button);
-      expect(button.classList.contains("!size-11")).toBe(true);
-      expect(document.activeElement).toBe(button);
-      resizeComposer(false);
-      expect(screen.getByRole("button", { name: "Session settings" })).toBe(button);
-      expect(button.classList.contains("!size-11")).toBe(false);
-      expect(document.activeElement).toBe(button);
-      expect(textarea.value).toBe("Unsent draft survives responsive target changes");
-      fireEvent.click(button);
-      expect(await screen.findByRole("dialog", { name: "Session settings" })).toBeTruthy();
-      await waitFor(() => expect(readConfig).toHaveBeenCalled());
-      expect(readConfig.mock.calls[0]?.[0]).toBe("session");
-      expect(fakes.submitRun).not.toHaveBeenCalled();
-    } finally {
-      readConfig.mockRestore();
-    }
+    const textarea = composer({ behavior: "direct" });
+    type(textarea, "Unsent draft");
+    expect(screen.queryByRole("button", { name: "Session settings" })).toBeNull();
+    expect(textarea.value).toBe("Unsent draft");
   });
 });
 
@@ -1040,7 +1010,7 @@ describe("direct inbox and goal journeys", () => {
     fireEvent.keyDown(textarea, { key: "Enter" });
 
     expect(await screen.findByRole("textbox", { name: "Goal objective" })).toBeTruthy();
-    expect(screen.getByText("Current Goal")).toBeTruthy();
+    expect(screen.getByText("Current goal")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Close goal editor" })).toBeTruthy();
     expect(screen.getByDisplayValue("existing objective")).toBeTruthy();
   });
@@ -1054,7 +1024,7 @@ describe("direct inbox and goal journeys", () => {
         goalState: { ...goal(), token_budget: 500 },
       });
       fireEvent.blur(textarea);
-      fireEvent.click(screen.getByRole("button", { name: "Edit goal: Active" }));
+      openGoalFromMenu("Edit goal: Active");
       fireEvent.change(screen.getByRole("textbox", { name: "Goal objective" }), {
         target: { value: "unsaved objective" },
       });
@@ -1092,7 +1062,7 @@ describe("direct inbox and goal journeys", () => {
     fakes.updateGoal.mockImplementationOnce(() => update.promise);
     const textarea = composer({ behavior: "direct", goalState: goal() });
     fireEvent.blur(textarea);
-    fireEvent.click(screen.getByRole("button", { name: "Edit goal: Active" }));
+    openGoalFromMenu("Edit goal: Active");
     fireEvent.change(screen.getByRole("textbox", { name: "Goal objective" }), {
       target: { value: "keep this failed edit" },
     });
@@ -1119,14 +1089,14 @@ describe("direct inbox and goal journeys", () => {
   it("starts from the stored goal after explicitly closing a resized editor", () => {
     const textarea = composer({ behavior: "direct", goalState: { ...goal(), token_budget: 500 } });
     fireEvent.blur(textarea);
-    fireEvent.click(screen.getByRole("button", { name: "Edit goal: Active" }));
+    openGoalFromMenu("Edit goal: Active");
     fireEvent.change(screen.getByRole("textbox", { name: "Goal objective" }), {
       target: { value: "discard only on close" },
     });
     resizeComposer(true);
     resizeComposer(false);
     fireEvent.click(screen.getByRole("button", { name: "Close goal editor" }));
-    fireEvent.click(screen.getByRole("button", { name: "Edit goal: Active" }));
+    openGoalFromMenu("Edit goal: Active");
     expect(
       (screen.getByRole("textbox", { name: "Goal objective" }) as HTMLTextAreaElement).value,
     ).toBe("existing objective");
@@ -1222,7 +1192,7 @@ describe("skill suggestions", () => {
     expect(mirror?.className).toContain("pointer-events-none");
     expect(mirror?.textContent).toContain("$code-reviewer");
     expect(mirror?.querySelectorAll("strong")).toHaveLength(1);
-    expect(emphasized.className).toContain("text-danger-primary");
+    expect(emphasized.className).toContain("text-basic-primary");
     expect(emphasized.style.webkitTextStroke).toBe("0.45px currentColor");
     expect(textarea.style.color).toBe("transparent");
   });
@@ -1651,3 +1621,42 @@ it.each(["send", "steer", "queue", "compact", "shell"] as const)(
     expect(getDraft("b").text).toBe("separate draft");
   },
 );
+
+it.each(["/goal describe the scheduler", "/compact", "! explain this command"])(
+  "delivers Home's literal %s only after the owning interactive stream is live",
+  async (text) => {
+    const draft = updateDraft("session", text);
+    scheduleFirstPrompt("session", draft);
+    composer({ behavior: "direct" });
+    expect(fakes.submitRun).not.toHaveBeenCalled();
+    act(() => setStreamStatus("live"));
+    await waitFor(() => expect(fakes.submitRun).toHaveBeenCalledOnce());
+    expect(fakes.submitRun).toHaveBeenCalledWith("session", text);
+    expect(fakes.compactSession).not.toHaveBeenCalled();
+    expect(fakes.submitShellCommand).not.toHaveBeenCalled();
+    expect(getDraft("session").text).toBe("");
+  },
+);
+
+it("leaves a newer edit unsent when a queued Home draft has been replaced", async () => {
+  const draft = updateDraft("session", "original intent");
+  scheduleFirstPrompt("session", draft);
+  updateDraft("session", "newer edit");
+  composer({ behavior: "direct" });
+  act(() => setStreamStatus("live"));
+  await act(async () => {});
+  expect(fakes.submitRun).not.toHaveBeenCalled();
+  expect(getDraft("session").text).toBe("newer edit");
+});
+
+it("cancels an undispatched Home intent on leaving without losing its draft or replaying it on return", async () => {
+  const draft = updateDraft("session", "waiting for connection");
+  scheduleFirstPrompt("session", draft);
+  composer({ behavior: "direct" });
+  cleanup();
+  await act(async () => {});
+  act(() => setStreamStatus("live"));
+  composer({ behavior: "direct" });
+  expect(fakes.submitRun).not.toHaveBeenCalled();
+  expect(getDraft("session").text).toBe("waiting for connection");
+});

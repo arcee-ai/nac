@@ -3,48 +3,24 @@ import { InsightsNavigationProvider } from "@/app/features/insights/InsightsNavi
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { sessionAvailable } from "@/app/features/ui-policy/policy";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
-import {
-  Activity,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  type KeyboardEvent as ReactKeyboardEvent,
-} from "react";
+import { Activity, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useDesktopVisible } from "@/app/features/desktop-commands/visibility";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 
-import { Button, Modal } from "@/app/atoms";
+import { Button } from "@/app/atoms";
 import { ChatInputBox } from "@/app/components/inspector/ChatInputBox";
-import { MobileBottomBar } from "@/app/components/inspector/MobileBottomBar";
-import { RightSidebarRail } from "@/app/components/inspector/RightSidebarRail";
-import { SessionSideBox } from "@/app/components/inspector/SessionSideBox";
 import { Transcript } from "@/app/components/inspector/Transcript";
 import { TranscriptModelProvider } from "@/app/components/inspector/transcript/TranscriptModelProvider";
 import { TopSingleSessionHeader } from "@/app/components/inspector/TopSingleSessionHeader";
-import { useIsMobile } from "@/app/hooks/useMediaQuery";
+import { SessionDrawer } from "@/app/features/session-chrome/SessionDrawer";
+import { InboxReadMarker } from "@/app/features/inbox/InboxProvider";
 import { useRunStateSync, useSessionStream } from "@/app/hooks/useSessionStream";
-import { cn } from "@/app/lib/cn";
 import { perfRender } from "@/app/lib/perfDebug";
 import { sessionPanelPolicy } from "@/app/lib/sessionBehavior";
 import type { SessionBehavior } from "@/app/types/api";
 import { useErrorNotice } from "@/app/hooks/useErrorNotice";
-import {
-  DEFAULT_SESSION_PANEL,
-  isSessionPanel,
-  routes,
-  SESSION_PANEL_LABEL,
-  type SessionPanel,
-} from "@/app/lib/routes";
-import { PanelPhoneChromeProvider } from "@/app/providers/PanelPhoneChrome";
+import { DEFAULT_SESSION_PANEL, isSessionPanel, routes, type SessionPanel } from "@/app/lib/routes";
 import { useSessionSnapshot, useSessionSummary, useSshConnect } from "@/app/services/queries";
-
-// 80% as wide as the chat beside it, so 4/9 of the row, between 480px and
-// 800px, but never so wide that the chat gets less than 200px, or less than
-// half of a row under 400px. The bounds sit inside the width rather than in
-// `min-w` / `max-w`, which would stop the collapse tween dead at a bound.
-const SIDE_PANEL_WIDTH = "w-[min(clamp(480px,calc(100%*4/9),800px),max(50%,100%_-_200px))]";
 
 /**
  * Opens an SSH browse handshake once when landing on a remote session that is
@@ -95,21 +71,20 @@ function useAutoSshConnect(
   }, [target, status, connect, sshTargetKey, markSshConnected, markSshDisconnected]);
 }
 
-/** Session screen: the Insights/Files/Worksets box beside a permanent chat. */
+/**
+ * Session screen: header, transcript and composer in one column, and nothing
+ * else until it has something to say. Panels open as a drawer beside or over
+ * the column (`SessionDrawer`), never inside it: the native attention probe
+ * reads that column as exactly header, transcript, composer layer.
+ */
 export default function SessionPage() {
   const desktopVisible = useDesktopVisible();
   const {
-    useSidePanelExpanded,
     useSidePanelCollapsed,
-    useSidePanelAnimate,
     useSelectedThread,
     selectInsight,
-    toggleSidePanelExpanded,
     leaveFocusedSidePanel,
-    toggleSidePanelCollapsed,
-    showSidePanelList,
     revealSidePanel,
-    setSidePanelAnimate,
     activateSessionSelection,
     unbindSidePanelProject,
     bindSidePanelProject,
@@ -132,10 +107,7 @@ export default function SessionPage() {
   const { data: entry = null } = useSessionSummary(id);
   const toNotice = useErrorNotice(id, entry?.summary.backend);
   const collapsed = useSidePanelCollapsed();
-  const animateSidePanel = useSidePanelAnimate();
-  const expanded = useSidePanelExpanded();
   const selectedThread = useSelectedThread();
-  const isMobile = useIsMobile();
 
   // An omitted behavior on a loaded session is the legacy orchestrator. An
   // unloaded session is not that default: painting Insights/Files/Worksets and
@@ -187,19 +159,10 @@ export default function SessionPage() {
     activateSessionSelection(id);
   }, [id, activateSessionSelection]);
 
-  // A focused panel belongs to the session it was focused on: another session,
-  // or leaving the page, finds the split again. A phone's dialog is left to its
-  // own way out.
-  const mobileRef = useRef(isMobile);
-  useEffect(() => {
-    mobileRef.current = isMobile;
-  }, [isMobile]);
-  useEffect(
-    () => () => {
-      if (!mobileRef.current) leaveFocusedSidePanel();
-    },
-    [id, leaveFocusedSidePanel],
-  );
+  // Full width belongs to the session it was chosen on: another session, or
+  // leaving the page, finds the drawer back in its column. An exact child→parent
+  // return still restores what the parent had, after this runs.
+  useEffect(() => () => leaveFocusedSidePanel(), [id, leaveFocusedSidePanel]);
 
   const projectKey = entry ? (entry.summary.project_id ?? "") : null;
   useLayoutEffect(() => {
@@ -207,14 +170,6 @@ export default function SessionPage() {
     if (projectKey == null) return;
     bindSidePanelProject(projectKey);
   }, [bindSidePanelProject, id, projectKey, unbindSidePanelProject]);
-
-  // Restored after paint, so the launch open has already landed at full width
-  // and putting the tween back does not replay it.
-  useEffect(() => {
-    if (animateSidePanel) return undefined;
-    const frame = requestAnimationFrame(() => setSidePanelAnimate(true));
-    return () => cancelAnimationFrame(frame);
-  }, [animateSidePanel, setSidePanelAnimate]);
 
   // The composer floats over the transcript, whose run-out under the last
   // message has to clear it however tall it grows.
@@ -231,9 +186,11 @@ export default function SessionPage() {
 
   if (behaviorKnown && !available)
     return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-4 p-8">
-        <h1 className="heading-small">This chat is unavailable in direct-only mode</h1>
-        <p>
+      <div className="flex flex-1 flex-col items-center justify-center gap-3 bg-elevation-ground p-8 text-center">
+        <h1 className="type-heading text-basic-primary">
+          This chat is unavailable in direct-only mode
+        </h1>
+        <p className="type-body-chrome max-w-[420px] text-basic-tertiary">
           Its saved behavior and history are preserved. An operator can enable orchestration to open
           it.
         </p>
@@ -259,163 +216,49 @@ export default function SessionPage() {
   const failure = configError ?? (!snapshot && error ? error : null);
   const errorNotice = failure ? toNotice(failure, () => void refetchSnapshot()) : null;
 
-  const goToPanel = (next: SessionPanel) => navigate(routes.session(id, next));
-
+  // The chat (the transcript's "Worked for…" line, a thread card, a snapshot)
+  // points the drawer at one of its rows and opens it there.
   const focusPanel = (next: SessionPanel) => {
-    revealSidePanel(isMobile);
-    goToPanel(next);
+    revealSidePanel();
+    navigate(routes.session(id, next));
   };
 
-  // The chat marks the rows the side box shows, so none while it is hidden:
-  // slid off to its rail, or on a phone, with the dialog closed.
-  const sideBoxShown = expanded || (!isMobile && !collapsed);
-  // Wider than a phone, focusing keeps the box where it is and widens it over
-  // the chat, so neither remounts: going back finds the same split, rows,
-  // drafts and scroll positions. The chat stays laid out at its own width
-  // underneath, only hidden. A phone's dialog left open as the window widens
-  // is focused too, even over the rail, and Back to chat finds the rail.
-  const focused = expanded && !isMobile;
-  const railed = collapsed && !focused;
-
-  const onFocusedKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    // An open menu, popover, dialog or tooltip marks Escape handled before it
-    // gets here, and closes first. Mid-composition it belongs to the input.
-    if (!focused || event.key !== "Escape" || event.defaultPrevented) return;
-    if (event.nativeEvent.isComposing) return;
-    // Only from inside the box itself. A terminal takes Escape as input; an
-    // expanded folder or section is no layer, so Escape still goes back.
-    const target = event.target;
-    if (!(target instanceof Element) || !event.currentTarget.contains(target)) return;
-    if (target.closest(".xterm")) return;
-    event.preventDefault();
-    leaveFocusedSidePanel();
-  };
-
-  const sideBox = (
-    <SessionSideBox
-      sessionId={id}
-      snapshot={snapshot}
-      behavior={behavior}
-      panel={effectivePanel}
-      onPanelChange={goToPanel}
-    />
-  );
+  const direct = behavior === "direct" || behavior === "direct-with-orchestrator";
+  const lineage = entry?.lineage ?? snapshot?.lineage ?? null;
 
   const page = (
     <section className="relative flex min-h-0 min-w-0 flex-1 h-full overflow-clip bg-elevation-ground">
-      <div className="relative flex flex-1 min-w-0 h-full min-h-0">
-        <div
-          className={cn("flex flex-col items-center flex-1 min-w-0 h-full", focused && "invisible")}
-          inert={focused}
-        >
-          <div ref={setChatColumn} className="flex flex-col flex-1 min-h-0 w-full relative">
-            {isMobile ? null : (
-              <TopSingleSessionHeader sessionId={id} snapshot={snapshot} entry={entry} />
-            )}
-            <Transcript
-              sessionId={id}
-              snapshot={snapshot}
-              panel={sideBoxShown ? effectivePanel : null}
-              onFocusPanel={focusPanel}
-              errorNotice={errorNotice}
-            />
+      {/* The chat column: exactly header, transcript, composer layer. */}
+      <div ref={setChatColumn} className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+        <TopSingleSessionHeader
+          sessionId={id}
+          snapshot={snapshot}
+          entry={entry}
+          panel={effectivePanel}
+        />
+        <Transcript
+          sessionId={id}
+          snapshot={snapshot}
+          // The chat marks the rows the drawer shows, so none while it is closed.
+          panel={collapsed ? null : effectivePanel}
+          onFocusPanel={focusPanel}
+          errorNotice={errorNotice}
+        />
 
-            <div ref={setComposerLayer} className="pointer-events-none absolute inset-x-0 bottom-0">
-              <ChatInputBox sessionId={id} snapshot={snapshot} entry={entry} />
-            </div>
-          </div>
+        <div ref={setComposerLayer} className="pointer-events-none absolute inset-x-0 bottom-0">
+          <ChatInputBox sessionId={id} snapshot={snapshot} entry={entry} />
         </div>
-
-        {isMobile ? null : (
-          <>
-            {/*
-              Same motion as the left sidebar: the column width is what the chat
-              lays out against, and the panel slides over the rail that stays.
-            */}
-            <div
-              className={cn(
-                "relative h-full shrink-0",
-                animateSidePanel && "transition-[width] duration-300 ease-out",
-                collapsed ? "w-[52px]" : SIDE_PANEL_WIDTH,
-              )}
-              style={animateSidePanel ? undefined : { transition: "none" }}
-            >
-              {collapsed ? (
-                <div className="absolute inset-y-0 right-0 w-[52px]" inert={focused}>
-                  <RightSidebarRail
-                    sessionId={id}
-                    snapshot={snapshot}
-                    behavior={behavior}
-                    panels={panelPolicy?.widePanels ?? []}
-                    onOpen={toggleSidePanelCollapsed}
-                    onSelect={focusPanel}
-                  />
-                </div>
-              ) : null}
-            </div>
-            {/*
-            Pinned to the right edge rather than laid out in the row: a box
-            that kept its width while the row shrank would reflow its whole tree
-            over the animation, so it slides out at full size instead. It fills
-            that column edge to edge.
-          */}
-            <div
-              className={cn(
-                "absolute inset-y-0 right-0 z-[1] flex flex-col min-w-0 outline-none",
-                focused ? "left-0" : SIDE_PANEL_WIDTH,
-                animateSidePanel && "transition-transform duration-300 ease-out",
-                railed && "translate-x-full",
-              )}
-              style={animateSidePanel ? undefined : { transition: "none" }}
-              aria-hidden={railed}
-              inert={railed}
-              // Focusable while focused, so a click anywhere in the box keeps
-              // the keyboard, and its Escape, inside it.
-              tabIndex={focused ? -1 : undefined}
-              onKeyDown={onFocusedKeyDown}
-            >
-              <div className="flex flex-col flex-1 min-h-0">
-                <div className="flex-1 min-h-0">{sideBox}</div>
-              </div>
-            </div>
-          </>
-        )}
       </div>
 
-      {isMobile ? (
-        <Modal
-          open={expanded}
-          onClose={toggleSidePanelExpanded}
-          // Its own tabs move the route, so a route change must not close it.
-          keepOnNavigate
-          // Every screen inside heads itself: a list leaves the dialog, an
-          // opened row goes back to its list.
-          chromeless
-          hideClose
-          title={SESSION_PANEL_LABEL[effectivePanel]}
-          bodyClassName="relative overflow-hidden"
-        >
-          <PanelPhoneChromeProvider
-            value={{
-              close: toggleSidePanelExpanded,
-              bar:
-                sessionPanels.length > 0 ? (
-                  <MobileBottomBar
-                    panel={effectivePanel}
-                    panels={sessionPanels}
-                    onPanelChange={(next) => {
-                      // A tab opens on its list, the screen the bar belongs to.
-                      showSidePanelList(true);
-                      goToPanel(next);
-                    }}
-                  />
-                ) : null,
-            }}
-          >
-            {sideBox}
-          </PanelPhoneChromeProvider>
-        </Modal>
-      ) : null}
+      <SessionDrawer
+        sessionId={id}
+        snapshot={snapshot}
+        behavior={behavior}
+        panel={effectivePanel}
+        goalEnabled={direct && lineage == null}
+      />
+      {/* Looking at a session reads its latest outcome off the Inbox. */}
+      {desktopVisible ? <InboxReadMarker sessionId={id} /> : null}
     </section>
   );
 

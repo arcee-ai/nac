@@ -26,14 +26,18 @@ import {
   ComposerInlineSlot,
 } from "@/app/components/inspector/composer/ComposerFrame";
 import {
-  goalBadgeColor as badgeColor,
-  goalStatusLabel as statusLabel,
-} from "@/app/features/goals/status";
+  GOAL_BUDGET_INPUT_RULE,
+  parseGoalBudget,
+  sameGoalEditableFields,
+} from "@/app/features/goals/budget";
+import { goalBadgeColor as badgeColor } from "@/app/features/goals/status";
 import { cn } from "@/app/lib/cn";
 import { toRunError } from "@/app/lib/providerError";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 import { useClearGoal, useCreateGoal, useSessionGoal, useUpdateGoal } from "@/app/services/queries";
 import type { GoalStatus, SessionGoalRecord } from "@/app/types/api";
+
+import { goalActionLabel, statusLabel } from "./goalStatus";
 
 const GOAL_HINT =
   "Direct-session work that continues across ordinary turns until completed, blocked, paused or limited.";
@@ -56,37 +60,14 @@ function sliderPosition(value: number): number {
   return Math.min(BUDGET_MAX, Math.max(BUDGET_MIN, value));
 }
 
-/** What the amount field accepts: larger values cannot be sent exactly. */
-const BUDGET_INPUT_RULE = `a whole number of tokens up to ${Number.MAX_SAFE_INTEGER.toLocaleString("en-US")}`;
-
-/**
- * A typed amount as a whole number of tokens, or null when it is not one. The
- * server owns which amounts are allowed and says so when it refuses one.
- */
-function parseBudget(text: string): number | null {
-  const digits = text.replace(/[\s,_]/g, "");
-  if (!/^\d+$/.test(digits)) return null;
-  const value = Number(digits);
-  return Number.isSafeInteger(value) ? value : null;
-}
-
 /** A stored amount as written, grouped, for one the field cannot send exactly. */
 function storedAmountLabel(text: string): string {
   const digits = text.replace(/[\s,_]/g, "");
   return /^\d+$/.test(digits) ? BigInt(digits).toLocaleString("en-US") : text;
 }
 
-/** Whether a stored goal still holds the fields an edit was started from. */
-function sameEditableFields(left: SessionGoalRecord, right: SessionGoalRecord): boolean {
-  return (
-    left.goal_id === right.goal_id &&
-    left.objective === right.objective &&
-    left.token_budget === right.token_budget
-  );
-}
-
 function usageLabel(goal: SessionGoalRecord): string {
-  return `${goal.tokens_used.toLocaleString()} Tokens, ${Math.floor(goal.time_used_ms / 1000)}s`;
+  return `${goal.tokens_used.toLocaleString()} tokens · ${Math.floor(goal.time_used_ms / 1000)}s`;
 }
 
 /**
@@ -138,7 +119,7 @@ function useGoalDraft(sessionId: string, open: boolean) {
   // An update omits a budget the user has not touched, so only an amount that
   // will be sent is checked: a stored one the field cannot send exactly still
   // survives an objective edit.
-  const budgetAmount = parseBudget(budgetText);
+  const budgetAmount = parseGoalBudget(budgetText);
   const budgetInvalid = budgetOn && budgetAmount === null && (budgetEdited || !editingExisting);
   const trimmed = objective.trim();
   const tokenBudget = budgetOn ? budgetAmount : null;
@@ -159,7 +140,7 @@ function useGoalDraft(sessionId: string, open: boolean) {
       return false;
     }
     if (budgetInvalid) {
-      toast.error(`Enter the token budget as ${BUDGET_INPUT_RULE}.`);
+      toast.error(`Enter the token budget as ${GOAL_BUDGET_INPUT_RULE}.`);
       return false;
     }
     // Edit the goal the editor loaded. Run accounting bumps the version on its
@@ -167,7 +148,7 @@ function useGoalDraft(sessionId: string, open: boolean) {
     // are still what the editor loaded; otherwise the loaded version lets the
     // server's version check refuse the stale overwrite.
     const target =
-      base == null ? null : goal != null && sameEditableFields(goal, base) ? goal : base;
+      base == null ? null : goal != null && sameGoalEditableFields(goal, base) ? goal : base;
     try {
       let saved: SessionGoalRecord;
       if (target != null && editingExisting) {
@@ -308,7 +289,7 @@ export function GoalFlag({ sessionId, compact, onOpen }: GoalFlagProps) {
         <ComposerInlineButton
           type="button"
           variant={active ? ButtonVariant.GhostHighlightedAccent : ButtonVariant.Ghost}
-          aria-label={goal ? `Edit goal: ${statusLabel(goal.status)}` : "Set durable goal"}
+          aria-label={goalActionLabel(goal)}
           onClick={onOpen}
         >
           <Icon iconName={IconName.Flag} size={20} />
@@ -327,9 +308,9 @@ function BudgetSwitch({ draft }: { draft: GoalDraft }) {
         aria-label="Token budget"
         onChange={draft.toggleBudget}
       />
-      <span className="label-micro shrink-0 text-basic-primary">Token Budget</span>
+      <span className="type-meta-strong shrink-0 text-basic-secondary">Token budget</span>
       {draft.budgetOn ? null : (
-        <span className="label-micro shrink-0 text-basic-muted">No token limit</span>
+        <span className="type-meta shrink-0 text-basic-tertiary">No token limit</span>
       )}
     </div>
   );
@@ -378,13 +359,16 @@ function BudgetNote({ draft, className }: { draft: GoalDraft; className?: string
   const { budgetAmount, budgetInvalid } = draft;
   return (
     <div className={cn("flex flex-col gap-1", className)}>
-      <p className="text-micro text-basic-secondary">{BUDGET_EXPLANATION}</p>
+      <p className="type-meta text-basic-secondary">{BUDGET_EXPLANATION}</p>
       <span
         role={budgetInvalid ? "alert" : undefined}
-        className={cn("text-micro", budgetInvalid ? "text-error-primary" : "text-basic-muted")}
+        className={cn(
+          "type-meta tabular",
+          budgetInvalid ? "text-error-primary" : "text-basic-tertiary",
+        )}
       >
         {budgetInvalid
-          ? `Enter ${BUDGET_INPUT_RULE}.`
+          ? `Enter ${GOAL_BUDGET_INPUT_RULE}.`
           : budgetAmount === null
             ? `${storedAmountLabel(draft.budgetText)} tokens, kept as stored.`
             : budgetAmount > BUDGET_MAX
@@ -452,8 +436,8 @@ function GoalEditor({ draft, onClose }: GoalEditorProps) {
         <>
           <div className="flex items-center justify-between gap-4 py-1 pr-1 pl-3">
             <div className="flex min-w-0 items-center gap-2">
-              <span className="header-sm shrink-0 text-accent-primary">Current Goal</span>
-              <span className="min-w-0 truncate text-micro text-accent-tertiary">
+              <span className="type-strong shrink-0 text-basic-primary">Current goal</span>
+              <span className="type-meta tabular min-w-0 truncate text-basic-tertiary">
                 {usageLabel(goal)}
               </span>
               <Badge
@@ -510,7 +494,7 @@ function GoalEditor({ draft, onClose }: GoalEditorProps) {
       <div className="flex items-end">
         <textarea
           ref={field}
-          className="block min-w-0 flex-1 resize-none border-none bg-transparent py-3 pr-2 pl-4 text-medium text-input outline-none placeholder:text-input-placeholder"
+          className="block min-w-0 flex-1 resize-none border-none bg-transparent py-2.5 pr-2 pl-3 text-[15px] leading-6 text-input outline-none placeholder:text-input-placeholder [@media(pointer:coarse)]:text-[16px]"
           rows={1}
           aria-label="Goal objective"
           placeholder={OBJECTIVE_PLACEHOLDER}
@@ -551,12 +535,27 @@ function GoalEditor({ draft, onClose }: GoalEditorProps) {
 function cornerAction(
   goal: SessionGoalRecord | null,
   saveDisabled: boolean,
-): { kind: "save" | "pause" | "resume"; label: string; icon: IconName; disabled: boolean } {
+): {
+  kind: "save" | "pause" | "resume";
+  label: string;
+  icon: IconName;
+  disabled: boolean;
+} {
   if (goal?.status === "active") {
-    return { kind: "pause", label: "Pause goal", icon: IconName.Pause, disabled: false };
+    return {
+      kind: "pause",
+      label: "Pause goal",
+      icon: IconName.Pause,
+      disabled: false,
+    };
   }
   if (goal && goal.status !== "complete") {
-    return { kind: "resume", label: "Resume goal", icon: IconName.Play, disabled: false };
+    return {
+      kind: "resume",
+      label: "Resume goal",
+      icon: IconName.Play,
+      disabled: false,
+    };
   }
   return {
     kind: "save",
@@ -587,7 +586,7 @@ function GoalMobileModal({ draft, open, onClose }: GoalMobileModalProps) {
     <Modal
       open={open}
       onClose={onClose}
-      title="Set Durable Goal"
+      title="Set durable goal"
       bodyClassName="p-0 pb-20 [&>*]:shrink-0"
       footer={
         ready ? (
@@ -642,8 +641,8 @@ function GoalMobileModal({ draft, open, onClose }: GoalMobileModalProps) {
         <>
           {goal ? (
             <section className="flex flex-wrap items-center gap-x-4 gap-y-1 p-4">
-              <span className="header-md text-accent-primary">Current Goal</span>
-              <span className="text-medium text-accent-tertiary">{usageLabel(goal)}</span>
+              <span className="type-subheading text-basic-primary">Current goal</span>
+              <span className="type-meta tabular text-basic-tertiary">{usageLabel(goal)}</span>
               <Badge
                 text={statusLabel(goal.status)}
                 color={badgeColor(goal.status)}
@@ -663,8 +662,8 @@ function GoalMobileModal({ draft, open, onClose }: GoalMobileModalProps) {
           </section>
           <section className="flex flex-col gap-4 p-4">
             <div className="flex items-center gap-2">
-              <span className="label-small min-w-0 flex-1 truncate text-basic-primary">
-                Token Budget
+              <span className="type-label min-w-0 flex-1 truncate text-basic-primary">
+                Token budget
               </span>
               <Switch
                 size={SwitchSize.Large}
@@ -680,7 +679,7 @@ function GoalMobileModal({ draft, open, onClose }: GoalMobileModalProps) {
                 <BudgetNote draft={draft} />
               </>
             ) : (
-              <p className="text-small text-basic-muted">No token limit</p>
+              <p className="type-body-chrome text-basic-tertiary">No token limit</p>
             )}
           </section>
         </>

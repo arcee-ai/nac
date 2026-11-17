@@ -602,7 +602,11 @@ test("healthy checkpoint with invalid native notifications permits explicit menu
     track,
   ];
   const values = {
-    preferences: { "nac.sidebar.open": "false" },
+    preferences: {
+      "nac.sidebar.open": "false",
+      // Keep Reset isolated from Focus's legitimate first-use Inbox write.
+      "nac.inbox.read.v1": JSON.stringify({ since: Date.now(), runs: {} }),
+    },
     drafts: {
       ["nac:prompt-drafts:v2:" + JSON.stringify(binding)]: JSON.stringify({
         version: 2,

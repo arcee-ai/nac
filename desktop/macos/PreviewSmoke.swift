@@ -140,7 +140,8 @@ final class PreviewSmoke {
                     try await wait("engine starting") { self.app.engine.pid > 0 }
                 } else {
                     if scenario == "engine-exit" {
-                        try await waitJS("loaded production workspace", "return !!document.querySelector('[role=dialog]');")
+                        // The seeded project opens Home's composer (no first-chat dialog).
+                        try await waitJS("loaded production workspace", "return !!document.getElementById('home-composer');")
                         kill(app.engine.pid, SIGTERM)
                     }
                     try await wait("native failure/recovery state", timeout: 65) {
@@ -330,8 +331,17 @@ final class PreviewSmoke {
     }
 
     private func journey() async throws {
-        try await waitJS("production new-chat dialog", "return [...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Create chat' && !b.disabled);")
-        _ = try await js("document.querySelectorAll('button').forEach(b => { if(b.textContent.trim() === 'Create chat') b.click(); }); return true;")
+        // Home's composer is the one new-session flow. Start session creates
+        // the direct session and sends the typed prompt as its first run.
+        try await waitJS("production Home composer", "const f = document.getElementById('home-composer'); return !!f && !f.disabled && [...f.labels].some(l => l.textContent.trim() === 'What should we work on?');")
+        _ = try await js("""
+        const input = document.getElementById('home-composer');
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input, '\(FixtureProvider.sessionStartPrompt)');
+        input.dispatchEvent(new Event('input', {bubbles:true}));
+        return true;
+        """)
+        try await waitJS("enabled Start session button", "return !!document.querySelector('button[aria-label=\"Start session\"]:not(:disabled)');")
+        _ = try await js("document.querySelector('button[aria-label=\"Start session\"]:not(:disabled)').click(); return true;")
         try await waitJS("production-created direct session", "return location.hash.includes('/session/') && !!document.querySelector('[role=combobox][aria-label=Message]');")
         let sessionID = try await js("return location.hash.split('/')[2];") as! String
         evidence["session_id"] = sessionID
@@ -341,6 +351,9 @@ final class PreviewSmoke {
             throw PreviewError.message("UI did not create a direct fixture session: \(snapshot)")
         }
         evidence["behavior"] = "direct"
+        // The first-run handoff waits for the interactive stream. Its distinct
+        // short reply precedes the controlled incremental streaming journey.
+        try await waitJS("Home first-run response", "return document.body.innerText.includes('\(FixtureProvider.sessionStartAnswer)') && ![...document.querySelectorAll('button')].some(b => b.getAttribute('aria-label') === 'Stop run');")
         try await sendPrompt("MAC_PREVIEW_STREAM")
         try await waitJS("incremental streamed response", "return __previewEvidence.partial;")
         try await waitJS("completed response", "return document.body.innerText.includes('Hello from the isolated NAC Mac preview.') && ![...document.querySelectorAll('button')].some(b => b.getAttribute('aria-label') === 'Stop run');")
@@ -389,7 +402,7 @@ final class PreviewSmoke {
         }
         // Close with a real active run to exercise cancellation and server settlement.
         try await sendPrompt("MAC_PREVIEW_CLOSE_ACTIVE")
-        try await wait("second provider request") { self.app.provider.responseCount == 2 }
+        try await wait("third provider request") { self.app.provider.responseCount == 3 }
         evidence["close_with_active_run"] = true
     }
 

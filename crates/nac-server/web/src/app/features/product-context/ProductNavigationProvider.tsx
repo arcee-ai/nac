@@ -1,8 +1,5 @@
-import { useLayoutEffect, useMemo, useState, type ReactNode } from "react";
+import { useLayoutEffect, useMemo, type ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { ConfigurationsModal } from "@/app/components/modals/ConfigurationsModal";
-import { McpServersModal } from "@/app/components/modals/MCPServersModal/McpServersModal";
-import { SshConfigsModal } from "@/app/components/modals/SshConfigsModal";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { routes, sessionIdFromPath, type SessionPanel } from "@/app/lib/routes";
@@ -10,15 +7,23 @@ import { sessionPanelPolicy } from "@/app/lib/sessionBehavior";
 import { useSessionSnapshot, useSessionSummary } from "@/app/services/queries";
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { sessionAvailable } from "@/app/features/ui-policy/policy";
-import { ProductNavigationContext } from "./context";
-import { ProductContextModal } from "./ProductContextModal";
+import {
+  capabilitiesHref,
+  productSessionFromLocation,
+} from "@/app/features/settings/settingsRoute";
+import { ProductNavigationContext, type ProductNavigationOwner } from "./context";
 
-/** One presentation owner for existing dialogs and the bounded navigation adapter. */
+/**
+ * One owner for settings destinations and the bounded native navigation
+ * adapter. Settings destinations are pages (`/settings/:section`); session
+ * panels stay inside the session already on screen.
+ */
 export function ProductNavigationProvider({ children }: { children: ReactNode }) {
   const runtime = useNativeRuntime();
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
   const navigate = useNavigate();
-  const sessionId = sessionIdFromPath(pathname);
+  // Settings › Capabilities keeps describing the session it was opened from.
+  const sessionId = productSessionFromLocation(pathname, search, sessionIdFromPath(pathname));
   const { data: entry } = useSessionSummary(sessionId);
   // Passive cache consumption: context/navigation cannot attach or recover a session.
   const { data: snapshot } = useSessionSnapshot(sessionId, { enabled: false });
@@ -32,15 +37,15 @@ export function ProductNavigationProvider({ children }: { children: ReactNode })
     !!entry &&
     sessionAvailable(uiPolicy, entry.summary.behavior, entry.lineage);
   const panelPolicy = sessionPanelPolicy(entry?.summary.behavior, snapshot?.lineage?.kind);
-  const [dialog, setDialog] = useState<"mcp" | "configurations" | "ssh" | "context" | null>(null);
-  const owner = useMemo(
+  const owner = useMemo<ProductNavigationOwner>(
     () => ({
-      openMcp: () => setDialog("mcp"),
-      openConfigurations: () => setDialog("configurations"),
-      openSsh: () => setDialog("ssh"),
-      inspect: () => setDialog("context"),
+      openMcp: () => navigate(routes.settings("mcp")),
+      openConfigurations: () => navigate(routes.settings("models")),
+      openSsh: () => navigate(routes.settings("ssh")),
+      inspect: () => navigate(capabilitiesHref(sessionId)),
+      openSettings: (section = "general") => navigate(routes.settings(section)),
     }),
-    [],
+    [navigate, sessionId],
   );
 
   useLayoutEffect(
@@ -66,7 +71,6 @@ export function ProductNavigationProvider({ children }: { children: ReactNode })
               owner.openSsh();
               return true;
             case "projects":
-              setDialog(null);
               navigate(routes.list());
               return true;
           }
@@ -83,9 +87,8 @@ export function ProductNavigationProvider({ children }: { children: ReactNode })
             !(mobile ? panelPolicy.mobilePanels : panelPolicy.widePanels).includes(panel)
           )
             return false;
-          // Route remains in the already rendered session. Opening its presentation
-          // does not attach another session or launch a terminal.
-          setDialog(null);
+          // Route remains in (or returns to) the session it describes. Opening
+          // its presentation does not attach another session or launch a terminal.
           runtime.stores.sessionLayoutStore.openSidePanelList();
           navigate(routes.session(sessionId, panel));
           return true;
@@ -94,16 +97,7 @@ export function ProductNavigationProvider({ children }: { children: ReactNode })
     [runtime, sessionId, sessionVisible, panelPolicy, mobile, owner, navigate, pathname],
   );
 
-  const close = () => setDialog(null);
   return (
-    <ProductNavigationContext.Provider value={owner}>
-      {children}
-      <ConfigurationsModal open={dialog === "configurations"} onClose={close} />
-      <McpServersModal open={dialog === "mcp"} onClose={close} />
-      <SshConfigsModal open={dialog === "ssh"} onClose={close} />
-      {dialog === "context" ? (
-        <ProductContextModal open sessionId={sessionId} onClose={close} />
-      ) : null}
-    </ProductNavigationContext.Provider>
+    <ProductNavigationContext.Provider value={owner}>{children}</ProductNavigationContext.Provider>
   );
 }

@@ -31,7 +31,16 @@ const mobileModalZIndex = { list: 100, catalog: 101, form: 102 } as const;
  * so the panel itself is the list and everything it leads to opens as another
  * panel on top of it: list → catalog → form, each with its own way back.
  */
-export function McpServersMobile({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function McpServersMobile({
+  open,
+  onClose,
+  presentation = "modal",
+}: {
+  open: boolean;
+  onClose?: () => void;
+  /** "page": the list is the Settings section itself; catalog and form still push. */
+  presentation?: "modal" | "page";
+}) {
   const { data: library } = useMcpLibrary();
   const { data, error, isError, isFetching, isLoading, refetch } = useMcpServers();
   const servers = data?.servers ?? [];
@@ -73,53 +82,68 @@ export function McpServersMobile({ open, onClose }: { open: boolean; onClose: ()
     setEditing(null);
   };
 
-  return (
+  const list = (
     <>
-      <Modal
-        open={open}
-        onClose={onClose}
-        title="MCP servers"
-        className={mobileModalClassName}
-        zIndex={mobileModalZIndex.list}
-      >
-        {isError ? (
-          <McpServersLoadError
-            error={error}
-            retrying={isFetching}
-            onRetry={() => {
-              void refetch();
-            }}
-          />
-        ) : (
-          <div className="flex flex-col gap-1 [&>*]:shrink-0">
-            <TabButton size={TabButtonSize.Large} onClick={() => setPicking(true)}>
-              <Icon iconName={IconName.Add} />
-              <span className="text-left flex-grow truncate">Add server</span>
+      {isError ? (
+        <McpServersLoadError
+          error={error}
+          retrying={isFetching}
+          onRetry={() => {
+            void refetch();
+          }}
+        />
+      ) : (
+        <div className="flex flex-col gap-1 [&>*]:shrink-0">
+          <TabButton size={TabButtonSize.Large} onClick={() => setPicking(true)}>
+            <Icon iconName={IconName.Add} />
+            <span className="text-left flex-grow truncate">Add server</span>
+            <Icon iconName={IconName.Right} className="shrink-0" />
+          </TabButton>
+          {servers.length ? <Separator /> : null}
+          {servers.map((server) => (
+            <TabButton
+              key={server.name}
+              size={TabButtonSize.Large}
+              onClick={() => {
+                formEpoch.current += 1;
+                setEditing(server.name);
+              }}
+            >
+              <span className="text-left flex-grow truncate">{server.name}</span>
               <Icon iconName={IconName.Right} className="shrink-0" />
             </TabButton>
-            {servers.length ? <Separator /> : null}
-            {servers.map((server) => (
-              <TabButton
-                key={server.name}
-                size={TabButtonSize.Large}
-                onClick={() => {
-                  formEpoch.current += 1;
-                  setEditing(server.name);
-                }}
-              >
-                <span className="text-left flex-grow truncate">{server.name}</span>
-                <Icon iconName={IconName.Right} className="shrink-0" />
-              </TabButton>
-            ))}
-            {isLoading ? (
-              <div className="flex items-center gap-2 px-2 py-1">
-                <Loader size={LoaderSize.XSmall} />
-                <span className="text-micro text-basic-muted">Loading…</span>
-              </div>
-            ) : null}
-          </div>
-        )}
-      </Modal>
+          ))}
+          {isLoading ? (
+            <div className="flex items-center gap-2 px-2 py-1">
+              <Loader size={LoaderSize.XSmall} />
+              <span className="text-micro text-basic-muted">Loading…</span>
+            </div>
+          ) : null}
+        </div>
+      )}
+    </>
+  );
+
+  return (
+    <>
+      {presentation === "page" ? (
+        <section
+          aria-label="MCP servers"
+          className="rounded-card border border-tertiary bg-elevation-level-1 p-1"
+        >
+          {list}
+        </section>
+      ) : (
+        <Modal
+          open={open}
+          onClose={onClose}
+          title="MCP servers"
+          className={mobileModalClassName}
+          zIndex={mobileModalZIndex.list}
+        >
+          {list}
+        </Modal>
+      )}
 
       <Modal
         open={picking}

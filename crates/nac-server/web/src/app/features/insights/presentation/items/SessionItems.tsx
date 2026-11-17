@@ -53,7 +53,9 @@ export function sessionContent(segment: ToolSegment, context: ItemContext): Item
         body: (state) => (
           <>
             {durationMs != null && state !== InsightItemState.Loading ? (
-              <p className="label-micro text-btn-secondary">Slept {formatSeconds(durationMs)}</p>
+              <p className="type-meta tabular text-basic-tertiary">
+                Slept {formatSeconds(durationMs)}
+              </p>
             ) : null}
             {result && isDefault(state) ? <BodyText>{result}</BodyText> : null}
             {sessionLink}

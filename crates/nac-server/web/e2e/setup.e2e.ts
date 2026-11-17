@@ -1,5 +1,6 @@
 import { createProject, createSession, expect, test, waitForRunIdle } from "./harness";
 import type { ModelCatalog } from "../src/app/types/api";
+import { openSessionSettings } from "./nav-focus-helpers";
 
 test.use({ orchestration: "0" });
 
@@ -12,31 +13,59 @@ for (const mobile of [false, true]) {
     if (mobile) await page.setViewportSize({ width: 390, height: 844 });
     const projectId = await createProject(request, harness);
     await page.goto(`${harness.baseUrl}/#/project/${projectId}`);
-    const dialog = page.getByRole("dialog", { name: "New Chat" });
-    await expect(dialog).toContainText("Inherited from the project default");
+    // An empty project opens Home's composer; its model chip shows what the
+    // session inherits, and Start session creates it and sends the first prompt.
+    await expect(page).toHaveURL(new RegExp(`#/\\?project=${projectId}$`));
+    const prompt = page.getByRole("textbox", { name: "What should we work on?", exact: true });
+    await expect(prompt).toBeVisible();
+    await page.getByRole("button", { name: /^Model: / }).click();
+    const dialog = page.getByRole("dialog", { name: "Model for this session" });
+    await expect(dialog).toContainText("Project default");
     await expect(dialog).toContainText("reasoning high");
     await expect(dialog.getByText("Primary model", { exact: true })).toBeVisible();
     await expect(dialog.getByRole("radiogroup")).toHaveCount(0);
     await expect(dialog.getByText("Optional light model", { exact: true })).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    harness.provider.enqueue(
+      "setup-first-run",
+      { token: "SETUP_FIRST_RUN" },
+      { kind: "text", text: "Setup first run complete.", stream: "request" },
+    );
+    await prompt.fill("SETUP_FIRST_RUN");
     const created = page.waitForResponse(
       (response) =>
         response.request().method() === "POST" && response.url() === `${harness.baseUrl}/sessions`,
     );
-    await dialog.getByRole("button", { name: "Create chat", exact: true }).focus();
+    await page.getByRole("button", { name: "Start session", exact: true }).focus();
     await page.keyboard.press("Enter");
     const response = await created;
     expect(response.ok()).toBe(true);
     const sessionId = (await response.json()).metadata.session_id;
     await expect(page).toHaveURL(new RegExp(`/session/${sessionId}/insights`));
+    await waitForRunIdle(request, harness, sessionId);
     const configUrl = `${harness.baseUrl}/sessions/${sessionId}/config`;
     const before = await (await request.get(configUrl)).json();
-    expect(before).toMatchObject({
-      reasoning_effort: "high",
-      orchestrator_compaction_threshold: null,
-    });
+    expect(before).toMatchObject({ reasoning_effort: "high" });
+    // Without a model override, Home inherits exactly as any plain project
+    // create does (the server applies the project default).
+    const reference = await createSession(request, harness, "direct", projectId);
+    const inherited = await (
+      await request.get(`${harness.baseUrl}/sessions/${reference}/config`)
+    ).json();
+    for (const field of [
+      "backend",
+      "model",
+      "base_url",
+      "api_key_env",
+      "reasoning_effort",
+      "orchestrator_compaction_threshold",
+      "extra_headers_json",
+    ])
+      expect(before[field]).toEqual(inherited[field]);
     const projectBefore = await (await request.get(`${harness.baseUrl}/projects`)).json();
 
-    await page.getByRole("button", { name: "Session settings", exact: true }).click();
+    await openSessionSettings(page);
     const settings = page.getByRole("dialog", { name: "Session settings", exact: true });
     await expect(settings).toContainText(
       "Project defaults and existing children keep their settings",
@@ -58,7 +87,7 @@ for (const mobile of [false, true]) {
     });
     expect(await (await request.get(`${harness.baseUrl}/projects`)).json()).toEqual(projectBefore);
 
-    await page.getByRole("button", { name: "Session settings", exact: true }).click();
+    await openSessionSettings(page);
     await settings.getByText("Advanced execution settings", { exact: true }).click();
     await settings.getByRole("button", { name: "Advanced Configurations", exact: true }).click();
     await settings.getByRole("textbox", { name: "Context limit", exact: true }).fill("333");
@@ -79,7 +108,7 @@ for (const mobile of [false, true]) {
     await page.keyboard.press("Escape");
     await expect(settings).toHaveCount(0);
 
-    await page.getByRole("button", { name: "Session settings", exact: true }).click();
+    await openSessionSettings(page);
     await expect(
       settings.getByRole("textbox", { name: "Session title", exact: true }),
     ).toBeVisible();
@@ -199,7 +228,7 @@ for (const mobile of [false, true]) {
       });
     });
     await page.goto(`${harness.baseUrl}/#/session/${sessionId}/files`);
-    await page.getByRole("button", { name: "Session settings", exact: true }).click();
+    await openSessionSettings(page);
     const settings = page.getByRole("dialog", { name: "Session settings", exact: true });
     await settings.getByRole("button", { name: "Provider connections", exact: true }).click();
     const accounts = settings.getByRole("region", { name: "Provider connections" });
@@ -270,7 +299,7 @@ test("explicitly updates a saved project default while existing children keep cr
   expect(presetResponse.ok()).toBe(true);
   const preset = await presetResponse.json();
   await page.goto(`${harness.baseUrl}/#/session/${parentId}/files`);
-  await page.getByRole("button", { name: "Session settings", exact: true }).click();
+  await openSessionSettings(page);
   const settings = page.getByRole("dialog", { name: "Session settings", exact: true });
   await settings
     .getByRole("button", { name: "Advanced presets and provider setup", exact: true })
@@ -299,7 +328,7 @@ test("explicitly updates a saved project default while existing children keep cr
   ).toBe(preset.config_id);
   // Opening the exact saved tuple auto-selects its preset. The explicit default
   // action must retain that identity without requiring a redundant re-selection.
-  await page.getByRole("button", { name: "Session settings", exact: true }).click();
+  await openSessionSettings(page);
   await settings
     .getByRole("button", { name: "Advanced presets and provider setup", exact: true })
     .click();

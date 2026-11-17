@@ -17,6 +17,8 @@ export declare const NAC_API_SURFACE: {
     readonly "POST /sessions/{session_id}/heartbeats/preview": "private:passive existing-chat calendar preview";
     readonly "POST /sessions/{session_id}/heartbeats/attention": "private:standalone human result acknowledgement";
     readonly "GET /attention/events": "private:native opt-in metadata attention stream";
+    readonly "GET /attention": "private:standalone passive fleet attention snapshot";
+    readonly "GET /attention/stream": "private:standalone passive fleet attention stream";
     readonly "GET /projects/{project_id}/task-schedules": "private:standalone Local interval task inventory";
     readonly "GET /projects/{project_id}/task-schedules/{schedule_id}": "private:standalone passive interval task history and retained resources";
     readonly "POST /projects/{project_id}/task-schedules/control": "private:standalone human interval task control";

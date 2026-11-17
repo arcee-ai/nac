@@ -49,8 +49,16 @@ for (const [name, viewport, mobile] of [
       page.getByRole("alert").filter({ hasText: "Subagents could not be loaded" }),
     ).toBeVisible();
 
-    // A phone opens the panel on its list; a tablet reaches it from the detail's header.
-    if (!mobile) await page.getByRole("button", { name: "Open list", exact: true }).click();
+    // A phone opens the panel on its list. A tablet shows one column at a time:
+    // opened from its header chip it starts on the list too, otherwise the
+    // detail's header leads back to it.
+    if (!mobile) {
+      const openList = page.getByRole("button", { name: "Open list", exact: true });
+      const closeList = page.getByRole("button", { name: "Close list", exact: true });
+      await expect(openList.or(closeList).first()).toBeVisible();
+      if (await openList.isVisible()) await openList.click();
+      await expect(closeList).toBeVisible();
+    }
     const list = subagentList(page, mobile);
     const alert = list.getByRole("alert").filter({ hasText: "Subagents could not be loaded" });
     await expect(alert).toBeVisible();
@@ -160,7 +168,7 @@ for (const [name, viewport, mobile] of [
     await expect(page).toHaveURL(new RegExp(`/session/${olderId}/`));
     // Open closes the phone's panel, so it does not cover the chat it opened.
     if (mobile) await expect(page.getByRole("dialog")).toHaveCount(0);
-    await page.getByRole("button", { name: "Parent chat" }).click();
+    await page.getByRole("button", { name: /, parent chat$/ }).click();
     await expect(page).toHaveURL(new RegExp(`/session/${parentId}/delegated$`));
     // Parent return restores the exact open panel and selected child's composer.
     await expect(page.getByText("Older child", { exact: true }).first()).toBeVisible();
@@ -187,7 +195,7 @@ for (const [name, viewport, mobile] of [
     const childDraft = page.getByRole("textbox", { name: "Send a message" });
     await expect(childDraft).toHaveValue("");
     await expect(childDraft).toBeEnabled();
-    await page.getByRole("button", { name: "Parent chat" }).click();
+    await page.getByRole("button", { name: /, parent chat$/ }).click();
     await expect(page).toHaveURL(new RegExp(`/session/${parentId}/delegated$`));
     // A running composer has no background switch; its Steer field is the only one on the page.
     const steer = page.getByRole("textbox", { name: "Send a message" });

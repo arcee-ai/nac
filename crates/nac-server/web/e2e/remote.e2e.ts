@@ -117,7 +117,13 @@ test("loads the production client through the authenticated gateway", async () =
       const response = await page.goto(target.baseUrl);
       expect(response?.status()).toBe(200);
       await expect(page).toHaveTitle("NAC");
-      await expect(page.getByRole("button", { name: "Open the menu" })).toBeVisible();
+      // The app shell's navigation: the sidebar's Search (phones: the menu).
+      await expect(
+        page
+          .getByRole("button", { name: "Search", exact: true })
+          .or(page.getByRole("button", { name: "Open the menu" }))
+          .first(),
+      ).toBeVisible();
       expect(pageErrorCount).toBe(0);
     } finally {
       await page.close();

@@ -16,8 +16,10 @@ pub use heartbeats::*;
 mod attention;
 mod completion_occurrences;
 pub use attention::{
-    read_attention_metadata, AttentionStoreObservation, AttentionStoredGoal, AttentionStoredRun,
-    AttentionStoredSession, ATTENTION_METADATA_BYTES, ATTENTION_SOURCE_LIMIT,
+    read_attention_census, read_attention_metadata, read_attention_topology, AttentionLineage,
+    AttentionLineageKind, AttentionStoreCensus, AttentionStoreObservation, AttentionStoredGoal,
+    AttentionStoredRun, AttentionStoredSession, AttentionTopology, ATTENTION_METADATA_BYTES,
+    ATTENTION_SOURCE_LIMIT,
 };
 pub use completion_occurrences::{
     read_completion_page, CompletionCursor, CompletionKind, CompletionOccurrence, CompletionPage,

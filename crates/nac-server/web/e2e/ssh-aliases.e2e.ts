@@ -65,7 +65,7 @@ test("lists server OpenSSH aliases beside saved profiles and fills Host without 
   // Tall enough that the open menu is not clipped by the modal's scroll area.
   await page.setViewportSize({ width: 1280, height: 1200 });
   await page.goto(harness.baseUrl);
-  await page.getByRole("button", { name: "New Project", exact: true }).click();
+  await page.getByRole("button", { name: "Get Started", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toContainText("New Project");
   await dialog.getByRole("button", { name: "SSH", exact: true }).click();

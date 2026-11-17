@@ -59,3 +59,9 @@ export function usePermissionQueue(
     .sort((left, right) => right.review.created_at_epoch_ms - left.review.created_at_epoch_ms);
   return { parent, children, records, scopes, requests, reviews, includeChildren };
 }
+
+export type PermissionQueue = ReturnType<typeof usePermissionQueue>;
+/** One pending request with the broker scope that owns it. */
+export type PermissionQueueEntry = PermissionQueue["requests"][number];
+/** One retained automatic review with the broker scope that owns it. */
+export type PermissionReviewEntry = PermissionQueue["reviews"][number];

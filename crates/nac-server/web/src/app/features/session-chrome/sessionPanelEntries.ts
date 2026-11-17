@@ -1,0 +1,64 @@
+import { goalStatusLabel } from "@/app/features/session-chrome/goalStatus";
+import type { SessionFacts } from "@/app/features/session-chrome/useSessionFacts";
+import type { SessionPanel } from "@/app/lib/routes";
+
+/** What a Session menu row opens: one of the drawer's panels, or the goal. */
+export type SessionPanelTarget = SessionPanel | "goal";
+
+/** The Session menu's panel rows, in one fixed order on every width. */
+const ORDER: readonly SessionPanelTarget[] = [
+  "files",
+  "delegated",
+  "worksets",
+  "terminal",
+  "goal",
+  "heartbeats",
+  "insights",
+  "history",
+];
+
+/**
+ * The panels the Session menu lists, among those the session's behavior
+ * allows. A wide screen lists only the panels with something to say (changes,
+ * subagents, a goal, schedules), the terminal and Insights; the drawer's own
+ * tab strip reaches the rest. A phone's sheet has no tab strip, so it lists
+ * every panel the behavior has. The goal is listed only while one exists.
+ */
+export function sessionPanelEntries(facts: SessionFacts, phone: boolean): SessionPanelTarget[] {
+  const allowed = (phone ? facts.policy?.mobilePanels : facts.policy?.widePanels) ?? [];
+  return ORDER.filter((target) => {
+    if (target === "goal") return facts.goal != null;
+    if (!allowed.includes(target)) return false;
+    if (phone) return true;
+    switch (target) {
+      case "files":
+        return facts.additions > 0 || facts.deletions > 0;
+      case "delegated":
+      case "worksets":
+        return facts.agents?.panel === target;
+      case "heartbeats":
+        return facts.schedules > 0;
+      default:
+        return true;
+    }
+  });
+}
+
+/**
+ * What is live in the session's background, as short phrases for the Session
+ * menu trigger's description: running subagents, an active goal, an armed
+ * schedule. Empty when nothing is, and then the trigger draws no dot. The
+ * session's own run already has the title's status dot, and changes are a
+ * fact rather than activity, so neither counts here.
+ */
+export function sessionLiveFacts(facts: SessionFacts): string[] {
+  const live: string[] = [];
+  const agents = facts.agents;
+  if (agents && agents.running > 0) {
+    const noun = agents.noun === "agent" ? "subagent" : "thread";
+    live.push(`${agents.running} ${noun}${agents.running === 1 ? "" : "s"} running`);
+  }
+  if (facts.goal?.status === "active") live.push(`Goal ${goalStatusLabel("active")}`);
+  if (facts.schedulesActive) live.push("Schedules active");
+  return live;
+}

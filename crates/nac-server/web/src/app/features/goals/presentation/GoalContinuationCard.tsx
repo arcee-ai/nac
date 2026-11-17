@@ -37,17 +37,17 @@ export function GoalContinuationCard({
 
   return (
     <section aria-label={title} className="py-6 md:pl-2">
-      <div className="flex max-w-full flex-col gap-2 rounded-[8px] bg-elevation-level-1 p-3">
+      <div className="flex max-w-full flex-col gap-2 rounded-lg border border-muted bg-[var(--f-wash-1)] px-3 py-2.5">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <Icon iconName={IconName.Flag} size={16} className="shrink-0 text-basic-secondary" />
-          <span className="shrink-0 text-micro font-semibold text-basic-primary">{title}</span>
+          <span className="type-meta-strong shrink-0 text-basic-primary">{title}</span>
           {current ? (
             <Badge text={goalStatusLabel(goal.status)} color={goalBadgeColor(goal.status)} />
           ) : ended ? (
             <Badge text="No longer current" color={BadgeColor.Gray} />
           ) : null}
           <span
-            className="code code-small min-w-0 truncate text-basic-muted"
+            className="type-meta tabular min-w-0 truncate text-basic-muted"
             title={`Goal ${turn.goalId}`}
           >
             Goal {shortId(turn.goalId)}
@@ -56,7 +56,7 @@ export function GoalContinuationCard({
         <p
           id={objectiveId}
           className={cn(
-            "whitespace-pre-wrap break-words text-small text-basic-primary",
+            "type-body-chrome whitespace-pre-wrap break-words text-basic-primary",
             long && !expanded && "line-clamp-4",
           )}
         >
@@ -65,7 +65,7 @@ export function GoalContinuationCard({
         {long ? (
           <button
             type="button"
-            className="self-start rounded-[4px] text-micro font-medium text-btn-secondary underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-border-focus-outline)]"
+            className="type-meta self-start rounded-md text-basic-tertiary underline-offset-2 hover:text-basic-primary hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-border-focus-outline)]"
             aria-expanded={expanded}
             aria-controls={objectiveId}
             onClick={() => setExpanded((open) => !open)}

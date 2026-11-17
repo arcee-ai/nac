@@ -18,7 +18,8 @@ test("New folder creates one folder that Select then applies", async ({
   const workspaceCanonical = await fs.realpath(path.join(harness.runRoot, "workspace"));
 
   await page.goto(harness.baseUrl);
-  await page.getByRole("button", { name: "New Project", exact: true }).click();
+  // An empty install opens New Project from Home's empty state.
+  await page.getByRole("button", { name: "Get Started", exact: true }).click();
   const form = page.getByRole("dialog", { name: "New Project" });
   const folderButton = form.getByRole("button", { name: /^Choose Working Folder(?::|$)/ });
   await expect(folderButton).toHaveText(workspaceCanonical);

@@ -26,6 +26,9 @@ directories return cancellation, and server admission revalidates again later.
 Cancellation, supersession, runtime closure, navigation and actual bridge
 retirement fence late callbacks. Source correlation is checked at choose and
 completion. Ordinary hidden-window lifetime does not retire the menu bridge.
+Smoke builds alone add `smokeChoose`, which settles the real open sheet with a
+fixture folder through the same completion checks; the local startup smoke uses
+it, and the CI XCTest journeys drive the panel itself.
 
 The shell composition owner must construct this bridge after `commands.bind()`
 and before the first load, forward the same navigation-start/finish callbacks,
@@ -93,8 +96,10 @@ and view; later phases must retain that exact successor. The failure case is
 `ready` (0), then `failure-panel-observed` (1) on its initial document.
 Readiness and phase 0 are published in one atomic app record.
 
-The normal journey uses existing Create chat/New Project/Local/SSH/Sandbox and
-Files controls. It proves the unconnected SSH form has no Local picker and
+The normal journey starts on Home's composer (no first-chat dialog), opens the
+create-project form from the composer's project chip (Add project…), uses its
+Local/SSH/Sandbox controls, and reaches Files through the session header's
+Session menu (Insights) and the drawer's Files tab. It proves the unconnected SSH form has no Local picker and
 Podman retains the API browser; live SSH/container execution is separate
 infrastructure coverage. After real NSOpenPanel Cancel, XCTest navigates inside
 the second actual panel through an ASCII parent and visible unique Unicode

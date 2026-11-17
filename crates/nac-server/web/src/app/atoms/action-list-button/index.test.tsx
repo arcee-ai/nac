@@ -62,13 +62,13 @@ it("styles the actual Insights metadata consumer while the neighboring compact a
     </>,
   );
   const compact = screen.getByText("Check");
-  expect(compact.className).toContain("text-[10px]");
+  expect(compact.className).toContain("text-2xs");
   expect(compact.className).toContain("text-basic-muted");
   const readable = screen.getByText("Read");
   expect(readable.className).toContain("text-xs");
   expect(readable.className).toContain("leading-4");
   expect(readable.className).toContain("text-basic-tertiary");
-  expect(readable.className).not.toContain("text-[10px]");
+  expect(readable.className).not.toContain("text-2xs");
   for (const name of ["Compact neighbor, Check", "Inspect source, Read"]) {
     const button = screen.getByRole("button", { name });
     expect(button.getAttribute("aria-pressed")).toBe("true");

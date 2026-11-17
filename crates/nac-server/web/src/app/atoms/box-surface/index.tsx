@@ -26,13 +26,13 @@ const BoxSurface: React.FC<BoxSurfaceProps> = ({
   return (
     <div
       className={cn(
-        "flex flex-col rounded-[8px] overflow-hidden bg-elevation-level-1 shadow-convex",
+        "flex flex-col rounded-card overflow-hidden border border-tertiary bg-elevation-level-1",
         className,
       )}
     >
       {showHeader ? (
-        <div className="flex items-center gap-4 h-14 px-4 py-2 border-b border-muted shrink-0">
-          <div className="header-md text-basic-primary flex-1 min-w-0 truncate">{title}</div>
+        <div className="flex items-center gap-4 h-12 px-4 py-2 border-b border-muted shrink-0">
+          <div className="type-subheading text-basic-primary flex-1 min-w-0 truncate">{title}</div>
           {headerContent}
         </div>
       ) : null}

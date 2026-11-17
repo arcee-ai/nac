@@ -115,11 +115,17 @@ function ApprovalNavigation() {
   );
 }
 
+/** The sheet opens only from its chip; requests themselves ask in the attention card. */
+function openSheet() {
+  fireEvent.click(screen.getByRole("button", { name: /^Permissions|open permissions$/ }));
+}
+
 function mount(
   records = [child("first"), child("second")],
   seed = true,
   search = "",
   navigation = false,
+  open = seed,
 ) {
   childrenApi.mockResolvedValue(records);
   const client = new QueryClient({
@@ -141,6 +147,7 @@ function mount(
       </MemoryRouter>
     </QueryClientProvider>,
   );
+  if (open) openSheet();
   return { ...view, client };
 }
 beforeEach(() => {
@@ -206,7 +213,7 @@ describe("parent permission queue", () => {
     expect(screen.getAllByRole("button", { name: /^Permissions/ })).toHaveLength(1);
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
     expect(screen.getAllByRole("radiogroup", { name: "Approval mode" })).toHaveLength(1);
-    expect(screen.getByText(`(${count + 1} pending)`)).toBeTruthy();
+    expect(screen.getByText(`${count + 1} pending`)).toBeTruthy();
     await waitFor(() => expect(streams.calls).toHaveBeenCalledTimes(count));
   });
   it.each(["once", "always", "reject"] as const)(
@@ -227,7 +234,7 @@ describe("parent permission queue", () => {
       );
       fireEvent.click(
         screen.getByRole("button", {
-          name: { once: "Allow once", always: "Always allow", reject: "Reject" }[reply],
+          name: { once: "Allow once", always: "Always allow", reject: "Deny" }[reply],
         }),
       );
       await waitFor(() =>
@@ -262,6 +269,7 @@ describe("parent permission queue", () => {
     expect(streams.disposed).toHaveBeenCalledWith("first");
     mount([child("first", "completed"), child("second")]);
     expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
     expect(
       screen.getByRole("button", { name: "child agent “first” (first): read-first" }),
     ).toBeTruthy();
@@ -430,9 +438,11 @@ it("revalidates exact links after manual selection in the same mounted session",
   fireEvent.click(screen.getByRole("button", { name: /tool-A/ }));
   fireEvent.keyDown(document, { key: "Escape" });
   fireEvent.click(screen.getByRole("button", { name: "Navigate to B" }));
+  openSheet();
   expect(screen.getByText(/tool-B requested by/)).toBeTruthy();
   fireEvent.keyDown(document, { key: "Escape" });
   fireEvent.click(screen.getByRole("button", { name: "Navigate to expired" }));
+  openSheet();
   expect(screen.getByText(/This permission request is no longer pending/)).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Allow once" })).toBeNull();
 });

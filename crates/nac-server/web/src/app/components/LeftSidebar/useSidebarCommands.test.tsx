@@ -19,11 +19,13 @@ vi.mock("@/app/features/product-context/context", () => ({
 }));
 const state = vi.hoisted(() => ({
   sessions: undefined as ManagedSessionSummary[] | undefined,
+  projects: [{ id: "project" }] as unknown[] | undefined,
   newChat: vi.fn(),
   create: vi.fn(),
 }));
 vi.mock("@/app/services/queries", () => ({
   useSessions: () => ({ data: state.sessions }),
+  useProjects: () => ({ data: state.projects && { projects: state.projects } }),
   useVisibleSessions: () => ({ data: [] }),
   useMcpServers: () => ({ data: { servers: [] } }),
   useSshConfigs: () => ({ data: { configurations: [] } }),
@@ -34,11 +36,15 @@ vi.mock("@/app/providers/ProjectActionsProvider", () => ({
 vi.mock("@/app/features/managed/controller/useManagedHost", () => ({
   useManagedHost: () => ({ isManaged: false }),
 }));
-vi.mock("@/app/components/modals/ConfigurationsModal", () => ({ ConfigurationsModal: () => null }));
+vi.mock("@/app/components/modals/ConfigurationsModal", () => ({
+  ConfigurationsModal: () => null,
+}));
 vi.mock("@/app/components/modals/MCPServersModal/McpServersModal", () => ({
   McpServersModal: () => null,
 }));
-vi.mock("@/app/components/modals/SshConfigsModal", () => ({ SshConfigsModal: () => null }));
+vi.mock("@/app/components/modals/SshConfigsModal", () => ({
+  SshConfigsModal: () => null,
+}));
 
 function legacy(behavior: SessionBehavior): ManagedSessionSummary {
   // SAFETY: this command only reads the canonical session/project identities.
@@ -52,6 +58,7 @@ function wrapper({ children }: { children: ReactNode }) {
 beforeEach(() => {
   vi.clearAllMocks();
   state.sessions = undefined;
+  state.projects = [{ id: "project" }];
 });
 
 it.each(["orchestrator", "direct-with-orchestrator"] as const)(
@@ -74,5 +81,42 @@ it("waits for canonical route identity before choosing a creation destination", 
   rerender();
   act(() => result.current.newSession());
   expect(state.newChat).toHaveBeenCalledExactlyOnceWith("project");
+  expect(state.create).not.toHaveBeenCalled();
+});
+
+it("sends a project-less new session to Home's composer instead of a new project", () => {
+  state.sessions = [];
+  const { result } = renderHook(useSidebarCommands, {
+    wrapper: ({ children }: { children: ReactNode }) => (
+      <MemoryRouter initialEntries={["/task-schedules"]}>{children}</MemoryRouter>
+    ),
+  });
+  act(() => expect(result.current.newSession()).toBe(true));
+  expect(state.create).not.toHaveBeenCalled();
+  expect(state.newChat).not.toHaveBeenCalled();
+});
+
+it("starts New Project when there is no project for Home's composer to pick", () => {
+  state.sessions = [];
+  state.projects = [];
+  const { result } = renderHook(useSidebarCommands, {
+    wrapper: ({ children }: { children: ReactNode }) => (
+      <MemoryRouter initialEntries={["/"]}>{children}</MemoryRouter>
+    ),
+  });
+  act(() => expect(result.current.newSession()).toBe(true));
+  expect(state.create).toHaveBeenCalledOnce();
+  expect(state.newChat).not.toHaveBeenCalled();
+});
+
+it("refuses a project-less new session until the project list has loaded", () => {
+  state.sessions = [];
+  state.projects = undefined;
+  const { result } = renderHook(useSidebarCommands, {
+    wrapper: ({ children }: { children: ReactNode }) => (
+      <MemoryRouter initialEntries={["/"]}>{children}</MemoryRouter>
+    ),
+  });
+  act(() => expect(result.current.newSession()).toBe(false));
   expect(state.create).not.toHaveBeenCalled();
 });

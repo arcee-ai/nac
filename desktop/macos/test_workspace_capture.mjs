@@ -45,6 +45,16 @@ function fixture(html, hash = '#/session/owned-child/insights') {
       original.ready = false;
       original.reason = 'owned full answer not settled';
     }
+    // Deliberate Focus delta: approval reads the non-modal card above the
+    // composer, not the retired modal. Only its DOM-derived readiness, reason
+    // and surfaces may differ; a route or broker rejection keeps the frozen
+    // reason, and every other field (owner binding included) stays exact.
+    if (expected.kind === 'approval') {
+      if (['requested route not current', 'owned pending read no longer current'].includes(original.reason)) {
+        assert.equal(result.reason, original.reason, 'route/broker rejections keep the frozen reason');
+      }
+      for (const key of ['ready', 'reason', 'surfaces']) { delete projection[key]; delete original[key]; }
+    }
     assert.deepEqual(plain(projection), plain(original), 'only the declared mandatory-page delta may change prior fields');
     assert.equal(dom.window.document.body.innerHTML, before, 'neither probe may mutate the document');
     return result;
@@ -182,11 +192,15 @@ test('probe waits for revealed content without modifying styles or loading flags
 const approval = {kind:'approval',id:'owned-direct',requestID:'owned-request',text:'/private/owned-fixture/approval.txt'};
 const pending = {requests:[{id:'owned-request',session_id:'owned-direct',tool:'read',call_id:'wk-approval',
   resources:[{action:'read',resource:approval.text,display:approval.text}]}]};
-const approvalHTML = '<div data-nac-content inert>' + composer + message + '</div><div data-nac-overlays>' +
-  '<div role="dialog" aria-labelledby="permission-title"><h2 id="permission-title">Permission required</h2>' +
-  '<section aria-label="Pending permission requests"><button aria-pressed="true">this session (owned-direct): read</button></section>' +
-  '<section aria-label="Requested access">Requested by this session (owned-direct). ' + approval.text + '</section>' +
-  '<button id="allow-once">Allow once</button></div></div>';
+// Focus's non-modal approval card above the composer: visible "Approval
+// needed" label, tool question, requester line, requested access, choices.
+const approvalCard = '<div role="dialog" aria-modal="false" aria-label="Permission required" tabindex="-1">' +
+  '<div><span aria-hidden="true"></span><span>Approval needed</span><span></span></div>' +
+  '<div><h3>Read file?</h3><p>read requested by this session is paused before execution.</p></div>' +
+  '<section aria-label="Requested access"><div role="group" aria-label="Request">' + approval.text + '</div></section>' +
+  '<button id="allow-once">Allow once<span aria-hidden="true"><kbd>⏎</kbd></span></button>' +
+  '<button aria-label="Always allow">Always allow</button><button>Deny<span aria-hidden="true"><kbd>D</kbd></span></button></div>';
+const approvalHTML = '<div data-nac-content>' + message + approvalCard + composer + '</div><div data-nac-overlays></div>';
 
 function approvalObservation(html = approvalHTML, state = pending, hash = '#/session/owned-direct/insights') {
   const f = fixture(html, hash);
@@ -194,13 +208,13 @@ function approvalObservation(html = approvalHTML, state = pending, hash = '#/ses
     const before = f.window.document.querySelector('[data-nac-content]').outerHTML;
     const result = f.probe(approval, state);
     assert.equal(f.window.document.querySelector('[data-nac-content]').outerHTML, before);
-    assert.equal(f.window.document.querySelector('[data-nac-content]').inert ||
-      f.window.document.querySelector('[data-nac-content]').hasAttribute('inert'), true);
+    // The card is non-modal: the conversation stays live behind it.
+    assert.equal(f.window.document.querySelector('[data-nac-content]').hasAttribute('inert'), false);
     return result;
   } finally { f.close(); }
 }
 
-test('active owned approval dialog qualifies while background stays inert', () => {
+test('active owned approval card qualifies while the conversation stays live', () => {
   assert.equal(approvalObservation().ready, true);
 });
 for (const [name, field, value] of [
@@ -219,10 +233,22 @@ test('wrong requested file cannot qualify approval', () => {
 test('retired broker request cannot qualify stale visible controls', () => {
   assert.equal(approvalObservation(approvalHTML, {requests:[]}).ready, false);
 });
-test('wrong modal selection cannot qualify approval', () => {
-  assert.equal(approvalObservation(approvalHTML.replaceAll('(owned-direct)', '(another-session)')).ready, false);
+test('wrong card question, requester or label cannot qualify approval', () => {
+  for (const html of [approvalHTML.replace('Read file?', 'Edit file?'),
+    approvalHTML.replace('by this session', 'by child agent “other”'),
+    approvalHTML.replace('<span>Approval needed</span>', '<span>Question</span>'),
+    approvalHTML.replace('<span>Approval needed</span>', '<span>Approval needed</span><span>Approval needed</span>')]) {
+    assert.equal(approvalObservation(html).ready, false);
+  }
 });
-test('hidden modal or hidden Allow once cannot qualify approval', () => {
+test('modal, duplicate or unnamed cards cannot qualify approval', () => {
+  for (const html of [approvalHTML.replace('aria-modal="false"', 'aria-modal="true"'),
+    approvalHTML.replace(approvalCard, approvalCard + approvalCard),
+    approvalHTML.replace('aria-label="Permission required"', 'aria-label="Question from the agent"')]) {
+    assert.equal(approvalObservation(html).ready, false);
+  }
+});
+test('hidden card or hidden Allow once cannot qualify approval', () => {
   assert.equal(approvalObservation(approvalHTML.replace('role="dialog"', 'role="dialog" style="opacity:0"')).ready, false);
   assert.equal(approvalObservation(approvalHTML.replace('id="allow-once"', 'id="allow-once" style="visibility:hidden"')).ready, false);
 });
@@ -341,7 +367,7 @@ test('more messages than the diagnostic cap still reach the complete original gu
   assert.equal(result.message_identity.visible_index, 32);
 });
 
-test('approval diagnostics separately retain exact ownership and selected-modal predicates', () => {
+test('approval diagnostics separately retain exact ownership and card predicates', () => {
   const result = approvalObservation();
   assert.equal(result.ready, true);
   for (const [key,value] of Object.entries(result.approval_predicates)) {

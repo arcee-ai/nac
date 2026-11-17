@@ -18,8 +18,15 @@ export declare const SESSION_PANEL_LABEL: {
 export declare const WIDE_SESSION_PANELS: ("threads" | "sessions" | "worksets" | "insights" | "delegated" | "files" | "terminal" | "heartbeats")[];
 export declare const DEFAULT_SESSION_PANEL: SessionPanel;
 export declare function isSessionPanel(value: string | undefined): value is SessionPanel;
+/** Full-page settings destinations (`/settings/:section`). */
+export declare const SETTINGS_SECTIONS: readonly ["general", "appearance", "models", "mcp", "capabilities", "ssh", "managed", "shortcuts", "about"];
+export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
+export declare function isSettingsSection(value: string | undefined): value is SettingsSection;
 export declare const routes: {
     list: () => string;
+    /** Home's composer, optionally pointed at a project: the one new-session flow. */
+    newSession: (projectId?: string | null) => string;
+    settings: (section?: SettingsSection) => string;
     session: (sessionId: string, panel?: SessionPanel) => string;
     /** Redirects to the project's newest session, or offers to start one. */
     project: (projectId: string) => string;

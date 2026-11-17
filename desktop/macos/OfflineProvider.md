@@ -52,11 +52,14 @@ accepts only CONNECT to its fresh nonce authority. OLD traffic, same-authority
 reuse and non-CONNECT HTTPS cannot satisfy a new label. Strict external receipts
 require the request class and fresh-authority fact for every one of the16 rows.
 
-The setup journey enters Advanced presets and provider setup and explicitly
-selects Custom / Protocol / OpenAI Responses; production defaults remain intact.
+The setup journey opens the model chip of Home's composer ("Model for this
+session"), enters Advanced presets and provider setup and explicitly selects
+Custom / Protocol / OpenAI Responses; production defaults remain intact.
 
-The positive journey uses the real configuration form, Create chat, streaming
-response and persistent transcript/configuration readback after reload. Every
+The positive journey uses the real configuration form, Start session (which
+saves the setup and sends the first prompt), streaming response, then the saved
+configuration readback and Rust outage controls, and persistent
+transcript/configuration readback after reload. Every
 continuation checks the ready engine, current document/view/launch and store.
 Normal exact-owned stop/reap and private-profile cleanup remain required; unknown
 custody retains evidence rather than authorizing deletion.

@@ -60,7 +60,9 @@ const EXPECTED_OPENAPI_OPERATIONS: &[(&str, &str)] = &[
     ("POST", "/sessions/{session_id}/heartbeats/attention"),
     ("GET", "/sessions/{session_id}/integrations"),
     ("POST", "/sessions/{session_id}/integrations/refresh"),
+    ("GET", "/attention"),
     ("GET", "/attention/events"),
+    ("GET", "/attention/stream"),
 
     ("POST", "/sessions/{session_id}/task-followup-delegations"),
     ("GET", "/sessions/{session_id}/task-followup-delegations/{delegation_id}"),

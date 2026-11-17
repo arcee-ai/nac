@@ -2,6 +2,7 @@ import type { Locator, Page } from "@playwright/test";
 
 import { expect, test } from "./harness";
 import { FAKE_DEVICE_CODE, ProviderDeviceAuthDouble } from "./provider-device-auth-double";
+import { openSettingsSection } from "./settings-focus";
 
 // The e2e program has no DOM library; these name only what the page code reads.
 type DomNode = { parentElement: DomNode | null; scrollTop: number };
@@ -51,17 +52,9 @@ for (const viewport of VIEWPORTS) {
       });
 
     await page.goto(harness.baseUrl);
-    const menu = page.getByRole("button", {
-      name: "Open the menu",
-      exact: true,
-    });
-    const configurations = page.getByRole("button", { name: "Configurations", exact: true });
-    // A phone keeps Configurations inside the menu; wait for either to paint
-    // so the branch never reads the page before it renders.
-    await expect(menu.or(configurations).first()).toBeVisible();
-    if (await menu.isVisible()) await menu.click();
-    await configurations.click();
-    const dialog = page.getByRole("dialog", {
+    // Settings › Models & providers holds the saved-configuration manager.
+    await openSettingsSection(page, "Models & providers");
+    const dialog = page.getByRole("region", {
       name: "Configurations",
       exact: true,
     });

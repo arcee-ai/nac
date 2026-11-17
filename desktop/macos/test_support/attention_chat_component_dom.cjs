@@ -75,6 +75,9 @@ async function productMarkup(expected, { readOnly = false } = {}) {
     stores: {
       promptDraftStore: draftStore,
       composerStore: {
+        useFirstPrompt: () => null,
+        takeFirstPrompt: () => false,
+        cancelFirstPrompt: noop,
         consumePromptRequests: noop,
         consumeDraftRequests: noop,
         shellIntents: new Map(),

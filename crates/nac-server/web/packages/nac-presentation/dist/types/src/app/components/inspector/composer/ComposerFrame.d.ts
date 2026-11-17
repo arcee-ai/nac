@@ -1,19 +1,21 @@
 import type { ComponentProps, FormHTMLAttributes, ReactNode } from "react";
 import { Button } from "../../../atoms";
 /**
- * The ground fades in under a 656px column of controls, so the transcript
- * scrolls out beneath the composer instead of stopping at a card edge. Only
- * the controls take the pointer; the faded margin lets it through.
+ * The ground fades in under a 720px column — the transcript's own measure —
+ * so the conversation runs out beneath the floating composer instead of
+ * stopping at a card edge. Only the controls take the pointer; the faded
+ * margin lets it through.
  */
 export declare function ComposerFrame({ compact, faded, className, children, ...form }: FormHTMLAttributes<HTMLFormElement> & {
     compact: boolean;
     faded?: boolean;
 }): import("react").JSX.Element;
 /**
- * The level-1 card both composers share: the field row over the session
- * controls. A focused field draws a hairline inside the edge, in the border
- * token `outline` names, and the goal editor washes the whole card in accent.
- * Rows that should paint over the wash are `relative`.
+ * The level-1 card both composers share: the field over its one row of
+ * controls, 22px round with a hairline and a soft floating shadow. A focused
+ * field firms the hairline, in the border token `outline` names, and the goal
+ * editor lays a faint ink wash over the card. Rows that should paint over the
+ * wash are `relative`.
  */
 export declare function ComposerCard({ compact, surface, outline, className, children, }: {
     compact: boolean;

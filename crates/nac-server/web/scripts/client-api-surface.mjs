@@ -30,6 +30,8 @@ export const clientApiSurface = {
   "POST /sessions/{session_id}/heartbeats/attention":
     "private:standalone human result acknowledgement",
   "GET /attention/events": "private:native opt-in metadata attention stream",
+  "GET /attention": "private:standalone passive fleet attention snapshot",
+  "GET /attention/stream": "private:standalone passive fleet attention stream",
   "GET /projects/{project_id}/task-schedules": "private:standalone Local interval task inventory",
   "GET /projects/{project_id}/task-schedules/{schedule_id}":
     "private:standalone passive interval task history and retained resources",

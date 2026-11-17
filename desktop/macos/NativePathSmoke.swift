@@ -309,7 +309,9 @@ final class NativePathSmoke {
     };
     document.addEventListener('click', input => {
       const button = input.target instanceof Element ? input.target.closest('button') : null;
-      if (!input.isTrusted || !button || button.disabled || button.textContent.trim() !== 'Reveal in Finder') return;
+      // Focus draws Reveal in Finder as an icon button named by aria-label.
+      const name = button && (button.getAttribute('aria-label') || button.textContent.trim());
+      if (!input.isTrusted || !button || button.disabled || name !== 'Reveal in Finder') return;
       count += 1;
       event = Object.freeze({sequence:count, run, document:documentID, href:location.href});
     }, true);

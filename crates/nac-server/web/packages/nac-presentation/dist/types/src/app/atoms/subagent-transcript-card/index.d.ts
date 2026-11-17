@@ -33,7 +33,8 @@ interface SubagentTranscriptCardProps {
     className?: string;
 }
 /**
- * A child session in its parent's transcript.
+ * A child session in its parent's transcript: a small quiet card with the
+ * status ladder's dot, the child's title, one line of state and a way to it.
  *
  * The card is a `div`, so no interactive element nests in another: a stretched
  * button opens the child in Subagents and the "Go to session" link sits above

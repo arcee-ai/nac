@@ -8,7 +8,8 @@ import {
   Tooltip,
   TooltipPosition,
 } from "@/app/atoms";
-import { useTheme } from "@/app/providers/ThemeProvider";
+import { cn } from "@/app/lib/cn";
+import { THEMES, useTheme, type Theme } from "@/app/providers/ThemeProvider";
 
 const THEME_ICON = {
   light: IconName.Sun,
@@ -16,19 +17,60 @@ const THEME_ICON = {
   system: IconName.Desktop,
 } as const;
 
-export function ThemeToggle({ size = ButtonSize.Small }: { size?: ButtonSize }) {
-  const { theme, toggleTheme } = useTheme();
+const THEME_LABEL: Record<Theme, string> = {
+  system: "System",
+  light: "Light",
+  dark: "Dark",
+};
+
+/** One quiet icon button that cycles System → Light → Dark. */
+export function ThemeToggle({ size = ButtonSize.Medium }: { size?: ButtonSize }) {
+  const { theme = "system", toggleTheme } = useTheme();
   return (
-    <Tooltip title={`Theme: ${theme} (click to cycle)`} position={TooltipPosition.BottomLeft}>
+    <Tooltip title={`Theme: ${THEME_LABEL[theme]}`} position={TooltipPosition.TopLeft}>
       <Button
         variant={ButtonVariant.Ghost}
         size={size}
         content={ButtonContent.Icon}
         onClick={toggleTheme}
-        aria-label={`Theme: ${theme}`}
+        aria-label={`Theme: ${THEME_LABEL[theme]}`}
       >
         <Icon iconName={THEME_ICON[theme] ?? IconName.Desktop} />
       </Button>
     </Tooltip>
+  );
+}
+
+/** System / Light / Dark as a segmented control (Settings › Appearance). */
+export function ThemeSegmented({ className }: { className?: string }) {
+  const { theme = "system", setTheme } = useTheme();
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Theme"
+      className={cn(
+        "inline-flex items-center gap-0.5 rounded-pill bg-[var(--f-wash-2)] p-0.5",
+        className,
+      )}
+    >
+      {THEMES.map((option) => (
+        <button
+          key={option}
+          type="button"
+          role="radio"
+          aria-checked={theme === option}
+          onClick={() => setTheme?.(option)}
+          className={cn(
+            "type-label inline-flex h-7 items-center gap-1.5 rounded-pill px-3 transition-colors duration-150",
+            theme === option
+              ? "bg-elevation-level-1 text-basic-primary shadow-md"
+              : "text-basic-tertiary hover:text-basic-primary",
+          )}
+        >
+          <Icon iconName={THEME_ICON[option]} size={14} />
+          {THEME_LABEL[option]}
+        </button>
+      ))}
+    </div>
   );
 }

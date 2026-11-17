@@ -2,6 +2,7 @@ pub(crate) mod attention;
 pub(crate) mod attention_runtime;
 pub(crate) mod credentials;
 pub(crate) mod delegation;
+pub(crate) mod fleet_attention;
 pub(crate) mod heartbeat_scheduler;
 pub(crate) mod heartbeats;
 pub(crate) mod managed;

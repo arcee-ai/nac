@@ -13,6 +13,10 @@ separate owners.
 - Canonical resource binding must match the operation that eventually executes;
   reject resources that cannot be independently projected or revalidated.
 - Agent execution fails closed when approval is required without an approver.
+  An approver is the session's own interactive stream or a human client
+  attached to the store's serving process (`presence.rs`): an open session
+  stream or Inbox stream. Presence only lets an Ask wait; it never answers,
+  grants or reviews, and losing the last client denies what is pending.
   Authenticated human-initiated product operations never enter that agent
   approval lifecycle: private service-issued intent skips Ask only after hard
   and configured Deny. It creates no grants and does not read/change answer mode.
@@ -45,6 +49,7 @@ separate owners.
 - `human_operations.rs` — hard/configured Deny for authenticated human product
   mutations outside a session (picker folder creation in
   `../project_folders.rs`); Ask is the invocation itself, never a request or grant.
+- `presence.rs` — per-store "a human client is attached" signal for Ask.
 - `broker.rs` — interactive request/reply lifecycle. It stays one module
   (about 900 lines) because pending prompts, answer-mode transitions, captured
   run capabilities, waiter delivery and human grant settlement share admission

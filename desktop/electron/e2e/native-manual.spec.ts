@@ -149,7 +149,6 @@ test("manual native acceptance holds a private relocated LaunchServices candidat
     NAC_ELECTRON_DATA_HOME: path.join(profile, "electron-data"),
     NAC_E2E_API_KEY: "nac-native-manual-dummy-only",
     MODELS_DEV_URL: `${provider.baseUrl}/models-dev`,
-    NAC_ORCHESTRATION: "1",
     BROWSER: "none",
   };
   const require = createRequire(path.join(resources, "app/package.json"));

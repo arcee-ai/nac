@@ -35,7 +35,7 @@ interface InsightItemProps {
  * title and a copy button, then the type's own body. Loading swaps the icon
  * for the spinner and shimmers the title; Error swaps it for the error-tone
  * Close and appends the message and its action. Neither offers copy. Body
- * text defaults to the design's 12px tertiary text; code boxes and links
+ * text defaults to Focus chrome (13px, secondary ink); code boxes and links
  * bring their own.
  * Each item draws its own bottom divider inside its 24px bottom padding, as
  * the design does, so a stack of items needs no gap or separators.

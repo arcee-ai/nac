@@ -79,13 +79,13 @@ function VariantMatrix() {
     <div className="grid w-fit grid-cols-[200px_repeat(4,max-content)] items-center justify-items-start gap-x-6 gap-y-3">
       <span />
       {["Default", "Disabled", "Icon", "Icon, disabled"].map((label) => (
-        <span key={label} className="label-micro text-basic-muted">
+        <span key={label} className="type-meta-strong text-basic-muted">
           {label}
         </span>
       ))}
       {VARIANTS.map(({ label, variant }) => (
         <Fragment key={label}>
-          <span className="label-small text-basic-secondary">{label}</span>
+          <span className="type-body-chrome text-basic-secondary">{label}</span>
           <Sample variant={variant} />
           <Sample variant={variant} disabled />
           <Sample variant={variant} content={ButtonContent.Icon} />
@@ -101,14 +101,14 @@ function SizeMatrix() {
     <div className="grid w-fit grid-cols-[200px_repeat(4,max-content)] items-center justify-items-start gap-x-6 gap-y-3">
       <span />
       {CONTENTS.map(({ label }) => (
-        <span key={label} className="label-micro text-basic-muted">
+        <span key={label} className="type-meta-strong text-basic-muted">
           {label}
         </span>
       ))}
       {SIZE_VARIANTS.flatMap((variant) =>
         SIZES.map((size) => (
           <Fragment key={`${variant.label}-${size.label}`}>
-            <span className="label-small text-basic-secondary">
+            <span className="type-body-chrome text-basic-secondary">
               {variant.label}, {size.label}
             </span>
             {CONTENTS.map(({ label, content }) => (
@@ -126,25 +126,33 @@ export function ButtonsSection() {
   return (
     <BoxSurface title="Buttons">
       <div className="p-4 flex flex-col gap-8 overflow-x-auto [&>*]:shrink-0">
-        <div className="flex flex-wrap items-center gap-3">
-          <Button variant={ButtonVariant.Primary}>Primary</Button>
-          <Button variant={ButtonVariant.Secondary}>Secondary</Button>
-          <Button variant={ButtonVariant.Tertiary}>Tertiary</Button>
-          <Button variant={ButtonVariant.Ghost}>Ghost</Button>
-          <Button variant={ButtonVariant.GhostDestructive}>Destructive</Button>
-          <Button variant={ButtonVariant.Primary} loading>
-            Loading
-          </Button>
-          <Button variant={ButtonVariant.Secondary} disabled>
-            Disabled
-          </Button>
-          <Button variant={ButtonVariant.Secondary} content={ButtonContent.IconLeft}>
-            <Icon iconName={IconName.Add} />
-            With icon
-          </Button>
+        <div className="flex flex-col gap-2">
+          <p className="type-body-chrome text-basic-tertiary">
+            Every control is a pill. Primary is ink; secondary is a surface with a hairline; ghost
+            and tertiary carry no box until hovered. Accent variants are ink washes: there is no
+            brand hue. Small 24, medium 32, large 40.
+          </p>
+          <div className="flex flex-wrap items-center gap-3">
+            <Button variant={ButtonVariant.Primary}>Primary</Button>
+            <Button variant={ButtonVariant.Secondary}>Secondary</Button>
+            <Button variant={ButtonVariant.Ghost}>Ghost</Button>
+            <Button variant={ButtonVariant.Tertiary}>Tertiary</Button>
+            <Button variant={ButtonVariant.SecondaryDestructive}>Delete</Button>
+            <Button variant={ButtonVariant.GhostDestructive}>Remove</Button>
+            <Button variant={ButtonVariant.Primary} loading>
+              Loading
+            </Button>
+            <Button variant={ButtonVariant.Secondary} disabled>
+              Disabled
+            </Button>
+            <Button variant={ButtonVariant.Secondary} content={ButtonContent.IconLeft}>
+              <Icon iconName={IconName.Add} />
+              New session
+            </Button>
+          </div>
         </div>
         <div className="flex flex-col gap-3">
-          <span className="label-medium text-basic-primary">Button</span>
+          <span className="type-subheading text-basic-primary">Variants and states</span>
           <VariantMatrix />
           <SizeMatrix />
         </div>

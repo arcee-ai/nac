@@ -19,6 +19,7 @@ use tokio::{
 use uuid::Uuid;
 
 mod projection;
+pub(in crate::application) use projection::classify;
 use projection::{emit, normalized, publish};
 
 type Result<T> = std::result::Result<T, AttentionSubscribeError>;

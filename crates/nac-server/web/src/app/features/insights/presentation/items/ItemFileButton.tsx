@@ -70,7 +70,7 @@ export function ItemFileButton({ path, context, additions, deletions }: ItemFile
   const target = fileTarget(path, context);
   const label = fileName(path);
   return (
-    <div className="flex w-full flex-col items-start border-l-2 border-muted py-1 pl-4">
+    <div className="flex w-full flex-col items-start">
       {target.kind === "workspace" ? (
         <FileButton
           path={target.path}

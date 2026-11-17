@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, expect, it, vi } from "vitest";
 import { NativeTaskLink } from "./NativeTaskLink";
-import { TranscriptGroupBadge } from "./TranscriptGroupBadge";
+import { WorkFoldView } from "@/app/components/inspector/transcript/WorkFold";
 import { indexToolEvents, presentToolCall } from "@/app/lib/toolPresentation";
 import type { ManagedSessionSummary } from "@/app/types/api";
 
@@ -122,25 +122,30 @@ function mountErrorReceipt({
   render(
     <MemoryRouter initialEntries={["/session/caller/insights"]}>
       <CurrentRoute />
-      <TranscriptGroupBadge
-        group={{
-          id: "launch-group",
-          status: "failed",
-          durationMs: null,
-          segments: [
+      <WorkFoldView
+        fold={{
+          kind: "fold",
+          key: "fold:launch-group",
+          groupIds: ["launch-group"],
+          steps: [
             {
-              kind: "tool",
+              kind: "segment",
               key: "launch",
-              name: "launch_task",
-              action: "other",
-              pending: false,
-              presentation,
+              groupId: "launch-group",
+              segment: {
+                kind: "tool",
+                key: "launch",
+                name: "launch_task",
+                action: "other",
+                pending: false,
+                presentation,
+              },
             },
           ],
         }}
         active={false}
-        trailing={false}
-        selected={false}
+        turnDurationMs={null}
+        selectedGroupId={null}
         interactive={interactive}
       />
     </MemoryRouter>,

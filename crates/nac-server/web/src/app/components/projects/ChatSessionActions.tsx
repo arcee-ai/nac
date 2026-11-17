@@ -13,6 +13,8 @@ interface ChatSessionActionsProps {
   onPin?: () => void;
   onRename?: () => void;
   onDelete?: () => void;
+  /** Files a session that belongs to no project. */
+  onAssign?: () => void;
 }
 
 /** Shared row actions; callers choose whether pinning is server or browser presentation. */
@@ -23,6 +25,7 @@ export function ChatSessionActions({
   onPin,
   onRename,
   onDelete,
+  onAssign,
 }: ChatSessionActionsProps) {
   return (
     <div className={isMobile ? "nac-session-actions flex items-center gap-0" : "contents"}>
@@ -33,6 +36,15 @@ export function ChatSessionActions({
           label={`${pinned ? "Unpin" : "Pin"} ${title}`}
           isMobile={isMobile}
           onClick={onPin}
+        />
+      ) : null}
+      {onAssign ? (
+        <RowActionButton
+          icon={IconName.Folder}
+          title="Assign to project"
+          label={`Assign ${title} to a project`}
+          isMobile={isMobile}
+          onClick={onAssign}
         />
       ) : null}
       {onRename ? (

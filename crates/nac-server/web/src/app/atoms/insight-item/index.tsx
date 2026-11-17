@@ -50,7 +50,7 @@ interface InsightItemProps {
  * title and a copy button, then the type's own body. Loading swaps the icon
  * for the spinner and shimmers the title; Error swaps it for the error-tone
  * Close and appends the message and its action. Neither offers copy. Body
- * text defaults to the design's 12px tertiary text; code boxes and links
+ * text defaults to Focus chrome (13px, secondary ink); code boxes and links
  * bring their own.
  * Each item draws its own bottom divider inside its 24px bottom padding, as
  * the design does, so a stack of items needs no gap or separators.
@@ -78,29 +78,30 @@ const InsightItem: React.FC<InsightItemProps> = ({
       aria-labelledby={titleId}
       aria-current={active || undefined}
       className={cn(
-        "flex flex-col gap-4 border-b border-muted px-4 pt-6 pb-[23px] text-micro text-basic-tertiary",
-        active && "bg-elevation-level-1",
+        "flex flex-col gap-3 border-b border-muted px-5 pt-5 pb-[19px] type-body-chrome text-basic-secondary",
+        "transition-colors duration-150 ease-out",
+        active && "bg-[var(--f-wash-1)]",
       )}
     >
-      <div className="flex w-full items-start gap-2 py-1">
+      <div className="flex w-full items-start gap-2.5">
         {loading ? (
-          <Loader size={LoaderSize.Small} aria-hidden className="shrink-0" />
+          <Loader size={LoaderSize.Small} aria-hidden className="mt-0.5 shrink-0" />
         ) : (
           <Icon
             iconName={failed ? IconName.Close : icon}
-            size={20}
+            size={16}
             aria-hidden
             className={cn(
-              "shrink-0",
-              failed ? "text-fill-error-primary" : "text-fill-basic-primary",
+              "mt-0.5 shrink-0",
+              failed ? "text-fill-error-primary" : "text-fill-basic-tertiary",
             )}
           />
         )}
         <span
           id={titleId}
           className={cn(
-            "flex-1 min-w-0 break-words label-small",
-            loading ? "text-shimmer-basic motion-reduce:animate-none" : "text-basic-primary",
+            "flex-1 min-w-0 break-words type-label",
+            loading ? "focus-shimmer" : "text-basic-primary",
           )}
         >
           {loading ? `${title}…` : title}
@@ -119,7 +120,7 @@ const InsightItem: React.FC<InsightItemProps> = ({
       {children}
       {failed && errorMessage ? (
         <div className="flex flex-col gap-2">
-          <p className="whitespace-pre-wrap break-words text-small text-error-primary">
+          <p className="whitespace-pre-wrap break-words type-body-chrome text-error-primary">
             {errorMessage}
           </p>
           {errorAction}

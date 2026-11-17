@@ -16,6 +16,8 @@ export { default as CodeDisplayer, type CodeDisplayerLine, type CodeDisplayerLin
 export { default as CoverBackground } from "./cover-background";
 export { default as DatePicker, type DateRange } from "./date-picker";
 export { default as DateSelector, type DateString, type DateStringRange } from "./date-selector";
+export { default as Drawer, type DrawerProps } from "./drawer";
+export { default as StatusDot } from "./status-dot";
 export { default as DropdownContent } from "./dropdown-content";
 export { default as EditableHeader, EditableHeaderSize } from "./editable-header";
 export { default as FileButton, FileButtonSize } from "./file-button";

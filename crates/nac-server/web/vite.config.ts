@@ -23,6 +23,8 @@ export const API_PREFIXES = [
   "/product-destinations",
   "/store",
   "/sessions",
+  "/heartbeats",
+  "/attention",
   "/projects",
   "/sandbox",
   "/auth",

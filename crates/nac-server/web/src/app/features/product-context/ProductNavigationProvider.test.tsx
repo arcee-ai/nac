@@ -1,5 +1,5 @@
 /** @vitest-environment jsdom */
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -14,6 +14,7 @@ import type {
 } from "@/app/types/api";
 import { ProductNavigationProvider } from "./ProductNavigationProvider";
 import { useProductNavigationOwner } from "./context";
+import { ProductContextPanel } from "./ProductContextPanel";
 
 const state = vi.hoisted(() => ({ mobile: false, known: true }));
 vi.mock("@/app/hooks/useMediaQuery", () => ({
@@ -33,18 +34,6 @@ vi.mock("@/app/services/queries", () => ({
     return { data: state.known ? { lineage: null } : undefined };
   },
 }));
-vi.mock("@/app/components/modals/ConfigurationsModal", () => ({
-  ConfigurationsModal: ({ open }: { open: boolean }) =>
-    open ? <div role="dialog" aria-label="Configurations" /> : null,
-}));
-vi.mock("@/app/components/modals/MCPServersModal/McpServersModal", () => ({
-  McpServersModal: ({ open }: { open: boolean }) =>
-    open ? <div role="dialog" aria-label="MCP servers" /> : null,
-}));
-vi.mock("@/app/components/modals/SshConfigsModal", () => ({
-  SshConfigsModal: ({ open }: { open: boolean }) =>
-    open ? <div role="dialog" aria-label="SSH configurations" /> : null,
-}));
 vi.mock("@/app/atoms", () => ({
   Button: ({
     children,
@@ -63,13 +52,6 @@ vi.mock("@/app/atoms", () => ({
   ),
   ButtonSize: { Large: "large" },
   ButtonVariant: { Secondary: "secondary" },
-  ModalSize: { Medium: "medium" },
-  Modal: ({ open, children, title }: { open: boolean; children: ReactNode; title: string }) =>
-    open ? (
-      <div role="dialog" aria-label={title}>
-        {children}
-      </div>
-    ) : null,
 }));
 const build = {
   product_version: "1.0.0",
@@ -126,7 +108,11 @@ function Probe() {
   return (
     <>
       <p data-testid="route">{location.pathname}</p>
+      <p data-testid="search">{location.search}</p>
       <button onClick={owner.inspect}>Inspect</button>
+      {location.pathname === "/settings/capabilities" ? (
+        <ProductContextPanel sessionId={new URLSearchParams(location.search).get("session")} />
+      ) : null}
       <button onClick={owner.openMcp}>Sidebar MCP</button>
       <button onClick={() => navigate("/session/other/insights")}>Switch chat</button>
     </>
@@ -187,26 +173,27 @@ function fixture() {
   };
   return { ...view, runtime, fetch, open, refresh };
 }
-it("reads/renders facts without navigation, then opens the same MCP dialog as the sidebar", async () => {
+it("reads facts on Settings › Capabilities for the session it came from, then opens the same MCP section as the sidebar", async () => {
   const { fetch } = fixture();
   fireEvent.click(screen.getByRole("button", { name: "Inspect" }));
+  expect(screen.getByTestId("route").textContent).toBe("/settings/capabilities");
+  expect(screen.getByTestId("search").textContent).toBe("?session=session");
   await screen.findByText("installed-runtime");
-  expect(screen.queryByRole("dialog", { name: "MCP servers" })).toBeNull();
   expect(fetch.mock.calls.every(([, init]) => init?.method === "GET")).toBe(true);
+  // The capabilities page still counts as that session's view for navigation.
   fireEvent.click(screen.getByRole("button", { name: "Open MCP settings" }));
-  await screen.findByRole("dialog", { name: "MCP servers" });
-  expect(screen.queryByRole("dialog", { name: "NAC capabilities" })).toBeNull();
-  expect(screen.getByTestId("route").textContent).toBe("/session/session/insights");
+  await waitFor(() => expect(screen.getByTestId("route").textContent).toBe("/settings/mcp"));
+  expect(screen.queryByText("installed-runtime")).toBeNull();
 });
 it.each([
-  ["mcp-settings", "MCP servers"],
-  ["configurations", "Configurations"],
-  ["model-authentication", "Configurations"],
-  ["ssh-configurations", "SSH configurations"],
-] as const)("opens %s through its existing dialog", async (destination, label) => {
+  ["mcp-settings", "/settings/mcp"],
+  ["configurations", "/settings/models"],
+  ["model-authentication", "/settings/models"],
+  ["ssh-configurations", "/settings/ssh"],
+] as const)("opens %s as its Settings section", async (destination, route) => {
   const { open } = fixture();
   expect((await open(destination)).opened).toBe(true);
-  expect(screen.getByRole("dialog", { name: label })).toBeTruthy();
+  expect(screen.getByTestId("route").textContent).toBe(route);
 });
 it.each([
   ["session-subagents", "delegated"],
@@ -294,6 +281,8 @@ it.each([false, true])(
       if (hidden) await expect(action).rejects.toThrow("view changed");
       else expect((await action).opened).toBe(true);
     });
-    expect(screen.queryByRole("dialog", { name: "MCP servers" }) !== null).toBe(!hidden);
+    expect(screen.getByTestId("route").textContent).toBe(
+      hidden ? "/session/session/insights" : "/settings/mcp",
+    );
   },
 );

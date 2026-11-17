@@ -36,6 +36,20 @@ bundle, and builds the `nac-web` binary. Product use cases live in focused
   remains valid.
 - The production bundle is embedded from committed assets and must match web
   source.
+- Browser fleet attention (`/attention`, `/attention/stream`) is a separate,
+  passive composition over the shared `attention_runtime::classify`. It never
+  installs the single service observer, reserves or relaxes the native
+  `/attention/events` seat/guard, subscribes to a session event bus, or attaches
+  sessions. Keep one classification; report unknown/unsupported facets as-is.
+  A session absent from the process cache reports idle with no broker requests
+  only when its durable census has no live/unreconciled run. An uncached owner
+  can start work after a busy lease retires; keep its broker facets unknown while
+  durable run recovery is present. An open `/attention/stream`, like an
+  open session event stream, holds `InteractivePresence`, so Ask waits for the
+  attached human instead of failing closed; it never answers anything.
+  It covers primary direct sessions and direct traditional children (child
+  decisions attributed only to the child); orchestration topologies stay
+  unsupported.
 
 ## Starting points
 

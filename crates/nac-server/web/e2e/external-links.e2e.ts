@@ -1,6 +1,7 @@
 import type { APIRequestContext, Locator, Page, TestInfo } from "@playwright/test";
 
 import { createDirectSession, createProject, expect, test, type EmbeddedHarness } from "./harness";
+import { openSessionSettings } from "./settings-focus";
 
 test.use({ orchestration: "0" });
 
@@ -93,7 +94,7 @@ for (const viewport of [
   { width: 1440, height: 900 },
   { width: 390, height: 844 },
 ]) {
-  test(`header component browser navigation and existing mobile menu at ${viewport.width}`, async ({
+  test(`settings about owned links open as browser navigation at ${viewport.width}`, async ({
     harness,
     page,
     context,
@@ -114,72 +115,50 @@ for (const viewport of [
         json: { ...(await response.json()), store_path: "/fixture/store.db" },
       });
     });
-    const projectId = await createProject(request, harness, { name: "External links fixture" });
-    // HeaderMenu is mounted while this real project route awaits ownership.
-    // This is transient/loading component evidence, not a session-header journey.
-    const sessionList = (url: URL) =>
-      url.origin === new URL(harness.baseUrl).origin && url.pathname === "/sessions" && !url.search;
-    let releaseSessionList = () => {};
-    const sessionListGate = new Promise<void>((resolve) => {
-      releaseSessionList = resolve;
-    });
-    const deferredResponses: Promise<void>[] = [];
-    await page.route(sessionList, (route) => {
-      if (route.request().method() !== "GET") return route.fallback();
-      const response = (async () => {
-        const response = await route.fetch();
-        await sessionListGate;
-        await route.fulfill({ response });
-      })();
-      deferredResponses.push(response);
-      return response;
-    });
-    try {
-      await page.goto(`${harness.baseUrl}/#/project/${projectId}`);
-      const menu = page.getByRole("button", { name: "Open the menu", exact: true });
-      await menu.click();
-      const docs = page.getByRole("link", { name: "See docs", exact: true });
-      const repository = page.getByRole("link", { name: "See Github", exact: true });
-      if (viewport.width < 768) {
-        await expect(docs).toHaveCount(0);
-        await expect(repository).toHaveCount(0);
-      } else {
-        await expect(docs).toBeVisible();
-        await expect(repository).toBeVisible();
-      }
-      expect(deferredResponses.length).toBeGreaterThan(0);
-      await capture(
-        page,
-        info,
-        `header-component-${viewport.width}.png`,
-        viewport.width < 768
-          ? page.getByRole("navigation", { name: "Menu", exact: true })
-          : docs.locator(".."),
-        browserEvents,
-      );
-      if (viewport.width < 768) {
-        await page.getByRole("button", { name: "Configurations", exact: true }).click();
-        await expect(
-          page.getByRole("dialog", { name: "Configurations", exact: true }),
-        ).toBeVisible();
-        await expect(page).toHaveURL(new RegExp(`/#/project/${projectId}$`));
-        await attachLinkBrowserEvents(info, browserEvents);
-        return;
-      }
-      await followWithKeyboard(page, docs, "https://github.com/arcee-ai/nac#readme");
-      await expect(menu).toBeVisible();
-      await menu.click();
-      await followWithKeyboard(page, repository, "https://github.com/arcee-ai/nac");
-      await menu.click();
-      await page.getByRole("button", { name: "Configurations", exact: true }).click();
-      await expect(page.getByRole("dialog", { name: "Configurations", exact: true })).toBeVisible();
-      await expect(page).toHaveURL(new RegExp(`/#/project/${projectId}$`));
-      await attachLinkBrowserEvents(info, browserEvents);
-    } finally {
-      releaseSessionList();
-      await page.unroute(sessionList);
-      await Promise.all(deferredResponses);
+    await createProject(request, harness, { name: "External links fixture" });
+    // Docs, GitHub and the store path moved from the old header menu to Settings › About.
+    await page.goto(`${harness.baseUrl}/#/`);
+    const home = page.url();
+    if (viewport.width < 768) {
+      await page.getByRole("button", { name: "Open the menu", exact: true }).click();
+      await page
+        .getByRole("dialog", { name: "Menu", exact: true })
+        .getByRole("button", { name: "Settings", exact: true })
+        .click();
+      // On a phone the menu opens Settings on its section list (push navigation).
+      await expect(page).toHaveURL(`${harness.baseUrl}/#/settings`);
+    } else {
+      await page.getByRole("button", { name: "Settings", exact: true }).click();
     }
+    await page
+      .getByRole("navigation", { name: "Settings sections", exact: true })
+      .getByRole("link", { name: /^About/ })
+      .click();
+    const about = page.getByRole("main", { name: "About", exact: true });
+    await expect(about).toBeVisible();
+    await expect(page).toHaveURL(`${harness.baseUrl}/#/settings/about`);
+    await expect(about.getByText("/fixture/store.db", { exact: true })).toBeVisible();
+    const docs = about.getByRole("link", { name: /^Documentation/ });
+    const repository = about.getByRole("link", { name: /^GitHub/ });
+    await expect(docs).toBeVisible();
+    await expect(repository).toBeVisible();
+    await capture(
+      page,
+      info,
+      `settings-about-${viewport.width}.png`,
+      docs.locator(".."),
+      browserEvents,
+    );
+    await followWithKeyboard(page, docs, "https://github.com/arcee-ai/nac#readme");
+    await expect(about).toBeVisible();
+    await followWithKeyboard(page, repository, "https://github.com/arcee-ai/nac");
+    // Following an owned link never navigates the app itself.
+    await expect(page).toHaveURL(`${harness.baseUrl}/#/settings/about`);
+    if (viewport.width < 768)
+      await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page.getByRole("button", { name: "Back", exact: true }).click();
+    await expect(page).toHaveURL(home);
+    await attachLinkBrowserEvents(info, browserEvents);
   });
 
   test(`provider browser auto-open and explicit retry share one attempt at ${viewport.width}`, async ({
@@ -236,8 +215,7 @@ for (const viewport of [
     });
     const id = await linkSession(request, harness);
     await page.goto(`${harness.baseUrl}/#/session/${id}/insights`);
-    await page.getByRole("button", { name: "Session settings", exact: true }).click();
-    const settings = page.getByRole("dialog", { name: "Session settings", exact: true });
+    const settings = await openSessionSettings(page);
     await settings.getByRole("button", { name: "Provider connections", exact: true }).click();
     const accounts = settings.getByRole("region", { name: "Provider connections" });
     // This is browser fallback, using controlled HTTP UI responses. Native

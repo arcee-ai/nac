@@ -1,4 +1,5 @@
 import json
+import plistlib
 from contextlib import ExitStack
 import hashlib
 import io
@@ -10,6 +11,53 @@ from unittest.mock import Mock, patch
 
 import smoke
 from smoke import cleanup_failed_case
+
+
+class ConsoleLockTests(unittest.TestCase):
+    def observe(self, record):
+        with patch('smoke.subprocess.check_output', return_value=plistlib.dumps(record)):
+            return smoke.session_lock_state()
+
+    def test_hosted_root_lock_fact_survives_omitted_optional_cgs_flags(self):
+        record = [dict(IOConsoleLocked=False, IOConsoleUsers=[dict(kCGSessionLoginDoneKey=True)])]
+        self.assertEqual(self.observe(record), dict(observed=True, locked=False))
+
+    def test_any_explicit_lock_overrides_conflicting_unlocked_facts(self):
+        for root, cgs in [(False, True), (True, False), (True, True)]:
+            with self.subTest(root=root, cgs=cgs):
+                record = [dict(IOConsoleLocked=root, IOConsoleUsers=[dict(CGSSessionScreenIsLocked=cgs)])]
+                self.assertEqual(self.observe(record), dict(observed=True, locked=True))
+
+    def test_existing_positive_cgs_observation_remains_supported(self):
+        self.assertEqual(self.observe(dict(IOConsoleUsers=[dict(CGSSessionScreenIsLocked=False)])),
+                         dict(observed=True, locked=False))
+
+    def test_child_only_root_named_fact_cannot_qualify_the_console(self):
+        record = [dict(IORegistryEntryChildren=[dict(IOConsoleLocked=False)])]
+        self.assertEqual(self.observe(record), dict(observed=False, locked=None))
+
+    def test_nested_explicit_cgs_lock_overrides_the_actual_root(self):
+        record = [dict(IOConsoleLocked=False, IORegistryEntryChildren=[
+            dict(IOConsoleUsers=[dict(CGSSessionScreenIsLocked=True)])])]
+        self.assertEqual(self.observe(record), dict(observed=True, locked=True))
+
+    def test_absent_or_malformed_facts_remain_unknown(self):
+        for record in [[], {}, [dict(IOConsoleUsers=[{}])], [dict(IOConsoleLocked=0)],
+                       [dict(IOConsoleLocked='false')], [dict(IOConsoleLocked=False, IOConsoleUsers={})],
+                       [dict(IOConsoleLocked=False, IOConsoleUsers=[dict(CGSSessionScreenIsLocked=0)])],
+                       [dict(IOConsoleLocked=False, IOConsoleUsers=['invalid'])],
+                       [dict(IOConsoleLocked=False, IORegistryEntryChildren={})]]:
+            with self.subTest(record=record):
+                self.assertEqual(self.observe(record), dict(observed=False, locked=None))
+
+    def test_explicit_lock_remains_locked_even_beside_malformed_facts(self):
+        record = [dict(IOConsoleLocked=True, IOConsoleUsers=[dict(CGSSessionScreenIsLocked='false')])]
+        self.assertEqual(self.observe(record), dict(observed=True, locked=True))
+
+    def test_unavailable_or_invalid_observations_remain_unknown(self):
+        for options in [dict(side_effect=OSError('unavailable')), dict(return_value=b'invalid plist')]:
+            with self.subTest(options=options), patch('smoke.subprocess.check_output', **options):
+                self.assertEqual(smoke.session_lock_state(), dict(observed=False, locked=None))
 
 
 class CleanupTests(unittest.TestCase):

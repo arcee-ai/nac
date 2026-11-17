@@ -18,7 +18,7 @@ interface ActionListButtonProps {
      */
     icon: IconName;
     label: string;
-    /** Rendered uppercase, in every status; the caller leaves it out where a row has none. */
+    /** Quiet trailing meta (a duration, a count), in every status; left out where a row has none. */
     meta?: string;
     status?: ActionListButtonStatus;
     size?: ActionListButtonSize;

@@ -13,7 +13,15 @@ import * as sessionLayoutStore from "../store/sessionLayoutStore";
 import * as sessionNavigationStore from "../store/sessionNavigationStore";
 import * as sidebarLayoutStore from "../store/sidebarLayoutStore";
 import * as sshConnectionStore from "../store/sshConnectionStore";
+import { createInboxReadStore } from "../features/inbox/readStore";
+import { createHomeDraftStore } from "../features/home/homeDraftStore";
+import { createCommandSurfaceStore } from "../features/command-palette/commandSurfaceStore";
+import { createTranscriptDensityStore } from "../store/transcriptDensityStore";
 export interface PresentationStores {
+    inboxReadStore: ReturnType<typeof createInboxReadStore>;
+    homeDraftStore: ReturnType<typeof createHomeDraftStore>;
+    commandSurfaceStore: ReturnType<typeof createCommandSurfaceStore>;
+    transcriptDensityStore: ReturnType<typeof createTranscriptDensityStore>;
     panelWidth: ReturnType<typeof panelWidth.createPanelWidth>;
     threadLogHeight: ReturnType<typeof threadLogHeight.createThreadLogHeight>;
     lastLight: ReturnType<typeof lastLight.createLastLight>;
@@ -30,6 +38,43 @@ export interface PresentationStores {
 }
 export declare function createPresentationStores(storage?: Pick<Storage, "getItem" | "setItem">, scope?: NativeRuntimeScope, draftStorage?: PromptDraftStorage, draftPersistenceBinding?: PromptDraftPersistenceBinding): PresentationStores;
 export declare const standalonePresentationStores: {
+    inboxReadStore: {
+        firstSeen: Map<string, number>;
+        release(): void;
+        useReadState: () => import("../features/inbox/inboxModel").InboxReadState;
+        getState: () => import("../features/inbox/inboxModel").InboxReadState;
+        markRead(sessionId: string, runId: string): void;
+        markAllRead(marks: ReadonlyArray<{
+            sessionId: string;
+            runId: string;
+        }>): void;
+    };
+    homeDraftStore: {
+        get: () => {
+            text: string;
+            revision: number;
+        };
+        usePrompt: () => string;
+        update(text: string): void;
+        acknowledge(revision: number): void;
+        release(): void;
+    };
+    commandSurfaceStore: {
+        openCommandPalette: () => void;
+        openShortcutSheet: () => void;
+        closeCommandSurfaces: () => void;
+        useCommandSurface: () => import("../features/command-palette/commandSurfaceStore").CommandSurface;
+        useSidebarToggleAvailable: () => boolean;
+        registerSidebarToggle(handler: () => void): () => void;
+        requestSidebarToggle(): boolean;
+        release(): void;
+    };
+    transcriptDensityStore: {
+        useTranscriptDensity: () => import("../store/transcriptDensityStore").TranscriptDensity;
+        setTranscriptDensity: (density: import("../store/transcriptDensityStore").TranscriptDensity) => void;
+        toggleTranscriptDensity: () => void;
+        release(): void;
+    };
     promptDraftStore: typeof promptDraftStore;
     panelWidth: typeof panelWidth;
     threadLogHeight: typeof threadLogHeight;

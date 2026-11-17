@@ -1,253 +1,195 @@
 import SessionNameDisclosure, {
   useSessionNameDisclosure,
 } from "@/app/atoms/session-name-disclosure";
-import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
-import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import {
-  Button,
-  ButtonContent,
-  ButtonSize,
-  ButtonVariant,
-  CodeChangesBadge,
-  Icon,
-  IconName,
-  PopoverPlacement,
-  Tooltip,
-  TooltipPosition,
-} from "@/app/atoms";
-import { BranchPicker } from "@/app/components/inspector/BranchPicker";
-import { RevisionPicker } from "@/app/components/inspector/RevisionPicker";
-import { SessionUsage } from "@/app/components/inspector/SessionUsage";
-import { SessionIntegrations } from "@/app/features/session-integrations/SessionIntegrations";
-import { useSessionTitle } from "@/app/hooks/useSessionTitle";
-import { contextShare, resolveCatalogModel } from "@/app/lib/catalog";
-import { routes } from "@/app/lib/routes";
+import { Icon, IconName, StatusDot } from "@/app/atoms";
+import { SessionMenu } from "@/app/features/session-chrome/SessionMenu";
+import { useSessionDrawer } from "@/app/features/session-chrome/useSessionDrawer";
+import { useSessionFacts, type SessionFacts } from "@/app/features/session-chrome/useSessionFacts";
+import { SidebarToggle, useSidebar } from "@/app/features/sidebar/useSidebar";
+import { useTerminalLinkMode } from "@/app/features/terminal/terminalLinkMode";
+import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
-import {
-  formatCostMicros,
-  formatTokensCompact,
-  runMetrics,
-  sessionEnvLabel,
-  tokenUsage,
-} from "@/app/lib/format";
-import {
-  useModelCatalog,
-  useVisibleSessions,
-  useWorkspaceRevisionChanges,
-} from "@/app/services/queries";
+import { DEFAULT_SESSION_PANEL, routes, type SessionPanel } from "@/app/lib/routes";
 
-import type {
-  ManagedSessionSummary,
-  SessionBehavior,
-  SessionSnapshotResponse,
-} from "@/app/types/api";
-
-const BEHAVIOR_BADGE: Record<SessionBehavior, string> = {
-  direct: "Agent",
-  "direct-with-orchestrator": "Agent + NAC",
-  orchestrator: "Orchestrator",
-};
+import type { ManagedSessionSummary, SessionSnapshotResponse } from "@/app/types/api";
 
 /**
- * The single-session bar above the transcript: the title with its behavior or
- * parent, the usage readings behind one button, then the checkout the chat is
- * working in.
+ * Whether the transcript below has scrolled away from its top, so the header
+ * can draw its hairline only once something passes under it. Scroll events do
+ * not bubble, so the chat column is watched in its capture phase.
+ */
+function useScrolledBelow(header: HTMLElement | null): boolean {
+  const [scrolled, setScrolled] = useState(false);
+  useEffect(() => {
+    const column = header?.parentElement;
+    if (!header || !column) return undefined;
+    const onScroll = (event: Event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement) || header.contains(target)) return;
+      if (header.nextElementSibling?.contains(target) !== true) return;
+      setScrolled(target.scrollTop > 0);
+    };
+    column.addEventListener("scroll", onScroll, { capture: true, passive: true });
+    return () => column.removeEventListener("scroll", onScroll, { capture: true });
+  }, [header]);
+  return scrolled;
+}
+
+/** "← Parent title": the way back up from a delegated transcript. */
+function ParentCrumb({ facts, phone }: { facts: SessionFacts; phone: boolean }) {
+  const navigate = useNavigate();
+  const parent = facts.parent;
+  const disclosure = useSessionNameDisclosure(parent?.title ?? "");
+  if (!parent) return null;
+  const open = () => navigate(routes.session(parent.id, "delegated"));
+  return (
+    <span className="flex min-w-0 shrink items-center">
+      {disclosure.hint(
+        <button
+          type="button"
+          aria-label={`${parent.title}, parent chat`}
+          onClick={open}
+          className={cn(
+            "flex min-w-0 items-center gap-1 rounded-pill text-basic-tertiary outline-none",
+            "transition-colors duration-150 ease-out hover:text-basic-primary focus-visible:ring-2 focus-visible:ring-[var(--f-focus)]",
+            phone
+              ? "size-11 shrink-0 justify-center hover:bg-[var(--f-wash-2)]"
+              : "type-meta h-6 max-w-[180px] px-1.5 hover:bg-[var(--f-wash-2)]",
+          )}
+        >
+          <Icon iconName={IconName.ArrowLeft} size={phone ? 20 : 14} className="shrink-0" />
+          {phone ? null : <span className="truncate">{parent.title}</span>}
+        </button>,
+      )}
+      {phone ? null : <span className="opacity-60">{disclosure.action}</span>}
+      {disclosure.overlay}
+    </span>
+  );
+}
+
+function TitleBlock({
+  sessionId,
+  facts,
+  compact,
+}: {
+  sessionId: string;
+  facts: SessionFacts;
+  compact: boolean;
+}) {
+  const managed = facts.lineage?.kind === "managed-orchestrator";
+  const meta = managed ? ["Managed orchestrator", ...facts.meta] : facts.meta;
+  return (
+    <div className="flex min-w-0 flex-1 flex-col justify-center">
+      <div className="flex min-w-0 items-center gap-2">
+        <StatusDot status={facts.status} size="md" />
+        <SessionNameDisclosure
+          key={sessionId}
+          name={facts.title}
+          running={facts.running}
+          quietIcon
+          className={cn("min-w-0 text-basic-primary", compact ? "type-strong" : "type-subheading")}
+        />
+      </div>
+      {meta.length > 0 ? (
+        <p className="type-meta truncate pl-4 text-basic-tertiary" title={meta.join(" · ")}>
+          {meta.join(" · ")}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * The session header: 52px, quiet, one row. The title with its status dot and
+ * one muted line of where it runs; then one control, the Session menu, for
+ * every panel, detail and action (a dot on it when something is live). On a
+ * phone it is the screen's own top bar: back, title, and that same control.
  */
 export function TopSingleSessionHeader({
   sessionId,
   snapshot,
   entry,
-  onShowPanel,
+  panel = DEFAULT_SESSION_PANEL,
 }: {
   sessionId: string;
   snapshot: SessionSnapshotResponse | null;
   entry: ManagedSessionSummary | null;
-  /** Restores the side panel while it is slid away. */
-  onShowPanel?: () => void;
+  /** The panel the route has open, after the behavior policy corrected it. */
+  panel?: SessionPanel;
 }) {
-  const {
-    useSessionSpend,
-    useRunning,
-    useRunUsage,
-    useRunStartedAt,
-    useLastElapsedMs,
-    useCancelArmed,
-    liftSessionSpend,
-  } = useNativeRuntime().stores.runtimeStore;
-
-  const { useSelectedRevision, selectRevision } = useNativeRuntime().stores.sessionLayoutStore;
-
+  const facts = useSessionFacts(sessionId, snapshot, entry);
+  const drawer = useSessionDrawer(sessionId, panel);
+  const phone = useIsMobile();
   const navigate = useNavigate();
-  const sessionTitle = useSessionTitle();
-  const { data: sessions = [] } = useVisibleSessions();
-  const running = useRunning(sessionId);
-  const stopping = useCancelArmed(sessionId);
-  const runUsage = useRunUsage();
-  const sessionSpend = useSessionSpend();
-  useEffect(() => {
-    liftSessionSpend(tokenUsage(snapshot));
-  }, [liftSessionSpend, snapshot]);
-  const metrics = runMetrics(snapshot, entry, running || stopping ? runUsage : null, sessionSpend);
-  const catalog = useModelCatalog();
-  const persistedUsage = tokenUsage(snapshot);
-  const contextTokens = metrics.usage?.total_tokens || persistedUsage?.total_tokens || null;
-  const runStartedAt = useRunStartedAt();
-  const lastElapsedMs = useLastElapsedMs();
+  const sidebar = useSidebar();
+  const native = useTerminalLinkMode() === "native-visible-anchor";
+  const [header, setHeader] = useState<HTMLElement | null>(null);
+  const scrolled = useScrolledBelow(header);
+  const menu = (
+    <SessionMenu
+      sessionId={sessionId}
+      snapshot={snapshot}
+      entry={entry}
+      facts={facts}
+      drawer={drawer}
+    />
+  );
 
-  const selectedRevision = useSelectedRevision();
-  const changes = useWorkspaceRevisionChanges(sessionId, selectedRevision);
-  const workspace = snapshot?.workspace ?? null;
-  const totals =
-    selectedRevision == null
-      ? workspace
-      : (changes.data ?? { total_additions: 0, total_deletions: 0 });
-  const additions = totals?.total_additions ?? 0;
-  const deletions = totals?.total_deletions ?? 0;
-  const repo = workspace?.repo_label ?? workspace?.workspace_display ?? null;
-  const branch = workspace?.branch ?? null;
-  const lineage = entry?.lineage ?? snapshot?.lineage ?? null;
-  const readOnly = lineage != null;
-  const parent = lineage
-    ? sessions.find((item) => item.summary.session_id === lineage.parent_session_id)
-    : undefined;
-  const parentTitle = parent ? sessionTitle(parent.summary) : "Parent session";
-  const parentDisclosure = useSessionNameDisclosure(parentTitle);
-  const openParent = () => {
-    if (lineage) navigate(routes.session(lineage.parent_session_id, "delegated"));
-  };
-  const policy = useUiPolicy();
-  const behavior = entry?.summary.behavior ?? snapshot?.metadata.behavior ?? null;
-  // The parent link before the title already marks a child, so only a managed
-  // orchestrator spells out what kind of child it is.
-  const badge = lineage
-    ? lineage.kind === "managed-orchestrator"
-      ? "Managed NAC orchestrator"
-      : null
-    : behavior && policy.orchestrationEnabled
-      ? BEHAVIOR_BADGE[behavior]
-      : null;
-  const title = sessionTitle(entry?.summary);
+  if (phone) {
+    return (
+      <header
+        ref={setHeader}
+        className={cn(
+          "relative z-20 flex min-h-14 shrink-0 items-center gap-1 bg-elevation-ground px-1 pt-[env(safe-area-inset-top)]",
+          "border-b transition-[border-color] duration-150 ease-out motion-reduce:transition-none",
+          scrolled ? "border-muted" : "border-transparent",
+        )}
+      >
+        {facts.parent ? (
+          <ParentCrumb facts={facts} phone />
+        ) : (
+          <button
+            type="button"
+            aria-label="Home"
+            onClick={() => navigate(routes.list())}
+            className="flex size-11 shrink-0 items-center justify-center rounded-pill text-basic-secondary outline-none hover:bg-[var(--f-wash-2)] focus-visible:ring-2 focus-visible:ring-[var(--f-focus)]"
+          >
+            <Icon iconName={IconName.ArrowLeft} size={20} />
+          </button>
+        )}
+        <TitleBlock sessionId={sessionId} facts={facts} compact />
+        {menu}
+      </header>
+    );
+  }
 
+  // In the native shell the window's traffic lights sit over the top-left
+  // corner whenever the sidebar is hidden, so the leading control moves past them.
+  const trafficLights = native && sidebar.mode !== "none" && !sidebar.open;
   return (
-    <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex flex-col border-b border-muted bg-elevation-ground px-4 pt-4 pb-4">
-      <div className="pointer-events-auto flex w-full flex-col gap-1.5">
-        <div className="flex w-full items-center gap-4">
-          <div className="flex min-w-0 flex-1 items-center gap-1">
-            {lineage ? (
-              <>
-                {parentDisclosure.hint(
-                  <Button
-                    variant={ButtonVariant.Tertiary}
-                    size={ButtonSize.Medium}
-                    className="min-w-0 max-w-[120px]"
-                    aria-label={`${parentTitle}, parent chat`}
-                    onClick={openParent}
-                  >
-                    <span className="truncate underline">{parentTitle}</span>
-                  </Button>,
-                )}
-                {parentDisclosure.action}
-                {parentDisclosure.overlay}
-                <Icon iconName={IconName.Right} size={16} className="shrink-0 text-btn-secondary" />
-              </>
-            ) : null}
-            <div className="flex min-w-0 items-center gap-2">
-              <SessionNameDisclosure
-                key={sessionId}
-                name={title}
-                running={running}
-                className={cn("header-sm min-w-0 truncate text-left", "text-basic-primary")}
-              />
-              {/* Beside the side panel the chat can drop to 200px, too narrow
-                  for the title and a whole badge, so the badge truncates
-                  rather than run under Usage. */}
-              {badge ? (
-                <span
-                  className="tag-label min-w-0 truncate rounded-full border border-tertiary px-2 py-[3px] text-basic-tertiary"
-                  title={badge}
-                >
-                  {badge}
-                </span>
-              ) : null}
-            </div>
-          </div>
-          <SessionUsage
-            context={formatTokensCompact(contextTokens)}
-            contextShare={contextShare(
-              contextTokens,
-              resolveCatalogModel(catalog.data, snapshot?.metadata?.backend, metrics.model),
-            )}
-            input={formatTokensCompact(metrics.usage?.input_tokens)}
-            output={formatTokensCompact(metrics.usage?.output_tokens)}
-            cacheRead={
-              metrics.usage?.cache_read_tokens
-                ? formatTokensCompact(metrics.usage.cache_read_tokens)
-                : null
-            }
-            cost={formatCostMicros(metrics.usage?.cost?.total)}
-            running={running}
-            startedAt={runStartedAt}
-            lastElapsedMs={lastElapsedMs ?? metrics.lastResponseMs}
-          />
-          {onShowPanel ? (
-            <Tooltip title="Show panel" position={TooltipPosition.BottomLeft}>
-              <Button
-                size={ButtonSize.Medium}
-                variant={ButtonVariant.Ghost}
-                content={ButtonContent.Icon}
-                aria-label="Show panel"
-                onClick={onShowPanel}
-              >
-                <Icon iconName={IconName.ShowSidePanel} />
-              </Button>
-            </Tooltip>
-          ) : null}
-        </div>
-        {/* Clipped sideways only: the buttons are as tall as the row, and
-            their focus rings reach past it. The pickers are their names
-            alone, but next to the side panel the chat can drop to 200px, so
-            under 24rem they keep only their icons rather than clip. `.icon`
-            sets its display outside the utility layer. */}
-        <div className="@container flex w-full min-w-0 items-center gap-4 overflow-x-clip">
-          {repo ? (
-            <div className="flex shrink-0 items-center gap-0.5 @max-sm:hidden">
-              <span className="label-micro max-w-[120px] truncate text-basic-tertiary">{repo}</span>
-              <span className="tag-label text-basic-muted">{sessionEnvLabel(entry?.summary)}</span>
-            </div>
-          ) : null}
-          {branch && !readOnly ? (
-            <BranchPicker
-              sessionId={sessionId}
-              branch={branch}
-              placement={PopoverPlacement.BottomRight}
-              tertiary
-              labelClassName="@max-sm:hidden"
-              iconClassName="@sm:!hidden"
-            />
-          ) : null}
-          {branch && readOnly ? (
-            <span className="label-micro flex min-w-0 items-center gap-1.5 text-btn-secondary">
-              <Icon iconName={IconName.Scheme} size={16} className="shrink-0 @sm:!hidden" />
-              <span className="truncate @max-sm:sr-only">{branch}</span>
-            </span>
-          ) : null}
-          <RevisionPicker
-            sessionId={sessionId}
-            selected={selectedRevision}
-            onSelect={selectRevision}
-            placement={PopoverPlacement.BottomRight}
-            labelClassName="@max-sm:hidden"
-            iconClassName="@sm:!hidden"
-          />
-          {additions || deletions ? (
-            <CodeChangesBadge additions={additions} deletions={deletions} />
-          ) : null}
-          {!readOnly ? <SessionIntegrations key={sessionId} sessionId={sessionId} /> : null}
-        </div>
+    <header
+      ref={setHeader}
+      className={cn(
+        "relative z-20 flex h-[52px] shrink-0 items-center gap-3 bg-elevation-ground pr-3",
+        trafficLights ? "pl-[80px]" : "pl-3",
+        "border-b transition-[border-color] duration-150 ease-out motion-reduce:transition-none",
+        scrolled ? "border-muted" : "border-transparent",
+      )}
+    >
+      <SidebarToggle />
+      <div className="flex min-w-0 flex-1 items-center gap-1">
+        <ParentCrumb facts={facts} phone={false} />
+        {facts.parent ? (
+          <span aria-hidden className="type-meta pr-1 text-basic-muted">
+            /
+          </span>
+        ) : null}
+        <TitleBlock sessionId={sessionId} facts={facts} compact={false} />
       </div>
-    </div>
+      {menu}
+    </header>
   );
 }

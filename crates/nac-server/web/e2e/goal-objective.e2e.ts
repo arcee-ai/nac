@@ -1,6 +1,7 @@
 import type { APIRequestContext, Page } from "@playwright/test";
 
 import { createDirectSession, expect, test, waitForRunIdle, type EmbeddedHarness } from "./harness";
+import { openGoalFromComposerMenu } from "./focus-embedded-helpers";
 import { ScriptGate } from "./scripted-provider";
 
 const CONTINUATION = "Continue autonomously pursuing this durable goal";
@@ -56,7 +57,7 @@ test("shows the actual goal objective from the composer through continuation and
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto(`${harness.baseUrl}/#/session/${sessionId}/delegated`);
 
-  await page.getByRole("button", { name: "Set durable goal" }).click();
+  await openGoalFromComposerMenu(page, "Set durable goal");
   const budgetSwitch = page.getByRole("switch", { name: "Token budget" });
   await expect(budgetSwitch).toHaveAttribute("aria-checked", "false");
   await expect(page.getByText("No token limit")).toBeVisible();
@@ -138,7 +139,7 @@ test("shows a /goal objective and keeps a custom budget above the slider", async
     .poll(async () => (await storedGoal(request, harness, sessionId))?.status)
     .toBe("paused");
 
-  await page.getByRole("button", { name: "Edit goal: Paused" }).click();
+  await openGoalFromComposerMenu(page, "Edit goal: Paused");
   await page.getByRole("switch", { name: "Token budget" }).click();
   await expect(page.getByText(/total billable tokens all of this goal's runs/)).toBeVisible();
   await page.getByRole("textbox", { name: "Token budget amount" }).fill("2500000");
@@ -158,7 +159,7 @@ test("shows a /goal objective and keeps a custom budget above the slider", async
 
   // Reload, then edit only the objective: the stored budget survives untouched.
   await page.reload();
-  await page.getByRole("button", { name: "Edit goal: Paused" }).click();
+  await openGoalFromComposerMenu(page, "Edit goal: Paused");
   await expect(page.getByRole("textbox", { name: "Token budget amount" })).toHaveValue("2500000");
   await page
     .getByRole("textbox", { name: "Goal objective" })

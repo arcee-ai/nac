@@ -10,13 +10,20 @@ interface SessionSideBoxProps {
     behavior?: SessionBehavior | null;
     panel: SessionPanel;
     onPanelChange: (panel: SessionPanel) => void;
+    /** The drawer's way out. Omitted, the header has no Close (a bare test mount). */
+    onClose?: () => void;
+    /** Whether the drawer is docked beside the chat rather than floating. */
+    pinned?: boolean;
+    /** Dock or float the drawer (⌘\); omitted where docking has no room. */
+    onTogglePinned?: () => void;
 }
 /**
- * The right column of the session screen: one box with the Insights / Files /
- * Worksets / Subagents panels, sized by the shared layout store. Session
- * switching lives in the left sidebar. On a phone the panels are the body of
- * the modal box that SessionPage puts them in, each screen heading itself with
- * the way out and the tab bar the dialog lends it.
+ * The panels a session's drawer holds: Insights, Files (Changes), Subagents,
+ * Terminal, Schedules, Worksets, History — whichever the session's behavior
+ * has. On a wide screen it heads itself with a 52px bar: a quiet segmented
+ * row to move between the panels, then dock, full width and close. On a
+ * phone the drawer is a bottom sheet and each screen heads itself with the
+ * way out the sheet lends it.
  */
-export declare function SessionSideBox({ sessionId, snapshot, behavior: behaviorProp, panel, onPanelChange, }: SessionSideBoxProps): import("react").JSX.Element;
+export declare function SessionSideBox({ sessionId, snapshot, behavior: behaviorProp, panel, onPanelChange, onClose, pinned, onTogglePinned, }: SessionSideBoxProps): import("react").JSX.Element;
 export {};

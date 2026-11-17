@@ -113,3 +113,41 @@ describe("phone modal panel", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 });
+
+describe("phone modal background", () => {
+  function Sheet({ inertOnPhone }: { inertOnPhone?: boolean }) {
+    const [open, setOpen] = useState(false);
+    return (
+      <>
+        <Button onClick={() => setOpen(true)}>Open menu</Button>
+        <Modal open={open} onClose={() => setOpen(false)} title="Menu" inertOnPhone={inertOnPhone}>
+          Menu body
+        </Modal>
+      </>
+    );
+  }
+  const show = (inertOnPhone?: boolean) => {
+    render(
+      <MemoryRouter>
+        <PresentationBoundary>
+          <Sheet inertOnPhone={inertOnPhone} />
+        </PresentationBoundary>
+      </MemoryRouter>,
+    );
+    const opener = screen.getByRole("button", { name: "Open menu" });
+    fireEvent.click(opener);
+    return opener;
+  };
+
+  it("stays live behind a covering sheet by default", async () => {
+    const opener = show();
+    await waitFor(() => expect(panel("Menu")).toBeTruthy());
+    expect(opener.closest("[inert]")).toBeNull();
+  });
+
+  it("goes inert behind a sheet that repeats the page", async () => {
+    const opener = show(true);
+    await waitFor(() => expect(opener.closest("[inert]")).not.toBeNull());
+    expect(panel("Menu").closest("[inert]")).toBeNull();
+  });
+});

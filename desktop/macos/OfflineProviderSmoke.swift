@@ -77,7 +77,14 @@ final class OfflineProviderSmoke {
         const r=await fetch('/model-configs');if(!r.ok)return false;
         return (await r.json()).configurations.length===0;
         """#) as? Bool == true else { throw OfflineProviderPolicy.Refusal.invalid }
-        // The project was seeded without a model/key. This is the actual form.
+        // The project was seeded without a model/key. Home's composer opens
+        // the actual model setup form from its model chip, for this session.
+        try await wait { try await self.js(Self.visible + #"""
+        const f=document.getElementById('home-composer');
+        return !!f&&!f.disabled&&[...f.labels].some(l=>l.textContent.trim()==='What should we work on?')&&
+          [...document.querySelectorAll('button')].some(b=>visible(b)&&!b.disabled&&b.textContent.trim()==='Project default model');
+        """#) as? Bool == true }
+        try await click("Project default model")
         try await click("Advanced presets and provider setup")
         try await click("Browse Models")
         try await click("Create New")
@@ -92,8 +99,15 @@ final class OfflineProviderSmoke {
         const rows=[...document.querySelectorAll('[role=group][aria-labelledby]')];
         return rows.some(e=>visible(e)&&document.getElementById(e.getAttribute('aria-labelledby'))?.textContent.trim().replace(/\*$/,'')==='Protocol'&&e.textContent.includes('Responses'));
         """#) as? Bool == true else { throw OfflineProviderPolicy.Refusal.invalid }
-        try await click("Create chat")
-        try await wait { try await self.js("return /^#\\/session\\/[^/]+/.test(location.hash)&&!!document.querySelector('[role=combobox][aria-label=Message]')") as? Bool == true }
+        try await click("Use this model")
+        // Starting always sends the typed prompt as the session's first run,
+        // so the local response prompt is typed here and started by run().
+        guard try await js(#"""
+        const f=document.getElementById('home-composer');
+        if(!f||document.querySelector('[role=dialog]'))return false;
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(f,'OFFLINE_LOCAL_RESPONSE');
+        f.dispatchEvent(new Event('input',{bubbles:true}));return f.value==='OFFLINE_LOCAL_RESPONSE';
+        """#) as? Bool == true else { throw OfflineProviderPolicy.Refusal.invalid }
     }
 
     private func saved() async throws -> [String: Any] {
@@ -148,21 +162,19 @@ final class OfflineProviderSmoke {
         try fence.requireStore(view)
         try await setup()
         let initialDocument = binding.document
-        let config = try await saved()
-        try await rustControls("before", config: config)
+        // Start session saves the configured setup, creates the session and
+        // delivers its first prompt, so the streamed local response is
+        // observed here and the outage controls follow once it has settled.
         let count = fence.policy.responseAccepted
         let providerCount = app.provider.responseCount
-        _ = try await js(#"""
-        const e=document.querySelector('[role=combobox][aria-label=Message]');
-        if(!e)throw new Error('composer');
-        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(e,'OFFLINE_LOCAL_RESPONSE');
-        e.dispatchEvent(new Event('input',{bubbles:true}));return true;
-        """#)
-        try await wait { try await self.js("return !!document.querySelector('button[aria-label=Send]:not(:disabled)')") as? Bool == true }
-        _ = try await js("document.querySelector('button[aria-label=Send]:not(:disabled)').click();return true")
+        try await wait { try await self.js("return !!document.querySelector('button[aria-label=\"Start session\"]:not(:disabled)')") as? Bool == true }
+        _ = try await js("document.querySelector('button[aria-label=\"Start session\"]:not(:disabled)').click();return true")
+        try await wait { try await self.js("return /^#\\/session\\/[^/]+/.test(location.hash)&&!!document.querySelector('[role=combobox][aria-label=Message]')") as? Bool == true }
         try await wait { try await self.js("return __previewEvidence.partial===true") as? Bool == true }
         try await wait { try await self.js("return document.body.innerText.includes('Hello from the isolated NAC Mac preview.')&&!document.querySelector('button[aria-label=\"Stop run\"]')") as? Bool == true }
         guard fence.policy.responseAccepted > count, fence.policy.responseAccepted - count == app.provider.responseCount - providerCount else { throw OfflineProviderPolicy.Refusal.missingObservation }
+        let config = try await saved()
+        try await rustControls("before", config: config)
         let previous = document!
         view.reload()
         let end = ProcessInfo.processInfo.systemUptime + 25

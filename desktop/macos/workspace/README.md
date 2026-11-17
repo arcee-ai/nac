@@ -20,7 +20,10 @@ native-flow completeness remains a qualification obligation. Product routes come
 `src/App.tsx` and `src/app/lib/routes.ts`: projects, project entry, and session
 Insights/Subagents/Files/Terminal/Worksets/History. Legacy Threads resolves to
 Insights; invalid panels redirect through the existing behavior policy.
-Provider/settings/MCP/goals/approvals remain overlays in those routes.
+Provider configurations and MCP servers are Settings page sections
+(`#/settings/models`, `#/settings/mcp`); session panels open in the session
+drawer; session settings is a dialog from the Session menu; approvals are the
+non-modal card above the composer.
 The design route remains orchestration-gated. Terminal protocol/trusted-input
 qualification belongs to ALL-352.
 
@@ -114,7 +117,7 @@ The local provider supplies deterministic text/tool calls; no real vendor
 authentication/schema acceptance is claimed. Goals exercised with it do not
 replace the separate ALL-422 nullable goal-schema supplier. Delegated sessions
 are explicitly seeded through existing production endpoints, then navigated
-through the production Subagents/Open/Parent controls. That fixture setup is
+through the production Subagents drawer/Open/parent-chat controls. That fixture setup is
 simulated product input and grants no synthetic human authority. MCP's production
 Test connection launches `/bin/sh` on an owned profile-local JSON-RPC fixture,
 discovers its one inert tool, then saves the configuration disabled. The fixture
