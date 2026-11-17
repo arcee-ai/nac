@@ -68,13 +68,13 @@ function createNativeAdapters({
       !current(flight.state) ||
       !flight.state.uiReady ||
       !workspaceVisible(window, app) ||
-      !window.isFocused() ||
       picker ||
       commandFlight
     ) {
       clearTarget("unavailable");
       return;
     }
+    if (!window.isFocused()) return;
     flight.sent = true;
     flight.generation = flight.state.targetGeneration;
     send("session_target", { targetMessage: flight.message }, flight.state);
@@ -413,6 +413,7 @@ function createNativeAdapters({
     }
   };
   ipcMain.on("nac:native", listener);
+  window.on("focus", dispatchTarget);
   const native = {
     sessionTarget(session, occurrence) {
       const state = document;
@@ -425,7 +426,6 @@ function createNativeAdapters({
         commandFlight ||
         targetFlight ||
         !workspaceVisible(window, app) ||
-        !window.isFocused() ||
         !identifier(session) ||
         !identifier(occurrence) ||
         request >= 2147483647
@@ -434,8 +434,8 @@ function createNativeAdapters({
       const number = ++request;
       return new Promise((resolve) => {
         const timer = setTimeout(() => clearTarget("unavailable"), 3000);
-        // One original explicit click may wait for this document's React owner
-        // to register after reopen. No dispatched outcome is retried, and the
+        // One original explicit click may wait for native focus and this
+        // document's React owner after reopen. No dispatched outcome is retried; the
         // same deadline bounds both initialization and the eventual ACK.
         targetFlight = {
           state,
@@ -517,6 +517,7 @@ function createNativeAdapters({
       invalidate();
       disposed = true;
       ipcMain.removeListener("nac:native", listener);
+      window.removeListener("focus", dispatchTarget);
       contents.removeListener("did-start-navigation", navigation);
       contents.removeListener("render-process-gone", invalidate);
       removeNavigation();

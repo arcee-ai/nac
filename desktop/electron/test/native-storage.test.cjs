@@ -24,12 +24,12 @@ function fixture() {
     isDestroyed: () => false,
     setWindowOpenHandler() {},
   });
-  const window = {
+  const window = Object.assign(new EventEmitter(), {
     webContents: contents,
     isVisible: () => true,
     isMinimized: () => false,
     isFocused: () => true,
-  };
+  });
   let resolveWrite;
   const storage = {
     profile: { digest: "a".repeat(64) },
@@ -64,6 +64,7 @@ function fixture() {
   };
   return {
     native,
+    window,
     storage,
     frame,
     contents,
@@ -188,4 +189,76 @@ test("target initialization wait expires and retirement fences later owner readi
     false,
   );
   f.native.dispose();
+});
+
+test("one click waits for native focus and owner readiness in either order, then dispatches once", async () => {
+  for (const readyFirst of [true, false]) {
+    const f = fixture();
+    let focused = false;
+    f.window.isFocused = () => focused;
+    await f.ready(readyFirst);
+    const target = f.native.sessionTarget("fixture-session", "fixture-occurrence");
+    assert.equal(f.messages.filter((message) => message.kind === "session_target").length, 0);
+    f.window.emit("focus"); // Notification of focus is not itself a focused fact.
+    assert.equal(f.messages.filter((message) => message.kind === "session_target").length, 0);
+    focused = true;
+    f.window.emit("focus");
+    if (!readyFirst) {
+      assert.equal(f.messages.filter((message) => message.kind === "session_target").length, 0);
+      f.send("session_target_ready", { generation: 1 });
+    }
+    const requests = f.messages.filter((message) => message.kind === "session_target");
+    assert.equal(requests.length, 1);
+    f.send("target_settled", { request: requests[0].targetMessage.request, outcome: "deferred" });
+    assert.equal(await target, "deferred");
+    f.window.emit("focus");
+    assert.equal(f.messages.filter((message) => message.kind === "session_target").length, 1);
+    f.native.dispose();
+    assert.equal(f.window.listenerCount("focus"), 0);
+  }
+});
+
+test("focus and readiness consume one original deadline without retrying a dispatched timeout", async (context) => {
+  context.mock.timers.enable({ apis: ["setTimeout"] });
+  const f = fixture();
+  let focused = false;
+  f.window.isFocused = () => focused;
+  await f.ready(false);
+  const target = f.native.sessionTarget("fixture-session", "fixture-occurrence");
+  context.mock.timers.tick(2000);
+  focused = true;
+  f.window.emit("focus");
+  context.mock.timers.tick(900);
+  f.send("session_target_ready", { generation: 1 });
+  assert.equal(f.messages.filter((message) => message.kind === "session_target").length, 1);
+  context.mock.timers.tick(100);
+  assert.equal(await target, "unavailable");
+  f.window.emit("focus");
+  assert.equal(f.messages.filter((message) => message.kind === "session_target").length, 1);
+  f.native.dispose();
+});
+
+test("hide and document retirement fence a click waiting for native focus", async () => {
+  for (const boundary of ["hide", "retire", "navigate", "dispose"]) {
+    const f = fixture();
+    let focused = false;
+    f.window.isFocused = () => focused;
+    await f.ready();
+    const target = f.native.sessionTarget("fixture-session", "fixture-occurrence");
+    if (boundary === "hide") f.native.setVisible(false);
+    if (boundary === "retire") {
+      const done = f.native.retire();
+      f.send("retired", { closed: true });
+      await done;
+    }
+    if (boundary === "navigate")
+      f.contents.emit("did-start-navigation", { isMainFrame: true, isSameDocument: false });
+    if (boundary === "dispose") f.native.dispose();
+    assert.equal(await target, "stale");
+    focused = true;
+    f.window.emit("focus");
+    assert.equal(f.messages.filter((message) => message.kind === "session_target").length, 0);
+    f.native.dispose();
+    assert.equal(f.window.listenerCount("focus"), 0);
+  }
 });
