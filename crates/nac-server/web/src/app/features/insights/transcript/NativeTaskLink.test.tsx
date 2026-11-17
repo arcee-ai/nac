@@ -209,3 +209,88 @@ it("keeps historical noninteractive error receipts without navigation controls",
   expect(screen.queryByRole("link")).toBeNull();
   expect(state.inventoryIntervals).toEqual([]);
 });
+
+it("deduplicates validated launch and status receipts within each group, including after settlement", () => {
+  const otherTask = { ...task, sessionId: "a8e19c14-37b7-4b7e-a687-a628529b088f" };
+  state.sessions = [
+    known,
+    { ...known, summary: { ...known.summary, session_id: otherTask.sessionId } },
+  ];
+  function step(key: string, groupId: string, name: string, receipt: typeof task) {
+    const presentation = presentToolCall({
+      call: { id: key, type: "function", function: { name, arguments: "{}" } },
+      events: undefined,
+      hasResult: true,
+      resultText: JSON.stringify({
+        navigation: `/session/${receipt.sessionId}`,
+        launch: {
+          session_id: receipt.sessionId,
+          caller_session_id: receipt.callerId,
+          project_id: receipt.projectId,
+          phase: "ready",
+          request: { request_id: receipt.sessionId, title: receipt.title },
+        },
+      }),
+      resultHasImage: false,
+      active: false,
+      turnCancelled: false,
+    });
+    return {
+      kind: "segment" as const,
+      key,
+      groupId,
+      segment: {
+        kind: "tool" as const,
+        key,
+        name,
+        action: "other" as const,
+        pending: false,
+        presentation,
+      },
+    };
+  }
+  const fold = {
+    kind: "fold" as const,
+    key: "fold:groups",
+    groupIds: ["one", "two"],
+    steps: [
+      step("bad-caller", "one", "launch_task", { ...task, callerId: "other" }),
+      step("bad-project", "one", "task_launch_status", { ...task, projectId: "other" }),
+      step("launch", "one", "launch_task", task),
+      step("status", "one", "task_launch_status", task),
+      step("status-again", "one", "task_launch_status", task),
+      step("other-launch", "one", "launch_task", otherTask),
+      step("other-retry", "one", "launch_task", otherTask),
+      step("later-group", "two", "task_launch_status", task),
+    ],
+  };
+  const view = (active: boolean, interactive = true) => (
+    <MemoryRouter initialEntries={["/session/caller/insights"]}>
+      <CurrentRoute />
+      <WorkFoldView
+        fold={fold}
+        active={active}
+        turnDurationMs={null}
+        selectedGroupId={null}
+        interactive={interactive}
+      />
+    </MemoryRouter>
+  );
+  const { rerender } = render(view(true));
+  const hrefs = () => screen.getAllByRole("link").map((link) => link.getAttribute("href"));
+  expect(hrefs()).toEqual([
+    `/session/${task.sessionId}/insights`,
+    `/session/${otherTask.sessionId}/insights`,
+    `/session/${task.sessionId}/insights`,
+  ]);
+  expect(screen.getByLabelText("Current route").textContent).toBe("/session/caller/insights");
+  rerender(view(false));
+  expect(hrefs()).toHaveLength(3);
+  expect(state.inventoryIntervals.every((interval) => interval === 0)).toBe(true);
+  fireEvent.click(screen.getAllByRole("link")[1]);
+  expect(screen.getByLabelText("Current route").textContent).toBe(
+    `/session/${otherTask.sessionId}/insights`,
+  );
+  rerender(view(false, false));
+  expect(screen.queryByRole("link")).toBeNull();
+});
