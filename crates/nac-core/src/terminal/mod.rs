@@ -65,8 +65,19 @@ pub enum CommandStatus {
     SpawnError,
 }
 
+/// Outcome of deadline/cancellation termination, separate from command status.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CommandTermination {
+    Terminated,
+    CleanupPending,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct CommandOutput {
+    pub timeout_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub termination_status: Option<CommandTermination>,
     pub status: CommandStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exit_code: Option<i32>,

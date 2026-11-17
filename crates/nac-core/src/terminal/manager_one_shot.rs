@@ -89,6 +89,8 @@ impl TerminalManager {
         let start = Instant::now();
         if cancellation.is_some_and(ThreadCancellation::is_cancelled) {
             return CommandOutput {
+                timeout_ms: yield_ms,
+                termination_status: None,
                 status: CommandStatus::Cancelled,
                 exit_code: None,
                 wall_time_ms: start.elapsed().as_millis() as u64,
@@ -122,6 +124,8 @@ impl TerminalManager {
             Ok(lease) => lease,
             Err(error) => {
                 return CommandOutput {
+                    timeout_ms: yield_ms,
+                    termination_status: None,
                     status: CommandStatus::SpawnError,
                     exit_code: None,
                     wall_time_ms: start.elapsed().as_millis() as u64,
@@ -149,6 +153,8 @@ impl TerminalManager {
             Ok(execution) => execution,
             Err(_) => {
                 return CommandOutput {
+                    timeout_ms: yield_ms,
+                    termination_status: None,
                     status: CommandStatus::SpawnError,
                     exit_code: None,
                     wall_time_ms: 0,
@@ -207,6 +213,8 @@ impl TerminalManager {
         };
         let Some((spawned, remote_transport)) = admitted else {
             return CommandOutput {
+                timeout_ms: yield_ms,
+                termination_status: None,
                 status: CommandStatus::Cancelled,
                 exit_code: None,
                 wall_time_ms: start.elapsed().as_millis() as u64,
@@ -229,6 +237,8 @@ impl TerminalManager {
                     let _ = self.forget_remote_cleanup(pidfile);
                 }
                 return CommandOutput {
+                    timeout_ms: yield_ms,
+                    termination_status: None,
                     status: CommandStatus::SpawnError,
                     exit_code: None,
                     wall_time_ms: start.elapsed().as_millis() as u64,
@@ -527,6 +537,12 @@ impl TerminalManager {
         }
 
         CommandOutput {
+            timeout_ms: yield_ms,
+            termination_status: (!process_exited).then_some(if cleanup_pending {
+                super::super::CommandTermination::CleanupPending
+            } else {
+                super::super::CommandTermination::Terminated
+            }),
             status,
             exit_code: if status == CommandStatus::Completed {
                 exit_code

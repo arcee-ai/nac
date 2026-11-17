@@ -390,6 +390,11 @@ async fn failed_remote_one_shot_cleanup_remains_owned_for_settlement_retry() {
         .exec_one_shot("sleep 30", None, 120, 40, 20, 8_000, &backend, None)
         .await;
     assert_eq!(output.status, CommandStatus::TimedOut);
+    assert_eq!(output.timeout_ms, 20);
+    assert_eq!(
+        output.termination_status,
+        Some(super::super::CommandTermination::CleanupPending)
+    );
     assert!(output
         .stderr_preview
         .contains("remote command cleanup incomplete"));
@@ -832,6 +837,10 @@ async fn run_one_shot_with_pidfd_failure(cancel: bool) -> CommandOutput {
     assert!(output.stderr_preview.contains("parent-error"));
     assert!(output.stderr_preview.contains("child-error"));
     assert!(output.stderr_preview.contains("command cleanup incomplete"));
+    assert_eq!(
+        output.termination_status,
+        Some(super::super::CommandTermination::CleanupPending)
+    );
 
     unsafe {
         libc::kill(descendant_pid, libc::SIGKILL);

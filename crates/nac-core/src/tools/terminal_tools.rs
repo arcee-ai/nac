@@ -1,3 +1,9 @@
+//! Native process tools and their prepared authorization adapters.
+
+#[cfg(test)]
+#[path = "command_timing_tests.rs"]
+mod timing_tests;
+
 use serde_json::Value;
 use std::time::Duration;
 
@@ -24,12 +30,13 @@ impl kernel::NativeTool for ExecCommandTool {
         input: &mut Value,
         requested: Option<Duration>,
     ) -> Result<kernel::ToolTimeout, ToolResult> {
-        let default_ms = if input.get("tty").and_then(Value::as_bool).unwrap_or(false) {
-            500
-        } else {
-            30_000
-        };
-        delegated_yield_timeout(input, requested, default_ms)
+        let tty = input.get("tty").and_then(Value::as_bool).unwrap_or(false);
+        if tty && input.get("timeout_ms").is_some() {
+            return Err(invalid(
+                "'timeout_ms' is only valid for non-PTY commands; for tty=true use 'yield_time_ms' to poll the original process (not a lifetime deadline)",
+            ));
+        }
+        delegated_yield_timeout(input, requested, if tty { 500 } else { 30_000 })
     }
 
     fn decode(&self, input: Value) -> Result<Self::Input, ToolResult> {
@@ -251,18 +258,19 @@ fn delegated_yield_timeout(
     let object = input
         .as_object_mut()
         .ok_or_else(|| invalid("tool arguments must be an object"))?;
-    let existing_value = object.get("yield_time_ms");
-    let existing = existing_value.and_then(Value::as_u64);
+    optional_u64(object, "yield_time_ms", 0, 3_600_000)?;
+    optional_u64(object, "timeout_ms", 0, 3_600_000)?;
+    let existing = object.get("yield_time_ms").and_then(Value::as_u64);
+    let deadline = object.get("timeout_ms").and_then(Value::as_u64);
     let requested_ms = requested.map(|duration| duration.as_millis() as u64);
-    if existing.is_some() && requested_ms.is_some() && existing != requested_ms {
+    let explicit = [existing, deadline, requested_ms];
+    let effective_ms = explicit.into_iter().flatten().next().unwrap_or(default_ms);
+    if explicit.into_iter().flatten().any(|ms| ms != effective_ms) {
         return Err(invalid(
-            "'_nac.timeout_ms' conflicts with the existing 'yield_time_ms' argument",
+            "explicit 'timeout_ms', 'yield_time_ms', and '_nac.timeout_ms' values must be equal; differing values cause conflicts",
         ));
     }
-    let effective_ms = requested_ms.or(existing).unwrap_or(default_ms);
-    if existing_value.is_none() && requested.is_some() {
-        object.insert("yield_time_ms".to_string(), Value::from(effective_ms));
-    }
+    object.insert("yield_time_ms".to_string(), Value::from(effective_ms));
     Ok(kernel::ToolTimeout {
         duration: Duration::from_millis(effective_ms),
         disposition: kernel::ToolTimeoutDisposition::Delegated,
@@ -408,11 +416,19 @@ fn validate_exec_command(input: &Value) -> Result<(), ToolResult> {
     let object = object(input)?;
     reject_unknown(
         object,
-        &["cmd", "workdir", "tty", "yield_time_ms", "max_output_chars"],
+        &[
+            "cmd",
+            "workdir",
+            "tty",
+            "timeout_ms",
+            "yield_time_ms",
+            "max_output_chars",
+        ],
     )?;
     required_string(input, "cmd")?;
     optional_string(object, "workdir")?;
     optional_bool(object, "tty")?;
+    optional_u64(object, "timeout_ms", 0, 3_600_000)?;
     optional_u64(object, "yield_time_ms", 0, 3_600_000)?;
     optional_u64(object, "max_output_chars", 0, usize::MAX as u64)
 }

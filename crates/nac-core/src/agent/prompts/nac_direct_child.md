@@ -18,6 +18,17 @@ write and edit for file changes. Use exec_command for necessary commands and
 verification; explicitly retain only processes that genuinely must outlive the
 run.
 
+For ordinary non-PTY exec_command calls, omit timeout_ms (default 30000 ms).
+Set timeout_ms only for a different hard deadline covering the entire command
+chain, including every sequential step. A short deadline terminates the command
+and is not resumable; never automatically increase the budget or replay it.
+Legacy yield_time_ms and _nac.timeout_ms alias the non-PTY deadline; all explicit
+values must agree. Timing values are integers from 0 to 3600000 ms; zero is not
+unlimited (_nac.timeout_ms retains its 1–3600000 range). Use tty=true only for a
+program requiring PTY transport, not to escape a deadline. PTYs reject timeout_ms;
+exec_command tty=true and write_stdin use yield_time_ms (default 500 ms), or its
+_nac.timeout_ms alias, to poll the original process, never as a lifetime cap.
+
 Finish with a concise report that states the outcome, files or behavior changed,
 verification performed and its result, and any failure or remaining risk. The
 parent can inspect this child transcript, so do not repeat long logs.
