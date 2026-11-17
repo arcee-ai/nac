@@ -289,6 +289,97 @@ async fn conflict_is_rejected_before_marker_spawn() {
 }
 
 #[tokio::test]
+async fn prepared_git_policy_binds_cwd_and_denies_before_execution() {
+    let root = TempRoot::new();
+    let repo = root.path().join("repo");
+    std::fs::create_dir(&repo).unwrap();
+    assert!(std::process::Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(&repo)
+        .status()
+        .unwrap()
+        .success());
+    let mut runtime = crate::tools::test_runtime();
+    runtime.workspace_cwd = root.path().into();
+    runtime.backend = crate::sandbox::execution_backend_from_sandbox(None, root.path());
+    let client = crate::model::ModelClient::new_for_test();
+    let registry = registry();
+    let snapshot = registry.snapshot(["exec_command"]).unwrap();
+    let services = kernel::ToolServices {
+        runtime: &runtime,
+        client: &client,
+    };
+
+    let command = "git -C repo -c core.quotepath=false status --short";
+    let prepared = snapshot
+        .prepare("exec_command", json!({"cmd": command}), services)
+        .unwrap();
+    assert!(prepared
+        .permission_resources()
+        .iter()
+        .any(|r| r.resource == repo.display().to_string()));
+    assert!(prepared
+        .permission_resources()
+        .iter()
+        .all(|r| r.hard_denial.is_none()));
+    let result = snapshot
+        .invoke(
+            "exec_command",
+            json!({"cmd":command}),
+            services,
+            &kernel::ToolCallContext::default(),
+        )
+        .await;
+    assert!(!result.is_error, "{}", result.content);
+
+    let denied = snapshot
+        .invoke(
+            "exec_command",
+            json!({"cmd":"git -C repo reset --hard; touch must-not-spawn"}),
+            services,
+            &kernel::ToolCallContext::default(),
+        )
+        .await;
+    assert!(denied.is_error, "{}", denied.content);
+    assert!(denied.content.to_string().contains("destructive Git"));
+    assert!(!root.path().join("must-not-spawn").exists());
+
+    let store = root.path().join("store.db");
+    crate::store::initialize(&store).unwrap();
+    crate::store::insert_test_session(&store, "session-a");
+    runtime.store_path = store.clone();
+    runtime.session_id = Some("session-a".into());
+    runtime.permission_broker = Some(std::sync::Arc::new(
+        crate::permissions::PermissionBroker::new(
+            store,
+            "session-a".into(),
+            crate::permissions::PermissionBackend::Local,
+            0,
+            [crate::permissions::PermissionRule::new(
+                "execute*",
+                "*",
+                crate::permissions::PermissionEffect::Deny,
+            )],
+        ),
+    ));
+    let denied = snapshot
+        .invoke(
+            "exec_command",
+            json!({"cmd":command}),
+            kernel::ToolServices {
+                runtime: &runtime,
+                client: &client,
+            },
+            &kernel::ToolCallContext::default(),
+        )
+        .await;
+    assert!(
+        denied.is_error,
+        "configured Deny must apply to safe settings"
+    );
+}
+
+#[tokio::test]
 async fn completion_and_zero_deadline_preserve_defaults_and_short_budgets() {
     let runtime = crate::tools::test_runtime();
     let client = crate::model::ModelClient::new_for_test();

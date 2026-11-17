@@ -13,7 +13,8 @@ pub(super) fn shell_path_resources(
             let effective = effective_command_tokens(tokens);
             let command_index = tokens.len().saturating_sub(effective.len());
             let preserve_final_component =
-                deletion_operand_path_position(tokens, command_index, index);
+                deletion_operand_path_position(tokens, command_index, index)
+                    || git_simple_add_path_position(tokens, command_index, index);
             if let Some((_, existing_mutating, existing_preserve_final)) =
                 paths.iter_mut().find(|(existing, _, _)| existing == &path)
             {
@@ -431,6 +432,11 @@ pub(super) fn git_bare_relative_path_position(
         return false;
     };
     let subcommand = tokens[subcommand_index].as_str();
+    // Simple add operands are pathspecs relative to Git's effective -C cwd.
+    // Do not infer operands of option-bearing forms whose values may be data.
+    if subcommand == "add" {
+        return git_simple_add_path_position(tokens, command_index, index);
+    }
     if !matches!(subcommand, "diff" | "log" | "show" | "status") {
         return false;
     }
@@ -458,6 +464,29 @@ pub(super) fn git_bare_relative_path_position(
         .any(|candidate| *candidate == index)
 }
 
+fn git_simple_add_path_position(tokens: &[String], command_index: usize, index: usize) -> bool {
+    if !tokens
+        .get(command_index)
+        .and_then(|command| command.rsplit('/').next())
+        .is_some_and(|command| command.eq_ignore_ascii_case("git"))
+    {
+        return false;
+    }
+    let Some(subcommand) = git_subcommand_index(tokens, command_index) else {
+        return false;
+    };
+    if tokens[subcommand] != "add" || index <= subcommand || tokens[index] == "--" {
+        return false;
+    }
+    let args = &tokens[subcommand + 1..];
+    let simple =
+        args.first().is_some_and(|arg| arg == "--") || args.iter().all(|arg| !arg.starts_with('-'));
+    let operand = &tokens[index];
+    simple && !operand.starts_with(':') && !operand.contains(['*', '?', '['])
+}
+
+// Parse global options once for both policy and resource binding. Unknown or
+// incomplete options cannot safely identify the operation or its operands.
 pub(super) fn git_subcommand_index(tokens: &[String], command_index: usize) -> Option<usize> {
     let mut index = command_index + 1;
     while let Some(option) = tokens.get(index) {
@@ -470,9 +499,39 @@ pub(super) fn git_subcommand_index(tokens: &[String], command_index: usize) -> O
                 | "--super-prefix"
                 | "--config-env"
         ) {
+            tokens.get(index + 1)?;
             index += 2;
-        } else if option.starts_with('-') {
+        } else if [
+            "-C",
+            "-c",
+            "--git-dir=",
+            "--work-tree=",
+            "--namespace=",
+            "--super-prefix=",
+            "--config-env=",
+        ]
+        .iter()
+        .any(|prefix| {
+            option
+                .strip_prefix(prefix)
+                .is_some_and(|value| !value.is_empty())
+        }) || matches!(
+            option.as_str(),
+            "--no-pager"
+                | "--paginate"
+                | "-p"
+                | "-P"
+                | "--bare"
+                | "--no-replace-objects"
+                | "--literal-pathspecs"
+                | "--glob-pathspecs"
+                | "--noglob-pathspecs"
+                | "--icase-pathspecs"
+                | "--no-optional-locks"
+        ) {
             index += 1;
+        } else if option.starts_with('-') {
+            return None;
         } else {
             return Some(index);
         }

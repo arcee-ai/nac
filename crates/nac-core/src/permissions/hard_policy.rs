@@ -144,21 +144,31 @@ pub(super) fn hard_shell_denial_inner(
         return Some("filesystem formatting commands are blocked".to_string());
     }
     if command == "git" {
-        if git_alias_override(tokens) {
+        let Some(subcommand_index) = git_subcommand_index(tokens, 0) else {
+            return Some(
+                "Git global options or subcommand are unsupported or ambiguous".to_string(),
+            );
+        };
+        if git_unsafe_config_override(tokens, subcommand_index) {
             return Some(
                 "Git command-scoped configuration is blocked because it can execute hidden commands"
                     .to_string(),
             );
         }
-        let destructive = tokens
-            .iter()
-            .skip(1)
-            .any(|token| matches!(token.as_str(), "clean" | "reset" | "restore"));
-        let checkout = tokens.iter().skip(1).any(|token| token == "checkout");
-        if destructive || checkout {
+        let operation = tokens[subcommand_index].as_str();
+        let args = &tokens[subcommand_index + 1..];
+        let simple_branch = operation == "checkout"
+            && args.len() == 2
+            && args[0] == "-b"
+            && !args[1].is_empty()
+            && !args[1].starts_with('-');
+        if matches!(operation, "clean" | "reset" | "restore")
+            || operation == "checkout" && !simple_branch
+        {
             return Some("destructive Git workspace rewrites are blocked".to_string());
         }
     }
+
     if command == "rm" && removes_protected_root(tokens, cwd, backend) {
         return Some(
             "recursive deletion of the workspace or filesystem root is blocked".to_string(),
@@ -178,29 +188,30 @@ pub(super) fn hard_shell_denial_inner(
     None
 }
 
-pub(super) fn git_alias_override(tokens: &[String]) -> bool {
-    let Some(command_index) = tokens.iter().position(|token| {
-        token
-            .rsplit('/')
-            .next()
-            .is_some_and(|command| command.eq_ignore_ascii_case("git"))
-    }) else {
-        return false;
-    };
-    let subcommand_index = git_subcommand_index(tokens, command_index).unwrap_or(tokens.len());
-    let mut index = command_index + 1;
+// Only this exact presentation setting on status is known not to invoke code
+// or alter repository state. Other overrides remain subject to the hard denial.
+pub(super) fn git_unsafe_config_override(tokens: &[String], subcommand_index: usize) -> bool {
+    let mut index = 1;
     while index < subcommand_index {
         let token = &tokens[index];
-        let configured = if token == "-c" || token == "--config-env" {
+        if token == "--config-env" || token.starts_with("--config-env=") {
+            return true;
+        }
+        let configured = if token == "-c" {
             index += 1;
             tokens.get(index).map(String::as_str)
-        } else if let Some(configured) = token.strip_prefix("-c") {
-            (!configured.is_empty()).then_some(configured)
         } else {
-            token.strip_prefix("--config-env=")
+            token.strip_prefix("-c").filter(|value| !value.is_empty())
         };
-        if configured.is_some() {
-            return true;
+        if let Some(configured) = configured {
+            if tokens[subcommand_index] != "status" || configured != "core.quotepath=false" {
+                return true;
+            }
+        } else if matches!(
+            token.as_str(),
+            "-C" | "--git-dir" | "--work-tree" | "--namespace" | "--super-prefix"
+        ) {
+            index += 1;
         }
         index += 1;
     }

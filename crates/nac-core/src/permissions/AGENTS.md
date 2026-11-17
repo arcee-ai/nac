@@ -26,6 +26,12 @@ separate owners.
   only where the current policy requires it.
 - Shell wrappers, redirections, mutable project launchers, interpreters, and
   opaque command forms must retain their conservative classification.
+- Git hard policy identifies the operation through the shared global-option parser.
+  Unknown or incomplete global options fail closed as ambiguous. Only the exact
+  `checkout -b <name>` form without a start point is exempt from the checkout
+  rewrite denial; command-scoped `core.quotepath=false` is allowed only for
+  `status`. Other configuration overrides remain denied, and Git remains broad
+  execution authority subject to configured rules and the selected backend.
 - Approval authorizes a prepared invocation on the already-selected backend.
   It never changes Local/SSH/Podman selection and never claims to be a sandbox.
 - Explicit PTY controller transfer is private service-issued human intent, with
