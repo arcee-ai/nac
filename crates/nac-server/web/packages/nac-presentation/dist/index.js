@@ -1,9 +1,9 @@
-import { A as e, C as t, D as n, F as r, I as i, L as a, M as o, N as s, O as c, P as l, R as u, S as d, T as f, _ as p, a as m, b as h, c as g, d as _, f as v, g as y, h as b, i as x, j as S, k as C, l as w, m as T, n as E, o as D, p as O, r as k, s as A, t as j, u as M, v as ee, w as te, x as ne, y as N } from "./chunks/RuntimeContext-vBfe3WXu.js";
+import { A as e, C as t, D as n, F as r, I as i, L as a, M as o, N as s, O as c, P as l, R as u, S as d, T as f, _ as p, a as m, b as h, c as g, d as _, f as v, g as y, h as b, i as x, j as S, k as C, l as w, m as T, n as E, o as D, p as O, r as k, s as A, t as j, u as M, v as ee, w as te, x as ne, y as N } from "./chunks/RuntimeContext-DzO0SGcs.js";
 import { C as re, D as ie, E as ae, O as oe, S as se, b as ce, d as le, f as ue, g as de, h as fe, i as pe, l as me, m as he, n as ge, p as _e, r as ve, t as ye, u as be, v as xe, w as Se, x as Ce, y as P } from "./chunks/PresentationBoundary-BAUfAcJZ.js";
 import { n as we, t as Te } from "./chunks/visibility-Cy5NeKga.js";
-import { $ as Ee, $n as De, $t as Oe, A as ke, An as Ae, At as je, B as Me, Bn as Ne, Bt as Pe, C as Fe, Cn as Ie, Ct as Le, D as Re, Dn as ze, Dt as Be, E as Ve, En as He, Et as Ue, F as We, Fn as Ge, Ft as Ke, G as qe, Gn as Je, Gt as Ye, H as Xe, Hn as Ze, Ht as Qe, I as $e, In as et, It as tt, J as nt, Jn as rt, Jt as it, K as at, Kn as ot, Kt as st, L as ct, Ln as lt, Lt as ut, M as dt, Mn as ft, Mt as pt, N as mt, Nn as ht, Nt as gt, O as _t, On as vt, Ot as yt, P as bt, Pn as xt, Pt as St, Q as Ct, Qn as wt, Qt as Tt, R as Et, Rn as Dt, Rt as Ot, S as kt, Sn as At, St as jt, T as Mt, Tn as Nt, Tt as Pt, U as Ft, Un as It, Ut as Lt, V as Rt, Vn as zt, Vt as Bt, W as Vt, Wn as Ht, Wt as Ut, X as Wt, Xn as Gt, Xt as Kt, Y as qt, Yn as Jt, Yt, Z as Xt, Zn as Zt, Zt as Qt, _ as $t, _n as en, _r as tn, _t as nn, a as rn, an, ar as on, at as sn, b as cn, bn as ln, br as un, bt as dn, c as fn, cn as pn, cr as mn, ct as hn, d as gn, dn as _n, dr as vn, dt as yn, en as bn, er as xn, et as Sn, f as Cn, fn as wn, fr as Tn, ft as En, g as Dn, gn as On, gr as kn, gt as An, h as jn, hn as Mn, hr as Nn, ht as Pn, i as Fn, in as In, ir as Ln, it as Rn, j as zn, jn as Bn, jt as Vn, k as Hn, kn as Un, kt as Wn, l as Gn, ln as Kn, lr as qn, lt as Jn, m as Yn, mn as Xn, mr as Zn, mt as Qn, nn as $n, nr as er, nt as tr, o as nr, on as rr, or as ir, ot as ar, p as or, pn as sr, pr as cr, pt as lr, q as ur, qn as dr, qt as fr, r as pr, rn as mr, rr as hr, rt as gr, s as _r, sn as vr, sr as yr, st as br, t as xr, tn as Sr, tr as Cr, tt as wr, u as Tr, un as Er, ur as Dr, ut as Or, v as kr, vn as Ar, vr as jr, vt as Mr, w as Nr, wn as Pr, wt as Fr, x as Ir, xn as Lr, xt as Rr, y as zr, yn as Br, yr as F, yt as Vr, z as Hr, zn as Ur, zt as Wr } from "./chunks/workspaceLink-Bhs5xst-.js";
+import { $ as Ee, $n as De, $t as Oe, A as ke, An as Ae, At as je, B as Me, Bn as Ne, Bt as Pe, C as Fe, Cn as Ie, Ct as Le, D as Re, Dn as ze, Dt as Be, E as Ve, En as He, Et as Ue, F as We, Fn as Ge, Ft as Ke, G as qe, Gn as Je, Gt as Ye, H as Xe, Hn as Ze, Ht as Qe, I as $e, In as et, It as tt, J as nt, Jn as rt, Jt as it, K as at, Kn as ot, Kt as st, L as ct, Ln as lt, Lt as ut, M as dt, Mn as ft, Mt as pt, N as mt, Nn as ht, Nt as gt, O as _t, On as vt, Ot as yt, P as bt, Pn as xt, Pt as St, Q as Ct, Qn as wt, Qt as Tt, R as Et, Rn as Dt, Rt as Ot, S as kt, Sn as At, St as jt, T as Mt, Tn as Nt, Tt as Pt, U as Ft, Un as It, Ut as Lt, V as Rt, Vn as zt, Vt as Bt, W as Vt, Wn as Ht, Wt as Ut, X as Wt, Xn as Gt, Xt as Kt, Y as qt, Yn as Jt, Yt, Z as Xt, Zn as Zt, Zt as Qt, _ as $t, _n as en, _r as tn, _t as nn, a as rn, an, ar as on, at as sn, b as cn, bn as ln, br as un, bt as dn, c as fn, cn as pn, cr as mn, ct as hn, d as gn, dn as _n, dr as vn, dt as yn, en as bn, er as xn, et as Sn, f as Cn, fn as wn, fr as Tn, ft as En, g as Dn, gn as On, gr as kn, gt as An, h as jn, hn as Mn, hr as Nn, ht as Pn, i as Fn, in as In, ir as Ln, it as Rn, j as zn, jn as Bn, jt as Vn, k as Hn, kn as Un, kt as Wn, l as Gn, ln as Kn, lr as qn, lt as Jn, m as Yn, mn as Xn, mr as Zn, mt as Qn, nn as $n, nr as er, nt as tr, o as nr, on as rr, or as ir, ot as ar, p as or, pn as sr, pr as cr, pt as lr, q as ur, qn as dr, qt as fr, r as pr, rn as mr, rr as hr, rt as gr, s as _r, sn as vr, sr as yr, st as br, t as xr, tn as Sr, tr as Cr, tt as wr, u as Tr, un as Er, ur as Dr, ut as Or, v as kr, vn as Ar, vr as jr, vt as Mr, w as Nr, wn as Pr, wt as Fr, x as Ir, xn as Lr, xt as Rr, y as zr, yn as Br, yr as F, yt as Vr, z as Hr, zn as Ur, zt as Wr } from "./chunks/workspaceLink-BhskQIQp.js";
 import { $ as Gr, A as Kr, B as qr, F as Jr, I as Yr, J as Xr, K as Zr, L as Qr, M as $r, N as ei, O as ti, P as ni, Q as ri, R as ii, S as ai, V as oi, X as si, Y as ci, Z as li, _ as I, a as ui, b as di, c as fi, d as pi, et as L, f as mi, g as R, h as z, j as hi, k as gi, l as _i, m as B, nt as V, o as vi, p as yi, q as H, tt as U, u as bi, x as xi, y as Si, z as Ci } from "./chunks/Toast-phk3tngI.js";
-import { A as wi, At as Ti, B as Ei, Bt as Di, C as Oi, Ct as ki, D as Ai, Dt as ji, E as Mi, Et as Ni, F as Pi, Ft as Fi, G as Ii, H as Li, Ht as Ri, I as zi, J as Bi, K as Vi, Kt as Hi, L as Ui, Mt as Wi, N as Gi, Ot as Ki, P as qi, Pt as Ji, Q as Yi, S as Xi, St as Zi, T as Qi, U as $i, V as ea, Vt as ta, W as na, X as ra, Xt as ia, Y as W, Z as aa, Zt as oa, _ as sa, _t as ca, a as la, an as ua, at as da, b as fa, bt as pa, c as ma, d as ha, dt as ga, en as _a, et as va, f as ya, ft as ba, h as xa, i as Sa, in as Ca, it as wa, kt as Ta, l as Ea, m as Da, mt as Oa, n as ka, nn as Aa, nt as ja, o as Ma, on as Na, p as Pa, pt as Fa, q as G, qt as Ia, r as La, rn as Ra, rt as za, s as Ba, sn as Va, st as Ha, t as Ua, tn as Wa, tt as Ga, u as Ka, ut as qa, v as Ja, vt as Ya, w as Xa, x as Za, xt as Qa, z as $a, zt as eo } from "./chunks/ChatSessionActions-BrgekTOc.js";
+import { A as wi, At as Ti, B as Ei, Bt as Di, C as Oi, Ct as ki, D as Ai, Dt as ji, E as Mi, Et as Ni, F as Pi, Ft as Fi, G as Ii, H as Li, Ht as Ri, I as zi, J as Bi, K as Vi, Kt as Hi, L as Ui, Mt as Wi, N as Gi, Ot as Ki, P as qi, Pt as Ji, Q as Yi, S as Xi, St as Zi, T as Qi, U as $i, V as ea, Vt as ta, W as na, X as ra, Xt as ia, Y as W, Z as aa, Zt as oa, _ as sa, _t as ca, a as la, an as ua, at as da, b as fa, bt as pa, c as ma, d as ha, dt as ga, en as _a, et as va, f as ya, ft as ba, h as xa, i as Sa, in as Ca, it as wa, kt as Ta, l as Ea, m as Da, mt as Oa, n as ka, nn as Aa, nt as ja, o as Ma, on as Na, p as Pa, pt as Fa, q as G, qt as Ia, r as La, rn as Ra, rt as za, s as Ba, sn as Va, st as Ha, t as Ua, tn as Wa, tt as Ga, u as Ka, ut as qa, v as Ja, vt as Ya, w as Xa, x as Za, xt as Qa, z as $a, zt as eo } from "./chunks/ChatSessionActions-CSASV1fk.js";
 import { Activity as to, Fragment as no, Suspense as ro, createContext as io, forwardRef as ao, lazy as oo, memo as so, use as co, useCallback as K, useContext as lo, useEffect as q, useEffectEvent as uo, useId as fo, useLayoutEffect as po, useMemo as J, useRef as Y, useState as X, useSyncExternalStore as mo } from "react";
 import { QueryClientProvider as ho, QueryObserver as go, replaceEqualDeep as _o, useIsFetching as vo, useMutation as yo, useQueries as bo, useQuery as xo, useQueryClient as So } from "@tanstack/react-query";
 import { Fragment as Z, jsx as Q, jsxs as $ } from "react/jsx-runtime";
@@ -28667,7 +28667,7 @@ function fk({ sessionId: e, snapshot: t, behavior: n, panel: r, onPanelChange: i
 						children: /* @__PURE__ */ Q(L, { iconName: U.ShowSidePanel })
 					})
 				}) : null,
-				o ? null : /* @__PURE__ */ Q(Si, {
+				/* @__PURE__ */ Q(Si, {
 					title: h ? "Exit full width" : "Full width",
 					position: si.BottomLeft,
 					className: "shrink-0",
@@ -28937,7 +28937,7 @@ function yk(e) {
 		shown: r
 	};
 }
-function bk({ pinned: e, onTogglePinned: t, onClose: n }) {
+function bk({ pinned: e, onTogglePinned: t, onClose: n, expanded: r, onToggleExpanded: i }) {
 	return /* @__PURE__ */ $("header", {
 		className: "flex h-[52px] shrink-0 items-center gap-1 border-b border-muted pr-2 pl-5",
 		children: [
@@ -28959,6 +28959,15 @@ function bk({ pinned: e, onTogglePinned: t, onClose: n }) {
 				size: R.Medium,
 				variant: I.Ghost,
 				content: z.Icon,
+				"aria-label": r ? "Exit full width" : "Full width",
+				"aria-pressed": r,
+				onClick: i,
+				children: /* @__PURE__ */ Q(L, { iconName: r ? U.FullScreenExit : U.FullScreen })
+			}),
+			/* @__PURE__ */ Q(B, {
+				size: R.Medium,
+				variant: I.Ghost,
+				content: z.Icon,
 				"aria-label": "Hide panel",
 				onClick: n,
 				children: /* @__PURE__ */ Q(L, { iconName: U.Close })
@@ -28967,18 +28976,46 @@ function bk({ pinned: e, onTogglePinned: t, onClose: n }) {
 	});
 }
 function xk({ sessionId: e, snapshot: t, behavior: n, panel: r, goalEnabled: i }) {
-	let a = wC(e, r), o = H(), s = ci(_k) && !o, c = a.open && a.pinned && s, l = yk(c), u = a.content === "goal" && i;
+	let a = wC(e, r), o = H(), s = ci(_k) && !o, { useDockWidth: c, setDockWidth: l } = E().stores.dockWidth, u = c(), d = Y(null), f = Y(null), [p, m] = X(940), [h, g] = X(!1);
+	q(() => () => f.current?.(), []), po(() => {
+		let e = d.current?.parentElement;
+		if (!e || typeof ResizeObserver > "u") return;
+		let t = () => m(e.clientWidth);
+		t();
+		let n = new ResizeObserver(t);
+		return n.observe(e), () => n.disconnect();
+	}, []);
+	let _ = typeof ResizeObserver < "u" && s && p >= 940, v = a.open && a.pinned && _, y = yk(v), b = Math.max(480, p - 460), x = Math.min(u, b), S = a.expanded && p ? p : x, C = (e) => l(Math.min(b, Math.max(480, e))), w = (e) => {
+		if (e.button !== 0) return;
+		e.preventDefault(), f.current?.();
+		let t = e.clientX, n = x, r = e.pointerId, i = e.currentTarget;
+		i.setPointerCapture(r), g(!0);
+		let a = (e) => {
+			e.pointerId === r && C(n + t - e.clientX);
+		}, o = (e) => {
+			if (!(e && e.pointerId !== r)) {
+				window.removeEventListener("pointermove", a), window.removeEventListener("pointerup", o), window.removeEventListener("pointercancel", o);
+				try {
+					i.releasePointerCapture(r);
+				} catch {}
+				f.current = null, g(!1);
+			}
+		};
+		f.current = () => o(), window.addEventListener("pointermove", a), window.addEventListener("pointerup", o), window.addEventListener("pointercancel", o);
+	}, T = a.content === "goal" && i;
 	ru([{
 		keys: Kr,
 		onTrigger: a.togglePinned,
-		enabled: s
+		enabled: _
 	}]);
-	let d = s ? a.togglePinned : void 0, f = (s) => u ? /* @__PURE__ */ $("div", {
+	let D = _ ? a.togglePinned : void 0, O = (s) => T ? /* @__PURE__ */ $("div", {
 		className: "flex min-h-0 flex-1 flex-col",
 		children: [o ? null : /* @__PURE__ */ Q(bk, {
 			pinned: s,
-			onTogglePinned: d,
-			onClose: a.close
+			onTogglePinned: D,
+			onClose: a.close,
+			expanded: a.expanded,
+			onToggleExpanded: a.toggleExpanded
 		}), /* @__PURE__ */ Q("div", {
 			className: "min-h-0 flex-1 overflow-y-auto",
 			children: /* @__PURE__ */ Q(gk, {
@@ -28994,61 +29031,95 @@ function xk({ sessionId: e, snapshot: t, behavior: n, panel: r, goalEnabled: i }
 		onPanelChange: a.openPanel,
 		onClose: a.close,
 		pinned: s,
-		onTogglePinned: d
-	}), p = u ? "Goal" : Nn[r];
-	return /* @__PURE__ */ $(Z, { children: [l.mounted ? /* @__PURE__ */ Q("aside", {
-		"aria-label": p,
-		"aria-hidden": !c || void 0,
-		inert: !c,
-		className: V("relative h-full shrink-0 overflow-hidden border-l border-tertiary bg-elevation-ground", "transition-[width] duration-200 ease-[var(--ease-drawer)] motion-reduce:transition-none", l.shown ? "w-[var(--drawer-width)]" : "w-0"),
-		onKeyDown: (e) => {
-			e.key !== "Escape" || e.defaultPrevented || e.nativeEvent.isComposing || e.target instanceof Element && e.target.closest(".xterm") || (e.preventDefault(), a.close());
-		},
-		children: /* @__PURE__ */ Q("div", {
-			className: "absolute inset-y-0 left-0 flex w-[var(--drawer-width)] flex-col",
-			children: f(!0)
-		})
-	}) : null, /* @__PURE__ */ Q(ki, {
-		open: a.open && !c,
-		onClose: a.close,
-		onEscape: (e) => {
-			e.target instanceof Element && e.target.closest(".xterm") || (!o && a.expanded ? a.toggleExpanded() : a.close());
-		},
-		title: p,
-		bare: !0,
-		expanded: a.expanded,
-		className: o ? "h-[92dvh] bg-elevation-ground" : void 0,
-		bodyClassName: "overflow-hidden",
-		children: o ? /* @__PURE__ */ Q(PC, {
-			value: {
-				close: a.close,
-				bar: null
+		onTogglePinned: D
+	}), k = T ? "Goal" : Nn[r];
+	return /* @__PURE__ */ $(Z, { children: [
+		/* @__PURE__ */ Q("span", {
+			ref: d,
+			"aria-hidden": "true",
+			className: "absolute hidden"
+		}),
+		y.mounted ? /* @__PURE__ */ $("aside", {
+			"aria-label": k,
+			"aria-hidden": !v || void 0,
+			inert: !v,
+			className: V("relative h-full shrink-0 overflow-hidden border-l border-tertiary bg-elevation-ground", !h && "transition-[width] duration-200 ease-[var(--ease-drawer)] motion-reduce:transition-none"),
+			style: { width: y.shown ? S : 0 },
+			onKeyDown: (e) => {
+				e.key !== "Escape" || e.defaultPrevented || e.nativeEvent.isComposing || e.target instanceof Element && e.target.closest(".xterm") || (e.preventDefault(), a.expanded ? a.toggleExpanded() : a.close());
 			},
-			children: u ? /* @__PURE__ */ $("div", {
-				className: "flex min-h-0 flex-1 flex-col",
-				children: [/* @__PURE__ */ $("div", {
-					className: "flex h-12 shrink-0 items-center justify-between pr-1 pl-5",
-					children: [/* @__PURE__ */ Q("h2", {
-						className: "type-heading text-basic-primary",
-						children: "Goal"
-					}), /* @__PURE__ */ Q(B, {
-						size: R.Large,
-						variant: I.Ghost,
-						content: z.Icon,
-						"aria-label": "Hide panel",
-						onClick: a.close,
-						children: /* @__PURE__ */ Q(L, { iconName: U.Close })
+			children: [/* @__PURE__ */ Q("div", {
+				className: "absolute inset-y-0 left-0 flex flex-col",
+				style: { width: S || 560 },
+				children: O(!0)
+			}), !a.expanded && v ? /* @__PURE__ */ Q("div", {
+				role: "separator",
+				"aria-label": "Resize session panel",
+				"aria-orientation": "vertical",
+				"aria-valuemin": 480,
+				"aria-valuemax": b,
+				"aria-valuenow": x,
+				tabIndex: 0,
+				title: "Resize session panel",
+				className: "absolute inset-y-0 left-0 z-10 w-3 cursor-col-resize touch-none hover:bg-basic-primary/10 focus-visible:bg-basic-primary/10 focus-visible:outline focus-visible:outline-2",
+				onPointerDown: w,
+				onKeyDown: (e) => {
+					let t = e.shiftKey ? 50 : 10;
+					if (e.key === "ArrowLeft") C(x + t);
+					else if (e.key === "ArrowRight") C(x - t);
+					else if (e.key === "Home") C(480);
+					else if (e.key === "End") C(b);
+					else return;
+					e.preventDefault();
+				},
+				children: /* @__PURE__ */ Q("span", {
+					"aria-hidden": "true",
+					className: "absolute top-1/2 left-1 h-8 w-1 -translate-y-1/2 rounded-full bg-basic-tertiary"
+				})
+			}) : null]
+		}) : null,
+		/* @__PURE__ */ Q(ki, {
+			open: a.open && !v,
+			onClose: a.close,
+			onEscape: (e) => {
+				e.target instanceof Element && e.target.closest(".xterm") || (!o && a.expanded ? a.toggleExpanded() : a.close());
+			},
+			title: k,
+			bare: !0,
+			expanded: a.expanded,
+			className: o ? "h-[92dvh] bg-elevation-ground" : void 0,
+			bodyClassName: "overflow-hidden",
+			children: o ? /* @__PURE__ */ Q(PC, {
+				value: {
+					close: a.close,
+					bar: null
+				},
+				children: T ? /* @__PURE__ */ $("div", {
+					className: "flex min-h-0 flex-1 flex-col",
+					children: [/* @__PURE__ */ $("div", {
+						className: "flex h-12 shrink-0 items-center justify-between pr-1 pl-5",
+						children: [/* @__PURE__ */ Q("h2", {
+							className: "type-heading text-basic-primary",
+							children: "Goal"
+						}), /* @__PURE__ */ Q(B, {
+							size: R.Large,
+							variant: I.Ghost,
+							content: z.Icon,
+							"aria-label": "Hide panel",
+							onClick: a.close,
+							children: /* @__PURE__ */ Q(L, { iconName: U.Close })
+						})]
+					}), /* @__PURE__ */ Q("div", {
+						className: "min-h-0 flex-1 overflow-y-auto",
+						children: /* @__PURE__ */ Q(gk, {
+							sessionId: e,
+							enabled: i
+						})
 					})]
-				}), /* @__PURE__ */ Q("div", {
-					className: "min-h-0 flex-1 overflow-y-auto",
-					children: /* @__PURE__ */ Q(gk, {
-						sessionId: e,
-						enabled: i
-					})
-				})]
-			}) : f(!1)
-		}) : f(!1)
-	})] });
+				}) : O(!1)
+			}) : O(!1)
+		})
+	] });
 }
 // src/app/components/pages/SessionPage.tsx
 function Sk(e, t) {
@@ -29707,7 +29778,7 @@ function Dk({ children: e }) {
 	});
 }
 // src/App.tsx
-var Ok = oo(() => import("./chunks/DesktopSessionTargetOwner-CXRBaqcg.js").then((e) => ({ default: e.DesktopSessionTargetOwner }))), kk = oo(() => import("./chunks/DesignPreviewPage-DsmL71pk.js").catch(() => ({ default: () => /* @__PURE__ */ Q("p", {
+var Ok = oo(() => import("./chunks/DesktopSessionTargetOwner-C5Jbx8OU.js").then((e) => ({ default: e.DesktopSessionTargetOwner }))), kk = oo(() => import("./chunks/DesignPreviewPage-HFwFdSfS.js").catch(() => ({ default: () => /* @__PURE__ */ Q("p", {
 	role: "alert",
 	children: "The design preview could not be loaded. Reload this page to try again."
 }) })));

@@ -1,3 +1,4 @@
+import * as dockWidth from "../hooks/useDockWidth";
 import * as panelWidth from "../hooks/usePanelListWidth";
 import * as threadLogHeight from "../hooks/useThreadLogHeight";
 import * as lastLight from "../lib/lastLight";
@@ -22,6 +23,7 @@ export interface PresentationStores {
     homeDraftStore: ReturnType<typeof createHomeDraftStore>;
     commandSurfaceStore: ReturnType<typeof createCommandSurfaceStore>;
     transcriptDensityStore: ReturnType<typeof createTranscriptDensityStore>;
+    dockWidth: ReturnType<typeof dockWidth.createDockWidth>;
     panelWidth: ReturnType<typeof panelWidth.createPanelWidth>;
     threadLogHeight: ReturnType<typeof threadLogHeight.createThreadLogHeight>;
     lastLight: ReturnType<typeof lastLight.createLastLight>;
@@ -76,6 +78,7 @@ export declare const standalonePresentationStores: {
         release(): void;
     };
     promptDraftStore: typeof promptDraftStore;
+    dockWidth: typeof dockWidth;
     panelWidth: typeof panelWidth;
     threadLogHeight: typeof threadLogHeight;
     lastLight: typeof lastLight;
