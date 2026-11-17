@@ -179,13 +179,52 @@ Admission still requires a separately authenticated, currently active,
 independently reviewed post-build approval for the exact image; no version-only
 or source-order-only candidate assertion can approve it.
 
-For `not_affected`, `proof` has exactly `kind: "application-absence"` and a
-nonempty unique `affected_applications` list. Artifacts must include
+The established `not_affected` proof has exactly `kind: "application-absence"`
+and a nonempty unique `affected_applications` list. Artifacts must include
 `complete_filesystem`, `complete_consumers`, and `provenance`. Introduced or
 changed executables/consumers must change the independently derived profile
 commitment, invalidating the previous binding. The verifier cannot infer this
 property from a caller-supplied label; the collector/integrator must establish
 it from complete final-image data.
+
+### Narrow libssh versus libssh2 subject proof
+
+Three official [libssh](https://www.libssh.org/security/advisories/) advisories
+are matched by the upstream-Wolfi scan to the separately built **libssh2**
+package. A version-1 `not_affected` rule for only
+`(upstream-wolfi:libssh2, 1.11.1, grype-upstream)` may instead use:
+
+```json
+{"kind":"official-subject-mismatch","advisory_project":"libssh","installed_project":"libssh2"}
+```
+
+Each rule must select exactly one of these CVE/GHSA pairs:
+
+| Official advisory subject | Exact aliases |
+| --- | --- |
+| [libssh SFTP server `sftp_handle()`](https://www.libssh.org/security/advisories/CVE-2025-5318.txt) | `CVE-2025-5318`, `GHSA-98qw-prqm-9f4p` |
+| [libssh OpenSSL ChaCha20 initialization](https://www.libssh.org/security/advisories/CVE-2025-5987.txt) | `CVE-2025-5987`, `GHSA-3pvj-q7qj-89fg` |
+| [libssh Windows `C:\etc` configuration](https://www.libssh.org/security/advisories/CVE-2025-14821.txt) | `CVE-2025-14821`, `GHSA-5jf9-8f86-jhvw` |
+
+The evidence roles are exactly `official_advisory`, `official_alias`,
+`libssh2_release_archive`, and `provenance`. The first two are pinned official
+libssh advisory bytes and GitHub advisory API bytes; each alias must bind its
+listed CVE. The release archive is the pinned official `libssh2 1.11.1`
+source, whose README and header identify that project. The provenance must
+bind the exact image/source/platform, application profile, installed
+`apk:libssh2 1.11.1-r12` payload, source commit/archive and reviewed patch
+set. The caller must independently verify that installed binding. Changed
+advisory, alias, package, source, patch, payload, image or profile bytes fail
+closed. A new package revision or official artifact needs a reviewed source
+pin update.
+
+This proof establishes a **wrong-project scanner match for this package**;
+it does not claim global absence of libssh, dismiss other libssh2 advisories,
+or erase these six raw rows. An independent reviewer must assess the official
+project distinction and exact installed-byte bridge after the image exists.
+Only a separately authenticated, active, independently reviewed post-build
+approval can admit the rules. The source policy remains empty. Existing
+application-absence rules and policy schemas retain their previous behavior.
 
 ## Results and integration boundary
 
