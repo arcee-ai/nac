@@ -252,6 +252,30 @@ impl From<runtime::RemoteBrowseError> for ApiError {
     }
 }
 
+impl From<nac_core::project_folders::NewFolderError> for ApiError {
+    fn from(error: nac_core::project_folders::NewFolderError) -> Self {
+        use nac_core::project_folders::NewFolderError;
+        let status = match &error {
+            NewFolderError::InvalidName(_)
+            | NewFolderError::InvalidRequest(_)
+            | NewFolderError::ParentNotADirectory(_) => StatusCode::BAD_REQUEST,
+            NewFolderError::Denied { .. } | NewFolderError::Refused { .. } => StatusCode::FORBIDDEN,
+            NewFolderError::ParentNotFound(_) => StatusCode::NOT_FOUND,
+            NewFolderError::AlreadyExists(_) | NewFolderError::ParentChanged(_) => {
+                StatusCode::CONFLICT
+            }
+            // Only these two leave the outcome unknown; clients look before
+            // they offer a retry.
+            NewFolderError::Unreachable { .. } => StatusCode::BAD_GATEWAY,
+            NewFolderError::Failed(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        };
+        Self {
+            status,
+            message: error.to_string(),
+        }
+    }
+}
+
 impl From<RequestConfigurationError> for ApiError {
     fn from(error: RequestConfigurationError) -> Self {
         Self {
@@ -332,6 +356,11 @@ impl From<anyhow::Error> for ApiError {
                 } => StatusCode::CONFLICT,
                 SessionSubmitError::Coordination { .. } => StatusCode::INTERNAL_SERVER_ERROR,
             }
+        } else if error
+            .downcast_ref::<nac_core::store::InternalInboxItemError>()
+            .is_some()
+        {
+            StatusCode::CONFLICT
         } else if let Some(error) = error.downcast_ref::<sessions::SessionOperationLeaseError>() {
             match error {
                 sessions::SessionOperationLeaseError::Busy(_) => StatusCode::CONFLICT,
@@ -344,6 +373,14 @@ impl From<anyhow::Error> for ApiError {
                     StatusCode::BAD_REQUEST
                 }
             }
+        } else if error
+            .downcast_ref::<nac_core::traditional_children::TraditionalChildDescriptionError>()
+            .is_some()
+            || message.starts_with("child description ")
+        {
+            // Typed because a mismatch quotes the caller's own label, which
+            // must not be classified by the text matching below.
+            StatusCode::BAD_REQUEST
         } else if error.downcast_ref::<ModelConfigurationError>().is_some()
             || error.downcast_ref::<RequestConfigurationError>().is_some()
             || message.contains("invalid model configuration")

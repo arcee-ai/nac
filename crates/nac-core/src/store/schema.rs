@@ -16,6 +16,7 @@ mod heartbeat_calendar_tests;
 #[cfg(test)]
 mod heartbeat_migration_tests;
 pub(super) mod heartbeat_tables;
+mod internal_completions;
 #[cfg(test)]
 mod native_task_launch_migration_tests;
 mod native_task_launches;
@@ -42,7 +43,9 @@ mod lineage_retention_tests;
 mod managed_tables;
 mod migration_status;
 mod model_configurations;
+mod session_summaries;
 mod transaction_observation;
+use session_summaries::backfill_session_summaries;
 mod transcript_tables;
 mod wal_preflight;
 
@@ -88,6 +91,7 @@ mod permission_reviewer_tests;
 
 use wal_preflight::read_schema_version_header;
 
+// 51 records internal completion provenance on parent inbox rows.
 // 50 extends the occurrence source format for calendar cadence.
 // 49 adds the physical completion ledger; runtime production remains separately owned.
 // 48 adds standalone fresh-task schedule ownership and retained-resource receipts.
@@ -132,7 +136,7 @@ use wal_preflight::read_schema_version_header;
 // early whenever the stored version already equals this one. (12 carries the
 // same schema as 11, which added episodes.status; 10 added the
 // ssh_configurations table; 9 the per-session ssh port and key columns.)
-const STORE_SCHEMA_VERSION: i64 = 50;
+const STORE_SCHEMA_VERSION: i64 = 51;
 const HTTP_OPT_IN_COLUMN: &str = "INTEGER NOT NULL DEFAULT 0 CHECK (allow_insecure_http IN (0, 1))";
 pub const MINIMUM_MIGRATABLE_SCHEMA_VERSION: i64 = 0;
 
@@ -150,6 +154,11 @@ const RUN_COUNT_BACKFILL_VERSION: i64 = 5;
 /// Later versions add columns without touching them, so a store at or past this
 /// one does not need its whole message history walked again.
 const SESSION_SUMMARY_BACKFILL_VERSION: i64 = 8;
+
+/// Schema version that records internal completion provenance. Older stores
+/// classify still-pending legacy completions once, from durable evidence only.
+const INTERNAL_COMPLETION_ORIGIN_VERSION: i64 = 51;
+
 /// Hard SQLite checkout limits for one NAC process.
 ///
 /// Connections are operation-scoped, but concurrent opens still need a
@@ -527,6 +536,9 @@ fn check_readiness_inner(path: &Path) -> Result<()> {
     reject_future_schema_before_open(path)?;
     let conn = connect_existing(path)?;
     let schema_version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if schema_version == 50 {
+        heartbeat_calendar::verify_format(&conn)?;
+    }
     if schema_version != STORE_SCHEMA_VERSION {
         return Err(anyhow!(
             "SQLite store schema version {schema_version} is not ready (expected {STORE_SCHEMA_VERSION})"
@@ -683,6 +695,9 @@ pub(crate) fn open_probe_read_connection(path: &Path) -> Result<StoreConnection>
     reject_future_schema_before_open(path)?;
     let conn = connect_probe_read_only(path)?;
     let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if version == 50 {
+        heartbeat_calendar::verify_format(&conn)?;
+    }
     anyhow::ensure!(
         version == STORE_SCHEMA_VERSION,
         "probe store is not initialized"
@@ -698,6 +713,9 @@ pub(crate) fn open_probe_read_connection(path: &Path) -> Result<StoreConnection>
 pub(crate) fn open_initialized_read_connection(path: &Path) -> Result<StoreConnection> {
     let conn = connect_read_only(path)?;
     let schema_version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if schema_version == 50 {
+        heartbeat_calendar::verify_format(&conn)?;
+    }
     if schema_version != STORE_SCHEMA_VERSION {
         return Err(anyhow!(
             "store schema version {schema_version} is not initialized for runtime reads; expected {STORE_SCHEMA_VERSION}"
@@ -714,7 +732,7 @@ pub(crate) fn open_runtime_connection(path: &Path) -> Result<StoreConnection> {
     if schema_version > STORE_SCHEMA_VERSION {
         return Err(StoreFutureSchemaError::new(schema_version).into());
     }
-    if schema_version == STORE_SCHEMA_VERSION {
+    if schema_version >= 50 {
         heartbeat_calendar::verify_format(&conn)?;
     }
     conn.execute_batch("PRAGMA foreign_keys = ON;")?;
@@ -776,9 +794,11 @@ fn open_connection_with_hooks(
         return Err(StoreFutureSchemaError::new(preflight_schema_version).into());
     }
     conn.execute_batch("PRAGMA foreign_keys = ON;")?;
-    if preflight_schema_version == STORE_SCHEMA_VERSION {
+    if preflight_schema_version >= 50 {
         heartbeat_calendar::verify_format(&conn)?;
-        return Ok(conn);
+        if preflight_schema_version == STORE_SCHEMA_VERSION {
+            return Ok(conn);
+        }
     }
     after_preflight();
     // journal_mode is database-wide and persistent, so future schemas must be
@@ -794,6 +814,11 @@ fn open_connection_with_hooks(
         before_commit()?;
         transaction.commit()?;
         return Ok(conn);
+    }
+    // Schema 51 adds inbox provenance only. Preserve the schema 50 format fence
+    // before any older migration helper can rebuild its calendar table.
+    if schema_version == 50 {
+        heartbeat_calendar::verify_format(&transaction)?;
     }
     let needs_session_summary_backfill = schema_version < SESSION_SUMMARY_BACKFILL_VERSION;
     match schema_version {
@@ -838,7 +863,7 @@ fn open_connection_with_hooks(
             migrate_thread_events(&transaction)?;
             transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
-        2..=49 => {}
+        2..=50 => {}
         unsupported => {
             if unsupported > STORE_SCHEMA_VERSION {
                 return Err(StoreFutureSchemaError::new(unsupported).into());
@@ -1006,6 +1031,7 @@ fn open_connection_with_hooks(
     // input from agents, MCP clients and NAC itself.
     ensure_column(&transaction, "session_inbox", "review_intent", "TEXT")?;
     ensure_column(&transaction, "thread_steering", "review_intent", "TEXT")?;
+    let completion_origins_added = internal_completions::ensure_columns(&transaction)?;
     create_permission_grants_table(&transaction)?;
     create_session_goals_table(&transaction)?;
     ensure_column(
@@ -1024,6 +1050,9 @@ fn open_connection_with_hooks(
     create_traditional_children_table(&transaction)?;
     create_managed_orchestrators_table(&transaction)?;
     delegation_receipts::create_and_seed(&transaction)?;
+    if schema_version < INTERNAL_COMPLETION_ORIGIN_VERSION && completion_origins_added {
+        internal_completions::classify_pending_legacy_completions(&transaction)?;
+    }
     // Execution mode records how a generation was admitted and must remain
     // immutable. Deletion suppresses completion delivery independently.
     ensure_column(
@@ -1073,7 +1102,9 @@ fn open_connection_with_hooks(
     super::task_questions::create_table(&transaction)?;
     fresh_task_tables::migrate(&transaction)?;
     completion_tables::create_tables(&transaction)?;
-    heartbeat_calendar::rebuild_occurrences_for_calendar(&transaction)?;
+    if schema_version < 50 {
+        heartbeat_calendar::rebuild_occurrences_for_calendar(&transaction)?;
+    }
     heartbeat_calendar::verify_format(&transaction)?;
     verify_auxiliary_foreign_keys(&transaction)?;
 
@@ -1944,45 +1975,6 @@ fn ensure_column(conn: &Connection, table: &str, column: &str, definition: &str)
     }
     let alter = format!("ALTER TABLE {table} ADD COLUMN {column} {definition}");
     conn.execute(&alter, [])?;
-    Ok(())
-}
-
-fn backfill_session_summaries(conn: &Connection) -> Result<()> {
-    let rows = {
-        let mut statement = conn.prepare("SELECT session_id, messages_json FROM sessions")?;
-        let rows = statement
-            .query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        rows
-    };
-    for (session_id, messages_json) in rows {
-        let messages: Vec<crate::types::Message> = serde_json::from_str(&messages_json)
-            .with_context(|| {
-                format!("failed to parse stored messages for session '{session_id}'")
-            })?;
-        let blob_visible = crate::sessions::visible_message_count(&messages);
-        let log_from_idx =
-            u64::try_from(messages.len()).context("session transcript length overflowed")?;
-        let log_visible =
-            crate::store::count_visible_transcript_log_messages(conn, &session_id, log_from_idx)?;
-        let visible_count = i64::try_from(
-            blob_visible
-                .checked_add(log_visible)
-                .context("session visible message count overflowed")?,
-        )
-        .context("session visible message count overflowed")?;
-        let last_user_prompt =
-            crate::store::last_transcript_log_user_prompt(conn, &session_id, log_from_idx)?
-                .or_else(|| crate::sessions::last_user_prompt(&messages));
-        conn.execute(
-            "UPDATE sessions
-             SET visible_message_count = ?1, last_user_prompt = ?2
-             WHERE session_id = ?3",
-            params![visible_count, last_user_prompt, session_id],
-        )?;
-    }
     Ok(())
 }
 
