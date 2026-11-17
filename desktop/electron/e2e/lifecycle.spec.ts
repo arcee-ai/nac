@@ -353,7 +353,7 @@ test("native application Hide/Show and minimize/restore preserve hidden activity
     console.log("Owned native Hide facts", JSON.stringify(hidden));
     expect(hidden.applicationHidden).toBe(true);
     await expect(composer).toBeHidden({ timeout: 1500 });
-    await c.app.evaluate(({ app }) => app.show());
+    await c.app.evaluate(({ app }) => app.emit("activate"));
     await expect.poll(() => c.app.evaluate(({ app }) => app.isHidden())).toBe(false);
     await expect(composer).toBeVisible();
     await c.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].minimize());
