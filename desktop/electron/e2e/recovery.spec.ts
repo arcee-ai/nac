@@ -350,3 +350,113 @@ test("automatic renderer recovery is bounded and explicit menu reload retains th
   await expect(c.page.getByText("No projects yet", { exact: true })).toBeVisible();
   expect((await state(c)).receipt).toEqual(before.receipt);
 });
+
+test("new engine Retry permits fresh terminal input while same-engine reload still requires acknowledgement", async ({
+  candidate: c,
+}) => {
+  const session = await c.session(),
+    original = await state(c);
+  await c.page.evaluate((id) => {
+    location.hash = `/session/${id}/terminal`;
+  }, session);
+  let pane = c.page.getByRole("region", { name: "Session terminal", exact: true });
+  const show = c.page.getByRole("button", { name: "Show panel", exact: true });
+  await expect(show.or(pane)).toBeVisible();
+  if (await show.isVisible()) await show.click();
+  await pane.getByRole("button", { name: /^New shell$/i }).click();
+  await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
+  await pane.getByRole("region", { name: "Interactive terminal", exact: true }).click();
+  await c.page.keyboard.type("echo $$ > retry-original-shell.pid");
+  await c.page.keyboard.press("Enter");
+  await expect
+    .poll(() =>
+      fs.readFile(path.join(c.workspace, "retry-original-shell.pid"), "utf8").catch(() => ""),
+    )
+    .not.toBe("");
+  c.ownedPids.push(
+    Number((await fs.readFile(path.join(c.workspace, "retry-original-shell.pid"), "utf8")).trim()),
+  );
+  const previousDocument = await c.app.evaluate(({ BrowserWindow, Menu }) => {
+    const id = BrowserWindow.getAllWindows()[0].webContents.id;
+    Menu.getApplicationMenu()!.getMenuItemById("workspace-reload")!.click();
+    return id;
+  });
+  await replacement(c, previousDocument);
+  expect((await state(c)).receipt).toEqual(original.receipt);
+  const acknowledgement = c.page.getByRole("button", {
+    name: "Acknowledge failure and enable fresh input",
+    exact: true,
+  });
+  await expect(acknowledgement).toBeVisible();
+  expect(
+    await c.page.evaluate(() => Reflect.get(window, "__nacRequireTerminalAcknowledgement")),
+  ).toBe(true);
+  await acknowledgement.click();
+  pane = c.page.getByRole("region", { name: "Session terminal", exact: true });
+  await pane.getByRole("region", { name: "Interactive terminal", exact: true }).click();
+  await c.page.keyboard.type("printf acknowledged > retry-same-engine.txt");
+  await c.page.keyboard.press("Enter");
+  await expect
+    .poll(() =>
+      fs.readFile(path.join(c.workspace, "retry-same-engine.txt"), "utf8").catch(() => ""),
+    )
+    .toBe("acknowledged");
+
+  await c.app.evaluate(({ dialog }) => {
+    dialog.showMessageBox = async () => ({ response: 0, checkboxChecked: false });
+  });
+  process.kill(original.enginePid, "SIGKILL"); // Exact private fixture leader only.
+  await expect.poll(async () => (await state(c)).enginePid).toBe(0);
+  await expect
+    .poll(async () => (await c.app.windows()).filter((page) => !page.isClosed()).length)
+    .toBe(0);
+  expect((await state(c)).failure).toBeTruthy();
+  const nextWindow = c.app.waitForEvent("window");
+  await c.app.evaluate(({ app }) => {
+    void process
+      .getBuiltinModule("module")
+      .createRequire(app.getAppPath() + "/package.json")(app.getAppPath())
+      .retry();
+  });
+  c.page = await nextWindow;
+  await c.page.waitForURL(/^http:\/\/127\.0\.0\.1:\d+/);
+  const restarted = await state(c);
+  expect(restarted.receipt.incarnation).not.toBe(original.receipt.incarnation);
+  expect(restarted.enginePid).not.toBe(original.enginePid);
+  expect(restarted.receipt.store).toBe(original.receipt.store);
+  const custody = Number(
+    execFileSync("/bin/ps", ["-p", String(restarted.enginePid), "-o", "ppid="], {
+      encoding: "utf8",
+    }).trim(),
+  );
+  expect(
+    execFileSync("/bin/ps", ["-p", String(custody), "-o", "ppid=,comm="], {
+      encoding: "utf8",
+    }).trim(),
+  ).toMatch(new RegExp(`^${c.app.process().pid}\\s+.*\\/engine-launcher$`));
+  c.ownedPids.push(restarted.enginePid, custody);
+  pane = c.page.getByRole("region", { name: "Session terminal", exact: true });
+  await expect(pane).toBeVisible();
+  await pane.getByRole("button", { name: /^New shell$/i }).click();
+  await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
+  await expect(
+    c.page.getByRole("button", { name: "Acknowledge failure and enable fresh input", exact: true }),
+  ).toHaveCount(0);
+  await pane.getByRole("region", { name: "Interactive terminal", exact: true }).click();
+  await c.page.keyboard.type(
+    "printf fresh > retry-fresh-engine.txt; echo $$ > retry-fresh-shell.pid",
+  );
+  await c.page.keyboard.press("Enter");
+  await expect
+    .poll(() =>
+      fs.readFile(path.join(c.workspace, "retry-fresh-engine.txt"), "utf8").catch(() => ""),
+    )
+    .toBe("fresh");
+  c.ownedPids.push(
+    Number((await fs.readFile(path.join(c.workspace, "retry-fresh-shell.pid"), "utf8")).trim()),
+  );
+  expect(
+    await c.page.evaluate(() => Reflect.get(window, "__nacRequireTerminalAcknowledgement")),
+  ).toBeUndefined();
+  expect(c.provider.requests).toHaveLength(0);
+});

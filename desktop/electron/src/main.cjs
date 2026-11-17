@@ -325,7 +325,6 @@ async function recoverWorkspace(automatic = false, wake = false) {
 async function fail(error) {
   if (failure || !["running", "confirming"].includes(lifecycle.phase)) return;
   failure = error;
-  recovered = true;
   retireAttention();
   recoveryGeneration++;
   recoveryPending = false;
@@ -440,6 +439,9 @@ async function retry() {
       next.once("ready", (receipt) => {
         if (engine !== next || failure || !["running", "confirming"].includes(lifecycle.phase))
           return;
+        // Only a replacement document on the same verified engine inherits
+        // terminal delivery uncertainty. A new incarnation has fresh handles.
+        recovered = false;
         recoveryAttempts = 0;
         let presenting = false;
         const present = async () => {
