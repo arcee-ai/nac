@@ -52,7 +52,7 @@ impl TerminalManager {
         cols: u16,
         rows: u16,
         backend: &Arc<ExecutionBackend>,
-        cancellation: Option<&ThreadCancellation>,
+        cancellation: Option<&RunCancellation>,
     ) -> Result<TerminalInfo> {
         self.create_with_environment(name, command, cwd, cols, rows, backend, cancellation, &[])
             .await
@@ -70,7 +70,7 @@ impl TerminalManager {
         cols: u16,
         rows: u16,
         backend: &Arc<ExecutionBackend>,
-        cancellation: Option<&ThreadCancellation>,
+        cancellation: Option<&RunCancellation>,
         extra_envs: &[(String, String)],
     ) -> Result<TerminalInfo> {
         self.create_sanitized(
@@ -99,7 +99,7 @@ impl TerminalManager {
         cols: u16,
         rows: u16,
         backend: &Arc<ExecutionBackend>,
-        cancellation: Option<&ThreadCancellation>,
+        cancellation: Option<&RunCancellation>,
         extra_envs: &[(String, String)],
         environment: nac_contracts::CommandEnvironmentSnapshot,
     ) -> Result<TerminalInfo> {
@@ -241,13 +241,13 @@ impl TerminalManager {
         input: &str,
         yield_ms: u64,
         max_output: usize,
-        cancellation: Option<&ThreadCancellation>,
+        cancellation: Option<&RunCancellation>,
     ) -> Result<TerminalOutput> {
         let ticket = if input.is_empty() {
             None
         } else {
             let mut sessions = self.sessions.lock().await;
-            if cancellation.is_some_and(ThreadCancellation::is_cancelled) {
+            if cancellation.is_some_and(RunCancellation::is_cancelled) {
                 return Err(anyhow!("terminal command cancelled before input"));
             }
             let session = sessions
@@ -280,11 +280,11 @@ impl TerminalManager {
         input: &str,
         yield_ms: u64,
         max_output: usize,
-        cancellation: Option<&ThreadCancellation>,
+        cancellation: Option<&RunCancellation>,
         ticket: Option<&super::super::InputTicket>,
     ) -> Result<TerminalOutput> {
         let start = Instant::now();
-        if cancellation.is_some_and(ThreadCancellation::is_cancelled) {
+        if cancellation.is_some_and(RunCancellation::is_cancelled) {
             self.settle_run().await?;
             return Err(anyhow!("terminal command cancelled"));
         }
@@ -351,7 +351,7 @@ impl TerminalManager {
                 let ticket = ticket
                     .ok_or_else(|| anyhow!("prepared terminal input authority is missing"))?
                     .clone();
-                let default_cancellation = ThreadCancellation::default();
+                let default_cancellation = RunCancellation::default();
                 Some(session.enqueue_input(
                     &bytes,
                     ticket,
@@ -405,7 +405,7 @@ impl TerminalManager {
                 cancellation,
             )
             .await;
-        if cancellation.is_some_and(ThreadCancellation::is_cancelled) {
+        if cancellation.is_some_and(RunCancellation::is_cancelled) {
             self.settle_run().await?;
             return Err(anyhow!("terminal command cancelled"));
         }
@@ -418,7 +418,7 @@ impl TerminalManager {
         ) {
             Ok(preview) => preview,
             Err(error) => {
-                if cancellation.is_some_and(ThreadCancellation::is_cancelled) {
+                if cancellation.is_some_and(RunCancellation::is_cancelled) {
                     self.settle_run().await?;
                     return Err(anyhow!("terminal command cancelled"));
                 }
@@ -452,7 +452,7 @@ impl TerminalManager {
         } else {
             (Some(name.to_string()), None)
         };
-        if cancellation.is_some_and(ThreadCancellation::is_cancelled) {
+        if cancellation.is_some_and(RunCancellation::is_cancelled) {
             self.settle_run().await?;
             return Err(anyhow!("terminal command cancelled"));
         }

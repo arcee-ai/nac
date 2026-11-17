@@ -1397,7 +1397,7 @@ async fn headless_ask_fails_closed_without_creating_a_waiter() {
                 "command:[curl][example.com]",
             )],
             &crate::tools::kernel::ToolCallContext::default(),
-            &crate::tools::ThreadCancellation::default(),
+            &crate::tools::RunCancellation::default(),
         )
         .await;
     assert!(
@@ -1422,7 +1422,7 @@ async fn session_auto_approve_answers_asks_headlessly_without_creating_grants() 
                     .with_save_resource("command:[curl]*"),
             ],
             &crate::tools::kernel::ToolCallContext::default(),
-            &crate::tools::ThreadCancellation::default(),
+            &crate::tools::RunCancellation::default(),
         )
         .await;
     assert_eq!(outcome, AuthorizationOutcome::Allowed);
@@ -1497,7 +1497,7 @@ async fn session_auto_approve_never_overrides_configured_or_hard_denials() {
                 "command:[curl][example.com]",
             )],
             &crate::tools::kernel::ToolCallContext::default(),
-            &crate::tools::ThreadCancellation::default(),
+            &crate::tools::RunCancellation::default(),
         )
         .await;
     assert!(
@@ -1510,7 +1510,7 @@ async fn session_auto_approve_never_overrides_configured_or_hard_denials() {
             &[PermissionResource::new("edit", "/workspace/.git/config")
                 .with_hard_denial("protected target")],
             &crate::tools::kernel::ToolCallContext::default(),
-            &crate::tools::ThreadCancellation::default(),
+            &crate::tools::RunCancellation::default(),
         )
         .await;
     assert_eq!(
@@ -1539,7 +1539,7 @@ async fn enabling_auto_approve_claims_pending_once_and_disabling_restores_manual
                         "command:[curl][example.com]",
                     )],
                     &crate::tools::kernel::ToolCallContext::default(),
-                    &crate::tools::ThreadCancellation::default(),
+                    &crate::tools::RunCancellation::default(),
                 )
                 .await
         })
@@ -1565,7 +1565,7 @@ async fn enabling_auto_approve_claims_pending_once_and_disabling_restores_manual
                 "command:[curl][example.com]",
             )],
             &crate::tools::kernel::ToolCallContext::default(),
-            &crate::tools::ThreadCancellation::default(),
+            &crate::tools::RunCancellation::default(),
         )
         .await;
     assert!(
@@ -1598,7 +1598,7 @@ async fn independent_brokers_observe_mode_changes_and_drain_cross_process_waiter
                         "command:[curl][example.com]",
                     )],
                     &crate::tools::kernel::ToolCallContext::default(),
-                    &crate::tools::ThreadCancellation::default(),
+                    &crate::tools::RunCancellation::default(),
                 )
                 .await
         })
@@ -1637,7 +1637,7 @@ async fn independent_brokers_observe_mode_changes_and_drain_cross_process_waiter
                 "command:[curl][example.com]",
             )],
             &crate::tools::kernel::ToolCallContext::default(),
-            &crate::tools::ThreadCancellation::default(),
+            &crate::tools::RunCancellation::default(),
         )
         .await;
     assert!(
@@ -1656,7 +1656,7 @@ async fn independent_brokers_observe_mode_changes_and_drain_cross_process_waiter
                     "command:[curl][example.com]",
                 )],
                 &crate::tools::kernel::ToolCallContext::default(),
-                &crate::tools::ThreadCancellation::default(),
+                &crate::tools::RunCancellation::default(),
             )
             .await,
         AuthorizationOutcome::Allowed
@@ -1672,7 +1672,7 @@ async fn independent_brokers_observe_mode_changes_and_drain_cross_process_waiter
                 "command:[curl][example.com]",
             )],
             &crate::tools::kernel::ToolCallContext::default(),
-            &crate::tools::ThreadCancellation::default(),
+            &crate::tools::RunCancellation::default(),
         )
         .await;
     assert!(
@@ -1700,7 +1700,7 @@ async fn pending_waiters_share_one_bounded_broker_mode_observer() {
                         format!("command:[curl][example-{index}.com]"),
                     )],
                     &crate::tools::kernel::ToolCallContext::default(),
-                    &crate::tools::ThreadCancellation::default(),
+                    &crate::tools::RunCancellation::default(),
                 )
                 .await
         }));
@@ -1770,7 +1770,7 @@ async fn delegated_child_allows_its_parent_ui_time_to_connect_and_reply() {
                         "command:[curl][example.com]",
                     )],
                     &crate::tools::kernel::ToolCallContext::default(),
-                    &crate::tools::ThreadCancellation::default(),
+                    &crate::tools::RunCancellation::default(),
                 )
                 .await
         })
@@ -1799,7 +1799,7 @@ async fn interactive_once_releases_exact_waiting_call_without_saving() {
                         "command:[curl][example.com]",
                     )],
                     &crate::tools::kernel::ToolCallContext::default(),
-                    &crate::tools::ThreadCancellation::default(),
+                    &crate::tools::RunCancellation::default(),
                 )
                 .await
         })
@@ -1818,7 +1818,7 @@ async fn cancellation_dismisses_the_live_prompt_and_waiting_call() {
     let mut events = bus.subscribe();
     let _interactive = bus.subscribe_assistant_deltas();
     broker.attach_event_bus(bus);
-    let cancellation = crate::tools::ThreadCancellation::default();
+    let cancellation = crate::tools::RunCancellation::default();
     let authorize = {
         let broker = Arc::clone(&broker);
         let cancellation = cancellation.clone();
@@ -1872,7 +1872,7 @@ async fn aborting_authorization_dismisses_prompt_before_any_stale_grant_reply() 
                             .with_save_resource("command:[curl]*"),
                     ],
                     &crate::tools::kernel::ToolCallContext::default(),
-                    &crate::tools::ThreadCancellation::default(),
+                    &crate::tools::RunCancellation::default(),
                 )
                 .await
         })
@@ -1904,7 +1904,7 @@ async fn losing_the_sole_interactive_subscriber_dismisses_approval_prompt() {
                         "command:[curl][example.com]",
                     )],
                     &crate::tools::kernel::ToolCallContext::default(),
-                    &crate::tools::ThreadCancellation::default(),
+                    &crate::tools::RunCancellation::default(),
                 )
                 .await
         })

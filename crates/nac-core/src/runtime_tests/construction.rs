@@ -1841,12 +1841,12 @@ async fn persisted_settings_are_identical_across_create_snapshot_resume_and_work
     );
     assert_eq!(resumed.client.extra_headers(), &headers);
     match &resumed.session {
-        OrchestratorSession::Active { snapshot, .. } => assert_eq!(
+        RuntimeSession::Active { snapshot, .. } => assert_eq!(
             snapshot.orchestrator_compaction_threshold,
             Some(48_000),
             "resume must ignore the current compaction config"
         ),
-        OrchestratorSession::Picker { .. } => panic!("expected active resumed session"),
+        RuntimeSession::Picker { .. } => panic!("expected active resumed session"),
     }
     assert_eq!(
         crate::tools::thread::worker_model_arguments_for_test(&resumed.client),

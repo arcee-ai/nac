@@ -151,7 +151,7 @@ impl PermissionBroker {
         tool: &str,
         resources: &[PermissionResource],
         context: &crate::tools::kernel::ToolCallContext,
-        cancellation: &crate::tools::ThreadCancellation,
+        cancellation: &crate::tools::RunCancellation,
         review_stop: &super::review::ReviewRunPermit,
         mode_revision: i64,
     ) -> Option<AuthorizationOutcome> {

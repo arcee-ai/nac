@@ -58,7 +58,7 @@ pub(super) struct PipeExecution {
     pub(super) output_id: String,
     pub(super) created_at: Instant,
     pub(super) outcome: StdMutex<Option<super::super::CommandStatus>>,
-    cancellation: ThreadCancellation,
+    cancellation: RunCancellation,
     started: AtomicBool,
 }
 
@@ -227,7 +227,7 @@ impl TerminalManager {
             }),
             started: AtomicBool::new(false),
             output_id: output_id.to_owned(),
-            cancellation: ThreadCancellation::default(),
+            cancellation: RunCancellation::default(),
         });
         executions.push_back(Arc::clone(&execution));
         Ok(PipeExecutionGuard {

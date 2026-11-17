@@ -329,7 +329,7 @@ impl SessionService {
                     Some(task_run_id.clone()),
                     run_client_id.clone(),
                 ));
-                agent.set_steering_dispatch_id(Some(task_run_id.to_string()));
+                agent.set_current_run_id(Some(task_run_id.to_string()));
                 let result = agent
                     .send_session_run(
                         &expanded_prompt,
@@ -638,7 +638,7 @@ impl SessionService {
         let run_id = reserved
             .map(SessionRunId::from_stored)
             .unwrap_or_else(SessionRunId::new);
-        if !self.active_threads.begin_run(run_id.as_str()) {
+        if !self.run_admission.begin_run(run_id.as_str()) {
             return Err(SessionSubmitError::Coordination {
                 message: SessionCoordinationError::local_agent_busy(),
             });
@@ -649,7 +649,7 @@ impl SessionService {
                 // Orchestrator cancellation continues through its established
                 // active-thread registry and must not add a new agent-lock
                 // admission requirement.
-                crate::tools::ThreadCancellation::default()
+                crate::tools::RunCancellation::default()
             } else {
                 self.agent
                     .try_lock()

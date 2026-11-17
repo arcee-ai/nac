@@ -39,7 +39,7 @@ async fn aborted_owned_approval_removes_authority_without_waiting_for_event_pers
                             .with_save_resource("command:[curl]*"),
                     ],
                     &crate::tools::kernel::ToolCallContext::default(),
-                    &crate::tools::ThreadCancellation::default(),
+                    &crate::tools::RunCancellation::default(),
                 )
                 .await
         })

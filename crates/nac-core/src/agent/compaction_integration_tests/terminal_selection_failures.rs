@@ -59,7 +59,7 @@ async fn selection_provenance_transient_failures_preserve_checkpoint_and_block_p
         .fail_selection_provenance_after_reads_for_test(0)
         .await
         .unwrap();
-    agent.set_steering_dispatch_id(Some(uuid::Uuid::new_v4().to_string()));
+    agent.set_current_run_id(Some(uuid::Uuid::new_v4().to_string()));
     let error = agent
         .send("metadata unavailable on this turn")
         .await
@@ -98,7 +98,7 @@ async fn selection_provenance_transient_failures_preserve_checkpoint_and_block_p
         .unwrap();
     assert_eq!(prepared.checkpoint_id, Some(checkpoint.id));
     assert!(prepared.context_estimate < 1_000);
-    agent.set_steering_dispatch_id(Some(uuid::Uuid::new_v4().to_string()));
+    agent.set_current_run_id(Some(uuid::Uuid::new_v4().to_string()));
     agent.send("explicit verified recovery turn").await.unwrap();
     assert_eq!(observed.load(Ordering::SeqCst), 2);
     assert_eq!(

@@ -662,7 +662,7 @@ async fn mcp_mount_refresh_during_compaction_applies_before_the_following_model_
     );
     agent.client = ModelClient::new_for_test_server(model.base_url.clone());
     let run_id = SessionRunId::new();
-    agent.set_steering_dispatch_id(Some(run_id.to_string()));
+    agent.set_current_run_id(Some(run_id.to_string()));
     let (prompt_commit, _receipt) = watch::channel(RunPromptCommitStatus::Pending);
     assert_eq!(
         agent

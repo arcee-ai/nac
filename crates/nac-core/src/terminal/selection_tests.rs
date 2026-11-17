@@ -1,5 +1,5 @@
 use super::*;
-use crate::tools::ThreadCancellation;
+use crate::tools::RunCancellation;
 use nac_contracts::CommandEnvironmentSnapshot;
 
 fn policy(values: &[&str]) -> CommandOutputRedactor {
@@ -94,7 +94,7 @@ async fn launch(manager: &TerminalManager, values: &[&str]) -> String {
                 values.iter().map(|value| (*value).to_owned()).collect(),
             ),
             None,
-            &ThreadCancellation::default(),
+            &RunCancellation::default(),
         )
         .await
         .unwrap();

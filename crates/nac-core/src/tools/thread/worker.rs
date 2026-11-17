@@ -1,3 +1,4 @@
+use crate::managed_native_credentials::ManagedNativeCredentials;
 use std::collections::BTreeMap;
 use std::process::Stdio;
 use std::sync::Arc;
@@ -11,10 +12,8 @@ use tokio::time::{sleep, timeout};
 use crate::events::{decode_stderr_event, sanitize_external_agent_event, AgentEvent};
 use crate::model::{ModelClient, TokenUsage};
 use crate::process::ProcessTreeGuard;
-use crate::tools::{ThreadCancellation, ToolRuntime};
-use crate::worker_credentials::{
-    prepare_worker_credential_channel, ManagedWorkerNativeCredentials,
-};
+use crate::tools::{RunCancellation, ToolRuntime};
+use crate::worker_credentials::prepare_worker_credential_channel;
 const CANCEL_ACK_GRACE: Duration = Duration::from_millis(250);
 // SSH cleanup can spend five seconds in the kill request; Podman can spend two.
 const COOPERATIVE_CLEANUP_GRACE: Duration = Duration::from_secs(7);
@@ -239,7 +238,7 @@ pub(super) async fn run_worker(
     runtime: &ToolRuntime,
     client: &ModelClient,
     invocation: WorkerInvocation<'_>,
-    cancellation: ThreadCancellation,
+    cancellation: RunCancellation,
 ) -> std::io::Result<WorkerRun> {
     let executable = runtime.worker_executable.clone().ok_or_else(|| {
         std::io::Error::new(
@@ -252,11 +251,11 @@ pub(super) async fn run_worker(
     let delegates_native_credentials =
         runtime.command_environment.is_some() || runtime.web_credential.is_some();
     let native_credentials = if let Some(credential) = runtime.web_credential.as_ref() {
-        ManagedWorkerNativeCredentials::from_exa_api_key(Some(credential.secret().to_string()))
+        ManagedNativeCredentials::from_exa_api_key(Some(credential.secret().to_string()))
     } else if runtime.command_environment.is_some() {
-        ManagedWorkerNativeCredentials::from_process_environment()?
+        ManagedNativeCredentials::from_process_environment()?
     } else {
-        ManagedWorkerNativeCredentials::default()
+        ManagedNativeCredentials::default()
     };
     let native_credential_redactions = native_credentials.exact_redactions();
     let mut command = Command::new(executable);
@@ -339,8 +338,8 @@ pub(super) async fn run_worker(
     let (commit_ack_tx, commit_ack_rx) = watch::channel(false);
     let (history_tx, mut history_rx) = watch::channel(None::<std::result::Result<(), String>>);
     let require_history = invocation.require_history;
-    let reader_shutdown = ThreadCancellation::default();
-    let protocol_failure = ThreadCancellation::default();
+    let reader_shutdown = RunCancellation::default();
+    let protocol_failure = RunCancellation::default();
     let stderr_protocol_failure = protocol_failure.clone();
     let stderr_cancellation = cancellation.clone();
     let stderr_shutdown = reader_shutdown.clone();
@@ -734,7 +733,7 @@ async fn commit_completion_frame(
     expected: &crate::store::WorkerDispatchIdentity,
     payload: &str,
     redactions: &[String],
-    cancellation: &ThreadCancellation,
+    cancellation: &RunCancellation,
     stdin: &Arc<Mutex<Option<tokio::process::ChildStdin>>>,
 ) -> anyhow::Result<()> {
     use crate::worker_protocol::{CommitAck, Completion, ACK_PREFIX};
@@ -1134,7 +1133,7 @@ mod tests {
                 scheduled_skills: &no_skills,
                 timeout_secs: 30,
             },
-            ThreadCancellation::default(),
+            RunCancellation::default(),
         )
         .await
         .unwrap();
@@ -1268,7 +1267,7 @@ mod tests {
                 scheduled_skills: &no_skills,
                 timeout_secs: 30,
             },
-            ThreadCancellation::default(),
+            RunCancellation::default(),
         )
         .await
         .unwrap();
@@ -1369,7 +1368,7 @@ done
                 scheduled_skills: &no_skills,
                 timeout_secs: 30,
             },
-            ThreadCancellation::default(),
+            RunCancellation::default(),
         )
         .await
         .unwrap();
@@ -1552,7 +1551,7 @@ wait
             runtime.workspace_cwd = root.clone();
             runtime.config_cwd = root.clone();
             runtime.worker_executable = Some(executable);
-            let cancellation = ThreadCancellation::default();
+            let cancellation = RunCancellation::default();
             let worker_cancellation = cancellation.clone();
             let no_sources = Vec::<String>::new();
             let no_skills = Vec::<String>::new();
@@ -1647,7 +1646,7 @@ exit 0
         runtime.config_cwd = root.clone();
         runtime.store_path = root.join("store.db");
         runtime.worker_executable = Some(executable);
-        let cancellation = ThreadCancellation::default();
+        let cancellation = RunCancellation::default();
         let client = ModelClient::new_for_test();
         let no_sources = Vec::<String>::new();
         let no_skills = Vec::<String>::new();
@@ -1753,7 +1752,7 @@ exit 0
                 scheduled_skills: &no_skills,
                 timeout_secs: 30,
             },
-            ThreadCancellation::default(),
+            RunCancellation::default(),
         )
         .await
         .unwrap();
@@ -1807,7 +1806,7 @@ exit 0
                 scheduled_skills: &no_skills,
                 timeout_secs: 30,
             },
-            ThreadCancellation::default(),
+            RunCancellation::default(),
         )
         .await
         .unwrap();

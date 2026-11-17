@@ -5,7 +5,7 @@ use crate::model::test_http::{ScriptedResponse, ScriptedServer};
 use crate::permissions::{PermissionEffect, PermissionRule};
 use crate::runtime::{
     build_run_config_for_project_with_behavior, ModelOptions, NacConfig, OptionalModelOption,
-    OrchestratorRunConfig, RunOptions, StoreOptions,
+    RunOptions, SessionRunConfig, StoreOptions,
 };
 use crate::sessions::SessionBehavior;
 use crate::types::Message;
@@ -107,7 +107,7 @@ impl Fixture {
         .unwrap()
     }
 
-    async fn direct(&self, url: &str, rules: Vec<PermissionRule>) -> OrchestratorRunConfig {
+    async fn direct(&self, url: &str, rules: Vec<PermissionRule>) -> SessionRunConfig {
         let mut config = NacConfig::default();
         config.permissions.rules = rules;
         let mut run = build_run_config_for_project_with_behavior(
@@ -141,7 +141,7 @@ impl Fixture {
         .config_version;
         assert!(run.agent.configure_permission_broker(version).is_some());
         run.agent
-            .set_steering_dispatch_id(Some(uuid::Uuid::new_v4().to_string()));
+            .set_current_run_id(Some(uuid::Uuid::new_v4().to_string()));
         run
     }
 }
@@ -184,7 +184,7 @@ fn done() -> ScriptedResponse {
     )
 }
 
-fn tool_result(run: &OrchestratorRunConfig, id: &str) -> String {
+fn tool_result(run: &SessionRunConfig, id: &str) -> String {
     run.agent
         .messages
         .iter()

@@ -242,7 +242,7 @@ fn direct_topologies_expose_exact_capability_boundaries() {
         names(&parent),
         crate::tools::DIRECT_TOOL_NAMES.map(str::to_string)
     );
-    let child_names: Vec<_> = crate::tools::WORKER_TOOL_NAMES
+    let child_names: Vec<_> = crate::tools::CODING_TOOL_NAMES
         .into_iter()
         .chain(["nac_guide"])
         .map(str::to_string)
@@ -416,7 +416,7 @@ fn delegated_worker_native_search_is_credential_gated_and_model_safe() {
 
     assert_eq!(
         names(worker.refresh_model_request_capabilities().unwrap()),
-        crate::tools::WORKER_TOOL_NAMES
+        crate::tools::CODING_TOOL_NAMES
     );
     let credential = "delegated-exa-capability-canary";
     worker.set_worker_web_credential(Some(credential.to_string()));
@@ -441,11 +441,11 @@ fn delegated_worker_native_search_is_credential_gated_and_model_safe() {
     );
     let names = names(definitions);
     assert_eq!(
-        &names[..crate::tools::WORKER_TOOL_NAMES.len()],
-        crate::tools::WORKER_TOOL_NAMES
+        &names[..crate::tools::CODING_TOOL_NAMES.len()],
+        crate::tools::CODING_TOOL_NAMES
     );
     assert_eq!(
-        &names[crate::tools::WORKER_TOOL_NAMES.len()..],
+        &names[crate::tools::CODING_TOOL_NAMES.len()..],
         crate::tools::WEB_TOOL_NAMES
     );
     let credential_debug = format!("{:?}", worker.tool_runtime.web_credential);

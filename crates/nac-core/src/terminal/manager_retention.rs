@@ -361,7 +361,7 @@ impl TerminalManager {
     pub(crate) async fn retain_with_cancellation(
         &self,
         name: &str,
-        cancellation: Option<&ThreadCancellation>,
+        cancellation: Option<&RunCancellation>,
     ) -> Result<TerminalInfo> {
         let mut sessions = self.sessions.lock().await;
         let session = sessions
@@ -517,11 +517,11 @@ impl TerminalManager {
         start_cursor: u64,
         yield_ms: u64,
         notify: Arc<tokio::sync::Notify>,
-        cancellation: Option<&ThreadCancellation>,
+        cancellation: Option<&RunCancellation>,
     ) -> Result<()> {
         let deadline = Instant::now() + Duration::from_millis(yield_ms);
         loop {
-            if cancellation.is_some_and(ThreadCancellation::is_cancelled) {
+            if cancellation.is_some_and(RunCancellation::is_cancelled) {
                 return Err(anyhow!("terminal command cancelled"));
             }
             let notified = notify.notified();

@@ -45,7 +45,7 @@ fn spawn_ask(
                 "exec_command",
                 &[PermissionResource::new("execute", resource)],
                 &crate::tools::kernel::ToolCallContext::default(),
-                &crate::tools::ThreadCancellation::default(),
+                &crate::tools::RunCancellation::default(),
             )
             .await
     })
@@ -300,7 +300,7 @@ async fn direct_with_orchestrator_root_covers_children_but_not_managed_orchestra
                     "command:[blocked][still-denied]",
                 )],
                 &crate::tools::kernel::ToolCallContext::default(),
-                &crate::tools::ThreadCancellation::default(),
+                &crate::tools::RunCancellation::default(),
             )
             .await,
         AuthorizationOutcome::Denied("configured permission rules deny exec_command".to_string())
@@ -312,7 +312,7 @@ async fn direct_with_orchestrator_root_covers_children_but_not_managed_orchestra
                 &[PermissionResource::new("edit", "/workspace/.git/config")
                     .with_hard_denial("protected target")],
                 &crate::tools::kernel::ToolCallContext::default(),
-                &crate::tools::ThreadCancellation::default(),
+                &crate::tools::RunCancellation::default(),
             )
             .await,
         AuthorizationOutcome::Denied("protected target".to_string())

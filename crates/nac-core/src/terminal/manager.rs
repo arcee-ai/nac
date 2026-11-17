@@ -12,7 +12,7 @@ use tokio::time::sleep;
 
 use crate::process::ProcessTreeGuard;
 use crate::sandbox::ExecutionBackend;
-use crate::tools::ThreadCancellation;
+use crate::tools::RunCancellation;
 
 use super::keyparse::parse_keys;
 use super::session::{terminal_env_owned, TerminalSession};
@@ -311,7 +311,7 @@ async fn read_chunks<R>(
     mut reader: R,
     stream: OutputStream,
     sender: mpsc::Sender<StreamChunk>,
-    shutdown: ThreadCancellation,
+    shutdown: RunCancellation,
 ) -> std::io::Result<bool>
 where
     R: AsyncRead + Unpin,

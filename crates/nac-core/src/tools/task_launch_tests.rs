@@ -369,7 +369,7 @@ async fn native_launch_ask_is_headless_fail_closed_and_project_reads_are_passive
 
 #[test]
 fn launch_tools_are_direct_only_and_named_skill_is_fresh_brief_content() {
-    let worker = crate::tools::worker_tool_definitions(false);
+    let worker = crate::tools::coding_tool_definitions(false);
     let direct = crate::tools::direct_tool_definitions(false);
     for name in ["list_projects", "launch_task", "task_launch_status"] {
         assert!(!worker.iter().any(|d| d.function.name == name));

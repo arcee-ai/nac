@@ -8,10 +8,7 @@ fn combine_system_guidance(primary: Option<String>, secondary: Option<String>) -
     }
 }
 
-pub async fn build_run_config(
-    options: RunOptions,
-    config: &NacConfig,
-) -> Result<OrchestratorRunConfig> {
+pub async fn build_run_config(options: RunOptions, config: &NacConfig) -> Result<SessionRunConfig> {
     build_run_config_inner(
         options,
         config,
@@ -25,7 +22,7 @@ pub async fn build_run_config_for_project(
     options: RunOptions,
     config: &NacConfig,
     project_id: Option<String>,
-) -> Result<OrchestratorRunConfig> {
+) -> Result<SessionRunConfig> {
     build_run_config_inner(
         options,
         config,
@@ -43,7 +40,7 @@ pub async fn build_run_config_for_project_with_behavior(
     config: &NacConfig,
     project_id: Option<String>,
     behavior: sessions::SessionBehavior,
-) -> Result<OrchestratorRunConfig> {
+) -> Result<SessionRunConfig> {
     build_run_config_inner(options, config, project_id, behavior).await
 }
 
@@ -52,7 +49,7 @@ async fn build_run_config_inner(
     config: &NacConfig,
     project_id: Option<String>,
     behavior: sessions::SessionBehavior,
-) -> Result<OrchestratorRunConfig> {
+) -> Result<SessionRunConfig> {
     prepare_run_config_inner(options, config, project_id, behavior, None)
         .await?
         .persist()
@@ -289,10 +286,10 @@ async fn prepare_run_config_inner(
         session_snapshot.orchestrator_compaction_threshold = orchestrator_compaction_threshold;
         session_snapshot.light_model = light_model;
         return Ok(PreparedSessionRunConfig::new(
-            OrchestratorRunConfig {
+            SessionRunConfig {
                 agent,
                 client,
-                session: OrchestratorSession::Active {
+                session: RuntimeSession::Active {
                     session_id,
                     store_path,
                     snapshot: session_snapshot,
@@ -351,7 +348,7 @@ async fn prepare_run_config_inner(
     } else {
         None
     };
-    let build_result = (|| -> Result<OrchestratorRunConfig> {
+    let build_result = (|| -> Result<SessionRunConfig> {
         let workspace_dir = effective_workspace_dir(&workspace_cwd, sandbox.as_ref());
         let agents_md = AgentsMdBundle::load(workspace_dir.as_deref(), &paths)?;
         let (skill_workspace, visibility) = if sandbox.is_some() {
@@ -430,10 +427,10 @@ async fn prepare_run_config_inner(
         session_snapshot.project_id = project_id;
         session_snapshot.orchestrator_compaction_threshold = orchestrator_compaction_threshold;
         session_snapshot.light_model = light_model;
-        Ok(OrchestratorRunConfig {
+        Ok(SessionRunConfig {
             agent,
             client,
-            session: OrchestratorSession::Active {
+            session: RuntimeSession::Active {
                 session_id,
                 store_path,
                 snapshot: session_snapshot,

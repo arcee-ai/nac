@@ -6,8 +6,10 @@
 //! before MCP construction. Every worker announces readiness only after MCP
 //! construction; credential bytes are not written before that handshake.
 
+#[cfg(target_os = "linux")]
+use crate::managed_native_credentials::restrict_same_uid_inspection;
+use crate::managed_native_credentials::ManagedNativeCredentials;
 use std::io;
-use std::sync::OnceLock;
 
 use anyhow::{anyhow, Result};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -17,112 +19,7 @@ const MANAGED_WORKER_CREDENTIAL_PREFIX: &[u8] = b"__NAC_NATIVE_CREDENTIALS_V2__"
 const MANAGED_WORKER_CREDENTIAL_READY: &[u8] = b"__NAC_NATIVE_CREDENTIALS_READY_V2__";
 const MAX_CREDENTIAL_FRAME_BYTES: usize = 64 * 1024;
 
-/// Prevent same-UID descendants from inspecting this process through ordinary
-/// Linux ptrace/procfs interfaces, and prevent later execs from acquiring new
-/// privilege. A process with pre-existing `CAP_SYS_PTRACE` remains outside this
-/// in-process boundary and must be excluded by deployment policy.
-pub fn restrict_same_uid_inspection() -> io::Result<()> {
-    #[cfg(target_os = "linux")]
-    {
-        // SAFETY: both prctl operations take integer flags and no pointers.
-        if unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) } != 0 {
-            return Err(io::Error::last_os_error());
-        }
-        // Executing an ordinary binary resets dumpability, so this function is
-        // called independently by the server and each managed worker.
-        // SAFETY: PR_SET_DUMPABLE takes an integer flag and no pointers.
-        if unsafe { libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0) } != 0 {
-            return Err(io::Error::last_os_error());
-        }
-    }
-    Ok(())
-}
-
-#[derive(Clone, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct ManagedWorkerNativeCredentials {
-    exa_api_key: Option<String>,
-}
-
-static MANAGED_NATIVE_CREDENTIALS: OnceLock<ManagedWorkerNativeCredentials> = OnceLock::new();
-
-/// Capture native integration credentials before managed server construction
-/// and remove them from the generic process environment. Only the native web
-/// capability and the private worker transport can consult this snapshot.
-pub fn capture_managed_native_credentials_from_environment() -> io::Result<()> {
-    let credentials = ManagedWorkerNativeCredentials::read_process_environment()?;
-    if let Some(existing) = MANAGED_NATIVE_CREDENTIALS.get() {
-        if existing != &credentials {
-            return Err(io::Error::other(
-                "managed native credentials were already captured",
-            ));
-        }
-    } else {
-        let _ = MANAGED_NATIVE_CREDENTIALS.set(credentials);
-    }
-    // SAFETY: managed startup calls this before constructing the SessionManager,
-    // MCP registries, refresh tasks, or any other application threads.
-    unsafe { std::env::remove_var(crate::model::EXA_API_KEY_ENV) };
-    Ok(())
-}
-
-pub(crate) fn managed_exa_api_key() -> Option<String> {
-    MANAGED_NATIVE_CREDENTIALS
-        .get()
-        .and_then(|credentials| credentials.exa_api_key.clone())
-}
-
-/// Output-only patterns from the already captured private snapshot. Never
-/// consult ambient credentials or forward these values into child environments.
-pub(crate) fn captured_managed_native_redactions() -> Vec<String> {
-    MANAGED_NATIVE_CREDENTIALS
-        .get()
-        .map(ManagedWorkerNativeCredentials::exact_redactions)
-        .unwrap_or_default()
-}
-
-impl ManagedWorkerNativeCredentials {
-    pub(crate) fn from_process_environment() -> io::Result<Self> {
-        if let Some(credentials) = MANAGED_NATIVE_CREDENTIALS.get() {
-            return Ok(credentials.clone());
-        }
-        Self::read_process_environment()
-    }
-
-    fn read_process_environment() -> io::Result<Self> {
-        let exa_api_key = std::env::var_os(crate::model::EXA_API_KEY_ENV)
-            .map(|value| {
-                value.into_string().map_err(|_| {
-                    io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "EXA_API_KEY is not valid Unicode",
-                    )
-                })
-            })
-            .transpose()?
-            .filter(|value| !value.trim().is_empty());
-        Ok(Self { exa_api_key })
-    }
-
-    pub(crate) fn exact_redactions(&self) -> Vec<String> {
-        self.exa_api_key.iter().cloned().collect()
-    }
-
-    pub(crate) fn into_exa_api_key(self) -> Option<String> {
-        self.exa_api_key
-    }
-
-    pub(crate) fn from_exa_api_key(exa_api_key: Option<String>) -> Self {
-        Self { exa_api_key }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn for_test(exa_api_key: Option<&str>) -> Self {
-        Self {
-            exa_api_key: exa_api_key.map(str::to_string),
-        }
-    }
-
+impl ManagedNativeCredentials {
     fn encode_control_frame(&self) -> io::Result<CredentialFrame> {
         let mut payload = serde_json::to_vec(self)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
@@ -304,7 +201,7 @@ mod platform {
     impl WorkerCredentialSender {
         pub(crate) async fn send_after_ready(
             self,
-            credentials: &ManagedWorkerNativeCredentials,
+            credentials: &ManagedNativeCredentials,
         ) -> io::Result<()> {
             #[cfg(target_os = "linux")]
             let mut stream = match self.transport {
@@ -401,9 +298,9 @@ mod platform {
             }
         }
 
-        pub(crate) async fn receive_after_mcp(self) -> Result<ManagedWorkerNativeCredentials> {
+        pub(crate) async fn receive_after_mcp(self) -> Result<ManagedNativeCredentials> {
             let Some(stream) = self.stream else {
-                return Ok(ManagedWorkerNativeCredentials::default());
+                return Ok(ManagedNativeCredentials::default());
             };
             stream.set_nonblocking(true)?;
             let mut stream = tokio::net::UnixStream::from_std(stream)?;
@@ -451,7 +348,7 @@ mod platform {
                     break;
                 }
             }
-            let decoded = ManagedWorkerNativeCredentials::decode_control_frame(&frame);
+            let decoded = ManagedNativeCredentials::decode_control_frame(&frame);
             frame.fill(0);
             decoded
         }
@@ -608,7 +505,7 @@ mod platform {
     impl WorkerCredentialSender {
         pub(crate) async fn send_after_ready(
             self,
-            credentials: &ManagedWorkerNativeCredentials,
+            credentials: &ManagedNativeCredentials,
         ) -> io::Result<()> {
             if credentials.exa_api_key.is_some() {
                 return Err(io::Error::new(
@@ -633,8 +530,8 @@ mod platform {
             Ok(Self)
         }
 
-        pub(crate) async fn receive_after_mcp(self) -> Result<ManagedWorkerNativeCredentials> {
-            Ok(ManagedWorkerNativeCredentials::default())
+        pub(crate) async fn receive_after_mcp(self) -> Result<ManagedNativeCredentials> {
+            Ok(ManagedNativeCredentials::default())
         }
     }
 }
@@ -903,7 +800,7 @@ mod tests {
     }
 
     #[cfg(unix)]
-    async fn send_raw_frame(chunks: &[&[u8]]) -> Result<ManagedWorkerNativeCredentials> {
+    async fn send_raw_frame(chunks: &[&[u8]]) -> Result<ManagedNativeCredentials> {
         let (mut sender, receiver) = platform::raw_channel_for_test().unwrap();
         let receiver = tokio::spawn(receiver.receive_after_mcp());
         let mut ready = vec![0_u8; MANAGED_WORKER_CREDENTIAL_READY.len()];
@@ -922,11 +819,10 @@ mod tests {
     #[test]
     fn native_credential_control_frame_round_trips_without_echoing_invalid_payloads() {
         let credential = "exa-control-frame-canary";
-        let encoded = ManagedWorkerNativeCredentials::for_test(Some(credential))
+        let encoded = ManagedNativeCredentials::for_test(Some(credential))
             .encode_control_frame()
             .unwrap();
-        let decoded =
-            ManagedWorkerNativeCredentials::decode_control_frame(encoded.as_bytes()).unwrap();
+        let decoded = ManagedNativeCredentials::decode_control_frame(encoded.as_bytes()).unwrap();
         assert_eq!(decoded.into_exa_api_key().as_deref(), Some(credential));
 
         let invalid = [
@@ -935,7 +831,7 @@ mod tests {
             b"\n",
         ]
         .concat();
-        let error = match ManagedWorkerNativeCredentials::decode_control_frame(&invalid) {
+        let error = match ManagedNativeCredentials::decode_control_frame(&invalid) {
             Ok(_) => panic!("invalid credential control frame was accepted"),
             Err(error) => error.to_string(),
         };
@@ -946,7 +842,7 @@ mod tests {
     #[tokio::test]
     async fn sender_blocks_until_worker_announces_post_mcp_readiness() {
         let (sender, receiver) = platform::channel_for_test().unwrap();
-        let credentials = ManagedWorkerNativeCredentials::for_test(Some("ready-gated-canary"));
+        let credentials = ManagedNativeCredentials::for_test(Some("ready-gated-canary"));
         let delivery = tokio::spawn(async move { sender.send_after_ready(&credentials).await });
         tokio::time::sleep(std::time::Duration::from_millis(25)).await;
         assert!(

@@ -166,7 +166,7 @@ impl Agent {
             let session_id = sink.session_id.clone();
             let stored_message = message.clone();
             let run_id = run_id.to_string();
-            self.steering_append_pending = true;
+            self.prompt_commit_pending = true;
             self.pending_log_end = Some(idx + 1);
             let appended = crate::store::spawn_blocking_store_caller(move || {
                 let append = || match (inbox_prompt.as_ref(), review_intent.as_deref()) {
@@ -225,11 +225,11 @@ impl Agent {
                     failure.transient = false;
                     return Err(error.context(failure));
                 }
-                self.steering_append_pending = false;
+                self.prompt_commit_pending = false;
                 self.pending_log_end = None;
                 return Err(error);
             }
-            self.steering_append_pending = false;
+            self.prompt_commit_pending = false;
             self.pending_log_end = None;
             self.committed_log_len = idx + 1;
             self.event_sink
@@ -290,7 +290,7 @@ impl Agent {
         let batch_len = staged.len() as u64;
         self.pending_log_end = Some(from_idx as u64 + batch_len);
         let staged = staged.to_vec();
-        self.steering_append_pending = true;
+        self.prompt_commit_pending = true;
         let joined = crate::store::spawn_blocking_store_caller(move || {
             writer.append_claimed_thread_steering(
                 &sink_session_id,
@@ -301,7 +301,7 @@ impl Agent {
             )
         })
         .await;
-        self.steering_append_pending = false;
+        self.prompt_commit_pending = false;
         let committed =
             joined.map_err(|error| anyhow!("steering transcript commit task failed: {error}"))?;
         match committed {
@@ -325,7 +325,7 @@ impl Agent {
             return Ok(0);
         };
         let run_id = self
-            .steering_dispatch_id
+            .current_run_id
             .clone()
             .ok_or_else(|| anyhow!("direct inbox delivery requires an active run id"))?;
         let writer = Arc::clone(&sink.writer);

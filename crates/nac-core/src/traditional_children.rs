@@ -4,6 +4,9 @@
 //! The server supplies session construction/attachment through this trait so
 //! model tools never loop back through HTTP or depend on `nac-server`.
 
+#[path = "traditional_children/legacy_direct_prompts.rs"]
+mod legacy_direct_prompts;
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex};
@@ -80,27 +83,63 @@ pub fn fresh_general_child_messages(
     parent_working_directory: &str,
     description: &str,
 ) -> Result<Vec<Message>> {
-    let parent_system = parent_messages.first().and_then(|message| match message {
-        Message::System { content } => Some(content.as_str()),
-        _ => None,
-    });
-    let parent_base = crate::agent::render_direct_system_prompt(parent_working_directory);
-    let delegating_parent_base =
-        crate::agent::render_direct_with_orchestrator_system_prompt(parent_working_directory);
-    // Schema-17 prototypes and hand-authored fixture rows may predate the
-    // canonical direct system head. They still get a safe fresh child prompt,
-    // but have no persisted project-instruction suffix to inherit.
-    let project_suffix = parent_system
-        .and_then(|system| {
-            system
-                .strip_prefix(&delegating_parent_base)
-                .or_else(|| system.strip_prefix(&parent_base))
-        })
-        .unwrap_or_default();
+    let instructions = InheritedProjectInstructions::from_parent_transcript(
+        parent_messages,
+        parent_working_directory,
+    );
     let mut child =
         crate::agent::render_general_child_system_prompt(parent_working_directory, description);
-    child.push_str(project_suffix);
+    child.push_str(instructions.suffix);
     Ok(vec![Message::System { content: child }])
+}
+
+// Existing transcripts contain the rendered system head, not separate guidance.
+// Keep this compatibility decoder at the child boundary so the inherited bytes
+// have an explicit owner until a durable representation can replace it.
+struct InheritedProjectInstructions<'a> {
+    suffix: &'a str,
+}
+
+impl<'a> InheritedProjectInstructions<'a> {
+    #[expect(
+        clippy::expect_used,
+        reason = "the delegating prompt is constructed by extending the direct prompt"
+    )]
+    fn from_parent_transcript(
+        parent_messages: &'a [Message],
+        parent_working_directory: &str,
+    ) -> Self {
+        let parent_system = parent_messages.first().and_then(|message| match message {
+            Message::System { content } => Some(content.as_str()),
+            _ => None,
+        });
+        let parent_base = crate::agent::render_direct_system_prompt(parent_working_directory);
+        let delegating_parent_base =
+            crate::agent::render_direct_with_orchestrator_system_prompt(parent_working_directory);
+        // Schema-17 prototypes and hand-authored fixture rows may predate the
+        // canonical direct system head. They still get a safe fresh child prompt,
+        // but have no persisted project-instruction suffix to inherit.
+        let managed_suffix = delegating_parent_base
+            .strip_prefix(&parent_base)
+            .expect("delegating prompt extends the direct prompt");
+        let project_suffix = parent_system
+            .and_then(|system| {
+                system
+                    .strip_prefix(&delegating_parent_base)
+                    .or_else(|| system.strip_prefix(&parent_base))
+                    .or_else(|| {
+                        legacy_direct_prompts::instruction_suffix(
+                            system,
+                            parent_working_directory,
+                            managed_suffix,
+                        )
+                    })
+            })
+            .unwrap_or_default();
+        Self {
+            suffix: project_suffix,
+        }
+    }
 }
 
 pub fn parent_prompt_working_directory(
@@ -186,6 +225,117 @@ pub fn check_continuation_description(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inherited_project_suffix_is_exact_and_legacy_heads_stay_empty() {
+        let cwd = "/workspace";
+        let suffix = "\n\nProject guidance:\n  preserve whitespace\n";
+        let parent = format!("{}{suffix}", crate::agent::render_direct_system_prompt(cwd));
+        let messages =
+            fresh_general_child_messages(&[Message::System { content: parent }], cwd, "task")
+                .unwrap();
+        let Message::System { content } = &messages[0] else {
+            panic!("expected system head")
+        };
+        assert_eq!(
+            content,
+            &format!(
+                "{}{suffix}",
+                crate::agent::render_general_child_system_prompt(cwd, "task")
+            )
+        );
+        let legacy = fresh_general_child_messages(
+            &[Message::System {
+                content: "legacy".into(),
+            }],
+            cwd,
+            "task",
+        )
+        .unwrap();
+        let Message::System { content } = &legacy[0] else {
+            panic!("expected system head");
+        };
+        assert_eq!(
+            content,
+            &crate::agent::render_general_child_system_prompt(cwd, "task")
+        );
+    }
+
+    #[test]
+    fn persisted_historical_direct_heads_inherit_exact_guidance_without_history() {
+        let root =
+            std::env::temp_dir().join(format!("nac-legacy-child-prompts-{}", uuid::Uuid::new_v4()));
+        let store = root.join("store.db");
+        crate::store::initialize(&store).unwrap();
+        let cwd = "/workspace";
+        let direct = crate::agent::render_direct_system_prompt(cwd);
+        let delegating = crate::agent::render_direct_with_orchestrator_system_prompt(cwd);
+        let managed_suffix = delegating.strip_prefix(&direct).unwrap();
+        let guidance = "\n\nProject instructions:\n  retain exact whitespace\n\nMCP guidance: α\n";
+        let client = crate::model::ModelClient::new_for_test();
+        for (index, template) in legacy_direct_prompts::TEMPLATES.iter().enumerate() {
+            for managed in [false, true] {
+                let base = template.replacen("{working_directory}", cwd, 1);
+                let parent_head = format!(
+                    "{base}{}{guidance}",
+                    if managed { managed_suffix } else { "" }
+                );
+                let id = format!("legacy-{index}-{managed}");
+                let mut snapshot = crate::sessions::new_snapshot(
+                    id.clone(),
+                    PathBuf::from(cwd),
+                    client.model.clone(),
+                    client.base_url().to_string(),
+                    client.backend(),
+                    client.reasoning_effort(),
+                    None,
+                    None,
+                    vec![
+                        Message::System {
+                            content: parent_head.clone(),
+                        },
+                        Message::User {
+                            content: "private parent history".into(),
+                        },
+                    ],
+                    None,
+                    std::collections::BTreeMap::new(),
+                );
+                snapshot.behavior = if managed {
+                    crate::sessions::SessionBehavior::DirectWithOrchestrator
+                } else {
+                    crate::sessions::SessionBehavior::Direct
+                };
+                crate::sessions::create_session(&store, &snapshot).unwrap();
+                let restored = crate::sessions::load_session(&store, &id).unwrap();
+                let Message::System {
+                    content: restored_head,
+                } = &restored.messages[0]
+                else {
+                    panic!("expected parent system head")
+                };
+                assert_eq!(
+                    restored_head, &parent_head,
+                    "historical transcript changed: {id}"
+                );
+                let child =
+                    fresh_general_child_messages(&restored.messages, cwd, "review").unwrap();
+                assert_eq!(child.len(), 1, "parent history leaked: {id}");
+                let Message::System { content } = &child[0] else {
+                    panic!("expected child system head")
+                };
+                assert_eq!(
+                    content,
+                    &format!(
+                        "{}{guidance}",
+                        crate::agent::render_general_child_system_prompt(cwd, "review")
+                    ),
+                    "wrong inherited bytes: {id}"
+                );
+            }
+        }
+        let _ = std::fs::remove_dir_all(root);
+    }
 
     #[test]
     fn delegating_parent_does_not_give_managed_orchestrator_instructions_to_child() {

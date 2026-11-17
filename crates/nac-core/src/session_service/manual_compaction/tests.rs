@@ -471,10 +471,10 @@ async fn assert_two_service_admissions_refresh_external_checkpoint(
     let snapshot_b = sessions::load_session(&store_path, &session_id).unwrap();
     let mut agent_b = test_agent(client.clone(), store_path.clone(), Some(session_id.clone()));
     agent_b.messages = snapshot_b.messages.clone().into();
-    let parts_b = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
+    let parts_b = SessionService::from_session_run_config(SessionRunConfig {
         agent: agent_b,
         client,
-        session: OrchestratorSession::Active {
+        session: RuntimeSession::Active {
             session_id: session_id.clone(),
             store_path: store_path.clone(),
             snapshot: snapshot_b,
@@ -626,10 +626,10 @@ async fn sequential_run_admission_preserves_provider_context_sample_for_threshol
         std::collections::BTreeMap::new(),
     );
     sessions::create_session(&store_path, &snapshot).unwrap();
-    let parts = SessionService::from_orchestrator_run_config(OrchestratorRunConfig {
+    let parts = SessionService::from_session_run_config(SessionRunConfig {
         agent,
         client,
-        session: OrchestratorSession::Active {
+        session: RuntimeSession::Active {
             session_id: session_id.to_string(),
             store_path: store_path.clone(),
             snapshot,
