@@ -226,6 +226,52 @@ Only a separately authenticated, active, independently reviewed post-build
 approval can admit the rules. The source policy remains empty. Existing
 application-absence rules and policy schemas retain their previous behavior.
 
+### Narrow libssh2 pinned-source fixed proof
+
+The `fixed` proof `pinned-libssh2-fixed-source` is available only for the
+following exact scanner selectors on the pinned `apk:libssh2 1.11.1-r12`
+source, patch set, and installed payload. These are five raw rows across four
+rules; no other alias or libssh2 finding inherits a disposition.
+
+| Advisory | Package / version / scanner source | Explicit aliases |
+| --- | --- | --- |
+| [CVE-2026-58050](https://github.com/advisories/GHSA-mf77-5hj2-98w9) | `apk:libssh2` / `1.11.1-r12` / `grype` | CVE only |
+| [CVE-2026-58050](https://github.com/libssh2/libssh2/commit/34497525929b9a47f03dfb81887ac896202b7e12) | `upstream:libssh2/libssh2` / `1.11.1` / `grype-upstream` | CVE only |
+| [CVE-2026-55200](https://github.com/libssh2/libssh2/commit/97acf3dfda80c91c3a8c9f2372546301d4a1a7a8) | `upstream:libssh2/libssh2` / `1.11.1` / `grype-upstream` | CVE only |
+| [CVE-2026-55200](https://github.com/advisories/GHSA-r8mh-x5qv-7gg2) | `upstream-wolfi:libssh2` / `1.11.1` / `grype-upstream` | CVE and `GHSA-r8mh-x5qv-7gg2` |
+
+The reviewed evidence has exactly eight roles: the pinned GitHub advisory API
+bytes, official upstream fix patch, actual Debian/Wolfi patch, fully composed
+source file, official libssh2 release archive, Debian patch archive, NAC
+source lock, and exact-image provenance. The verifier checks the CVE/GHSA
+identity, official fix commit, actual patch bytes, final source hash and guard
+ordering, a canonical SHA-256 pin of the complete `libssh2` source-lock subtree,
+installed APK payload aggregate, image/source/platform/profile and independently
+verified observation. The entire installed source lock must also match its
+independently collected provenance digest. An unrelated package's lock change
+can therefore accompany a new image review without changing this libssh2 proof;
+any libssh2 lock change needs a reviewed pin update. The 58050 Debian
+patch must be extracted from the retained Debian archive; the 55200 Wolfi
+patch must match the provenance source download. A changed official artifact,
+patch, composed source, package payload, image or profile fails closed.
+The existing v10 image bundle retains source archives, patches, lock and
+provenance, but not the fully composed source files. A post-build evidence
+collector must independently reproduce and retain those exact files before a
+human can review a real rule; a local matching source hash is preparation only.
+
+This is **source-guard and installed-byte identity evidence**, not an amd64
+behavioral differential or a reproducible source-to-binary build. The 58050
+advisory describes a multiplication overflow on 32-bit platforms; the
+bounded 32-bit control demonstrates that source correction. The 55200
+advisory is not limited to 32-bit platforms: its upstream fix places a packet
+length cap before arithmetic and allocation, while the retained paired
+behavioral differential exercises that seam on i386. The independent reviewer
+must decide whether the exact patched source, source lock, package provenance,
+installed ELF bridge, and architecture-limited controls suffice for the
+specific image. This proof cannot approve itself. It requires the same
+separate authenticated post-build human review and external active approval as
+every other applicability rule; the checked-in source policy remains empty.
+
 ## Results and integration boundary
 
 The result contains `schema_version`, the effective `policy_sha256`,

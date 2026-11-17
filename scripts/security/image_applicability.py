@@ -11,6 +11,7 @@ import json
 import re
 
 import image_applicability_curl_release
+import image_applicability_libssh2_source
 import image_applicability_subject_mismatch
 
 
@@ -214,6 +215,8 @@ def evidence_for(rule, evidence, observations, now):
     if rule["disposition"] == "fixed":
         if isinstance(proof, dict) and proof.get("kind") == "official-curl-fixed-release":
             image_applicability_curl_release.validate(rule, record, evidence)
+        elif isinstance(proof, dict) and proof.get("kind") == "pinned-libssh2-fixed-source":
+            image_applicability_libssh2_source.validate(rule, record, evidence)
         else:
             exact(proof, {"kind", "vulnerable_control", "fixed_control"}, "fixed proof")
             require(proof == {"kind": "regression", "vulnerable_control": "failed-as-expected",
