@@ -2,6 +2,7 @@ import { test, expect, type Candidate } from "./fixture";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { workspacePage } from "./ui-readiness";
 
 const state = (c: Candidate) =>
   c.app.evaluate(({ app }) =>
@@ -137,9 +138,8 @@ for (const response of [0, 1]) {
         windows: [owner.id],
       });
     } else {
-      const workspace = c.app.waitForEvent("window");
       await answer(c, 0);
-      c.page = await workspace;
+      c.page = await workspacePage(c.app, ready.receipt.endpoint);
       await c.page.waitForURL(/^http:\/\/127\.0\.0\.1:\d+/);
       await expect(c.page.getByText("No projects yet", { exact: true })).toBeVisible();
       const after = await state(c);

@@ -2,6 +2,7 @@ import { test, expect, type Candidate } from "./fixture";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
+import { prepareNewShell, workspacePage } from "./ui-readiness";
 
 async function state(c: Candidate) {
   return c.app.evaluate(({ app }) =>
@@ -22,17 +23,7 @@ async function replacement(c: Candidate, previous: number) {
       ),
     )
     .not.toContain(previous);
-  await expect
-    .poll(
-      async () =>
-        (await c.app.windows()).filter(
-          (page) => !page.isClosed() && page.url().startsWith(c.endpoint),
-        ).length,
-    )
-    .toBe(1);
-  c.page = (await c.app.windows()).find(
-    (page) => !page.isClosed() && page.url().startsWith(c.endpoint),
-  )!;
+  c.page = await workspacePage(c.app, c.endpoint);
   await expect.poll(async () => (await state(c)).recovery.pending).toBe(false);
   return c.page;
 }
@@ -47,6 +38,7 @@ test("renderer crash retires the document while approval, queue and PTY retain t
   const show = c.page.getByRole("button", { name: "Show panel", exact: true });
   await expect(show.or(pane)).toBeVisible();
   if (await show.isVisible()) await show.click();
+  await prepareNewShell(pane);
   await pane.getByRole("button", { name: /^New shell$/i }).click();
   await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
   await pane.getByRole("region", { name: "Interactive terminal", exact: true }).click();
@@ -279,9 +271,7 @@ test("deterministic suspend/resume retires document and revalidates the exact en
   expect((await state(c)).receipt).toEqual(before.receipt);
   await c.app.evaluate(({ powerMonitor }) => powerMonitor.emit("resume"));
   await expect.poll(async () => (await state(c)).recovery.pending).toBe(false);
-  c.page = (await c.app.windows()).find(
-    (page) => !page.isClosed() && page.url().startsWith(c.endpoint),
-  )!;
+  c.page = await workspacePage(c.app, c.endpoint);
   await expect(c.page.getByRole("combobox", { name: "Message" })).toBeVisible();
   expect(new URL(c.page.url()).hash).toBe(`#/session/${session}/files`);
   expect((await state(c)).receipt).toEqual(before.receipt);
@@ -344,9 +334,7 @@ test("automatic renderer recovery is bounded and explicit menu reload retains th
     item.click();
   });
   await expect.poll(async () => (await state(c)).recovery.pending).toBe(false);
-  c.page = (await c.app.windows()).find(
-    (page) => !page.isClosed() && page.url().startsWith(c.endpoint),
-  )!;
+  c.page = await workspacePage(c.app, c.endpoint);
   await expect(c.page.getByText("No projects yet", { exact: true })).toBeVisible();
   expect((await state(c)).receipt).toEqual(before.receipt);
 });
@@ -363,6 +351,7 @@ test("new engine Retry permits fresh terminal input while same-engine reload sti
   const show = c.page.getByRole("button", { name: "Show panel", exact: true });
   await expect(show.or(pane)).toBeVisible();
   if (await show.isVisible()) await show.click();
+  await prepareNewShell(pane);
   await pane.getByRole("button", { name: /^New shell$/i }).click();
   await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
   await pane.getByRole("region", { name: "Interactive terminal", exact: true }).click();
@@ -437,6 +426,7 @@ test("new engine Retry permits fresh terminal input while same-engine reload sti
   c.ownedPids.push(restarted.enginePid, custody);
   pane = c.page.getByRole("region", { name: "Session terminal", exact: true });
   await expect(pane).toBeVisible();
+  await prepareNewShell(pane);
   await pane.getByRole("button", { name: /^New shell$/i }).click();
   await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
   await expect(
