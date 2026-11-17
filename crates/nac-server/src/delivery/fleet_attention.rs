@@ -104,9 +104,6 @@ impl FleetAttentionSessionDto {
                         AttentionLineageKind::TraditionalChild => {
                             SessionLineageKind::TraditionalChild
                         }
-                        AttentionLineageKind::ManagedOrchestrator => {
-                            SessionLineageKind::ManagedOrchestrator
-                        }
                     },
                     parent_session_id: lineage.parent_session_id.clone(),
                     root_session_id: lineage.root_session_id.clone(),

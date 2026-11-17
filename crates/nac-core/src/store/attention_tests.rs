@@ -435,9 +435,9 @@ fn historical_completed_goal_allows_only_a_later_exact_successful_idle_request()
 }
 
 #[test]
-fn topology_reads_project_and_both_delegated_lineages_without_descriptions() {
+fn topology_reads_project_and_child_lineage_without_descriptions() {
     let path = fixture();
-    for id in ["root", "child", "orchestrator"] {
+    for id in ["root", "child"] {
         insert_test_session(&path, id);
     }
     let connection = open_runtime_connection(&path).unwrap();
@@ -445,15 +445,13 @@ fn topology_reads_project_and_both_delegated_lineages_without_descriptions() {
         .execute_batch(
             "INSERT INTO traditional_children(child_session_id,parent_session_id,root_session_id,profile,description,nesting_depth,status,generation,created_at,updated_at)
              VALUES('child','root','root','general','private child description',1,'idle',0,'now','now');
-             INSERT INTO managed_orchestrators(orchestrator_session_id,parent_session_id,root_session_id,description,status,generation,created_at,updated_at)
-             VALUES('orchestrator','root','root','private orchestrator description','idle',0,'now','now');
              PRAGMA foreign_keys=OFF;
              INSERT INTO session_projects(session_id,project_id) VALUES('root','project-a');",
         )
         .unwrap();
     let topology = read_attention_topology(&path).unwrap();
     let find = |id: &str| topology.iter().find(|row| row.session_id == id).unwrap();
-    assert_eq!(topology.len(), 4);
+    assert_eq!(topology.len(), 3);
     assert_eq!(find("root").project_id.as_deref(), Some("project-a"));
     assert!(find("root").lineage.is_none());
     assert!(find("session").lineage.is_none());
@@ -464,10 +462,6 @@ fn topology_reads_project_and_both_delegated_lineages_without_descriptions() {
             parent_session_id: "root".into(),
             root_session_id: "root".into(),
         })
-    );
-    assert_eq!(
-        find("orchestrator").lineage.as_ref().unwrap().kind,
-        AttentionLineageKind::ManagedOrchestrator
     );
     assert!(!format!("{topology:?}").contains("private"));
     let _ = std::fs::remove_dir_all(path.parent().unwrap());

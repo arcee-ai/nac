@@ -253,11 +253,11 @@ correlation |command| crate::telemetry::Correlation::session(command.session.as_
 port public;
 }
 
-/// The two distinct delegated topologies, kept separate (never a worker role).
+/// Delegated topology of a session. Only traditional children are linked;
+/// orchestration topologies are being retired and are reported unlinked.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AttentionLineageKind {
     TraditionalChild,
-    ManagedOrchestrator,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -283,19 +283,27 @@ pub fn read_attention_topology(path: &Path) -> Result<Vec<AttentionTopology>> {
     let mut connection = open_initialized_read_connection(path)?;
     let tx = connection.transaction()?;
     let mut lineage = HashMap::new();
-    for (table, child, kind) in [
-        ("traditional_children", "child_session_id", AttentionLineageKind::TraditionalChild),
-        ("managed_orchestrators", "orchestrator_session_id", AttentionLineageKind::ManagedOrchestrator),
-    ] {
-        let mut statement = tx.prepare(&format!(
-            "SELECT {child},parent_session_id,root_session_id FROM {table}"
-        ))?;
+    {
+        let mut statement = tx.prepare(
+            "SELECT child_session_id,parent_session_id,root_session_id FROM traditional_children",
+        )?;
         let rows = statement.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
         })?;
         for row in rows {
             let (session, parent_session_id, root_session_id) = row?;
-            lineage.insert(session, AttentionLineage { kind, parent_session_id, root_session_id });
+            lineage.insert(
+                session,
+                AttentionLineage {
+                    kind: AttentionLineageKind::TraditionalChild,
+                    parent_session_id,
+                    root_session_id,
+                },
+            );
         }
     }
     let mut statement = tx.prepare(

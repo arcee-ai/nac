@@ -9,11 +9,10 @@ use axum::{
     Json, Router,
 };
 use futures_core::Stream;
-use nac_core::model::BackendKind;
-use nac_core::sessions::{self, SessionBehavior};
+use nac_core::sessions;
 use std::{
     collections::BTreeMap,
-    path::{Path, PathBuf},
+    path::PathBuf,
     pin::Pin,
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -153,24 +152,6 @@ struct Fixture {
     _env: ScopedModelEnv,
 }
 
-fn seed(root: &Path, id: &str, behavior: SessionBehavior) {
-    let mut snapshot = sessions::new_snapshot(
-        id.into(),
-        root.to_path_buf(),
-        "model-a".into(),
-        "https://api.openai.com/v1".into(),
-        BackendKind::OpenAiResponses,
-        None,
-        None,
-        None,
-        Vec::new(),
-        Some("OPENAI_API_KEY".into()),
-        BTreeMap::new(),
-    );
-    snapshot.behavior = behavior;
-    sessions::create_session(&root.join("store.db"), &snapshot).unwrap();
-}
-
 async fn fixture() -> Fixture {
     let root = std::env::temp_dir().join(format!("nac-fleet-attention-{}", Uuid::new_v4()));
     std::fs::create_dir_all(&root).unwrap();
@@ -217,7 +198,6 @@ async fn fixture() -> Fixture {
     seed_direct_session(&root, "session");
     seed_direct_session(&root, "dormant");
     seed_direct_session(&root, "child");
-    seed(&root, "legacy", SessionBehavior::Orchestrator);
     let path = root.join("store.db");
     let mut snapshot = sessions::load_session(&path, "session").unwrap();
     snapshot.base_url = base;
@@ -331,8 +311,8 @@ async fn real_pending_permission_reaches_every_browser_stream_and_resolves_besid
     assert_eq!(busy.status(), StatusCode::CONFLICT);
 
     let (mut one, mut two) = (Sessions::new(), Sessions::new());
-    until(&mut first, &mut one, |state| state.len() == 4).await;
-    until(&mut second, &mut two, |state| state.len() == 4).await;
+    until(&mut first, &mut one, |state| state.len() == 3).await;
+    until(&mut second, &mut two, |state| state.len() == 3).await;
     let baseline = json(&app, "/attention").await;
     // Unknown and unsupported are reported, never collapsed into "none".
     assert_eq!(
@@ -353,9 +333,7 @@ async fn real_pending_permission_reaches_every_browser_stream_and_resolves_besid
     assert_eq!(child["lineage"]["kind"], "traditional-child");
     assert_eq!(child["lineage"]["parent_session_id"], "session");
     assert_eq!(child["lineage"]["root_session_id"], "session");
-    let legacy = session(&baseline, "legacy");
-    assert_eq!(legacy["availability"]["permissions"], "unsupported");
-    assert!(legacy["lineage"].is_null());
+    assert!(session(&baseline, "dormant")["lineage"].is_null());
     assert!(!baseline.to_string().contains("private child description"));
 
     fixture.submit().await;
@@ -430,7 +408,7 @@ async fn headless_ask_with_only_fleet_attention_observers_still_fails_closed() {
     let mut first = open(&app, "/attention/stream").await;
     let _second = open(&app, "/attention/stream").await;
     let mut state = Sessions::new();
-    until(&mut first, &mut state, |state| state.len() == 4).await;
+    until(&mut first, &mut state, |state| state.len() == 3).await;
     let service = manager.attach_session("session").await.unwrap();
     fixture.submit().await;
     // No session event subscriber: the Ask is denied before it is ever pending,
@@ -487,7 +465,7 @@ async fn fleet_routes_keep_shared_web_guards_and_bound_concurrent_streams() {
     assert_eq!(busy.status(), StatusCode::SERVICE_UNAVAILABLE);
     // Snapshots remain available as the polling fallback.
     let snapshot = json(&app, "/attention").await;
-    assert_eq!(snapshot["sessions"].as_array().unwrap().len(), 4);
+    assert_eq!(snapshot["sessions"].as_array().unwrap().len(), 3);
     drop(streams);
     fixture.finish().await;
 }
