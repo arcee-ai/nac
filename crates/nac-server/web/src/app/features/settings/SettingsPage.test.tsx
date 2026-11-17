@@ -165,6 +165,45 @@ it("goes back to where the user was before Settings, or Home", () => {
   expect(where()).toBe("/");
 });
 
+it("leaves on Escape like Back, but never from a field or an open menu", () => {
+  render(
+    <MemoryRouter initialEntries={["/session/one/insights"]}>
+      <SettingsReturnProvider>
+        <Routes>
+          <Route path="/settings/:section" element={<SettingsPage />} />
+          <Route path="*" element={<Where />} />
+        </Routes>
+      </SettingsReturnProvider>
+    </MemoryRouter>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Open settings" }));
+  // A focused field keeps Escape (it may clear itself), and Settings stays.
+  const search = screen.getByRole("searchbox", { name: "Search settings" });
+  fireEvent.keyDown(search, { key: "Escape" });
+  expect(screen.getByRole("navigation", { name: "Settings sections" })).toBeTruthy();
+  // An open menu keeps Escape too.
+  const menu = document.createElement("div");
+  menu.setAttribute("role", "menu");
+  const item = document.createElement("button");
+  menu.append(item);
+  document.body.append(menu);
+  fireEvent.keyDown(item, { key: "Escape" });
+  expect(screen.getByRole("navigation", { name: "Settings sections" })).toBeTruthy();
+  menu.remove();
+  // Composition in progress is not a dismissal.
+  fireEvent.keyDown(document.body, { key: "Escape", isComposing: true });
+  expect(screen.getByRole("navigation", { name: "Settings sections" })).toBeTruthy();
+  // Otherwise Escape returns to where Settings was opened from.
+  fireEvent.keyDown(document.body, { key: "Escape" });
+  expect(screen.getByTestId("where").textContent).toBe("/session/one/insights");
+  cleanup();
+
+  // Arriving directly, Escape goes Home.
+  mount("/settings/about");
+  fireEvent.keyDown(document.body, { key: "Escape" });
+  expect(where()).toBe("/");
+});
+
 it("pushes from the phone's section list to a section and back", () => {
   state.mobile = true;
   mount("/settings");

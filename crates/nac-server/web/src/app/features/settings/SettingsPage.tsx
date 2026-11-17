@@ -24,6 +24,7 @@ import { AboutSection } from "./sections/AboutSection";
 import { AppearanceSection } from "./sections/AppearanceSection";
 import { GeneralSection } from "./sections/GeneralSection";
 import { useSettingsReturn } from "./settingsReturn";
+import { useSettingsEscape } from "./useSettingsEscape";
 
 function SectionBody({ section }: { section: SettingsSection }) {
   const { search } = useLocation();
@@ -238,6 +239,7 @@ export function SettingsPage() {
   const managed = useManagedHost();
   const managedStatus = useManagedHostStatus();
   const leave = useSettingsReturn();
+  useSettingsEscape(leave);
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
   const matches = useSectionMatches(query);
