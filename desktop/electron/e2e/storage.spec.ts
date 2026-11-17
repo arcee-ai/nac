@@ -307,6 +307,80 @@ test("Focus preference keys cross the native bridge and survive Quit on a new se
       "aria-selected",
       "true",
     );
+    const origin = new URL(next.page.url()).origin;
+    const attention = async () => {
+      const response = await next.page.request.get(`${origin}/attention`);
+      expect(response.ok()).toBe(true);
+      return (await response.json()).sessions;
+    };
+    const facts = async () => {
+      const current = await attention();
+      return [session, unreadSession].map((id) => {
+        const value = current.find((entry: any) => entry.session_id === id);
+        return {
+          outcome: value?.last_outcome,
+          activity: value?.activity.kind,
+          permissions: value?.availability.permissions,
+          questions: value?.availability.questions,
+          reviews: value?.availability.reviews,
+        };
+      });
+    };
+    // A cold passive census does not attach dormant sessions or pretend their
+    // broker facets are known, even though the outcomes are durable.
+    await expect.poll(facts).toEqual(
+      [outcome, unreadOutcome].map((value) => ({
+        outcome: value,
+        activity: "unknown",
+        permissions: "unknown",
+        questions: "available",
+        reviews: "unknown",
+      })),
+    );
+    await expect(
+      next.page.getByText("Status unavailable for 2 sessions", { exact: true }),
+    ).toBeVisible();
+    // Fixture-owned interactive GETs retain both broker owners. Snapshot GETs
+    // alone allow the next attachment to evict the prior idle owner. Keep Home
+    // unchanged: no SessionPage/read-marker or outcome click may mark B read.
+    await next.page.evaluate(
+      async (ids) => {
+        const sources = ids.map((id) => new EventSource(`/sessions/${id}/events/stream`));
+        (window as any).__focusColdSessionObservers = sources;
+        let timeout: ReturnType<typeof setTimeout> | undefined;
+        try {
+          await Promise.race([
+            Promise.all(
+              sources.map(
+                (source) =>
+                  new Promise<void>((resolve, reject) => {
+                    source.onopen = () => resolve();
+                    source.onerror = () => reject(Error("Cold fixture event stream failed"));
+                  }),
+              ),
+            ),
+            new Promise<never>((_resolve, reject) => {
+              timeout = setTimeout(
+                () => reject(Error("Cold fixture event stream admission timed out")),
+                10000,
+              );
+            }),
+          ]);
+        } finally {
+          clearTimeout(timeout);
+        }
+      },
+      [session, unreadSession],
+    );
+    await expect.poll(facts).toEqual(
+      [outcome, unreadOutcome].map((value) => ({
+        outcome: value,
+        activity: "idle",
+        permissions: "available",
+        questions: "available",
+        reviews: "available",
+      })),
+    );
     const restoredInbox = next.page.getByRole("group", { name: "Inbox", exact: true });
     await expect(
       restoredInbox.getByRole("button", { name: `${unreadTitle}, Finished`, exact: true }),
@@ -314,17 +388,26 @@ test("Focus preference keys cross the native bridge and survive Quit on a new se
     await expect(
       restoredInbox.getByRole("button", { name: `${title}, Finished`, exact: true }),
     ).toHaveCount(0);
-    const origin = new URL(next.page.url()).origin;
+    let previousCheckpoint = "";
     await expect
       .poll(async () => {
-        const response = await next.page.request.get(`${origin}/attention`);
-        expect(response.ok()).toBe(true);
-        const current = (await response.json()).sessions;
-        return [session, unreadSession].map(
-          (id) => current.find((value: any) => value.session_id === id)?.last_outcome,
+        const state = await next.app.evaluate(({ app }) =>
+          process
+            .getBuiltinModule("module")
+            .createRequire(app.getAppPath() + "/package.json")(app.getAppPath())
+            .getState(),
         );
+        const bytes = await fs.readFile(checkpoint, "utf8");
+        const stable = bytes === previousCheckpoint;
+        previousCheckpoint = bytes;
+        return {
+          available: state.storage.available,
+          pending: state.storage.pending,
+          stable,
+          values: JSON.parse(bytes).values,
+        };
       })
-      .toEqual([outcome, unreadOutcome]);
+      .toEqual({ available: true, pending: 0, stable: true, values: restored.values });
     await restoredList.getByRole("tab", { name: "Sessions", exact: true }).click();
     await expect(
       next.page
@@ -345,7 +428,13 @@ test("Focus preference keys cross the native bridge and survive Quit on a new se
     expect(c.provider.requests).toHaveLength(2);
     c.provider.assertConsumed();
   } finally {
-    await stop(next.app);
+    try {
+      await next.page.evaluate(() => {
+        for (const source of (window as any).__focusColdSessionObservers ?? []) source.close();
+      });
+    } finally {
+      await stop(next.app);
+    }
   }
 });
 
