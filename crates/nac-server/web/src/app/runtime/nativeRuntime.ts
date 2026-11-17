@@ -145,6 +145,16 @@ export class NativeRuntime {
     return release;
   };
 
+  /** Authenticated EventSource for a passive, non-session stream path. */
+  readonly openStream = async (path: string): Promise<EventSource> => {
+    this.controller.signal.throwIfAborted();
+    const url = this.client.transport.url(path);
+    if (!this.eventSource) return new EventSource(url, this.client.transport.eventSourceInit());
+    const context = await this.client.transport.streamContext();
+    this.controller.signal.throwIfAborted();
+    return this.eventSource(url, { withCredentials: context.credentials === "include" }, context);
+  };
+
   /** StrictMode may release/reacquire a view in the same commit. */
   readonly retain = () => {
     this.attachments += 1;
@@ -188,7 +198,12 @@ export type RuntimeDependencies = Pick<NativeRuntime, "api" | "client" | "stores
   Partial<
     Pick<
       NativeRuntime,
-      "id" | "assets" | "terminalInputRecovery" | "productNavigation" | "nativeDirectory"
+      | "id"
+      | "assets"
+      | "terminalInputRecovery"
+      | "productNavigation"
+      | "nativeDirectory"
+      | "openStream"
     >
   >;
 export function runtimeForQueryClient(client: QueryClient): RuntimeDependencies {

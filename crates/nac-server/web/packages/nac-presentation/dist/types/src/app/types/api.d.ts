@@ -147,6 +147,11 @@ export type SessionForkOrigin = ApiSchema<"SessionForkOrigin">;
 export type SessionForkLink = ApiSchema<"SessionForkLink">;
 export type SessionLineage = ApiSchema<"SessionLineageSnapshot">;
 export type ManagedSessionSummary = ApiSchema<"ManagedSessionSummary">;
+/** Identity-only attention for one session from `GET /attention`. */
+export type FleetAttentionSession = ApiSchema<"FleetAttentionSessionDto">;
+export type FleetAttentionSnapshot = ApiSchema<"FleetAttentionSnapshotDto">;
+export type FleetAttentionFrame = ApiSchema<"FleetAttentionFrame">;
+export type AttentionFacet = ApiSchema<"AttentionFacetDto">;
 /** `GET /sessions/{id}/config` — the raw persisted row, not the effective config. */
 export type RawSessionConfig = ApiSchema<"RawSessionConfig">;
 export type LaunchModelDefaults = ApiSchema<"LaunchModelDefaults">;

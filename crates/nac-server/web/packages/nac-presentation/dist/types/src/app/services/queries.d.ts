@@ -5,4 +5,5 @@ export * from "./queries/configuration";
 export * from "./queries/session";
 export * from "./queries/workspace";
 export * from "./queries/projects";
+export * from "./queries/attention";
 export { useDeleteManagedSecret, useManagedAuth, useManagedGitHub, useManagedHostStatus, useManagedProviderModels, useManagedSecrets, usePutManagedSecret, useReadyProviderModels, } from "../features/managed/queries";

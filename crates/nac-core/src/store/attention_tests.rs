@@ -433,3 +433,41 @@ fn historical_completed_goal_allows_only_a_later_exact_successful_idle_request()
     drop(connection);
     std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
 }
+
+#[test]
+fn topology_reads_project_and_child_lineage_without_descriptions() {
+    let path = fixture();
+    for id in ["root", "child"] {
+        insert_test_session(&path, id);
+    }
+    let connection = open_runtime_connection(&path).unwrap();
+    connection
+        .execute_batch(
+            "INSERT INTO traditional_children(child_session_id,parent_session_id,root_session_id,profile,description,nesting_depth,status,generation,created_at,updated_at)
+             VALUES('child','root','root','general','private child description',1,'idle',0,'now','now');
+             PRAGMA foreign_keys=OFF;
+             INSERT INTO session_projects(session_id,project_id) VALUES('root','project-a');",
+        )
+        .unwrap();
+    let topology = read_attention_topology(&path).unwrap();
+    let find = |id: &str| topology.iter().find(|row| row.session_id == id).unwrap();
+    assert_eq!(topology.len(), 3);
+    assert_eq!(find("root").project_id.as_deref(), Some("project-a"));
+    assert!(find("root").lineage.is_none());
+    assert!(find("session").lineage.is_none());
+    assert_eq!(
+        find("child").lineage,
+        Some(AttentionLineage {
+            kind: AttentionLineageKind::TraditionalChild,
+            parent_session_id: "root".into(),
+            root_session_id: "root".into(),
+        })
+    );
+    assert!(!format!("{topology:?}").contains("private"));
+    let metadata = read_attention_metadata(&path, None).unwrap();
+    let child = metadata.iter().find(|row| row.id == "child").unwrap();
+    assert!(child.traditional_child && !child.primary);
+    let root = metadata.iter().find(|row| row.id == "root").unwrap();
+    assert!(!root.traditional_child && root.primary);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}

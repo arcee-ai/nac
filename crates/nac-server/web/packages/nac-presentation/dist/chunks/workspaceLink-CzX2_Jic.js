@@ -1,4 +1,4 @@
-import { D as e, O as t, a as n, n as r, z as i } from "./RuntimeContext-DaUNegyn.js";
+import { D as e, O as t, a as n, n as r, z as i } from "./RuntimeContext-CFgTw6bL.js";
 import { a, y as o } from "./PresentationBoundary-DtRoHZkM.js";
 import { n as s, t as c } from "./Toast-89GVBaOd.js";
 import { Profiler as l, createContext as u, useCallback as d, useContext as f, useEffect as p, useMemo as m, useRef as h, useState as ee } from "react";
@@ -128,6 +128,7 @@ var _e = 5e3, y = {
 		"skills"
 	],
 	sessionsAll: ["sessions"],
+	fleetAttention: (e) => ["fleet-attention", { projectId: e }],
 	threadEventsRoot: (e) => [
 		"session",
 		e,

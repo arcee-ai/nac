@@ -20,10 +20,12 @@ import type {
   QuestionAnswer,
   QuestionAnswerReceipt,
   SessionMcpRefreshStatus,
+  FleetAttentionSnapshot,
 } from "@/app/types/api";
 import { nacClient } from "@/app/services/nacClient";
 export * from "../../../packages/nac-client/src/api.js";
 export type NativeApi = ReturnType<typeof createNacApi> & {
+  fleetAttention(projectId?: string, signal?: AbortSignal): Promise<FleetAttentionSnapshot>;
   taskQuestions(sessionId: string, signal?: AbortSignal): Promise<QuestionRecord[]>;
   answerTaskQuestion(sessionId: string, answer: QuestionAnswer): Promise<QuestionAnswerReceipt>;
   cancelTaskQuestion(
@@ -79,6 +81,12 @@ export function createNativeApi(
   const request = client.transport.request.bind(client.transport);
   return {
     ...createNacApi(client, { productContextBinding }),
+    fleetAttention: (projectId, signal) =>
+      request<FleetAttentionSnapshot>(
+        "GET",
+        `/attention${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ""}`,
+        { signal },
+      ),
     taskQuestions: (id, signal) =>
       request<QuestionRecord[]>("GET", `/sessions/${encodeURIComponent(id)}/questions`, { signal }),
     answerTaskQuestion: (id, answer) =>

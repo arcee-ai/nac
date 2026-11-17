@@ -27,6 +27,9 @@ pub struct AttentionStoredRun {
 pub struct AttentionStoredSession {
     pub id: String,
     pub primary: bool,
+    /// A durable traditional child relationship exists (never a managed
+    /// orchestrator). Children report decisions under their own session id.
+    pub traditional_child: bool,
     pub direct: bool,
     pub questions_supported: bool,
     pub goal: Option<AttentionStoredGoal>,
@@ -209,14 +212,15 @@ pub fn read_attention_metadata(path: &Path, session: Option<&str>) -> Result<Vec
     let mut statement = tx.prepare("SELECT substr(s.session_id,1,513),s.behavior,
         NOT EXISTS(SELECT 1 FROM traditional_children c WHERE c.child_session_id=s.session_id)
         AND NOT EXISTS(SELECT 1 FROM managed_orchestrators m WHERE m.orchestrator_session_id=s.session_id),
-        s.host_id IS NULL AND s.sandbox_json IS NULL, s.config_version
+        s.host_id IS NULL AND s.sandbox_json IS NULL, s.config_version,
+        EXISTS(SELECT 1 FROM traditional_children c WHERE c.child_session_id=s.session_id)
         FROM sessions s WHERE (?1 IS NULL OR s.session_id=?1) ORDER BY s.session_id LIMIT 1025")?;
-    let rows = statement.query_map([session], |row| Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,bool>(2)?,row.get::<_,bool>(3)?,row.get::<_,i64>(4)?)))?
+    let rows = statement.query_map([session], |row| Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,bool>(2)?,row.get::<_,bool>(3)?,row.get::<_,i64>(4)?,row.get::<_,bool>(5)?)))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     anyhow::ensure!(rows.len() <= ATTENTION_SOURCE_LIMIT, "attention metadata capacity exceeded");
     let mut output = Vec::with_capacity(rows.len());
     let mut bytes = 0usize;
-    for (id, behavior, primary, local, config_version) in rows {
+    for (id, behavior, primary, local, config_version, traditional_child) in rows {
         identifier(&id)?;
         anyhow::ensure!(config_version >= 0, "attention configuration revision unavailable");
         let direct = behavior == "direct" || behavior == "direct-with-orchestrator";
@@ -240,7 +244,7 @@ pub fn read_attention_metadata(path: &Path, session: Option<&str>) -> Result<Vec
             Ok(AttentionStoredRun { run_id, disposition: disposition.parse()? })
         }).transpose()?;
         let recovery_pending = tx.query_row("SELECT EXISTS(SELECT 1 FROM session_run_recovery WHERE session_id=?1)",[&id],|row|row.get(0))?;
-        let metadata = AttentionStoredSession { id,primary,direct,questions_supported,goal,question,inbox_pending,manual_unsettled,config_version,last_outcome,recovery_pending };
+        let metadata = AttentionStoredSession { id,primary,traditional_child,direct,questions_supported,goal,question,inbox_pending,manual_unsettled,config_version,last_outcome,recovery_pending };
         bytes = bytes.saturating_add(metadata.metadata_bytes());
         anyhow::ensure!(bytes <= ATTENTION_METADATA_BYTES, "attention metadata capacity exceeded");
         output.push(metadata);
@@ -250,6 +254,80 @@ pub fn read_attention_metadata(path: &Path, session: Option<&str>) -> Result<Vec
 command ReadAttentionMetadata { session:Option<String> = session.map(str::to_owned) }
 call |command| (command.session.as_deref())
 correlation |command| crate::telemetry::Correlation::session(command.session.as_deref());
+port public;
+}
+
+/// Delegated topology of a session. Only traditional children are linked;
+/// orchestration topologies are being retired and are reported unlinked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AttentionLineageKind {
+    TraditionalChild,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttentionLineage {
+    pub kind: AttentionLineageKind,
+    pub parent_session_id: String,
+    pub root_session_id: String,
+}
+
+/// Identity-only placement for every session: owning project and parent link.
+/// Descriptions, titles and configuration never enter this read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttentionTopology {
+    pub session_id: String,
+    pub project_id: Option<String>,
+    pub lineage: Option<AttentionLineage>,
+}
+
+coordinated_command! {
+/// One read transaction with a fixed number of statements, independent of the
+/// session count. Rows absent from `sessions` are never synthesized.
+pub fn read_attention_topology(path: &Path) -> Result<Vec<AttentionTopology>> {
+    let mut connection = open_initialized_read_connection(path)?;
+    let tx = connection.transaction()?;
+    let mut lineage = HashMap::new();
+    {
+        let mut statement = tx.prepare(
+            "SELECT child_session_id,parent_session_id,root_session_id FROM traditional_children",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?;
+        for row in rows {
+            let (session, parent_session_id, root_session_id) = row?;
+            lineage.insert(
+                session,
+                AttentionLineage {
+                    kind: AttentionLineageKind::TraditionalChild,
+                    parent_session_id,
+                    root_session_id,
+                },
+            );
+        }
+    }
+    let mut statement = tx.prepare(
+        "SELECT s.session_id,p.project_id FROM sessions s
+         LEFT JOIN session_projects p ON p.session_id=s.session_id ORDER BY s.session_id",
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+    })?;
+    let mut output = Vec::new();
+    for row in rows {
+        let (session_id, project_id) = row?;
+        let lineage = lineage.remove(&session_id);
+        output.push(AttentionTopology { session_id, project_id, lineage });
+    }
+    Ok(output)
+}
+command ReadAttentionTopology {}
+call |_command| ()
+correlation |_command| crate::telemetry::Correlation::default();
 port public;
 }
 

@@ -54,12 +54,13 @@ struct AttentionFeedTests {
         try arbitraryByteBoundaries()
         try exactIntegerAndNullableSchema()
         try semanticDecisionsAndReplay()
+        try childSourceDecisionIsOneChildEffect()
         try completionPublicationOrder()
         try sourceAndGenerationBoundaries()
         try boundsAndMalformedFrames()
         try maximumWriterEnvelope()
         disabledLifetime()
-        print("{\"suite\":\"attention-feed\",\"scenarios\":9,\"result\":\"passed\",\"actual_http\":false,\"native_os_delivery\":false}")
+        print("{\"suite\":\"attention-feed\",\"scenarios\":10,\"result\":\"passed\",\"actual_http\":false,\"native_os_delivery\":false}")
     }
     static func silentPendingCapacityF1() throws -> Bool {
         var projection = AttentionProjection()
@@ -174,6 +175,25 @@ struct AttentionFeedTests {
         check(projection.identities == 3)
         rejects { _ = try projection.accept(decode(record(6, ["kind": "decision_pending", "decision": question(1)])), engine: engine) }
         rejects { _ = try projection.accept(decode(record(7, ["kind": "checkpoint"])), engine: engine) }
+    }
+    /// A traditional child reports its own decision on its own source; the
+    /// parent source carries none, so one request is exactly one effect.
+    static func childSourceDecisionIsOneChildEffect() throws {
+        var projection = AttentionProjection()
+        let child: [String: Any] = ["work": "unsupported", "questions": "unsupported",
+                                    "permissions": "available", "reviews": "available", "topology": "available"]
+        check(try projection.accept(decode(baseline([snapshot("parent"), snapshot("child", facets: child)])),
+                                    engine: engine).isEmpty)
+        let ask = try decode(record(1, ["kind": "decision_pending", "decision": permission("child-ask")], fresh: true,
+                                    from: source("child")))
+        let effect = try projection.accept(ask, engine: engine)
+        check(effect.count == 1 && effect[0].kind == "permission" && effect[0].key.session == "child")
+        check(projection.pending == 1)
+        check(try projection.accept(ask, engine: engine).isEmpty)
+        check(try projection.accept(decode(record(2, ["kind": "decision_resolved", "decision": permission("child-ask")],
+                                                  from: source("child"))), engine: engine).isEmpty)
+        check(!projection.isCurrent(effect[0].key, kind: "permission"))
+        check(projection.pending == 0)
     }
     static func completionPublicationOrder() throws {
         var projection = AttentionProjection()
