@@ -415,6 +415,7 @@ async fn prepared_git_creates_branch_and_stages_symlink_entry() {
     ]);
     std::fs::write(repo.join("target"), "content").unwrap();
     symlink("target", repo.join("checkout")).unwrap();
+    std::fs::write(repo.join("--output=checkout"), "literal").unwrap();
 
     let mut runtime = crate::tools::test_runtime();
     runtime.workspace_cwd = root.path().into();
@@ -429,6 +430,7 @@ async fn prepared_git_creates_branch_and_stages_symlink_entry() {
     for command in [
         "git -C repo checkout -b topic",
         "git -C repo add -f -- checkout",
+        "git -C repo add -- --output=checkout",
     ] {
         let prepared = snapshot
             .prepare("exec_command", json!({"cmd":command}), services)
@@ -460,6 +462,7 @@ async fn prepared_git_creates_branch_and_stages_symlink_entry() {
         String::from_utf8_lossy(&entry)
     );
     assert_eq!(git(&["show", ":checkout"]), b"target");
+    assert_eq!(git(&["show", ":--output=checkout"]), b"literal");
 }
 
 #[tokio::test]

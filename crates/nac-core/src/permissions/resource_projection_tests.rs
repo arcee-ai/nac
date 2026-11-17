@@ -125,6 +125,7 @@ async fn git_dash_c_and_separator_preserve_canonical_operand_binding() {
     std::fs::create_dir_all(&repo).unwrap();
     std::fs::write(repo.join("target"), "content").unwrap();
     symlink("target", repo.join("checkout")).unwrap();
+    std::fs::write(repo.join("--output=checkout"), "literal").unwrap();
     symlink(&repo, root.join("alias")).unwrap();
     let backend = ExecutionBackend::Local {
         workspace_cwd: root.clone(),
@@ -142,6 +143,20 @@ async fn git_dash_c_and_separator_preserve_canonical_operand_binding() {
             "git -C {} add -- {}",
             canonical_repo.display(),
             canonical_repo.join("checkout").display()
+        )
+    );
+    let command = "git -C alias add -- --output=checkout";
+    let resources = shell_resources(command, &root, &backend);
+    assert!(resources.iter().all(|r| r.hard_denial.is_none()));
+    let canonical = canonicalize_authorization_resources(&resources, &backend, Path::new(""))
+        .await
+        .unwrap();
+    assert_eq!(
+        bind_authorized_shell_command(command, &root.canonicalize().unwrap(), &canonical).unwrap(),
+        format!(
+            "git -C {} add -- {}",
+            canonical_repo.display(),
+            canonical_repo.join("--output=checkout").display()
         )
     );
     std::fs::remove_dir_all(root).unwrap();

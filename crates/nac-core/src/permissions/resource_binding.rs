@@ -79,6 +79,11 @@ pub(super) fn shell_path_candidate(
             return Some((Some("-C"), Path::new(candidate)));
         }
     }
+    // After Git add's option boundary, even a leading dash or '=' belongs to
+    // the literal path rather than to a shell option assignment.
+    if git_command && git_add_path_position(tokens, command_index, index) {
+        return Some((None, Path::new(token)));
+    }
     if command == "dd" {
         if let Some(candidate) = token.strip_prefix("of=") {
             return Some((Some("of"), Path::new(candidate)));
