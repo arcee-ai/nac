@@ -3,7 +3,7 @@ import path from "node:path";
 import { createNacApi } from "../packages/nac-client/dist/api.js";
 import { NacClient } from "../packages/nac-client/dist/nacClient.js";
 import { createDirectSession, expect, showRoutePanel, test, waitForRunIdle } from "./harness";
-import { ScriptGate } from "./scripted-provider";
+import { finalFunctionOutput, ScriptGate } from "./scripted-provider";
 
 for (const mobile of [false, true]) {
   test(`same-process terminal input control ${mobile ? "mobile" : "desktop"}`, async ({
@@ -151,36 +151,93 @@ for (const mobile of [false, true]) {
       chars: string,
       beforeAllow?: () => Promise<void>,
     ) => {
-      harness.provider.enqueue(
-        tag,
-        { token: tag, requiredTools: ["write_stdin"] },
-        {
-          kind: "function_call",
-          name: "write_stdin",
-          callId: tag,
-          arguments: { session_id: id, chars, yield_time_ms: 10 },
-          stream: "request",
-        },
-      );
-      harness.provider.enqueue(
-        `${tag}-done`,
-        { functionOutputCallId: tag },
-        {
-          kind: "text",
-          text: `${tag} settled.`,
-          stream: "request",
-        },
-      );
-      expect(
-        (
-          await request.post(`${harness.baseUrl}/sessions/${session}/runs`, {
-            data: { prompt: tag },
+      const capture = id === agent.id ? "agent" : "human";
+      const beforePid = await fs.readFile(path.join(workspace, `${capture}.pid`), "utf8");
+      const beforeBytes = await Promise.all([bytes("agent"), bytes("human")]);
+      const beforeControl = await api.getTerminalInputControl(session, id);
+      expect(beforeControl.controller).toBe("agent");
+      const beforeExecution = (await api.listExecutions(session)).executions.find(
+        (entry) => entry.id === id,
+      )!;
+      expect(beforeExecution).toBeTruthy();
+      const initialPermissions = await api.getPermissions(session);
+      expect(initialPermissions.approval_mode).toBe("manual");
+      expect(initialPermissions.requests).toHaveLength(0);
+      expect(initialPermissions.grants).toHaveLength(0);
+      let approval: (typeof initialPermissions.requests)[number] | undefined;
+      // One fresh, named run is allowed only after definite pre-policy refusal.
+      // This loop ends before any Allow; it never retries an authorized write.
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const call = attempt === 0 ? tag : `${tag}_PREPARATION_RETRY`;
+        harness.provider.enqueue(
+          call,
+          { token: call, requiredTools: ["write_stdin"] },
+          {
+            kind: "function_call",
+            name: "write_stdin",
+            callId: call,
+            arguments: { session_id: id, chars, yield_time_ms: 10 },
+            stream: "request",
+          },
+        );
+        harness.provider.enqueue(
+          `${call}-done`,
+          { functionOutputCallId: call },
+          { kind: "text", text: `${call} settled.`, stream: "request" },
+        );
+        const started = await request.post(`${harness.baseUrl}/sessions/${session}/runs`, {
+          data: { prompt: call },
+        });
+        expect(started.status()).toBe(202);
+        const accepted = (await started.json()) as { run_id: string };
+        expect(accepted.run_id).toBeTruthy();
+        let output: string | undefined;
+        let outcome = "pending";
+        await expect
+          .poll(async () => {
+            const permissions = await api.getPermissions(session);
+            if (permissions.requests.length > 0) {
+              expect(permissions.requests).toHaveLength(1);
+              approval = permissions.requests[0];
+              return (outcome = "ask");
+            }
+            const response = harness.provider.requests.find(
+              (request) => request.matchedStep === `${call}-done`,
+            );
+            output = finalFunctionOutput(response, call);
+            return (outcome = output === undefined ? "pending" : "settled-without-ask");
           })
-        ).status(),
-      ).toBe(202);
-      await expect.poll(async () => (await api.getPermissions(session)).requests.length).toBe(1);
-      const approval = (await api.getPermissions(session)).requests[0];
-      expect(approval.tool).toBe("write_stdin");
+          .not.toBe("pending");
+        if (outcome === "ask") break;
+        expect(output).toBe("Error: terminal input owner is busy; retry preparation");
+        expect(attempt, "only one explicitly observed preparation retry is permitted").toBe(0);
+        await waitForRunIdle(request, harness, session);
+        const permissions = await api.getPermissions(session);
+        expect(permissions.approval_mode).toBe("manual");
+        expect(permissions.requests).toHaveLength(0);
+        expect(permissions.grants).toHaveLength(0);
+        expect(await api.getTerminalInputControl(session, id)).toEqual(beforeControl);
+        expect(
+          (await api.listExecutions(session)).executions.find((entry) => entry.id === id),
+        ).toMatchObject({
+          id,
+          origin: beforeExecution.origin,
+          representation: beforeExecution.representation,
+          backend: beforeExecution.backend,
+          retained: beforeExecution.retained,
+          alive: beforeExecution.alive,
+        });
+        expect(await fs.readFile(path.join(workspace, `${capture}.pid`), "utf8")).toBe(beforePid);
+        expect(await bytes("agent")).toEqual(beforeBytes[0]);
+        expect(await bytes("human")).toEqual(beforeBytes[1]);
+        await testInfo.attach(`preparation-refused-${call}`, {
+          body: JSON.stringify({ run: accepted.run_id, call, controller: beforeControl, output }),
+          contentType: "application/json",
+        });
+      }
+      expect(approval).toBeTruthy();
+      const allowed = approval!;
+      expect(allowed.tool).toBe("write_stdin");
       // The Ask is presented without covering the terminal, so the model stays
       // paused while it is used: a non-modal attention card above the composer,
       // or a phone's one-line "Approval needed" bar (its card waits in a sheet).
@@ -191,8 +248,9 @@ for (const mobile of [false, true]) {
         await expect(card).toBeVisible();
         await expect(card).toHaveAttribute("aria-modal", "false");
       }
+
       if (beforeAllow) await beforeAllow();
-      await api.replyPermission(session, approval.id, "once");
+      await api.replyPermission(session, allowed.id, "once");
       await waitForRunIdle(request, harness, session);
     };
     await choose("Give Agent Control", "Take Control");
