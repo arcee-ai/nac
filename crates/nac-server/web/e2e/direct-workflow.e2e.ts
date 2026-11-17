@@ -55,15 +55,20 @@ for (const mobile of [false, true]) {
         },
       });
       const NativeEventSource = globalThis.EventSource;
+      // Counts session observation streams only; the app-wide fleet
+      // attention stream (/attention/stream) stays open by design.
       globalThis.EventSource = class extends NativeEventSource {
         private released = false;
+        private readonly counted: boolean;
         constructor(url: string | URL, options?: EventSourceInit) {
           super(url, options);
+          this.counted = String(url).includes("/sessions/");
+          if (!this.counted) return;
           evidence.opened += 1;
           evidence.active += 1;
         }
         override close() {
-          if (!this.released) {
+          if (this.counted && !this.released) {
             this.released = true;
             evidence.closed += 1;
             evidence.active -= 1;

@@ -377,9 +377,12 @@ async function qualifyInstances(page: Page, info: TestInfo, label: string, id: s
     await menu.getByRole("button", { name: "Close", exact: true }).tap();
     await expect(menu).toHaveCount(0); // retained 300ms phone exit is part of the contract
     // The menu lives on Home: reopen the session so its stream is live again.
+    // A phone's Home is its session list (no project tiles).
     await right
-      .getByRole("region", { name: "Projects", exact: true })
-      .getByRole("button", { name: "Embedded E2E project", exact: true })
+      .getByRole("region", { name: "Sessions and Inbox", exact: true })
+      .getByRole("region", { name: "Embedded E2E project", exact: true })
+      .getByRole("button", { name: /, Agent$/ })
+      .first()
       .tap();
     await expect(rightComposer).toBeVisible();
     await expect.poll(async () => (await cacheState(page)).Right.openStreams).toBeGreaterThan(0);

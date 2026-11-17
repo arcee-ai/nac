@@ -434,12 +434,20 @@ async function managedComposed(j: Journey) {
     if (await sheet.isVisible())
       await activate(j, sheet.getByRole("button", { name: "Close", exact: true }));
   }
+  // Phones have no project tiles: Home is the session list, so open the
+  // project's session row there.
   await activate(
     j,
-    j.root
-      .getByRole("region", { name: "Projects", exact: true })
-      .getByRole("button", { name: /Composed qualification project/ })
-      .first(),
+    j.width < 768
+      ? j.root
+          .getByRole("region", { name: "Sessions and Inbox", exact: true })
+          .getByRole("region", { name: /Composed qualification project/ })
+          .getByRole("button", { name: /, Agent$/ })
+          .first()
+      : j.root
+          .getByRole("region", { name: "Projects", exact: true })
+          .getByRole("button", { name: /Composed qualification project/ })
+          .first(),
   );
 }
 

@@ -91,6 +91,12 @@ interface ModalProps {
    * `alertdialog`, described by the `ModalDescription` in its body.
    */
   alert?: boolean;
+  /**
+   * Make the page behind inert on phones too. For a sheet that repeats what
+   * the page under it shows (the phone Menu over Home's session list), so the
+   * hidden copy is out of reach and out of the accessibility tree.
+   */
+  inertOnPhone?: boolean;
   className?: string;
   /** Overrides the body's own padding and scrolling, for full-bleed content. */
   bodyClassName?: string;
@@ -122,6 +128,7 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
   hideClose = false,
   keepOnNavigate = false,
   alert = false,
+  inertOnPhone = false,
   className = "",
   bodyClassName = "",
   children,
@@ -303,8 +310,9 @@ const Modal: React.FC<ModalProps> & { Size: typeof ModalSize } = ({
       onOpenChange={(next) => {
         if (!next) onClose?.();
       }}
-      // Desktop only: on a phone the panel covers the view and inert is unnecessary.
-      inertBackground={!isMobile}
+      // Desktop by default: on a phone the panel covers the view, so inert is
+      // only needed when the page behind would duplicate the sheet.
+      inertBackground={!isMobile || inertOnPhone}
     >
       <DialogPortal forceMount>
         <Overlay asChild dismissible={overlayCloses}>

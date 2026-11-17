@@ -697,7 +697,9 @@ test("running full-name headings keep their visible shimmer text", async ({
   }
 });
 
-for (const width of [1440, 390])
+// Phones show no tiles (Home is their session list), so the narrow case is the
+// smallest width that still has them.
+for (const width of [1440, 768])
   test(`orphan cards disclose names without nested controls ${width}`, async ({
     harness,
     page,

@@ -267,22 +267,42 @@ test("project navigation, overflow, phone actions and notification feedback", as
         await expect(
           page.getByRole("textbox", { name: "What should we work on?", exact: true }),
         ).toBeVisible();
-        const projects = page.getByRole("region", { name: "Projects", exact: true });
-        const tile = projects.getByRole("button", {
-          name: "Navigation verification — repository maintenance",
-          exact: true,
-        });
-        await expect(tile).toBeVisible();
-        await expect(tile).toContainText("9 sessions");
-        // Project actions stay reachable from the tile; app-wide configuration
-        // moved to Settings, which stays one control away.
-        await expect(
-          tile.getByRole("button", {
-            name: "Navigation verification — repository maintenance options",
+        if (phone) {
+          // A phone has no sidebar, so Home is its session list (under the
+          // Inbox · Sessions switch) instead of project tiles; project actions
+          // stay on each project's header there.
+          const list = page.getByRole("region", { name: "Sessions and Inbox", exact: true });
+          await expect(
+            list.getByRole("button", {
+              name: "Navigation verification — repository maintenance, 9 sessions",
+              exact: true,
+            }),
+          ).toBeVisible();
+          await expect(
+            list.getByRole("button", {
+              name: "Navigation verification — repository maintenance options",
+              exact: true,
+            }),
+          ).toBeAttached();
+          await expect(list.getByRole("link", { name: "Interval tasks" })).toBeVisible();
+        } else {
+          const projects = page.getByRole("region", { name: "Projects", exact: true });
+          const tile = projects.getByRole("button", {
+            name: "Navigation verification — repository maintenance",
             exact: true,
-          }),
-        ).toBeAttached();
-        await expect(projects.getByRole("link", { name: "Interval tasks" })).toBeVisible();
+          });
+          await expect(tile).toBeVisible();
+          await expect(tile).toContainText("9 sessions");
+          // Project actions stay reachable from the tile; app-wide configuration
+          // moved to Settings, which stays one control away.
+          await expect(
+            tile.getByRole("button", {
+              name: "Navigation verification — repository maintenance options",
+              exact: true,
+            }),
+          ).toBeAttached();
+          await expect(projects.getByRole("link", { name: "Interval tasks" })).toBeVisible();
+        }
         await capture(`${version}-${width}-projects-dark`);
       }
     }

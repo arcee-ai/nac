@@ -54,7 +54,10 @@ function LiveInboxProvider({ children }: { children: ReactNode }) {
     );
     return sessions.map((entry) => ({
       id: entry.summary.session_id,
-      title: titleOf(entry.summary),
+      // A subagent nobody renamed goes by the task it was given, as in its
+      // parent's transcript, not by its raw prompt.
+      title:
+        entry.summary.title?.trim() || entry.lineage?.description?.trim() || titleOf(entry.summary),
       projectName: entry.summary.project_id
         ? (projectName.get(entry.summary.project_id) ?? null)
         : null,

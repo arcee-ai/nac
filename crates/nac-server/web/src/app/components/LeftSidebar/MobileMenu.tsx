@@ -58,7 +58,13 @@ export function MobileMenu({ open, onClose }: { open: boolean; onClose: () => vo
   };
 
   return (
-    <Modal open={open} onClose={onClose} title="Menu" bodyClassName="p-0 [&>*]:shrink-0">
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="Menu"
+      inertOnPhone
+      bodyClassName="p-0 [&>*]:shrink-0"
+    >
       <nav aria-label="Menu" className="flex flex-col gap-px border-b border-muted px-2 py-2">
         <MenuRow
           icon={IconName.AddChat}
