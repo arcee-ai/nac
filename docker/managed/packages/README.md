@@ -204,6 +204,14 @@ only the corresponding 66032, 66033 and 66035 cases. The 58051 reversal faults
 its case and other publickey cases sharing its uninitialised-list path. The
 66034 reversal, tested before NAC's overlapping publickey follow-ups, fails
 only its allocation-order case; the final packaged tree passes all six cases.
+The final-composition build additionally compiles two test-only publickey
+mutants from the exact source-locked `publickey.c`: removing the corrected
+66034 comment-length guard must add an attribute allocation, and leaving only
+the freshly grown 58051 entry uninitialised must make its malformed-list case
+fault in `libssh2_publickey_list_free()` under ASan. Focused fixed controls
+pass on the same final source. These synthetic negative controls supplement
+the exact pre-follow-up Debian patch reversals; they never change the APK or
+grant a scanner disposition.
 The 58050 integer-overflow seam requires separate 32-bit execution evidence;
 the linux/amd64 builder does not provide it. These source controls do not clear raw
 scanner findings or establish applicability.

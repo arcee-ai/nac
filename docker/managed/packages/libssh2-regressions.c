@@ -644,12 +644,26 @@ static int case_15661_sftp_short_name(void)
 int main(int argc, char **argv)
 {
     int sftp_only = argc == 2 && strcmp(argv[1], "--sftp-15661-only") == 0;
-    if(argc > 1 && !sftp_only) {
-        fprintf(stderr, "usage: %s [--sftp-15661-only]\n", argv[0]);
+    int comment_only = argc == 2 &&
+        strcmp(argv[1], "--publickey-66034-only") == 0;
+    int list_only = argc == 2 &&
+        strcmp(argv[1], "--publickey-58051-only") == 0;
+    if(argc > 1 && !sftp_only && !comment_only && !list_only) {
+        fprintf(stderr,
+                "usage: %s [--sftp-15661-only|--publickey-66034-only|"
+                "--publickey-58051-only]\n", argv[0]);
         return 2;
     }
     printf("libssh2 corrected-seam malformed-input regressions\n");
-    if(!sftp_only) {
+    if(comment_only) {
+        run_case("CVE-2026-66034 publickey comment overrun",
+                 case_66034_comment_overrun);
+    }
+    else if(list_only) {
+        run_case("CVE-2026-58051 uninitialised list entry",
+                 case_58051_uninitialised_entry);
+    }
+    else if(!sftp_only) {
         run_case("CVE-2026-66034 publickey comment overrun",
                  case_66034_comment_overrun);
         run_case("CVE-2026-58050 publickey attribute count overflow",
@@ -663,8 +677,10 @@ int main(int argc, char **argv)
         run_case("CVE-2026-66035 ETM short packet",
                  case_66035_etm_short_packet);
     }
-    run_case("CVE-2025-15661 SFTP truncated NAME",
-             case_15661_sftp_short_name);
+    if(!comment_only && !list_only) {
+        run_case("CVE-2025-15661 SFTP truncated NAME",
+                 case_15661_sftp_short_name);
+    }
 
     if(g_failures) {
         printf("%d regression case(s) failed\n", g_failures);
