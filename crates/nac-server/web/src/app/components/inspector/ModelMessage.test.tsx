@@ -102,6 +102,43 @@ describe("transcript topology badge navigation", () => {
     view.rerender(<ModelMessage {...props} turn={{ ...turn }} active />);
     expect(fold.getAttribute("aria-expanded")).toBe("false");
   });
+
+  it("keeps approval waits and failures visible when activity is folded", () => {
+    const turn: ModelTurn = {
+      kind: "model",
+      key: "model-1",
+      durationMs: null,
+      messageIndex: 1,
+      blocks: ["awaiting-approval", "error"].map((status, index) => ({
+        kind: "tool-detail" as const,
+        key: `tool-${index}`,
+        presentation: {
+          callId: `call-${index}`,
+          name: "exec_command",
+          label: "Run command",
+          summary: `command ${index}`,
+          resultPreview: null,
+          status: status as "awaiting-approval" | "error",
+          statusLabel: status,
+        },
+      })),
+    };
+    render(
+      <ModelMessage
+        turn={turn}
+        model="model"
+        active
+        readOnly
+        interactive={false}
+        selectedThreadEpisode={null}
+        onSelectThread={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("list", { name: "Steps that need attention" })).toBeTruthy();
+    expect(screen.getByText("Waiting for approval")).toBeTruthy();
+    expect(screen.getByText("Failed")).toBeTruthy();
+  });
+
   it("names destructive replay as regeneration from the original prompt", () => {
     const refresh = vi.fn();
     render(
