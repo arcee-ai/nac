@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "scenario": "cross-Quit/new-port draft recovery before explicit Review/Restore",
+  "before_source": "c49d4723d4ed87454f55f5f8092bc9c53ac9dc58",
+  "after_source": "332e9ad792787c081e0aead1b4e6aeae5f94dc56",
+  "fixture": "same scripted storage history and unsent multiline text; fresh disposable IDs in each arm",
+  "test": "desktop/electron/e2e/storage.spec.ts",
+  "test_sha256": "19b9a25c66624ce99f5d56c93d63ad9d4fa3dd0a714443310c680ac28ba932dc",
+  "settings": {
+    "viewport": [
+      1280,
+      800
+    ],
+    "theme": "dark",
+    "zoom": 1,
+    "screenshot_scale": "css"
+  },
+  "captions": {
+    "drafts-c49d-before.png": "After Quit/new port, the baseline has lost unsent text and offers no review receipt. The expected recovery assertion fails.",
+    "drafts-332e-review.png": "The current app restores text as review evidence while the composer remains empty; it does not submit anything.",
+    "drafts-332e-restored.png": "Only the explicit Restore to composer click fills the draft; provider request count remains unchanged."
+  },
+  "limits": [
+    "Images show the recorded source revisions, not later evidence-only commits.",
+    "Fresh fixture IDs affect project icon color; visible fixture text and capture settings match.",
+    "These captures establish draft presentation, not OS notifications, physical input, paint or broader platform qualification."
+  ],
+  "sha256": {
+    "drafts-332e-restored.png": "50557b022cbd405b2e8e097a5b0fb27feddc0b61d87d9354b41c2e10b5d6e173",
+    "drafts-332e-review.png": "941815a289b5629087eb5e7bb3620df84466fca5e86c5d9abc269b9fcd8491f5",
+    "drafts-c49d-before.png": "f28a0f1fbb11ef22308cc62c135cd2a429e2c4c26ab36ee166db4f25c2e1ac8c"
+  }
+}

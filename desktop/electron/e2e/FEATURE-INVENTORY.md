@@ -1,4 +1,4 @@
-# Actual-Electron feature inventory, version 1
+# Actual-Electron feature inventory, version 2
 
 Baseline: dev `c49d4723d4ed87454f55f5f8092bc9c53ac9dc58`, November 17, 2026.
 Route sources: `crates/nac-server/web/src/App.tsx` and
@@ -7,8 +7,8 @@ Route sources: `crates/nac-server/web/src/App.tsx` and
 that every scenario passed on a hosted runner. Use the exact candidate's
 `identity.json`, `scenarios.json` and `cleanup.json` for observed verdicts.
 ALL-642's original Mac/Linux acceptance stays broader than this Mac CI slice.
-The selected follow-up joins storage/recovery source `18b2ebdfa` and passive
-notification modules `ff885d564`; current-head packets remain the verdict source.
+The selected follow-up joins storage/recovery and passive notification scenarios;
+their existence is separate from the exact-head packaged and hosted verdicts.
 
 ## Route and feature mapping
 
@@ -35,16 +35,16 @@ workflow claim, even when browser tests exist. Browser scenarios below are in
 | `/design` and unknown-route fallback | Deferred | Browser `src/App.designRoute.test.tsx`; showcase is not ordinary startup |
 | Direct chat streaming/tool turn | Covered: `workflow.spec.ts`, `performance.spec.ts` | Complete large transcript, token/usage accounting and model/tool variants deferred |
 | `orchestrator`, `direct-with-orchestrator` | Partial: `workflow.spec.ts` API creation and immutable metadata assertions | End-to-end execution of these topologies deferred; browser `direct-workflow.e2e.ts`, `subagent-orchestrators.e2e.ts` |
-| Steering/queue/inbox | Deferred | Browser `permission-queue.e2e.ts`, `subagent-message-recovery.e2e.ts`, `internal-completions.e2e.ts` |
+| Steering/queue/inbox | Partial: `recovery.spec.ts` canonical queued delivery after renderer loss and Rust fail-closed approval denial | Broader steering/inbox coordination deferred; browser `permission-queue.e2e.ts`, `subagent-message-recovery.e2e.ts`, `internal-completions.e2e.ts` |
 | Questions and approvals | Covered: `workflow.spec.ts` Allow once and one question; manual mode/no human-shell grant assertions | Coordination, remembered grants, hard/configured denies and other approval modes deferred; browser `task-question-coordination.e2e.ts`, `permission-queue.e2e.ts` |
 | Goal/budget controls | Deferred | Browser `goal-objective.e2e.ts`, `exact-goal-wait.e2e.ts`, `peer-goal-coordination.e2e.ts` |
 | Models/settings/provider account | Covered: `native.spec.ts` native Settings menu, modal guard and device-sign-in UI actor | Real vendor/browser auth is separate manual evidence; complete settings/model editing deferred; browser `provider-sign-in.e2e.ts` |
 | MCP library/OAuth | Covered: `native.spec.ts` local Rust PKCE success/denial/wrong-state/cancel through actual native bridge | OS browser opener is doubled; full MCP tool execution/config matrix deferred; browser `mcp-arguments.e2e.ts`, `settings-mcp-visual.e2e.ts` |
 | Local/SSH/Podman backend selection | Partial: local only in current app scenarios | SSH/Podman actual-app construction/admission deferred; browser `setup-ssh.e2e.ts`, `human-shell.e2e.ts`; no backend switching by approval |
-| Navigation/tabs/drafts | Covered: representative route/menu/modal guards and retained document, `native.spec.ts`, `lifecycle.spec.ts` | Full tabs/draft/restart matrix deferred; browser `prompt-drafts.e2e.ts`, `navigation-header.e2e.ts` |
+| Navigation/tabs/drafts | Covered: representative route/menu/modal guards, retained document and text Review/Restore/clear, `native.spec.ts`, `lifecycle.spec.ts`, `storage.spec.ts` | Full tabs matrix deferred; browser `prompt-drafts.e2e.ts`, `navigation-header.e2e.ts` |
 | Durable state/Swift fixture migration | Added: `storage.spec.ts` cross-Quit/new-port Review/Restore and acknowledged clear, Swift v1 fixture handoff, delayed storage ACK/menu cancellation | Full migration/corruption/concurrent-writer failure controls stay with `test/storage.test.cjs` and `test/native-storage.test.cjs`; no personal stores |
 | Renderer/transport recovery and suspend boundaries | Added: `recovery.spec.ts` real renderer crash with approval/queue/PTY, failed GET, bounded recovery/menu reload, Quit Cancel/Stop, accepted-write drain and simulated suspend/resume/engine death; adapted `load-failure.spec.ts` | A lost renderer canonically denies its pending manual approval in Rust; queued work may run once through the durable scheduler. Same-engine recovery sends no approval/input replay. Actual system sleep remains deferred |
-| Default-off notification frontier/target response | Peer-owned `notification.spec.ts` automatically selected on integration; real Rust semantic feed/main/preload plus trusted native delivery doubles | Delivery/click/authorization on signed OS candidate stays separate; inspect the integrated exact-head verdict before claiming this journey passed. No interactive permission expectation in CI |
+| Default-off notification frontier/target response | Added: `notification.spec.ts` real Rust semantic completion/question feed, hidden retained window, exact saved frontier, native adapter doubles, first-click guarded navigation, opt-out fence, cold restart and retired-document refusal | Permission/save/callback races use owner doubles. `notification-adapter.spec.ts` separately probes an opt-in actual Electron/OS request; mocked delivery is not OS proof. Signed show/click/withdraw remains open; inspect exact-head verdicts |
 | Native menu/Edit/links/folder cancellation | Covered: `native.spec.ts` actual main/preload, trusted links, wrong frames/stale document, OS opener double, helper EOF/reap | AppKit folder success/Finder reveal/real browser are manual, `NATIVE-MANUAL.md`, `NATIVE-ACCEPTANCE.md` (historical revisions only) |
 | Renderer sandbox / isolation / Node off / throttling | Covered: `workflow.spec.ts`; added exact package/launch/store identity in `ci-smoke.spec.ts` | No `--no-sandbox`, alternative IPC or fixed-port adoption permitted |
 | Close/reopen, protected Quit, crash/contention/Retry | Covered: `lifecycle.spec.ts`, `startup-quit.spec.ts`, `load-failure.spec.ts`, `startup-cleanup.spec.ts` | Main-controller dialog outcomes/faults are explicit test actors; actual startup sheet clicks are manual |
@@ -82,3 +82,12 @@ sleep/wake, signed notification delivery, minimum-host/release packaging,
 replacement/update, real paint, performance budgets and final qualification
 remain deferred to the existing broader tickets. Trusted Chromium events and
 DOM/rAF counters cannot establish those observations.
+
+## Draft presentation comparison
+
+The safe disposable [comparison metadata](evidence/draft-comparison.json) binds
+the base/current images to their captured source revisions and matching fixture,
+1280×800 viewport, dark theme and CSS-scale settings. The baseline deliberately
+fails the new recovered-text assertion; the current arm shows review evidence
+and a separate explicit Restore. These images establish that presentation change,
+not notification, physical-input, paint or full-platform acceptance.
