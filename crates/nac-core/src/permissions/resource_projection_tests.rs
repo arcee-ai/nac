@@ -77,7 +77,12 @@ fn git_operands_and_safe_settings_do_not_look_like_destructive_operations() {
                 "{command}: {resources:?}"
             );
         }
-        for command in ["git --unknown reset", "git -C", "git -c"] {
+        for command in [
+            "git --unknown reset",
+            "git -C",
+            "git -c",
+            "git custom-alias reset",
+        ] {
             let resources = shell_resources(command, cwd, backend);
             let reason = resources
                 .iter()

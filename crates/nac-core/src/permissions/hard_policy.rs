@@ -163,6 +163,16 @@ pub(super) fn hard_shell_denial_inner(
             );
         }
         let args = &tokens[subcommand_index + 1..];
+        // An unknown operation can be a repository-defined alias. Preserve the
+        // prior hard boundary when its arguments contain a protected verb; the
+        // alias expansion cannot be classified from these tokens alone.
+        if !git_known_operation(operation)
+            && args
+                .iter()
+                .any(|arg| matches!(arg.as_str(), "clean" | "reset" | "restore" | "checkout"))
+        {
+            return Some("Git operation may be an alias with ambiguous arguments".to_string());
+        }
         let simple_branch = operation == "checkout"
             && args.len() == 2
             && args[0] == "-b"
@@ -192,6 +202,57 @@ pub(super) fn hard_shell_denial_inner(
         }
     }
     None
+}
+
+// Recognized operations whose later arguments are not Git subcommands.
+// Unknown names may be aliases and stay conservative around protected words.
+fn git_known_operation(operation: &str) -> bool {
+    matches!(
+        operation,
+        "add"
+            | "bisect"
+            | "blame"
+            | "branch"
+            | "cat-file"
+            | "checkout"
+            | "cherry"
+            | "cherry-pick"
+            | "clean"
+            | "clone"
+            | "commit"
+            | "config"
+            | "describe"
+            | "diff"
+            | "fetch"
+            | "fsck"
+            | "gc"
+            | "grep"
+            | "init"
+            | "log"
+            | "ls-files"
+            | "ls-tree"
+            | "merge"
+            | "mv"
+            | "pull"
+            | "push"
+            | "rebase"
+            | "reflog"
+            | "remote"
+            | "reset"
+            | "restore"
+            | "rev-parse"
+            | "revert"
+            | "rm"
+            | "show"
+            | "show-ref"
+            | "stash"
+            | "status"
+            | "submodule"
+            | "switch"
+            | "tag"
+            | "worktree"
+            | "--version"
+    )
 }
 
 // Only this exact presentation setting on status is known not to invoke code
