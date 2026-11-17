@@ -22,7 +22,7 @@ authentication.
 
 The service and every local agent command share UID/GID `10001:10001`. Every
 generic host secret is added to every newly spawned agent command, including
-workers, traditional children, and separately launched orchestrators. An
+traditional children. An
 arbitrary-shell agent can enumerate and transmit those secrets. Managed v0 is
 an owner-wide trust boundary, not a per-Project or per-agent sandbox.
 
@@ -31,26 +31,18 @@ fails closed if that bit appears in the inheritable, permitted, effective,
 bounding, or ambient capability set, or if those sets cannot be parsed. The
 server captures `EXA_API_KEY` into its native-web-only memory and removes it
 from the environment before loading configuration, constructing MCP servers,
-or starting background work. Managed workers do not inherit a credential
-descriptor on Linux: they first set `no_new_privs` and become non-dumpable,
-then connect to a filesystem Unix socket whose peers authenticate both the
-worker and parent PIDs. The parent sends the credential only after the worker
-has constructed MCP transports and closed the endpoint to descendants.
-Together these controls block ordinary same-UID environment, procfs, ptrace,
-and `pidfd_getfd` inspection of server/worker native credentials. A same-UID
-process can still discover, unlink, or flood the socket path and cause denial
-of service, but cannot authenticate as either peer to read or inject the
-credential. The controller must not use a privileged pod, add ptrace
-capability, or weaken the host's process-inspection controls. These controls do
-not protect against kernel compromise or a fully compromised NAC process;
-separate UIDs or an external credential broker are required for a stronger
-boundary.
-
-macOS still uses an inherited close-on-exec socket and post-MCP readiness
-ordering, but does not have the Linux `prctl`/procfs boundary described above.
-Do not treat a same-user macOS MCP process as mutually isolated from NAC; use
-separate privileges or an external credential broker when that guarantee is
-required.
+or starting background work. The server and legacy worker transport retain
+platform-specific credential hardening until ALL-614 removes the old engine.
+On Linux the managed server and legacy worker become non-dumpable and set
+`no_new_privs` before untrusted descendants. The legacy credential socket
+checks both peer PIDs and sends the credential only after MCP construction;
+credentials are not inherited by MCP descendants. A same-UID process can
+still disrupt the socket. These controls do not protect against privileged
+ptrace, kernel compromise or a fully compromised NAC process. Do not grant
+`CAP_SYS_PTRACE` or weaken host process-inspection controls. A stronger boundary
+requires separate UIDs or an external credential broker. macOS does not have
+the Linux `prctl`/procfs guarantee; do not treat same-user MCP processes as
+mutually isolated.
 
 Platform owns the logical-host controller, gateway/SSO, stable URL, volumes,
 runtime confinement, egress, host-scoped model credential, and lifecycle.
@@ -257,7 +249,8 @@ Live JWS supersession can never request this mode. A configured startup
 expectation also rejects an absent database instead of initializing one.
 
 Authoritative blockers include active runs and manual compactions, traditional
-children and managed orchestrators, live terminal processes, pending remote
+children and legacy sessions pending retirement, live terminal processes,
+pending remote
 terminal cleanup, repository clones, workspace mutations, process-local HTTP
 admissions, cross-process operation/resource/host leases, background model or
 GitHub device logins, and another maintenance operation. Blocker scans are
@@ -270,8 +263,8 @@ cleanup succeeds.
 
 Once maintenance is committed, public recovery/static/status routes and
 explicit completion/cancellation paths remain available, while every new-work
-admission seam fails closed. This includes direct and orchestrated runs,
-session creation and attachment, manual compaction, child/orchestrator launch,
+admission seam fails closed. This includes runs, session creation and
+attachment, manual compaction, child launch,
 workspace mutations, repository clones, and the full lifetime of background
 login flows. Private authenticated status remains available. Maintenance is
 cleared only by the exact accepted forward replacement after store

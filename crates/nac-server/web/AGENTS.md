@@ -20,10 +20,10 @@ server remains the source of business truth and wire schemas.
   stable aliases from `src/app/types/api.ts`; client-only refinements may live
   there, but do not hand-copy wire DTOs.
 - Keep managed-host product state inside `features/managed`. Managed
-  orchestrator session views remain session/delegation features because they
-  are a distinct durable topology.
+  legacy orchestrator session views remain distinct pending retirement.
 - Preserve navigation, abort signals, polling settlement, optimistic state,
-  query invalidation, accessibility labels, and behavior-selection defaults.
+  query invalidation and accessibility labels. Preserve current wire behavior
+  until the direct-only cutover.
 - Human product operations never invoke agent approval. A focused fresh terminal
   keystroke is intentional input on ordinary attach/reconnect; attaching sends
   no bytes. Accepted-but-uncertain delivery freezes input until explicit recovery

@@ -1,6 +1,6 @@
 # AGENTS.md Files
 
-`AGENTS.md` is loaded hierarchically and injected as instructions for both the orchestrator and worker threads. More specific files override broader ones when they conflict.
+`AGENTS.md` is loaded hierarchically and injected as instructions for the direct agent. More specific files override broader ones when they conflict.
 
 ## Where files are loaded
 
@@ -14,4 +14,4 @@ In each directory nac tries these names, in order, and uses the first non-empty 
 
 Empty files are skipped. Combined UTF-8 size across loaded files is capped by `[agents_md] max_bytes` (default 4 MiB, minimum 1). Content past that cap is truncated.
 
-The orchestrator receives the combined documents as a separate system message. Workers receive the same text appended to their system prompt. See [Skills](skills.md) for skill discovery, which is independent of `AGENTS.md`.
+The direct agent receives the combined documents as a separate system message. See [Skills](skills.md) for skill discovery, which is independent of `AGENTS.md`.

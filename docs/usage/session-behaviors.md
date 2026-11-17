@@ -1,62 +1,12 @@
-# Session behaviors
+# Direct sessions
 
-Every session has one immutable persisted behavior. The shipped web UI defaults
-to a persistent direct coding agent: every creation entrypoint sends explicit
-`behavior: "direct"`, and orchestration choices, Worksets, managed
-orchestrator controls, mode badges, and unused light-model controls are hidden.
-Direct Insights/Files/History, traditional children, permissions, goals, queueing,
-compaction, tool results, and local/SSH/sandbox/managed execution remain available.
-Hidden light-model settings and saved presets are preserved; direct light-model
-execution remains deferred.
+The web UI starts a persistent direct coding agent. Direct chats support native
+file and terminal tools, traditional child agents, durable goals, Insights,
+permissions, compaction, and Local, SSH, Podman or managed-host execution.
+A session keeps its behavior after creation.
 
-To restore the established three-mode UI, start the same binary with
-`NAC_ORCHESTRATION=1`. Exactly `1` enables orchestration; `0` or an unset variable
-selects direct-only presentation. Aliases such as `true` and `enabled`, blank
-values, whitespace, and other values fail closed with a startup and browser
-configuration diagnostic. Change the environment, restart nac-web, and reload
-the browser. No frontend rebuild is required. The server captures this setting
-when it builds its router and exposes it through `GET /ui-config`; endpoint-aware
-clients consume the same typed bootstrap. Creation is unavailable while that
-endpoint's configuration is loading or failed, with an explicit retry on failure.
-Vite development previews proxy the same route to the configured API server.
-
-With orchestration enabled, the web asks which behavior to use for each first
-and New Chat action, preselects **NAC orchestrator** on each modal opening, and
-shows the chosen mode above the transcript. Existing orchestrator/hybrid/managed
-sessions keep their IDs, data, behavior, and lineage. Direct-only navigation
-excludes them; deep links show an unavailable view with **New direct chat**.
-Enabling orchestration restores access. This presentation setting changes no
-tool authorization, backend, inbound MCP exposure, or legacy REST defaults.
-
-An empty-project route refreshes project and chat ownership before presenting
-the required first-chat dialog. Concurrent required-first-chat submissions
-converge on one primary chat. Direct-only UI additionally sends the additive
-`first_chat_same_behavior: true` so a legacy session created during that race
-cannot become its result. Omitted/false retains the existing API semantics of
-returning the newest primary session regardless of behavior. Projects containing
-only hidden legacy sessions use ordinary New Chat creation (`first_chat: false`)
-instead. Explicit New Chat always remains a request for another session.
-
-The wire values are:
-
-- `orchestrator` — NAC's established planner and worker-thread topology. It
-  retains the Worksets navigation, lists its threads in Insights, and remains
-  the default when an API client or legacy database row omits `behavior`.
-- `direct` — a persistent coding agent with native file and terminal tools,
-  durable goals, and traditional child coding agents. Its side panel opens on
-  Insights and offers Delegated work instead of orchestrator Worksets.
-- `direct-with-orchestrator` — the same direct coding agent plus native controls
-  for separate managed NAC orchestrator sessions. Delegated work keeps
-  traditional coding agents and managed orchestrators in distinct sections.
-
-Behavior cannot be switched after creation. Start another chat to choose a
-different topology. A managed orchestrator is itself an immutable
-`orchestrator` session, while a traditional child inherits direct execution
-internals but is recognized by its durable parent relationship. Both delegated
-transcripts show their lineage and a **Back to Parent** action. They are
-read-only in the web MVP: continuation, steering, and cancellation remain owned
-by the parent workflow, and a traditional child cannot create an autonomous
-goal.
+Traditional children have their own transcripts and generations and share the
+parent workspace. See [child sessions](traditional-children.md).
 
 While a direct run is active, the ordinary composer remains available. **Send**
 creates a durable `steer` item for the active run; **Queue Next** creates a

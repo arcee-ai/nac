@@ -7,11 +7,13 @@ recovery, cancellation, and settlement over these contracts.
 
 ## Invariants and dependencies
 
-- Persisted behavior values and omitted-value defaults are public compatibility
-  surfaces. A snapshot's behavior is immutable after creation.
-- Codec changes remain backward compatible with supported stored sessions and
-  preserve unknown/legacy defaults deliberately. Never rewrite IDs or history
-  as a side effect of loading.
+- Until the ADR 0009 cutover, persisted behavior values and omitted-value
+  defaults remain compatibility surfaces. A snapshot's behavior is immutable.
+  The planned cutover rejects retired/unknown creation choices and authorizes
+  deletion of retired ownership trees under the bounded migration contract.
+- Preserve surviving direct IDs and history; never rewrite them as a side effect
+  of loading. Codec changes otherwise remain backward compatible with supported
+  stored sessions.
 - Snapshot and summary projections are read models over canonical durable
   state; they do not invent liveness from process-local tasks.
 - Operation leases coordinate across processes and retain owner/generation

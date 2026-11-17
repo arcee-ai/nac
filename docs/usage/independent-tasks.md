@@ -2,7 +2,7 @@
 
 A direct chat can find and inspect other visible direct chats, its independent
 tasks, without launching, waking or steering them. Session ID is task identity.
-Traditional child sessions and managed orchestrators keep their own topologies
+Traditional child sessions keep their own topology
 and are never returned as tasks.
 
 ## Finding tasks
@@ -80,7 +80,7 @@ candidate, count, flag or cursor.
 Ask a persistent Local direct chat to start a separate task for a specific brief.
 The new chat has its own title, session identity and initial input. Both chats
 remain independently steerable. A launch starts no goal and copies no transcript.
-Traditional children and managed orchestrators keep their existing semantics.
+Traditional children keep their existing semantics.
 
 The native tools are:
 

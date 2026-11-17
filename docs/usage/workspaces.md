@@ -30,8 +30,7 @@ execution to make a denied or unavailable sandbox operation succeed.
 
 A managed host provides its own workspace, ownership, credentials, readiness
 and persistence contract; it is not a different public session behavior. See
-[Managed NAC](../managed/README.md). Do not infer a managed installation from
-having an orchestrator session. Backend choices do not imply that web search,
+[Managed NAC](../managed/README.md). Backend choices do not imply that web search,
 MCP servers or models have usable credentials.
 
 ## Retained tasks and recovery

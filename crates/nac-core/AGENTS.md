@@ -7,10 +7,10 @@ It must not own HTTP/React delivery or managed-host product onboarding.
 
 ## Invariants and dependencies
 
-- Preserve orchestrator prompts/defaults and the three persisted session
-  behaviors. Construction chooses one behavior; there is no runtime switching.
-- Orchestrator workers, traditional child sessions, and managed orchestrators
-  are distinct topologies. Shared lifecycle code does not make them one role.
+- Preserve direct sessions, traditional children and independent tasks under
+  the retirement contract in `docs/architecture/0009-direct-only-retirement.md`.
+  Legacy topology remains present pending the cutover and removal slices; do not
+  change its compatibility incidentally before those slices.
 - Durable state is generation-aware and restart-safe. Completion delivery,
   recovery markers, inbox/goals, relationships, leases, transcript revisions,
   and cancellation ordering are compatibility surfaces.

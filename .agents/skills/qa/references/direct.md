@@ -6,7 +6,7 @@ workspace and policy ceiling; skill instructions cannot grant permissions.
 This live QA workflow requires a Local unsandboxed host controller. If the
 current backend cannot provide that, retain a named infrastructure gap and stop;
 do not reconstruct a Local runtime to escape the selected backend.
-Do not enable an orchestrator, call public MCP to loop back into NAC, launch a
+Do not call public MCP to loop back into NAC, launch a
 visible independent task, or create a goal for any QA phase. A child loading
 this reference remains its explicit `mode`, never a controller.
 
@@ -78,8 +78,7 @@ Do not place ephemeral Podman connection fields in committed files or RUN.json.
    `general` aggregate child with `mode=aggregate`. Supply the complete skill,
    adapter, setup-defined root/pass/SHA/`n`/expected slots, setup report, every
    available worker report and structured child outcome, and explicit outcomes
-   for missing reports. Child outcomes replace orchestrator source-thread
-   episodes here; never invent a source-thread argument or omit failed slots.
+   for missing reports. Never invent a source-thread argument or omit failed slots.
    Supply setup-proven ephemeral Podman fields for exact cleanup recovery.
    Aggregate follows the skill's validation, `infra` stubs, status precedence
    and ownership-checked cleanup; it cannot test or dispatch replacements.

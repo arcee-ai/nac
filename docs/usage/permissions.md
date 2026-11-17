@@ -49,8 +49,7 @@ answer modes:
   and operations whose description had to be redacted, keeps
   the manual prompt; without an interactive approver it fails closed.
 
-Automatic approval has durable ownership-tree scope. On a direct or
-direct-with-orchestrator primary session, it applies to that session and all of
+Automatic approval has durable ownership-tree scope. On a direct primary session, it applies to that session and all of
 its traditional child sessions, including children that already exist or are
 created later. The policy is resolved through the durable root owner, so it
 also covers deeper descendants if the traditional-child nesting limit changes
@@ -60,8 +59,7 @@ control. Disabling restores manual handling immediately across the tree.
 
 Traditional children keep their own requester identity, transcript, remembered
 grants, configured rules, and execution backend. A manual prompt identifies the
-child that requested access. Managed orchestrator sessions are a distinct
-durable topology and do not inherit this setting. The primary composer shows
+child that requested access. The primary composer shows
 the selected mode for as long as it is enabled so the disable control remains
 easy to find. For Approve for me, enabled describes the saved answer policy;
 it does not guarantee that the review service is available.
@@ -129,7 +127,7 @@ messages typed after it is enabled. Selecting the current mode again preserves
 its accumulated scope. Each message becomes
 intent in the same store write that hands it to the model, so a queued
 message counts only once its run starts, and one cancelled before then never
-counts. Text that NAC, the agent, a child, an orchestrator or an MCP client
+counts. Text that NAC, the agent, a child or an MCP client
 wrote is never sent as intent, though a run an MCP client starts is still
 reviewed against what a person typed earlier. Requests keep the manual prompt
 instead of being reviewed without scope when no person has typed anything

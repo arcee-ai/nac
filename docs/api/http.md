@@ -158,14 +158,12 @@ outcomes survive. Forks preserve settled attribution without inheriting output
 handles. Session snapshots expose `shell_commands`, and snapshot refresh events
 publish command transitions without manufacturing a model run.
 
-## Session behaviors and direct inbox
+## Direct sessions and inbox
 
-`POST /sessions` accepts `behavior` as `orchestrator`, `direct`, or
-`direct-with-orchestrator`. It is persisted and immutable. Omitting it selects
-`orchestrator` for compatibility. Session summaries and detail metadata expose
-the value. A delegated session detail response also includes `lineage` with a
-`traditional-child` or `managed-orchestrator` kind, parent and root session IDs,
-and the immutable relationship description.
+For a direct session, send `behavior: "direct"` in `POST /sessions`. The
+behavior is persisted and immutable. The current API still defaults an omitted
+behavior to the legacy value; ALL-613 owns changing that default and rejecting
+retired selections. Session detail exposes traditional-child lineage.
 
 Direct parents expose their durable input at `GET /sessions/{session_id}/inbox`
 and `POST /sessions/{session_id}/inbox`. A create body contains `delivery`
@@ -195,25 +193,8 @@ ownership, changes to a child's profile or description, sandboxed sessions
 without a host-backed shared workspace, and more than four simultaneously
 running children per root parent.
 
-## Managed orchestrator sessions
-
-`GET /sessions/{session_id}/orchestrators` lists orchestrator sessions owned by
-a `direct-with-orchestrator` parent. `POST` on the same path launches a new
-session or continues the optional `orchestrator_session_id`. The request has an
-immutable short `description`, a complete `prompt`, and optional `background`
-(default false). Foreground waits for settlement; background returns the
-running relationship immediately and later delivers one durable parent inbox
-item.
-
-`GET /sessions/{session_id}/orchestrators/{orchestrator_session_id}` reads one
-owned relationship. `POST .../cancel` propagates cancellation to the active
-generation. Responses include status, generation, run and execution mode,
-terminal report or failure, completion inbox ID, timestamps, and version.
-
-The endpoints reject every parent behavior except `direct-with-orchestrator`,
-mismatched ownership, recursive control, changed descriptions, and more than
-four simultaneously running managed orchestrators. Managed sessions always use
-the existing `orchestrator` behavior and its worker topology.
+The legacy managed-orchestrator routes remain present until the ALL-613
+cutover; they are pending removal and are not part of the direct workflow.
 
 ## Remote access
 

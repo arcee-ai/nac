@@ -1,6 +1,6 @@
 ---
 name: qa
-description: Run scalable, isolated live QA for nac development. In NAC orchestrator mode the top-level local orchestrator must parse n (default 4), dispatch one setup worker with this skill, copy its n assignment contracts verbatim into exactly n parallel test workers with this skill, then dispatch one aggregate worker with this skill using all test episodes; setup selects or creates a clean worktree for the requested revision, every phase changes to that worktree, slots and paths stay immutable after setup, and preloaded workers never dispatch. NAC direct mode uses internal general subagents with the same topology; read references/direct.md. No user-owned tasks or child goals.
+description: Run scalable, isolated live QA for nac development. Use one setup child, exactly n parallel test children, and one aggregate child; preserve immutable assignments and isolated evidence. Read references/direct.md. No user-owned tasks or child goals.
 compatibility: Requires a local unsandboxed Git checkout, Rust and web build tools, curl, and rootless Podman.
 ---
 
@@ -18,17 +18,9 @@ Caller requests about focus or duration are ordinary test context, not additiona
 
 The process's starting directory is only a place from which to resolve the requested revision. Its branch, staged files, unstaged files, and untracked files are never infrastructure failures by themselves. Setup must select an existing clean worktree at the target commit or create one, change its working directory to that root, and run the pass there. Workers and aggregate must likewise change to the setup-defined root before inspecting Git or running commands.
 
-The top-level controller is not a QA test worker. Select the adapter from the current immutable session behavior; never enable another behavior to run QA. In NAC direct mode, read [references/direct.md](references/direct.md) before dispatch. It maps these phases to traditional internal subagents without user-owned tasks or child goals.
+The top-level controller is not a QA test worker. Read [references/direct.md](references/direct.md) before dispatch. Use one setup child, exactly `n` parallel test children with the setup contracts copied verbatim, and one aggregate child. Keep assignments and paths immutable; do not create user-owned tasks or child goals.
 
-In NAC's established orchestrator mode the controller sees this catalog description but cannot read or write files; preserve this choreography:
-
-1. Dispatch `qa/setup` with `skills: ["qa"]` and `mode=setup`, `n`, the caller's requested revision or PR, and the caller's complete scope/focus context.
-2. Read the retained setup episode. It must contain the absolute execution-worktree root, pass root, source SHA, binary, and `n` distinct assignment contracts.
-3. Dispatch exactly those `n` test workers together in one parallel wave. Copy every setup contract verbatim—especially `repo_root`, `slot`, `scope`, `report`, and `evidence`—then add `skills: ["qa"]`, `qa/setup` as a source thread, the setup-proven `podman_mode`, `XDG_RUNTIME_DIR` only for local mode, and ephemeral connection fields only for remote mode. Never rename, repartition, or “improve” assignments after `RUN.json` exists.
-4. After all `n` finish, dispatch `qa/aggregate` with `skills: ["qa"]`, `mode=aggregate`, the setup-defined `repo_root`, exact slots, `qa/setup`, every test worker that produced a retained episode, and explicit dispatch outcomes for workers without episodes. A failed or timed-out worker cannot be named as a source thread.
-5. Return the aggregate conclusion. Never substitute one all-purpose QA worker for this topology.
-
-Other harnesses must use the equivalent setup → exactly `n` peers → aggregate topology. NAC direct mode also dispatches separate setup and aggregate children. In other harnesses a controller with direct file/process tools may perform setup or aggregation itself; those phases still do not count toward `n`.
+Other harnesses use the equivalent setup → exactly `n` peers → aggregate topology. A controller with direct file/process tools may perform setup or aggregation itself; those phases do not count toward `n`.
 
 Determine the preloaded worker role only from an explicit `mode`:
 
@@ -61,7 +53,7 @@ The setup worker may start in any worktree or subdirectory. It owns source selec
 5. Immediately change the setup worker's process or tool working directory to the selected root and use that absolute root for every remaining command. Record it as `repo_root`. Never stash, commit, reset, clean, switch, or delete anything in the starting checkout or a rejected candidate.
 6. In `repo_root`, confirm the top-level path, exact `HEAD`, and mechanical cleanliness. If a newly created worktree cannot satisfy these checks, stop with the concrete Git error. Ignored build output and prior `.nac/qa/` passes do not make the selected worktree dirty.
 7. Require `podman --version` and `podman info --format '{{.Host.Security.Rootless}}'` to succeed and report `true`. The client user's UID does not prove a remote engine is rootless. On failure retain the command, exit status and sanitized error as a named setup `infra` coverage gap. Do not dispatch test workers without valid contracts, start a VM, change backend or claim a live QA pass.
-8. Classify the selected engine as local or remote/VM-backed and prove it remains rootless after replacing `HOME`. For a local engine, capture `XDG_RUNTIME_DIR` ephemerally, require it to be an absolute existing directory owned by the current user, and prove rootless `podman info` with isolated HOME/XDG config plus that runtime directory. For a remote engine, read `podman system connection list --format json`, select its default connection, and map only its URI and identity path to ephemeral `CONTAINER_HOST` and `CONTAINER_SSHKEY`; prove rootless `podman info` with an isolated home. Return the mode and its ephemeral runtime fields in the setup episode, outside `RUN.json`; never copy the containers configuration tree.
+8. Classify the selected engine as local or remote/VM-backed and prove it remains rootless after replacing `HOME`. For a local engine, capture `XDG_RUNTIME_DIR` ephemerally, require it to be an absolute existing directory owned by the current user, and prove rootless `podman info` with isolated HOME/XDG config plus that runtime directory. For a remote engine, read `podman system connection list --format json`, select its default connection, and map only its URI and identity path to ephemeral `CONTAINER_HOST` and `CONTAINER_SSHKEY`; prove rootless `podman info` with an isolated home. Return the mode and its ephemeral runtime fields in the setup report, outside `RUN.json`; never copy the containers configuration tree.
 
 ### 2. Create the pass
 
@@ -82,9 +74,9 @@ Create a collision-safe directory beneath:
 Verify with `git check-ignore -v` that a prospective report resolves through the existing `.nac/` rule before dispatch. Never reuse or overwrite an earlier pass.
 Run `make setup` in the selected worktree before development or verification, and again after either lockfile changes. Retain preparation commands, outcomes and prerequisite gaps; do not introduce automatic hooks or use preparation to change the selected backend.
 
-Build once into a fresh pass-owned target directory with `CARGO_TARGET_DIR=<pass_root>/build-target make build`. When a caller or host requires a shared build admission/cache, run preparation and build through that gate and keep validation/copying inside its lease instead of allocating a private cache. Run the build with provider, proxy, SSH-agent, cloud, CI, token, password, and secret variables removed; retain only the host toolchain/cache variables it needs. Require the produced nac-web to be a regular non-symlink file, copy it to `<pass_root>/bin/nac-web`, make the copy non-writable, record its version and SHA-256, remove a pass-owned `build-target` if used, and confirm `HEAD` still equals the captured SHA. Use only that absolute pass-owned copy for every worker's server and `--worker-executable`; never execute the shared incremental `target/` artifact after releasing its lease or use an installed binary.
+Build once into a fresh pass-owned target directory with `CARGO_TARGET_DIR=<pass_root>/build-target make build`. When a caller or host requires a shared build admission/cache, run preparation and build through that gate and keep validation/copying inside its lease instead of allocating a private cache. Run the build with provider, proxy, SSH-agent, cloud, CI, token, password, and secret variables removed; retain only the host toolchain/cache variables it needs. Require the produced nac-web to be a regular non-symlink file, copy it to `<pass_root>/bin/nac-web`, make the copy non-writable, record its version and SHA-256, remove a pass-owned `build-target` if used, and confirm `HEAD` still equals the captured SHA. Use only that absolute pass-owned copy for every worker's server ; never execute the shared incremental `target/` artifact after releasing its lease or use an installed binary.
 
-Write `RUN.json` atomically. Include the pass ID, execution-worktree `repo_root`, ref, full SHA, pass-owned binary path/version/SHA-256, requested `n`, coordinator identity, start time, Podman version/mode, and worker assignments. Never include credentials or environment values; remote connection URI and identity path remain ephemeral in the setup episode.
+Write `RUN.json` atomically. Include the pass ID, execution-worktree `repo_root`, ref, full SHA, pass-owned binary path/version/SHA-256, requested `n`, coordinator identity, start time, Podman version/mode, and worker assignments. Never include credentials or environment values; remote connection URI and identity path remain ephemeral in the setup report.
 
 `resources.jsonl` is an append-only coordinator ledger for resources the coordinator itself creates. Workers keep their own ledgers below `workers/<slot>/resources.jsonl`.
 
@@ -118,11 +110,11 @@ caller_context=<relevant focus or time guidance>
 podman_mode=<local|remote>
 ```
 
-Return the execution-worktree root, pass root, captured SHA, pass-owned binary path/version/SHA-256, requested `n`, Podman mode, the selected mode's ephemeral runtime fields (`XDG_RUNTIME_DIR` for local or connection URI/key path for remote), and all `n` complete worker contracts in the retained setup episode. Do not dispatch them yourself.
+Return the execution-worktree root, pass root, captured SHA, pass-owned binary path/version/SHA-256, requested `n`, Podman mode, the selected mode's ephemeral runtime fields (`XDG_RUNTIME_DIR` for local or connection URI/key path for remote), and all `n` complete worker contracts in the retained setup report. Do not dispatch them yourself.
 
 ## Aggregate workflow
 
-Run only with `mode=aggregate`, the absolute setup-defined `repo_root`, absolute pass root, captured source SHA, requested `n`, expected slot/report paths, the setup episode, every available completed test-worker episode, and explicit dispatch outcomes for missing episodes. Ignore the aggregate process's initial directory: resolve and change to `repo_root` first, then validate that root and the other values against `RUN.json` before writing anything. Then:
+Run only with `mode=aggregate`, the absolute setup-defined `repo_root`, absolute pass root, captured source SHA, requested `n`, expected slot/report paths, the setup report, every available completed test-worker report, and explicit dispatch outcomes for missing episodes. Ignore the aggregate process's initial directory: resolve and change to `repo_root` first, then validate that root and the other values against `RUN.json` before writing anything. Then:
 
 1. Require one final report at every assigned path. If a worker exited before atomically finalizing its report, write an aggregate-owned `infra` stub for that slot from its dispatch outcome and partial evidence; never call it a pass.
 2. Recover cleanup after any crashed, cancelled, or timed-out worker. Validate each write-ahead worker ledger against its setup-defined slot, pass label, exact service names/cidfiles, pre-request Podman container-ID snapshot, pass-owned event log, ledgered observer PID/command, and setup-proven Podman engine. Stop and wait an exact leftover observer only after its command names the pass-owned event log, then ensure the log is closed. For a nac sandbox request without a completed response, consider only container IDs absent from the snapshot and created during the ledgered request window. Before removal, require `podman inspect` to prove the candidate's mount source lies under this slot's pass-owned isolated `NAC_HOME/worktrees/` and its mount destination equals the requested guest workspace. Remove only proven pending or created resources, then verify them absent. Stop and report exact leftovers when ownership cannot be proven.
@@ -174,7 +166,6 @@ Immediately before launch, re-hash the binary against `RUN.json`. Then launch ex
 -y
 -C <repo_root>
 --store-path <absolute worker store.db>
---worker-executable <same supplied binary>
 ```
 
 Capture stdout and stderr separately. Parse the actual listening address from nac-web's startup log; do not reserve a free port and race another process. Bypass ambient proxies for loopback probes.

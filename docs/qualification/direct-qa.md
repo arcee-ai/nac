@@ -1,10 +1,9 @@
 # Direct internal-subagent QA choreography
 
 ALL-423 adapts the repository QA skill to the existing NAC direct child tools.
-The orchestrator's setup → exactly n peers → aggregate path remains available.
 The direct adapter uses one fresh `general` child for setup, one parallel wave
 of exactly n fresh test children, then one fresh aggregate child. No independent
-task, autonomous goal, orchestrator enablement, new allocator or runtime API is
+task, autonomous goal, new allocator or runtime API is
 introduced. The selected execution backend and ordinary permissions still apply.
 
 ## Bounded fixture

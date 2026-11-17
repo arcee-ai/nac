@@ -6,10 +6,7 @@ fn installed_pack_is_bounded_and_grounded_without_a_checkout() {
     for (question, expected) in [
         ("How do I add MCP?", "mcp"),
         ("Where are my skills?", "skills"),
-        (
-            "What does direct-with-orchestrator mean?",
-            "session-behaviors",
-        ),
+        ("How do direct sessions work?", "session-behaviors"),
         ("Why can't this subagent search?", "web-retrieval"),
         ("How do I pause heartbeats in this chat?", "heartbeats"),
     ] {
@@ -20,6 +17,19 @@ fn installed_pack_is_bounded_and_grounded_without_a_checkout() {
         );
         assert!(hits.iter().all(|hit| hit.excerpt.len() <= 512));
     }
+    let terminal = guide
+        .read(
+            "terminal-output",
+            "command-deadlines-and-pty-polls",
+            0,
+            2048,
+        )
+        .unwrap();
+    assert!(terminal.text.contains("timeout_ms"));
+    assert!(guide.document("managed-orchestrators").is_err());
+    assert!(guide
+        .read("skills", "how-the-orchestrator-uses-skills", 0, 100)
+        .is_err());
     let section = guide.read("skills", "discovery", 0, 1024).unwrap();
     assert!(section.text.contains(".nac/skills"));
     assert!(section.text.len() <= 1024);

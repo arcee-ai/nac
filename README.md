@@ -18,7 +18,10 @@
   </a>
 </p>
 
-nac is an open-source agent harness for longer, ambitious tasks — experiments, training runs, infrastructure, and prototyping that has to stay aligned with the original intent. It uses a thread-and-episode architecture inspired by [slate](https://randomlabs.ai/blog/slate): a central orchestrator plans and decomposes work but cannot execute commands or edit files; it only launches threads, which return episodes — structured summaries of what they accomplished. Also takes inspiration from [nanocode](https://github.com/1rgs/nanocode) and [pi](https://github.com/badlogic/pi-mono). For the technical write-up, see the [nac blog post](https://arcee.ai/blog/nac).
+nac is an open-source coding-agent harness for longer tasks. A persistent direct
+agent works in your project, can use tools and delegate bounded work to child
+agents, and retains session history and goals. It takes inspiration from
+[nanocode](https://github.com/1rgs/nanocode) and [pi](https://github.com/badlogic/pi-mono).
 
 ## Quickstart
 
@@ -155,7 +158,7 @@ The local verification lanes are `make test-web` for frontend unit/component
 tests, `make test-e2e` for isolated real-browser tests against the embedded
 server and a credential-free scripted model, and `make test-durability` for the
 focused lifecycle/crash-window regressions. `make test-managed-load` runs the
-bounded deterministic 1/2/4-orchestrator load and fault scenario described in
+bounded deterministic legacy load and fault scenario described in
 [the managed-load guide](docs/managed/deterministic-load.md). Install the E2E
 browser once with `npm --prefix crates/nac-server/web exec -- playwright install chromium`.
 `make ci` is the portable unit, lint, formatting, and committed-asset lane.

@@ -55,10 +55,6 @@
         "heading": "Local direct sessions"
       },
       {
-        "section_id": "how-the-orchestrator-uses-skills",
-        "heading": "How the orchestrator uses skills"
-      },
-      {
         "section_id": "referencing-skills-in-a-prompt",
         "heading": "Referencing skills in a prompt"
       }
@@ -67,19 +63,13 @@
   {
     "document_id": "session-behaviors",
     "source_path": "docs/usage/session-behaviors.md",
-    "title": "Session behaviors: orchestrator, direct and direct-with-orchestrator",
+    "title": "Direct sessions",
     "sections": []
   },
   {
     "document_id": "subagents",
     "source_path": "docs/usage/traditional-children.md",
     "title": "Traditional child sessions",
-    "sections": []
-  },
-  {
-    "document_id": "managed-orchestrators",
-    "source_path": "docs/usage/managed-orchestrators.md",
-    "title": "Managed orchestrators",
     "sections": []
   },
   {
@@ -119,7 +109,7 @@
       },
       {
         "section_id": "orchestrator-compaction-threshold",
-        "heading": "Orchestrator compaction threshold"
+        "heading": "Compaction threshold"
       },
       {
         "section_id": "api-key-selection",
