@@ -98,7 +98,7 @@ function updateAttentionMenus(snapshot) {
     item("notifications-mute").enabled =
       snapshot.loaded && !snapshot.saving && !suspended && lifecycle.phase === "running";
     item("notifications-reset").enabled =
-      snapshot.loaded && !suspended && lifecycle.phase === "running";
+      (snapshot.loaded || snapshot.resettable) && !suspended && lifecycle.phase === "running";
     item("notifications-status").label =
       `Notifications: ${snapshot.message}${snapshot.unreadCompletions ? ` · ${snapshot.unreadCompletions} unread` : ""}`;
   }
