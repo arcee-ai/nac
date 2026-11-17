@@ -279,12 +279,19 @@ test("connected native shell, less resize, and trusted browser bracketed UTF-8 p
     );
     expect(pasteInputs).toHaveLength(0);
     await page.keyboard.press(shortcut);
+    // The shell writes this file in place, so a read can land on it empty or
+    // partial; poll again until it parses rather than failing the poll.
     await expect
-      .poll(async () =>
-        JSON.parse(
-          await fs.readFile(path.join(workspace, "paste_bytes.json"), "utf8").catch(() => "null"),
-        ),
-      )
+      .poll(async () => {
+        const text = await fs
+          .readFile(path.join(workspace, "paste_bytes.json"), "utf8")
+          .catch(() => "");
+        try {
+          return JSON.parse(text);
+        } catch {
+          return null;
+        }
+      })
       .toEqual(Array.from(new TextEncoder().encode("\x1b[200~Ω中\rliteral paste\x1b[201~")));
     expect(pasteInputs.flat(), "trusted paste product input bytes").toEqual(
       Array.from(new TextEncoder().encode("\x1b[200~Ω中\rliteral paste\x1b[201~")),
