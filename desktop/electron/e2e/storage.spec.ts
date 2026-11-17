@@ -326,52 +326,9 @@ test("Focus preference keys cross the native bridge and survive Quit on a new se
         };
       });
     };
-    // A cold passive census does not attach dormant sessions or pretend their
-    // broker facets are known, even though the outcomes are durable.
-    await expect.poll(facts).toEqual(
-      [outcome, unreadOutcome].map((value) => ({
-        outcome: value,
-        activity: "unknown",
-        permissions: "unknown",
-        questions: "available",
-        reviews: "unknown",
-      })),
-    );
-    await expect(
-      next.page.getByText("Status unavailable for 2 sessions", { exact: true }),
-    ).toBeVisible();
-    // Fixture-owned interactive GETs retain both broker owners. Snapshot GETs
-    // alone allow the next attachment to evict the prior idle owner. Keep Home
-    // unchanged: no SessionPage/read-marker or outcome click may mark B read.
-    await next.page.evaluate(
-      async (ids) => {
-        const sources = ids.map((id) => new EventSource(`/sessions/${id}/events/stream`));
-        (window as any).__focusColdSessionObservers = sources;
-        let timeout: ReturnType<typeof setTimeout> | undefined;
-        try {
-          await Promise.race([
-            Promise.all(
-              sources.map(
-                (source) =>
-                  new Promise<void>((resolve, reject) => {
-                    source.onopen = () => resolve();
-                    source.onerror = () => reject(Error("Cold fixture event stream failed"));
-                  }),
-              ),
-            ),
-            new Promise<never>((_resolve, reject) => {
-              timeout = setTimeout(
-                () => reject(Error("Cold fixture event stream admission timed out")),
-                10000,
-              );
-            }),
-          ]);
-        } finally {
-          clearTimeout(timeout);
-        }
-      },
-      [session, unreadSession],
-    );
+    // The exclusive serving process knows dormant brokers have no pending
+    // permissions/reviews. A passive cold census must restore these outcomes
+    // without attaching sessions or visiting them (which could mark B read).
     await expect.poll(facts).toEqual(
       [outcome, unreadOutcome].map((value) => ({
         outcome: value,
@@ -428,13 +385,7 @@ test("Focus preference keys cross the native bridge and survive Quit on a new se
     expect(c.provider.requests).toHaveLength(2);
     c.provider.assertConsumed();
   } finally {
-    try {
-      await next.page.evaluate(() => {
-        for (const source of (window as any).__focusColdSessionObservers ?? []) source.close();
-      });
-    } finally {
-      await stop(next.app);
-    }
+    await stop(next.app);
   }
 });
 
