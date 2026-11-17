@@ -1,0 +1,339 @@
+/* Focus — semantic tokens.
+   The ~200 role names the client was written against, each derived once
+   from the per-mode base palette (`light-mode.css`, `dark-mode.css`). The
+   names stay so every existing surface inherits the new look; the values
+   say what Focus means by them:
+   - "accent" is ink. There is no brand hue in chrome.
+   - "danger" is amber: needs you / caution. "error" is red.
+   - elevation is a step in lightness plus a hairline, never a heavy shadow. */
+.light,
+.dark {
+  /* Background / Accent (ink washes) */
+  --color-bg-accent-primary: var(--f-wash-1);
+  --color-bg-accent-secondary: var(--f-wash-2);
+  --color-bg-accent-tertiary: var(--f-wash-3);
+  --color-bg-accent-inverse: var(--f-ink);
+
+  /* Background / Buttons */
+  --color-bg-btn-primary: var(--f-ink);
+  --color-bg-btn-primary-hovered: var(--f-ink-hover);
+  --color-bg-btn-primary-pressed: var(--f-ink-pressed);
+  --color-bg-btn-primary-disabled: var(--f-ink-disabled);
+
+  --color-bg-btn-secondary: var(--f-surface);
+  --color-bg-btn-secondary-hovered: var(--f-wash-2);
+  --color-bg-btn-secondary-pressed: var(--f-wash-3);
+  --color-bg-btn-secondary-disabled: var(--f-wash-1);
+
+  --color-bg-btn-secondary-highlighted: var(--f-wash-3);
+  --color-bg-btn-secondary-highlighted-hovered: var(--f-wash-4);
+  --color-bg-btn-secondary-highlighted-pressed: var(--f-wash-4);
+  --color-bg-btn-secondary-highlighted-disabled: var(--f-wash-1);
+
+  --color-bg-btn-ghost: transparent;
+  --color-bg-btn-ghost-hovered: var(--f-wash-2);
+  --color-bg-btn-ghost-pressed: var(--f-wash-3);
+  --color-bg-btn-ghost-disabled: transparent;
+
+  --color-bg-btn-ghost-highlighted: var(--f-wash-2);
+  --color-bg-btn-ghost-highlighted-hovered: var(--f-wash-3);
+  --color-bg-btn-ghost-highlighted-pressed: var(--f-wash-4);
+  --color-bg-btn-ghost-highlighted-disabled: var(--f-wash-1);
+
+  --color-bg-btn-secondary-destructive: var(--f-red-wash);
+  --color-bg-btn-secondary-destructive-hovered: var(--f-red-wash-2);
+  --color-bg-btn-secondary-destructive-pressed: var(--f-red-wash-2);
+  --color-bg-btn-secondary-destructive-disabled: var(--f-red-wash);
+
+  --color-bg-btn-ghost-destructive: transparent;
+  --color-bg-btn-ghost-destructive-hovered: var(--f-red-wash);
+  --color-bg-btn-ghost-destructive-pressed: var(--f-red-wash-2);
+  --color-bg-btn-ghost-destructive-disabled: transparent;
+
+  --color-bg-btn-secondary-accent: var(--f-wash-2);
+  --color-bg-btn-secondary-accent-hovered: var(--f-wash-3);
+  --color-bg-btn-secondary-accent-pressed: var(--f-wash-4);
+  --color-bg-btn-secondary-accent-disabled: var(--f-wash-1);
+
+  --color-bg-btn-secondary-accent-highlighted: var(--f-wash-3);
+  --color-bg-btn-secondary-accent-highlighted-hovered: var(--f-wash-4);
+  --color-bg-btn-secondary-accent-highlighted-pressed: var(--f-wash-4);
+  --color-bg-btn-secondary-accent-highlighted-disabled: var(--f-wash-1);
+
+  --color-bg-btn-ghost-accent: transparent;
+  --color-bg-btn-ghost-accent-hovered: var(--f-wash-2);
+  --color-bg-btn-ghost-accent-pressed: var(--f-wash-3);
+  --color-bg-btn-ghost-accent-disabled: transparent;
+
+  --color-bg-btn-ghost-accent-highlighted: var(--f-wash-2);
+  --color-bg-btn-ghost-accent-highlighted-hovered: var(--f-wash-3);
+  --color-bg-btn-ghost-accent-highlighted-pressed: var(--f-wash-4);
+  --color-bg-btn-ghost-accent-highlighted-disabled: transparent;
+
+  /* Background / Danger (amber: needs you) */
+  --color-bg-danger-primary: var(--f-amber-wash);
+  --color-bg-danger-secondary: var(--f-amber-wash-2);
+  --color-bg-danger-tertiary: var(--f-amber-wash-2);
+  --color-bg-danger-inverse: var(--f-amber);
+
+  /* Background / Divider */
+  --color-bg-divider-primary: var(--f-ink);
+  --color-bg-divider-secondary: var(--f-line-strong);
+  --color-bg-divider-tertiary: var(--f-line-strong);
+  --color-bg-divider-muted: var(--f-line);
+
+  /* Background / Elevation */
+  --color-bg-elevation-ground: var(--f-ground);
+  --color-bg-elevation-ground-transparent: transparent;
+  --color-bg-elevation-ground-inverse: var(--f-ink);
+  --color-bg-elevation-level-0-5: var(--f-sidebar);
+  --color-bg-elevation-level-1: var(--f-surface);
+  --color-bg-elevation-level-2: var(--f-raised);
+  --color-bg-elevation-level-3: var(--f-overlay);
+  --color-bg-elevation-sublevel-variant-A: var(--f-wash-1);
+  --color-bg-elevation-sublevel-variant-B: var(--f-wash-2);
+
+  /* Background / Error */
+  --color-bg-error-primary: var(--f-red-wash);
+  --color-bg-error-secondary: var(--f-red-wash-2);
+  --color-bg-error-tertiary: var(--f-red-wash-2);
+  --color-bg-error-inverse: var(--f-red);
+
+  /* Background / Info (blue is for links and information only) */
+  --color-bg-info-primary: var(--f-blue-wash);
+  --color-bg-info-secondary: var(--f-blue-wash-2);
+  --color-bg-info-tertiary: var(--f-blue-wash-2);
+  --color-bg-info-inverse: var(--f-blue);
+
+  /* Background / Input */
+  --color-bg-input-switcher: var(--f-wash-4);
+  --color-bg-input-switcher-disabled: var(--f-wash-2);
+  --color-bg-input-knob: var(--f-surface);
+  --color-bg-input-knob-disabled: var(--f-wash-2);
+  --color-bg-input-switcher-active: var(--f-ink);
+  --color-bg-input-switcher-active-disabled: var(--f-ink-disabled);
+  --color-bg-input-knob-active: var(--f-on-ink);
+  --color-bg-input-knob-active-disabled: var(--f-wash-2);
+  --color-bg-input-progress: var(--f-ink-2);
+  --color-bg-input-progress-bar: var(--f-wash-3);
+  --color-bg-input-progress-disabled: var(--f-wash-4);
+  --color-bg-input-progress-bar-disabled: var(--f-wash-2);
+  --color-bg-input: var(--f-surface);
+  --color-bg-input-disabled: var(--f-wash-1);
+
+  /* Background / Success */
+  --color-bg-success-primary: var(--f-green-wash);
+  --color-bg-success-secondary: var(--f-green-wash-2);
+  --color-bg-success-tertiary: var(--f-green-wash-2);
+  --color-bg-success-inverse: var(--f-green);
+
+  /* Border / Accent */
+  --color-border-accent-primary: var(--f-line-ink);
+  --color-border-accent-secondary: var(--f-line-strong);
+  --color-border-accent-tertiary: var(--f-line);
+  --color-border-accent-muted: var(--f-line-soft);
+
+  /* Border / Basic */
+  --color-border-primary: var(--f-line-ink);
+  --color-border-secondary: var(--f-line-strong);
+  --color-border-tertiary: var(--f-line);
+  --color-border-muted: var(--f-line-soft);
+  --color-border-card: var(--f-line);
+  --color-border-btn-destructive: var(--f-red-line);
+  --color-border-focus-outline: var(--f-focus);
+
+  /* Border / Danger */
+  --color-border-danger-primary: var(--f-amber);
+  --color-border-danger-secondary: var(--f-amber-line);
+  --color-border-danger-tertiary: var(--f-amber-line);
+  --color-border-danger-muted: var(--f-amber-wash);
+
+  /* Border / Error */
+  --color-border-error-primary: var(--f-red);
+  --color-border-error-secondary: var(--f-red-line);
+  --color-border-error-tertiary: var(--f-red-line);
+  --color-border-error-muted: var(--f-red-wash);
+
+  /* Border / Info */
+  --color-border-info-primary: var(--f-blue);
+  --color-border-info-secondary: var(--f-blue-line);
+  --color-border-info-tertiary: var(--f-blue-line);
+  --color-border-info-muted: var(--f-blue-wash);
+
+  /* Border / Input */
+  --color-border-input: var(--f-line-strong);
+
+  /* Border / Inversed */
+  --color-border-primary-inversed: var(--f-on-ink);
+  --color-border-secondary-inversed: color-mix(in oklch, var(--f-on-ink) 50%, transparent);
+  --color-border-tertiary-inversed: color-mix(in oklch, var(--f-on-ink) 14%, transparent);
+  --color-border-muted-inversed: color-mix(in oklch, var(--f-on-ink) 8%, transparent);
+
+  /* Border / Success */
+  --color-border-success-primary: var(--f-green);
+  --color-border-success-secondary: var(--f-green-line);
+  --color-border-success-tertiary: var(--f-green-line);
+  --color-border-success-muted: var(--f-green-wash);
+
+  /* Fill / Accent (icons) */
+  --color-fill-accent-primary: var(--f-ink);
+  --color-fill-accent-secondary: var(--f-ink-2);
+  --color-fill-accent-tertiary: var(--f-ink-3);
+  --color-fill-accent-muted: var(--f-ink-5);
+
+  /* Fill / Basic */
+  --color-fill-basic-primary: var(--f-ink);
+  --color-fill-basic-secondary: var(--f-ink-2);
+  --color-fill-basic-tertiary: var(--f-ink-3);
+  --color-fill-basic-muted: var(--f-ink-4);
+
+  /* Fill / Buttons */
+  --color-fill-btn-primary: var(--f-on-ink);
+  --color-fill-btn-primary-disabled: var(--f-ink-4);
+  --color-fill-btn-accent: var(--f-ink);
+  --color-fill-btn-accent-hovered: var(--f-ink-2);
+  --color-fill-btn-accent-pressed: var(--f-ink-2);
+  --color-fill-btn-accent-muted: var(--f-ink-4);
+
+  --color-fill-btn-secondary: var(--f-ink-3);
+  --color-fill-btn-secondary-hovered: var(--f-ink);
+  --color-fill-btn-secondary-pressed: var(--f-ink);
+  --color-fill-btn-secondary-disabled: var(--f-ink-5);
+  --color-fill-btn-secondary-highlighted: var(--f-ink);
+  --color-fill-btn-secondary-hovered-highlighted: var(--f-ink);
+  --color-fill-btn-secondary-pressed-highlighted: var(--f-ink);
+  --color-fill-btn-secondary-disabled-highlighted: var(--f-ink-5);
+
+  --color-fill-btn-destructive: var(--f-red-text);
+  --color-fill-btn-destructive-hovered: var(--f-red);
+  --color-fill-btn-destructive-pressed: var(--f-red);
+  --color-fill-btn-destructive-disabled: var(--f-red-line);
+
+  /* Fill / Danger */
+  --color-fill-danger-primary: var(--f-amber);
+  --color-fill-danger-secondary: var(--f-amber);
+  --color-fill-danger-tertiary: var(--f-amber);
+  --color-fill-danger-muted: var(--f-amber-line);
+
+  /* Fill / Error */
+  --color-fill-error-primary: var(--f-red);
+  --color-fill-error-secondary: var(--f-red);
+  --color-fill-error-tertiary: var(--f-red);
+  --color-fill-error-muted: var(--f-red-line);
+
+  /* Fill / Info */
+  --color-fill-info-primary: var(--f-blue);
+  --color-fill-info-secondary: var(--f-blue);
+  --color-fill-info-tertiary: var(--f-blue);
+  --color-fill-info-muted: var(--f-blue-line);
+
+  /* Fill / Inversed */
+  --color-fill-primary-inversed: var(--f-on-ink);
+  --color-fill-secondary-inversed: var(--f-ink-4);
+  --color-fill-tertiary-inversed: var(--f-ink-3);
+  --color-fill-muted-inversed: var(--f-ink-2);
+
+  /* Fill / Success */
+  --color-fill-success-primary: var(--f-green);
+  --color-fill-success-secondary: var(--f-green);
+  --color-fill-success-tertiary: var(--f-green);
+  --color-fill-success-muted: var(--f-green-line);
+
+  /* Text / Accent (ink: emphasis without hue) */
+  --color-text-accent-primary: var(--f-ink);
+  --color-text-accent-secondary: var(--f-ink-2);
+  --color-text-accent-tertiary: var(--f-ink-3);
+  --color-text-accent-muted: var(--f-ink-4);
+
+  /* Text / Basic */
+  --color-text-basic-primary: var(--f-ink);
+  --color-text-basic-secondary: var(--f-ink-2);
+  --color-text-basic-tertiary: var(--f-ink-3);
+  --color-text-basic-muted: var(--f-ink-4);
+
+  /* Text / Buttons */
+  --color-text-btn-primary: var(--f-on-ink);
+  --color-text-btn-primary-disabled: var(--f-ink-4);
+  --color-text-btn-accent: var(--f-ink);
+  --color-text-btn-accent-hovered: var(--f-ink);
+  --color-text-btn-accent-pressed: var(--f-ink-2);
+  --color-text-btn-accent-disabled: var(--f-ink-4);
+
+  --color-text-btn-secondary: var(--f-ink-2);
+  --color-text-btn-secondary-hovered: var(--f-ink);
+  --color-text-btn-secondary-pressed: var(--f-ink);
+  --color-text-btn-secondary-disabled: var(--f-ink-4);
+  --color-text-btn-secondary-highlighted: var(--f-ink);
+  --color-text-btn-secondary-hovered-highlighted: var(--f-ink);
+  --color-text-btn-secondary-pressed-highlighted: var(--f-ink);
+  --color-text-btn-secondary-disabled-highlighted: var(--f-ink-4);
+
+  --color-text-btn-destructive: var(--f-red-text);
+  --color-text-btn-destructive-hovered: var(--f-red-text);
+  --color-text-btn-destructive-pressed: var(--f-red);
+  --color-text-btn-destructive-disabled: var(--f-red-line);
+
+  /* Text / Danger */
+  --color-text-danger-primary: var(--f-amber-text);
+  --color-text-danger-secondary: var(--f-amber-text);
+  --color-text-danger-tertiary: var(--f-amber);
+  --color-text-danger-muted: var(--f-amber-line);
+
+  /* Text / Error */
+  --color-text-error-primary: var(--f-red-text);
+  --color-text-error-secondary: var(--f-red-text);
+  --color-text-error-tertiary: var(--f-red);
+  --color-text-error-muted: var(--f-red-line);
+
+  /* Text / Info */
+  --color-text-info-primary: var(--f-blue-text);
+  --color-text-info-secondary: var(--f-blue-text);
+  --color-text-info-tertiary: var(--f-blue);
+  --color-text-info-muted: var(--f-blue-line);
+
+  /* Text / Input */
+  --color-text-input: var(--f-ink);
+  --color-text-input-disabled: var(--f-ink-4);
+  --color-text-input-placeholder: var(--f-ink-4);
+  --color-text-input-placeholder-disabled: var(--f-ink-5);
+
+  /* Text / Inversed */
+  --color-text-primary-inverse: var(--f-on-ink);
+  --color-text-secondary-inverse: color-mix(in oklch, var(--f-on-ink) 80%, transparent);
+  --color-text-tertiary-inverse: color-mix(in oklch, var(--f-on-ink) 65%, transparent);
+  --color-text-muted-inverse: color-mix(in oklch, var(--f-on-ink) 45%, transparent);
+
+  /* Text / Success */
+  --color-text-success-primary: var(--f-green-text);
+  --color-text-success-secondary: var(--f-green-text);
+  --color-text-success-tertiary: var(--f-green);
+  --color-text-success-muted: var(--f-green-line);
+
+  /* Code */
+  --color-code-bg: var(--f-code-bg);
+  --color-code-keyword: var(--f-code-keyword);
+  --color-code-string: var(--f-code-string);
+  --color-code-number: var(--f-code-number);
+  --color-code-function: var(--f-code-function);
+  --color-code-variable: var(--f-code-variable);
+  --color-code-comment: var(--f-code-comment);
+
+  /* Shadows: hairline ring + one soft drop, floating layers only. */
+  --shadow-md: var(--f-ring), var(--f-shadow-md);
+  --shadow-lg: var(--f-ring), var(--f-shadow-lg);
+  --shadow-xl: var(--f-ring), var(--f-shadow-lg);
+  --shadow-2xl: var(--f-ring), var(--f-shadow-xl);
+  --shadow-3xl: var(--f-ring), var(--f-shadow-xl);
+  --shadow-convex: inset 0 0 0 1px var(--f-line);
+  --shadow-concave: inset 0 0 0 1px var(--f-line-strong);
+  --shadow-range-knob: 0 1px 2px oklch(0 0 0 / 22%), 0 0 0 1px var(--f-line);
+  --left-sidebar-open: 1px 0 0 0 var(--f-line), 8px 0 24px -12px oklch(0 0 0 / 18%);
+}
+
+/* Legacy primitive names still referenced by a few components. */
+.light,
+.dark {
+  --brand-450: var(--f-amber);
+  --brand-500: var(--f-ink);
+  --blue-500: var(--f-blue);
+}

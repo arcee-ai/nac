@@ -3,6 +3,8 @@ export type BrowseKind = "directory" | "toml" | "file";
 /** How often the session list is refreshed; the list has no event stream. */
 export declare const SESSIONS_POLL_MS = 5000;
 export declare const WORKSPACE_STATS_POLL_MS = 30000;
+/** Fleet attention polling cadence while its stream is not live. */
+export declare const FLEET_ATTENTION_POLL_MS = 5000;
 export declare const queryKeys: {
     storeInfo: readonly ["store"];
     managedHostStatus: readonly ["managed-host-status"];
@@ -14,6 +16,7 @@ export declare const queryKeys: {
     managedAuth: readonly ["managed-auth"];
     modelConfigs: readonly ["model-configs"];
     sshConfigs: readonly ["ssh-configs"];
+    sshAliases: readonly ["ssh-aliases"];
     mcpLibrary: readonly ["mcp-library"];
     mcpServers: readonly ["mcp-servers"];
     mcpRuntime: readonly ["mcp-runtime"];
@@ -56,6 +59,9 @@ export declare const queryKeys: {
     sessionSnapshot: (id: string) => readonly ["session", string, "snapshot"];
     sessionSkills: (id: string) => readonly ["session", string, "skills"];
     sessionsAll: readonly ["sessions"];
+    fleetAttention: (projectId: string | null) => readonly ["fleet-attention", {
+        readonly projectId: string | null;
+    }];
     threadEventsRoot: (id: string) => readonly ["session", string, "thread-events"];
     threadEvents: (id: string, threadName: string) => readonly ["session", string, "thread-events", string];
     toolCallContent: (id: string, callId: string, blockKey: string) => readonly ["session", string, "tool-call", string, string];

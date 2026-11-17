@@ -64,9 +64,9 @@ export function TerminalFrame({
   return (
     <>
       {!isMobile && !isTablet ? (
-        <div className="flex items-center gap-2 h-12 pl-4 pr-2 shrink-0 border-b border-muted bg-elevation-ground">
+        <div className="flex items-center gap-2 h-11 pl-4 pr-2 shrink-0 border-b border-tertiary">
           <div className="flex flex-1 min-w-0 items-center gap-2">
-            <span className="min-w-0 truncate header-sm text-basic-primary">{heading.title}</span>
+            <span className="min-w-0 truncate type-strong text-basic-primary">{heading.title}</span>
             <TerminalTag heading={heading} hint />
           </div>
           {menu}
@@ -97,9 +97,7 @@ export function TerminalTag({
 }) {
   return (
     <>
-      {heading.agent ? (
-        <Badge text="Agent" color={BadgeColor.Blue} background={false} className="shrink-0" />
-      ) : null}
+      {heading.agent ? <Badge text="Agent" color={BadgeColor.Gray} className="shrink-0" /> : null}
       {hint ? (
         // The facts run to several lines, and the header sits just under the
         // panel's tabs: hanging from the glyph keeps the tip off them.
@@ -158,7 +156,7 @@ function TerminalOptions({ options }: { options: () => readonly TerminalOption[]
         </StickyButton>
       ) : (
         <Button
-          size={ButtonSize.Medium}
+          size={ButtonSize.Small}
           variant={ButtonVariant.Ghost}
           content={ButtonContent.Icon}
           {...trigger}

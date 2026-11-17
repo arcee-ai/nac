@@ -74,9 +74,9 @@ describe("project session tab behavior identity", () => {
     );
 
     const expected = [
-      ["Plan the managed deployment rollout", "NAC orchestrator", "orchestrator"],
-      ["Implement connection status feedback", "Direct coding agent", "plane"],
-      ["Coordinate release readiness review", "Direct + NAC orchestration", "planeAdd"],
+      ["Plan the managed deployment rollout", "Orchestrator", "orchestrator"],
+      ["Implement connection status feedback", "Agent", "plane"],
+      ["Coordinate release readiness review", "Agent + Orchestrator", "planeAdd"],
     ] as const;
 
     for (const [title, behavior, icon] of expected) {
@@ -93,7 +93,7 @@ describe("project session tab behavior identity", () => {
     }
 
     const active = screen.getByRole("button", {
-      name: "Implement connection status feedback, Direct coding agent",
+      name: "Implement connection status feedback, Agent",
     });
     expect(active.getAttribute("aria-current")).toBe("page");
     expect(active.className).toContain("pl-2");
@@ -108,19 +108,19 @@ describe("project session tab behavior identity", () => {
 
     expect(screen.queryByText("Orchestrator")).toBeNull();
     expect(screen.queryByText("Direct")).toBeNull();
-    expect(screen.queryByText("Direct + NAC")).toBeNull();
+    expect(screen.queryByText("Agent + Orchestrator")).toBeNull();
 
     const orchestrator = screen.getByRole("button", {
-      name: "Plan the managed deployment rollout, NAC orchestrator",
+      name: "Plan the managed deployment rollout, Orchestrator",
     });
     const orchestratorIcon = orchestrator.querySelector(
       '[data-session-behavior-icon="orchestrator"]',
     );
     fireEvent.mouseEnter(orchestratorIcon!);
-    expect(screen.getByRole("tooltip").textContent).toContain("NAC orchestrator");
+    expect(screen.getByRole("tooltip").textContent).toContain("Orchestrator");
     fireEvent.keyDown(orchestrator, { key: "Escape" });
 
     act(() => active.focus());
-    expect(screen.getByRole("tooltip").textContent).toContain("Direct coding agent");
+    expect(screen.getByRole("tooltip").textContent).toContain("Agent");
   });
 });

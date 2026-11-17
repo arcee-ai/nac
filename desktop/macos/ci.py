@@ -249,6 +249,19 @@ def alive(pid):
         return False
 
 
+def run_preview_smoke(raw, source_root):
+    # Owner discovery already passed in fixture-controls. Keep building and the
+    # shared Swift controls outside the unchanged actual-journey allocation;
+    # standalone preview.sh smoke still runs its complete checks itself.
+    run(['bash', 'desktop/macos/preview.sh', 'smoke-build'],
+        raw / 'smoke-build.log', 900, cwd=source_root)
+    run(['bash', 'desktop/macos/smoke_controls.sh', str(raw)],
+        raw / 'smoke-controls.log', 120, cwd=source_root)
+    app = raw / 'NAC Development Preview Smoke.app'
+    run(['python3', '-B', 'desktop/macos/smoke.py', str(app), str(raw / 'evidence')],
+        raw / 'app-journeys.log', 800, cwd=source_root)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--expected-sha', required=True)
@@ -354,7 +367,7 @@ def main():
         if command(['git', 'status', '--porcelain']):
             raise RuntimeError('Locked setup modified the candidate source')
         run(['python3', '-B', '-m', 'unittest', 'discover', '-v', '-s', 'desktop/macos', '-p', 'test_*.py'],
-            raw / 'fixture-controls.log', 120)
+            raw / 'fixture-controls.log', 600)
         envelope = target['envelope'] if target else 'ci-toolchain.json'
         expected = json.loads((ROOT / 'desktop/macos' / envelope).read_text())
         actual = {'developer_directory': os.environ.get('DEVELOPER_DIR'),
@@ -452,8 +465,12 @@ def main():
                     json.loads((raw / 'workspace/matrix.json').read_text())['provenance'],
                     raw / 'workspace/workspace-direct-rich-chat.png', source_root / 'desktop/macos/WorkspaceFixture.swift')
                 report['rich_capture']['episode_sha256'] = hashlib.sha256((raw / 'workspace/workspace-direct.json').read_bytes()).hexdigest()
-            else:
+            elif target:
+                # Immutable qualification sources retain their own complete
+                # smoke command; they predate the shared current-CI controls.
                 run(['bash', 'desktop/macos/preview.sh', 'smoke'], raw / 'app-journeys.log', 800, cwd=source_root)
+            else:
+                run_preview_smoke(raw, source_root)
             if target and not workspace:
                 report['target_suite'] = require_full_preview(json.loads((raw / 'evidence/summary.json').read_text()),
                     target, report['ordinary_build']['engine_sha256'])

@@ -1,4 +1,11 @@
-import { createSession, expect, showSidePanel, test, waitForRunIdle } from "./harness";
+import {
+  createSession,
+  expect,
+  showPhonePanel,
+  showSidePanel,
+  test,
+  waitForRunIdle,
+} from "./harness";
 import { captureInspector } from "./inspector-evidence";
 
 for (const width of [1440, 390]) {
@@ -65,8 +72,8 @@ for (const width of [1440, 390]) {
     });
     await page.goto(`${harness.baseUrl}/#/session/${parent}/worksets`);
     if (width < 768) {
-      await page.getByRole("button", { name: "Open panel", exact: true }).click();
-      await page.getByRole("button", { name: "inspection-plan", exact: true }).click();
+      const worksets = await showPhonePanel(page, "Worksets");
+      await worksets.getByRole("button", { name: "inspection-plan", exact: true }).click();
     } else await showSidePanel(page);
     await expect(
       page.getByText("Inspect the retained workflow without mutating its plan", { exact: true }),

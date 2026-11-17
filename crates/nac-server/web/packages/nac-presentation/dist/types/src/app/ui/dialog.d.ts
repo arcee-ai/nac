@@ -7,6 +7,8 @@ type DialogProps = Omit<React.ComponentProps<typeof DialogPrimitive.Root>, "moda
     inertBackground?: boolean;
     /** False keeps this layer open on Escape, without dismissing a layer below it. */
     closeOnEscape?: boolean;
+    /** A view transition may consume Escape while retaining this same layer. */
+    onEscape?: (event: KeyboardEvent) => void;
 };
 /**
  * Radix runs non-modal here: its modal mode hides and locks the whole document,
@@ -14,7 +16,7 @@ type DialogProps = Omit<React.ComponentProps<typeof DialogPrimitive.Root>, "moda
  * second instance beside it. The instance's layer stack provides the modality
  * instead — Escape, the scrim, background inertness and focus return.
  */
-declare function Dialog({ open: openProp, defaultOpen, onOpenChange, layer, inertBackground, closeOnEscape, children, }: DialogProps): React.JSX.Element;
+declare function Dialog({ open: openProp, defaultOpen, onOpenChange, layer, inertBackground, closeOnEscape, onEscape, children, }: DialogProps): React.JSX.Element;
 declare function DialogTrigger(props: React.ComponentProps<typeof DialogPrimitive.Trigger>): React.JSX.Element;
 declare function DialogPortal({ container, ...props }: React.ComponentProps<typeof DialogPrimitive.Portal>): React.JSX.Element;
 declare function DialogClose(props: React.ComponentProps<typeof DialogPrimitive.Close>): React.JSX.Element;

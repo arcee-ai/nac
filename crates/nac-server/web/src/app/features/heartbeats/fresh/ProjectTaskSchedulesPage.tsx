@@ -1,7 +1,20 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Button, ButtonVariant, Select } from "@/app/atoms";
+import {
+  Badge,
+  BadgeColor,
+  Button,
+  ButtonContent,
+  ButtonSize,
+  ButtonVariant,
+  Icon,
+  IconName,
+  Select,
+  TabButton,
+  TabButtonSize,
+} from "@/app/atoms";
+import { cn } from "@/app/lib/cn";
 import { LeftSidebar } from "@/app/components/LeftSidebar";
 import { useManagedHost } from "@/app/features/managed/controller/useManagedHost";
 import { useProjects, useSessions } from "@/app/services/queries";
@@ -94,24 +107,32 @@ function ProjectSchedules({ projectId }: { projectId: string }) {
   return (
     <div className="flex h-full min-h-0 bg-elevation-ground">
       <LeftSidebar variant="session" />
-      <main className="flex-1 min-w-0 overflow-auto px-4 md:px-8 py-4 pt-18">
-        <div className="max-w-5xl mx-auto flex flex-col gap-5">
-          <header className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h1 className="header-lg">Interval tasks</h1>
-              <p className="text-basic-muted text-small">
-                Fresh retained direct tasks from a saved Local project. No automatic goal.
-              </p>
-            </div>
-            <Link to={routes.list()} className="text-small underline">
-              All projects
-            </Link>
-          </header>
+      <main className="flex-1 min-w-0 overflow-auto">
+        <header className="sticky top-0 z-20 flex h-[52px] items-center gap-2 border-b border-muted bg-elevation-ground/90 px-3 backdrop-blur-md md:px-5">
+          <Link
+            to={routes.list()}
+            className="type-label inline-flex h-8 shrink-0 items-center gap-1 rounded-pill pr-3 pl-2 text-basic-tertiary transition-colors duration-150 ease-out hover:bg-elevation-sublevel-variant-B hover:text-basic-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-border-focus-outline)] max-md:h-11"
+          >
+            <Icon iconName={IconName.Left} size={16} />
+            Home
+          </Link>
+          <span aria-hidden className="h-4 w-px shrink-0 bg-divider-muted" />
+          <h1 className="type-strong min-w-0 truncate px-1 text-basic-primary">Interval tasks</h1>
+        </header>
+        <div className="mx-auto flex max-w-[1040px] flex-col gap-6 px-4 pt-6 pb-16 md:px-8 md:pt-10">
+          <div className="flex flex-col gap-1.5">
+            <p className="type-title text-basic-primary">{project?.name ?? "All schedules"}</p>
+            <p className="type-body-chrome max-w-[64ch] text-basic-tertiary">
+              Fresh retained direct tasks from a saved Local project, on an interval. No automatic
+              goal.
+            </p>
+          </div>
           <div
-            className="flex flex-wrap gap-3 items-center"
+            className="flex flex-wrap items-center gap-2"
             aria-label="Schedule project selection"
           >
             <Select
+              triggerClassName={TOUCH}
               value={projectId || "all"}
               disabled={busy}
               placeholder="Choose saved Local project"
@@ -126,35 +147,56 @@ function ProjectSchedules({ projectId }: { projectId: string }) {
                 navigate(id === "all" ? routes.taskSchedules() : routes.taskSchedules(id))
               }
             />
+            <div className="flex-1" />
             <Button
+              className={TOUCH}
               variant={ButtonVariant.Primary}
+              content={ButtonContent.IconLeft}
               disabled={!available || busy}
               onClick={openCreate}
             >
+              <Icon iconName={IconName.Add} />
               New task schedule
             </Button>
           </div>
-          {projects.error && <p role="alert">{projects.error.message}</p>}
+          {projects.error && (
+            <p role="alert" className={NOTICE_ERROR}>
+              {projects.error.message}
+            </p>
+          )}
           {managed.isManaged && (
-            <p role="alert">Fresh interval tasks require an unmanaged Local host.</p>
+            <p role="alert" className={NOTICE_CAUTION}>
+              Fresh interval tasks require an unmanaged Local host.
+            </p>
           )}
           {projectId && !project && projects.isSuccess && (
-            <p role="status">
+            <p role="status" className={NOTICE_QUIET}>
               The destination project was removed. Retained receipts remain inspectable; future
               launches cannot rebind to another project.
             </p>
           )}
-          {project?.ssh_host && <p role="alert">SSH interval tasks are not qualified.</p>}
+          {project?.ssh_host && (
+            <p role="alert" className={NOTICE_CAUTION}>
+              SSH interval tasks are not qualified.
+            </p>
+          )}
           {schedules.error && (
-            <div role="alert" className="rounded border border-muted p-3 flex flex-wrap gap-2">
+            <div role="alert" className={cn(NOTICE_ERROR, "flex flex-wrap items-center gap-2")}>
               <p className="w-full">{schedules.error.message}</p>
               {schedules.intent && (
-                <Button disabled={schedules.control.isPending} onClick={schedules.retry}>
+                <Button
+                  variant={ButtonVariant.Secondary}
+                  size={ButtonSize.Small}
+                  disabled={schedules.control.isPending}
+                  onClick={schedules.retry}
+                >
                   Retry same request
                 </Button>
               )}
               {schedules.rejected && (
                 <Button
+                  variant={ButtonVariant.Secondary}
+                  size={ButtonSize.Small}
                   onClick={() => {
                     schedules.reviewLatest();
                     setForm(null);
@@ -165,17 +207,28 @@ function ProjectSchedules({ projectId }: { projectId: string }) {
               )}
             </div>
           )}
-          <div className="grid md:grid-cols-[240px_minmax(0,1fr)] gap-5">
-            <nav aria-label="Interval schedules" className="flex flex-col gap-2">
-              {schedules.inventory.isPending && <p role="status">Loading schedules…</p>}
-              {schedules.inventory.error && <p role="alert">{schedules.inventory.error.message}</p>}
+          <div className="grid gap-6 md:grid-cols-[240px_minmax(0,1fr)]">
+            <nav aria-label="Interval schedules" className="flex flex-col gap-0.5">
+              <p className="type-meta-strong px-2.5 pb-1.5 text-basic-tertiary">Schedules</p>
+              {schedules.inventory.isPending && (
+                <p role="status" className="type-body-chrome px-2.5 text-basic-tertiary">
+                  Loading schedules…
+                </p>
+              )}
+              {schedules.inventory.error && (
+                <p role="alert" className="type-body-chrome px-2.5 text-error-primary">
+                  {schedules.inventory.error.message}
+                </p>
+              )}
               {schedules.inventory.data?.map((item) => (
-                <Button
+                <TabButton
                   key={item.schedule_id}
+                  size={TabButtonSize.Medium}
+                  className={TOUCH}
                   disabled={busy}
-                  variant={
-                    selected === item.schedule_id ? ButtonVariant.Primary : ButtonVariant.Ghost
-                  }
+                  active={selected === item.schedule_id}
+                  aria-current={selected === item.schedule_id ? "page" : undefined}
+                  aria-label={`${item.spec.name} · ${item.state}`}
                   onClick={() => {
                     const target = item.binding.project_id;
                     if (target && target !== projectId)
@@ -185,18 +238,29 @@ function ProjectSchedules({ projectId }: { projectId: string }) {
                     else choose(item.schedule_id);
                   }}
                 >
-                  {item.spec.name} · {item.state}
-                </Button>
+                  <span className="min-w-0 flex-1 truncate text-left">{item.spec.name}</span>
+                  <span className="type-meta shrink-0 text-basic-muted">{item.state}</span>
+                </TabButton>
               ))}
               {schedules.inventory.data?.length === 0 && (
-                <p className="text-basic-muted">No interval task schedules.</p>
+                <p className="type-body-chrome px-2.5 text-basic-tertiary">
+                  No interval task schedules yet.
+                </p>
               )}
             </nav>
-            <section className="flex flex-col gap-4 min-w-0">
+            <section className="flex min-w-0 flex-col gap-5">
               {form ? (
-                <>
-                  {source.isPending && <p role="status">Checking saved project source…</p>}
-                  {source.error && <p role="alert">{source.error.message}</p>}
+                <div className={CARD}>
+                  {source.isPending && (
+                    <p role="status" className="type-body-chrome text-basic-tertiary">
+                      Checking saved project source…
+                    </p>
+                  )}
+                  {source.error && (
+                    <p role="alert" className="type-body-chrome text-error-primary">
+                      {source.error.message}
+                    </p>
+                  )}
                   {source.data && (
                     <HeartbeatForm
                       key={`${form}:${selected}`}
@@ -214,119 +278,184 @@ function ProjectSchedules({ projectId }: { projectId: string }) {
                       />
                     </HeartbeatForm>
                   )}
-                </>
+                </div>
               ) : schedule ? (
                 <>
-                  <h2 className="header-md">{schedule.spec.name}</h2>
-                  <p role="status">
-                    {schedule.state}
-                    {schedule.reason ? ` · ${schedule.reason}` : ""}
-                  </p>
-                  <p className="text-small text-basic-muted">
-                    Next anchored occurrence: {new Date(schedule.next_due_ms).toLocaleString()}.{" "}
-                    {schedule.starts} launches accepted.
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      disabled={busy || !available || !editable}
-                      onClick={() => {
-                        setDestination(schedule.binding.fresh_task!);
-                        setEditingVersion(schedule.version);
-                        setForm("edit");
-                      }}
-                    >
-                      Edit schedule
-                    </Button>
-                    <Button
-                      disabled={busy || !available || schedule.state !== "active"}
-                      onClick={() => act("run_now")}
-                    >
-                      Run now
-                    </Button>
-                    <Button disabled={busy || !editable} onClick={() => act("pause")}>
-                      Pause
-                    </Button>
-                    <Button
-                      disabled={
-                        busy || !available || !["paused", "suspended"].includes(schedule.state)
-                      }
-                      onClick={() => act("resume")}
-                    >
-                      Resume
-                    </Button>
-                    <Button
-                      disabled={busy || ["stopped", "deleted", "finished"].includes(schedule.state)}
-                      onClick={() => act("stop")}
-                    >
-                      Stop schedule
-                    </Button>
-                    <Button
-                      disabled={busy || schedule.state === "deleted"}
-                      onClick={() => act("delete")}
-                    >
-                      Delete schedule
-                    </Button>
-                  </div>
-                  <p className="text-small text-basic-muted">
-                    Pause withdraws unstarted occurrences. Stop also targets this schedule's exact
-                    active initial run. Delete retains active receipts; task/workspace resources are
-                    never cleaned up automatically.
-                  </p>
-                  <details>
-                    <summary className="cursor-pointer">Saved instructions and choices</summary>
-                    <div className="flex flex-col gap-2 py-3">
-                      <p className="whitespace-pre-wrap">{schedule.spec.instructions}</p>
-                      <p>Skills: {(schedule.spec.skills ?? []).join(", ") || "None"}</p>
-                      <p>End condition: {schedule.spec.end_condition}</p>
-                      <p>
-                        Model: {schedule.binding.fresh_task?.model ?? "Destination default"} ·
-                        Reasoning:{" "}
-                        {schedule.binding.fresh_task?.reasoning_effort ?? "Destination default"}
-                      </p>
-                      <p className="break-all">Local · {schedule.binding.cwd}</p>
-                      <p>
-                        Creator provenance:{" "}
-                        {schedule.binding.creator_session_id ?? "Human project management"};
-                        execution is independent of that chat.
-                      </p>
+                  <div className={cn(CARD, "gap-4")}>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                      <h2 className="type-heading min-w-0 break-words text-basic-primary">
+                        {schedule.spec.name}
+                      </h2>
+                      <Badge
+                        text={schedule.state}
+                        color={
+                          schedule.state === "active"
+                            ? BadgeColor.Neutral
+                            : schedule.state === "suspended"
+                              ? BadgeColor.Yellow
+                              : BadgeColor.Gray
+                        }
+                      />
                     </div>
-                  </details>
-                  <p>
-                    Retained reservations/resources: {inspection?.inventory.length ?? 0} /{" "}
-                    {schedule.binding.fresh_task?.retained_limit} for this schedule.
-                  </p>
-                  {inspection && (
-                    <RetainedAllowanceControls
-                      key={schedule.schedule_id}
-                      projectId={projectId}
-                      allowance={inspection.host_allowance}
-                      disabled={!available || busy}
-                    />
-                  )}
-                  <h3 className="header-sm">Produced tasks and exact initial results</h3>
-                  {inspection && (
-                    <ResourceInventory
-                      key={schedule.schedule_id}
-                      inspection={inspection}
-                      presentSessionIds={
-                        sessions.isSuccess
-                          ? new Set(sessions.data.map((session) => session.summary.session_id))
-                          : undefined
-                      }
-                    />
-                  )}
-                  <details>
-                    <summary className="cursor-pointer">Recent occurrence history</summary>
-                    <div className="flex flex-col gap-3 py-3">
+                    <p role="status" className="type-body-chrome text-basic-secondary">
+                      {schedule.state}
+                      {schedule.reason ? ` · ${schedule.reason}` : ""}
+                    </p>
+                    <p className="type-body-chrome tabular text-basic-tertiary">
+                      Next anchored occurrence: {new Date(schedule.next_due_ms).toLocaleString()}.{" "}
+                      {schedule.starts} launches accepted.
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        className={TOUCH}
+                        variant={ButtonVariant.Primary}
+                        disabled={busy || !available || schedule.state !== "active"}
+                        onClick={() => act("run_now")}
+                      >
+                        Run now
+                      </Button>
+                      <Button
+                        className={TOUCH}
+                        variant={ButtonVariant.Secondary}
+                        disabled={busy || !available || !editable}
+                        onClick={() => {
+                          setDestination(schedule.binding.fresh_task!);
+                          setEditingVersion(schedule.version);
+                          setForm("edit");
+                        }}
+                      >
+                        Edit schedule
+                      </Button>
+                      <Button
+                        className={TOUCH}
+                        variant={ButtonVariant.Secondary}
+                        disabled={busy || !editable}
+                        onClick={() => act("pause")}
+                      >
+                        Pause
+                      </Button>
+                      <Button
+                        className={TOUCH}
+                        variant={ButtonVariant.Secondary}
+                        disabled={
+                          busy || !available || !["paused", "suspended"].includes(schedule.state)
+                        }
+                        onClick={() => act("resume")}
+                      >
+                        Resume
+                      </Button>
+                      <Button
+                        className={TOUCH}
+                        variant={ButtonVariant.Secondary}
+                        disabled={
+                          busy || ["stopped", "deleted", "finished"].includes(schedule.state)
+                        }
+                        onClick={() => act("stop")}
+                      >
+                        Stop schedule
+                      </Button>
+                      <Button
+                        className={TOUCH}
+                        variant={ButtonVariant.GhostDestructive}
+                        disabled={busy || schedule.state === "deleted"}
+                        onClick={() => act("delete")}
+                      >
+                        Delete schedule
+                      </Button>
+                    </div>
+                    <p className="type-meta text-basic-tertiary">
+                      Pause withdraws unstarted occurrences. Stop also targets this schedule's exact
+                      active initial run. Delete retains active receipts; task/workspace resources
+                      are never cleaned up automatically.
+                    </p>
+                    <details className="group border-t border-muted pt-3">
+                      <summary className="type-label cursor-pointer list-none text-basic-secondary hover:text-basic-primary [&::-webkit-details-marker]:hidden">
+                        <span className="inline-flex items-center gap-1">
+                          <Icon
+                            iconName={IconName.Right}
+                            size={14}
+                            className="transition-transform duration-150 ease-out group-open:rotate-90 motion-reduce:transition-none"
+                          />
+                          Saved instructions and choices
+                        </span>
+                      </summary>
+                      <div className="type-body-chrome flex flex-col gap-2 pt-3 text-basic-secondary">
+                        <p className="whitespace-pre-wrap text-basic-primary">
+                          {schedule.spec.instructions}
+                        </p>
+                        <p>Skills: {(schedule.spec.skills ?? []).join(", ") || "None"}</p>
+                        <p>End condition: {schedule.spec.end_condition}</p>
+                        <p>
+                          Model: {schedule.binding.fresh_task?.model ?? "Destination default"} ·
+                          Reasoning:{" "}
+                          {schedule.binding.fresh_task?.reasoning_effort ?? "Destination default"}
+                        </p>
+                        <p className="break-all">Local · {schedule.binding.cwd}</p>
+                        <p className="text-basic-tertiary">
+                          Creator provenance:{" "}
+                          {schedule.binding.creator_session_id ?? "Human project management"};
+                          execution is independent of that chat.
+                        </p>
+                      </div>
+                    </details>
+                  </div>
+                  <div className={cn(CARD, "gap-3")}>
+                    <h3 className="type-subheading text-basic-primary">Retained resources</h3>
+                    <p className="type-body-chrome tabular text-basic-secondary">
+                      Retained reservations/resources: {inspection?.inventory.length ?? 0} /{" "}
+                      {schedule.binding.fresh_task?.retained_limit} for this schedule.
+                    </p>
+                    {inspection && (
+                      <RetainedAllowanceControls
+                        key={schedule.schedule_id}
+                        projectId={projectId}
+                        allowance={inspection.host_allowance}
+                        disabled={!available || busy}
+                      />
+                    )}
+                  </div>
+                  <div className="flex flex-col gap-3">
+                    <h3 className="type-subheading text-basic-primary">
+                      Produced tasks and exact initial results
+                    </h3>
+                    {inspection && (
+                      <ResourceInventory
+                        key={schedule.schedule_id}
+                        inspection={inspection}
+                        presentSessionIds={
+                          sessions.isSuccess
+                            ? new Set(sessions.data.map((session) => session.summary.session_id))
+                            : undefined
+                        }
+                      />
+                    )}
+                  </div>
+                  <details className={cn(CARD, "group")}>
+                    <summary className="type-label cursor-pointer list-none text-basic-secondary hover:text-basic-primary [&::-webkit-details-marker]:hidden">
+                      <span className="inline-flex items-center gap-1">
+                        <Icon
+                          iconName={IconName.Right}
+                          size={14}
+                          className="transition-transform duration-150 ease-out group-open:rotate-90 motion-reduce:transition-none"
+                        />
+                        Recent occurrence history
+                      </span>
+                    </summary>
+                    <div className="flex flex-col gap-3 pt-3">
                       {inspection?.heartbeat.history.map((item) => (
-                        <article key={item.occurrence_id} className="border-t border-muted pt-2">
-                          <p>
+                        <article
+                          key={item.occurrence_id}
+                          className="type-body-chrome flex flex-col gap-1 border-t border-muted pt-3 text-basic-secondary"
+                        >
+                          <p className="tabular text-basic-primary">
                             {item.outcome ?? item.state} · {item.coalesced_count} coalesced check(s)
                             · {new Date(item.due_first_ms).toLocaleString()}
                           </p>
                           <p>{item.evidence}</p>
                           {item.run_id && (
-                            <p className="break-all">Exact initial run: {item.run_id}</p>
+                            <p className="type-meta break-all text-basic-tertiary">
+                              Exact initial run: {item.run_id}
+                            </p>
                           )}
                         </article>
                       ))}
@@ -334,13 +463,23 @@ function ProjectSchedules({ projectId }: { projectId: string }) {
                   </details>
                 </>
               ) : (
-                <p className="text-basic-muted">
-                  Select a schedule to inspect its saved purpose, limits, retained tasks and exact
-                  initial results. Select a saved Local project to create one.
-                </p>
+                <div
+                  className={cn(
+                    CARD,
+                    "items-start border-dashed bg-transparent py-10 text-basic-tertiary",
+                  )}
+                >
+                  <Icon iconName={IconName.Clock} size={20} className="text-basic-muted" />
+                  <p className="type-body-chrome max-w-[52ch]">
+                    Select a schedule to inspect its saved purpose, limits, retained tasks and exact
+                    initial results. Select a saved Local project to create one.
+                  </p>
+                </div>
               )}
               {schedules.inspection.error && (
-                <p role="alert">{schedules.inspection.error.message}</p>
+                <p role="alert" className={NOTICE_ERROR}>
+                  {schedules.inspection.error.message}
+                </p>
               )}
             </section>
           </div>
@@ -349,3 +488,15 @@ function ProjectSchedules({ projectId }: { projectId: string }) {
     </div>
   );
 }
+
+/** Phone touch targets: a min-height outranks the matrix height on narrow screens. */
+const TOUCH = "max-md:min-h-11";
+/** A hairline card on the surface: the page's one container. */
+const CARD = "flex flex-col rounded-card border border-tertiary bg-elevation-level-1 p-5";
+const NOTICE_BASE = "type-body-chrome rounded-card border px-4 py-3";
+const NOTICE_ERROR = cn(NOTICE_BASE, "border-error-secondary bg-error-primary text-error-primary");
+const NOTICE_CAUTION = cn(
+  NOTICE_BASE,
+  "border-danger-secondary bg-danger-primary text-basic-primary",
+);
+const NOTICE_QUIET = cn(NOTICE_BASE, "border-tertiary text-basic-secondary");

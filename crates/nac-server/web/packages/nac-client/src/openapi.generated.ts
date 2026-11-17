@@ -217,6 +217,8 @@ export interface components {
       input_tokens_above: number;
       output: number;
     };
+    CreatedFolder: { path: string };
+    CreateFolderRequest: { name: string; parent: string };
     CreateGoalRequest: { objective: string; token_budget?: number | null };
     CreateInboxItemRequest: { delivery: components["schemas"]["InboxDelivery"]; prompt: string };
     CreateMcpServerRequest: {
@@ -289,6 +291,13 @@ export interface components {
     CreateSshConfigurationRequest: {
       name: string;
       ssh_host: string;
+      ssh_identity_file?: string | null;
+      ssh_port?: number | null;
+    };
+    CreateSshFolderRequest: {
+      name: string;
+      parent: string;
+      ssh_host?: string | null;
       ssh_identity_file?: string | null;
       ssh_port?: number | null;
     };
@@ -458,6 +467,7 @@ export interface components {
       | "interrupted"
       | "unknown";
     InboxDelivery: "steer" | "queue";
+    InboxItemOrigin: "input" | "traditional_child" | "managed_orchestrator";
     InboxItemResponse: {
       cancelled_at?: string | null;
       client_id?: string | null;
@@ -466,6 +476,7 @@ export interface components {
       delivered_run_id?: string | null;
       delivery: components["schemas"]["InboxDelivery"];
       id: number;
+      origin: components["schemas"]["InboxItemOrigin"];
       prompt: string;
       session_id: string;
       status: components["schemas"]["InboxStatus"];
@@ -830,6 +841,23 @@ export interface components {
     ModelOrigin: { backend: components["schemas"]["BackendKind"]; model: string };
     ModelSource: "baseline" | "overlay" | "user_override" | "provider_default" | "fallback";
     OpenLocalPathResult: { fell_back_to_parent: boolean; opened: string };
+    OpenSshAliasList: {
+      aliases: string[];
+      undiscoverable_patterns: number;
+      warnings: components["schemas"]["OpenSshAliasWarning"][];
+    };
+    OpenSshAliasWarning:
+      | "home_unavailable"
+      | "unreadable_file"
+      | "oversized_file"
+      | "missing_include"
+      | "include_cycle"
+      | "include_depth_exceeded"
+      | "file_limit_reached"
+      | "alias_limit_reached"
+      | "unsupported_include"
+      | "conditional_include_skipped"
+      | "malformed_line";
     OpenUserTerminalRequest: {
       cols: number;
       launch_id: string;
@@ -1146,6 +1174,11 @@ export interface components {
       token_usages?: (components["schemas"]["TokenUsage"] | null)[] | null;
       unattributed_token_usage?: components["schemas"]["TokenUsage"] | null;
     };
+    RevealWorkspacePathRequest: {
+      expected_path_root: string;
+      expected_workspace_root: string;
+      path: string;
+    };
     RevertSessionRequest: { message_idx: number };
     RevertSessionResponse: {
       messages_removed: number;
@@ -1430,7 +1463,7 @@ export interface components {
     StartTraditionalChildRequest: {
       background?: boolean;
       child_session_id?: string | null;
-      description: string;
+      description?: string | null;
       profile: string;
       prompt: string;
     };
@@ -1857,7 +1890,7 @@ export interface components {
       path: string;
       sections: components["schemas"]["WorkspaceDiffSection"][];
     };
-    WorkspaceFileList: { files: string[]; truncated: boolean };
+    WorkspaceFileList: { files: string[]; path_root?: string | null; truncated: boolean };
     WorkspaceRevisionChanges: {
       changed_files: components["schemas"]["ChangedFileStat"][];
       error?: string | null;

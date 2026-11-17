@@ -1,5 +1,7 @@
 //! Process-tree supervision shared by terminal, worker, and managed Git adapters.
 
+#[cfg(test)]
+mod escaped_root_tests;
 mod native_pty;
 #[cfg(all(
     any(test, feature = "test-support"),
@@ -322,14 +324,19 @@ impl ProcessTreeGuard {
                 }
             }
 
-            self.terminate_owned_group().await;
+            self.terminate_owned_group(child).await;
+            // The root has been sent SIGKILL directly. Bound this reap so an
+            // unexpected survivor cannot postpone the census/tagged SIGKILL.
             if child.id().is_some() {
-                let _ = child.wait().await;
+                let _ = tokio::time::timeout(TERMINATE_GRACE, child.wait()).await;
             }
             #[cfg(unix)]
             {
                 cleanup_result =
                     first_cleanup_error(cleanup_result, self.finish_tagged_cleanup().await);
+            }
+            if child.id().is_some() {
+                let _ = child.wait().await;
             }
             self.disarm();
             return cleanup_result;
@@ -466,7 +473,7 @@ impl ProcessTreeGuard {
     }
 
     #[cfg(unix)]
-    async fn terminate_owned_group(&mut self) {
+    async fn terminate_owned_group(&mut self, child: &mut Child) {
         let Some(pgid) = self.pgid else {
             return;
         };
@@ -475,12 +482,29 @@ impl ProcessTreeGuard {
         unsafe {
             libc::killpg(pgid, libc::SIGTERM);
         }
+        // A root can leave the group with setsid/setpgid, so the group signal
+        // no longer reaches it. An unreaped child's PID cannot be reused, so
+        // signal it directly and wait for it alongside the group.
+        let escaped_root = child
+            .id()
+            .map(|pid| pid as libc::pid_t)
+            // SAFETY: `getpgid` accepts any integer process id; failure is a
+            // negative return and is treated as having left the group.
+            .filter(|pid| unsafe { libc::getpgid(*pid) } != pgid);
+        if let Some(root) = escaped_root {
+            // SAFETY: `root` is the caller's unreaped child, so its PID still
+            // names that process; `kill` has no pointer preconditions.
+            unsafe {
+                libc::kill(root, libc::SIGTERM);
+            }
+        }
         let deadline = sleep(TERMINATE_GRACE);
         tokio::pin!(deadline);
         loop {
             // SAFETY: signal zero only probes the captured process-group id
             // and has no pointer or memory preconditions.
-            if unsafe { libc::killpg(pgid, 0) != 0 } {
+            let group_alive = unsafe { libc::killpg(pgid, 0) == 0 };
+            if !group_alive && !escaped_root.is_some_and(process_is_live) {
                 break;
             }
             tokio::select! {
@@ -492,6 +516,11 @@ impl ProcessTreeGuard {
         // integer id and the constant signal value.
         unsafe {
             libc::killpg(pgid, libc::SIGKILL);
+        }
+        // The root may also have left the group during the grace period.
+        // Tokio signals only an unreaped child, and SIGKILL is idempotent.
+        if child.id().is_some() {
+            let _ = child.start_kill();
         }
         if let Some(mut group_leader) = self.group_leader.take() {
             let _ = group_leader.wait().await;

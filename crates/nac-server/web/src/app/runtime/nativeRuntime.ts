@@ -14,8 +14,9 @@ import {
   standalonePresentationStores,
 } from "./presentationStores";
 import { LifetimeTransport } from "./requestLifetime";
-import type { PromptDraftStorage } from "../store/promptDraftStore";
+import type { PromptDraftPersistenceBinding, PromptDraftStorage } from "../store/promptDraftStore";
 import { TerminalInputRecovery } from "../features/terminal/inputRecovery";
+import { bindNativeDirectoryPort, type NativeDirectoryPort } from "../features/setup/localFolder";
 
 /** Opaque consumer bindings, never credentials or native admission authority. */
 export interface NativeRuntimeScope {
@@ -41,10 +42,16 @@ export interface NativeRuntimeOptions {
   storage?: Pick<Storage, "getItem" | "setItem">;
   /** Text drafts only; caller owns tab lifetime and complete identity scoping. */
   draftStorage?: PromptDraftStorage;
+  /** Same-engine native document recovery; conservative restriction, never input authority. */
+  requireTerminalAcknowledgement?: boolean;
+  /** Optional durable text namespace; never replaces the live request/stream scope. */
+  draftPersistenceBinding?: PromptDraftPersistenceBinding;
   assets?: NativePresentationAssets;
   eventSource?: SessionStreamOptions["eventSource"];
   /** Hosted reads default to no replay; standalone retains its one retry. */
   queryRetry?: false | 1;
+  /** Host-local folder information only; Rust retains project admission. */
+  nativeDirectory?: NativeDirectoryPort;
 }
 
 const runtimes = new WeakMap<QueryClient, NativeRuntime>();
@@ -59,7 +66,8 @@ export class NativeRuntime {
   readonly productNavigation: ProductNavigation;
   readonly stores: ReturnType<typeof createPresentationStores>;
   readonly queryClient: QueryClient;
-  readonly terminalInputRecovery = new TerminalInputRecovery();
+  readonly terminalInputRecovery: TerminalInputRecovery;
+  readonly nativeDirectory: NativeDirectoryPort | undefined;
   private readonly controller = new AbortController();
   private readonly disposers = new Set<() => void>();
   private readonly listeners = new Set<() => void>();
@@ -70,6 +78,10 @@ export class NativeRuntime {
   constructor(options: NativeRuntimeOptions) {
     if (options.scope.endpoint !== options.client.transport.endpoint)
       throw new Error("Runtime scope must name the supplied client's endpoint.");
+    this.terminalInputRecovery = new TerminalInputRecovery(
+      128,
+      options.requireTerminalAcknowledgement ?? false,
+    );
     this.queryClient = new QueryClient({
       defaultOptions: {
         queries: {
@@ -83,7 +95,13 @@ export class NativeRuntime {
       },
     });
     this.assets = options.assets ? Object.freeze({ ...options.assets }) : undefined;
-    this.stores = createPresentationStores(options.storage, options.scope, options.draftStorage);
+    this.nativeDirectory = bindNativeDirectoryPort(options.nativeDirectory, this.controller.signal);
+    this.stores = createPresentationStores(
+      options.storage,
+      options.scope,
+      options.draftStorage,
+      options.draftPersistenceBinding,
+    );
     this.scope = Object.freeze({ ...options.scope });
     this.client = new NacClient(
       new LifetimeTransport(options.client.transport, this.controller.signal),
@@ -127,6 +145,16 @@ export class NativeRuntime {
     return release;
   };
 
+  /** Authenticated EventSource for a passive, non-session stream path. */
+  readonly openStream = async (path: string): Promise<EventSource> => {
+    this.controller.signal.throwIfAborted();
+    const url = this.client.transport.url(path);
+    if (!this.eventSource) return new EventSource(url, this.client.transport.eventSourceInit());
+    const context = await this.client.transport.streamContext();
+    this.controller.signal.throwIfAborted();
+    return this.eventSource(url, { withCredentials: context.credentials === "include" }, context);
+  };
+
   /** StrictMode may release/reacquire a view in the same commit. */
   readonly retain = () => {
     this.attachments += 1;
@@ -167,7 +195,17 @@ export const standaloneRuntime: RuntimeDependencies = {
   events: (id: string, handlers: SessionStreamHandlers) => subscribeToSessionEvents(id, handlers),
 };
 export type RuntimeDependencies = Pick<NativeRuntime, "api" | "client" | "stores" | "events"> &
-  Partial<Pick<NativeRuntime, "id" | "assets" | "terminalInputRecovery" | "productNavigation">>;
+  Partial<
+    Pick<
+      NativeRuntime,
+      | "id"
+      | "assets"
+      | "terminalInputRecovery"
+      | "productNavigation"
+      | "nativeDirectory"
+      | "openStream"
+    >
+  >;
 export function runtimeForQueryClient(client: QueryClient): RuntimeDependencies {
   return runtimes.get(client) ?? standaloneRuntime;
 }

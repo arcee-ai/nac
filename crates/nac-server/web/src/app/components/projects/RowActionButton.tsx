@@ -31,11 +31,15 @@ export function RowActionButton({
   return (
     <Tooltip title={title ?? label} sticky>
       <Button
-        variant={destructive ? ButtonVariant.GhostDestructive : ButtonVariant.Ghost}
+        // Destructive reads as such on hover/focus; a list of rows stays calm.
+        variant={ButtonVariant.Ghost}
         size={isMobile ? ButtonSize.Medium : ButtonSize.Small}
         content={ButtonContent.Icon}
         aria-label={label}
-        className={cn(isMobile && "!size-11 !rounded-lg !p-0")}
+        className={cn(
+          isMobile && "!size-11 !rounded-lg !p-0",
+          destructive && "hover:!text-error-primary focus-visible:!text-error-primary",
+        )}
         onClick={onClick}
       >
         <Icon iconName={icon} />

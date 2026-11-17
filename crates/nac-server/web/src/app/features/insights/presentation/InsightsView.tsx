@@ -2,7 +2,8 @@ import { useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode
 
 import { Button, ButtonSize, ButtonVariant } from "@/app/atoms";
 import { PanelEmptyState } from "@/app/components/inspector/PanelMessages";
-import { PanelEmpty, PanelLoading, PanelSplit } from "@/app/components/inspector/PanelSplit";
+import { PanelLoading, PanelSplit } from "@/app/components/inspector/PanelSplit";
+import { PanelQuiet } from "@/app/components/inspector/PanelQuiet";
 import { TaskButton, TaskPill } from "@/app/components/inspector/TaskPreview";
 import { ThreadSteeringModal } from "@/app/components/inspector/ThreadSteeringModal";
 import { ThreadDetail } from "@/app/components/inspector/threads/ThreadDetail";
@@ -353,12 +354,12 @@ export function InsightsView({
       />
     );
   } else if (sections.length === 0) {
-    detail = <PanelEmpty title={emptyCopy.title}>{emptyCopy.body}</PanelEmpty>;
+    detail = <PanelQuiet title={emptyCopy.title}>{emptyCopy.body}</PanelQuiet>;
   } else {
     detail = (
-      <PanelEmpty title="No action selected">
+      <PanelQuiet title="No action selected">
         Select an action in the list to see its details.
-      </PanelEmpty>
+      </PanelQuiet>
     );
   }
 

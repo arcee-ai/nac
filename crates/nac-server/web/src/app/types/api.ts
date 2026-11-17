@@ -253,6 +253,12 @@ export type SessionLineage = ApiSchema<"SessionLineageSnapshot">;
 
 export type ManagedSessionSummary = ApiSchema<"ManagedSessionSummary">;
 
+/** Identity-only attention for one session from `GET /attention`. */
+export type FleetAttentionSession = ApiSchema<"FleetAttentionSessionDto">;
+export type FleetAttentionSnapshot = ApiSchema<"FleetAttentionSnapshotDto">;
+export type FleetAttentionFrame = ApiSchema<"FleetAttentionFrame">;
+export type AttentionFacet = ApiSchema<"AttentionFacetDto">;
+
 /** `GET /sessions/{id}/config` — the raw persisted row, not the effective config. */
 export type RawSessionConfig = ApiSchema<"RawSessionConfig">;
 
@@ -287,6 +293,9 @@ export type BrowseEntry = ApiSchema<"BrowseEntry">;
 
 export type BrowseListing = ApiSchema<"BrowseListing">;
 
+/** A folder created by `POST /fs/folders` or `POST /ssh/folders`. */
+export type CreatedFolder = ApiSchema<"CreatedFolder">;
+
 /**
  * How to reach an SSH host, as the launch form has it before a session exists.
  *
@@ -306,6 +315,9 @@ export type SshBrowseRequest = ApiSchema<"SshBrowseRequest">;
 export type SshConfigurationRecord = ApiSchema<"SshConfigurationRecord">;
 
 export type SshConfigurationList = ApiSchema<"SshConfigurationList">;
+
+/** Literal OpenSSH aliases discovered on the NAC server machine, names only. */
+export type OpenSshAliasList = ApiSchema<"OpenSshAliasList">;
 
 export type CreateSshConfigurationRequest = ApiSchema<"CreateSshConfigurationRequest">;
 

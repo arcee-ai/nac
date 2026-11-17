@@ -99,6 +99,10 @@ fn census_rejects_the_extra_row_instead_of_silently_truncating() {
     for id in 0..1024 {
         insert_test_session(&path, &format!("extra-{id}"));
     }
+    assert!(read_attention_census(&path)
+        .unwrap_err()
+        .to_string()
+        .contains("capacity"));
     assert!(read_attention_metadata(&path, None)
         .unwrap_err()
         .to_string()
@@ -430,6 +434,114 @@ fn historical_completed_goal_allows_only_a_later_exact_successful_idle_request()
             "{assignment}"
         );
     }
+    drop(connection);
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}
+
+#[test]
+fn topology_reads_project_and_child_lineage_without_descriptions() {
+    let path = fixture();
+    for id in ["root", "child"] {
+        insert_test_session(&path, id);
+    }
+    let connection = open_runtime_connection(&path).unwrap();
+    connection
+        .execute_batch(
+            "INSERT INTO traditional_children(child_session_id,parent_session_id,root_session_id,profile,description,nesting_depth,status,generation,created_at,updated_at)
+             VALUES('child','root','root','general','private child description',1,'idle',0,'now','now');
+             PRAGMA foreign_keys=OFF;
+             INSERT INTO session_projects(session_id,project_id) VALUES('root','project-a');",
+        )
+        .unwrap();
+    let topology = read_attention_topology(&path).unwrap();
+    let find = |id: &str| topology.iter().find(|row| row.session_id == id).unwrap();
+    assert_eq!(topology.len(), 3);
+    assert_eq!(find("root").project_id.as_deref(), Some("project-a"));
+    assert!(find("root").lineage.is_none());
+    assert!(find("session").lineage.is_none());
+    assert_eq!(
+        find("child").lineage,
+        Some(AttentionLineage {
+            kind: AttentionLineageKind::TraditionalChild,
+            parent_session_id: "root".into(),
+            root_session_id: "root".into(),
+        })
+    );
+    assert!(!format!("{topology:?}").contains("private"));
+    let metadata = read_attention_metadata(&path, None).unwrap();
+    let child = metadata.iter().find(|row| row.id == "child").unwrap();
+    assert!(child.traditional_child && !child.primary);
+    let root = metadata.iter().find(|row| row.id == "root").unwrap();
+    assert!(!root.traditional_child && root.primary);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn census_keeps_question_and_project_placement_on_one_snapshot() {
+    let path = fixture();
+    insert_project(
+        &path,
+        NewProject {
+            project_id: "project".into(),
+            name: None,
+            description: None,
+            cwd: PathBuf::from("/tmp/project"),
+            ssh_host: None,
+            ssh_port: None,
+            ssh_identity_file: None,
+            default_model_config_id: None,
+        },
+    )
+    .unwrap();
+    let run = uuid::Uuid::new_v4().to_string();
+    TranscriptLogWriter::new(&path)
+        .unwrap()
+        .append_run_prompt(
+            "session",
+            0,
+            &crate::types::Message::User {
+                content: "private".into(),
+            },
+            &run,
+        )
+        .unwrap();
+    create_task_question(
+        &path,
+        &QuestionRequest {
+            session_id: "session".into(),
+            request_id: "question".into(),
+            run_id: run.clone(),
+            generation: run,
+            text: "private".into(),
+            choices: vec![],
+            responder_class: QuestionResponder::HumanDecision,
+        },
+        0,
+    )
+    .unwrap();
+
+    let mut connection = open_initialized_read_connection(&path).unwrap();
+    let tx = connection.transaction().unwrap();
+    let metadata = metadata_with_connection(&tx, None).unwrap();
+    assert!(metadata[0].question.is_some());
+    // This real canonical mutation commits project placement and question
+    // invalidation together between the census's two constituent reads.
+    assign_session_to_project(&path, "project", "session").unwrap();
+    // Negative control: the old split public reads can now combine this old
+    // question with the new project. The census transaction must not do so.
+    assert_eq!(
+        read_attention_topology(&path).unwrap()[0]
+            .project_id
+            .as_deref(),
+        Some("project")
+    );
+    let topology = topology_with_connection(&tx).unwrap();
+    assert_eq!(topology[0].project_id, None);
+    drop(tx);
+    let current = read_attention_census(&path).unwrap();
+    assert!(current.metadata[0].question.is_none());
+    assert_eq!(current.topology[0].project_id.as_deref(), Some("project"));
+    assert!(!format!("{current:?}").contains("private"));
     drop(connection);
     std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
 }

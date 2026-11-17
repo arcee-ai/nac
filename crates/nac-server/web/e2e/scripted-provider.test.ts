@@ -1,6 +1,35 @@
 import { afterEach, expect, test } from "vitest";
 
-import { ScriptGate, ScriptedProvider } from "./scripted-provider";
+import { finalFunctionOutput, ScriptGate, ScriptedProvider } from "./scripted-provider";
+
+test("tool-output evidence belongs to the exact final call, not older history or a later prompt", () => {
+  const busy = "Error: terminal input owner is busy; retry preparation";
+  const output = { type: "function_call_output", call_id: "attempt", output: busy };
+  const request = (input: unknown) => ({
+    method: "POST",
+    path: "/responses",
+    headers: {},
+    body: { input },
+    receivedAt: "fixture",
+  });
+  expect(finalFunctionOutput(request([output]), "attempt")).toBe(busy);
+  expect(finalFunctionOutput(request([output]), "other-attempt")).toBeUndefined();
+  expect(
+    finalFunctionOutput(request([output, { role: "user", content: "new attempt" }]), "attempt"),
+  ).toBeUndefined();
+  expect(
+    finalFunctionOutput(request([output, { ...output, call_id: "new-call" }]), "attempt"),
+  ).toBeUndefined();
+  expect(finalFunctionOutput(request([{ ...output, output: "other error" }]), "attempt")).toBe(
+    "other error",
+  );
+  expect(
+    finalFunctionOutput(request([{ ...output, output: { error: busy } }]), "attempt"),
+  ).toBeUndefined();
+  expect(
+    finalFunctionOutput(request("quoted " + JSON.stringify(output)), "attempt"),
+  ).toBeUndefined();
+});
 
 const providers: ScriptedProvider[] = [];
 afterEach(async () => {

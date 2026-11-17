@@ -10,6 +10,9 @@ interface SwitchProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>
     onChange?: (checked: boolean) => void;
     size?: SwitchSize;
 }
-/** Track and knob toggle. Sizes and tokens follow the Figma Switcher. */
+/**
+ * Track and knob toggle. Off is a soft wash with a white knob; on is an ink
+ * track with an on-ink knob, in either theme.
+ */
 declare const Switch: React.FC<SwitchProps>;
 export default Switch;

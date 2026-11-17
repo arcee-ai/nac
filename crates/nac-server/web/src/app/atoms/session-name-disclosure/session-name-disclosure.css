@@ -1,4 +1,4 @@
-.session-name-dialog {
+.session-name-dialog[data-slot="dialog-content"] {
   max-height: min(100%, calc(100dvh - 2rem));
 }
 
@@ -27,7 +27,7 @@
 
 @media (max-width: 767.98px) {
   /* Respect both a smaller hosted frame and a phone's dynamic visible viewport. */
-  .session-name-dialog {
+  .session-name-dialog[data-slot="dialog-content"] {
     height: min(100%, 100dvh);
     min-height: min(100%, 100dvh);
     max-height: min(100%, 100dvh);

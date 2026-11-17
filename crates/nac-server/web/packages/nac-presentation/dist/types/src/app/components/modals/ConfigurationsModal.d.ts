@@ -8,3 +8,8 @@ export declare function ConfigurationsModal({ open, onClose }: {
     open: boolean;
     onClose: () => void;
 }): import("react").JSX.Element | null;
+/**
+ * The same manager as a Settings section: rendered in the page instead of a
+ * dialog. Saving stays explicit; Cancel discards the open form's edits.
+ */
+export declare function ConfigurationsSettings(): import("react").JSX.Element;

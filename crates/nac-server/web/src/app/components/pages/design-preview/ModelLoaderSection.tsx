@@ -22,19 +22,19 @@ const FRAMES: ModelLoaderFrame[] = [1, 2, 3];
 
 export function ModelLoaderSection() {
   return (
-    <BoxSurface title="Model loader">
+    <BoxSurface title="Model loader" bodyClassName="overflow-x-auto">
       <div className="p-4 grid w-fit grid-cols-[160px_repeat(4,72px)] items-center gap-x-4 gap-y-3">
         <span />
-        <span className="label-micro text-basic-muted">Animated</span>
+        <span className="type-meta-strong text-basic-muted">Animated</span>
         {FRAMES.map((frame) => (
-          <span key={frame} className="label-micro text-basic-muted">
+          <span key={frame} className="type-meta-strong text-basic-muted">
             Frame {frame}
           </span>
         ))}
         {VARIANTS.flatMap(({ variant, label }) =>
           SIZES.map(({ size, label: sizeLabel }) => (
             <Fragment key={`${variant}-${size}`}>
-              <span className="label-small text-basic-secondary">
+              <span className="type-body-chrome text-basic-secondary">
                 {label} · {sizeLabel}
               </span>
               <ModelLoader size={size} variant={variant} />

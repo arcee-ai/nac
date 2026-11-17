@@ -344,6 +344,33 @@ impl SessionService {
         installed.then_some(registration)
     }
 
+    /// Passive current-state read for additional browser observers. Unlike
+    /// installation it registers no observer, never publishes, never retires
+    /// the single native slot, and grants no approval or interactive-client
+    /// status. Settled work is observer-owned publication state, so it is
+    /// never synthesized here; callers report that facet as unknown.
+    pub fn passive_attention_snapshot(&self) -> Option<AttentionServiceSnapshot> {
+        self.metadata.session_id.as_deref()?;
+        let operation = {
+            let published = self
+                .published_operation
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            normalized(published.as_ref())
+        };
+        let broker = self
+            .permission_broker
+            .as_ref()
+            .map(|broker| broker.attention_snapshot());
+        Some(AttentionServiceSnapshot {
+            epoch: Uuid::nil(),
+            revision: broker.as_ref().map_or(0, |broker| broker.revision),
+            operation,
+            settled: None,
+            broker,
+        })
+    }
+
     pub fn remove_attention_observer(&self, registration: Uuid) {
         let retired = {
             let mut state = self

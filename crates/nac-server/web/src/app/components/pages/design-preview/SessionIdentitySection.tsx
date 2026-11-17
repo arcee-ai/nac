@@ -56,13 +56,13 @@ function SessionBehaviorIconGrid() {
     <div className="grid w-fit grid-cols-[200px_repeat(12,32px)] items-center gap-y-3">
       <span />
       {ICON_TONES.map((tone) => (
-        <span key={tone.label} className="col-span-3 label-micro text-basic-muted">
+        <span key={tone.label} className="col-span-3 type-meta-strong text-basic-muted">
           {tone.label}
         </span>
       ))}
       {SESSION_BEHAVIORS.map((option) => (
         <Fragment key={option.id}>
-          <span className="label-small truncate text-basic-secondary">{option.label}</span>
+          <span className="type-body-chrome truncate text-basic-secondary">{option.label}</span>
           {ICON_TONES.flatMap((tone) =>
             ICON_SIZES.map((size) => (
               <span
@@ -97,15 +97,15 @@ function ChatSessionButtonMatrix({ isMobile }: { isMobile: boolean }) {
         isMobile ? "grid-cols-[120px_repeat(4,240px)]" : "grid-cols-[120px_repeat(4,200px)]",
       )}
     >
-      <span className="label-micro text-basic-muted">{isMobile ? "Mobile" : "Desktop"}</span>
+      <span className="type-meta-strong text-basic-muted">{isMobile ? "Mobile" : "Desktop"}</span>
       {BUTTON_COLUMNS.map((column) => (
-        <span key={column.label} className="label-micro text-basic-muted">
+        <span key={column.label} className="type-meta-strong text-basic-muted">
           {column.label}
         </span>
       ))}
       {BUTTON_ROWS.map((row) => (
         <Fragment key={row.label}>
-          <span className="label-small text-basic-secondary">{row.label}</span>
+          <span className="type-body-chrome text-basic-secondary">{row.label}</span>
           {BUTTON_COLUMNS.map((column) => (
             <ChatSessionButton
               key={column.label}
@@ -125,7 +125,7 @@ function ChatSessionButtonMatrix({ isMobile }: { isMobile: boolean }) {
 
 export function SessionIdentitySection() {
   return (
-    <BoxSurface title="Project navigation">
+    <BoxSurface title="Project navigation" bodyClassName="overflow-x-auto">
       <div className="p-4 flex flex-col gap-6 overflow-x-auto [&>*]:shrink-0">
         <SessionBehaviorIconGrid />
         <div className="flex items-start gap-2">

@@ -91,7 +91,7 @@ export function DeleteModal({ open, onClose, summary }: DeleteModalProps) {
       footer={
         <>
           <Button
-            variant={ButtonVariant.Tertiary}
+            variant={ButtonVariant.Secondary}
             content={ButtonContent.Text}
             onClick={onClose}
             disabled={remove.isPending}
@@ -109,11 +109,13 @@ export function DeleteModal({ open, onClose, summary }: DeleteModalProps) {
         </>
       }
     >
-      <ModalDescription>
-        Are you sure you want to delete the session{" "}
-        <span className="text-basic-primary">&quot;{sessionTitle(summary)}&quot;</span>{" "}
-        <span className="font-mono text-basic-muted">({shortId(summary?.session_id)})</span>? This
-        action cannot be undone.
+      <ModalDescription className="flex flex-col gap-2">
+        <span>
+          <span className="text-basic-primary">“{sessionTitle(summary)}”</span>{" "}
+          <span className="code-small text-basic-muted">{shortId(summary?.session_id)}</span> and
+          its conversation will be permanently deleted.
+        </span>
+        <span className="type-body-chrome text-basic-tertiary">This action cannot be undone.</span>
       </ModalDescription>
     </Modal>
   );

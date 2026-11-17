@@ -48,10 +48,10 @@ function verify(workflow) {
     step.run = step.run.replace("--fully-parallel ", "");
   }
   reversed.jobs["test-server"].steps.find(s => s.name === "Run nac-server tests").run = "cargo test -p nac-server --locked";
-  // Canonical projection also retains the required startup custody check.
+  // Canonical projection retains required startup custody and isolated native auth checks.
   // Reverse ONLY S12's server input: all three provenance fields stay present.
   assert.equal(createHash("sha256").update(JSON.stringify(sort(reversed))).digest("hex"),
-    "08eeb130cff8903bc0837279bbca6c1c7e39bc672f6cde4e18e76f34a3233499");
+    "d58c312b872e6dc99dd0ba26f0dde69192e185297912c7125f10764bb2d77877");
 }
 
 test("only the server runner input changes; pinned compiler/cache trust and stable identity stay", () => verify(read()));

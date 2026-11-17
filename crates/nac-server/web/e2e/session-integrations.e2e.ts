@@ -1,5 +1,5 @@
 import http from "node:http";
-import type { APIRequestContext } from "@playwright/test";
+import type { APIRequestContext, Page } from "@playwright/test";
 import { createSession, expect, test, waitForRunIdle, type EmbeddedHarness } from "./harness";
 
 test.skip(!!process.env.NAC_E2E_REMOTE, "Requires disposable local MCP and model fixtures");
@@ -70,6 +70,22 @@ async function run(
   await waitForRunIdle(request, harness, session);
 }
 
+/**
+ * Chat integrations live in the session's details: the header's Session menu
+ * on a wide screen, the "Open panel" sheet on a phone.
+ */
+async function integrationsTrigger(page: Page, mobile: boolean) {
+  const trigger = page.getByRole("button", { name: "Chat integrations", exact: true });
+  if (!(await trigger.isVisible())) {
+    await page
+      .getByRole("button", { name: mobile ? "Open panel" : "Session menu", exact: true })
+      .click();
+    await expect(page.getByRole("dialog", { name: "Session", exact: true })).toBeVisible();
+  }
+  await expect(trigger).toBeVisible();
+  return trigger;
+}
+
 for (const mobile of [false, true]) {
   test(`refreshes an existing chat after connect and removal (${mobile ? "phone" : "desktop"})`, async ({
     harness,
@@ -106,7 +122,7 @@ for (const mobile of [false, true]) {
       await page.goto(`${harness.baseUrl}/#/session/${session}/threads`);
       await expect(page.getByText("Chat predates integration", { exact: true })).toBeVisible();
       await page.evaluate("document.fonts.ready");
-      await page.getByRole("button", { name: "Chat integrations", exact: true }).click();
+      await (await integrationsTrigger(page, mobile)).click();
       const panel = page.getByRole("dialog", { name: "Chat integrations", exact: true });
       await expect(panel).toBeVisible();
       await expect(panel.getByRole("status")).toHaveText(
@@ -145,7 +161,7 @@ for (const mobile of [false, true]) {
       );
       await run(request, harness, session, "REFRESH_ADDED");
       expect(fixture.calls()).toBe(1);
-      await page.getByRole("button", { name: "Chat integrations", exact: true }).click();
+      await (await integrationsTrigger(page, mobile)).click();
       await expect(panel.getByRole("status")).toHaveText("Integrations are current for this chat.");
       await expect(panel.getByText("Refresh 1 · Applied 1", { exact: true })).toBeVisible();
       expect(

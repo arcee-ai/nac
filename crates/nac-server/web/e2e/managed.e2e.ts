@@ -1,24 +1,41 @@
 import type { Page, Request, Route, TestInfo } from "@playwright/test";
 
 import { expect, test } from "./harness";
+import { leaveSettings, openSettingsSection, settingsSection } from "./settings-focus";
 import { captureSetup, withSetupBaselines, setupBaseline } from "./setup-visual-fixture";
 import { openNameZoom } from "./session-name-zoom";
 
 test.use({ hasTouch: true });
 
-/** The projects sidebar exposes Managed host directly; phones still use the menu. */
+/** Settings › Managed host, by the command palette (the product's settings entry). */
 async function openManagedHost(page: Page) {
-  const hosted = page.getByRole("button", { name: /^(Managed host|Manage Host)$/ });
-  const menu = page.getByRole("button", { name: "Open the menu" });
-  await expect(hosted.or(menu).first()).toBeVisible();
-  if (await hosted.first().isVisible()) {
-    await hosted.first().click();
-    return;
-  }
-  await menu.click();
-  await hosted.click();
+  const host = await openSettingsSection(page, "Managed host");
+  await expect(host.getByRole("navigation", { name: "Managed host sections" })).toBeVisible();
+  return host;
 }
 
+/**
+ * A phone reaches Managed host from the Menu: Settings opens on its section
+ * list (push navigation), then Managed host.
+ */
+async function openManagedHostFromPhoneMenu(page: Page) {
+  await page.getByRole("button", { name: "Open the menu", exact: true }).click();
+  await page
+    .getByRole("dialog", { name: "Menu", exact: true })
+    .getByRole("button", { name: "Settings", exact: true })
+    .click();
+  await expect(page).toHaveURL(/#\/settings$/);
+  await page
+    .getByRole("navigation", { name: "Settings sections", exact: true })
+    .getByRole("link", { name: /^Managed host/ })
+    .click();
+  await expect(settingsSection(page, "Managed host")).toBeVisible();
+}
+
+/**
+ * Geometry of the control that leaves a managed surface: a dialog's Close, or
+ * for the Managed host Settings page on a phone its "‹ Settings" back button.
+ */
 async function inspectManagedClose(
   page: Page,
   info: TestInfo,
@@ -26,9 +43,12 @@ async function inspectManagedClose(
   stage: string,
   assertMinimum = true,
 ) {
-  const close = page
-    .getByRole("dialog", { name: dialogName, exact: true })
-    .getByRole("button", { name: "Close", exact: true });
+  const close =
+    dialogName === "Managed host"
+      ? page.getByRole("button", { name: "Settings", exact: true })
+      : page
+          .getByRole("dialog", { name: dialogName, exact: true })
+          .getByRole("button", { name: "Close", exact: true });
   await expect(close).toBeVisible();
   await expect(close).toBeInViewport();
   const geometry = await close.evaluate((element) => {
@@ -587,13 +607,13 @@ test("completes the managed first-run, write-only secret, and clone journey", as
   await page.getByRole("button", { name: "Cancel" }).click();
 
   await openManagedHost(page);
-  await page.getByRole("button", { name: "secrets", exact: true }).click();
+  await page.getByRole("button", { name: "Secrets", exact: true }).click();
   await page.getByLabel("Variable name").fill("DEMO_SERVICE_TOKEN");
   await page.getByLabel("New value").fill("browser-e2e-secret-value");
   await page.getByRole("button", { name: "Save secret" }).click();
   await expect(page.getByText("DEMO_SERVICE_TOKEN")).toBeVisible();
   await expect(page.getByText("browser-e2e-secret-value")).toHaveCount(0);
-  await page.getByRole("button", { name: "Close" }).click();
+  await closeManagedHost(page);
 
   await page.getByRole("button", { name: "Add repository" }).first().click();
   await page.getByLabel("Find repository").fill("managed-demo");
@@ -605,7 +625,8 @@ test("completes the managed first-run, write-only secret, and clone journey", as
   await page.getByRole("option", { name: alternateBranch }).click();
   await page.getByRole("button", { name: "Clone repository" }).click();
   await expect(page.getByText("Cloning objects: 75%")).toBeVisible();
-  await expect(page).toHaveURL(/#\/project\/managed-project-e2e$/);
+  // A project's address opens Home on that project (`/project/:id` redirects there).
+  await expect(page).toHaveURL(/#\/\?project=managed-project-e2e$/);
   expect(state.cloneRequest).toEqual({
     repository_id: 42,
     repository: "arcee-ai/managed-demo",
@@ -635,7 +656,7 @@ test("keeps GitHub Connected visible after device authorization and reopening se
   await expect(panel.getByRole("button", { name: "Connect GitHub", exact: true })).toHaveCount(0);
   await expect(panel.getByRole("button", { name: "Reconnect GitHub" })).toBeVisible();
   await expect(panel.getByRole("button", { name: "Disconnect", exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Close", exact: true }).click();
+  await closeManagedHost(page);
   await openGitHub();
   await expect(panel.getByText("Connected", { exact: true })).toBeVisible();
   await expect(page.getByText("GitHub connected", { exact: true })).toHaveCount(0);
@@ -646,6 +667,125 @@ test("keeps GitHub Connected visible after device authorization and reopening se
     contentType: "image/png",
   });
 });
+
+function linkBrowserEvents(page: Page) {
+  const events: Array<Record<string, unknown>> = [];
+  page.on("console", (message) => {
+    events.push({ kind: "console", type: message.type(), text: message.text() });
+  });
+  page.on("pageerror", (error) => {
+    events.push({ kind: "pageerror", message: error.message });
+  });
+  page.on("response", (response) => {
+    if (response.status() >= 400) {
+      const url = new URL(response.url());
+      events.push({
+        kind: "http-error",
+        origin: url.origin,
+        path: url.pathname,
+        status: response.status(),
+      });
+    }
+  });
+  page.on("requestfailed", (request) => {
+    const url = new URL(request.url());
+    events.push({
+      kind: "requestfailed",
+      origin: url.origin,
+      path: url.pathname,
+      error: request.failure()?.errorText,
+    });
+  });
+  return events;
+}
+
+async function attachLinkBrowserEvents(info: TestInfo, events: Array<Record<string, unknown>>) {
+  await info.attach("external-link browser console and request failures", {
+    body: JSON.stringify(events, null, 2),
+    contentType: "application/json",
+  });
+}
+
+for (const viewport of [
+  { width: 1440, height: 900 },
+  { width: 390, height: 844 },
+]) {
+  test(`GitHub retry is a keyboard link on the same pending attempt at ${viewport.width}`, async ({
+    harness,
+    page,
+    context,
+  }, info) => {
+    const browserEvents = linkBrowserEvents(page);
+    await page.setViewportSize(viewport);
+    await installManagedDouble(page);
+    let starts = 0;
+    let canceled = 0;
+    await page.route(`${harness.baseUrl}/managed/github/login`, async (route) => {
+      starts += 1;
+      await route.fallback();
+    });
+    await page.route(`${harness.baseUrl}/managed/github/login/managed-login-e2e`, async (route) => {
+      if (route.request().method() === "DELETE") {
+        canceled += 1;
+        return route.fulfill({ status: 204 });
+      }
+      return route.fulfill({ json: { state: "pending" } });
+    });
+    await context.route("https://github.com/login/device", (route) =>
+      route.fulfill({
+        contentType: "text/html",
+        body: "<!doctype html><title>Owned GitHub double</title>",
+      }),
+    );
+    await page.goto(harness.baseUrl);
+    if (viewport.width === 390) {
+      await openManagedHostFromPhoneMenu(page);
+    } else {
+      await openManagedHost(page);
+    }
+    await page.getByRole("button", { name: "GitHub", exact: true }).click();
+    const panel = page.getByTestId("managed-github-settings");
+    await panel.getByRole("button", { name: "Connect GitHub", exact: true }).click();
+    const link = panel.getByRole("link", { name: "Open GitHub", exact: true });
+    await expect(link).toHaveAttribute("href", "https://github.com/login/device");
+    await expect(link).toHaveAttribute("target", "_blank");
+    await expect(link).toHaveAttribute("rel", /noopener/);
+    await expect(link).toHaveAttribute("rel", /noreferrer/);
+    await page.evaluate(() =>
+      (
+        globalThis as unknown as { document: { fonts: { ready: Promise<unknown> } } }
+      ).document.fonts.ready.then(() => undefined),
+    );
+    const screenshot = info.outputPath(`github-retry-${viewport.width}.png`);
+    await attachLinkBrowserEvents(info, browserEvents);
+    await page.screenshot({ path: screenshot, animations: "disabled", caret: "hide" });
+    await info.attach(`github-retry-${viewport.width}.png`, {
+      path: screenshot,
+      contentType: "image/png",
+    });
+    const crop = info.outputPath(`github-retry-${viewport.width}-controls.png`);
+    await panel.screenshot({ path: crop, animations: "disabled", caret: "hide" });
+    await info.attach(`github-retry-${viewport.width}-controls.png`, {
+      path: crop,
+      contentType: "image/png",
+    });
+    const opened = page.waitForEvent("popup");
+    await link.focus();
+    await link.press("Enter");
+    const popup = await opened;
+    await expect(popup).toHaveURL("https://github.com/login/device");
+    expect(
+      await popup.evaluate(() => (globalThis as unknown as { opener: unknown }).opener === null),
+    ).toBe(true);
+    await popup.close();
+    expect(starts).toBe(1);
+    await panel.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect.poll(() => canceled).toBe(1);
+    await expect(panel.getByRole("button", { name: "Connect GitHub", exact: true })).toBeVisible();
+    expect(starts).toBe(1);
+    await attachLinkBrowserEvents(info, browserEvents);
+  });
+}
 
 test("runs and reload-recovers a durable latest-beta upgrade through the same-origin facade", async ({
   harness,
@@ -780,12 +920,13 @@ test("cancels an in-progress managed clone without publishing a Project", async 
   await expect(page.getByText("Clone cancelled; staging checkout removed")).toBeVisible();
   expect(state.projectReady).toBe(false);
   expect(page.url()).not.toContain("/#/project/");
+  expect(page.url()).not.toContain("project=managed-project-e2e");
 });
 
+/** Leaves Settings › Managed host for where the user came from; nothing stays open. */
 async function closeManagedHost(page: Page) {
-  const host = page.getByRole("dialog", { name: "Managed host", exact: true });
-  await host.getByRole("button", { name: "Close", exact: true }).click();
-  await expect(host).toHaveCount(0);
+  await leaveSettings(page);
+  await expect(settingsSection(page, "Managed host")).toHaveCount(0);
   await expect(page.getByRole("dialog", { name: "Menu", exact: true })).toHaveCount(0);
 }
 
@@ -848,7 +989,7 @@ test("keeps managed secret drafts owned through delayed saves", async ({ harness
       await page.route(endpoint, holdSave);
       try {
         await openManagedHost(page);
-        await page.getByRole("button", { name: "secrets", exact: true }).click();
+        await page.getByRole("button", { name: "Secrets", exact: true }).click();
         const name = page.getByLabel("Variable name", { exact: true });
         const value = page.getByLabel("New value", { exact: true });
         const save = page.getByRole("button", { name: "Save secret", exact: true });
@@ -960,7 +1101,7 @@ for (const width of [1440, 768, 390]) {
         page.getByTestId("managed-github-settings").getByText("Connected", { exact: true }),
       ).toBeVisible();
       await captureSetup(page, info, width, "managed-github");
-      await page.getByRole("button", { name: "secrets", exact: true }).click();
+      await page.getByRole("button", { name: "Secrets", exact: true }).click();
       await expect(page.getByText("DEMO_SERVICE_TOKEN", { exact: true })).toBeVisible();
       await captureSetup(page, info, width, "managed-secrets");
       const draftName = page.getByLabel("Variable name", { exact: true });
@@ -973,7 +1114,7 @@ for (const width of [1440, 768, 390]) {
       expect(secretWrites).toEqual([]);
       await closeManagedHost(page);
       await openManagedHost(page);
-      await page.getByRole("button", { name: "secrets", exact: true }).click();
+      await page.getByRole("button", { name: "Secrets", exact: true }).click();
       await expect(draftName).toHaveValue("");
       await expect(draftValue).toHaveValue("");
       expect(secretWrites).toEqual([]);
@@ -1489,7 +1630,7 @@ for (const width of [1440, 768, 390]) {
       await page.goto(harness.baseUrl);
       await openManagedHost(page);
       await page.getByRole("button", { name: "GitHub", exact: true }).click();
-      await expect(page.getByRole("dialog", { name: "Managed host", exact: true })).toBeVisible();
+      await expect(settingsSection(page, "Managed host")).toBeVisible();
       await captureSetup(page, info, width, "managed-checking");
       expect(writes).toEqual([]);
       connection = "unconfigured";

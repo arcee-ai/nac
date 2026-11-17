@@ -16,7 +16,7 @@ export interface SessionBehaviorPresentation {
 export const SESSION_BEHAVIORS: readonly SessionBehaviorPresentation[] = [
   {
     id: "orchestrator",
-    label: "NAC orchestrator",
+    label: "Orchestrator",
     navigationLabel: "Orchestrator",
     topLevel: "A planner handles the top-level conversation.",
     editsDirectly: false,
@@ -26,8 +26,8 @@ export const SESSION_BEHAVIORS: readonly SessionBehaviorPresentation[] = [
   },
   {
     id: "direct",
-    label: "Direct coding agent",
-    navigationLabel: "Direct",
+    label: "Agent",
+    navigationLabel: "Agent",
     topLevel: "One persistent coding agent handles the top-level conversation.",
     editsDirectly: true,
     editing: "The top-level agent edits files and runs commands directly.",
@@ -36,8 +36,8 @@ export const SESSION_BEHAVIORS: readonly SessionBehaviorPresentation[] = [
   },
   {
     id: "direct-with-orchestrator",
-    label: "Direct + NAC orchestration",
-    navigationLabel: "Direct + NAC",
+    label: "Agent + Orchestrator",
+    navigationLabel: "Agent + Orchestrator",
     topLevel: "One persistent coding agent handles the top-level conversation.",
     editsDirectly: true,
     editing: "The top-level agent edits files and runs commands directly.",
@@ -82,8 +82,8 @@ export function sessionBehaviorName(
   behavior: SessionBehavior | null | undefined,
   lineage?: SessionLineage["kind"] | null,
 ): string {
-  if (lineage === "managed-orchestrator") return "NAC orchestrator";
-  if (lineage === "traditional-child") return "Coding agent";
+  if (lineage === "managed-orchestrator") return "Managed orchestrator";
+  if (lineage === "traditional-child") return "Subagent";
   return sessionBehaviorPresentation(behavior).label;
 }
 

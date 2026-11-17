@@ -10,6 +10,7 @@ export const INPUTS = [
   "Cargo.lock",
   "crates/nac-server/web/package-lock.json",
   ".github/scripts/package-lock.json",
+  "desktop/electron/package-lock.json",
 ];
 export const POLICY = ".github/security/exceptions.json";
 export const CONFIG = ".github/security/osv-scanner.toml";

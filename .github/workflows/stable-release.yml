@@ -249,6 +249,18 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: python3 .github/scripts/server-tests.py
 
+      - name: Test isolated native-auth fixture boundary
+        env:
+          EXPECTED_SOURCE_SHA: ${{ needs.prepare.outputs.sha }}
+        run: |
+          fixture_sha=$(git rev-parse --verify HEAD)
+          test "$fixture_sha" = "$EXPECTED_SOURCE_SHA"
+          printf 'Native-auth fixture source: %s\n' "$fixture_sha"
+          NAC_BUILD_TRACK=dev \
+          NAC_BUILD_ID="native-auth-fixture-v1-${fixture_sha}" \
+          NAC_SOURCE_REVISION="$fixture_sha" \
+            cargo test --locked -p nac-server --lib --features native-auth-fixture native_auth_fixture::tests::
+
       - name: Exercise stable binary readiness and status identity
         run: make test-stable-binary
 

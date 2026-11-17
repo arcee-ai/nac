@@ -92,7 +92,7 @@ function DropdownMenuContent({
         sideOffset={sideOffset}
         collisionPadding={collisionPadding}
         className={cn(
-          "fade z-[120] flex min-w-[160px] max-h-(--radix-dropdown-menu-content-available-height) flex-col gap-1 overflow-y-auto rounded-[8px] bg-popover p-2 text-popover-foreground shadow-2xl outline-none motion-reduce:!animate-none [&>*]:shrink-0",
+          "type-body-chrome fade z-[120] flex min-w-[180px] max-h-(--radix-dropdown-menu-content-available-height) flex-col gap-0.5 overflow-y-auto rounded-xl bg-popover p-1.5 text-popover-foreground shadow-lg outline-none motion-reduce:!animate-none [&>*]:shrink-0",
           className,
         )}
         {...props}
@@ -128,7 +128,7 @@ function DropdownMenuItem({
       data-slot="dropdown-menu-item"
       data-variant={variant}
       className={cn(
-        "label-small flex h-8 cursor-default items-center gap-2 rounded-[6px] px-2 outline-none select-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[variant=destructive]:text-destructive",
+        "type-label flex h-8 cursor-default items-center gap-2 rounded-md px-2.5 outline-none select-none transition-colors duration-150 ease-out focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[variant=destructive]:text-destructive data-[variant=destructive]:focus:bg-[var(--f-red-wash)] max-md:h-11",
         className,
       )}
       {...props}
@@ -143,7 +143,7 @@ function DropdownMenuLabel({
   return (
     <DropdownMenuPrimitive.Label
       data-slot="dropdown-menu-label"
-      className={cn("label-micro px-2 py-1 text-muted-foreground", className)}
+      className={cn("type-meta-strong px-2.5 pt-1.5 pb-1 text-muted-foreground", className)}
       {...props}
     />
   );
@@ -156,7 +156,7 @@ function DropdownMenuSeparator({
   return (
     <DropdownMenuPrimitive.Separator
       data-slot="dropdown-menu-separator"
-      className={cn("-mx-2 my-1 h-px bg-border", className)}
+      className={cn("-mx-1.5 my-1 h-px bg-divider-muted", className)}
       {...props}
     />
   );
@@ -166,7 +166,7 @@ function DropdownMenuShortcut({ className, ...props }: React.ComponentProps<"spa
   return (
     <span
       data-slot="dropdown-menu-shortcut"
-      className={cn("ml-auto text-micro text-muted-foreground", className)}
+      className={cn("type-meta ml-auto text-muted-foreground", className)}
       {...props}
     />
   );

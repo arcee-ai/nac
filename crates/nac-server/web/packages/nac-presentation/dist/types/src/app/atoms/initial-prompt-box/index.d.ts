@@ -9,9 +9,8 @@ interface InitialPromptBoxProps {
     className?: string;
 }
 /**
- * Card offering one ready-made prompt. The elevation sits on the card while the
- * ghost tokens paint hover and press on a layer above it, which is how the
- * design stacks them — a single background could not carry both.
+ * Card offering one ready-made prompt: a hairline card whose hover and press
+ * washes sit on a layer above its surface, so both read in light and dark.
  */
 declare const InitialPromptBox: React.FC<InitialPromptBoxProps>;
 export default InitialPromptBox;

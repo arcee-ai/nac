@@ -76,6 +76,7 @@ export declare function useFreshInitialInput(sessionId: string, inputId: number 
     delivered_run_id?: string | null;
     delivery: import("../../../../../packages/nac-client/src/openapi.generated").components["schemas"]["InboxDelivery"];
     id: number;
+    origin: import("../../../../../packages/nac-client/src/openapi.generated").components["schemas"]["InboxItemOrigin"];
     prompt: string;
     session_id: string;
     status: import("../../../../../packages/nac-client/src/openapi.generated").components["schemas"]["InboxStatus"];

@@ -1,13 +1,14 @@
 import AppKit
 import WebKit
 
-/// Compiled only for `preview.sh smoke`. There is no script message bridge.
+/// Instrumentation compiled only for `preview.sh smoke`; UI commands use the production bridge.
 @MainActor
 final class PreviewSmoke {
     private unowned let app: PreviewApp
     private let destination: URL
     private let scenario: String
     private var evidence: [String: Any] = [:]
+    private(set) var offline: OfflineNetworkFence?
     private var passed = false
     private var cleanupError: String?
     private var pausedFirstLoad = false
@@ -17,8 +18,7 @@ final class PreviewSmoke {
         let args = CommandLine.arguments
         destination = URL(fileURLWithPath: args[args.firstIndex(of: "--smoke-output")! + 1])
         scenario = args[args.firstIndex(of: "--smoke-scenario")! + 1]
-        // Attribute decoy requests to this fixture on a shared interactive host.
-        app.webView.customUserAgent = "NACPreviewSmoke/ALL-340 AppleWebKit/605.1.15"
+        if let view = app.webView { configure(view) }
         let observer = #"""
         window.__previewEvidence = {errors: [], partial: false, deltas: []};
         addEventListener('error', e => __previewEvidence.errors.push(String(e.message)));
@@ -40,13 +40,46 @@ final class PreviewSmoke {
             source: observer, injectionTime: .atDocumentStart, forMainFrameOnly: true))
     }
 
+    /// Each recovery view keeps the fixture classification before its first load.
+    func configure(_ view: WKWebView) {
+        if scenario == "external-navigation-recording" { ExternalNavigationSmoke.installObserver(in: view) }
+        view.customUserAgent = scenario == "external-auth"
+            ? "NACExternalAuthWK/ALL348 AppleWebKit/605.1.15"
+            : "NACPreviewSmoke/ALL-340 AppleWebKit/605.1.15"
+    }
+
     func start() {
         evidence["app_pid"] = getpid()
         evidence["scenario"] = scenario
+        if scenario == "offline-api-key" { evidence["offline_phase"] = "await_workspace" }
         write()
         Task {
             do {
-                if ["normal", "ci-terminal", "ci-terminal-xctest", "slow-drain", "watchdog", "parent-loss-active", "channel-loss-active", "stale-launch"].contains(scenario) {
+                if scenario == "offline-api-key" {
+                    try await wait("owned offline workspace", timeout: 60) { self.offline != nil && self.app.baseURL != nil }
+                    guard let offline else { throw PreviewError.message("Offline fence was not installed") }
+                    evidence["offline_phase"] = "offline_journey"
+                    recordOfflineDiagnostic()
+                    evidence["offline_provider"] = try await OfflineProviderSmoke(app: app, fence: offline).run()
+                } else if scenario.hasPrefix("workspace-") {
+                    try await WorkspaceSmoke(app: app, scenario: scenario, output: destination) { [self] fields in
+                        evidence.merge(fields) { _, new in new }
+                        write()
+                    }.run()
+                } else if scenario == "external-navigation-recording" {
+                    evidence["external_navigation_recording"] = try await ExternalNavigationSmoke(app: app, checkpoint: { self.recordOwnership() }).run()
+                } else if scenario == "external-auth" {
+                    evidence["external_auth"] = try await ExternalAuthSmoke(app: app, checkpoint: { self.recordOwnership() }).run()
+                } else if ["commands", "commands-input"].contains(scenario) {
+                    evidence["commands"] = try await NativeCommandSmoke(app: app, commands: app.commands).run(
+                        trustedInput: scenario == "commands-input", captures: destination.deletingLastPathComponent())
+                } else if ["paths-xctest", "paths-failure-xctest"].contains(scenario) {
+                    let paths = try await NativePathSmoke.awaitBridge(app: app) { self.recordOwnership() }
+                    evidence["native_paths"] = try await NativePathSmoke(app: app, paths: paths).run(failure: scenario == "paths-failure-xctest") { record in
+                        record.forEach { self.evidence[$0] = $1 }
+                        self.write()
+                    }
+                } else if ["normal", "ci-terminal", "ci-terminal-xctest", "slow-drain", "watchdog", "parent-loss-active", "channel-loss-active", "stale-launch"].contains(scenario) {
                     if scenario == "stale-launch" {
                         try await wait("first launch load barrier") { self.pausedFirstLoad }
                         let previous = app.engine.receipt!.incarnation
@@ -107,11 +140,14 @@ final class PreviewSmoke {
                     try await wait("engine starting") { self.app.engine.pid > 0 }
                 } else {
                     if scenario == "engine-exit" {
-                        try await waitJS("loaded production workspace", "return !!document.querySelector('[role=dialog]');")
+                        // The seeded project opens Home's composer (no first-chat dialog).
+                        try await waitJS("loaded production workspace", "return !!document.getElementById('home-composer');")
                         kill(app.engine.pid, SIGTERM)
                     }
-                    try await wait("native failure state", timeout: 65) { self.app.failure != nil }
-                    let message = app.failure!
+                    try await wait("native failure/recovery state", timeout: 65) {
+                        self.app.failure != nil || (scenario == "engine-exit" && self.app.recovery.needsRecovery && !self.app.recovery.busy)
+                    }
+                    let message = app.failure ?? "The bundled engine stopped; explicit recovery is required."
                     let expected: String
                     switch scenario {
                     case "missing": expected = "missing or not executable"
@@ -123,6 +159,9 @@ final class PreviewSmoke {
                     }
                     guard message.contains(expected) else { throw PreviewError.message("Unexpected failure: \(message)") }
                     guard app.engine.receipt == nil else { throw PreviewError.message("Failed launch retained active identity") }
+                    guard (app.commands?.smokeSnapshot["installed"] as? Bool ?? false) == false else {
+                        throw PreviewError.message("Failure retained the native command bridge")
+                    }
                     guard app.baseURL == nil || scenario == "engine-exit" else {
                         throw PreviewError.message("Unverified engine activated the workspace")
                     }
@@ -138,10 +177,17 @@ final class PreviewSmoke {
                 }
                 passed = true
             } catch {
-                evidence["error"] = String(describing: error)
-                evidence["engine_log"] = app.engine.log
-                if let body = try? await js("return document.body.innerText;") { evidence["dom"] = body }
+                if scenario == "offline-api-key" {
+                    evidence["offline_failure_phase"] = evidence["offline_phase"]
+                    recordOfflineDiagnostic()
+                    evidence["error"] = "Offline qualification failed; no network/credential payload retained"
+                } else {
+                    evidence["error"] = String(describing: error)
+                    evidence["engine_log"] = app.engine.log
+                    if let body = try? await js("return document.body.innerText;") { evidence["dom"] = body }
+                }
             }
+            offline?.close()
             evidence["engine_pid"] = app.engine.pid
             evidence["profile"] = app.profile?.root.path
             evidence["base_url"] = app.baseURL?.absoluteString
@@ -179,6 +225,19 @@ final class PreviewSmoke {
     }
 
     func beforeLaunch(_ profile: PreviewProfile) async throws {
+        if OfflineProviderPolicy.selected() {
+            guard offline == nil, app.baseURL == nil, app.engine.pid == 0, let view = app.webView else {
+                throw PreviewError.message("Offline fence admission is not pre-launch")
+            }
+            evidence["offline_phase"] = "fence_admission"
+            recordOfflineDiagnostic()
+            offline = try OfflineNetworkFence(provider: app.provider, view: view)
+            evidence["offline_phase"] = "prelaunch_controls"
+            recordOfflineDiagnostic()
+            try await offline!.initialControls()
+            evidence["offline_phase"] = "prelaunch_controls_passed"
+            recordOfflineDiagnostic()
+        }
         if scenario.hasSuffix("initialization") {
             try await wait("startup store barrier") {
                 FileManager.default.fileExists(atPath: profile.root.appendingPathComponent("startup-go").path)
@@ -261,7 +320,7 @@ final class PreviewSmoke {
             try await wait("runner kills owning app", timeout: 70) { false }
         } else if scenario == "channel-loss-active" {
             app.engine.loseChannel()
-            try await wait("runtime channel loss") { self.app.failure != nil }
+            try await wait("runtime channel loss") { self.app.failure != nil || self.app.recovery.needsRecovery }
             guard app.engine.receipt == nil else { throw PreviewError.message("Channel loss retained active identity") }
             try captureNative()
         } else {
@@ -272,8 +331,17 @@ final class PreviewSmoke {
     }
 
     private func journey() async throws {
-        try await waitJS("production new-chat dialog", "return [...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Create chat' && !b.disabled);")
-        _ = try await js("document.querySelectorAll('button').forEach(b => { if(b.textContent.trim() === 'Create chat') b.click(); }); return true;")
+        // Home's composer is the one new-session flow. Start session creates
+        // the direct session and sends the typed prompt as its first run.
+        try await waitJS("production Home composer", "const f = document.getElementById('home-composer'); return !!f && !f.disabled && [...f.labels].some(l => l.textContent.trim() === 'What should we work on?');")
+        _ = try await js("""
+        const input = document.getElementById('home-composer');
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input, '\(FixtureProvider.sessionStartPrompt)');
+        input.dispatchEvent(new Event('input', {bubbles:true}));
+        return true;
+        """)
+        try await waitJS("enabled Start session button", "return !!document.querySelector('button[aria-label=\"Start session\"]:not(:disabled)');")
+        _ = try await js("document.querySelector('button[aria-label=\"Start session\"]:not(:disabled)').click(); return true;")
         try await waitJS("production-created direct session", "return location.hash.includes('/session/') && !!document.querySelector('[role=combobox][aria-label=Message]');")
         let sessionID = try await js("return location.hash.split('/')[2];") as! String
         evidence["session_id"] = sessionID
@@ -283,6 +351,9 @@ final class PreviewSmoke {
             throw PreviewError.message("UI did not create a direct fixture session: \(snapshot)")
         }
         evidence["behavior"] = "direct"
+        // The first-run handoff waits for the interactive stream. Its distinct
+        // short reply precedes the controlled incremental streaming journey.
+        try await waitJS("Home first-run response", "return document.body.innerText.includes('\(FixtureProvider.sessionStartAnswer)') && ![...document.querySelectorAll('button')].some(b => b.getAttribute('aria-label') === 'Stop run');")
         try await sendPrompt("MAC_PREVIEW_STREAM")
         try await waitJS("incremental streamed response", "return __previewEvidence.partial;")
         try await waitJS("completed response", "return document.body.innerText.includes('Hello from the isolated NAC Mac preview.') && ![...document.querySelectorAll('button')].some(b => b.getAttribute('aria-label') === 'Stop run');")
@@ -331,7 +402,7 @@ final class PreviewSmoke {
         }
         // Close with a real active run to exercise cancellation and server settlement.
         try await sendPrompt("MAC_PREVIEW_CLOSE_ACTIVE")
-        try await wait("second provider request") { self.app.provider.responseCount == 2 }
+        try await wait("third provider request") { self.app.provider.responseCount == 3 }
         evidence["close_with_active_run"] = true
     }
 
@@ -453,7 +524,27 @@ final class PreviewSmoke {
         throw PreviewError.message("Timed out waiting for \(label)")
     }
 
+    // Only closed fixture stage names, booleans and the existing redacted counts.
+    // A false observation never asserts that an engine was never launched.
+    private func recordOfflineDiagnostic() {
+        guard scenario == "offline-api-key" else { return }
+        let previous = evidence["offline_diagnostic"] as? [String: Any] ?? [:]
+        let next: [String: Any] = [
+            "phase": evidence["offline_phase"] as? String ?? "await_workspace",
+            "network_stage": offline?.diagnosticStage ?? "not_created",
+            "fence_created": offline != nil,
+            "startup_failure_observed": app.failure != nil,
+            "engine_pid_observed_positive": previous["engine_pid_observed_positive"] as? Bool == true || app.engine.pid > 0,
+            "ready_receipt_observed": previous["ready_receipt_observed"] as? Bool == true || app.engine.receipt != nil,
+            "network_observations": offline?.policy.snapshot ?? [:]]
+        if !NSDictionary(dictionary: previous).isEqual(to: next) {
+            evidence["offline_diagnostic"] = next
+            write()
+        }
+    }
+
     private func recordOwnership() {
+        recordOfflineDiagnostic()
         let root = app.profile?.root.path
         guard evidence["engine_pid"] as? Int32 != app.engine.pid || evidence["profile"] as? String != root else { return }
         evidence["engine_pid"] = app.engine.pid
@@ -487,12 +578,14 @@ final class PreviewSmoke {
     }
     func cleanupFailed(_ error: Error) { cleanupError = String(describing: error) }
     func didCleanUp() {
-        evidence["engine_log_after_shutdown"] = app.engine.log
+        if scenario != "offline-api-key" { evidence["engine_log_after_shutdown"] = app.engine.log }
         evidence["profile_removed"] = app.profile.map { !FileManager.default.fileExists(atPath: $0.root.path) } ?? true
         evidence["engine_reaped"] = app.engine.pid == 0
         evidence["identity_retired"] = app.engine.receipt == nil
+        evidence["commands_retired"] = (app.commands?.smokeSnapshot["installed"] as? Bool ?? false) == false
         evidence["cleanup_error"] = cleanupError
         evidence["passed"] = passed && cleanupError == nil && evidence["profile_removed"] as? Bool == true
+            && evidence["commands_retired"] as? Bool == true
         write()
     }
     private func write() {

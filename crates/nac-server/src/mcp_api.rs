@@ -1625,7 +1625,7 @@ pub async fn authenticate_oauth_handler(
             if start_receiver.await.is_err() {
                 return;
             }
-            let success = run_oauth_callback(listeners, session).await;
+            let success = run_oauth_callback(listeners, session, generation).await;
             if success {
                 let mut flows = OAUTH_FLOWS.lock().await;
                 if matches!(flows.get(&completion_key), Some(OAuthFlowState::Connecting { generation: value, .. }) if *value == generation)
@@ -1833,8 +1833,12 @@ pub async fn oauth_callback_handler(
 async fn run_oauth_callback(
     listeners: Arc<OAuthCallbackListeners>,
     session: mcp::McpOAuthAuthorizationSession,
+    generation: u64,
 ) -> bool {
+    use nac_core::telemetry::{observe_oauth_callback, OAuthCallbackObservation};
     let deadline = tokio::time::Instant::now() + mcp::MCP_OAUTH_STATE_TTL;
+    observe_oauth_callback(generation, OAuthCallbackObservation::Listening);
+    let mut rejection_observed = false;
     loop {
         let Ok(Ok(mut stream)) = tokio::time::timeout_at(deadline, listeners.accept()).await else {
             return false;
@@ -1859,6 +1863,10 @@ async fn run_oauth_callback(
         };
         let callback_url = format!("http://localhost:1456{target}");
         if !session.matches_callback_state(&callback_url) {
+            if !rejection_observed {
+                observe_oauth_callback(generation, OAuthCallbackObservation::StateRejected);
+                rejection_observed = true;
+            }
             write_oauth_callback_response(
                 &mut stream,
                 "400 Bad Request",

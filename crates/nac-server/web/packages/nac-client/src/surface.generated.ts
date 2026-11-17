@@ -4,6 +4,7 @@ export const NAC_API_SURFACE = {
   "GET /sessions/{session_id}/integrations": "private:standalone session integration status",
   "POST /sessions/{session_id}/integrations/refresh":
     "private:standalone explicit session integration refresh",
+  "POST /sessions/{session_id}/workspace/reveal": "api.revealWorkspacePath",
   "GET /product-context": "api.getProductContext",
   "POST /product-destinations/resolve": "api.resolveProductDestination",
   "POST /sessions/{session_id}/task-followup-delegations":
@@ -28,6 +29,8 @@ export const NAC_API_SURFACE = {
   "POST /sessions/{session_id}/heartbeats/attention":
     "private:standalone human result acknowledgement",
   "GET /attention/events": "private:native opt-in metadata attention stream",
+  "GET /attention": "private:standalone passive fleet attention snapshot",
+  "GET /attention/stream": "private:standalone passive fleet attention stream",
   "GET /projects/{project_id}/task-schedules": "private:standalone Local interval task inventory",
   "GET /projects/{project_id}/task-schedules/{schedule_id}":
     "private:standalone passive interval task history and retained resources",
@@ -85,6 +88,7 @@ export const NAC_API_SURFACE = {
   "PUT /credentials/{name}": "api.storeCredential",
   "DELETE /credentials/{name}": "api.deleteCredential",
   "GET /fs/browse": "api.browsePath",
+  "POST /fs/folders": "api.createFolder",
   "GET /health": "api.health",
   "GET /healthz": "private:liveness probe for infrastructure",
   "GET /managed/github": "api.getManagedGitHub",
@@ -201,6 +205,8 @@ export const NAC_API_SURFACE = {
   "DELETE /ssh-configs/{config_id}": "api.deleteSshConfig",
   "PATCH /ssh-configs/{config_id}": "api.updateSshConfig",
   "POST /ssh/browse": "api.browseSshPath",
+  "POST /ssh/folders": "api.createSshFolder",
+  "GET /ssh/aliases": "api.listSshAliases",
   "GET /store": "api.getStore",
   "GET /ui-config": "client.getUiConfiguration",
 } as const;

@@ -167,6 +167,15 @@ pub(crate) async fn stream_events(
         receiver,
         assistant_deltas,
     );
+    // While this stream is open a human client is attached, so an Ask in any
+    // session of this store waits for it instead of failing closed.
+    let presence = nac_core::permissions::InteractivePresence::enter(&manager.inner.store_path);
+    let event_stream = async_stream::stream! {
+        let _presence = presence;
+        for await event in event_stream {
+            yield event;
+        }
+    };
 
     Ok(Sse::new(event_stream).keep_alive(
         KeepAlive::new()

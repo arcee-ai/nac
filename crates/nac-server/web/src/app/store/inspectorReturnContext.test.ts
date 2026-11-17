@@ -47,14 +47,21 @@ describe("inspector return context", () => {
       key: "thread:worker:episode-2",
       offset: 52,
     });
+    layout.toggleSidePanelExpanded();
     layout.rememberSubagentPage("parent", "two");
     layout.toggleSidePanelExpanded();
     layout.activateSessionSelection("two");
+    // Arriving at the child closes the floating drawer the parent had open.
+    expect(layout.sessionLayoutStore.getState()).toMatchObject({
+      collapsed: true,
+      expanded: false,
+    });
     layout.selectInsight({ kind: "group", groupId: "child-action", segmentKey: null });
     layout.activateSessionSelection("two"); // Refetch/route changes within the child are inert.
     layout.activateSessionSelection("parent");
 
     expect(layout.sessionLayoutStore.getState()).toMatchObject({
+      collapsed: false,
       expanded: true,
       selectedInsight: { kind: "thread" },
       selectedThread: "worker",

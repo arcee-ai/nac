@@ -83,7 +83,7 @@ const ToolsAndReasoningBadge: React.FC<ToolsAndReasoningBadgeProps> = ({
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        "group relative inline-flex min-h-11 max-w-full items-center gap-2 border-l border-tertiary pl-3 transition-colors motion-reduce:transition-none",
+        "group relative inline-flex h-8 max-w-full items-center gap-2 rounded-md px-1.5 transition-colors duration-150 ease-out hover:bg-[var(--f-wash-1)] motion-reduce:transition-none max-md:min-h-11",
         "focus-visible:outline-none disabled:cursor-not-allowed",
         labelTone,
         className,
@@ -91,7 +91,7 @@ const ToolsAndReasoningBadge: React.FC<ToolsAndReasoningBadgeProps> = ({
     >
       <span
         aria-hidden="true"
-        className="pointer-events-none absolute -inset-1 hidden rounded-[4px] border-2 border-[var(--color-border-focus-outline)] group-focus-visible:block"
+        className="pointer-events-none absolute inset-0 hidden rounded-[inherit] ring-2 ring-[var(--color-border-focus-outline)] group-focus-visible:block"
       />
       {inProgress ? (
         <ModelLoader
@@ -99,7 +99,10 @@ const ToolsAndReasoningBadge: React.FC<ToolsAndReasoningBadgeProps> = ({
           variant={selected ? ModelLoaderVariant.Accent : ModelLoaderVariant.Default}
         />
       ) : null}
-      <span ref={labelRef} className={cn("label-small min-w-0 truncate", shimmering && SHIMMER)}>
+      <span
+        ref={labelRef}
+        className={cn("type-body-chrome min-w-0 truncate", shimmering && SHIMMER)}
+      >
         {label}
       </span>
       {avatarUrl || leadingIcon ? (

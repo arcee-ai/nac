@@ -75,12 +75,12 @@ export function AssignToProjectModal({
     <Modal
       open={open}
       onClose={onClose}
-      title="Assign to Project"
+      title="Assign to project"
       size={ModalSize.Small}
       footer={
         <>
           <Button
-            variant={ButtonVariant.Tertiary}
+            variant={ButtonVariant.Ghost}
             content={ButtonContent.Text}
             onClick={onClose}
             disabled={busy}
@@ -99,17 +99,20 @@ export function AssignToProjectModal({
       }
     >
       <div className="flex flex-col gap-4">
-        <p className="text-small">
-          <span className="text-basic-primary font-bold">{sessionTitle(summary)}</span> belongs to
-          no project yet.
+        <p>
+          <span className="text-basic-primary">“{sessionTitle(summary)}”</span> belongs to no
+          project yet.{" "}
+          {existing
+            ? "A project already covers its working directory:"
+            : "Create a project for its working directory:"}
         </p>
 
         {existing ? (
-          <div className="flex items-center gap-3 rounded-[8px] border border-muted p-3">
-            <SessionAvatar id={existing.project_id} size={32} className="rounded-[4px]" />
-            <div className="flex flex-col min-w-0">
-              <span className="label-medium text-basic-primary truncate">{existing.name}</span>
-              <span className="text-micro text-basic-muted truncate">{existing.cwd}</span>
+          <div className="flex items-center gap-3 rounded-card border border-tertiary bg-elevation-level-1 p-3">
+            <SessionAvatar id={existing.project_id} size={32} className="rounded-sm" />
+            <div className="flex min-w-0 flex-col">
+              <span className="type-label truncate text-basic-primary">{existing.name}</span>
+              <span className="type-meta truncate text-basic-tertiary">{existing.cwd}</span>
             </div>
           </div>
         ) : (
@@ -127,7 +130,11 @@ export function AssignToProjectModal({
           </>
         )}
 
-        {error ? <p className="text-error-primary text-micro">{error}</p> : null}
+        {error ? (
+          <p role="alert" className="type-meta text-error-primary">
+            {error}
+          </p>
+        ) : null}
       </div>
     </Modal>
   );

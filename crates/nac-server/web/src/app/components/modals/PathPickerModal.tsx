@@ -18,9 +18,16 @@ import {
 import { useExitTransition } from "@/app/hooks/useExitTransition";
 import { cn } from "@/app/lib/cn";
 import { errorMessage } from "@/app/providers/ToastProvider";
-import { useBrowsePath, useSshBrowsePath, type BrowseKind } from "@/app/services/queries";
+import type { BrowseKind } from "@/app/services/queries";
 import type { SshTarget } from "@/app/types/api";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
+import { localDirectoryCapability } from "@/app/features/setup/localFolder";
+import { NativeFolderPicker } from "@/app/features/setup/NativeFolderPicker";
+
+import { PathPickerNewFolder } from "./PathPickerNewFolder";
+import { useNewFolder } from "./useNewFolder";
+import { usePathPicker } from "./usePathPicker";
 
 /**
  * Picks a path from the machine running the server, or from an SSH host when
@@ -34,6 +41,8 @@ import { useIsMobile } from "@/app/hooks/useMediaQuery";
 interface PathPickerProps {
   kind: BrowseKind;
   initialPath: string;
+  /** Explicit opt-in from the normal create-project Local backend only. */
+  nativeLocalDirectory?: boolean;
   /** Browses this host instead of the local filesystem. */
   ssh?: SshTarget | null;
   /** Overrides the title derived from `kind`. */
@@ -47,10 +56,31 @@ interface PathPickerProps {
   onSelect: (path: string) => void;
 }
 
-export function PathPickerModal({ open, ssh, ...props }: PathPickerProps & { open: boolean }) {
+export function PathPickerModal({
+  open,
+  ssh,
+  nativeLocalDirectory = false,
+  ...props
+}: PathPickerProps & { open: boolean }) {
   const mounted = useExitTransition(open);
+  // Each opening owns its draft and pending Select, including a quick reopen.
+  const [opening, setOpening] = useState({ open, count: 0 });
+  if (opening.open !== open) setOpening({ open, count: opening.count + (open ? 1 : 0) });
+  const { nativeDirectory } = useNativeRuntime();
+  const port = localDirectoryCapability(nativeDirectory, nativeLocalDirectory, props.kind, ssh);
   if (!mounted) return null;
-  return <PathPicker open={open} ssh={ssh ?? null} {...props} />;
+  if (port)
+    return (
+      <NativeFolderPicker
+        key={opening.count}
+        port={port}
+        open={open}
+        initialPath={props.initialPath}
+        onSelect={props.onSelect}
+        onClose={props.onClose}
+      />
+    );
+  return <PathPicker key={opening.count} open={open} ssh={ssh ?? null} {...props} />;
 }
 
 function PathPicker({
@@ -65,27 +95,28 @@ function PathPicker({
   onClose,
   onSelect,
 }: PathPickerProps & { open: boolean }) {
-  const pickingFile = kind !== "directory";
   const isMobile = useIsMobile();
-  // A directory is picked from an empty path so the server starts at its root,
-  // or the host at the login home.
-  const [directory, setDirectory] = useState(initialPath.trim());
-  const [draft, setDraft] = useState(initialPath.trim());
-  const [file, setFile] = useState<string | null>(null);
-  const [hidden, setHidden] = useState(showHidden);
-  // Both hooks are called every render, as hooks must be; the one that is not
-  // the source of this listing is disabled and never fetches.
-  const local = useBrowsePath(directory || null, kind, hidden, !ssh);
-  const remote = useSshBrowsePath(ssh ?? null, directory || null, hidden, Boolean(ssh));
-  const { data, error, isFetching } = ssh ? remote : local;
-
-  const goTo = (path: string) => {
-    setDirectory(path);
-    setDraft(path);
-    setFile(null);
-  };
-
-  const chosen = pickingFile ? file : (data?.path ?? directory);
+  const picker = usePathPicker({
+    open,
+    kind,
+    initialPath,
+    ssh: ssh ?? null,
+    showHidden,
+    onSelect,
+  });
+  const { pickingFile, draft, hidden, chosen, checking, failure } = picker;
+  const { data, error, isFetching } = picker.listing;
+  const selectDisabled = !chosen || checking !== null;
+  // Only a working-folder picker offers to make one. The folder goes in the
+  // listed directory, and leaving that directory abandons the form.
+  const creating = kind === "directory";
+  const newFolder = useNewFolder({
+    source: ssh ?? null,
+    parent: data?.path ?? null,
+    binding: `${picker.binding}:${data?.path ?? ""}`,
+    fence: picker.fence,
+    onCreated: picker.goTo,
+  });
 
   return (
     <Modal
@@ -157,10 +188,9 @@ function PathPicker({
               className="min-h-11 max-w-full"
               variant={ButtonVariant.Primary}
               content={ButtonContent.Text}
-              disabled={!chosen}
-              onClick={() => {
-                if (chosen) onSelect(chosen);
-              }}
+              disabled={selectDisabled}
+              aria-busy={checking !== null}
+              onClick={picker.select}
             >
               Select
             </StickyButton>
@@ -169,10 +199,9 @@ function PathPicker({
               variant={ButtonVariant.Primary}
               size={ButtonSize.Large}
               content={ButtonContent.Text}
-              disabled={!chosen}
-              onClick={() => {
-                if (chosen) onSelect(chosen);
-              }}
+              disabled={selectDisabled}
+              aria-busy={checking !== null}
+              onClick={picker.select}
             >
               Select
             </Button>
@@ -181,7 +210,7 @@ function PathPicker({
       }
     >
       <div className="flex flex-col gap-3 h-full min-h-0">
-        <p className="shrink-0 text-small !leading-[22px] text-basic-secondary">
+        <p className="type-body-chrome shrink-0 text-basic-tertiary">
           {ssh
             ? "Browse folders on the connected SSH host."
             : "Browse files on the NAC server, including existing Git working folders."}
@@ -192,7 +221,7 @@ function PathPicker({
             size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
             content={ButtonContent.Icon}
             disabled={!data?.parent}
-            onClick={() => data?.parent && goTo(data.parent)}
+            onClick={() => data?.parent && picker.goTo(data.parent)}
             aria-label="Parent directory"
           >
             <Icon iconName={IconName.Top} />
@@ -202,7 +231,7 @@ function PathPicker({
             size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
             content={ButtonContent.Icon}
             disabled={!data?.home}
-            onClick={() => data?.home && goTo(data.home)}
+            onClick={() => data?.home && picker.goTo(data.home)}
             aria-label="Home directory"
           >
             <Icon iconName={IconName.Home} />
@@ -210,41 +239,67 @@ function PathPicker({
           <Input
             inputSize={isMobile ? InputSize.Large : InputSize.Medium}
             className="order-last w-full min-w-0 md:order-none md:w-auto md:flex-1"
-            aria-label="Folder path"
             placeholder={ssh ? "~/path/on/the/host" : "/path/to/directory"}
+            aria-label={pickingFile ? "Directory path" : "Folder path"}
+            aria-invalid={failure !== null}
             value={draft}
-            onChange={(event) => setDraft(event.target.value)}
+            onChange={(event) => picker.setDraft(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.nativeEvent.isComposing) goTo(draft.trim());
+              if (event.key === "Enter" && !event.nativeEvent.isComposing) picker.goTo(draft);
             }}
           />
           <Button
             variant={hidden ? ButtonVariant.SecondaryHighlighted : ButtonVariant.Secondary}
             size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
             content={ButtonContent.Icon}
-            onClick={() => setHidden((on) => !on)}
+            onClick={picker.toggleHidden}
             aria-pressed={hidden}
             title={hidden ? "Hide dot-prefixed entries" : "Show hidden entries"}
             aria-label={hidden ? "Hide dot-prefixed entries" : "Show hidden entries"}
           >
             <Icon iconName={hidden ? IconName.Eye : IconName.EyeStrikethrough} />
           </Button>
+          {creating ? (
+            <Button
+              variant={
+                newFolder.open ? ButtonVariant.SecondaryHighlighted : ButtonVariant.Secondary
+              }
+              size={ButtonSize.Medium}
+              content={isMobile ? ButtonContent.Icon : ButtonContent.IconLeft}
+              disabled={!data?.path}
+              onClick={newFolder.open ? newFolder.cancel : newFolder.start}
+              aria-expanded={newFolder.open}
+              aria-label="New folder"
+              title={data?.path ? `New folder in ${data.path}` : "New folder"}
+            >
+              <Icon iconName={IconName.Add} />
+              {isMobile ? null : "New folder"}
+            </Button>
+          ) : null}
         </div>
 
-        {error ? (
-          <p role="alert" className="text-small !leading-[22px] text-error-primary shrink-0">
+        {creating && newFolder.open ? (
+          <PathPickerNewFolder folder={newFolder} onOpen={picker.goTo} />
+        ) : null}
+
+        {failure ? (
+          <p role="alert" className="type-body-chrome shrink-0 text-error-primary">
+            {`Cannot select this folder: ${errorMessage(failure.error)}. Check the path, or choose a folder from the list.`}
+          </p>
+        ) : error ? (
+          <p role="alert" className="type-body-chrome shrink-0 text-error-primary">
             {errorMessage(error)}
           </p>
         ) : null}
 
-        <div className="flex-1 min-h-0 overflow-auto rounded-[8px] border border-muted p-1 flex flex-col [&>*]:shrink-0">
+        <div className="flex min-h-0 flex-1 flex-col overflow-auto rounded-card border border-tertiary bg-elevation-level-1 p-1 [&>*]:shrink-0">
           {isFetching && !data ? (
             <div className="flex items-center justify-center py-6">
               <Loader size={LoaderSize.Small} />
             </div>
           ) : null}
           {data?.entries.length === 0 ? (
-            <p className="text-micro text-basic-muted px-2 py-3">
+            <p className="type-meta px-2.5 py-3 text-basic-tertiary">
               {kind === "toml"
                 ? "No directories or .toml files here."
                 : kind === "file"
@@ -258,11 +313,13 @@ function PathPicker({
               key={entry.path}
               type="button"
               className={cn(
-                "flex min-h-11 md:min-h-9 items-center gap-3 md:gap-2 w-full px-2 md:px-2 py-3 md:py-1.5 rounded-[4px] text-left",
-                "hover:bg-elevation-sublevel-variant-A",
-                file === entry.path && "bg-elevation-sublevel-variant-A",
+                "flex min-h-11 w-full items-center gap-3 rounded-md px-2.5 py-2.5 text-left transition-colors duration-150 ease-out md:min-h-8 md:gap-2 md:py-1.5",
+                "hover:bg-elevation-sublevel-variant-B focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-border-focus-outline)]",
+                picker.file === entry.path && "bg-elevation-sublevel-variant-B",
               )}
-              onClick={() => (entry.is_directory ? goTo(entry.path) : setFile(entry.path))}
+              onClick={() =>
+                entry.is_directory ? picker.goTo(entry.path) : picker.chooseFile(entry.path)
+              }
               onDoubleClick={() => {
                 if (!entry.is_directory) onSelect(entry.path);
               }}
@@ -270,27 +327,24 @@ function PathPicker({
               <Icon
                 iconName={entry.is_directory ? IconName.Folder : IconName.File}
                 size={isMobile ? 20 : 16}
-                className="shrink-0 text-basic-muted"
+                className="shrink-0 text-basic-tertiary"
               />
-              <span
-                className={cn(
-                  "text-basic-primary truncate",
-                  isMobile ? "text-small" : "text-small ",
-                )}
-              >
-                {entry.name}
-              </span>
+              <span className="type-body-chrome truncate text-basic-primary">{entry.name}</span>
             </button>
           ))}
           {data?.truncated ? (
-            <p className="text-micro text-basic-muted px-2 py-2">
+            <p className="type-meta px-2.5 py-2 text-basic-tertiary">
               Only the first entries are listed; type a path to go deeper.
             </p>
           ) : null}
         </div>
 
-        <p className="text-small !leading-[22px] text-basic-secondary shrink-0 break-all">
-          {chosen ? `Selected: ${chosen}` : "Nothing selected yet."}
+        <p className="type-body-chrome shrink-0 break-all text-basic-secondary">
+          {checking !== null
+            ? `Checking ${checking || "this folder"}…`
+            : chosen
+              ? `Selected: ${chosen}`
+              : "Nothing selected yet."}
         </p>
       </div>
     </Modal>

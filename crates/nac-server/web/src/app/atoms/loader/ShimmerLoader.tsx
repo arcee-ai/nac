@@ -20,7 +20,7 @@ const ShimmerLoader: React.FC<ShimmerLoaderProps> = ({
       <div
         key={index}
         className={cn(
-          "relative h-4 rounded-[4px] overflow-hidden bg-elevation-level-2",
+          "relative h-4 rounded-xs overflow-hidden bg-elevation-sublevel-variant-B",
           rowClassName,
         )}
       >
@@ -28,7 +28,7 @@ const ShimmerLoader: React.FC<ShimmerLoaderProps> = ({
           className="absolute inset-0 animate-shimmer bg-[length:200%_100%] bg-[position:-200%_0] opacity-50"
           style={{
             backgroundImage:
-              "linear-gradient(90deg, transparent 0%, var(--color-bg-btn-secondary-highlighted-hovered) 50%, transparent 100%)",
+              "linear-gradient(90deg, transparent 0%, var(--f-wash-3) 50%, transparent 100%)",
           }}
         />
       </div>

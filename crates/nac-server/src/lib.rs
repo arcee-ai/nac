@@ -27,6 +27,9 @@ mod mcp;
 mod mcp_api;
 mod mcp_catalog_api;
 mod mcp_runtime_api;
+#[cfg(feature = "native-auth-fixture")]
+#[doc(hidden)]
+pub mod native_auth_fixture;
 mod orchestration;
 mod revert;
 pub(crate) use managed_control::running_target as managed_running_target;
@@ -330,6 +333,7 @@ struct SessionManagerInner {
     active_sessions: RwLock<HashMap<String, Arc<SessionService>>>,
     terminal_observations: application::terminal_observation::TerminalObservationHub,
     attention: application::attention_runtime::AttentionRuntime,
+    fleet_attention: application::fleet_attention::FleetAttentionHub,
     task_preparations: application::task_preparations::TaskPreparations,
     lifecycle_gates: StdMutex<HashMap<String, Weak<Mutex<()>>>>,
     workspace_diff_cache: RwLock<HashMap<GitTargetKey, WorkspaceDiffCacheEntry>>,
@@ -590,6 +594,7 @@ impl SessionManager {
                 managed_clones,
                 active_sessions: RwLock::new(HashMap::new()),
                 attention: application::attention_runtime::AttentionRuntime::default(),
+                fleet_attention: application::fleet_attention::FleetAttentionHub::default(),
                 task_preparations: application::task_preparations::TaskPreparations::default(),
                 terminal_observations:
                     application::terminal_observation::TerminalObservationHub::default(),
@@ -888,6 +893,12 @@ impl SessionManager {
 
     pub(crate) fn projects(&self) -> application::projects::ProjectApplication<'_> {
         application::projects::ProjectApplication::new(self)
+    }
+
+    pub(crate) fn project_folders(
+        &self,
+    ) -> application::project_folders::ProjectFolderApplication<'_> {
+        application::project_folders::ProjectFolderApplication::new(self)
     }
 
     pub(crate) fn model_configurations(

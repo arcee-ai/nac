@@ -340,11 +340,12 @@ export function CatalogModelPicker({
         onClick={() => (open ? close() : setOpen(true))}
         aria-expanded={open}
         aria-label={compact ? "Model" : undefined}
+        title={compact && value ? `${label} · ${providerLabel(value.backend)}` : undefined}
         aria-invalid={ariaInvalid}
         aria-describedby={ariaDescribedBy}
         className={
           compact
-            ? "min-w-0 max-w-full !gap-1 !rounded-[4px] !px-2"
+            ? "min-w-0 max-w-full !gap-1 !px-2.5"
             : "w-full md:w-[280px] !h-auto min-h-11 !py-2"
         }
       >
@@ -352,7 +353,7 @@ export function CatalogModelPicker({
           className={cn(
             "min-w-0 text-left",
             compact
-              ? cn("label-micro truncate", isMobile ? "max-w-[64px]" : "max-w-[96px]")
+              ? cn("type-meta-strong truncate", isMobile ? "max-w-[96px]" : "max-w-[160px]")
               : "flex flex-1 flex-col gap-1",
           )}
         >
@@ -363,17 +364,6 @@ export function CatalogModelPicker({
             </span>
           ) : null}
         </span>
-        {compact && value && providerLabel(value.backend) !== label ? (
-          <span
-            className={cn(
-              "text-micro font-normal truncate",
-              isMobile ? "max-w-[64px]" : "max-w-[96px]",
-              triggerDisabled ? "text-basic-muted" : "text-basic-tertiary",
-            )}
-          >
-            {providerLabel(value.backend)}
-          </span>
-        ) : null}
         {compact ? null : (
           <Icon
             iconName={IconName.Down}

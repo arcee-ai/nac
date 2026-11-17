@@ -95,7 +95,7 @@ const Separator: React.FC<SeparatorProps> & {
         style={horizontalStyle}
         {...restDivProps}
       >
-        <span className={`label-micro ${textColorClass} whitespace-nowrap`}>{label}</span>
+        <span className={`type-meta-strong ${textColorClass} whitespace-nowrap`}>{label}</span>
         <div className={`flex-1 h-[1px] min-h-[1px] max-h-[1px] ${dividerColorClass}`} />
       </div>
     );

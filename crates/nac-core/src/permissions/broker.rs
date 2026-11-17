@@ -621,12 +621,7 @@ impl PermissionBroker {
             Ok(state) => state,
             Err(reason) => return AuthorizationOutcome::Denied(reason),
         };
-        let interactive = self
-            .event_bus
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .as_ref()
-            .is_some_and(crate::events::SessionEventBus::has_interactive_subscribers);
+        let interactive = self.has_approver();
         let child = match &owner {
             Some(owner) => owner.load_traditional_child(self.session_id.clone()).await,
             None => crate::store::load_traditional_child(&self.store_path, &self.session_id),
@@ -969,16 +964,23 @@ impl PermissionBroker {
         }
     }
 
+    /// Someone can answer an Ask: this session's own interactive stream is
+    /// open, or a human client is attached to this store's serving process
+    /// (its Inbox lists the request and opening the session answers it).
+    /// Presence is never an answer; with neither, Ask fails closed.
+    fn has_approver(&self) -> bool {
+        self.event_bus
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .is_some_and(crate::events::SessionEventBus::has_interactive_subscribers)
+            || super::InteractivePresence::connected(&self.store_path)
+    }
+
     async fn interactive_subscriber_lost(&self) {
         loop {
             tokio::time::sleep(APPROVAL_SUBSCRIBER_POLL_INTERVAL).await;
-            let interactive = self
-                .event_bus
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .as_ref()
-                .is_some_and(crate::events::SessionEventBus::has_interactive_subscribers);
-            if !interactive {
+            if !self.has_approver() {
                 return;
             }
         }
@@ -989,13 +991,7 @@ impl PermissionBroker {
             let connected = tokio::time::timeout(DELEGATED_APPROVAL_CONNECT_TIMEOUT, async {
                 loop {
                     tokio::time::sleep(APPROVAL_SUBSCRIBER_POLL_INTERVAL).await;
-                    let interactive = self
-                        .event_bus
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)
-                        .as_ref()
-                        .is_some_and(crate::events::SessionEventBus::has_interactive_subscribers);
-                    if interactive {
+                    if self.has_approver() {
                         return;
                     }
                 }

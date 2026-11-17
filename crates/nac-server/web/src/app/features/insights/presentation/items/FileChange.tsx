@@ -72,7 +72,10 @@ const displayerLine = (
   content: line.content,
   tokens,
   trailing: line.has_trailing_newline ? null : (
-    <span className="italic text-basic-muted"> No newline at end of file</span>
+    <span className="select-none font-sans italic text-basic-muted">
+      {" "}
+      No newline at end of file
+    </span>
   ),
 });
 
@@ -126,7 +129,7 @@ function LoadFailure({ retrying, onRetry }: { retrying: boolean; onRetry: () => 
   return (
     <div className="flex w-full flex-wrap items-center gap-x-2 gap-y-1">
       {retrying ? null : (
-        <p role="alert" className="break-words text-micro text-error-primary">
+        <p role="alert" className="break-words type-meta text-error-primary">
           Could not load this change.
         </p>
       )}
@@ -213,7 +216,7 @@ export function FileChange({ path, call, context }: FileChangeProps) {
         />
       ) : null}
       {(query.isPending || awaitingResult) && !failed ? (
-        <div role="status" className="flex items-center gap-2 text-micro text-basic-muted">
+        <div role="status" className="flex items-center gap-2 type-meta text-basic-tertiary">
           <Loader size={LoaderSize.XSmall} aria-hidden />
           Loading the change…
         </div>
@@ -222,7 +225,7 @@ export function FileChange({ path, call, context }: FileChangeProps) {
         <LoadFailure retrying={query.isFetching} onRetry={() => void query.refetch()} />
       ) : null}
       {change && !change.diff && !awaitingResult ? (
-        <p className="break-words text-micro text-basic-muted">
+        <p className="break-words type-meta text-basic-tertiary">
           This change is too large to show here.
         </p>
       ) : null}

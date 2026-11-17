@@ -5,7 +5,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createNacApi } from "../packages/nac-client/dist/api.js";
 import { NacClient } from "../packages/nac-client/dist/nacClient.js";
-import { createProject, createSession, expect, test } from "./harness";
+import { createProject, createSession, expect, showSidePanel, test } from "./harness";
 import { ScriptGate } from "./scripted-provider";
 import type { HeartbeatInspection, HeartbeatSchedule } from "../src/app/types/api";
 
@@ -177,7 +177,7 @@ test("native heartbeat survives ended chat, closed client and restart, then fini
   ]);
   const reopened = await context.newPage();
   await reopened.goto(`${harness.baseUrl}/#/session/${session}/heartbeats`);
-  await reopened.getByRole("button", { name: "Show panel", exact: true }).click();
+  await showSidePanel(reopened);
   await reopened.getByRole("button", { name: "Local job check finished", exact: true }).click();
   await expect(reopened.getByRole("link", { name: `Run ${active.run_id}` })).toBeVisible();
   await expect(
@@ -208,7 +208,7 @@ test("human heartbeat UI reconciles lost create acknowledgement and controls an 
     await route.abort("failed");
   });
   await page.goto(`${harness.baseUrl}/#/session/${session}/heartbeats`);
-  await page.getByRole("button", { name: "Show panel", exact: true }).click();
+  await showSidePanel(page);
   await page.getByRole("button", { name: "New heartbeat", exact: true }).click();
   await page.getByRole("textbox", { name: "Heartbeat name" }).fill("Human Local check");
   await page

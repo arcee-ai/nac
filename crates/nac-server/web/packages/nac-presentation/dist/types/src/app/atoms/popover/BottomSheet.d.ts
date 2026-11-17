@@ -10,6 +10,7 @@ interface BottomSheetProps {
 /**
  * The mobile face of a popover: a sheet that slides up from the bottom edge
  * instead of a panel floating next to a trigger that is barely on screen.
+ * 20px top corners, a grab handle, and the home-indicator inset below.
  */
 declare const BottomSheet: React.FC<BottomSheetProps>;
 export default BottomSheet;

@@ -1,3 +1,4 @@
+import type { PromptDraft } from "./promptDraftStore";
 /** One presentation lifetime; hosted preferences are ephemeral. */
 export declare function createComposerStore(_storage?: Pick<Storage, "getItem" | "setItem">): {
     release: () => void;
@@ -8,6 +9,10 @@ export declare function createComposerStore(_storage?: Pick<Storage, "getItem" |
         uncertain(sessionId: string, intent: import("../features/human-shell/intents").ShellIntent): void;
         release(): void;
     };
+    scheduleFirstPrompt(sessionId: string, draft: PromptDraft): void;
+    useFirstPrompt: (sessionId: string) => PromptDraft | null;
+    takeFirstPrompt(sessionId: string, draft: PromptDraft): boolean;
+    cancelFirstPrompt(sessionId: string): void;
     sendPrompt: (pending: string) => void;
     consumePromptRequests: (send: (prompt: string) => void) => () => void;
     draftPrompt: (sessionId: string, text: string) => void;
@@ -19,4 +24,4 @@ export declare const release: () => void, sendPrompt: (pending: string) => void,
     confirmed(sessionId: string, intent: import("../features/human-shell/intents").ShellIntent): void;
     uncertain(sessionId: string, intent: import("../features/human-shell/intents").ShellIntent): void;
     release(): void;
-};
+}, scheduleFirstPrompt: (sessionId: string, draft: PromptDraft) => void, useFirstPrompt: (sessionId: string) => PromptDraft | null, takeFirstPrompt: (sessionId: string, draft: PromptDraft) => boolean, cancelFirstPrompt: (sessionId: string) => void;

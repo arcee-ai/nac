@@ -1,6 +1,7 @@
 import type React from "react";
 
 import { cn } from "../../lib/cn";
+import { buttonVariants } from "../../ui/button";
 import Button, { ButtonContent, ButtonSize, ButtonVariant } from "../button";
 import Icon, { IconName } from "../icon";
 
@@ -11,11 +12,19 @@ export enum ChatSessionMessageVariant {
   Success = "success",
 }
 
-const variantBorders = {
-  [ChatSessionMessageVariant.Info]: "border-info-primary text-info-primary",
-  [ChatSessionMessageVariant.Error]: "border-error-primary text-error-primary",
-  [ChatSessionMessageVariant.Danger]: "border-danger-primary text-danger-primary",
-  [ChatSessionMessageVariant.Success]: "border-success-primary text-success-primary",
+/** A hairline card ruled in its signal; info stays neutral ink, since blue means a link. */
+const variantSurfaces = {
+  [ChatSessionMessageVariant.Info]: "border-tertiary bg-elevation-level-1",
+  [ChatSessionMessageVariant.Error]: "border-[var(--f-red-line)] bg-elevation-level-1",
+  [ChatSessionMessageVariant.Danger]: "border-[var(--f-amber-line)] bg-elevation-level-1",
+  [ChatSessionMessageVariant.Success]: "border-[var(--f-green-line)] bg-elevation-level-1",
+} satisfies Record<ChatSessionMessageVariant, string>;
+
+const variantTitles = {
+  [ChatSessionMessageVariant.Info]: "text-basic-primary",
+  [ChatSessionMessageVariant.Error]: "text-[var(--f-red-text)]",
+  [ChatSessionMessageVariant.Danger]: "text-[var(--f-amber-text)]",
+  [ChatSessionMessageVariant.Success]: "text-[var(--f-green-text)]",
 } satisfies Record<ChatSessionMessageVariant, string>;
 
 const variantIcons = {
@@ -26,11 +35,15 @@ const variantIcons = {
 } satisfies Record<ChatSessionMessageVariant, IconName>;
 
 const variantFills = {
-  [ChatSessionMessageVariant.Info]: "var(--color-fill-info-primary)",
+  [ChatSessionMessageVariant.Info]: "var(--color-fill-basic-tertiary)",
   [ChatSessionMessageVariant.Error]: "var(--color-fill-error-primary)",
   [ChatSessionMessageVariant.Danger]: "var(--color-fill-danger-primary)",
   [ChatSessionMessageVariant.Success]: "var(--color-fill-success-primary)",
 } satisfies Record<ChatSessionMessageVariant, string>;
+
+export type ChatSessionMessageAction =
+  | { label: string; onClick: () => void }
+  | { label: string; href: string };
 
 interface ChatSessionMessageProps extends Omit<React.HTMLAttributes<HTMLDivElement>, "title"> {
   title: React.ReactNode;
@@ -38,13 +51,14 @@ interface ChatSessionMessageProps extends Omit<React.HTMLAttributes<HTMLDivEleme
   /** Optional second line explaining the title. */
   children?: React.ReactNode;
   /** Optional way out of whatever the message reports. */
-  action?: { label: string; onClick: () => void };
+  action?: ChatSessionMessageAction;
 }
 
 /**
  * What the transcript says when something happened to the run rather than in
- * it. Unlike `MessageBox` it carries no surface of its own — a coloured rule
- * down the left is the whole frame, so it reads as part of the conversation.
+ * it: a quiet surface card whose hairline and title carry its signal — red
+ * failed, amber needs you, green done, neutral information — so it is seen
+ * without shouting.
  */
 const ChatSessionMessage: React.FC<ChatSessionMessageProps> & {
   Variant: typeof ChatSessionMessageVariant;
@@ -58,28 +72,51 @@ const ChatSessionMessage: React.FC<ChatSessionMessageProps> & {
 }) => (
   <div
     className={cn(
-      "flex w-full items-start overflow-hidden border-l-2 px-4 py-2",
-      variantBorders[variant],
+      "flex w-full items-start overflow-hidden rounded-card border px-4 py-3",
+      variantSurfaces[variant],
       className,
     )}
     {...props}
   >
-    <div className="flex flex-1 min-w-0 flex-col items-start gap-2">
-      <div className="flex w-full items-start gap-1.5">
+    <div className="flex flex-1 min-w-0 flex-col items-start gap-1.5">
+      <div className="flex w-full items-start gap-2">
         <Icon
           iconName={variantIcons[variant]}
-          size={20}
+          size={16}
           color={variantFills[variant]}
-          className="shrink-0"
+          className="mt-0.5 shrink-0"
         />
-        <p className="flex-1 min-w-0 header-sm break-words !my-0">{title}</p>
+        <p className={cn("flex-1 min-w-0 type-strong break-words !my-0", variantTitles[variant])}>
+          {title}
+        </p>
       </div>
-      {children ? <div className="w-full text-small break-words">{children}</div> : null}
-      {action ? (
+      {children ? (
+        <div className="w-full pl-6 type-body-chrome text-basic-secondary break-words">
+          {children}
+        </div>
+      ) : null}
+      {action && "href" in action ? (
+        <a
+          href={action.href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={cn(
+            buttonVariants({
+              size: ButtonSize.Small,
+              variant: ButtonVariant.Primary,
+              content: ButtonContent.Text,
+            }),
+            "mt-1 ml-6",
+          )}
+        >
+          {action.label}
+        </a>
+      ) : action ? (
         <Button
           size={ButtonSize.Small}
           variant={ButtonVariant.Primary}
           content={ButtonContent.Text}
+          className="mt-1 ml-6"
           onClick={action.onClick}
         >
           {action.label}

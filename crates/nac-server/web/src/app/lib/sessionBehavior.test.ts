@@ -23,14 +23,14 @@ describe("session behavior presentation", () => {
       inspection: expect.stringMatching(/Insights and Worksets/i),
     });
     expect(sessionBehaviorPresentation("direct")).toMatchObject({
-      navigationLabel: "Direct",
+      navigationLabel: "Agent",
       topLevel: expect.stringMatching(/persistent coding agent/i),
       editsDirectly: true,
       delegation: expect.stringMatching(/fresh-context traditional coding agents/i),
       inspection: expect.stringMatching(/Subagents/i),
     });
     expect(sessionBehaviorPresentation("direct-with-orchestrator")).toMatchObject({
-      navigationLabel: "Direct + NAC",
+      navigationLabel: "Agent + Orchestrator",
       topLevel: expect.stringMatching(/persistent coding agent/i),
       editsDirectly: true,
       delegation: expect.stringMatching(/separate NAC orchestrator sessions/i),

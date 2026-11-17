@@ -87,7 +87,7 @@ function languageOf(node: ReactNode): string {
 
 /**
  * Fenced block rendered as the design-system CodeBlock (header, copy,
- * fullscreen) — same chrome ArceeFM uses via CodeInput, with matching `my-6`.
+ * fullscreen): a hairline card on the code ground, 12.5px mono.
  */
 function CodeFence({ children }: { children?: ReactNode }) {
   const code = textOf(children).replace(/\n$/, "");
@@ -97,10 +97,10 @@ function CodeFence({ children }: { children?: ReactNode }) {
       code={code}
       language={language === "plaintext" ? undefined : language}
       title={language}
-      size={CodeBlockSize.Small}
+      size={CodeBlockSize.Medium}
       copyable
       expandable
-      className="my-6"
+      className="my-4"
     />
   );
 }

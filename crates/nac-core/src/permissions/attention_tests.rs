@@ -299,3 +299,41 @@ async fn real_ask_racing_atomic_install_is_in_the_baseline_or_a_newer_callback()
     assert!(broker.pending().is_empty());
     std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
 }
+#[tokio::test]
+async fn passive_snapshot_reports_exact_membership_without_registration_or_interactivity() {
+    let (path, broker) = crate::permissions::tests::broker_fixture();
+    let bus = SessionEventBus::new(Some("session-a".into()));
+    broker.attach_event_bus(bus.clone());
+    assert!(empty(&broker.attention_snapshot()));
+    // A passive reader never satisfies the interactive-client requirement.
+    let before = broker.attention_snapshot();
+    assert!(
+        matches!(ask(&broker).await.unwrap(), AuthorizationOutcome::Denied(reason) if reason.contains("no interactive session client is connected"))
+    );
+    assert!(!bus.has_interactive_subscribers());
+    assert!(!bus.has_subscribers());
+    assert!(broker.attention.lock().unwrap().registration.is_none());
+    assert!(empty(&broker.attention_snapshot()));
+    assert_eq!(broker.attention_snapshot().owner, before.owner);
+    // With a real interactive client the same exact identity becomes visible,
+    // then disappears once resolved; reading it never answers or registers.
+    let interactive = bus.subscribe_assistant_deltas();
+    let request = ask(&broker);
+    pending(&broker, 1).await;
+    let id = broker.pending()[0].id.clone();
+    let observed = broker.attention_snapshot();
+    assert!(
+        matches!(&observed.state, AttentionBrokerState::Current { permissions, authorizable_reviews } if permissions == &[Uuid::parse_str(&id).unwrap()] && authorizable_reviews.is_empty())
+    );
+    assert!(observed.revision > before.revision);
+    assert!(!request.is_finished());
+    assert!(broker.attention.lock().unwrap().registration.is_none());
+    broker.reply(&id, PermissionReply::Reject).unwrap();
+    assert!(matches!(
+        request.await.unwrap(),
+        AuthorizationOutcome::Denied(_)
+    ));
+    assert!(empty(&broker.attention_snapshot()));
+    drop(interactive);
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}

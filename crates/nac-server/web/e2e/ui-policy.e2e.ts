@@ -1,25 +1,25 @@
 import type { Page } from "@playwright/test";
 
 import { test, expect, createProject, createSession, waitForRunIdle } from "./harness";
+import { openSessionPanel } from "./nav-focus-helpers";
 
-/** Behavior icons are decorative, so they carry no role or name to query by. */
-const BEHAVIOR_ICONS = "[data-session-behavior-icon]";
+/**
+ * Behavior is presented only as the navigation label's suffix ("<title>,
+ * Orchestrator"); direct-only presentation names rows by title alone.
+ */
+const BEHAVIOR_MARKERS = [", Agent", ", Agent + Orchestrator", ", Orchestrator"]
+  .map((suffix) => `button[aria-label$="${suffix}"]`)
+  .join(", ");
 
-/** The side panel starts collapsed: a rail on a pointer, a dialog on a phone. */
-async function openSidePanel(page: Page, mobile: boolean) {
-  if (mobile) {
-    await page.getByRole("button", { name: "Open panel", exact: true }).click();
-    await expect(page.getByRole("dialog")).toBeVisible();
-    return;
-  }
-  const show = page.getByRole("button", { name: "Show panel", exact: true });
-  const open = page.getByRole("tab", { name: "Files", exact: true });
-  await expect(show.or(open).first()).toBeVisible();
-  await expect(async () => {
-    if (await open.isVisible()) return;
-    if (await show.isVisible()) await show.click();
-    await expect(open).toBeVisible();
-  }).toPass();
+const NEW_SESSION_CHORD = () =>
+  /Mac|iPhone|iPad/.test(navigator.userAgent) ? "Meta+Shift+O" : "Control+Shift+O";
+
+/** Home's composer: the one new-session flow, preset to a project. */
+async function expectHomeComposer(page: Page, projectId: string) {
+  await expect(page).toHaveURL(new RegExp(`#/\\?project=${projectId}$`));
+  await expect(
+    page.getByRole("textbox", { name: "What should we work on?", exact: true }),
+  ).toBeFocused();
 }
 
 for (const orchestration of [null, "0"] as const) {
@@ -40,52 +40,70 @@ for (const orchestration of [null, "0"] as const) {
         await page.goto(`${harness.baseUrl}/#/session/${legacy}/threads`);
         await expect(page.getByText("This chat is unavailable in direct-only mode")).toBeVisible();
         await expect(page.getByRole("combobox", { name: "Message" })).toHaveCount(0);
-        await page.keyboard.press(
-          await page.evaluate(() =>
-            /Mac|iPhone|iPad/.test(navigator.userAgent) ? "Meta+Shift+O" : "Control+Shift+O",
-          ),
-        );
-        const shortcutDialog = page.getByRole("dialog", { name: "New Chat" });
-        await expect(shortcutDialog).toBeVisible();
-        await page.keyboard.press("Escape");
-        await expect(shortcutDialog).not.toBeVisible();
+        await page.keyboard.press(await page.evaluate(NEW_SESSION_CHORD));
+        // The chord opens Home's composer for this project; leaving it returns
+        // to the unavailable view without creating anything.
+        await expectHomeComposer(page, projectId);
+        await page.goBack();
         await expect(page.getByText("This chat is unavailable in direct-only mode")).toBeVisible();
         await page.getByRole("button", { name: "New direct chat" }).click();
-        await expect(page.getByRole("dialog", { name: "New Chat" })).toBeVisible();
+        await expectHomeComposer(page, projectId);
+        // Direct-only creation offers no behavior or light-model choice.
+        await expect(page.getByRole("button", { name: /^Behavior:/ })).toHaveCount(0);
         await expect(page.getByRole("radiogroup")).toHaveCount(0);
         await expect(page.getByText("Optional light model", { exact: true })).toHaveCount(0);
+        harness.provider.enqueue(
+          "policy-direct",
+          { token: "POLICY_DIRECT_TOKEN" },
+          // Home sends before the session page subscribes; follow the request's mode.
+          { kind: "text", text: "direct policy response", stream: "request" },
+        );
+        await page
+          .getByRole("textbox", { name: "What should we work on?", exact: true })
+          .fill("POLICY_DIRECT_TOKEN");
         const created = page.waitForResponse(
           (response) =>
             response.url() === `${harness.baseUrl}/sessions` &&
             response.request().method() === "POST",
         );
-        await page.getByRole("button", { name: "Create chat", exact: true }).click();
+        const firstRun = page.waitForResponse(
+          (response) =>
+            /\/sessions\/[^/]+\/runs$/.test(new URL(response.url()).pathname) &&
+            response.request().method() === "POST",
+        );
+        // Start session creates the session and sends the prompt as its first run.
+        await page.getByRole("button", { name: "Start session", exact: true }).click();
         const response = await created;
-        expect(response.request().postDataJSON()).toMatchObject({
-          behavior: "direct",
-          project_id: projectId,
-          first_chat: false,
-        });
+        const body = response.request().postDataJSON();
+        expect(body).toMatchObject({ behavior: "direct", project_id: projectId });
+        // Only hidden legacy sessions exist: ordinary creation, never a first-chat merge.
+        expect(body.first_chat ?? false).toBe(false);
         const directId = (await response.json()).metadata.session_id;
         await expect(page).toHaveURL(new RegExp(`/session/${directId}/insights`));
-        harness.provider.enqueue(
-          "policy-direct",
-          { token: "POLICY_DIRECT_TOKEN" },
-          { kind: "text", text: "direct policy response", stream: true },
-        );
+        const delivered = await firstRun;
+        expect(delivered.request().postDataJSON()).toMatchObject({ prompt: "POLICY_DIRECT_TOKEN" });
+        // Startup projection may hold the local operation briefly. A confirmed
+        // rejection returns the prompt to the composer and permits a fresh
+        // click; an unknown reply never permits retry.
+        let admission: "ready" | "busy" | "accepted" | "unconfirmed" = delivered.ok()
+          ? "accepted"
+          : "busy";
+        if (!delivered.ok()) {
+          expect(delivered.status()).toBe(409);
+          expect(await delivered.json()).toEqual({
+            error: "session is busy with a local operation",
+          });
+        }
         const composer = page.getByRole("combobox", { name: "Message" });
-        await composer.fill("POLICY_DIRECT_TOKEN");
         const send = page
           .locator("form")
           .filter({ has: composer })
           .getByRole("button", { name: "Send", exact: true });
-        // Startup projection may hold the local operation briefly. A confirmed
-        // rejection permits a fresh click; an unknown reply never permits retry.
-        let admission: "ready" | "busy" | "accepted" | "unconfirmed" = "ready";
         await expect
           .poll(
             async () => {
               if (admission === "accepted" || admission === "unconfirmed") return admission;
+              await expect(composer).toHaveValue("POLICY_DIRECT_TOKEN");
               admission = "unconfirmed";
               const reply = page.waitForResponse(
                 (response) =>
@@ -113,23 +131,31 @@ for (const orchestration of [null, "0"] as const) {
           .toBe("accepted");
         await waitForRunIdle(request, harness, directId);
         await expect(page.getByText("direct policy response")).toBeVisible();
-        await expect(page.locator(BEHAVIOR_ICONS)).toHaveCount(0);
+        await expect(page.locator(BEHAVIOR_MARKERS)).toHaveCount(0);
         await page.goto(`${harness.baseUrl}/#/session/${directId}/worksets`);
         await expect(page).toHaveURL(new RegExp(`/session/${directId}/insights`));
-        await openSidePanel(page, mobile);
-        await expect(page.getByRole("tab", { name: "Insights", exact: true })).toHaveAttribute(
-          "aria-selected",
-          "true",
-        );
-        await expect(page.getByRole("tab", { name: "Threads", exact: true })).toHaveCount(0);
-        await expect(page.getByRole("tab", { name: "Worksets", exact: true })).toHaveCount(0);
         if (mobile) {
-          const panel = page.getByRole("dialog");
-          await panel.getByRole("button", { name: "Close" }).click();
-          await expect(panel).toBeHidden();
+          // The phone panel sheet lists only the panels direct policy allows.
+          await page.getByRole("button", { name: "Open panel", exact: true }).click();
+          const sheet = page.getByRole("dialog", { name: "Session", exact: true });
+          await expect(sheet.getByRole("button").filter({ hasText: /^Insights/ })).toHaveCount(1);
+          await expect(sheet.getByRole("button").filter({ hasText: /^Threads/ })).toHaveCount(0);
+          await expect(sheet.getByRole("button").filter({ hasText: /^Worksets/ })).toHaveCount(0);
+          await page.keyboard.press("Escape");
+          await expect(sheet).toBeHidden();
         }
+        const insights = await openSessionPanel(page, "Insights");
+        if (!mobile) {
+          await expect(
+            insights.getByRole("tab", { name: "Insights", exact: true }),
+          ).toHaveAttribute("aria-selected", "true");
+        }
+        await expect(insights.getByRole("tab", { name: "Threads", exact: true })).toHaveCount(0);
+        await expect(insights.getByRole("tab", { name: "Worksets", exact: true })).toHaveCount(0);
+        await page.keyboard.press("Escape");
+        await expect(insights).toBeHidden();
         await expect(page.getByRole("button", { name: "Spawn", exact: true })).toHaveCount(0);
-        await expect(page.locator(BEHAVIOR_ICONS)).toHaveCount(0);
+        await expect(page.locator(BEHAVIOR_MARKERS)).toHaveCount(0);
         await page.reload();
         await expect(page.getByText("direct policy response")).toBeVisible();
         harness.provider.enqueue(
@@ -158,15 +184,16 @@ for (const orchestration of [null, "0"] as const) {
         await expect(page.getByRole("button", { name: "Create fork", exact: true })).toHaveCount(0);
         await page.getByRole("button", { name: "Parent chat" }).click();
         await expect(page).toHaveURL(new RegExp(`/session/${directId}/delegated`));
-        await openSidePanel(page, mobile);
-        await expect(page.getByRole("tab", { name: "Subagents", exact: true })).toHaveAttribute(
-          "aria-selected",
-          "true",
-        );
+        const subagents = await openSessionPanel(page, "Subagents");
+        if (!mobile) {
+          await expect(
+            subagents.getByRole("tab", { name: "Subagents", exact: true }),
+          ).toHaveAttribute("aria-selected", "true");
+        }
         await expect(
-          page.getByRole("button", { name: "Direct child policy", exact: true }),
+          subagents.getByRole("button", { name: "Direct child policy", exact: true }),
         ).toBeVisible();
-        await expect(page.locator(BEHAVIOR_ICONS)).toHaveCount(0);
+        await expect(page.locator(BEHAVIOR_MARKERS)).toHaveCount(0);
         for (const [id, behavior] of [
           [legacy, "orchestrator"],
           [hybrid, "direct-with-orchestrator"],
@@ -186,26 +213,36 @@ for (const orchestration of [null, "0"] as const) {
     }) => {
       const projectId = await createProject(request, harness);
       await page.goto(`${harness.baseUrl}/#/project/${projectId}`);
-      await expect(page.getByRole("dialog", { name: "New Chat" })).toBeVisible();
+      // An empty project opens Home's composer, preset to it and focused.
+      await expectHomeComposer(page, projectId);
+      harness.provider.enqueue(
+        "policy-first",
+        { token: "POLICY_FIRST_TOKEN" },
+        { kind: "text", text: "first chat response", stream: "request" },
+      );
+      await page.keyboard.type("POLICY_FIRST_TOKEN");
       const created = page.waitForResponse(
         (response) =>
           response.url() === `${harness.baseUrl}/sessions` &&
           response.request().method() === "POST",
       );
-      await page.getByRole("button", { name: "Create chat", exact: true }).click();
+      await page.getByRole("button", { name: "Start session", exact: true }).focus();
+      await page.keyboard.press("Enter");
       const response = await created;
+      // The project's first primary session converges under concurrent submits.
       expect(response.request().postDataJSON()).toMatchObject({
         behavior: "direct",
         first_chat: true,
         first_chat_same_behavior: true,
       });
       await expect(page.getByRole("combobox", { name: "Message" })).toBeVisible();
-      await page.keyboard.press(
-        await page.evaluate(() =>
-          /Mac|iPhone|iPad/.test(navigator.userAgent) ? "Meta+Shift+O" : "Control+Shift+O",
-        ),
-      );
-      await expect(page.getByRole("dialog", { name: "New Chat" })).toBeVisible();
+      const firstId = (await response.json()).metadata.session_id;
+      await waitForRunIdle(request, harness, firstId);
+      await expect(page.getByText("first chat response")).toBeVisible();
+      await page.getByRole("combobox", { name: "Message" }).focus();
+      await page.keyboard.press(await page.evaluate(NEW_SESSION_CHORD));
+      await expectHomeComposer(page, projectId);
+      await expect(page.getByRole("button", { name: /^Behavior:/ })).toHaveCount(0);
       await expect(page.getByRole("radiogroup")).toHaveCount(0);
     });
   });
@@ -223,14 +260,12 @@ test.describe("runtime opt-in with the same production binary", () => {
     await page.goto(`${harness.baseUrl}/#/session/${legacy}/threads`);
     await expect(page.getByRole("combobox", { name: "Message" })).toBeVisible();
     // Keeps the zero counts above honest: opting in shows the same icons.
-    await expect(page.locator(BEHAVIOR_ICONS).first()).toBeVisible();
-    await page.keyboard.press(
-      await page.evaluate(() =>
-        /Mac|iPhone|iPad/.test(navigator.userAgent) ? "Meta+Shift+O" : "Control+Shift+O",
-      ),
-    );
-    await expect(page.getByRole("dialog", { name: "New Chat" })).toBeVisible();
-    await expect(page.getByRole("radio")).toHaveCount(3);
+    await expect(page.locator(BEHAVIOR_MARKERS).first()).toBeVisible();
+    await page.keyboard.press(await page.evaluate(NEW_SESSION_CHORD));
+    // Home's composer offers every behavior again.
+    await expectHomeComposer(page, projectId);
+    await page.getByRole("button", { name: /^Behavior: / }).click();
+    await expect(page.getByRole("menuitemradio")).toHaveCount(3);
     expect(
       (await (await request.get(`${harness.baseUrl}/ui-config`)).json()).orchestration_enabled,
     ).toBe(true);

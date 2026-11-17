@@ -103,8 +103,10 @@ for (const mobile of [false, true]) {
         };
       });
       expect(nativeStyles.font).toContain("NACPresentationInter");
-      expect(nativeStyles.background).toBe("rgb(5, 5, 5)");
-      expect(nativeStyles.brand).toBe("#008c8c");
+      // The runtime paints its own Focus dark ground and ink brand, never the caller's.
+      expect(nativeStyles.background).toBe("oklch(0.17 0.003 85)");
+      // Minified token text: the packed CSS carries the ink as written by the build.
+      expect(nativeStyles.brand).toBe("oklch(94% .004 85)");
       const nativeIcons = await page.locator("[data-nac-runtime]").evaluate((node) => {
         const runtime = node as unknown as {
           querySelectorAll: (selector: string) => ArrayLike<unknown>;
@@ -158,6 +160,10 @@ for (const mobile of [false, true]) {
           return { font: style.fontFamily, lineHeight: style.lineHeight };
         });
       await expect.poll(callerFormulaStyle).toEqual({ font: "monospace", lineHeight: "19px" });
+      // Session settings lives behind the header's session menu (phone: "Open panel").
+      await page
+        .getByRole("button", { name: mobile ? "Open panel" : "Session menu", exact: true })
+        .click();
       await page.getByRole("button", { name: "Session settings", exact: true }).click();
       const settings = page.getByRole("dialog", { name: "Session settings", exact: true });
       await expect(settings).toBeVisible();
