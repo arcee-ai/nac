@@ -329,7 +329,9 @@ async fn real_pending_permission_reaches_every_browser_stream_and_resolves_besid
     assert_eq!(dormant["availability"]["reviews"], "unknown");
     assert_eq!(dormant["activity"]["kind"], "unknown");
     let child = session(&baseline, "child");
-    assert_eq!(child["availability"]["permissions"], "unsupported");
+    assert_eq!(child["availability"]["permissions"], "unknown");
+    assert_eq!(child["availability"]["topology"], "available");
+    assert_eq!(child["availability"]["work"], "unsupported");
     assert_eq!(child["lineage"]["kind"], "traditional-child");
     assert_eq!(child["lineage"]["parent_session_id"], "session");
     assert_eq!(child["lineage"]["root_session_id"], "session");
@@ -540,3 +542,6 @@ fn wire_entry_carries_exact_question_review_and_permission_identities_only() {
         })
     );
 }
+
+#[path = "fleet_attention_child_tests.rs"]
+mod child;

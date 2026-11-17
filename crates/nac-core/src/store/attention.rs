@@ -27,6 +27,9 @@ pub struct AttentionStoredRun {
 pub struct AttentionStoredSession {
     pub id: String,
     pub primary: bool,
+    /// A durable traditional child relationship exists (never a managed
+    /// orchestrator). Children report decisions under their own session id.
+    pub traditional_child: bool,
     pub direct: bool,
     pub questions_supported: bool,
     pub goal: Option<AttentionStoredGoal>,
@@ -209,14 +212,15 @@ pub fn read_attention_metadata(path: &Path, session: Option<&str>) -> Result<Vec
     let mut statement = tx.prepare("SELECT substr(s.session_id,1,513),s.behavior,
         NOT EXISTS(SELECT 1 FROM traditional_children c WHERE c.child_session_id=s.session_id)
         AND NOT EXISTS(SELECT 1 FROM managed_orchestrators m WHERE m.orchestrator_session_id=s.session_id),
-        s.host_id IS NULL AND s.sandbox_json IS NULL, s.config_version
+        s.host_id IS NULL AND s.sandbox_json IS NULL, s.config_version,
+        EXISTS(SELECT 1 FROM traditional_children c WHERE c.child_session_id=s.session_id)
         FROM sessions s WHERE (?1 IS NULL OR s.session_id=?1) ORDER BY s.session_id LIMIT 1025")?;
-    let rows = statement.query_map([session], |row| Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,bool>(2)?,row.get::<_,bool>(3)?,row.get::<_,i64>(4)?)))?
+    let rows = statement.query_map([session], |row| Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,bool>(2)?,row.get::<_,bool>(3)?,row.get::<_,i64>(4)?,row.get::<_,bool>(5)?)))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     anyhow::ensure!(rows.len() <= ATTENTION_SOURCE_LIMIT, "attention metadata capacity exceeded");
     let mut output = Vec::with_capacity(rows.len());
     let mut bytes = 0usize;
-    for (id, behavior, primary, local, config_version) in rows {
+    for (id, behavior, primary, local, config_version, traditional_child) in rows {
         identifier(&id)?;
         anyhow::ensure!(config_version >= 0, "attention configuration revision unavailable");
         let direct = behavior == "direct" || behavior == "direct-with-orchestrator";
@@ -240,7 +244,7 @@ pub fn read_attention_metadata(path: &Path, session: Option<&str>) -> Result<Vec
             Ok(AttentionStoredRun { run_id, disposition: disposition.parse()? })
         }).transpose()?;
         let recovery_pending = tx.query_row("SELECT EXISTS(SELECT 1 FROM session_run_recovery WHERE session_id=?1)",[&id],|row|row.get(0))?;
-        let metadata = AttentionStoredSession { id,primary,direct,questions_supported,goal,question,inbox_pending,manual_unsettled,config_version,last_outcome,recovery_pending };
+        let metadata = AttentionStoredSession { id,primary,traditional_child,direct,questions_supported,goal,question,inbox_pending,manual_unsettled,config_version,last_outcome,recovery_pending };
         bytes = bytes.saturating_add(metadata.metadata_bytes());
         anyhow::ensure!(bytes <= ATTENTION_METADATA_BYTES, "attention metadata capacity exceeded");
         output.push(metadata);

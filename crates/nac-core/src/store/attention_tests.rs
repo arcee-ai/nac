@@ -464,5 +464,10 @@ fn topology_reads_project_and_child_lineage_without_descriptions() {
         })
     );
     assert!(!format!("{topology:?}").contains("private"));
+    let metadata = read_attention_metadata(&path, None).unwrap();
+    let child = metadata.iter().find(|row| row.id == "child").unwrap();
+    assert!(child.traditional_child && !child.primary);
+    let root = metadata.iter().find(|row| row.id == "root").unwrap();
+    assert!(!root.traditional_child && root.primary);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }

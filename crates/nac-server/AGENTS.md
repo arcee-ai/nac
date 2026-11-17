@@ -38,6 +38,9 @@ bundle, and builds the `nac-web` binary. Product use cases live in focused
   installs the single service observer, reserves or relaxes the native
   `/attention/events` seat/guard, subscribes to a session event bus, or attaches
   sessions. Keep one classification; report unknown/unsupported facets as-is.
+  It covers primary direct sessions and direct traditional children (child
+  decisions attributed only to the child); orchestration topologies stay
+  unsupported.
 
 ## Starting points
 

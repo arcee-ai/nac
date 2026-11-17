@@ -8,6 +8,7 @@ fn stored(id: &str, primary: bool) -> AttentionStoredSession {
     AttentionStoredSession {
         id: id.into(),
         primary,
+        traditional_child: !primary,
         direct: true,
         questions_supported: primary,
         goal: None,
@@ -93,9 +94,23 @@ fn exact_identities_appear_and_resolve_while_unchanged_entries_keep_revisions() 
     // Settled work is observer-owned; it is unknown here, never inferred.
     assert_eq!(parent.attention.availability.work, AttentionFacet::Unknown);
     assert!(parent.attention.work.is_none());
+    // A traditional child with no cached owner is unknown, never "none";
+    // it never settles work or asks structured questions itself.
     let child = &first.entries["child"].facts;
     assert_eq!(
         child.attention.availability.permissions,
+        AttentionFacet::Unknown
+    );
+    assert_eq!(
+        child.attention.availability.topology,
+        AttentionFacet::Available
+    );
+    assert_eq!(
+        child.attention.availability.work,
+        AttentionFacet::Unsupported
+    );
+    assert_eq!(
+        child.attention.availability.questions,
         AttentionFacet::Unsupported
     );
     assert_eq!(child.lineage.as_ref().unwrap().parent_session_id, "parent");

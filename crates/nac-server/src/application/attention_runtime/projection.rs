@@ -23,7 +23,11 @@ pub(in crate::application) fn classify(
     service: Option<&AttentionServiceSnapshot>,
     bound_config: Option<Option<i64>>,
 ) -> AttentionSourceSnapshot {
-    let supported = stored.primary && stored.direct;
+    // Primary direct sessions own settled work and goals. Traditional children
+    // additionally report their own broker decisions and topology, attributed
+    // to the child session; orchestration topologies stay unsupported.
+    let primary = stored.primary && stored.direct;
+    let supported = primary || (stored.traditional_child && stored.direct);
     let broker = service.and_then(|service| service.broker.as_ref());
     let mut pending: Vec<_> = stored.question.clone().into_iter().collect();
     let broker_available = if supported {
@@ -62,7 +66,7 @@ pub(in crate::application) fn classify(
     };
     let work = service.and_then(|service| {
         let work = service.settled.as_ref()?;
-        if !supported || stored.manual_unsettled || stored.inbox_pending || !pending.is_empty() {
+        if !primary || stored.manual_unsettled || stored.inbox_pending || !pending.is_empty() {
             return None;
         }
         if work.goal.as_ref() != stored.goal.as_ref().map(|goal| &goal.identity)
@@ -104,7 +108,7 @@ pub(in crate::application) fn classify(
         },
         revision: 0,
         availability: AttentionAvailability {
-            work: if !supported {
+            work: if !primary {
                 AttentionFacet::Unsupported
             } else if work.is_some() {
                 AttentionFacet::Available
