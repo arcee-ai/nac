@@ -15,7 +15,7 @@ pub fn exec_command_definition() -> ToolDefinition {
         def_type: "function".to_string(),
         function: FunctionDef {
             name: "exec_command".to_string(),
-            description: "Execute a shell command. One-shot commands run non-interactively and return structured status, separate concise stdout/stderr previews, and an output_id. Git, Git Credential Manager, and GitHub CLI terminal prompts are disabled in this mode, so configure credentials in advance. A completed command may have a non-zero exit_code. If truncated=true or overflowed=true, call read_command_output with the output_id instead of rerunning or filtering the command. Use tty=true only for a foreground program that needs a PTY. Opaque commands and broad shells/interpreters require explicit direct-session approval. An accepted PTY can be polled, receive separately approved input on its exact handle, or be explicitly retained with write_stdin."
+            description: "Execute a shell command. One-shot commands run non-interactively and return structured status, separate concise stdout/stderr previews, and an output_id. Git, Git Credential Manager, and GitHub CLI terminal prompts are disabled in this mode, so configure credentials in advance. A completed command may have a non-zero exit_code. If truncated=true or overflowed=true, call read_command_output with the output_id instead of rerunning or filtering the command. A non-PTY call has a hard deadline for the entire shell command, including every chained step; a short deadline terminates it and cannot be resumed. Ordinarily omit timeout_ms (default: 30000); set it explicitly only for a different whole-command budget. Legacy yield_time_ms and _nac.timeout_ms are aliases and explicit values must agree. Never switch to PTY to escape a deadline or automatically increase/replay a timed-out command. Use tty=true only for a foreground program that needs a PTY. Opaque commands and broad shells/interpreters require explicit direct-session approval. An accepted PTY can be polled, receive separately approved input on its exact handle, or be explicitly retained with write_stdin."
                 .to_string(),
             parameters: serde_json::json!({
                 "type": "object",
@@ -23,7 +23,8 @@ pub fn exec_command_definition() -> ToolDefinition {
                     "cmd": { "type": "string", "description": "Shell command to execute" },
                     "workdir": { "type": "string", "description": "Working directory (default: project root)" },
                     "tty": { "type": "boolean", "description": "Use a persistent PTY session (default: false)" },
-                    "yield_time_ms": { "type": "number", "description": "One-shot timeout or PTY poll duration in milliseconds (max: 3600000)" },
+                    "timeout_ms": { "type": "integer", "minimum": 0, "maximum": 3600000, "description": "Non-PTY only: hard deadline for the entire command chain (default: 30000 ms). Zero is an immediate deadline, not unlimited. Explicit aliases must agree." },
+                    "yield_time_ms": { "type": "integer", "minimum": 0, "maximum": 3600000, "description": "Legacy non-PTY deadline alias for timeout_ms; with tty=true, output poll duration only (default: 500 ms), not a process lifetime cap. _nac.timeout_ms aliases this field; explicit values must agree." },
                     "max_output_chars": { "type": "number", "description": "Shared concise preview budget (default: 8000); omitted bytes remain pageable" }
                 },
                 "required": ["cmd"]
@@ -45,7 +46,7 @@ pub fn write_stdin_definition() -> ToolDefinition {
                     "session_id": { "type": "string", "description": "Exact PTY handle: session_name returned by exec_command, or id of a supported current-chat PTY from list_executions. Human PTYs require explicit user handoff to the agent." },
                     "chars": { "type": "string", "description": "Nonempty input follows ordinary prepared terminal_input policy and controller revalidation; approval, when required, is invocation-only. Key tokens such as <RET> are supported. Empty polls agent PTY output; retrieve human PTY output with read_command_output execution_id." },
                     "retain": { "type": "boolean", "description": "Explicitly retain this live terminal across direct run boundaries (default: false)" },
-                    "yield_time_ms": { "type": "number", "description": "Maximum poll duration in milliseconds (default: 500, max: 3600000)" },
+                    "yield_time_ms": { "type": "integer", "minimum": 0, "maximum": 3600000, "description": "Maximum PTY output poll duration (default: 500 ms); never a process lifetime cap. _nac.timeout_ms is an alias; explicit values must agree." },
                     "max_output_chars": { "type": "number", "description": "Concise preview budget (default: 8000)" }
                 },
                 "required": ["session_id"]
@@ -118,7 +119,8 @@ async fn execute_exec_command_inner(
     let tty = args.get("tty").and_then(Value::as_bool).unwrap_or(false);
     let default_yield_ms = if tty { 500 } else { 30_000 };
     let yield_ms = clamp_yield(
-        args.get("yield_time_ms")
+        args.get("timeout_ms")
+            .or_else(|| args.get("yield_time_ms"))
             .and_then(Value::as_u64)
             .unwrap_or(default_yield_ms),
     );

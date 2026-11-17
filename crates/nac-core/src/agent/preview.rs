@@ -425,12 +425,35 @@ pub(super) fn preview_exec_command_result(content: &str) -> Option<String> {
     let exit_code = parsed.get("exit_code").and_then(serde_json::Value::as_i64);
     let more = ellipsis(lines.len());
 
+    if status == "timed_out" {
+        // Delivery already labels the outcome "Timed out". Supply evidence,
+        // not a second status label, and never infer successful cleanup.
+        let deadline = parsed
+            .get("timeout_ms")
+            .and_then(serde_json::Value::as_u64)
+            .map_or_else(
+                || "command deadline exceeded".to_string(),
+                |ms| format!("{ms} ms deadline exceeded"),
+            );
+        let termination = match parsed
+            .get("termination_status")
+            .and_then(serde_json::Value::as_str)
+        {
+            Some("terminated") => "; terminated",
+            Some("cleanup_pending") => "; cleanup pending",
+            _ => "",
+        };
+        let details = format!("{deadline}{termination}");
+        return Some(match summary {
+            Some(summary) => format!("{details}: {summary}{more}"),
+            None => details,
+        });
+    }
+
     match (status, exit_code, summary) {
         ("completed", Some(0), Some(summary)) => Some(format!("{summary}{more}")),
         ("completed", Some(code), Some(summary)) => Some(format!("exit {code}: {summary}{more}")),
         ("completed", Some(code), None) => Some(format!("exit {code}")),
-        ("timed_out", _, Some(summary)) => Some(format!("timed out: {summary}{more}")),
-        ("timed_out", _, None) => Some("timed out".to_string()),
         ("cancelled", _, Some(summary)) => Some(format!("cancelled: {summary}{more}")),
         ("cancelled", _, None) => Some("cancelled".to_string()),
         ("spawn_error", _, Some(summary)) => Some(format!("spawn error: {summary}{more}")),

@@ -635,6 +635,47 @@ fn exec_command_result_preview_includes_nonzero_exit() {
 }
 
 #[test]
+fn exec_command_timeout_preview_reports_deadline_and_honest_termination() {
+    for (termination, expected) in [
+        (Some("terminated"), "1000 ms deadline exceeded; terminated"),
+        (
+            Some("cleanup_pending"),
+            "1000 ms deadline exceeded; cleanup pending",
+        ),
+        (None, "1000 ms deadline exceeded"),
+    ] {
+        let result = ToolResult::text(
+            serde_json::json!({
+                "status":"timed_out", "timeout_ms":1000,
+                "termination_status":termination, "stdout_preview":"", "stderr_preview":""
+            })
+            .to_string(),
+            false,
+        );
+        let preview = preview_tool_result("exec_command", &result);
+        assert_eq!(preview, expected);
+        assert!(!format!("Timed out: {preview}").contains("Timed out: timed out"));
+    }
+    let result = ToolResult::text(
+        serde_json::json!({
+            "status":"timed_out", "timeout_ms":1000, "termination_status":"cleanup_pending",
+            "stdout_preview":"", "stderr_preview":"remote command cleanup incomplete"
+        })
+        .to_string(),
+        false,
+    );
+    assert_eq!(
+        preview_tool_result("exec_command", &result),
+        "1000 ms deadline exceeded; cleanup pending: remote command cleanup incomplete"
+    );
+    let legacy = ToolResult::text(serde_json::json!({"status":"timed_out"}).to_string(), false);
+    assert_eq!(
+        preview_tool_result("exec_command", &legacy),
+        "command deadline exceeded"
+    );
+}
+
+#[test]
 fn exec_command_finished_event_carries_structured_outcome() {
     let result = ToolResult {
         content: (serde_json::json!({

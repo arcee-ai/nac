@@ -129,10 +129,12 @@ struct GetMessagesParams {
     session_id: String,
     #[schemars(description = "Maximum messages to return (default 24)")]
     limit: Option<usize>,
-    #[schemars(description = "Return messages before this index (cursor)")]
+    #[schemars(
+        description = "Return messages before this position in the filtered page (exclusive cursor). Use page.start to fetch the older page; this is not a transcript_index."
+    )]
     before: Option<usize>,
     #[schemars(
-        description = "Include system messages (default true). When true, transcript_index values are raw transcript positions usable directly with session_action(revert). Setting false breaks the transcript_index ↔ revert mapping."
+        description = "Include system messages (default true). transcript_index always identifies the canonical transcript position usable with session_action(revert), regardless of this filter."
     )]
     include_system: Option<bool>,
 }
@@ -163,7 +165,9 @@ struct SessionActionParams {
     session_id: String,
     #[schemars(description = "Action: \"compact\", \"cancel\", \"delete\", or \"revert\"")]
     action: String,
-    #[schemars(description = "Message index (required for \"revert\")")]
+    #[schemars(
+        description = "Canonical transcript_index returned by get_messages (required for \"revert\"); must identify a user message in this session, not a page cursor."
+    )]
     message_idx: Option<usize>,
 }
 
@@ -478,7 +482,7 @@ impl NacMcpService {
 
     #[tool(
         name = "get_messages",
-        description = "Get a page of messages from a session transcript. Each message includes a transcript_index — the raw transcript position that can be passed to session_action(action=\"revert\", message_idx=transcript_index) to roll back to that point. System messages are included by default so that transcript_index values match raw transcript positions used by revert."
+        description = "Get a page of messages from a session transcript. Each transcript_index identifies the canonical transcript position, independent of include_system, and can be passed to session_action(action=\"revert\", message_idx=transcript_index) for a user-message boundary. System messages are included by default. page.start/end/total and before use filtered pagination positions, not transcript indices; pass page.start as before to fetch older messages with the same include_system setting."
     )]
     async fn get_messages(
         &self,
@@ -498,35 +502,7 @@ impl NacMcpService {
             )
             .await
         {
-            Ok(page) => {
-                let base = page.page.start;
-                let messages: Vec<_> = page
-                    .messages
-                    .iter()
-                    .enumerate()
-                    .map(|(i, msg)| {
-                        json!({
-                            "transcript_index": base + i,
-                            "role": message_role(msg),
-                            "content": message_content(msg),
-                            "created_at": page.created_at.get(i).and_then(|c| c.as_ref()),
-                        })
-                    })
-                    .collect();
-                let result = json!({
-                    "messages": messages,
-                    "page": {
-                        "start": page.page.start,
-                        "end": page.page.end,
-                        "total": page.page.total,
-                        "has_older": page.page.has_older,
-                    },
-                });
-                Ok(CallToolResult::success(vec![Content::text(
-                    serde_json::to_string_pretty(&result)
-                        .unwrap_or_else(|e| format!("Error serializing: {e}")),
-                )]))
-            }
+            Ok(page) => encode_messages_page(page),
             Err(e) => Ok(CallToolResult::error(vec![Content::text(format!(
                 "Error: {e}"
             ))])),
@@ -716,78 +692,63 @@ fn message_content(msg: &nac_core::types::Message) -> String {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use rmcp::model::{ClientCapabilities, ClientConfig, ProtocolVersion};
-
-    #[test]
-    fn create_session_schema_exposes_optional_project_id() {
-        let schema = serde_json::to_value(schemars::schema_for!(CreateSessionParams)).unwrap();
-        let properties = schema["properties"].as_object().unwrap();
-        assert!(properties.contains_key("project_id"));
-        assert!(properties.contains_key("cwd"));
-        assert!(!schema["required"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .any(|field| field == "project_id"));
+// Canonical identities are supplied by the projection, never inferred from
+// filtered pagination. Refuse a broken alignment rather than returning a
+// plausible index that could mutate a different transcript boundary.
+fn encode_messages_page(
+    page: nac_core::session_service::MessagesPageSnapshot,
+) -> Result<CallToolResult, ErrorData> {
+    if page.canonical_message_indices.len() != page.messages.len()
+        || page
+            .canonical_message_indices
+            .windows(2)
+            .any(|indices| indices[0] >= indices[1])
+        || page
+            .canonical_message_indices
+            .iter()
+            .any(|index| usize::try_from(*index).is_err())
+    {
+        return Err(ErrorData::internal_error(
+            "Inconsistent canonical transcript indices",
+            None,
+        ));
     }
-
-    #[test]
-    fn inbound_mcp_identity_uses_injected_product_version() {
-        let info = mcp_server_info_for_version("9.8.7");
-
-        assert_eq!(info.server_info.name, "nac_server");
-        assert_eq!(info.server_info.version, "9.8.7");
-        assert!(info.capabilities.tools.is_some());
-        assert_eq!(info.instructions.as_deref(), Some(NAC_MCP_INSTRUCTIONS));
-        assert_eq!(info.protocol_version, ProtocolVersion::LATEST);
-        assert!(!info.protocol_version.has_initialize());
-    }
-
-    #[test]
-    fn inbound_mcp_router_preserves_orchestration_and_adds_passive_product_tools() {
-        let names = NacMcpService::tool_router()
-            .list_all()
-            .into_iter()
-            .map(|tool| tool.name.into_owned())
-            .collect::<Vec<_>>();
-
-        assert_eq!(
-            names,
-            vec![
-                "create_session",
-                "get_messages",
-                "get_product_context",
-                "get_session_status",
-                "get_thread_episodes",
-                "get_thread_events",
-                "list_models",
-                "list_sessions",
-                "resolve_product_destination",
-                "send_message",
-                "session_action",
-                "steer",
-                "update_session",
-            ]
-        );
-    }
-
-    #[test]
-    fn rmcp_versions_separate_legacy_initialization_from_current_discovery() {
-        let request = ClientConfig::new(
-            ClientCapabilities::default(),
-            Implementation::new("compatibility-test", "1.0.0"),
-        )
-        .with_protocol_version(ProtocolVersion::LATEST_WITH_INITIALIZE);
-
-        assert!(request.protocol_version.has_initialize());
-        assert_eq!(request.protocol_version, ProtocolVersion::V_2025_11_25);
-        assert_eq!(ProtocolVersion::LATEST, ProtocolVersion::V_2026_07_28);
-        assert!(!ProtocolVersion::LATEST.has_initialize());
-    }
+    let messages: Vec<_> = page
+        .messages
+        .iter()
+        .zip(&page.canonical_message_indices)
+        .enumerate()
+        .map(|(i, (msg, index))| {
+            json!({
+                "transcript_index": index,
+                "role": message_role(msg),
+                "content": message_content(msg),
+                "created_at": page.created_at.get(i).and_then(|c| c.as_ref()),
+            })
+        })
+        .collect();
+    let result = json!({
+        "messages": messages,
+        "page": {
+            "start": page.page.start,
+            "end": page.page.end,
+            "total": page.page.total,
+            "has_older": page.page.has_older,
+        },
+    });
+    Ok(CallToolResult::success(vec![Content::text(
+        serde_json::to_string_pretty(&result)
+            .map_err(|_| ErrorData::internal_error("Could not encode transcript page", None))?,
+    )]))
 }
+
+#[cfg(test)]
+#[path = "mcp_tests.rs"]
+mod tests;
+
+#[cfg(test)]
+#[path = "mcp_transcript_tests.rs"]
+mod transcript_wire_tests;
 
 #[cfg(test)]
 #[path = "mcp_product_context_tests.rs"]
