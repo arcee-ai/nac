@@ -47,9 +47,7 @@ async function checkpoint(c: Candidate) {
 }
 
 async function nativeSubmissions(c: Candidate) {
-  return c.app.evaluate(
-    () => (globalThis as any).__notificationProbe.submissions,
-  );
+  return c.app.evaluate(() => (globalThis as any).__notificationProbe.submissions);
 }
 
 async function closeWorkspace(c: Candidate) {
@@ -60,16 +58,10 @@ async function closeWorkspace(c: Candidate) {
     return id;
   });
   await expect
-    .poll(() =>
-      c.app.evaluate(({ BrowserWindow }) =>
-        BrowserWindow.getAllWindows()[0].isVisible(),
-      ),
-    )
+    .poll(() => c.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible()))
     .toBe(false);
   expect(
-    await c.app.evaluate(
-      ({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.id,
-    ),
+    await c.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.id),
   ).toBe(document);
   return document;
 }
@@ -166,9 +158,7 @@ async function clickTarget(c: Candidate, index: number, session: string) {
     probe.handles.get(probe.submissions[index].id).emit("click");
   }, index);
   try {
-    await expect
-      .poll(() => c.page.evaluate(() => location.hash))
-      .toContain(`/session/${session}`);
+    await expect.poll(() => c.page.evaluate(() => location.hash)).toContain(`/session/${session}`);
   } catch (error) {
     console.log(
       "Notification target diagnostic",
@@ -178,9 +168,7 @@ async function clickTarget(c: Candidate, index: number, session: string) {
           return {
             index,
             acknowledgments: probe.targetAcks,
-            previouslyClosed: probe.closed.includes(
-              probe.submissions[index].id,
-            ),
+            previouslyClosed: probe.closed.includes(probe.submissions[index].id),
             trace: probe.trace,
             traceOverflow: probe.traceOverflow,
           };
@@ -212,15 +200,11 @@ async function stop(app: ElectronApplication) {
 
 async function relaunch(c: Candidate) {
   const packaged = process.env.NAC_ELECTRON_APP;
-  const executablePath = packaged
-    ? path.join(packaged, "Contents/MacOS/NAC")
-    : undefined;
+  const executablePath = packaged ? path.join(packaged, "Contents/MacOS/NAC") : undefined;
   const started = _electron.launch({
     ...(executablePath ? { executablePath } : {}),
     args: [
-      ...(packaged
-        ? ["--inspect-brk=0"]
-        : [path.join(root, "desktop/electron")]),
+      ...(packaged ? ["--inspect-brk=0"] : [path.join(root, "desktop/electron")]),
       "--directory",
       c.workspace,
       "--store-path",
@@ -243,9 +227,7 @@ async function relaunch(c: Candidate) {
   });
   const [app] = await Promise.all([
     started,
-    executablePath
-      ? preparePackagedInspector(executablePath, c.workspace)
-      : Promise.resolve(),
+    executablePath ? preparePackagedInspector(executablePath, c.workspace) : Promise.resolve(),
   ]);
   await installNativeDouble(app);
   const page = await app.firstWindow();
@@ -257,9 +239,7 @@ test("main semantic observer stays off by default and delivers bounded hidden co
   candidate: c,
 }) => {
   await installNativeDouble(c.app);
-  await expect
-    .poll(async () => (await state(c)).notifications?.loaded)
-    .toBe(true);
+  await expect.poll(async () => (await state(c)).notifications?.loaded).toBe(true);
   let notifications = (await state(c)).notifications;
   expect(notifications.enabled).toBe(false);
   expect(notifications.observer?.tasks ?? 0).toBe(0);
@@ -270,9 +250,7 @@ test("main semantic observer stays off by default and delivers bounded hidden co
   await expect
     .poll(async () => {
       const value = (await state(c)).notifications;
-      return (
-        value.enabled && !value.saving && value.observer?.projectionAvailable
-      );
+      return value.enabled && !value.saving && value.observer?.projectionAvailable;
     })
     .toBe(true);
   const saved = (await checkpoint(c)).native.notifications;
@@ -316,46 +294,25 @@ test("main semantic observer stays off by default and delivers bounded hidden co
   await completionGate.accepted;
   completionGate.release();
   await expect
-    .poll(
-      async () =>
-        (await c.api(`/sessions/${completedSession}`)).active_run == null,
-    )
+    .poll(async () => (await c.api(`/sessions/${completedSession}`)).active_run == null)
     .toBe(true);
   await expect
-    .poll(async () =>
-      (await nativeSubmissions(c)).map((value: any) => value.title),
-    )
+    .poll(async () => (await nativeSubmissions(c)).map((value: any) => value.title))
     .toEqual(["Request completed"]);
-  await expect
-    .poll(async () => (await state(c)).notifications.unreadCompletions)
-    .toBe(1);
-  await expect
-    .poll(
-      async () => (await checkpoint(c)).native.notifications.receipts.length,
-    )
-    .toBe(0);
-  expect((await checkpoint(c)).native.notifications.frontier).not.toBe(
-    saved.frontier,
-  );
+  await expect.poll(async () => (await state(c)).notifications.unreadCompletions).toBe(1);
+  await expect.poll(async () => (await checkpoint(c)).native.notifications.receipts.length).toBe(0);
+  expect((await checkpoint(c)).native.notifications.frontier).not.toBe(saved.frontier);
   expect((await state(c)).enginePid).toBe(identity.enginePid);
-  expect((await state(c)).receipt.incarnation).toBe(
-    identity.receipt.incarnation,
-  );
+  expect((await state(c)).receipt.incarnation).toBe(identity.receipt.incarnation);
 
   // A single native callback routes only its retained session. It cannot
   // submit another prompt, answer a question or create a remembered grant.
   await clickTarget(c, 0, completedSession);
   await expect
-    .poll(() =>
-      c.app.evaluate(({ BrowserWindow }) =>
-        BrowserWindow.getAllWindows()[0].isVisible(),
-      ),
-    )
+    .poll(() => c.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible()))
     .toBe(true);
   expect(
-    await c.app.evaluate(
-      ({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.id,
-    ),
+    await c.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.id),
   ).toBe(document);
   expect(c.provider.requests).toHaveLength(1);
 
@@ -363,9 +320,7 @@ test("main semantic observer stays off by default and delivers bounded hidden co
   // Exercise ordinary application Hide as well as a closed workspace. The
   // original click must handle native focus ordering; do not pre-focus it.
   await c.app.evaluate(({ app }) => app.hide());
-  await expect
-    .poll(() => c.app.evaluate(({ app }) => app.isHidden()))
-    .toBe(true);
+  await expect.poll(() => c.app.evaluate(({ app }) => app.isHidden())).toBe(true);
   c.provider.enqueue(
     "notification-question",
     { token: "NOTIFICATION_DECISION" },
@@ -386,20 +341,13 @@ test("main semantic observer stays off by default and delivers bounded hidden co
     prompt: "NOTIFICATION_DECISION",
   });
   await expect
-    .poll(
-      async () =>
-        (await c.api(`/sessions/${decisionSession}/questions`))[0]?.status,
-    )
+    .poll(async () => (await c.api(`/sessions/${decisionSession}/questions`))[0]?.status)
     .toBe("pending");
   await expect
-    .poll(async () =>
-      (await nativeSubmissions(c)).map((value: any) => value.title),
-    )
+    .poll(async () => (await nativeSubmissions(c)).map((value: any) => value.title))
     .toEqual(["Request completed", "Decision needed"]);
   await clickTarget(c, 1, decisionSession);
-  expect(
-    (await c.api(`/sessions/${decisionSession}/questions`))[0].status,
-  ).toBe("pending");
+  expect((await c.api(`/sessions/${decisionSession}/questions`))[0].status).toBe("pending");
   const permissions = await c.api(`/sessions/${decisionSession}/permissions`);
   expect(permissions.grants).toHaveLength(0);
   expect(c.provider.requests).toHaveLength(2);
@@ -433,17 +381,11 @@ test("main semantic observer stays off by default and delivers bounded hidden co
   expect((await checkpoint(c)).native.notifications.enabled).toBe(false);
   lateGate.release();
   await expect
-    .poll(
-      async () => (await c.api(`/sessions/${lateSession}`)).active_run == null,
-    )
+    .poll(async () => (await c.api(`/sessions/${lateSession}`)).active_run == null)
     .toBe(true);
   await c.app.evaluate(({ app }) => app.emit("activate"));
   await expect
-    .poll(() =>
-      c.app.evaluate(({ BrowserWindow }) =>
-        BrowserWindow.getAllWindows()[0].isVisible(),
-      ),
-    )
+    .poll(() => c.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible()))
     .toBe(true);
   await c.page.evaluate(() => {
     location.hash = "/";
@@ -457,15 +399,11 @@ test("main semantic observer stays off by default and delivers bounded hidden co
     }
   });
   await menu(c, "notifications-reset");
-  await expect
-    .poll(async () => (await state(c)).notifications.saving)
-    .toBe(false);
+  await expect.poll(async () => (await state(c)).notifications.saving).toBe(false);
   expect((await checkpoint(c)).native?.notifications ?? null).toBeNull();
   expect((await state(c)).notifications.unreadCompletions).toBe(0);
   expect(await c.page.evaluate(() => location.hash)).toBe("#/");
-  expect(
-    (await c.api(`/sessions/${decisionSession}/questions`))[0].status,
-  ).toBe("pending");
+  expect((await c.api(`/sessions/${decisionSession}/questions`))[0].status).toBe("pending");
   expect(await nativeSubmissions(c)).toHaveLength(2);
   c.provider.assertConsumed();
 });
@@ -474,14 +412,10 @@ test("persisted opt-in/frontier survives a cold app/new-port restart and retired
   candidate: c,
 }) => {
   await installNativeDouble(c.app);
-  await expect
-    .poll(async () => (await state(c)).notifications?.loaded)
-    .toBe(true);
+  await expect.poll(async () => (await state(c)).notifications?.loaded).toBe(true);
   await menu(c, "notifications-enable", true);
   await expect
-    .poll(
-      async () => (await state(c)).notifications.observer?.projectionAvailable,
-    )
+    .poll(async () => (await state(c)).notifications.observer?.projectionAvailable)
     .toBe(true);
   const session = await c.session();
   await closeWorkspace(c);
@@ -496,15 +430,9 @@ test("persisted opt-in/frontier survives a cold app/new-port restart and retired
   );
   await c.api(`/sessions/${session}/runs`, { prompt: "NOTIFICATION_RESTART" });
   await expect
-    .poll(async () =>
-      (await nativeSubmissions(c)).map((value: any) => value.title),
-    )
+    .poll(async () => (await nativeSubmissions(c)).map((value: any) => value.title))
     .toEqual(["Request completed"]);
-  await expect
-    .poll(
-      async () => (await checkpoint(c)).native.notifications.receipts.length,
-    )
-    .toBe(0);
+  await expect.poll(async () => (await checkpoint(c)).native.notifications.receipts.length).toBe(0);
   const saved = (await checkpoint(c)).native.notifications;
   expect(saved.unreadCompletions).toBe(1);
   const original = await state(c),
@@ -532,9 +460,7 @@ test("persisted opt-in/frontier survives a cold app/new-port restart and retired
   expect(await c.page.evaluate(() => location.hash)).toBe(route);
   expect(await nativeSubmissions(c)).toHaveLength(1);
   expect(c.provider.requests).toHaveLength(1);
-  expect((await state(c)).receipt.incarnation).toBe(
-    original.receipt.incarnation,
-  );
+  expect((await state(c)).receipt.incarnation).toBe(original.receipt.incarnation);
   await stop(c.app);
 
   let successor: ElectronApplication | undefined;
@@ -545,9 +471,7 @@ test("persisted opt-in/frontier survives a cold app/new-port restart and retired
     const currentCandidate = { ...c, app: next.app, page: next.page };
     await expect
       .poll(
-        async () =>
-          (await state(currentCandidate)).notifications?.observer
-            ?.projectionAvailable,
+        async () => (await state(currentCandidate)).notifications?.observer?.projectionAvailable,
       )
       .toBe(true);
     const current = await state(currentCandidate);
@@ -557,12 +481,8 @@ test("persisted opt-in/frontier survives a cold app/new-port restart and retired
     expect(current.storage.profile).toBe(original.storage.profile);
     expect(current.notifications.enabled).toBe(true);
     expect(current.notifications.unreadCompletions).toBe(1);
-    expect(
-      (await checkpoint(currentCandidate)).native.notifications.frontier,
-    ).toBe(saved.frontier);
-    expect(
-      (await checkpoint(currentCandidate)).native.notifications.cutoff,
-    ).toBe(saved.cutoff);
+    expect((await checkpoint(currentCandidate)).native.notifications.frontier).toBe(saved.frontier);
+    expect((await checkpoint(currentCandidate)).native.notifications.cutoff).toBe(saved.cutoff);
     expect(await nativeSubmissions(currentCandidate)).toEqual([]);
     expect(c.provider.requests).toHaveLength(1);
     c.provider.assertConsumed();
@@ -593,26 +513,14 @@ test("healthy checkpoint with invalid native notifications permits explicit menu
   await stop(c.app);
   const profile = original.storage.profile,
     track = original.receipt.identity.track;
-  const binding = [
-    `desktop-${profile}`,
-    profile,
-    "local",
-    "local",
-    profile,
-    track,
-  ];
+  const binding = [`desktop-${profile}`, profile, "local", "local", profile, track];
   const values = {
     preferences: { "nac.sidebar.open": "false" },
     drafts: {
       ["nac:prompt-drafts:v2:" + JSON.stringify(binding)]: JSON.stringify({
         version: 2,
         binding,
-        drafts: [
-          [
-            session,
-            "Private malformed-notification recovery draft; never send.",
-          ],
-        ],
+        drafts: [[session, "Private malformed-notification recovery draft; never send."]],
       }),
     },
   };
@@ -636,9 +544,7 @@ test("healthy checkpoint with invalid native notifications permits explicit menu
     const next = await relaunch(c);
     successor = next.app;
     const current = { ...c, app: next.app, page: next.page };
-    await expect
-      .poll(async () => (await state(current)).notifications?.resettable)
-      .toBe(true);
+    await expect.poll(async () => (await state(current)).notifications?.resettable).toBe(true);
     const before = await state(current);
     enginePid = before.enginePid;
     expect(before.storage.available).toBe(true);
@@ -648,21 +554,15 @@ test("healthy checkpoint with invalid native notifications permits explicit menu
     expect(await fs.readFile(file, "utf8")).toBe(source);
     expect(
       await next.app.evaluate(({ Menu }) => ({
-        enable: Menu.getApplicationMenu()!.getMenuItemById(
-          "notifications-enable",
-        )!.enabled,
-        reset: Menu.getApplicationMenu()!.getMenuItemById(
-          "notifications-reset",
-        )!.enabled,
+        enable: Menu.getApplicationMenu()!.getMenuItemById("notifications-enable")!.enabled,
+        reset: Menu.getApplicationMenu()!.getMenuItemById("notifications-reset")!.enabled,
       })),
     ).toEqual({ enable: false, reset: true });
     await menu(current, "notifications-reset");
     await expect
       .poll(async () => {
         const value = (await state(current)).notifications;
-        return (
-          value.loaded && !value.enabled && !value.saving && !value.suspended
-        );
+        return value.loaded && !value.enabled && !value.saving && !value.suspended;
       })
       .toBe(true);
     const saved = JSON.parse(await fs.readFile(file, "utf8"));
@@ -693,9 +593,7 @@ test("notification clicks preserve a focused retained draft and consume unretain
   candidate: c,
 }) => {
   await installNativeDouble(c.app);
-  await expect
-    .poll(async () => (await state(c)).notifications?.loaded)
-    .toBe(true);
+  await expect.poll(async () => (await state(c)).notifications?.loaded).toBe(true);
   const project = await c.project();
   const source = await c.session("direct", project);
   const target = await c.session("direct", project);
@@ -704,8 +602,7 @@ test("notification clicks preserve a focused retained draft and consume unretain
   }, source);
   const composer = c.page.getByRole("combobox", { name: "Message" });
   await expect(composer).toBeVisible();
-  const draft =
-    "  Retained private draft 雪\nNever submit from a notification.  ";
+  const draft = "  Retained private draft 雪\nNever submit from a notification.  ";
   await composer.fill(draft);
   await expect(composer).toHaveAttribute("data-nac-retained-draft", "");
   const draftIsSaved = () =>
@@ -721,13 +618,16 @@ test("notification clicks preserve a focused retained draft and consume unretain
   await expect.poll(draftIsSaved).toBe(true);
   await menu(c, "notifications-enable", true);
   await expect
-    .poll(
-      async () => (await state(c)).notifications.observer?.projectionAvailable,
-    )
+    .poll(async () => (await state(c)).notifications.observer?.projectionAvailable)
     .toBe(true);
 
   const completeWhileHidden = async (index: number, token: string) => {
     await closeWorkspace(c);
+    // A notification/target ACK does not retire Rust's run operation. Observe
+    // canonical settlement before the next deliberate POST, never retry input.
+    await expect
+      .poll(async () => (await c.api(`/sessions/${target}`)).active_run == null)
+      .toBe(true);
     c.provider.enqueue(
       `notification-editor-${index}`,
       { token },
@@ -738,28 +638,18 @@ test("notification clicks preserve a focused retained draft and consume unretain
       },
     );
     await c.api(`/sessions/${target}/runs`, { prompt: token });
+    await expect.poll(async () => (await nativeSubmissions(c)).length).toBe(index + 1);
     await expect
-      .poll(async () => (await nativeSubmissions(c)).length)
-      .toBe(index + 1);
-    await expect
-      .poll(
-        async () => (await checkpoint(c)).native.notifications.receipts.length,
-      )
+      .poll(async () => (await checkpoint(c)).native.notifications.receipts.length)
       .toBe(0);
     await c.app.evaluate((_electron, index) => {
       const probe = (globalThis as any).__notificationProbe;
       probe.handles.get(probe.submissions[index].id).emit("click");
     }, index);
     await expect
-      .poll(() =>
-        c.app.evaluate(
-          () => (globalThis as any).__notificationProbe.targetAcks.length,
-        ),
-      )
+      .poll(() => c.app.evaluate(() => (globalThis as any).__notificationProbe.targetAcks.length))
       .toBe(index + 1);
-    return c.app.evaluate(
-      () => (globalThis as any).__notificationProbe.targetAcks.at(-1).outcome,
-    );
+    return c.app.evaluate(() => (globalThis as any).__notificationProbe.targetAcks.at(-1).outcome);
   };
   const refuseLateReplay = async (index: number) => {
     await c.page.evaluate(
@@ -772,13 +662,9 @@ test("notification clicks preserve a focused retained draft and consume unretain
       const probe = (globalThis as any).__notificationProbe;
       probe.handles.get(probe.submissions[index].id).emit("click");
     }, index);
-    expect(await c.page.evaluate(() => location.hash)).toContain(
-      `/session/${source}`,
-    );
+    expect(await c.page.evaluate(() => location.hash)).toContain(`/session/${source}`);
     expect(
-      await c.app.evaluate(
-        () => (globalThis as any).__notificationProbe.targetAcks.length,
-      ),
+      await c.app.evaluate(() => (globalThis as any).__notificationProbe.targetAcks.length),
     ).toBe(index + 1);
     await expect(composer).toHaveValue(draft);
     expect(await draftIsSaved()).toBe(true);
@@ -786,16 +672,10 @@ test("notification clicks preserve a focused retained draft and consume unretain
 
   await composer.focus();
   expect(
-    await c.page.evaluate(() =>
-      document.activeElement?.hasAttribute("data-nac-retained-draft"),
-    ),
+    await c.page.evaluate(() => document.activeElement?.hasAttribute("data-nac-retained-draft")),
   ).toBe(true);
-  expect(await completeWhileHidden(0, "NOTIFICATION_RETAINED_EDITOR")).toBe(
-    "opened",
-  );
-  await expect
-    .poll(() => c.page.evaluate(() => location.hash))
-    .toContain(`/session/${target}`);
+  expect(await completeWhileHidden(0, "NOTIFICATION_RETAINED_EDITOR")).toBe("opened");
+  await expect.poll(() => c.page.evaluate(() => location.hash)).toContain(`/session/${target}`);
   expect(await draftIsSaved()).toBe(true);
   expect(c.provider.requests).toHaveLength(1);
   await c.page.evaluate((id) => {
@@ -815,18 +695,12 @@ test("notification clicks preserve a focused retained draft and consume unretain
   expect(await c.page.evaluate(() => document.activeElement?.id)).toBe(
     "notification-unretained-editor",
   );
-  expect(await completeWhileHidden(1, "NOTIFICATION_UNRETAINED_EDITOR")).toBe(
-    "deferred",
+  expect(await completeWhileHidden(1, "NOTIFICATION_UNRETAINED_EDITOR")).toBe("deferred");
+  expect(await c.page.evaluate(() => location.hash)).toContain(`/session/${source}`);
+  expect(await c.page.locator("#notification-unretained-editor").inputValue()).toBe(
+    "Private unretained editor text",
   );
-  expect(await c.page.evaluate(() => location.hash)).toContain(
-    `/session/${source}`,
-  );
-  expect(
-    await c.page.locator("#notification-unretained-editor").inputValue(),
-  ).toBe("Private unretained editor text");
-  await c.page.evaluate(() =>
-    document.getElementById("notification-unretained-editor")!.remove(),
-  );
+  await c.page.evaluate(() => document.getElementById("notification-unretained-editor")!.remove());
   await composer.focus();
   await refuseLateReplay(1);
   expect(c.provider.requests).toHaveLength(2);
@@ -834,12 +708,8 @@ test("notification clicks preserve a focused retained draft and consume unretain
   // Synthetic composition events exercise the existing guard only; this is
   // separate from native IME/input qualification.
   await composer.dispatchEvent("compositionstart", { bubbles: true });
-  expect(await completeWhileHidden(2, "NOTIFICATION_IME_EDITOR")).toBe(
-    "deferred",
-  );
-  expect(await c.page.evaluate(() => location.hash)).toContain(
-    `/session/${source}`,
-  );
+  expect(await completeWhileHidden(2, "NOTIFICATION_IME_EDITOR")).toBe("deferred");
+  expect(await c.page.evaluate(() => location.hash)).toContain(`/session/${source}`);
   await composer.dispatchEvent("compositionend", { bubbles: true });
   await composer.focus();
   await refuseLateReplay(2);

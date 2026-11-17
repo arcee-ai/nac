@@ -65,6 +65,7 @@ function fixture() {
   return {
     native,
     window,
+    app,
     storage,
     frame,
     contents,
@@ -215,6 +216,95 @@ test("one click waits for native focus and owner readiness in either order, then
     assert.equal(f.messages.filter((message) => message.kind === "session_target").length, 1);
     f.native.dispose();
     assert.equal(f.window.listenerCount("focus"), 0);
+  }
+});
+
+test("an original hidden-app click waits for observed unhide, focus and its current owner", async () => {
+  for (const focusFirst of [true, false]) {
+    const f = fixture();
+    let hidden = true,
+      focused = false;
+    f.app.isHidden = () => hidden;
+    f.window.isFocused = () => focused;
+    await f.ready(false);
+    let outcome;
+    const target = f.native.sessionTarget("fixture-session", "fixture-occurrence");
+    target.then((value) => {
+      outcome = value;
+    });
+    f.native.setVisible(false); // Initial native unhide has not completed yet.
+    f.send("session_target_ready", { generation: 1 });
+    if (focusFirst) {
+      focused = true;
+      f.window.emit("focus");
+    }
+    f.native.setVisible(true); // A callback cannot replace the actual hidden-app fact.
+    await Promise.resolve();
+    assert.equal(outcome, undefined);
+    assert.equal(f.messages.filter((message) => message.kind === "session_target").length, 0);
+    hidden = false;
+    f.native.setVisible(true);
+    if (!focusFirst) {
+      assert.equal(f.messages.filter((message) => message.kind === "session_target").length, 0);
+      focused = true;
+      f.window.emit("focus");
+    }
+    const messages = f.messages.filter((message) => message.kind === "session_target");
+    assert.equal(messages.length, 1);
+    f.send("target_settled", { request: messages[0].targetMessage.request, outcome: "deferred" });
+    assert.equal(await target, "deferred");
+    f.window.emit("focus");
+    f.native.setVisible(true);
+    assert.equal(f.messages.filter((message) => message.kind === "session_target").length, 1);
+    f.native.dispose();
+  }
+});
+
+test("unhide readiness shares the original deadline and cannot revive after timeout", async (context) => {
+  context.mock.timers.enable({ apis: ["setTimeout"] });
+  const f = fixture();
+  let hidden = true;
+  f.app.isHidden = () => hidden;
+  await f.ready();
+  const target = f.native.sessionTarget("fixture-session", "fixture-occurrence");
+  context.mock.timers.tick(3000);
+  assert.equal(await target, "unavailable");
+  hidden = false;
+  f.native.setVisible(true);
+  f.window.emit("focus");
+  assert.equal(f.messages.filter((message) => message.kind === "session_target").length, 0);
+  f.native.dispose();
+});
+
+test("retirement fences hidden-app initialization and a new hide fences observed unhide", async () => {
+  for (const boundary of ["retire", "navigate", "dispose", "hide-again"]) {
+    const f = fixture();
+    let hidden = true;
+    f.app.isHidden = () => hidden;
+    f.window.isFocused = () => false;
+    await f.ready();
+    const target = f.native.sessionTarget("fixture-session", "fixture-occurrence");
+    if (boundary === "retire") {
+      const done = f.native.retire();
+      f.send("retired", { closed: true });
+      await done;
+    }
+    if (boundary === "navigate")
+      f.contents.emit("did-start-navigation", { isMainFrame: true, isSameDocument: false });
+    if (boundary === "dispose") f.native.dispose();
+    if (boundary === "hide-again") {
+      hidden = false;
+      f.native.setVisible(true);
+      hidden = true;
+      f.native.setVisible(false);
+    }
+    assert.equal(await target, "stale");
+    hidden = false;
+    f.window.isFocused = () => true;
+    f.native.setVisible(true);
+    f.window.emit("focus");
+    assert.equal(f.messages.filter((message) => message.kind === "session_target").length, 0);
+    f.native.dispose();
   }
 });
 

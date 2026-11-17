@@ -64,16 +64,15 @@ function createNativeAdapters({
   const dispatchTarget = () => {
     const flight = targetFlight;
     if (!flight || flight.sent || !flight.state.targetReady) return;
-    if (
-      !current(flight.state) ||
-      !flight.state.uiReady ||
-      !workspaceVisible(window, app) ||
-      picker ||
-      commandFlight
-    ) {
+    if (!current(flight.state) || !flight.state.uiReady || picker || commandFlight) {
       clearTarget("unavailable");
       return;
     }
+    // app.show()/window.show() may finish after the original native click.
+    // Wait only inside its current document and original deadline. A later
+    // hide fences it once visibility has actually been observed.
+    if (!workspaceVisible(window, app)) return;
+    flight.presented = true;
     if (!window.isFocused()) return;
     flight.sent = true;
     flight.generation = flight.state.targetGeneration;
@@ -425,7 +424,6 @@ function createNativeAdapters({
         picker ||
         commandFlight ||
         targetFlight ||
-        !workspaceVisible(window, app) ||
         !identifier(session) ||
         !identifier(occurrence) ||
         request >= 2147483647
@@ -434,15 +432,16 @@ function createNativeAdapters({
       const number = ++request;
       return new Promise((resolve) => {
         const timer = setTimeout(() => clearTarget("unavailable"), 3000);
-        // One original explicit click may wait for native focus and this
-        // document's React owner after reopen. No dispatched outcome is retried; the
-        // same deadline bounds both initialization and the eventual ACK.
+        // One original explicit click may wait for native unhide/focus and this
+        // document's React owner after reopen. No dispatched outcome is retried;
+        // the same deadline bounds initialization and the eventual ACK.
         targetFlight = {
           state,
           request: number,
           resolve,
           timer,
           sent: false,
+          presented: workspaceVisible(window, app),
           message: {
             version: 1,
             request: number,
@@ -481,10 +480,11 @@ function createNativeAdapters({
     setVisible(visible) {
       if (!visible) {
         cancelPending();
-        clearTarget("stale");
+        if (targetFlight?.presented) clearTarget("stale");
       }
       if (document && current(document)) send("visible", { visible: visible === true });
       onPresentation(visible === true && window.isFocused());
+      if (visible) dispatchTarget();
     },
     visibilityChanged() {
       native.setVisible(workspaceVisible(window, app));
