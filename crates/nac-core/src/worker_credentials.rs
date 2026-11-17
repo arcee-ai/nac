@@ -6,7 +6,7 @@
 //! before MCP construction. Every worker announces readiness only after MCP
 //! construction; credential bytes are not written before that handshake.
 
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(target_os = "linux")]
 use crate::managed_native_credentials::restrict_same_uid_inspection;
 use crate::managed_native_credentials::ManagedNativeCredentials;
 use std::io;
