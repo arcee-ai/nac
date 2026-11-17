@@ -42,7 +42,11 @@ export function InboxProvider({ children }: { children: ReactNode }) {
 function LiveInboxProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const { pathname } = useLocation();
-  const fleet = useFleetAttention();
+  // A session page holds its own streams (the session, open subagents), and
+  // HTTP/1.1 allows six connections per origin: there the fleet feed polls
+  // its snapshot instead, so a Stop or an approval is never queued behind it.
+  const onSessionPage = sessionIdFromPath(pathname) !== null;
+  const fleet = useFleetAttention({ stream: !onSessionPage });
   const { data: sessions = [] } = useVisibleSessions();
   const { data: projectsData } = useProjects();
   const titleOf = useSessionTitle();

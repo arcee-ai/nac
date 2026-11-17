@@ -24,6 +24,12 @@ export interface FleetAttentionOptions {
   projectId?: string;
   pollMs?: number;
   enabled?: boolean;
+  /**
+   * Hold the shared stream (default). False polls the snapshot only, for a
+   * view whose own streams already use most of the browser's six HTTP/1.1
+   * connections per origin.
+   */
+  stream?: boolean;
   /** Test/adapter seam; defaults to the runtime's authenticated stream. */
   eventSource?: FleetEventSourceFactory;
 }
@@ -40,6 +46,7 @@ export function useFleetAttention(options: FleetAttentionOptions = {}): FleetAtt
   const { api, client } = runtime;
   const projectId = options.projectId;
   const enabled = options.enabled ?? true;
+  const streaming = enabled && (options.stream ?? true);
   const [state, dispatch] = useReducer(applyFleetAttention, emptyFleetAttention);
   const streamPath = `/attention/stream${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ""}`;
   // Keyed by path so a new filter starts as "connecting" without effect setState.
@@ -47,7 +54,11 @@ export function useFleetAttention(options: FleetAttentionOptions = {}): FleetAtt
     path: string;
     status: "connecting" | "live" | "down";
   }>({ path: streamPath, status: "connecting" });
-  const stream = streamState.path === streamPath ? streamState.status : "connecting";
+  const stream = !streaming
+    ? "down"
+    : streamState.path === streamPath
+      ? streamState.status
+      : "connecting";
 
   const open = useMemo<FleetEventSourceFactory>(
     () =>
@@ -71,7 +82,7 @@ export function useFleetAttention(options: FleetAttentionOptions = {}): FleetAtt
   }, [poll.data, projectId]);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!streaming) return;
     const path = streamPath;
     const setStream = (status: "live" | "down") => setStreamState({ path, status });
     let closed = false;
@@ -133,14 +144,14 @@ export function useFleetAttention(options: FleetAttentionOptions = {}): FleetAtt
       source?.close();
       source = null;
     };
-  }, [enabled, projectId, open, streamPath]);
+  }, [streaming, projectId, open, streamPath]);
 
   const status: FleetAttentionStatus =
     stream === "live"
       ? "live"
       : poll.isError
         ? "unavailable"
-        : stream === "connecting" && !poll.data
+        : (stream === "connecting" || !streaming) && !poll.data
           ? "connecting"
           : "polling";
   // Never present another filter's sessions as this one's.

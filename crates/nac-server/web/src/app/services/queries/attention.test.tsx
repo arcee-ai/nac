@@ -74,7 +74,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function harness(projectId?: string) {
+function harness(projectId?: string, stream?: boolean) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -88,7 +88,7 @@ function harness(projectId?: string) {
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
   );
-  const hook = renderHook(() => useFleetAttention({ projectId, eventSource, pollMs: 50 }), {
+  const hook = renderHook(() => useFleetAttention({ projectId, eventSource, pollMs: 50, stream }), {
     wrapper,
   });
   return { hook, sources };
@@ -280,6 +280,19 @@ describe("useFleetAttention", () => {
     expect(hook.result.current.status).toBe("polling");
     // The last known sessions stay visible while polling continues.
     expect(hook.result.current.sessions.get("a")).toBeDefined();
+  });
+
+  it("polls without holding a stream when asked to", async () => {
+    const poll = vi.spyOn(api, "fleetAttention").mockResolvedValue({
+      epoch: "e1",
+      revision: 1,
+      sessions: [entry("a", 1)],
+    });
+    const { hook, sources } = harness(undefined, false);
+    await waitFor(() => expect(hook.result.current.sessions.get("a")).toBeDefined());
+    expect(hook.result.current.status).toBe("polling");
+    await waitFor(() => expect(poll.mock.calls.length).toBeGreaterThan(1));
+    expect(sources).toHaveLength(0);
   });
 
   it("reports unavailable when neither the stream nor the snapshot can be read", async () => {
