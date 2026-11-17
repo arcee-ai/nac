@@ -187,6 +187,17 @@ test("native saved-project launches open independent named-skill tasks across Gi
     harness.provider.enqueue(
       `launch-ack-${kind}`,
       { functionOutputCallId: callId },
+      {
+        kind: "function_call",
+        stream: "request",
+        name: "task_launch_status",
+        callId: `native-status-${kind}`,
+        arguments: { request_id: input.request_id },
+      },
+    );
+    harness.provider.enqueue(
+      `launch-status-ack-${kind}`,
+      { functionOutputCallId: `native-status-${kind}` },
       { kind: "text", stream: "request", text: `Separate ${kind} launch accepted` },
     );
     harness.provider.enqueue(
@@ -229,6 +240,11 @@ test("native saved-project launches open independent named-skill tasks across Gi
     receipts.push(receipt);
     expect(receipt.navigation).toBe(`/session/${receipt.launch.session_id}`);
     const link = page.getByRole("link", { name: `Open separate task: ${title}`, exact: true });
+    await expect(link).toHaveCount(1);
+    await expect(link).toBeVisible();
+    await waitForRunIdle(request, harness, caller);
+    await page.reload();
+    await expect(link).toHaveCount(1);
     await expect(link).toBeVisible();
     await link.click();
     await expect(page).toHaveURL(new RegExp(`${receipt.launch.session_id}/insights`));
