@@ -13,6 +13,7 @@ import re
 import image_applicability_curl_release
 import image_applicability_libssh2_source
 import image_applicability_subject_mismatch
+import image_applicability_sudo_absence
 
 
 POLICY_PATH = ".github/security/image-applicability.json"
@@ -226,6 +227,8 @@ def evidence_for(rule, evidence, observations, now):
     else:
         if isinstance(proof, dict) and proof.get("kind") == "official-subject-mismatch":
             image_applicability_subject_mismatch.validate(rule, record, evidence)
+        elif isinstance(proof, dict) and proof.get("kind") == "sudo-kerberos-image-absence":
+            image_applicability_sudo_absence.validate(rule, record, evidence)
         else:
             exact(proof, {"kind", "affected_applications"}, "absence proof")
             require(proof["kind"] == "application-absence" and

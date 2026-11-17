@@ -187,6 +187,44 @@ commitment, invalidating the previous binding. The verifier cannot infer this
 property from a caller-supplied label; the collector/integrator must establish
 it from complete final-image data.
 
+### Narrow sudo/Kerberos image absence proposal
+
+[CVE-2007-3149](https://www.cve.org/CVERecord?id=CVE-2007-3149) describes
+sudo's Kerberos authentication path. The
+[NVD record](https://nvd.nist.gov/vuln/detail/CVE-2007-3149) also maps the
+record to the MIT Kerberos CPE, so an image containing `krb5-libs` can receive
+the raw `upstream:mit/kerberos_5` finding even without sudo. A version-1
+`not_affected` rule for only `(upstream:mit/kerberos_5, 1.22.3,
+grype-upstream, CVE-2007-3149)` may propose this proof:
+
+```json
+{"kind":"sudo-kerberos-image-absence","affected_application":"sudo","scope":"final-underlying-image-filesystem"}
+```
+
+The six required artifact roles are `official_cve`, `official_nvd`,
+`complete_filesystem`, `complete_consumers`, `source_lock`, and `provenance`.
+The first two pin the official CVE and NVD bytes; their contents identify the
+sudo auth path and NVD's broad CPE match. The remaining artifacts must match
+the independently recollected final-image profile and exact installed
+`apk:krb5-libs 1.22.3-r0` source, patch and payload binding. The verifier
+requires no named sudo/sudoedit/sudoreplay file or link and no additional
+setuid/setgid file beyond the five known shadow account tools. Those five
+must be root-owned ELF files without a direct Kerberos `DT_NEEDED` dependency.
+Their names and dependency lists do not prove their implementation; the
+reviewer must inspect the exact file hashes and package provenance.
+Any new or changed file, image, source, profile or payload needs fresh evidence
+and review. The six declared volumes remain outside the underlying-image
+filesystem scope.
+
+These mechanical conditions do not rule out code embedded under another name,
+static linkage, `dlopen`, file capabilities, runtime privilege overrides, or
+sudo supplied by later mounts. A separate
+security reviewer must assess those limits against the exact image and
+deployment before choosing a disposition. This source contract supplies no
+approval, changes no candidate source policy, and does not turn the current
+strict blocked result green. The post-build approval and App gate remain
+separate.
+
 ### Narrow libssh versus libssh2 subject proof
 
 Three official [libssh](https://www.libssh.org/security/advisories/) advisories
