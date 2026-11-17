@@ -5,6 +5,172 @@ use crate::session_service::tests::test_direct_active_service;
 
 const QUEUED_PROMPT: &str = "foreground input sent before peer exit";
 
+#[cfg(feature = "managed-fault-fixture")]
+#[tokio::test]
+async fn private_child_read_fault_retains_generation_for_exactly_once_settlement() {
+    use std::io::Write;
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
+    let _lock = crate::TEST_ENV_LOCK.lock().unwrap();
+    struct Environment(Option<std::ffi::OsString>);
+    impl Drop for Environment {
+        fn drop(&mut self) {
+            match self.0.take() {
+                Some(value) => std::env::set_var("NAC_MANAGED_FAULT_ROOT", value),
+                None => std::env::remove_var("NAC_MANAGED_FAULT_ROOT"),
+            }
+        }
+    }
+    let (parts, path) =
+        test_direct_active_service("private_child_fault", "child", ModelClient::new_for_test());
+    let mut parent = sessions::load_session(&path, "child").unwrap();
+    parent.session_id = "parent".into();
+    sessions::create_session(&path, &parent).unwrap();
+    crate::store::create_traditional_child_relationship(
+        &path,
+        "parent",
+        "child",
+        "general",
+        "fault fixture",
+    )
+    .unwrap();
+    let child = crate::store::begin_traditional_child_run(
+        &path,
+        "child",
+        "child-run",
+        TraditionalChildExecutionMode::Background,
+    )
+    .unwrap();
+    let start = sessions::load_session(&path, "child")
+        .unwrap()
+        .messages
+        .len() as u64;
+    let writer = crate::store::TranscriptLogWriter::new(&path).unwrap();
+    writer
+        .append_run_prompt(
+            "child",
+            start,
+            &Message::User {
+                content: "durable prompt".into(),
+            },
+            "child-run",
+        )
+        .unwrap();
+    writer
+        .append(
+            "child",
+            start + 1,
+            &Message::Assistant {
+                content: Some("report".into()),
+                reasoning_text: None,
+                reasoning_details: None,
+                tool_calls: None,
+                duration_ms: None,
+                model_origin: None,
+                reasoning_field: None,
+            },
+        )
+        .unwrap();
+    let mut connection = crate::store::open_runtime_connection(&path).unwrap();
+    let transaction = connection
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .unwrap();
+    crate::store::clear_active_run(
+        &transaction,
+        "child",
+        "child-run",
+        crate::store::RunTerminalDisposition::Completed,
+        None,
+    )
+    .unwrap();
+    transaction.commit().unwrap();
+    drop(connection);
+    let control_root =
+        std::path::PathBuf::from(format!("/tmp/all117-fault-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir(&control_root).unwrap();
+    std::fs::set_permissions(&control_root, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let _environment = Environment(std::env::var_os("NAC_MANAGED_FAULT_ROOT"));
+    std::env::set_var("NAC_MANAGED_FAULT_ROOT", &control_root);
+    let nonce = uuid::Uuid::new_v4().to_string();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis();
+    let control = serde_json::json!({"nonce": nonce, "boundary": "child-read", "session_id": "child", "run_id": "child-run", "generation": child.generation, "expires_unix_ms": now + 10_000});
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(control_root.join("child-read.json"))
+        .unwrap();
+    file.write_all(serde_json::to_string(&control).unwrap().as_bytes())
+        .unwrap();
+    drop(file);
+    let run = SessionRunId::from_stored("child-run".into());
+    parts
+        .service
+        .settle_traditional_child_run(
+            &run,
+            crate::store::TraditionalChildStatus::Completed,
+            Some("report".into()),
+            None,
+        )
+        .await;
+    assert_eq!(
+        crate::store::load_traditional_child(&path, "child")
+            .unwrap()
+            .unwrap()
+            .status,
+        crate::store::TraditionalChildStatus::Running
+    );
+    assert!(crate::store::list_session_inbox(&path, "parent")
+        .unwrap()
+        .is_empty());
+    let reached: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(control_root.join(format!("used-{nonce}.json"))).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(reached["session_id"], "child");
+    assert_eq!(reached["run_id"], "child-run");
+    assert_eq!(reached["generation"], child.generation);
+    assert_eq!(reached["after_successful_sqlite_commit"], false);
+    drop(parts);
+    let (rebuilt, _) = crate::session_service::tests::test_direct_active_service_at(
+        "child",
+        ModelClient::new_for_test(),
+        path.clone(),
+    );
+    let lease = sessions::SessionOperationLease::try_acquire(&path, "child").unwrap();
+    rebuilt
+        .service
+        .reconcile_durable_run_recovery(&lease)
+        .await
+        .unwrap();
+    rebuilt
+        .service
+        .reconcile_durable_run_recovery(&lease)
+        .await
+        .unwrap();
+    let receipt =
+        crate::store::load_traditional_child_terminal_receipt(&path, "child", child.generation)
+            .unwrap()
+            .unwrap();
+    assert_eq!(receipt.run_id.as_deref(), Some("child-run"));
+    assert_eq!(
+        receipt.status,
+        crate::store::TraditionalChildStatus::Completed
+    );
+    assert_eq!(receipt.report.as_deref(), Some("report"));
+    assert!(crate::store::load_run_recovery(&path, "child")
+        .unwrap()
+        .is_none());
+    let inbox = crate::store::list_session_inbox(&path, "parent").unwrap();
+    assert_eq!(inbox.len(), 1);
+    assert_eq!(receipt.completion_inbox_id, Some(inbox[0].id));
+    std::fs::remove_dir_all(control_root).unwrap();
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
 fn successor_server() -> ScriptedServer {
     ScriptedServer::start(vec![ScriptedResponse::json(
         "200 OK",

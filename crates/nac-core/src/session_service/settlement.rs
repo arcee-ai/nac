@@ -362,6 +362,27 @@ impl SessionService {
                     return;
                 }
             };
+        #[cfg(feature = "managed-fault-fixture")]
+        if child.run_id.as_deref() == Some(run_id.as_str()) {
+            match crate::managed_fault_fixture::hit(
+                crate::managed_fault_fixture::Boundary::ChildRead,
+                session_id,
+                Some(run_id.as_str()),
+                Some(child.generation),
+            ) {
+                Ok(true) => {
+                    eprintln!(
+                        "nac: private fixture injected traditional child settlement read failure"
+                    );
+                    return;
+                }
+                Ok(false) => {}
+                Err(error) => {
+                    eprintln!("nac: failed to inspect private child fault control: {error:#}");
+                    return;
+                }
+            }
+        }
         let revision = crate::store::workspace_revision_for_run(
             &self.metadata.store_path,
             session_id,

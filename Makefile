@@ -228,6 +228,7 @@ test-durability:
 test-managed-fault-fixture:
 	$(CARGO) test --locked -p nac-core --features managed-fault-fixture managed_fault_fixture::tests
 	$(CARGO) test --locked -p nac-core --features managed-fault-fixture private_fixture_ack_failure_follows_real_commit_and_replay_is_once
+	$(CARGO) test --locked -p nac-core --features managed-fault-fixture private_child_read_fault_retains_generation_for_exactly_once_settlement
 	$(CARGO) test --locked -p nac-server --features managed-fault-fixture private_monitor_fault_is_generation_scoped_once_and_subsequent_read_recovers
 	$(CARGO) clippy --locked -p nac-server --features managed-fault-fixture --lib --bins -- -D warnings
 

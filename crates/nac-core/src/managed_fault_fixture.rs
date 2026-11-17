@@ -18,6 +18,7 @@ const MAX_ARM_WINDOW_MS: u64 = 20_000;
 pub enum Boundary {
     CommitAck,
     MonitorRead,
+    ChildRead,
 }
 
 impl Boundary {
@@ -25,6 +26,7 @@ impl Boundary {
         match self {
             Self::CommitAck => "commit-ack.json",
             Self::MonitorRead => "monitor-read.json",
+            Self::ChildRead => "child-read.json",
         }
     }
 }
@@ -200,6 +202,14 @@ fn hit_in_root(
         Boundary::MonitorRead => ensure!(
             control.run_id.is_none() && control.generation.is_some(),
             "monitor fault requires an exact generation"
+        ),
+        Boundary::ChildRead => ensure!(
+            control
+                .run_id
+                .as_ref()
+                .is_some_and(|run| !run.is_empty() && run.len() <= 128)
+                && control.generation.is_some(),
+            "child read fault requires an exact run and generation"
         ),
     }
     let now = clock_ms()?;

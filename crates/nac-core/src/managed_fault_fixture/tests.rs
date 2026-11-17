@@ -16,7 +16,7 @@ impl Root {
     }
     fn control(&self, boundary: Boundary) -> serde_json::Value {
         let value = serde_json::json!({"nonce": uuid::Uuid::new_v4().to_string(), "boundary": boundary,
-            "session_id": "selected", "run_id": if boundary == Boundary::CommitAck { Some("run") } else { None },
+            "session_id": "selected", "run_id": if boundary != Boundary::MonitorRead { Some("run") } else { None },
             "generation": 7, "expires_unix_ms": clock_ms().unwrap()+10_000});
         let mut file = std::fs::OpenOptions::new()
             .write(true)
@@ -28,6 +28,35 @@ impl Root {
             .unwrap();
         value
     }
+}
+
+#[test]
+fn child_read_control_binds_run_and_generation_once() {
+    let root = Root::new();
+    root.control(Boundary::ChildRead);
+    for (session, run, generation) in [
+        ("other", Some("run"), Some(7)),
+        ("selected", Some("other"), Some(7)),
+        ("selected", Some("run"), Some(8)),
+    ] {
+        assert!(!hit_in_root(&root.0, Boundary::ChildRead, session, run, generation).unwrap());
+    }
+    assert!(hit_in_root(
+        &root.0,
+        Boundary::ChildRead,
+        "selected",
+        Some("run"),
+        Some(7)
+    )
+    .unwrap());
+    assert!(!hit_in_root(
+        &root.0,
+        Boundary::ChildRead,
+        "selected",
+        Some("run"),
+        Some(7)
+    )
+    .unwrap());
 }
 impl Drop for Root {
     fn drop(&mut self) {
