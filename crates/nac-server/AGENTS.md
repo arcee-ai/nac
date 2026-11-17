@@ -41,8 +41,10 @@ bundle, and builds the `nac-web` binary. Product use cases live in focused
   installs the single service observer, reserves or relaxes the native
   `/attention/events` seat/guard, subscribes to a session event bus, or attaches
   sessions. Keep one classification; report unknown/unsupported facets as-is.
-  A session not loaded in this store-owning process reports idle with nothing
-  pending (no broker can exist for it). An open `/attention/stream`, like an
+  A session absent from the process cache reports idle with no broker requests
+  only when its durable census has no live/unreconciled run. An uncached owner
+  can start work after a busy lease retires; keep its broker facets unknown while
+  durable run recovery is present. An open `/attention/stream`, like an
   open session event stream, holds `InteractivePresence`, so Ask waits for the
   attached human instead of failing closed; it never answers anything.
   It covers primary direct sessions and direct traditional children (child

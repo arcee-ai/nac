@@ -307,7 +307,11 @@ impl FleetAttentionHub {
             for stored in &census.metadata {
                 let service = match live.get(&stored.id) {
                     Some(service) => service.as_ref(),
-                    None => Some(&dormant),
+                    None if !stored.recovery_pending => Some(&dormant),
+                    // An uncached attachment can start a successor after a
+                    // busy peer releases its lease. Durable run recovery then
+                    // proves absence from this cache is not a broker-idle fact.
+                    None => None,
                 };
                 let topology = census.topology.get(&stored.id);
                 let facts = FleetAttentionFacts {
@@ -458,12 +462,11 @@ pub(crate) fn delta(
     FleetAttentionDelta { upserts, removed }
 }
 
-/// A session with no live service in this process is idle with nothing
-/// pending. This is not inferred from a cached row: the serving process holds
-/// its store exclusively, and permission and review requests live only in a
-/// loaded session's broker, so none can exist until the session loads here
-/// again (which republishes its live state). Durable questions still come from
-/// the store row.
+/// An unloaded session without durable run recovery is idle with no pending
+/// broker requests. A live or unreconciled run stays unknown when its owner is
+/// absent from the cache: observer attachments returned while a peer holds
+/// the operation lease are intentionally uncached and can later start work.
+/// Durable questions still come from the store row.
 fn dormant_service() -> AttentionServiceSnapshot {
     AttentionServiceSnapshot {
         epoch: uuid::Uuid::nil(),

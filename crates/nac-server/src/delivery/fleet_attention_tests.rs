@@ -276,6 +276,103 @@ fn settled(state: &Sessions) -> bool {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn uncached_attachment_that_starts_after_a_busy_owner_is_not_reported_clear() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let fixture = fixture().await;
+    let manager = fixture.manager.clone();
+    let inbox = open(&fixture.app, "/attention/stream").await;
+    let path = fixture.root.join("store.db");
+    let seed_path = path.clone();
+    manager
+        .inner
+        ._store_ownership
+        .call_legacy(move || {
+            nac_core::store::TranscriptLogWriter::new(&seed_path)?.append_run_prompt(
+                "session",
+                0,
+                &nac_core::types::Message::User {
+                    content: "peer-owned work".into(),
+                },
+                "peer-run",
+            )
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    let lease = sessions::SessionOperationLease::try_acquire(&path, "session").unwrap();
+    // Recovery cannot run under the peer's lease, so this is a real uncached
+    // attachment, not a fabricated omission from the fleet's service sample.
+    let service = manager.attach_session("session").await.unwrap();
+    assert!(!manager
+        .inner
+        .active_sessions
+        .read()
+        .await
+        .contains_key("session"));
+    assert!(service.list_permission_requests().unwrap().is_empty());
+    drop(lease);
+    // This is the same attach -> enqueue -> wake sequence used by the public
+    // direct inbox mutation, with the peer leaving between attachment and wake.
+    service
+        .enqueue_direct_input(
+            nac_core::store::InboxDelivery::Queue,
+            "run the command",
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while service.list_permission_requests().unwrap().is_empty() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("uncached service owns a real pending Ask");
+    assert!(!manager
+        .inner
+        .active_sessions
+        .read()
+        .await
+        .contains_key("session"));
+    assert_eq!(fixture.calls.load(Ordering::SeqCst), 1);
+    let observed = session(&json(&fixture.app, "/attention").await, "session");
+    // Resolve through the actual owner before asserting the old failure, so
+    // the negative control also leaves no waiting model or operation lease.
+    let id = service.list_permission_requests().unwrap()[0].id.clone();
+    let replying = service.clone();
+    manager
+        .inner
+        ._store_ownership
+        .call_legacy(move || {
+            replying.reply_permission_request(&id, nac_core::permissions::PermissionReply::Reject)
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while service.has_active_operation() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let cleared = session(&json(&fixture.app, "/attention").await, "session");
+    let dormant = session(&json(&fixture.app, "/attention").await, "dormant");
+    drop((service, inbox, manager));
+    fixture.finish().await;
+    assert_eq!(observed["availability"]["permissions"], "unknown");
+    assert_eq!(observed["availability"]["reviews"], "unknown");
+    assert_eq!(observed["activity"]["kind"], "unknown");
+    assert_eq!(cleared["availability"]["permissions"], "available");
+    assert_eq!(cleared["availability"]["reviews"], "available");
+    assert_eq!(cleared["activity"]["kind"], "idle");
+    assert!(cleared["last_outcome"]["run_id"].is_string());
+    assert_eq!(dormant["availability"]["permissions"], "available");
+    assert_eq!(dormant["activity"]["kind"], "idle");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn real_pending_permission_reaches_every_browser_stream_and_resolves_beside_native() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let fixture = fixture().await;
