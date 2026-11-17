@@ -477,6 +477,56 @@ export interface components {
       rows: number;
       stop: boolean;
     };
+    FleetAttentionActivityDto:
+      | { kind: "unknown" }
+      | { kind: "idle" }
+      | { kind: "run"; run_id: string }
+      | { kind: "manual"; operation_id: string }
+      | { compaction_id: string; kind: "compaction" };
+    FleetAttentionFrame:
+      | {
+          epoch: string;
+          kind: "snapshot";
+          revision: number;
+          sessions: components["schemas"]["FleetAttentionSessionDto"][];
+        }
+      | {
+          epoch: string;
+          kind: "changes";
+          removed: string[];
+          revision: number;
+          upserts: components["schemas"]["FleetAttentionSessionDto"][];
+        }
+      | { kind: "unavailable"; reason: components["schemas"]["FleetAttentionUnavailableDto"] };
+    FleetAttentionLineageDto: {
+      kind: components["schemas"]["SessionLineageKind"];
+      parent_session_id: string;
+      root_session_id: string;
+    };
+    FleetAttentionOutcomeDto: {
+      disposition: components["schemas"]["FleetAttentionOutcomeKindDto"];
+      run_id: string;
+    };
+    FleetAttentionOutcomeKindDto: "completed" | "failed" | "cancelled";
+    FleetAttentionSessionDto: {
+      activity: components["schemas"]["FleetAttentionActivityDto"];
+      availability: components["schemas"]["AttentionAvailabilityDto"];
+      last_outcome: components["schemas"]["FleetAttentionOutcomeDto"] | null;
+      lineage: components["schemas"]["FleetAttentionLineageDto"] | null;
+      pending: components["schemas"]["AttentionDecisionDto"][];
+      project_id: string | null;
+      queued: boolean;
+      recovery_pending: boolean;
+      revision: number;
+      session_id: string;
+      work: components["schemas"]["AttentionWorkDto"] | null;
+    };
+    FleetAttentionSnapshotDto: {
+      epoch: string;
+      revision: number;
+      sessions: components["schemas"]["FleetAttentionSessionDto"][];
+    };
+    FleetAttentionUnavailableDto: "capacity" | "store";
     ForkSessionRequest: { message_idx: number };
     ForkSessionResponse: { session_id: string };
     FreshTaskDestination: {

@@ -9,6 +9,47 @@
     "version": "0.1.4"
   },
   "paths": {
+    "/attention": {
+      "get": {
+        "tags": [
+          "sessions"
+        ],
+        "operationId": "get_attention",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Only sessions assigned to this project.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Identity-only attention for every session, from the shared attention classification. Passive: never attaches, wakes, answers or counts as an interactive client.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetAttentionSnapshotDto"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The attention census is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/attention/events": {
       "get": {
         "tags": [
@@ -94,6 +135,47 @@
           },
           "503": {
             "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/attention/stream": {
+      "get": {
+        "tags": [
+          "sessions"
+        ],
+        "operationId": "get_attention_stream",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Only sessions assigned to this project.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Server-sent `fleet_attention` events (FleetAttentionFrame): a snapshot, then coalesced changes. Many concurrent browser streams share one refresher. Every connection starts with a fresh snapshot; the SSE id is informational. Never gzip-compressed.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetAttentionFrame"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The census is unavailable or the stream limit is reached; poll GET /attention instead",
             "content": {
               "application/json": {
                 "schema": {
@@ -14148,6 +14230,344 @@
             "type": "boolean"
           }
         }
+      },
+      "FleetAttentionActivityDto": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "unknown"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "idle"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "run_id",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "run"
+                ]
+              },
+              "run_id": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "operation_id",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "manual"
+                ]
+              },
+              "operation_id": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "compaction_id",
+              "kind"
+            ],
+            "properties": {
+              "compaction_id": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "compaction"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "Current operation of a cached owner. `unknown` means no owner in this\nprocess can be observed; it never means idle."
+      },
+      "FleetAttentionFrame": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "epoch",
+              "revision",
+              "sessions",
+              "kind"
+            ],
+            "properties": {
+              "epoch": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "snapshot"
+                ]
+              },
+              "revision": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "sessions": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/FleetAttentionSessionDto"
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "epoch",
+              "revision",
+              "upserts",
+              "removed",
+              "kind"
+            ],
+            "properties": {
+              "epoch": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "changes"
+                ]
+              },
+              "removed": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "revision": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "upserts": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/FleetAttentionSessionDto"
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "reason",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "unavailable"
+                ]
+              },
+              "reason": {
+                "$ref": "#/components/schemas/FleetAttentionUnavailableDto"
+              }
+            }
+          }
+        ],
+        "description": "`snapshot` is always first on a connection; `changes` replace whole\nsession entries and list sessions that disappeared; `unavailable` ends the\nstream and the client re-baselines (or polls) later."
+      },
+      "FleetAttentionLineageDto": {
+        "type": "object",
+        "required": [
+          "kind",
+          "parent_session_id",
+          "root_session_id"
+        ],
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/SessionLineageKind"
+          },
+          "parent_session_id": {
+            "type": "string"
+          },
+          "root_session_id": {
+            "type": "string"
+          }
+        }
+      },
+      "FleetAttentionOutcomeDto": {
+        "type": "object",
+        "description": "The latest durable run outcome. History, not a claim the session is idle.",
+        "required": [
+          "run_id",
+          "disposition"
+        ],
+        "properties": {
+          "disposition": {
+            "$ref": "#/components/schemas/FleetAttentionOutcomeKindDto"
+          },
+          "run_id": {
+            "type": "string"
+          }
+        }
+      },
+      "FleetAttentionOutcomeKindDto": {
+        "type": "string",
+        "enum": [
+          "completed",
+          "failed",
+          "cancelled"
+        ]
+      },
+      "FleetAttentionSessionDto": {
+        "type": "object",
+        "description": "Identity-only attention for one session. `pending` holds exact current\nrequest identities; read `availability` before treating an empty list as\n\"nothing pending\" (`unknown` / `unsupported` never mean none).",
+        "required": [
+          "session_id",
+          "revision",
+          "project_id",
+          "lineage",
+          "pending",
+          "work",
+          "availability",
+          "activity",
+          "last_outcome",
+          "queued",
+          "recovery_pending"
+        ],
+        "properties": {
+          "activity": {
+            "$ref": "#/components/schemas/FleetAttentionActivityDto"
+          },
+          "availability": {
+            "$ref": "#/components/schemas/AttentionAvailabilityDto"
+          },
+          "last_outcome": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FleetAttentionOutcomeDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lineage": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FleetAttentionLineageDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pending": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AttentionDecisionDto"
+            }
+          },
+          "project_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "queued": {
+            "type": "boolean",
+            "description": "Durable queued input not yet admitted to a run."
+          },
+          "recovery_pending": {
+            "type": "boolean",
+            "description": "A durable run marker is unsettled (running elsewhere or awaiting recovery)."
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "work": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AttentionWorkDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "FleetAttentionSnapshotDto": {
+        "type": "object",
+        "description": "Every visible session at one fleet revision.",
+        "required": [
+          "epoch",
+          "revision",
+          "sessions"
+        ],
+        "properties": {
+          "epoch": {
+            "type": "string",
+            "description": "Server incarnation of the revision sequence; a change means re-baseline."
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "sessions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FleetAttentionSessionDto"
+            }
+          }
+        }
+      },
+      "FleetAttentionUnavailableDto": {
+        "type": "string",
+        "enum": [
+          "capacity",
+          "store"
+        ]
       },
       "ForkSessionRequest": {
         "type": "object",
