@@ -232,10 +232,13 @@ if (process.isMainFrame && origin && location.origin === origin && incarnation) 
       const connection = sessionTarget,
         target = message.targetMessage;
       const focused = document.activeElement;
-      const editor =
+      const unretainedEditor =
         focused instanceof HTMLElement &&
-        (focused.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(focused.tagName));
-      if (composing || editor || !connection) {
+        (focused.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(focused.tagName)) &&
+        !focused.hasAttribute("data-nac-retained-draft");
+      // Retained composers survive routing. The shared owner still applies its
+      // keyboard/layer guards before deciding whether this target may open.
+      if (composing || unretainedEditor || !connection) {
         send("target_settled", {
           request: target.request,
           outcome: connection ? "deferred" : "unavailable",
