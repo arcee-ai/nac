@@ -35,6 +35,10 @@ export function applyFleetAttention(
   input: FleetAttentionInput,
 ): FleetAttentionState {
   const sameScope = state.scope === input.scope;
+  // A malformed frame (a stub or a proxy's error page) never replaces real state.
+  if (input.kind === "snapshot" && !Array.isArray(input.sessions)) return state;
+  if (input.kind !== "snapshot" && (!Array.isArray(input.upserts) || !Array.isArray(input.removed)))
+    return state;
   if (input.kind === "snapshot") {
     // A stale poll never rolls back a newer stream state in the same epoch.
     if (sameScope && state.epoch === input.epoch && input.revision < state.revision) return state;
