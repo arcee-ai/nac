@@ -12,6 +12,11 @@ import {
 } from "@/app/atoms";
 import { ModelMessage } from "@/app/components/inspector/ModelMessage";
 import { UserMessage } from "@/app/components/inspector/UserMessage";
+import {
+  keepTurnKeys,
+  replyKey,
+  type DrawnTurns,
+} from "@/app/components/inspector/transcript/turnKeys";
 import { DelegatedCompletionCard } from "@/app/features/delegation/presentation/DelegatedCompletionCard";
 import { GoalContinuationCard } from "@/app/features/goals/presentation/GoalContinuationCard";
 import { ChildTranscriptScope } from "@/app/features/insights/transcript/ChildTranscriptScope";
@@ -22,13 +27,12 @@ import { useStickToBottom } from "@/app/hooks/useStickToBottom";
 import { useTranscriptReveal } from "@/app/hooks/useTranscriptReveal";
 import { cn } from "@/app/lib/cn";
 import { displayPromptFromMessageText, invokedSkillNames } from "@/app/lib/format";
+import { buildTranscript, withStreamedOutput, type TranscriptTurn } from "@/app/lib/transcript";
 import {
-  STREAMING_TURN_KEY,
-  buildTranscript,
-  withStreamedOutput,
-  type TranscriptTurn,
-} from "@/app/lib/transcript";
-import { useLoadOlderMessages, useSessionSnapshot } from "@/app/services/queries";
+  useLoadOlderMessages,
+  useSessionPermissions,
+  useSessionSnapshot,
+} from "@/app/services/queries";
 
 function ignoreThread(): void {}
 
@@ -51,6 +55,7 @@ export function SubagentPreview({
   sessionId,
   title,
   fallbackText,
+  relationship,
   icon,
   header = true,
   phoneHeaderInFlow = false,
@@ -59,6 +64,7 @@ export function SubagentPreview({
   sessionId: string;
   title: string;
   fallbackText: string | null;
+  relationship?: { status: string; generation: number; runId: string | null };
   icon: IconName;
   /** Below the desktop width the panel's own header names it and carries Open. */
   header?: boolean;
@@ -69,10 +75,38 @@ export function SubagentPreview({
 }) {
   const isMobile = useIsMobile();
   const showBehaviorIcon = useSessionBehaviorIconVisible();
-  const snapshot = useSessionSnapshot(sessionId, { retry: false });
   const live = useDelegatedPreviewStream(sessionId);
+  const snapshot = useSessionSnapshot(sessionId, {
+    retry: false,
+    refetchInterval: live.recovering && relationship?.status === "running" ? 1_000 : false,
+  });
+  const refreshSnapshot = snapshot.refetch;
+  // Relationship polling supplies a separate settlement signal when a gap
+  // also lost the child's terminal event. A generation/status change forces a
+  // final read; active runs keep refreshing until that signal arrives.
+  useEffect(() => {
+    if (live.recovering) void refreshSnapshot();
+  }, [
+    live.recovering,
+    relationship?.generation,
+    relationship?.runId,
+    relationship?.status,
+    refreshSnapshot,
+  ]);
   const older = useLoadOlderMessages(sessionId);
   const data = snapshot.data;
+  const direct =
+    data?.metadata.behavior === "direct" || data?.metadata.behavior === "direct-with-orchestrator";
+  const { data: permissions } = useSessionPermissions(sessionId, direct);
+  const pendingPermissionCallIds = useMemo(
+    () =>
+      new Set(
+        (permissions?.requests ?? [])
+          .map((request) => request.call_id)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    [permissions?.requests],
+  );
   const hasOlder = Boolean(data?.message_page?.has_older);
   const windowStart = data?.message_page?.start ?? 0;
   const [olderFailed, setOlderFailed] = useState(false);
@@ -130,7 +164,24 @@ export function SubagentPreview({
     };
   }, [hasOlder, loadOlder, olderFailed, scrollRef, windowStart]);
 
-  const snapshotTurns = useMemo(() => buildTranscript(data ?? null, {}, {}, []), [data]);
+  const built = useMemo(
+    () => buildTranscript(data ?? null, {}, {}, live.toolEvents, pendingPermissionCallIds),
+    [data, live.toolEvents, pendingPermissionCallIds],
+  );
+  const [drawn, setDrawn] = useState<
+    (DrawnTurns & { sessionId: string; built: TranscriptTurn[]; turns: TranscriptTurn[] }) | null
+  >(null);
+  let current = drawn;
+  if (current?.built !== built || current.sessionId !== sessionId) {
+    current = {
+      sessionId,
+      built,
+      windowStart,
+      turns: keepTurnKeys(built, windowStart, current?.sessionId === sessionId ? current : null),
+    };
+    setDrawn(current);
+  }
+  const snapshotTurns = current.turns;
   const submitted = running ? data?.active_run?.submitted_user_message : undefined;
   const pendingText = submitted ? displayPromptFromMessageText(submitted.content) : "";
   const pendingSkills = submitted ? invokedSkillNames(submitted.content) : null;
@@ -138,22 +189,47 @@ export function SubagentPreview({
   // A run that has started producing before its prompt is in the snapshot must
   // open a new turn. Appending those tokens to the previous reply is what made
   // the preview look like one summarizing message.
-  const streamDetached = live.running && !data?.active_run && Boolean(live.text || live.reasoning);
+  const snapshotEnd = windowStart + (data?.messages.length ?? 0);
+  const matchesRun =
+    live.startedAt != null && data?.active_run?.started_at_epoch_ms === live.startedAt;
+  const streamDetached =
+    Boolean(live.text || live.reasoning) &&
+    (live.startedAt != null
+      ? !matchesRun &&
+        (live.promptEnd != null
+          ? snapshotEnd < live.promptEnd
+          : live.baselineEnd != null
+            ? snapshotEnd <= live.baselineEnd
+            : true)
+      : live.running && !data?.active_run);
+  const streamKey =
+    showPending || streamDetached
+      ? `model-${windowStart + (data?.messages.length ?? 0) + 1}`
+      : replyKey(snapshotTurns, windowStart);
   const turns = useMemo(
     () =>
       withStreamedOutput(
         snapshotTurns,
-        { text: live.text, reasoning: live.reasoning },
+        { text: live.text, reasoning: live.reasoning, settled: live.settled },
         showPending || streamDetached,
+        streamKey,
       ),
-    [live.reasoning, live.text, showPending, snapshotTurns, streamDetached],
+    [
+      live.reasoning,
+      live.text,
+      live.settled,
+      showPending,
+      snapshotTurns,
+      streamDetached,
+      streamKey,
+    ],
   );
 
   const lastTurn = turns[turns.length - 1];
   const liveTurn =
-    running && lastTurn?.kind === "model" && (!showPending || lastTurn.key === STREAMING_TURN_KEY);
+    running && lastTurn?.kind === "model" && (!showPending || lastTurn.key === streamKey);
   const showModelPending = running && !liveTurn;
-  const streamingTurn = showPending && lastTurn?.key === STREAMING_TURN_KEY;
+  const streamingTurn = showPending && lastTurn?.key === streamKey;
   const model = data?.metadata.model ?? "";
   const fade = revealed
     ? "opacity-100 transition-opacity duration-300 ease-in-out"
@@ -276,7 +352,7 @@ export function SubagentPreview({
                     interactive={false}
                   />
                 );
-                return streamingTurn && turn.key === STREAMING_TURN_KEY ? (
+                return streamingTurn && turn.key === streamKey ? (
                   <Fragment key={turn.key}>
                     <UserMessage
                       text={pendingText}

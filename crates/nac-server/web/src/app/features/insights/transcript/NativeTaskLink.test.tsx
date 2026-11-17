@@ -123,6 +123,7 @@ function mountErrorReceipt({
     <MemoryRouter initialEntries={["/session/caller/insights"]}>
       <CurrentRoute />
       <WorkFoldView
+        turnKey="test-turn"
         fold={{
           kind: "fold",
           key: "fold:launch-group",
@@ -269,6 +270,7 @@ it("deduplicates validated launch and status receipts within each group, includi
       <CurrentRoute />
       <WorkFoldView
         fold={fold}
+        turnKey="test-turn"
         active={active}
         turnDurationMs={null}
         selectedGroupId={null}

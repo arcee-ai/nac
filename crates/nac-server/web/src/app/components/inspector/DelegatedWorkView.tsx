@@ -21,13 +21,13 @@ import {
 } from "@/app/features/delegation/presentation/subagentRowModel";
 import { SubagentRowActions } from "@/app/components/inspector/SubagentListControls";
 import { SubagentPreview } from "@/app/components/inspector/SubagentPreview";
+import { FoldChoicesContext } from "@/app/components/inspector/transcript/foldChoices";
 import { PanelEmptyState } from "@/app/components/inspector/PanelMessages";
 import { PanelSplit } from "@/app/components/inspector/PanelSplit";
 import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
 import { usePanelListMarksOpen } from "@/app/hooks/usePanelListMarksOpen";
 import { useNow } from "@/app/hooks/useNow";
 import { cn } from "@/app/lib/cn";
-import { groupByRecency } from "@/app/lib/projects";
 import { routes } from "@/app/lib/routes";
 import { sessionBehaviorIcon } from "@/app/lib/sessionBehavior";
 import {
@@ -49,6 +49,8 @@ interface SubagentRow {
   id: string;
   description: string;
   status: TraditionalChildStatus;
+  generation: number;
+  runId: string | null;
   background: boolean;
   updatedAt: string;
   fallbackText: string | null;
@@ -71,6 +73,8 @@ function rowFromChild(child: TraditionalChildRecord): SubagentRow {
     id: child.child_session_id,
     description: child.description,
     status: child.status,
+    generation: child.generation,
+    runId: child.run_id ?? null,
     background: child.execution_mode !== "foreground",
     updatedAt: child.updated_at,
     fallbackText:
@@ -88,6 +92,8 @@ function rowFromOrchestrator(orchestrator: ManagedOrchestratorRecord): SubagentR
     id: orchestrator.orchestrator_session_id,
     description: orchestrator.description,
     status: orchestrator.status,
+    generation: orchestrator.generation,
+    runId: orchestrator.run_id ?? null,
     background: orchestrator.execution_mode !== "foreground",
     updatedAt: orchestrator.updated_at,
     fallbackText: nonempty(orchestrator.failure) ?? nonempty(orchestrator.report),
@@ -124,6 +130,7 @@ export function DelegatedWorkView({
   const sessions = useSessions();
   const now = useNow(60_000);
   const selectedKey = useSelectedSubagent(sessionId);
+  const [foldChoices] = useState(() => new Map<string, boolean>());
 
   const rows = useMemo(() => {
     const childRows = (children.data ?? []).map(rowFromChild);
@@ -166,27 +173,26 @@ export function DelegatedWorkView({
   );
   const rowTitle = (row: SubagentRow) => nonempty(summaries.get(row.id)?.title) ?? row.description;
 
-  const groups = useMemo(
-    () =>
-      groupByRecency(
-        rows,
-        (row) => ({ updatedAt: row.updatedAt, pinned: Boolean(summaries.get(row.id)?.pinned) }),
-        now,
-      ),
-    [rows, summaries, now],
-  );
+  const failed = children.isError || (supportsOrchestrators && orchestrators.isError);
+  const loaded = children.isSuccess && (!supportsOrchestrators || orchestrators.isSuccess);
+  const groups = useMemo(() => {
+    const ordered = [...rows].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    const active = ordered.filter((row) => row.status === "running");
+    const finished = ordered.filter((row) => row.status !== "running" && row.status !== "idle");
+    const idle = ordered.filter((row) => row.status === "idle");
+    return [
+      { label: loaded && !failed ? `Active (${active.length})` : "Active", items: active },
+      { label: "Finished", items: finished },
+      { label: "Idle", items: idle },
+    ].filter((group, index) => index === 0 || group.items.length > 0);
+  }, [rows, loaded, failed]);
 
   const chooseRow = (key: string) => {
     selectSubagent(sessionId, key);
     showSidePanelList(false);
   };
 
-  // A failed poll keeps the last successful payload. Only an empty failure
-  // replaces the list; otherwise the rows would vanish on a dropped refetch.
-  const failed =
-    rows.length === 0 && (children.isError || (supportsOrchestrators && orchestrators.isError));
   // "None yet" is only true once every list the panel shows has answered.
-  const loaded = children.isSuccess && (!supportsOrchestrators || orchestrators.isSuccess);
   // Subagents are started by the agent; the panel only shows and manages them.
   if (loaded && rows.length === 0) {
     return (
@@ -199,7 +205,11 @@ export function DelegatedWorkView({
   }
   const loadError = (
     <div role="alert" className="flex flex-col items-start gap-2 px-2.5 py-3">
-      <p className="type-body-chrome text-error-primary">Subagents could not be loaded.</p>
+      <p className="type-body-chrome text-error-primary">
+        {rows.length
+          ? "Some subagents could not be loaded. Showing available agents."
+          : "Subagents could not be loaded."}
+      </p>
       <Button
         className="max-md:!min-h-11 max-md:!min-w-11"
         size={ButtonSize.Small}
@@ -216,14 +226,15 @@ export function DelegatedWorkView({
   // In the list too, so a narrow list opened over a failed load still offers the retry.
   const listState = failed ? (
     loadError
-  ) : rows.length === 0 && !loaded ? (
+  ) : !loaded ? (
     <p role="status" className="type-body-chrome m-auto px-2.5 py-3 text-basic-tertiary">
-      Loading subagents…
+      {rows.length ? "Loading remaining subagents…" : "Loading subagents…"}
     </p>
   ) : null;
   const list = (
     <div className="flex flex-col gap-5">
       {listState}
+      <span className="type-meta px-2.5 text-basic-tertiary">Agents in this chat</span>
       {groups.map((group) => (
         <div key={group.label} className="flex flex-col gap-0.5">
           <span className={cn("type-meta text-basic-muted pb-1", isMobile ? "px-3" : "px-2.5")}>
@@ -329,15 +340,19 @@ export function DelegatedWorkView({
       <div ref={setDetailColumn} className="relative flex min-h-0 flex-1 flex-col">
         {selected ? (
           <>
-            <SubagentPreview
-              sessionId={selected.id}
-              title={rowTitle(selected)}
-              fallbackText={selected.fallbackText}
-              icon={sessionBehaviorIcon(null, MODE_LINEAGE[selected.mode])}
-              header={!narrow}
-              phoneHeaderInFlow={isMobile}
-              onOpen={() => openDetail(selected.id)}
-            />
+            <FoldChoicesContext value={foldChoices}>
+              <SubagentPreview
+                key={selected.key}
+                sessionId={selected.id}
+                title={rowTitle(selected)}
+                fallbackText={selected.fallbackText}
+                relationship={selected}
+                icon={sessionBehaviorIcon(null, MODE_LINEAGE[selected.mode])}
+                header={!narrow}
+                phoneHeaderInFlow={isMobile}
+                onOpen={() => openDetail(selected.id)}
+              />
+            </FoldChoicesContext>
             <div ref={setComposerLayer} className="pointer-events-none absolute inset-x-0 bottom-0">
               <SubagentComposer
                 key={`${selected.mode}:${selected.id}`}
