@@ -45,6 +45,18 @@ tests::persistence_load::owned_persistence_current_thread_load_scenario
 tests::persistence_load::owned_persistence_load_scenario
 '''.splitlines()
 
+DIRECT_IGNORED = '''\
+tests::managed_load::direct_acceptance::direct_load_replacement_scenario
+tests::managed_load::direct_acceptance::direct_load_concurrent_probe
+tests::managed_load::direct_acceptance::direct_load_busy_conflict
+tests::managed_load::direct_candidate::direct_candidate_load_scenario
+tests::managed_load::direct_faults::direct_native_cancellation_and_reconstruction
+tests::managed_load::direct_faults::direct_model_cancellation_and_reconstruction
+tests::managed_load::direct_faults::direct_child_append_failure_and_reconstruction
+tests::persistence_load::owned_direct_persistence_load_scenario
+tests::persistence_load::owned_direct_persistence_current_thread_load_scenario
+'''.splitlines()
+
 
 def cancellation_fixture_pids(ready, log, deadline):
     while time.monotonic() < deadline:
@@ -195,7 +207,8 @@ class Controls(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'inventory drift') as missing_calendar:
             runner.verify_inventory(previous, inventory)
         self.assertIn(calendar, str(missing_calendar.exception))
-        reviewed_names = [*RETAINED_IGNORED, heartbeat, calendar]
+        direct_names = DIRECT_IGNORED
+        reviewed_names = [*RETAINED_IGNORED, heartbeat, calendar, *direct_names]
         listing = '\n'.join(name + ': test' for name in reviewed_names)
         runner.verify_inventory(listing, inventory)
         # Every removal/rename, including the new manual case, still fails closed.
@@ -211,7 +224,8 @@ class Controls(unittest.TestCase):
             runner.verify_inventory(listing, legacy)
         for case in inventory[13:]:
             self.assertIn(case['name'], str(failure.exception))
-            self.assertNotEqual(case['disposition'], 'included')
+            if case['name'] not in direct_names:
+                self.assertNotEqual(case['disposition'], 'included')
         with self.assertRaisesRegex(RuntimeError, 'inventory drift'):
             runner.verify_inventory(listing + '\nnew::unreviewed: test', inventory)
 
@@ -220,6 +234,19 @@ class Controls(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'exact test did not pass'):
                 runner.require_exact(log, 'exact::case')
         runner.require_exact('test exact::case ... ok', 'exact::case')
+
+    def test_direct_pr_runner_rejects_empty_success(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cargo = Path(directory) / 'cargo'
+            cargo.write_text('#!/bin/sh\nexit 0\n')
+            cargo.chmod(0o700)
+            result = subprocess.run(
+                [sys.executable, str(SCRIPT.with_name('direct-load.py'))],
+                env={**os.environ, 'CARGO': str(cargo)},
+                capture_output=True, text=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('direct load case did not pass', result.stderr)
 
     def test_allowlist_and_serial_commands(self):
         # Guard the public CLI contract against accidentally including all ignored cases.
@@ -232,7 +259,9 @@ class Controls(unittest.TestCase):
             'tools::discovery::tests::tools_work_without_external_search_binaries_on_path',
             'tests::persistence_load::owned_persistence_load_scenario',
             'tests::persistence_load::owned_persistence_current_thread_load_scenario',
+            *DIRECT_IGNORED,
         })
+        self.assertEqual(len(included), 13)
         self.assertEqual(sum('process-PATH mutation' in c['capabilities'] for c in included), 2)
         self.assertFalse(any('Podman machine' in c['capabilities'] for c in included))
 

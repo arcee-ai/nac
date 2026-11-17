@@ -162,6 +162,13 @@ test('quality reusable retains full fallback, current-attempt validation and man
   const fault = steps.find(s => s.run === 'make test-managed-fault-fixture');
   assert.ok(steps.indexOf(fault) > steps.indexOf(full));
   assert.equal(fault.if, "steps.quality-mode.outputs.mode == 'full' || steps.fault-mode.outputs.mode == 'full'");
+  const clear = steps.find(s => s.run === 'rm -f target/direct-load/private-candidate-child-read.json');
+  assert.equal(clear.if, fault.if);
+  assert.ok(steps.indexOf(clear) < steps.indexOf(fault));
+  const artifact = steps.find(s => s.name === 'Retain standalone private candidate evidence');
+  assert.equal(artifact.with.path, 'target/direct-load/private-candidate-child-read.json');
+  assert.equal(artifact.if, "always() && (steps.quality-mode.outputs.mode == 'full' || steps.fault-mode.outputs.mode == 'full')");
+  assert.ok(steps.indexOf(artifact) > steps.indexOf(fault));
   const faultMode = steps.find(s => s.id === 'fault-mode');
   assert.equal(faultMode.env.FAULT_RECEIPT, '${{ inputs.fault_receipt }}');
   assert.equal(faultMode.env.EXPECTED_SHA, '${{ inputs.source_sha }}');

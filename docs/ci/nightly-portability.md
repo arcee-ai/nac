@@ -32,7 +32,7 @@ OS/browser matrix. Default ignored cases remain ignored during that phase.
 ## Reviewed ignored inventory
 
 The exact names, package, disposition, reason and required capabilities live in
-[the inventory](../../.github/scripts/nightly-portability.json). All twenty-two
+[the inventory](../../.github/scripts/nightly-portability.json). All thirty-one
 ignored tests discovered by the native workspace harness must match that file;
 new, renamed or removed entries fail before any selected execution. Review the
 owning test and its nearest AGENTS guide before changing that inventory.
@@ -41,6 +41,7 @@ owning test and its nearest AGENTS guide before changing that inventory.
 |---|---:|---|
 | Included: core `tools::discovery::tests` local fake-SSH parity and no-external-search tests | 2 | Local executable shims, system OpenSSH `sftp-server`, no remote connection or credentials. Both mutate process PATH. |
 | Included: server `tests::persistence_load` owned-store multi-thread and current-thread variants | 2 | Built `nac-web` worker, scripted local provider, SQLite and local processes. These exercise serving-store ownership and executor variants omitted by legacy managed-load. |
+| Included: direct parents and traditional children | 9 | Offline 1/2/4 ordered and four-way concurrent cases, SQLite contention, child transcript append failure, model and native-process cancellation with reconstruction, plus a built-candidate loopback workload and current-thread and multi-thread owned-store variants. Direct evidence is retained separately. |
 | Already covered: server `tests::managed_load::managed_load_scenario` | 1 | Required `test-workspace` invokes `make test-managed-load`; managed quality also runs it. Not duplicated as a nightly ignored selection. |
 | Excluded: core `agent::live_tests` | 2 | Paid/live provider API key and network calls. |
 | Excluded: process admission, core projection, Responses SSE latency, task-wait maximum timeout and server heartbeat measurements | 6 | Manual quiet-host/exclusive-window timing or resource qualification. Task-wait measures the real 60-second maximum; interval and calendar heartbeat cases measure two real scheduler owners at 1/10/100 schedules. |
@@ -168,7 +169,7 @@ claim that every detached process identity is observable. Abrupt SIGKILL/host
 loss may prevent final reports; missing evidence is not success. Hosted runner
 teardown is the final isolation boundary.
 
-Thirteen controls cover stale evidence rejection, inventory drift, exact-selection
+Sixteen controls cover stale evidence rejection, inventory drift, exact-selection
 failure, the full serialized command plan, long-argv fixture process visibility,
 allowlist scope, real Rust first-attempt failure and cancellation of an actual parent/child
 process behind a readiness barrier. They also cover a real zombie-only group,
@@ -176,7 +177,8 @@ fail-closed EPERM with live/stopped members or failed/malformed observation,
 and retained timing/summary when cleanup fails. The captured twenty-name native
 discovery also reproduces the old seven-name rejection, accepts the repaired
 inventory, and rejects every individual removal/rename plus an unreviewed
-addition. The allowlist control pins the original four selected names exactly.
+addition. The allowlist control pins the original four selected names and the
+nine direct-session selections exactly.
 Real Unix-socket controls reproduce rejected long paths and bind all three
 actual readonly/workspace socket suffixes under the short private root. The
 full runner command-plan control starts with a deliberately long host `TMPDIR`,

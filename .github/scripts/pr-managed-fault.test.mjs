@@ -117,32 +117,38 @@ test("early reusable fault job runs the complete unchanged fixture before emitti
   const fixture = job.steps.findIndex(s => s.id === "fixture");
   const evidence = job.steps.findIndex(s => s.id === "receipt");
   assert.ok(fixture > 0 && evidence > fixture);
+  const clear = job.steps.findIndex(s => s.run === "rm -f target/direct-load/private-candidate-child-read.json");
+  assert.ok(clear > 0 && clear < fixture);
   assert.equal(job.steps[fixture].run, "make test-managed-fault-fixture");
   assert.equal(job.steps.filter(s => s.run === "make test-managed-fault-fixture").length, 1);
   assert.equal(job.steps[evidence].run, 'node .github/scripts/managed-fault.mjs receipt >> "$GITHUB_OUTPUT"');
   assert.deepEqual(job.steps[evidence].env, { EXPECTED_SHA: "${{ inputs.source_sha }}", CHECKOUT_SHA: "${{ steps.candidate.outputs.sha }}", FIXTURE_RESULT: "${{ steps.fixture.outcome }}" });
   assert.match(job.steps.find(s => s.id === "candidate").run, /test "\$sha" = "\$EXPECTED_SHA"/);
+  const artifact = job.steps.find(s => s.uses?.startsWith("actions/upload-artifact@"));
+  assert.equal(artifact.if, "always()");
+  assert.equal(artifact.with.path, "target/direct-load/private-candidate-child-read.json");
+  assert.ok(job.steps.indexOf(artifact) > evidence);
   for (const step of job.steps) {
-    assert.equal(step.if, undefined, "no condition can omit mandatory fixture or emit on failure");
+    if (step !== artifact) assert.equal(step.if, undefined, "no condition can omit mandatory fixture or emit on failure");
     assert.equal(step["continue-on-error"], undefined);
     assert.equal(step.permissions, undefined);
     assert.doesNotMatch(step.run ?? "", /make ci/);
   }
 });
 
-test("real Make fixture retains all four test filters and clippy; each failure prevents receipt emission", t => {
+test("real Make fixture retains every fault case and clippy; each failure prevents receipt emission", t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "nac-fault-wiring-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const fakeCargo = path.join(root, "cargo.mjs");
-  fs.writeFileSync(fakeCargo, `#!${process.execPath}\nimport fs from 'node:fs';\nconst file=process.env.CARGO_CALLS;\nconst calls=fs.existsSync(file)?JSON.parse(fs.readFileSync(file,'utf8')):[];\ncalls.push(process.argv.slice(2));fs.writeFileSync(file,JSON.stringify(calls));\nif(calls.length===Number(process.env.FAIL_COMMAND_INDEX))process.exit(1);\n`);
+  fs.writeFileSync(fakeCargo, `#!${process.execPath}\nimport fs from 'node:fs';\nconst file=process.env.CARGO_CALLS;\nconst calls=fs.existsSync(file)?JSON.parse(fs.readFileSync(file,'utf8')):[];\ncalls.push(process.argv.slice(2));fs.writeFileSync(file,JSON.stringify(calls));\nif(calls.length===Number(process.env.FAIL_COMMAND_INDEX))process.exit(1);\nconst candidate='tests::managed_load::direct_candidate_fault::private_candidate_child_read_fault_reconciles_once';\nif(process.argv.includes(candidate) && !process.env.EMPTY_CANDIDATE)console.log('test '+candidate+' ... ok');\n`);
   fs.chmodSync(fakeCargo, 0o755);
   const fixture = YAML.parse(fs.readFileSync(".github/workflows/managed-fault.yml", "utf8")).jobs.fault.steps.find(s => s.id === "fixture").run;
-  for (let failed = 0; failed <= 5; failed++) {
+  for (let failed = 0; failed <= 7; failed++) {
     const calls = path.join(root, `calls-${failed}.json`);
     const output = path.join(root, `receipt-${failed}`);
     const result = spawnSync("bash", ["-e", "-c", `${fixture}\nnode .github/scripts/managed-fault.mjs receipt >> "$GITHUB_OUTPUT"`], { env: { ...env, CARGO: fakeCargo, CARGO_CALLS: calls, FAIL_COMMAND_INDEX: String(failed), GITHUB_OUTPUT: output }, encoding: "utf8" });
     const commands = JSON.parse(fs.readFileSync(calls, "utf8"));
-    assert.equal(commands.length, failed || 5);
+    assert.equal(commands.length, failed || 7);
     if (failed) {
       assert.notEqual(result.status, 0);
       assert.equal(fs.existsSync(output), false, "a failed fixture cannot emit reusable evidence");
@@ -154,11 +160,18 @@ test("real Make fixture retains all four test filters and clippy; each failure p
         ["test", "--locked", "-p", "nac-core", "--features", "managed-fault-fixture", "managed_fault_fixture::tests"],
         ["test", "--locked", "-p", "nac-core", "--features", "managed-fault-fixture", "private_fixture_ack_failure_follows_real_commit_and_replay_is_once"],
         ["test", "--locked", "-p", "nac-core", "--features", "managed-fault-fixture", "private_child_read_fault_retains_generation_for_exactly_once_settlement"],
-        ["test", "--locked", "-p", "nac-server", "--features", "managed-fault-fixture", "private_monitor_fault_is_generation_scoped_once_and_subsequent_read_recovers"],
+        ["test", "--locked", "-p", "nac-server", "--features", "managed-fault-fixture", "--lib", "private_monitor_fault_is_generation_scoped_once_and_subsequent_read_recovers"],
+        ["build", "--locked", "-p", "nac-server", "--features", "managed-fault-fixture", "--bin", "nac-web", "--target-dir", path.join(process.cwd(), "target/private-fault")],
+        ["test", "--locked", "-p", "nac-server", "--features", "managed-fault-fixture", "--lib", "tests::managed_load::direct_candidate_fault::private_candidate_child_read_fault_reconciles_once", "--", "--ignored", "--exact", "--show-output", "--test-threads=1"],
         ["clippy", "--locked", "-p", "nac-server", "--features", "managed-fault-fixture", "--lib", "--bins", "--", "-D", "warnings"],
       ]);
     }
   }
+  const emptyCalls = path.join(root, "calls-empty.json");
+  const emptyOutput = path.join(root, "receipt-empty");
+  const empty = spawnSync("bash", ["-e", "-c", `${fixture}\nnode .github/scripts/managed-fault.mjs receipt >> "$GITHUB_OUTPUT"`], { env: { ...env, CARGO: fakeCargo, CARGO_CALLS: emptyCalls, EMPTY_CANDIDATE: "1", GITHUB_OUTPUT: emptyOutput }, encoding: "utf8" });
+  assert.notEqual(empty.status, 0, "zero selected candidate tests must fail");
+  assert.equal(fs.existsSync(emptyOutput), false);
 });
 
 test("late controller validates both receipts before conditional work and joins the early result", () => {

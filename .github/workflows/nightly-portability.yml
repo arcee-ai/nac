@@ -70,6 +70,7 @@ jobs:
           PORTABILITY_CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
           SEED_FAILURE: ${{ inputs.seed-failure || false }}
         run: |
+          rm -rf target/persistence-load target/persistence-load-direct target/direct-load
           args=()
           if [ "$SEED_FAILURE" = true ]; then args+=(--seed-failure); fi
           exec python3 .github/scripts/nightly-portability.py \
@@ -90,5 +91,7 @@ jobs:
           path: |
             ${{ runner.temp }}/nightly-portability
             target/persistence-load
+            target/persistence-load-direct
+            target/direct-load
           retention-days: 14
           if-no-files-found: error

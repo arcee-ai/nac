@@ -55,6 +55,8 @@ jobs:
           prefix-key: ${{ (github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request') && inputs.cold_caches == true && format('nac-ci-cold-{0}-{1}', github.run_id, github.run_attempt) || 'nac-ci-v1' }}
           key: managed-fault
           save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
+      - name: Clear cached private candidate evidence
+        run: rm -f target/direct-load/private-candidate-child-read.json
       - name: Run every private managed fault fixture check
         id: fixture
         run: make test-managed-fault-fixture
@@ -65,3 +67,11 @@ jobs:
           CHECKOUT_SHA: ${{ steps.candidate.outputs.sha }}
           FIXTURE_RESULT: ${{ steps.fixture.outcome }}
         run: node .github/scripts/managed-fault.mjs receipt >> "$GITHUB_OUTPUT"
+      - name: Retain private candidate fault evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: private-fault-${{ inputs.source_sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: target/direct-load/private-candidate-child-read.json
+          if-no-files-found: warn
+          retention-days: 14
