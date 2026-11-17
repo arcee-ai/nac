@@ -6,7 +6,7 @@ export interface Store<S> {
     subscribe: (listener: Listener) => () => void;
     useStore: <T = S>(selector?: (state: S) => T) => T;
 }
-export declare function createStore<S extends object>(initial: S,
+export declare function createStore<S extends object>(initial: S, 
 /** Names the store in the dev perf report; has no effect otherwise. */
 name?: string): Store<S>;
 /** Resolve browser preferences at call time (also supports standalone test documents). */
