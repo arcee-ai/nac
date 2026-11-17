@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fingerprint": "b92614deddeefd5cf3ea75313400fd5cd87b49ffcac8219ac52cbb971bb89e14",
+  "fingerprint": "33f11e43240608f4e877f3b1cf47191d152797fea26219e7f50539cfc4e99ef7",
   "router_digest": "1eda1fb478eaa3ac8fcc1d76ca4d47eee96c567c525fa34864f3d7bbab0303bf",
   "documents": [
     {
@@ -63,7 +63,7 @@
       "document_id": "skills",
       "title": "Skills",
       "source_path": "docs/usage/skills.md",
-      "content_digest": "86a8cbf584610df81c82464c1004c293429c7bcce68b7d0c9bbf9ee78a4bef23",
+      "content_digest": "950574bb9ffd96bab2eade958b1e46e4277df6734271e9eb78c9efd3f8caa611",
       "sections": [
         {
           "section_id": "overview",
@@ -83,7 +83,7 @@
         {
           "section_id": "local-direct-sessions",
           "title": "Local direct sessions",
-          "text": "## Local direct sessions\n\nA direct session retains its discovered registry at construction. `$skillname` in a submitted prompt expands the selected skill body before the model call. Ordinary prose does not automatically select arbitrary custom skills, and the direct system prompt does not include a general available-skills catalog. There is no `activate_skill` tool. Traditional children do not inherit a skill catalog or accept skill selection; provide the instructions they need in the child prompt. Primary agents receive a compact first-party NAC self-help route and can retrieve the installed guide for ordinary product questions. Generic coding tasks merely mentioning NAC do not request unrelated guidance.\n\nLocal discovery follows skill-directory symlinks and renders the discovery path as the skill directory. Native resource reads resolve their canonical targets through the normal permission pipeline. A linked package outside the workspace can be discovered and expanded while its resources still require external-directory approval; a link inside the workspace does not grant access to its external target. Hard and configured denials remain effective.\n\nThe retained registry contains the loaded body and resource listing. Resource bytes are read from disk when requested and can change independently. Use a reviewed immutable package revision when reproducibility matters. See the [Local linked-skill qualification and supported-use recipe](../qualification/linked-skills.md) for reproducible fixtures, the installed-catalog snapshot, and explicit workflow limits.\n\n"
+          "text": "## Local direct sessions\n\nA direct session retains its discovered registry at construction. `$skillname` in a submitted prompt expands the selected skill body before the model call. Ordinary prose does not automatically select arbitrary custom skills, and the direct system prompt does not include a general available-skills catalog. There is no `activate_skill` tool. The child launch tool has no skill-selection argument and a fresh child does not inherit the parent’s activated skills. Provide needed instructions in its prompt; explicit `$skillname` references can expand against the child’s registry. Primary agents receive a compact first-party NAC self-help route and can retrieve the installed guide for ordinary product questions. Generic coding tasks merely mentioning NAC do not request unrelated guidance.\n\nLocal discovery follows skill-directory symlinks and renders the discovery path as the skill directory. Native resource reads resolve their canonical targets through the normal permission pipeline. A linked package outside the workspace can be discovered and expanded while its resources still require external-directory approval; a link inside the workspace does not grant access to its external target. Hard and configured denials remain effective.\n\nThe retained registry contains the loaded body and resource listing. Resource bytes are read from disk when requested and can change independently. Use a reviewed immutable package revision when reproducibility matters. See the [Local linked-skill qualification and supported-use recipe](../qualification/linked-skills.md) for reproducible fixtures, the installed-catalog snapshot, and explicit workflow limits.\n\n"
         },
         {
           "section_id": "referencing-skills-in-a-prompt",

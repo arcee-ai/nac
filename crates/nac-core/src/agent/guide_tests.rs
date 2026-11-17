@@ -100,6 +100,17 @@ async fn resumed_direct_guide_uses_fresh_system_head_without_rewriting_history()
     let store_path = root.join("store.db");
     crate::store::initialize(&store_path).unwrap();
     crate::store::insert_test_session(&store_path, "session");
+    rusqlite::Connection::open(&store_path)
+        .unwrap()
+        .execute(
+            "UPDATE sessions SET behavior = 'direct' WHERE session_id = 'session'",
+            [],
+        )
+        .unwrap();
+    assert_eq!(
+        crate::sessions::load_session_behavior(&store_path, "session").unwrap(),
+        crate::sessions::SessionBehavior::Direct
+    );
     let old = "Pre-change direct system: direct-with-orchestrator and worker dispatch".to_string();
     let stored = vec![
         Message::System { content: old },
