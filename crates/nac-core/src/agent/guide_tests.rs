@@ -130,8 +130,14 @@ async fn resumed_direct_guide_uses_fresh_system_head_without_rewriting_history()
             .unwrap()
     };
     let before = read();
+    let server = crate::model::test_http::ScriptedServer::start(vec![
+        crate::model::test_http::ScriptedResponse::json("200 OK", serde_json::json!({
+            "status": "completed", "output": [{"type": "message", "content": [{"type": "output_text", "text": "answer"}]}],
+            "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
+        }).to_string()),
+    ]);
     let mut agent = super::transcript_log_tests::transcript_test_agent(
-        ModelClient::new_for_test(),
+        ModelClient::new_for_test_server(server.base_url.clone()),
         store_path.clone(),
         Some("session"),
         AgentMode::Direct,
@@ -144,6 +150,13 @@ async fn resumed_direct_guide_uses_fresh_system_head_without_rewriting_history()
     assert!(
         matches!(&agent.messages[0], Message::System { content } if content.contains("NAC product self-help") && !content.contains("direct-with-orchestrator") && !content.contains("worker dispatch"))
     );
+    assert_eq!(agent.send("How do I use NAC?").await.unwrap(), "answer");
+    let requests = server.finish();
+    assert_eq!(requests.len(), 1);
+    let body = String::from_utf8(requests[0].body.clone()).unwrap();
+    assert!(body.contains("NAC product self-help"));
+    assert!(!body.contains("direct-with-orchestrator"));
+    assert!(!body.contains("worker dispatch"));
     drop(connection);
     std::fs::remove_dir_all(root).unwrap();
 }
