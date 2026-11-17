@@ -1,8 +1,16 @@
+import type { AgentEvent } from "../types/api";
 export interface DelegatedPreviewStream {
     text: string;
     reasoning: string;
     /** True from `run_started` until the run settles, and while deltas are arriving. */
     running: boolean;
+    settled: boolean;
+    startedAt: number | null;
+    baselineEnd: number | null;
+    runId: string | null;
+    promptEnd: number | null;
+    recovering: boolean;
+    toolEvents: AgentEvent[];
 }
 /**
  * Live model output for a subagent previewed from its parent.
