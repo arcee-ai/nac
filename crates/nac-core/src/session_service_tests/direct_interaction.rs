@@ -529,7 +529,7 @@ async fn ordinary_unmanaged_service_does_not_consult_managed_maintenance() {
             "ordinary work",
             None,
             true,
-            WorkerDispatchRegistryKind::default(),
+            RunAdmissionKind::default(),
         )
         .unwrap();
     parts
@@ -644,7 +644,7 @@ fn run_admission_and_workspace_mutation_are_cross_process_exclusive() {
             None,
             "must wait for branch mutation",
             Some(operation),
-            WorkerDispatchRegistryKind::default(),
+            RunAdmissionKind::default(),
         )
         .unwrap_err();
     assert!(matches!(error, SessionSubmitError::Coordination { .. }));
@@ -659,7 +659,7 @@ fn run_admission_and_workspace_mutation_are_cross_process_exclusive() {
             None,
             "run after branch mutation",
             Some(operation),
-            WorkerDispatchRegistryKind::default(),
+            RunAdmissionKind::default(),
         )
         .unwrap();
     assert!(matches!(
@@ -1786,7 +1786,7 @@ async fn maintenance_rejects_child_steering_before_inbox_mutation() {
             "existing child run",
             None,
             false,
-            WorkerDispatchRegistryKind {
+            RunAdmissionKind {
                 child_execution_mode: Some(crate::store::TraditionalChildExecutionMode::Foreground),
                 ..Default::default()
             },

@@ -26,8 +26,11 @@ any of the following:
   transcript heads. It must remain until equivalent durable inheritance is
   available, including old transcripts.
 
-The worker registry's `admission`, `begin_run` and `run_id` methods bridge to
-shared run admission for current composition and legacy thread callers. On
-cutover, construct the shared admission owner directly and remove these shims.
+Direct runtime constructs the shared run gate independently. It still attaches an
+inert worker registry for compatibility with current service and tool composition;
+cutover must remove that attachment and the worker-only recovery/cleanup calls.
+The worker registry's `run_id` method forwards to the shared gate for legacy
+thread callers; its test-only `begin_run` does the same. Remove those shims
+with their callers.
 Persisted topology, configuration, event, SQL and wire names remain unchanged;
 their eventual migration is separate.

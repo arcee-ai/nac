@@ -1133,7 +1133,7 @@ async fn cancellation_waits_for_the_atomic_prompt_commit() {
             "cancel prompt",
             None,
             false,
-            WorkerDispatchRegistryKind::default(),
+            RunAdmissionKind::default(),
         )
         .unwrap();
     let prompt_commit = parts.service.run_prompt_commit(&active.run_id).unwrap();

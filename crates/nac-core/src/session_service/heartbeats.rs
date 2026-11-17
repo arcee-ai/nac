@@ -193,9 +193,9 @@ impl SessionService {
                 None,
                 input.content,
                 Some(lease),
-                WorkerDispatchRegistryKind {
+                RunAdmissionKind {
                     inbox_item_id: Some(input.id),
-                    ..WorkerDispatchRegistryKind::default()
+                    ..RunAdmissionKind::default()
                 },
             ) {
                 Ok(run) => Ok(Some(run)),
@@ -469,9 +469,9 @@ impl SessionService {
                 None,
                 prompt,
                 Some(lease),
-                WorkerDispatchRegistryKind {
+                RunAdmissionKind {
                     heartbeat_occurrence: Some(Box::new(occurrence)),
-                    ..WorkerDispatchRegistryKind::default()
+                    ..RunAdmissionKind::default()
                 },
             );
             match result {

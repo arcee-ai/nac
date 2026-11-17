@@ -441,6 +441,7 @@ impl Agent {
         // The initial messages are exactly the snapshot blob written at
         // session creation; the log tail starts at this length.
         let committed_log_len = messages.len() as u64;
+        let run_admission = Arc::new(crate::tools::RunAdmission::default());
         let agent = Self {
             client,
             mode,
@@ -460,7 +461,10 @@ impl Agent {
                 config_cwd: config.config_cwd,
                 store_path: config.store_path,
                 session_id: config.session_id,
-                active_threads: Arc::new(crate::tools::WorkerDispatchRegistry::default()),
+                active_threads: Arc::new(crate::tools::WorkerDispatchRegistry::new(Arc::clone(
+                    &run_admission,
+                ))),
+                run_admission,
                 event_sink: config.event_sink.clone(),
                 worker_executable: config.worker_executable,
                 backend,
@@ -1310,6 +1314,10 @@ impl Agent {
         );
         self.tool_runtime.permission_broker = Some(Arc::clone(&broker));
         Some(broker)
+    }
+
+    pub(crate) fn run_admission_handle(&self) -> Arc<crate::tools::RunAdmission> {
+        Arc::clone(&self.tool_runtime.run_admission)
     }
 
     pub fn active_threads_handle(&self) -> Arc<crate::tools::WorkerDispatchRegistry> {

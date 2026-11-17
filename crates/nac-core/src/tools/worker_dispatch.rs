@@ -25,11 +25,7 @@ pub struct WorkerDispatchRegistry {
 
 impl Default for WorkerDispatchRegistry {
     fn default() -> Self {
-        Self {
-            admission: Arc::new(RunAdmission::default()),
-            workers: StdMutex::new(WorkerDispatches::default()),
-            activity: Notify::new(),
-        }
+        Self::new(Arc::new(RunAdmission::default()))
     }
 }
 
@@ -39,6 +35,14 @@ struct WorkerGuard<'a> {
 }
 
 impl WorkerDispatchRegistry {
+    pub(crate) fn new(admission: Arc<RunAdmission>) -> Self {
+        Self {
+            admission,
+            workers: StdMutex::new(WorkerDispatches::default()),
+            activity: Notify::new(),
+        }
+    }
+    #[cfg(test)]
     pub(crate) fn admission(&self) -> Arc<RunAdmission> {
         Arc::clone(&self.admission)
     }
@@ -56,6 +60,7 @@ impl WorkerDispatchRegistry {
         self.lock().run.run_id.clone()
     }
 
+    #[cfg(test)]
     pub fn begin_run(&self, run_id: &str) -> bool {
         self.admission.begin_run(run_id)
     }

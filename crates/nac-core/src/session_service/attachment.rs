@@ -75,7 +75,7 @@ impl SessionService {
         };
         let session_snapshot = run_config.session.into_snapshot();
         let active_threads = run_config.agent.active_threads_handle();
-        let run_admission = active_threads.admission();
+        let run_admission = run_config.agent.run_admission_handle();
         let transcript_log = run_config.agent.transcript_log_writer();
         let has_sandbox = run_config.agent.sandbox_session().is_some();
         let skills = run_config.agent.skills();

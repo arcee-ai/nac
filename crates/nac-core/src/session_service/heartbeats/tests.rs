@@ -612,7 +612,7 @@ async fn heartbeat_deferred_or_invalid_admission_does_not_retain_a_session_opera
                 None,
                 "Later explicit human run",
                 Some(lease),
-                WorkerDispatchRegistryKind::default(),
+                RunAdmissionKind::default(),
             )
         })
         .await
@@ -752,7 +752,7 @@ async fn heartbeat_question_deferral_releases_exact_service_lease_without_goal_a
             None,
             "Human guidance while deciding",
             Some(lease),
-            WorkerDispatchRegistryKind::default(),
+            RunAdmissionKind::default(),
         )
     })
     .await

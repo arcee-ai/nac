@@ -570,9 +570,9 @@ impl SessionClientHandle {
             Some(self.client_id.clone()),
             prompt.agent_prompt,
             Some(lease),
-            WorkerDispatchRegistryKind {
+            RunAdmissionKind {
                 review_intent,
-                ..WorkerDispatchRegistryKind::default()
+                ..RunAdmissionKind::default()
             },
         )
     }
@@ -591,9 +591,9 @@ impl SessionClientHandle {
             Some(self.client_id.clone()),
             prompt.agent_prompt,
             Some(lease),
-            WorkerDispatchRegistryKind {
+            RunAdmissionKind {
                 managed_orchestrator_execution_mode: Some(execution_mode),
-                ..WorkerDispatchRegistryKind::default()
+                ..RunAdmissionKind::default()
             },
         )
     }
@@ -765,7 +765,7 @@ struct ActiveRunState {
 }
 
 #[derive(Default)]
-struct WorkerDispatchRegistryKind {
+struct RunAdmissionKind {
     heartbeat_occurrence: Option<Box<crate::store::HeartbeatOccurrence>>,
     terminal_selection: Option<crate::store::TerminalSelectionEvidence>,
     inbox_item_id: Option<i64>,

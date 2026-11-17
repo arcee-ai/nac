@@ -173,12 +173,7 @@ impl SessionService {
         &self,
         expanded_prompt: String,
     ) -> std::result::Result<SessionRunHandle, SessionSubmitError> {
-        self.try_submit_prompt_inner(
-            None,
-            expanded_prompt,
-            None,
-            WorkerDispatchRegistryKind::default(),
-        )
+        self.try_submit_prompt_inner(None, expanded_prompt, None, RunAdmissionKind::default())
     }
 
     #[expect(
@@ -194,7 +189,7 @@ impl SessionService {
             Some(client_id),
             expanded_prompt,
             None,
-            WorkerDispatchRegistryKind::default(),
+            RunAdmissionKind::default(),
         )
     }
 
@@ -212,7 +207,7 @@ impl SessionService {
             Some(client_id),
             expanded_prompt,
             Some(lease),
-            WorkerDispatchRegistryKind::default(),
+            RunAdmissionKind::default(),
         )
     }
 
@@ -232,10 +227,10 @@ impl SessionService {
             None,
             expanded_prompt,
             None,
-            WorkerDispatchRegistryKind {
+            RunAdmissionKind {
                 child_execution_mode: Some(execution_mode),
                 review_intent,
-                ..WorkerDispatchRegistryKind::default()
+                ..RunAdmissionKind::default()
             },
         )
     }
@@ -249,7 +244,7 @@ impl SessionService {
         client_id: Option<SessionClientId>,
         expanded_prompt: String,
         operation_lease: Option<sessions::SessionOperationLease>,
-        admission: WorkerDispatchRegistryKind,
+        admission: RunAdmissionKind,
     ) -> std::result::Result<SessionRunHandle, SessionSubmitError> {
         self.try_submit_prompt_with_guard(
             client_id,
@@ -273,7 +268,7 @@ impl SessionService {
         client_id: Option<SessionClientId>,
         mut expanded_prompt: String,
         operation_lease: Option<sessions::SessionOperationLease>,
-        mut admission: WorkerDispatchRegistryKind,
+        mut admission: RunAdmissionKind,
         guard: Option<super::operation_state::ActiveOperationGuard<'a>>,
     ) -> std::result::Result<SessionRunHandle, SessionSubmitError> {
         admission.inbox_prompt =
@@ -405,7 +400,7 @@ impl SessionService {
             expanded_prompt,
             None,
             false,
-            WorkerDispatchRegistryKind::default(),
+            RunAdmissionKind::default(),
         )?;
         self.run_prompt_commit(&active.run_id)
             .expect("test run admission must own a prompt commit channel")
@@ -423,7 +418,7 @@ impl SessionService {
         client_id: Option<SessionClientId>,
         expanded_prompt: &str,
         supplied_lease: Option<sessions::SessionOperationLease>,
-        admission: WorkerDispatchRegistryKind,
+        admission: RunAdmissionKind,
     ) -> std::result::Result<ActiveRunSnapshot, SessionSubmitError> {
         self.try_begin_run_inner(client_id, expanded_prompt, supplied_lease, true, admission)
     }
@@ -439,7 +434,7 @@ impl SessionService {
         expanded_prompt: &str,
         supplied_lease: Option<sessions::SessionOperationLease>,
         enforce_coordination: bool,
-        admission: WorkerDispatchRegistryKind,
+        admission: RunAdmissionKind,
     ) -> std::result::Result<ActiveRunSnapshot, SessionSubmitError> {
         self.try_begin_run_inner_with_guard(
             client_id,
@@ -461,7 +456,7 @@ impl SessionService {
         expanded_prompt: &str,
         supplied_lease: Option<sessions::SessionOperationLease>,
         enforce_coordination: bool,
-        admission: WorkerDispatchRegistryKind,
+        admission: RunAdmissionKind,
         guard: Option<super::operation_state::ActiveOperationGuard<'a>>,
     ) -> std::result::Result<ActiveRunSnapshot, SessionSubmitError> {
         let _host_admission = (enforce_coordination && self.managed_admission_enabled)
@@ -478,7 +473,7 @@ impl SessionService {
                     "failed to acquire managed host run admission: {error:#}"
                 )),
             })?;
-        let WorkerDispatchRegistryKind {
+        let RunAdmissionKind {
             heartbeat_occurrence,
             terminal_selection,
             mut inbox_item_id,

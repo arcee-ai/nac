@@ -260,7 +260,7 @@ impl SessionService {
                 None,
                 prompt,
                 None,
-                WorkerDispatchRegistryKind {
+                RunAdmissionKind {
                     child_execution_mode: Some(execution_mode),
                     review_intent,
                     ..Default::default()

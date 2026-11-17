@@ -585,6 +585,7 @@ pub(crate) fn test_runtime() -> ToolRuntime {
     let backend = Arc::new(crate::sandbox::ExecutionBackend::Local {
         workspace_cwd: workspace_cwd.clone(),
     });
+    let run_admission = Arc::new(RunAdmission::default());
     ToolRuntime {
         product_context: None,
         command_cancellation: crate::tools::RunCancellation::default(),
@@ -593,7 +594,8 @@ pub(crate) fn test_runtime() -> ToolRuntime {
         store_path: PathBuf::new(),
         session_id: Some("test-session".to_string()),
         worker_executable: None,
-        active_threads: Arc::new(crate::tools::WorkerDispatchRegistry::default()),
+        active_threads: Arc::new(WorkerDispatchRegistry::new(Arc::clone(&run_admission))),
+        run_admission,
         event_sink: EventSink::none(),
         backend,
         mcp: None,
