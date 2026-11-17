@@ -209,56 +209,123 @@ coordinated_command! {
 pub fn read_attention_metadata(path: &Path, session: Option<&str>) -> Result<Vec<AttentionStoredSession>> {
     let mut connection = open_initialized_read_connection(path)?;
     let tx = connection.transaction()?;
-    let mut statement = tx.prepare("SELECT substr(s.session_id,1,513),s.behavior,
-        NOT EXISTS(SELECT 1 FROM traditional_children c WHERE c.child_session_id=s.session_id)
-        AND NOT EXISTS(SELECT 1 FROM managed_orchestrators m WHERE m.orchestrator_session_id=s.session_id),
-        s.host_id IS NULL AND s.sandbox_json IS NULL, s.config_version,
-        EXISTS(SELECT 1 FROM traditional_children c WHERE c.child_session_id=s.session_id)
-        FROM sessions s WHERE (?1 IS NULL OR s.session_id=?1) ORDER BY s.session_id LIMIT 1025")?;
-    let rows = statement.query_map([session], |row| Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,bool>(2)?,row.get::<_,bool>(3)?,row.get::<_,i64>(4)?,row.get::<_,bool>(5)?)))?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    anyhow::ensure!(rows.len() <= ATTENTION_SOURCE_LIMIT, "attention metadata capacity exceeded");
-    let mut output = Vec::with_capacity(rows.len());
-    let mut bytes = 0usize;
-    for (id, behavior, primary, local, config_version, traditional_child) in rows {
-        identifier(&id)?;
-        anyhow::ensure!(config_version >= 0, "attention configuration revision unavailable");
-        let direct = behavior == "direct" || behavior == "direct-with-orchestrator";
-        let goal = if primary && direct { goal(&tx,&id)? } else { None };
-        let questions_supported = primary && local && behavior == "direct";
-        let question = if questions_supported {
-            let question = task_questions::pending_attention_with_connection(&tx,&id)?;
-            if let Some(AttentionDecision::Question {request_id,run_id,generation,..}) = &question {
-                for id in [request_id,run_id,generation] { identifier(id)?; }
-            }
-            question
-        } else { None };
-        let inbox_pending = tx.query_row("SELECT EXISTS(SELECT 1 FROM session_inbox WHERE session_id=?1 AND status='pending')",[&id],|row|row.get(0))?;
-        let manual_unsettled = tx.query_row("SELECT EXISTS(SELECT 1 FROM human_shell_operations WHERE session_id=?1 AND phase!='finished')",[&id],|row|row.get(0))?;
-        let outcome: Option<(String,String)> = tx.query_row(
-            "SELECT substr(run_id,1,513),disposition FROM session_run_outcomes WHERE session_id=?1 ORDER BY id DESC LIMIT 1",
-            [&id], |row| Ok((row.get(0)?,row.get(1)?)),
-        ).optional()?;
-        let last_outcome = outcome.map(|(run_id, disposition)| -> Result<_> {
-            identifier(&run_id)?;
-            Ok(AttentionStoredRun { run_id, disposition: disposition.parse()? })
-        }).transpose()?;
-        let recovery_pending = tx.query_row("SELECT EXISTS(SELECT 1 FROM session_run_recovery WHERE session_id=?1)",[&id],|row|row.get(0))?;
-        let metadata = AttentionStoredSession { id,primary,traditional_child,direct,questions_supported,goal,question,inbox_pending,manual_unsettled,config_version,last_outcome,recovery_pending };
-        bytes = bytes.saturating_add(metadata.metadata_bytes());
-        anyhow::ensure!(bytes <= ATTENTION_METADATA_BYTES, "attention metadata capacity exceeded");
-        output.push(metadata);
-    }
-    Ok(output)
+    metadata_with_connection(&tx, session)
 }
+
 command ReadAttentionMetadata { session:Option<String> = session.map(str::to_owned) }
 call |command| (command.session.as_deref())
 correlation |command| crate::telemetry::Correlation::session(command.session.as_deref());
 port public;
 }
 
+fn metadata_with_connection(
+    connection: &Connection,
+    session: Option<&str>,
+) -> Result<Vec<AttentionStoredSession>> {
+    let mut statement = connection.prepare("SELECT substr(s.session_id,1,513),s.behavior,
+        NOT EXISTS(SELECT 1 FROM traditional_children c WHERE c.child_session_id=s.session_id)
+        AND NOT EXISTS(SELECT 1 FROM managed_orchestrators m WHERE m.orchestrator_session_id=s.session_id),
+        s.host_id IS NULL AND s.sandbox_json IS NULL, s.config_version,
+        EXISTS(SELECT 1 FROM traditional_children c WHERE c.child_session_id=s.session_id)
+        FROM sessions s WHERE (?1 IS NULL OR s.session_id=?1) ORDER BY s.session_id LIMIT 1025")?;
+    let rows = statement
+        .query_map([session], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, bool>(2)?,
+                row.get::<_, bool>(3)?,
+                row.get::<_, i64>(4)?,
+                row.get::<_, bool>(5)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    anyhow::ensure!(
+        rows.len() <= ATTENTION_SOURCE_LIMIT,
+        "attention metadata capacity exceeded"
+    );
+    let mut output = Vec::with_capacity(rows.len());
+    let mut bytes = 0usize;
+    for (id, behavior, primary, local, config_version, traditional_child) in rows {
+        identifier(&id)?;
+        anyhow::ensure!(
+            config_version >= 0,
+            "attention configuration revision unavailable"
+        );
+        let direct = behavior == "direct" || behavior == "direct-with-orchestrator";
+        let goal = if primary && direct {
+            goal(connection, &id)?
+        } else {
+            None
+        };
+        let questions_supported = primary && local && behavior == "direct";
+        let question = if questions_supported {
+            let question = task_questions::pending_attention_with_connection(connection, &id)?;
+            if let Some(AttentionDecision::Question {
+                request_id,
+                run_id,
+                generation,
+                ..
+            }) = &question
+            {
+                for id in [request_id, run_id, generation] {
+                    identifier(id)?;
+                }
+            }
+            question
+        } else {
+            None
+        };
+        let inbox_pending = connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM session_inbox WHERE session_id=?1 AND status='pending')",
+            [&id],
+            |row| row.get(0),
+        )?;
+        let manual_unsettled = connection.query_row("SELECT EXISTS(SELECT 1 FROM human_shell_operations WHERE session_id=?1 AND phase!='finished')",[&id],|row|row.get(0))?;
+        let outcome: Option<(String,String)> = connection.query_row(
+            "SELECT substr(run_id,1,513),disposition FROM session_run_outcomes WHERE session_id=?1 ORDER BY id DESC LIMIT 1",
+            [&id], |row| Ok((row.get(0)?,row.get(1)?)),
+        ).optional()?;
+        let last_outcome = outcome
+            .map(|(run_id, disposition)| -> Result<_> {
+                identifier(&run_id)?;
+                Ok(AttentionStoredRun {
+                    run_id,
+                    disposition: disposition.parse()?,
+                })
+            })
+            .transpose()?;
+        let recovery_pending = connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM session_run_recovery WHERE session_id=?1)",
+            [&id],
+            |row| row.get(0),
+        )?;
+        let metadata = AttentionStoredSession {
+            id,
+            primary,
+            traditional_child,
+            direct,
+            questions_supported,
+            goal,
+            question,
+            inbox_pending,
+            manual_unsettled,
+            config_version,
+            last_outcome,
+            recovery_pending,
+        };
+        bytes = bytes.saturating_add(metadata.metadata_bytes());
+        anyhow::ensure!(
+            bytes <= ATTENTION_METADATA_BYTES,
+            "attention metadata capacity exceeded"
+        );
+        output.push(metadata);
+    }
+    Ok(output)
+}
+
 /// Delegated topology of a session. Only traditional children are linked;
-/// orchestration topologies are being retired and are reported unlinked.
+/// managed orchestrators and legacy worker threads remain distinct and unlinked.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AttentionLineageKind {
     TraditionalChild,
@@ -286,9 +353,19 @@ coordinated_command! {
 pub fn read_attention_topology(path: &Path) -> Result<Vec<AttentionTopology>> {
     let mut connection = open_initialized_read_connection(path)?;
     let tx = connection.transaction()?;
+    topology_with_connection(&tx)
+}
+
+command ReadAttentionTopology {}
+call |_command| ()
+correlation |_command| crate::telemetry::Correlation::default();
+port public;
+}
+
+fn topology_with_connection(connection: &Connection) -> Result<Vec<AttentionTopology>> {
     let mut lineage = HashMap::new();
     {
-        let mut statement = tx.prepare(
+        let mut statement = connection.prepare(
             "SELECT child_session_id,parent_session_id,root_session_id FROM traditional_children",
         )?;
         let rows = statement.query_map([], |row| {
@@ -310,7 +387,7 @@ pub fn read_attention_topology(path: &Path) -> Result<Vec<AttentionTopology>> {
             );
         }
     }
-    let mut statement = tx.prepare(
+    let mut statement = connection.prepare(
         "SELECT s.session_id,p.project_id FROM sessions s
          LEFT JOIN session_projects p ON p.session_id=s.session_id ORDER BY s.session_id",
     )?;
@@ -321,11 +398,33 @@ pub fn read_attention_topology(path: &Path) -> Result<Vec<AttentionTopology>> {
     for row in rows {
         let (session_id, project_id) = row?;
         let lineage = lineage.remove(&session_id);
-        output.push(AttentionTopology { session_id, project_id, lineage });
+        output.push(AttentionTopology {
+            session_id,
+            project_id,
+            lineage,
+        });
     }
     Ok(output)
 }
-command ReadAttentionTopology {}
+
+/// One coherent durable sample for browser fleet classification and placement.
+#[derive(Debug)]
+pub struct AttentionStoreCensus {
+    pub metadata: Vec<AttentionStoredSession>,
+    pub topology: Vec<AttentionTopology>,
+}
+
+coordinated_command! {
+/// Classification inputs and placement share one SQLite snapshot. A project
+/// assignment may also invalidate a question; neither half can cross its commit.
+pub fn read_attention_census(path: &Path) -> Result<AttentionStoreCensus> {
+    let mut connection = open_initialized_read_connection(path)?;
+    let tx = connection.transaction()?;
+    let metadata = metadata_with_connection(&tx, None)?;
+    let topology = topology_with_connection(&tx)?;
+    Ok(AttentionStoreCensus { metadata, topology })
+}
+command ReadAttentionCensus {}
 call |_command| ()
 correlation |_command| crate::telemetry::Correlation::default();
 port public;

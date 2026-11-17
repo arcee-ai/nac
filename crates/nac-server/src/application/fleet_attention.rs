@@ -197,16 +197,16 @@ impl FleetAttentionHub {
                     topology: HashMap::new(),
                 });
             }
-            let metadata =
-                nac_core::store::read_attention_metadata(&path, None).map_err(|error| {
-                    if error.to_string().contains("capacity") {
-                        FleetAttentionUnavailable::Capacity
-                    } else {
-                        FleetAttentionUnavailable::Store
-                    }
-                })?;
-            let topology = nac_core::store::read_attention_topology(&path)
-                .map_err(|_| FleetAttentionUnavailable::Store)?
+            let census = nac_core::store::read_attention_census(&path).map_err(|error| {
+                if error.to_string().contains("capacity") {
+                    FleetAttentionUnavailable::Capacity
+                } else {
+                    FleetAttentionUnavailable::Store
+                }
+            })?;
+            let metadata = census.metadata;
+            let topology = census
+                .topology
                 .into_iter()
                 .map(|row| (row.session_id.clone(), row))
                 .collect();
