@@ -758,8 +758,8 @@
     top: calc(4px + env(safe-area-inset-top));
   }
 
-[data-nac-runtime]:is(.top-\[calc\(10px\+env\(safe-area-inset-top\)\)\]), [data-nac-runtime] .top-\[calc\(10px\+env\(safe-area-inset-top\)\)\] {
-    top: calc(10px + env(safe-area-inset-top));
+[data-nac-runtime]:is(.top-\[calc\(64px\+env\(safe-area-inset-top\)\)\]), [data-nac-runtime] .top-\[calc\(64px\+env\(safe-area-inset-top\)\)\] {
+    top: calc(64px + env(safe-area-inset-top));
   }
 
 [data-nac-runtime]:is(.top-\[calc\(var\(--header-height\)\+4px\)\]), [data-nac-runtime] .top-\[calc\(var\(--header-height\)\+4px\)\] {
@@ -1599,14 +1599,6 @@
     max-height: 70vh;
   }
 
-[data-nac-runtime]:is(.max-h-\[75dvh\]), [data-nac-runtime] .max-h-\[75dvh\] {
-    max-height: 75dvh;
-  }
-
-[data-nac-runtime]:is(.max-h-\[92dvh\]), [data-nac-runtime] .max-h-\[92dvh\] {
-    max-height: 92dvh;
-  }
-
 [data-nac-runtime]:is(.max-h-\[160px\]), [data-nac-runtime] .max-h-\[160px\] {
     max-height: 160px;
   }
@@ -1633,6 +1625,14 @@
 
 [data-nac-runtime]:is(.max-h-\[min\(40vh\,320px\)\]),[data-nac-runtime] .max-h-\[min\(40vh\,320px\)\] {
     max-height: min(40vh, 320px);
+  }
+
+[data-nac-runtime]:is(.max-h-\[min\(75dvh\,calc\(100\%-16px\)\)\]),[data-nac-runtime] .max-h-\[min\(75dvh\,calc\(100\%-16px\)\)\] {
+    max-height: min(75dvh, 100% - 16px);
+  }
+
+[data-nac-runtime]:is(.max-h-\[min\(92dvh\,calc\(100\%-16px\)\)\]),[data-nac-runtime] .max-h-\[min\(92dvh\,calc\(100\%-16px\)\)\] {
+    max-height: min(92dvh, 100% - 16px);
   }
 
 [data-nac-runtime]:is(.max-h-\[min\(100\%\,100dvh\)\]),[data-nac-runtime] .max-h-\[min\(100\%\,100dvh\)\] {
@@ -1711,10 +1711,6 @@
     min-height: 1px;
   }
 
-[data-nac-runtime]:is(.min-h-\[40dvh\]), [data-nac-runtime] .min-h-\[40dvh\] {
-    min-height: 40dvh;
-  }
-
 [data-nac-runtime]:is(.min-h-\[52px\]), [data-nac-runtime] .min-h-\[52px\] {
     min-height: 52px;
   }
@@ -1753,6 +1749,10 @@
 
 [data-nac-runtime]:is(.min-h-\[calc\(70vh-316px\)\]), [data-nac-runtime] .min-h-\[calc\(70vh-316px\)\] {
     min-height: calc(70vh - 316px);
+  }
+
+[data-nac-runtime]:is(.min-h-\[min\(40dvh\,50\%\)\]),[data-nac-runtime] .min-h-\[min\(40dvh\,50\%\)\] {
+    min-height: min(40dvh, 50%);
   }
 
 [data-nac-runtime]:is(.min-h-\[min\(100\%\,100dvh\)\]),[data-nac-runtime] .min-h-\[min\(100\%\,100dvh\)\] {

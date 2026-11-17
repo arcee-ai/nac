@@ -8118,7 +8118,7 @@ var Up = ({ open: e = !1, zIndex: t = 40, opacity: n, blur: r = 0, className: i 
 				role: void 0,
 				onOpenAutoFocus: (e) => e.preventDefault(),
 				style: { zIndex: r },
-				className: H("fixed inset-x-0 bottom-0 flex flex-col min-h-[120px] max-h-[75dvh] overflow-y-auto overscroll-contain", "rounded-t-sheet bg-elevation-level-2 pt-1 pb-[calc(12px+env(safe-area-inset-bottom))] shadow-2xl", "transition-transform duration-200 ease-[var(--ease-drawer)] motion-reduce:transition-none [&>*]:shrink-0", c ? "translate-y-full" : "translate-y-0", i),
+				className: H("fixed inset-x-0 bottom-0 flex flex-col min-h-[120px] max-h-[min(75dvh,calc(100%-16px))] overflow-y-auto overscroll-contain", "rounded-t-sheet bg-elevation-level-2 pt-1 pb-[calc(12px+env(safe-area-inset-bottom))] shadow-2xl", "transition-transform duration-200 ease-[var(--ease-drawer)] motion-reduce:transition-none [&>*]:shrink-0", c ? "translate-y-full" : "translate-y-0", i),
 				onMouseDown: (e) => e.stopPropagation(),
 				onClick: (e) => e.stopPropagation(),
 				children: [/* @__PURE__ */ y("div", {

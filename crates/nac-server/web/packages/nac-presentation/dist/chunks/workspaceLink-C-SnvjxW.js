@@ -1,6 +1,6 @@
 import { D as e, O as t, a as n, n as r, z as i } from "./RuntimeContext-BSGIfqM0.js";
 import { a, y as o } from "./PresentationBoundary-DgJz1GXw.js";
-import { n as s, t as c } from "./Toast-BMeEGYEb.js";
+import { n as s, t as c } from "./Toast-CAxEZCML.js";
 import { Profiler as l, createContext as u, useCallback as d, useContext as f, useEffect as p, useMemo as m, useRef as h, useState as ee } from "react";
 import { keepPreviousData as te, useInfiniteQuery as ne, useMutation as g, useQueries as re, useQuery as _, useQueryClient as v } from "@tanstack/react-query";
 import { Fragment as ie, jsx as ae, jsxs as oe } from "react/jsx-runtime";
@@ -7468,7 +7468,7 @@ function VE({ toasts: e, removeToast: t }) {
 		"aria-label": "Notifications",
 		"aria-live": "polite",
 		"aria-relevant": "additions",
-		className: "fixed inset-x-0 top-[calc(10px+env(safe-area-inset-top))] z-[1100] mx-auto flex w-[min(480px,calc(100%-2rem))] flex-col items-center gap-2 pointer-events-none",
+		className: "fixed inset-x-0 top-[calc(64px+env(safe-area-inset-top))] z-[1100] mx-auto flex w-[min(480px,calc(100%-2rem))] flex-col items-center gap-2 pointer-events-none",
 		children: e.map((e) => /* @__PURE__ */ ae("div", {
 			className: "pointer-events-none flex w-full justify-center",
 			children: /* @__PURE__ */ ae(c, {
