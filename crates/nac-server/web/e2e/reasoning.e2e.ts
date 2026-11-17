@@ -79,13 +79,19 @@ test("live activity distinguishes a readable trace from no-trace progress", asyn
   request,
 }, info) => {
   await page.setViewportSize({ width: 390, height: 900 });
+  const baseline = process.env.NAC_REASONING_BASELINE_DIST;
+  await serveReasoningBaseline(page, harness.baseUrl);
   const capture = async (name: string) => {
-    const file = info.outputPath(`${name}.png`);
+    const captureName = `${baseline ? "before" : "after"}-${name}`;
+    const file = info.outputPath(`${captureName}.png`);
     await page.screenshot({ path: file, animations: "disabled", caret: "hide" });
     await info.attach(name, { path: file, contentType: "image/png" });
     if (process.env.NAC_REASONING_CAPTURE_DIR) {
       await fs.mkdir(process.env.NAC_REASONING_CAPTURE_DIR, { recursive: true });
-      await fs.copyFile(file, path.join(process.env.NAC_REASONING_CAPTURE_DIR, `${name}.png`));
+      await fs.copyFile(
+        file,
+        path.join(process.env.NAC_REASONING_CAPTURE_DIR, `${captureName}.png`),
+      );
     }
   };
   for (const traced of [false, true]) {
@@ -119,6 +125,7 @@ test("live activity distinguishes a readable trace from no-trace progress", asyn
         const fold = page.locator("[data-work-fold]").first();
         const toggle = fold.getByRole("button").first();
         await expect(toggle).toHaveAttribute("aria-expanded", "false");
+        await capture("live-collapsed");
         await toggle.focus();
         await page.keyboard.press("Enter");
         const thought = fold.getByRole("list", { name: "Steps" }).getByRole("button", {
@@ -128,7 +135,8 @@ test("live activity distinguishes a readable trace from no-trace progress", asyn
         await thought.focus();
         await page.keyboard.press("Space");
         await expect(fold.getByText("Activity paragraph 0.", { exact: true })).toBeVisible();
-        await expect(page.getByRole("status").filter({ hasText: "Thinking" })).toHaveCount(0);
+        if (!baseline)
+          await expect(page.getByRole("status").filter({ hasText: "Thinking" })).toHaveCount(0);
         await toggle.scrollIntoViewIfNeeded();
         await capture("live-long-activity");
       }
