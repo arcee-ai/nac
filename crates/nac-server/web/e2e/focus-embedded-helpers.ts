@@ -104,14 +104,32 @@ export async function chooseBehavior(page: Page, label: BehaviorLabel) {
 }
 
 /** Sends Home's prompt as a new session's first run and returns the opened session. */
-export async function startSessionFromHome(page: Page, prompt: string): Promise<string> {
+export async function startSessionFromHome(
+  page: Page,
+  prompt: string,
+  options: { runAdmission?: "aborted" | "busy" } = {},
+): Promise<string> {
   const before = page.url();
   await homeComposer(page).fill(prompt);
+  // Home navigates after creation; its owning composer submits only after the
+  // interactive stream is ready. A route alone is not first-run admission.
+  const matches = (request: import("@playwright/test").Request) =>
+    request.method() === "POST" &&
+    /\/sessions\/[^/]+\/runs$/.test(new URL(request.url()).pathname) &&
+    request.postDataJSON()?.prompt === prompt;
+  // Hosted-provider configuration checks deliberately abort admission before
+  // any network effect; successful and known-rejection journeys await a receipt.
+  const firstRun = page.waitForRequest(matches);
   await page.getByRole("button", { name: "Start session", exact: true }).click();
   await expect.poll(() => page.url()).not.toBe(before);
   await expect(page).toHaveURL(/\/session\/[^/]+\/insights$/);
   const sessionId = page.url().match(/\/session\/([^/]+)\//)?.[1];
   expect(sessionId).toBeTruthy();
+  const attempted = await firstRun;
+  expect(new URL(attempted.url()).pathname).toBe(`/sessions/${sessionId}/runs`);
+  const receipt = await attempted.response();
+  if (options.runAdmission === "aborted") expect(receipt).toBeNull();
+  else expect(receipt?.status()).toBe(options.runAdmission === "busy" ? 409 : 202);
   return decodeURIComponent(sessionId!);
 }
 

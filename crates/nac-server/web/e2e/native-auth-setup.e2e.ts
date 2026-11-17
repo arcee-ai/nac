@@ -51,7 +51,7 @@ test("native auth setup settles session navigation and refreshes the real MCP ca
   harness.provider.enqueue(
     "first-message",
     { token: prompt },
-    { kind: "text", text: "native auth setup ready" },
+    { kind: "text", text: "native auth setup ready", stream: "request" },
   );
   let release!: () => void;
   const released = new Promise<void>((resolve) => {
@@ -88,6 +88,7 @@ test("native auth setup settles session navigation and refreshes the real MCP ca
       await expect(palette).toHaveCount(0);
     }
     await expect.poll(() => page.evaluate(ready, "")).toBe(true);
+    await expect(page.getByText("native auth setup ready", { exact: true })).toBeVisible();
     await waitForRunIdle(request, harness, session);
     const sessionRoute = new URL(page.url()).hash;
 

@@ -515,7 +515,21 @@ async function inspectorComposed(j: Journey, id: string) {
   const status = j.root.getByRole("group", { name: "Session status", exact: true });
   const jump = status.getByRole("button", { name: childTitle, exact: true });
   await expect(status).toHaveAttribute("aria-current", "true");
-  const anchor = await status.boundingBox();
+  const positionInDetail = () =>
+    status.evaluate((element) => {
+      let scroll = element.parentElement;
+      while (
+        scroll &&
+        !["auto", "scroll"].includes(
+          element.ownerDocument.defaultView!.getComputedStyle(scroll).overflowY,
+        )
+      ) {
+        scroll = scroll.parentElement;
+      }
+      if (!scroll) throw new Error("Session status has no Insights scroll owner");
+      return element.getBoundingClientRect().top - scroll.getBoundingClientRect().top;
+    });
+  const anchor = await positionInDetail();
   await activate(j, jump);
   const back = j.root.getByRole("button", { name: "Back to Insights", exact: true });
   const panelDraft = j.root
@@ -584,8 +598,10 @@ async function inspectorComposed(j: Journey, id: string) {
     await j.page.keyboard.press("Enter");
   }
   await expect(status).toHaveAttribute("aria-current", "true");
+  // Activation scrolls public controls into view and can move a packed host's
+  // outer page. Preserve the exact inspector position in its own scroll owner.
   await expect
-    .poll(async () => Math.abs((await status.boundingBox())!.y - anchor!.y))
+    .poll(async () => Math.abs((await positionInDetail()) - anchor))
     .toBeLessThanOrEqual(2);
   if (j.width < 768) {
     await activate(j, openList);

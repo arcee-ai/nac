@@ -274,7 +274,9 @@ test("uses the unified catalog for a cross-provider New Chat override", async ({
   const created = page.waitForRequest(
     (candidate) => candidate.method() === "POST" && candidate.url().endsWith("/sessions"),
   );
-  const sessionId = await startSessionFromHome(page, "ALL_CROSS_PROVIDER_OVERRIDE");
+  const sessionId = await startSessionFromHome(page, "ALL_CROSS_PROVIDER_OVERRIDE", {
+    runAdmission: "aborted",
+  });
   expect((await created).postDataJSON()).toMatchObject({
     backend: "deepseek-chat",
     model: "deepseek-v4-flash",
@@ -526,8 +528,8 @@ test("converges concurrent required-first-chat tabs and refreshes deleted owners
       ),
     );
     const starts = [
-      startSessionFromHome(page, "FIRST_TAB_PROMPT"),
-      startSessionFromHome(second, "SECOND_TAB_PROMPT"),
+      startSessionFromHome(page, "FIRST_TAB_PROMPT", { runAdmission: "busy" }),
+      startSessionFromHome(second, "SECOND_TAB_PROMPT", { runAdmission: "busy" }),
     ];
     await expect.poll(() => creates.length).toBe(2);
     releaseCreates();
