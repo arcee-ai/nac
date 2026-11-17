@@ -18,7 +18,7 @@ const root = path.resolve(__dirname, "../../..");
 const fixtureRequire = createRequire(path.join(root, "desktop/electron/package.json"));
 const { Engine } = fixtureRequire("./src/engine.cjs");
 const { selectConfiguration } = fixtureRequire("./src/configuration.cjs");
-const baselineRevision = "210d4c81e0b90cb36f31efe213e06d66a8dbe11a";
+const baselineRevision = "7dfe0bec86d2543cc4229049de200e75d253c8d6";
 const digest = async (file: string) =>
   createHash("sha256")
     .update(await fs.readFile(file))

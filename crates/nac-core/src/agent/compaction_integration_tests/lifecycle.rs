@@ -63,7 +63,8 @@ async fn checkpoint_store_failure_keeps_prior_view_and_continues_ordinary_call()
         Message::User {
             content: "recent".to_string(),
         },
-    ];
+    ]
+    .into();
     store_agent_snapshot(&store_path, &agent);
 
     assert_eq!(agent.send("current").await.unwrap(), "ordinary fallback");
@@ -251,7 +252,7 @@ async fn cancellation_during_summary_keeps_the_prior_checkpoint() {
         EventSink::channel(events_tx),
     );
     agent.set_steering_dispatch_id(Some("run".to_string()));
-    agent.messages = messages;
+    agent.messages = messages.into();
     store_agent_snapshot(&store_path, &agent);
     agent.restore_compaction_checkpoint().unwrap();
     let agent = Arc::new(tokio::sync::Mutex::new(agent));
@@ -364,7 +365,8 @@ async fn cancellation_after_checkpoint_commit_keeps_the_committed_projection() {
         Message::User {
             content: "recent".to_string(),
         },
-    ];
+    ]
+    .into();
     store_agent_snapshot(&store_path, &agent);
     let agent = Arc::new(tokio::sync::Mutex::new(agent));
     let task_agent = agent.clone();
@@ -464,7 +466,7 @@ async fn manual_summary_request_and_rejection_failures_are_typed_and_terminal() 
             None,
             EventSink::channel(events_tx),
         );
-        agent.messages = compactable_messages();
+        agent.messages = compactable_messages().into();
         agent.last_usage = Some(TokenUsage {
             input_tokens: 44,
             output_tokens: 5,
@@ -542,7 +544,7 @@ async fn manual_checkpoint_store_failure_is_hard_and_keeps_the_prior_view() {
         Some(1),
         EventSink::channel(events_tx),
     );
-    agent.messages = compactable_messages();
+    agent.messages = compactable_messages().into();
     let canonical_before = serde_json::to_vec(&agent.messages).unwrap();
 
     let error = agent.compact().await.unwrap_err();
@@ -614,7 +616,7 @@ async fn manual_cancellation_emits_cancelled_and_preserves_state() {
         None,
         EventSink::channel(events_tx),
     );
-    agent.messages = compactable_messages();
+    agent.messages = compactable_messages().into();
     agent.last_usage = Some(TokenUsage {
         input_tokens: 8,
         ..TokenUsage::default()
