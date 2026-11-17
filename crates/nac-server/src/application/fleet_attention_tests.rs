@@ -94,13 +94,15 @@ fn exact_identities_appear_and_resolve_while_unchanged_entries_keep_revisions() 
     // Settled work is observer-owned; it is unknown here, never inferred.
     assert_eq!(parent.attention.availability.work, AttentionFacet::Unknown);
     assert!(parent.attention.work.is_none());
-    // A traditional child with no cached owner is unknown, never "none";
-    // it never settles work or asks structured questions itself.
+    // A traditional child not loaded in this store-owning process has no
+    // broker, so nothing is pending; it never settles work or asks structured
+    // questions itself.
     let child = &first.entries["child"].facts;
     assert_eq!(
         child.attention.availability.permissions,
-        AttentionFacet::Unknown
+        AttentionFacet::Available
     );
+    assert!(child.attention.pending.is_empty());
     assert_eq!(
         child.attention.availability.topology,
         AttentionFacet::Available
@@ -114,7 +116,7 @@ fn exact_identities_appear_and_resolve_while_unchanged_entries_keep_revisions() 
         AttentionFacet::Unsupported
     );
     assert_eq!(child.lineage.as_ref().unwrap().parent_session_id, "parent");
-    assert!(child.operation.is_none());
+    assert_eq!(child.operation, Some(AttentionOperation::Idle));
 
     // Republishing identical facts changes nothing at all.
     hub.publish(|| live.clone());
@@ -134,20 +136,34 @@ fn exact_identities_appear_and_resolve_while_unchanged_entries_keep_revisions() 
     assert_eq!(change.upserts[0].0, "parent");
     assert!(change.removed.is_empty());
 
-    // An owner leaving this process is unknown, not "nothing pending".
+    // An owner unloading from the process that owns the store takes its
+    // broker with it: idle with nothing pending, never "status unavailable".
     live.remove("parent");
     hub.publish(|| live.clone());
     let third = view(&hub);
     let parent = &third.entries["parent"].facts;
     assert_eq!(
         parent.attention.availability.permissions,
-        AttentionFacet::Unknown
+        AttentionFacet::Available
     );
     assert_eq!(
         parent.attention.availability.reviews,
+        AttentionFacet::Available
+    );
+    assert!(parent.attention.pending.is_empty());
+    assert_eq!(parent.operation, Some(AttentionOperation::Idle));
+
+    // A live owner whose broker cannot be read stays unknown.
+    live.insert("parent".to_owned(), None);
+    hub.publish(|| live.clone());
+    assert_eq!(
+        view(&hub).entries["parent"]
+            .facts
+            .attention
+            .availability
+            .permissions,
         AttentionFacet::Unknown
     );
-    assert!(parent.operation.is_none());
 }
 
 #[test]

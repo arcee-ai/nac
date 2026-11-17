@@ -2,14 +2,18 @@
 //! every session, built from the same `classify` the native observer uses.
 //!
 //! It never installs the single service attention observer, never reserves the
-//! native seat, never subscribes to a session event bus (so it is never an
-//! interactive client), and never attaches, wakes, recovers, answers or cancels
-//! work. One shared refresher serves every stream; it exists only while at
+//! native seat, never subscribes to a session event bus, and never attaches,
+//! wakes, recovers, answers or cancels work. An open stream does mark a human
+//! client as present (see `InteractivePresence`), so an Ask waits for that
+//! human instead of failing closed; watching never answers it. One shared refresher serves every stream; it exists only while at
 //! least one stream is open. A slow stream only coalesces newer views.
 use super::attention_runtime::classify;
 use crate::{SessionManager, SessionManagerInner};
 use nac_core::{
-    events::{AttentionOperation, AttentionServiceSnapshot, AttentionSourceSnapshot},
+    events::{
+        AttentionBrokerSnapshot, AttentionBrokerState, AttentionOperation,
+        AttentionServiceSnapshot, AttentionSourceSnapshot,
+    },
     store::{
         AttentionLineage, AttentionStoreObservation, AttentionStoredRun, AttentionStoredSession,
         AttentionTopology,
@@ -295,12 +299,16 @@ impl FleetAttentionHub {
         // Sample and publish under one lock. Neither a census await nor another
         // publication can let older live identities overwrite a newer view.
         let live = sample();
+        let dormant = dormant_service();
         self.0.sender.send_if_modified(|current| {
             let revision = current.revision + 1;
             let mut changed = current.unavailable.is_some();
             let mut entries = BTreeMap::new();
             for stored in &census.metadata {
-                let service = live.get(&stored.id).and_then(Option::as_ref);
+                let service = match live.get(&stored.id) {
+                    Some(service) => service.as_ref(),
+                    None => Some(&dormant),
+                };
                 let topology = census.topology.get(&stored.id);
                 let facts = FleetAttentionFacts {
                     project_id: topology.and_then(|row| row.project_id.clone()),
@@ -448,6 +456,29 @@ pub(crate) fn delta(
         .map(|(id, _)| id.clone())
         .collect();
     FleetAttentionDelta { upserts, removed }
+}
+
+/// A session with no live service in this process is idle with nothing
+/// pending. This is not inferred from a cached row: the serving process holds
+/// its store exclusively, and permission and review requests live only in a
+/// loaded session's broker, so none can exist until the session loads here
+/// again (which republishes its live state). Durable questions still come from
+/// the store row.
+fn dormant_service() -> AttentionServiceSnapshot {
+    AttentionServiceSnapshot {
+        epoch: uuid::Uuid::nil(),
+        revision: 0,
+        operation: AttentionOperation::Idle,
+        settled: None,
+        broker: Some(AttentionBrokerSnapshot {
+            owner: uuid::Uuid::nil(),
+            revision: 0,
+            state: AttentionBrokerState::Current {
+                permissions: Vec::new(),
+                authorizable_reviews: Vec::new(),
+            },
+        }),
+    }
 }
 
 #[cfg(test)]

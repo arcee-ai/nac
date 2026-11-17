@@ -147,18 +147,27 @@ async fn real_child_permission_is_one_child_record_natively_and_in_every_browser
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn headless_child_ask_with_only_fleet_attention_observers_still_fails_closed() {
+async fn child_ask_waits_for_an_open_inbox_and_is_denied_when_it_closes() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let fixture = fixture().await;
     let (app, manager) = (fixture.app.clone(), fixture.manager.clone());
     let mut first = open(&app, "/attention/stream").await;
-    let _second = open(&app, "/attention/stream").await;
+    let second = open(&app, "/attention/stream").await;
     let mut state = Sessions::new();
     until(&mut first, &mut state, |state| state.len() == 3).await;
     let launched = launch(&fixture);
     let child = child_id(&app).await;
-    // No interactive client for the child: the existing delegated grace ends in
-    // the same denial whether or not browser attention is observing.
+    // Nobody has the child open, but the app is: its Ask waits past the
+    // delegated grace as the parent's Needs you decision.
+    until(&mut first, &mut state, |state| {
+        pending_permissions(state.get(&child)).len() == 1
+    })
+    .await;
+    tokio::time::sleep(Duration::from_secs(6)).await;
+    assert!(!launched.is_finished());
+    assert_eq!(fixture.calls.load(Ordering::SeqCst), 1);
+    // The last app client leaving denies it.
+    drop((first, second));
     assert_eq!(
         tokio::time::timeout(Duration::from_secs(20), launched)
             .await
@@ -169,17 +178,12 @@ async fn headless_child_ask_with_only_fleet_attention_observers_still_fails_clos
     assert_eq!(fixture.calls.load(Ordering::SeqCst), 2);
     let denial = fixture.requests.lock().unwrap()[1].to_string();
     assert!(
-        denial.contains("no interactive parent session client connected"),
+        denial.contains("disconnected while approval was pending"),
         "{denial}"
     );
     let service = manager.attach_session(&child).await.unwrap();
     assert!(service.list_permission_requests().unwrap().is_empty());
-    // Whatever was briefly pending during the grace is gone on the next record.
-    until(&mut first, &mut state, |state| {
-        state.contains_key(&child) && pending_permissions(state.get(&child)).is_empty()
-    })
-    .await;
-    drop((first, service));
+    drop(service);
     drop(manager);
     fixture.finish().await;
 }

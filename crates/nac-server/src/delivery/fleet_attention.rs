@@ -265,7 +265,11 @@ pub(crate) async fn stream(
             FleetAttentionSubscribeError::Unavailable(reason) => unavailable(reason),
         })?;
     let project = query.project_id;
+    // The Inbox is open: an Ask waits for this human instead of failing closed.
+    // Watching never answers; replying still means opening the session.
+    let presence = nac_core::permissions::InteractivePresence::enter(&manager.inner.store_path);
     Ok(Sse::new(async_stream::stream! {
+        let _presence = presence;
         let mut last: Arc<FleetAttentionView> = Arc::clone(&subscription.receiver.borrow_and_update());
         if let Some(reason) = last.unavailable {
             yield event(&last, &FleetAttentionFrame::Unavailable { reason: unavailable_dto(reason) });

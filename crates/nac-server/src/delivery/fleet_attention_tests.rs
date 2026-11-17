@@ -324,12 +324,15 @@ async fn real_pending_permission_reaches_every_browser_stream_and_resolves_besid
         "unknown"
     );
     assert_eq!(session(&baseline, "session")["activity"]["kind"], "idle");
+    // Not loaded in the process that owns the store: no broker exists, so
+    // nothing can be pending. It is idle and clear, not "status unavailable".
     let dormant = session(&baseline, "dormant");
-    assert_eq!(dormant["availability"]["permissions"], "unknown");
-    assert_eq!(dormant["availability"]["reviews"], "unknown");
-    assert_eq!(dormant["activity"]["kind"], "unknown");
+    assert_eq!(dormant["availability"]["permissions"], "available");
+    assert_eq!(dormant["availability"]["reviews"], "available");
+    assert_eq!(dormant["pending"], serde_json::json!([]));
+    assert_eq!(dormant["activity"]["kind"], "idle");
     let child = session(&baseline, "child");
-    assert_eq!(child["availability"]["permissions"], "unknown");
+    assert_eq!(child["availability"]["permissions"], "available");
     assert_eq!(child["availability"]["topology"], "available");
     assert_eq!(child["availability"]["work"], "unsupported");
     assert_eq!(child["lineage"]["kind"], "traditional-child");
@@ -403,33 +406,39 @@ async fn real_pending_permission_reaches_every_browser_stream_and_resolves_besid
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn headless_ask_with_only_fleet_attention_observers_still_fails_closed() {
+async fn open_inbox_stream_holds_ask_pending_until_the_last_app_client_leaves() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let fixture = fixture().await;
     let (app, manager) = (fixture.app.clone(), fixture.manager.clone());
     let mut first = open(&app, "/attention/stream").await;
-    let _second = open(&app, "/attention/stream").await;
+    let second = open(&app, "/attention/stream").await;
     let mut state = Sessions::new();
     until(&mut first, &mut state, |state| state.len() == 3).await;
     let service = manager.attach_session("session").await.unwrap();
     fixture.submit().await;
-    // No session event subscriber: the Ask is denied before it is ever pending,
-    // exactly as without any attention observer.
-    let frames = until(&mut first, &mut state, |state| {
-        settled(state) && state["session"]["last_outcome"]["run_id"].is_string()
+    // Nobody has the session open, but the app is: the Ask waits as a Needs
+    // you decision instead of failing closed. Watching never answers it.
+    until(&mut first, &mut state, |state| {
+        pending_permissions(state.get("session")).len() == 1
     })
     .await;
-    for frame in &frames {
-        assert!(!frame.to_string().contains("\"permission\""), "{frame}");
-    }
+    assert_eq!(service.list_permission_requests().unwrap().len(), 1);
+    assert_eq!(fixture.calls.load(Ordering::SeqCst), 1);
+    // The last app client leaving denies it, exactly like a closed session.
+    drop((first, second));
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while fixture.calls.load(Ordering::SeqCst) < 2 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the denied Ask returns to the model");
     assert!(service.list_permission_requests().unwrap().is_empty());
-    assert_eq!(fixture.calls.load(Ordering::SeqCst), 2);
     let denial = fixture.requests.lock().unwrap()[1].to_string();
     assert!(
-        denial.contains("no interactive session client is connected"),
+        denial.contains("disconnected while approval was pending"),
         "{denial}"
     );
-    drop(first);
     drop(service);
     drop(manager);
     fixture.finish().await;
