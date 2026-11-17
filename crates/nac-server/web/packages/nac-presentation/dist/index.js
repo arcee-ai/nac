@@ -4301,17 +4301,18 @@ function ou() {
 }
 // src/app/components/LeftSidebar/useSidebarCommands.tsx
 function su() {
-	let e = Ho(), { pathname: t } = Ao(), n = jo(), r = ou(), i = Wo(), { data: a = [] } = hn(), { data: o } = On(), { data: s } = He(), c = un(t), l = c != null && a.some((e) => e.summary.session_id === c), u = jr(t) ?? a.find((e) => e.summary.session_id === c)?.summary.project_id ?? null, d = o?.servers.filter((e) => e.enabled).length ?? 0;
+	let e = Ho(), { pathname: t } = Ao(), n = jo(), r = ou(), i = Wo(), { data: a = [] } = hn(), o = Et().data?.projects, { data: s } = On(), { data: c } = He(), l = un(t), u = l != null && a.some((e) => e.summary.session_id === l), d = jr(t) ?? a.find((e) => e.summary.session_id === l)?.summary.project_id ?? null, f = s?.servers.filter((e) => e.enabled).length ?? 0, p = c?.configurations.length ?? 0, m = () => d ? (r.newChat(d), !0) : l && !u || o === void 0 ? !1 : o.length === 0 ? (h(), !0) : (n(F.newSession(), { state: { focusComposer: Date.now() } }), !0);
+	function h() {
+		i.isManaged ? i.addRepository() : r.create();
+	}
 	return {
-		projectId: u,
-		sessionId: c,
-		activeMcp: d,
-		sshCount: s?.configurations.length ?? 0,
-		mcpLabel: d ? `MCP servers, ${d} active` : "MCP servers",
-		newSession: () => u ? (r.newChat(u), !0) : c && !l ? !1 : (n(F.newSession(), { state: { focusComposer: Date.now() } }), !0),
-		newProject: () => {
-			i.isManaged ? i.addRepository() : r.create();
-		},
+		projectId: d,
+		sessionId: l,
+		activeMcp: f,
+		sshCount: p,
+		mcpLabel: f ? `MCP servers, ${f} active` : "MCP servers",
+		newSession: m,
+		newProject: h,
 		createLabel: i.isManaged ? "Add repository" : "New Project",
 		openProjects: () => n(F.list()),
 		openMcp: e.openMcp,

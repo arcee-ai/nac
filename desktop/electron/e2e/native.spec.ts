@@ -55,9 +55,10 @@ test('native menu commands enter existing React flows and retain editor/modal gu
   await expect(models).toHaveCount(0);
   expect(await hash()).toBe('#/');
   await c.page.evaluate(() => document.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true })));
-  // Empty Home's Get Started opens New Project; an open modal refuses commands.
+  // With no project for Home's composer to pick, New Chat opens New Project;
+  // an open modal then refuses commands.
   await focusWorkspace(c);
-  await c.page.getByRole('button', { name: 'Get Started', exact: true }).click();
+  await menu(c, 'New Chat');
   const projectForm = c.page.getByRole('dialog', { name: 'New Project', exact: true });
   await expect(projectForm).toBeVisible();
   await projectForm.locator('input').first().focus();
