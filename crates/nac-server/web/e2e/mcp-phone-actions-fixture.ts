@@ -39,6 +39,7 @@ export const test = base.extend<{ f1Network: Guard }>({
   f1Network: async ({ baseURL: _baseURL }, use, info) => {
     const denied: string[] = [];
     const sockets = new Set<Duplex>();
+    let peerResets = 0;
     const server = http.createServer((request, response) => {
       denied.push(`${request.method} ${request.url}`);
       response.writeHead(403);
@@ -48,6 +49,11 @@ export const test = base.extend<{ f1Network: Guard }>({
       denied.push(`CONNECT ${request.url}`);
       sockets.add(socket);
       socket.once("close", () => sockets.delete(socket));
+      socket.on("error", (error: NodeJS.ErrnoException) => {
+        // A denied CONNECT peer may reset instead of reading our 403 response.
+        if (error.code !== "ECONNRESET") throw error;
+        peerResets++;
+      });
       socket.end("HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n");
     });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -67,6 +73,7 @@ export const test = base.extend<{ f1Network: Guard }>({
         proxy,
         ownerPid: process.pid,
         denied,
+        peerResets,
         forwardsTraffic: false,
       });
       for (const socket of sockets) socket.destroy();
