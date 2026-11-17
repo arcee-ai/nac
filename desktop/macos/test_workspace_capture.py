@@ -94,7 +94,21 @@ class WorkspaceCaptureTests(unittest.TestCase):
         yes, no = block.split('        } else {\n', 1)
         body = yes.split('\n', 1)[1]
         original = ''.join(line[4:] if line.startswith('    ') else line for line in body.splitlines(keepends=True))
-        self.assertEqual(original, self.frozen('originalGoalBlock'))
+        # Deliberate Focus migration, approved: goal editing moved from the
+        # composer's inline goal flag into its + menu. The frozen 24d block
+        # stays as supplied; only these lines may differ from it.
+        before = '''            try await self.waitJS("fresh goal controls after attachment", "return !window.__wkReloading && !!document.querySelector('[aria-label=\\"Edit goal: Active\\"]');")
+            try await self.button("Edit goal: Active")
+'''
+        after = '''            try await self.waitJS("fresh composer after attachment", "return !window.__wkReloading && !!document.querySelector('[role=combobox][aria-label=Message]');")
+            // Focus edits the goal from the composer's + menu; its row is
+            // named for the freshly loaded goal, so it waits on the reload.
+            try await self.button("Add to message")
+            try await self.button("Edit goal: Active")
+'''
+        frozen = self.frozen('originalGoalBlock')
+        self.assertEqual(frozen.count(before), 1)
+        self.assertEqual(original, frozen.replace(before, after))
         self.assertIn('"status": "fail", "blocked_by": "approvals", "executed": false', no)
         self.assertNotRegex(no, r'\b(send|js|waitJS|button|fill|navigate)\(')
         self.assertNotIn('webView', no)

@@ -310,7 +310,10 @@ extension WorkspaceSmoke {
                 // while this console is locked. Never replay an uncertain mutation.
                 _ = try await self.js("window.__wkReloading = true; return true;")
                 self.app.webView.reload()
-                try await self.waitJS("fresh goal controls after attachment", "return !window.__wkReloading && !!document.querySelector('[aria-label=\"Edit goal: Active\"]');")
+                try await self.waitJS("fresh composer after attachment", "return !window.__wkReloading && !!document.querySelector('[role=combobox][aria-label=Message]');")
+                // Focus edits the goal from the composer's + menu; its row is
+                // named for the freshly loaded goal, so it waits on the reload.
+                try await self.button("Add to message")
                 try await self.button("Edit goal: Active")
                 try await self.button("Pause goal")
                 try await self.waitJS("paused durable goal", "return (await (await fetch('/sessions/' + \(self.quote(self.sessionID)) + '/goal')).json())?.status === 'paused';")
