@@ -38,7 +38,12 @@ async fn human_shell_model_admission_recovers_orphans_before_refreshing_context(
         // recovery entry point, not a render-triggered cleanup.
         parts
             .service
-            .try_begin_run_with_lease(None, "continue", None, RunAdmissionKind::default())
+            .try_begin_run_with_lease(
+                None,
+                "continue",
+                None,
+                WorkerDispatchRegistryKind::default(),
+            )
             .unwrap();
         let result = crate::store::lookup_shell_command(&path, "session", "orphan")
             .unwrap()

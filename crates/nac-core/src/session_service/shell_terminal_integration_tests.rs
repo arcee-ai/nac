@@ -188,7 +188,7 @@ async fn identified_selection_active_projection_precedes_canonical_append_withou
                 &item.content,
                 None,
                 true,
-                crate::session_service::RunAdmissionKind {
+                crate::session_service::WorkerDispatchRegistryKind {
                     inbox_item_id: Some(item.id),
                     terminal_selection: item.terminal_selection.clone(),
                     ..Default::default()

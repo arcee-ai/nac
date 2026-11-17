@@ -14,7 +14,7 @@ pub struct ToolRuntime {
     pub store_path: PathBuf,
     pub session_id: Option<String>,
     pub worker_executable: Option<PathBuf>,
-    pub active_threads: Arc<RunAdmission>,
+    pub active_threads: Arc<WorkerDispatchRegistry>,
     pub event_sink: EventSink,
     pub backend: Arc<ExecutionBackend>,
     pub mcp: Option<Arc<McpRegistry>>,

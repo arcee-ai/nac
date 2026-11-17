@@ -91,9 +91,20 @@ impl SessionService {
             .session_id
             .as_deref()
             .map(|session_id| (self.metadata.store_path.as_path(), session_id));
-        match self.active_threads.cancel_and_drain(steering_store).await {
-            Ok(records) => self.emit_steering_expired_async(records).await,
-            Err(error) => eprintln!("nac: failed to expire cancelled worker steering: {error:#}"),
+        let owned = steering_store.is_some_and(|(path, _)| {
+            crate::store::coordinator::owner_for(path)
+                .map(|owner| owner.is_some())
+                .unwrap_or(true)
+        });
+        let direct_idle = self.metadata.behavior != sessions::SessionBehavior::Orchestrator
+            && self.run_admission.cancel_and_retire_if_idle(owned).await;
+        if !direct_idle {
+            match self.active_threads.cancel_and_drain(steering_store).await {
+                Ok(records) => self.emit_steering_expired_async(records).await,
+                Err(error) => {
+                    eprintln!("nac: failed to expire cancelled worker steering: {error:#}")
+                }
+            }
         }
 
         if let Some(task) = cancelling_run.task.as_mut() {

@@ -19,7 +19,7 @@ async fn source_question(
             "source question",
             None,
             true,
-            RunAdmissionKind::default(),
+            WorkerDispatchRegistryKind::default(),
         )
         .unwrap();
     let message = Message::User {

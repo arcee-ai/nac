@@ -44,8 +44,8 @@ and rich results. Individual families own their native operation and tests.
   redaction, and workspace capabilities.
 - `terminal_tools.rs`, `run_admission.rs` and `run_cancellation.rs` — process-tool
   adapter, generation-bound admission, and nested cancellation/mutation fencing.
-  `worker_dispatch.rs` retains worker bookkeeping under the same admission lock
-  for ordered draining.
+  `worker_dispatch.rs` takes the run lock before its worker bookkeeping lock;
+  direct admission and cancellation do not require the worker registry.
 - `mcp_adapter.rs` — dynamic imported capability adapter.
 - `discovery.rs` and `discovery/` — glob/grep orchestration and traversal.
 - `mutation.rs`, `mutation_remote.rs`, `mutation_tests.rs` — local/remote edit

@@ -570,9 +570,9 @@ impl SessionClientHandle {
             Some(self.client_id.clone()),
             prompt.agent_prompt,
             Some(lease),
-            RunAdmissionKind {
+            WorkerDispatchRegistryKind {
                 review_intent,
-                ..RunAdmissionKind::default()
+                ..WorkerDispatchRegistryKind::default()
             },
         )
     }
@@ -591,9 +591,9 @@ impl SessionClientHandle {
             Some(self.client_id.clone()),
             prompt.agent_prompt,
             Some(lease),
-            RunAdmissionKind {
+            WorkerDispatchRegistryKind {
                 managed_orchestrator_execution_mode: Some(execution_mode),
-                ..RunAdmissionKind::default()
+                ..WorkerDispatchRegistryKind::default()
             },
         )
     }
@@ -671,7 +671,8 @@ pub struct SessionService {
     published_operation: Arc<StdMutex<Option<ActiveSessionOperationSnapshot>>>,
     attention: Arc<StdMutex<Option<attention::ServiceAttention>>>,
     stopping_admission: Arc<std::sync::atomic::AtomicBool>,
-    active_threads: Arc<crate::tools::RunAdmission>,
+    active_threads: Arc<crate::tools::WorkerDispatchRegistry>,
+    run_admission: Arc<crate::tools::RunAdmission>,
     /// The session's skill registry, captured from the agent at construction
     /// so `prepare_user_input` can expand top-level `$skillname` references
     /// without taking the agent lock.
@@ -764,7 +765,7 @@ struct ActiveRunState {
 }
 
 #[derive(Default)]
-struct RunAdmissionKind {
+struct WorkerDispatchRegistryKind {
     heartbeat_occurrence: Option<Box<crate::store::HeartbeatOccurrence>>,
     terminal_selection: Option<crate::store::TerminalSelectionEvidence>,
     inbox_item_id: Option<i64>,

@@ -56,6 +56,154 @@ fn direct_admission_groups_reads_and_barriers_mutations_shell_and_unknowns() {
 }
 
 #[tokio::test]
+async fn reads_overlap_and_exclusive_calls_wait_for_prior_groups_in_model_order() {
+    use crate::permissions::{
+        PermissionBackend, PermissionBroker, PermissionEffect, PermissionReply, PermissionRule,
+    };
+    let root =
+        std::env::temp_dir().join(format!("nac-admission-interleave-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("input.txt"), "input").unwrap();
+    let store = root.join("store.db");
+    crate::store::initialize(&store).unwrap();
+    crate::store::insert_test_session(&store, "session");
+    let broker = Arc::new(PermissionBroker::new(
+        store.clone(),
+        "session".into(),
+        PermissionBackend::Local,
+        0,
+        ["read", "glob", "edit", "execute"]
+            .map(|action| PermissionRule::new(action, "*", PermissionEffect::Ask)),
+    ));
+    let bus = crate::events::SessionEventBus::new(Some("session".into()));
+    let _interactive = bus.subscribe_assistant_deltas();
+    broker.attach_event_bus(bus);
+    let mut runtime = test_runtime();
+    runtime.workspace_cwd = root.clone();
+    runtime.backend = crate::sandbox::execution_backend_from_sandbox(None, &root);
+    runtime.store_path = store;
+    runtime.session_id = Some("session".into());
+    runtime.permission_broker = Some(broker.clone());
+    let (events_tx, mut events_rx) = tokio::sync::mpsc::unbounded_channel();
+    let task = tokio::spawn(execute_tools_parallel(
+        vec![
+            make_tool_call("read", "read", json!({"path":"input.txt"})),
+            make_tool_call("glob", "glob", json!({"pattern":"*.txt"})),
+            make_tool_call(
+                "write",
+                "write",
+                json!({"path":"output.txt","content":"written","expected_revision":null}),
+            ),
+            make_tool_call("shell", "exec_command", json!({"cmd":"printf shell"})),
+        ],
+        runtime,
+        ModelClient::new_for_test(),
+        EventSink::channel(events_tx),
+        None,
+        true,
+    ));
+    let stage = std::sync::atomic::AtomicUsize::new(0);
+    let outcome = tokio::time::timeout(Duration::from_secs(10), async {
+        while broker.pending().len() != 2 {
+            tokio::task::yield_now().await;
+        }
+        stage.store(1, std::sync::atomic::Ordering::Relaxed);
+        let pending = broker.pending();
+        assert_eq!(
+            pending
+                .iter()
+                .map(|request| request.tool.as_str())
+                .collect::<std::collections::HashSet<_>>(),
+            std::collections::HashSet::from(["read", "glob"])
+        );
+        let read = pending
+            .iter()
+            .find(|request| request.tool == "read")
+            .unwrap();
+        broker.reply(&read.id, PermissionReply::Once).unwrap();
+        loop {
+            if let Some(AgentEvent::ToolCallFinished { call_id, .. }) = events_rx.recv().await {
+                if call_id == "read" {
+                    break;
+                }
+            }
+        }
+        stage.store(2, std::sync::atomic::Ordering::Relaxed);
+        assert_eq!(broker.pending().len(), 1);
+        assert!(!task.is_finished());
+        let glob = broker.pending().pop().unwrap();
+        assert_eq!(glob.tool, "glob");
+        broker.reply(&glob.id, PermissionReply::Once).unwrap();
+        loop {
+            if let Some(request) = broker
+                .pending()
+                .into_iter()
+                .find(|request| request.tool == "write")
+            {
+                assert!(!root.join("output.txt").exists());
+                broker.reply(&request.id, PermissionReply::Once).unwrap();
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        stage.store(3, std::sync::atomic::Ordering::Relaxed);
+        loop {
+            if task.is_finished() {
+                break;
+            }
+            if let Some(request) = broker
+                .pending()
+                .into_iter()
+                .find(|request| request.tool == "exec_command")
+            {
+                broker.reply(&request.id, PermissionReply::Once).unwrap();
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await;
+    assert!(
+        outcome.is_ok(),
+        "admission stalled at stage {}, pending {:?}, task finished {}",
+        stage.load(std::sync::atomic::Ordering::Relaxed),
+        broker.pending(),
+        task.is_finished()
+    );
+    let results = task.await.unwrap();
+    let mut write_finished = false;
+    let mut shell_started_after_write = false;
+    while let Ok(event) = events_rx.try_recv() {
+        match event {
+            AgentEvent::ToolCallFinished { call_id, .. } if call_id == "write" => {
+                write_finished = true
+            }
+            AgentEvent::ToolCallStarted { call_id, .. } if call_id == "shell" => {
+                shell_started_after_write = write_finished;
+            }
+            _ => {}
+        }
+    }
+    assert!(
+        shell_started_after_write,
+        "shell started before the write finished"
+    );
+    assert_eq!(
+        results
+            .iter()
+            .map(|result| result.0.as_str())
+            .collect::<Vec<_>>(),
+        vec!["read", "glob", "write", "shell"]
+    );
+    assert!(
+        results.iter().all(|result| !result.2.is_error),
+        "{results:?}"
+    );
+    assert!(results[3].2.content.to_string().contains("shell"));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
 async fn timed_out_exclusive_call_releases_the_following_admission_group() {
     let root = std::env::temp_dir().join(format!(
         "nac-tool-deadline-admission-{}",

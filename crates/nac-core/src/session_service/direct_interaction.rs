@@ -856,11 +856,11 @@ impl SessionService {
                     None,
                     item.content,
                     Some(lease),
-                    RunAdmissionKind {
+                    WorkerDispatchRegistryKind {
                         inbox_item_id: Some(item.id),
                         child_execution_mode,
                         terminal_selection: item.terminal_selection,
-                        ..RunAdmissionKind::default()
+                        ..WorkerDispatchRegistryKind::default()
                     },
                 )
                 .map(Selection::started)
@@ -939,9 +939,9 @@ impl SessionService {
             None,
             goal_continuation_prompt(&goal),
             Some(lease),
-            RunAdmissionKind {
+            WorkerDispatchRegistryKind {
                 goal_continuation: true,
-                ..RunAdmissionKind::default()
+                ..WorkerDispatchRegistryKind::default()
             },
         )
         .map(Selection::started)

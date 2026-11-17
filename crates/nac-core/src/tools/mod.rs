@@ -49,14 +49,16 @@ mod terminal_tools;
 pub mod thread;
 pub(crate) mod user_terminal;
 pub(crate) mod web;
+mod worker_dispatch;
 pub mod workset;
 pub mod write;
 
-pub use run_admission::RunAdmission;
+pub(crate) use run_admission::RunAdmission;
 pub(crate) use run_cancellation::RunCancellation;
 use runtime_context::shared_workspace_gate;
 pub(crate) use runtime_context::{remote_file_lock_busy, resolve_workspace_path};
 pub use runtime_context::{shared_workspace_gate_for, ToolRuntime};
+pub use worker_dispatch::WorkerDispatchRegistry;
 
 #[derive(Debug)]
 pub struct ToolResult {
@@ -591,7 +593,7 @@ pub(crate) fn test_runtime() -> ToolRuntime {
         store_path: PathBuf::new(),
         session_id: Some("test-session".to_string()),
         worker_executable: None,
-        active_threads: Arc::new(crate::tools::RunAdmission::default()),
+        active_threads: Arc::new(crate::tools::WorkerDispatchRegistry::default()),
         event_sink: EventSink::none(),
         backend,
         mcp: None,

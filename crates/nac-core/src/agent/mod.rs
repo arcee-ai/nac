@@ -460,7 +460,7 @@ impl Agent {
                 config_cwd: config.config_cwd,
                 store_path: config.store_path,
                 session_id: config.session_id,
-                active_threads: Arc::new(crate::tools::RunAdmission::default()),
+                active_threads: Arc::new(crate::tools::WorkerDispatchRegistry::default()),
                 event_sink: config.event_sink.clone(),
                 worker_executable: config.worker_executable,
                 backend,
@@ -1312,7 +1312,7 @@ impl Agent {
         Some(broker)
     }
 
-    pub fn active_threads_handle(&self) -> Arc<crate::tools::RunAdmission> {
+    pub fn active_threads_handle(&self) -> Arc<crate::tools::WorkerDispatchRegistry> {
         Arc::clone(&self.tool_runtime.active_threads)
     }
 

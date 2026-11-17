@@ -173,7 +173,12 @@ impl SessionService {
         &self,
         expanded_prompt: String,
     ) -> std::result::Result<SessionRunHandle, SessionSubmitError> {
-        self.try_submit_prompt_inner(None, expanded_prompt, None, RunAdmissionKind::default())
+        self.try_submit_prompt_inner(
+            None,
+            expanded_prompt,
+            None,
+            WorkerDispatchRegistryKind::default(),
+        )
     }
 
     #[expect(
@@ -189,7 +194,7 @@ impl SessionService {
             Some(client_id),
             expanded_prompt,
             None,
-            RunAdmissionKind::default(),
+            WorkerDispatchRegistryKind::default(),
         )
     }
 
@@ -207,7 +212,7 @@ impl SessionService {
             Some(client_id),
             expanded_prompt,
             Some(lease),
-            RunAdmissionKind::default(),
+            WorkerDispatchRegistryKind::default(),
         )
     }
 
@@ -227,10 +232,10 @@ impl SessionService {
             None,
             expanded_prompt,
             None,
-            RunAdmissionKind {
+            WorkerDispatchRegistryKind {
                 child_execution_mode: Some(execution_mode),
                 review_intent,
-                ..RunAdmissionKind::default()
+                ..WorkerDispatchRegistryKind::default()
             },
         )
     }
@@ -244,7 +249,7 @@ impl SessionService {
         client_id: Option<SessionClientId>,
         expanded_prompt: String,
         operation_lease: Option<sessions::SessionOperationLease>,
-        admission: RunAdmissionKind,
+        admission: WorkerDispatchRegistryKind,
     ) -> std::result::Result<SessionRunHandle, SessionSubmitError> {
         self.try_submit_prompt_with_guard(
             client_id,
@@ -268,7 +273,7 @@ impl SessionService {
         client_id: Option<SessionClientId>,
         mut expanded_prompt: String,
         operation_lease: Option<sessions::SessionOperationLease>,
-        mut admission: RunAdmissionKind,
+        mut admission: WorkerDispatchRegistryKind,
         guard: Option<super::operation_state::ActiveOperationGuard<'a>>,
     ) -> std::result::Result<SessionRunHandle, SessionSubmitError> {
         admission.inbox_prompt =
@@ -400,7 +405,7 @@ impl SessionService {
             expanded_prompt,
             None,
             false,
-            RunAdmissionKind::default(),
+            WorkerDispatchRegistryKind::default(),
         )?;
         self.run_prompt_commit(&active.run_id)
             .expect("test run admission must own a prompt commit channel")
@@ -418,7 +423,7 @@ impl SessionService {
         client_id: Option<SessionClientId>,
         expanded_prompt: &str,
         supplied_lease: Option<sessions::SessionOperationLease>,
-        admission: RunAdmissionKind,
+        admission: WorkerDispatchRegistryKind,
     ) -> std::result::Result<ActiveRunSnapshot, SessionSubmitError> {
         self.try_begin_run_inner(client_id, expanded_prompt, supplied_lease, true, admission)
     }
@@ -434,7 +439,7 @@ impl SessionService {
         expanded_prompt: &str,
         supplied_lease: Option<sessions::SessionOperationLease>,
         enforce_coordination: bool,
-        admission: RunAdmissionKind,
+        admission: WorkerDispatchRegistryKind,
     ) -> std::result::Result<ActiveRunSnapshot, SessionSubmitError> {
         self.try_begin_run_inner_with_guard(
             client_id,
@@ -456,7 +461,7 @@ impl SessionService {
         expanded_prompt: &str,
         supplied_lease: Option<sessions::SessionOperationLease>,
         enforce_coordination: bool,
-        admission: RunAdmissionKind,
+        admission: WorkerDispatchRegistryKind,
         guard: Option<super::operation_state::ActiveOperationGuard<'a>>,
     ) -> std::result::Result<ActiveRunSnapshot, SessionSubmitError> {
         let _host_admission = (enforce_coordination && self.managed_admission_enabled)
@@ -473,7 +478,7 @@ impl SessionService {
                     "failed to acquire managed host run admission: {error:#}"
                 )),
             })?;
-        let RunAdmissionKind {
+        let WorkerDispatchRegistryKind {
             heartbeat_occurrence,
             terminal_selection,
             mut inbox_item_id,
@@ -638,7 +643,7 @@ impl SessionService {
         let run_id = reserved
             .map(SessionRunId::from_stored)
             .unwrap_or_else(SessionRunId::new);
-        if !self.active_threads.begin_run(run_id.as_str()) {
+        if !self.run_admission.begin_run(run_id.as_str()) {
             return Err(SessionSubmitError::Coordination {
                 message: SessionCoordinationError::local_agent_busy(),
             });

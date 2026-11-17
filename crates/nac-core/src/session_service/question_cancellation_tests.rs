@@ -71,7 +71,7 @@ async fn settled_question(
             "source question",
             None,
             true,
-            RunAdmissionKind::default(),
+            WorkerDispatchRegistryKind::default(),
         )
         .unwrap();
     let message = Message::User {
@@ -362,7 +362,7 @@ async fn question_cancellation_keeps_active_guidance_and_lets_its_settlement_wak
             "unrelated guidance",
             None,
             true,
-            RunAdmissionKind::default(),
+            WorkerDispatchRegistryKind::default(),
         )
         .unwrap();
     let writer = {
