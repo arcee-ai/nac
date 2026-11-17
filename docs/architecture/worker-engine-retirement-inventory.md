@@ -22,9 +22,10 @@ any of the following:
   definitions still serve both workers and direct children.
 - `agent` current run binding and prompt commit pending state remain shared;
   neither is a worker-only steering field. `traditional_children.rs` owns a
-  compatibility decoder for project instruction suffixes in existing rendered
-  transcript heads. It must remain until equivalent durable inheritance is
-  available, including old transcripts.
+  compatibility decoder and bounded historical direct prompt templates for
+  project instruction suffixes in existing rendered transcript heads. Preserve
+  them until an equivalent durable representation supports all old transcripts;
+  do not remove them with the worker prompt or managed orchestration engine.
 
 The shared matches moved or renamed by this preparation are:
 

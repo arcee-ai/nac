@@ -29,6 +29,9 @@ It must not own HTTP/React delivery or managed-host product onboarding.
 - `src/runtime/` — configuration/model resolution and direct/orchestrator/
   worker/resume/backend construction. Shared session run contracts serve both
   direct and orchestrator paths.
+- `src/traditional_children/legacy_direct_prompts/` — bounded shipped prompt
+  templates needed to recover exact inherited guidance from older transcripts.
+  Preserve those bytes; child inheritance must not rewrite stored history.
 - `src/managed_native_credentials.rs` — managed native capture, exact redaction,
   and startup hardening; `worker_credentials.rs` owns worker transport.
 - `src/session_service/AGENTS.md` — run admission through durable settlement.
