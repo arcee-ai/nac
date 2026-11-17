@@ -379,6 +379,89 @@ async fn prepared_git_policy_binds_cwd_and_denies_before_execution() {
     );
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn prepared_git_creates_branch_and_stages_symlink_entry() {
+    use std::os::unix::fs::symlink;
+
+    let root = TempRoot::new();
+    let repo = root.path().join("repo");
+    std::fs::create_dir(&repo).unwrap();
+    let git = |args: &[&str]| {
+        let output = std::process::Command::new("git")
+            .args(args)
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output.stdout
+    };
+    git(&["init", "-q"]);
+    git(&[
+        "-c",
+        "user.name=Fixture",
+        "-c",
+        "user.email=fixture@example.invalid",
+        "commit",
+        "--allow-empty",
+        "--no-verify",
+        "-q",
+        "-m",
+        "initial",
+    ]);
+    std::fs::write(repo.join("target"), "content").unwrap();
+    symlink("target", repo.join("checkout")).unwrap();
+
+    let mut runtime = crate::tools::test_runtime();
+    runtime.workspace_cwd = root.path().into();
+    runtime.backend = crate::sandbox::execution_backend_from_sandbox(None, root.path());
+    let client = crate::model::ModelClient::new_for_test();
+    let registry = registry();
+    let snapshot = registry.snapshot(["exec_command"]).unwrap();
+    let services = kernel::ToolServices {
+        runtime: &runtime,
+        client: &client,
+    };
+    for command in [
+        "git -C repo checkout -b topic",
+        "git -C repo add -f -- checkout",
+    ] {
+        let prepared = snapshot
+            .prepare("exec_command", json!({"cmd":command}), services)
+            .unwrap();
+        assert!(
+            prepared
+                .permission_resources()
+                .iter()
+                .all(|r| r.hard_denial.is_none()),
+            "{command}"
+        );
+        let output = value(
+            snapshot
+                .invoke(
+                    "exec_command",
+                    json!({"cmd":command}),
+                    services,
+                    &kernel::ToolCallContext::default(),
+                )
+                .await,
+        );
+        assert_eq!(output["exit_code"], 0, "{command}: {output}");
+    }
+    assert_eq!(git(&["branch", "--show-current"]), b"topic\n");
+    let entry = git(&["ls-files", "--stage", "--", "checkout"]);
+    assert!(
+        String::from_utf8_lossy(&entry).starts_with("120000 "),
+        "{}",
+        String::from_utf8_lossy(&entry)
+    );
+    assert_eq!(git(&["show", ":checkout"]), b"target");
+}
+
 #[tokio::test]
 async fn completion_and_zero_deadline_preserve_defaults_and_short_budgets() {
     let runtime = crate::tools::test_runtime();

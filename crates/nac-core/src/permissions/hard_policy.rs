@@ -156,6 +156,12 @@ pub(super) fn hard_shell_denial_inner(
             );
         }
         let operation = tokens[subcommand_index].as_str();
+        if operation == "add" && git_add_operands(tokens, 0, subcommand_index).is_none() {
+            return Some(
+                "Git add options or pathspecs are unsupported for safe resource binding"
+                    .to_string(),
+            );
+        }
         let args = &tokens[subcommand_index + 1..];
         let simple_branch = operation == "checkout"
             && args.len() == 2

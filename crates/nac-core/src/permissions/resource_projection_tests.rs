@@ -42,6 +42,9 @@ fn git_operands_and_safe_settings_do_not_look_like_destructive_operations() {
             "git log --grep=clean",
             "git show checkout",
             "git -C repo add -- restore",
+            "git -C repo add -f -- checkout",
+            "git add -A -- reset",
+            "git --version",
             "env git -C repo log --grep checkout",
             "git checkout -b topic",
             "git -c core.quotepath=false status",
@@ -82,6 +85,24 @@ fn git_operands_and_safe_settings_do_not_look_like_destructive_operations() {
                 .unwrap();
             assert!(reason.contains("ambiguous"), "{command}: {reason}");
             assert!(!reason.contains("destructive Git"), "{command}: {reason}");
+        }
+        for command in [
+            "git add --pathspec-from-file=paths",
+            "git add --chmod=+x -- checkout",
+            "git add -- ':(glob)*'",
+            "git add -- '*.rs'",
+        ] {
+            let resources = shell_resources(command, cwd, backend);
+            let reason = resources
+                .iter()
+                .find_map(|r| r.hard_denial.as_deref())
+                .unwrap();
+            assert!(
+                reason.contains(
+                    "Git add options or pathspecs are unsupported for safe resource binding"
+                ),
+                "{command}: {reason}"
+            );
         }
     }
     let backend = &backends[0];
