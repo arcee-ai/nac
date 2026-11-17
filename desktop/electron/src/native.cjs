@@ -63,7 +63,7 @@ function createNativeAdapters({
   };
   const dispatchTarget = () => {
     const flight = targetFlight;
-    if (!flight || flight.sent || !flight.state.targetReady) return;
+    if (!flight || flight.sent) return;
     if (!current(flight.state) || !flight.state.uiReady || picker || commandFlight) {
       clearTarget("unavailable");
       return;
@@ -73,7 +73,7 @@ function createNativeAdapters({
     // hide fences it once visibility has actually been observed.
     if (!workspaceVisible(window, app)) return;
     flight.presented = true;
-    if (!window.isFocused()) return;
+    if (!flight.state.targetReady || !window.isFocused()) return;
     flight.sent = true;
     flight.generation = flight.state.targetGeneration;
     send("session_target", { targetMessage: flight.message }, flight.state);

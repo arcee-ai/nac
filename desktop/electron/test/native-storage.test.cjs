@@ -276,6 +276,29 @@ test("unhide readiness shares the original deadline and cannot revive after time
   f.native.dispose();
 });
 
+test("observed unhide fences a subsequent hide even before the React target owner is ready", async () => {
+  const f = fixture();
+  let hidden = true;
+  f.app.isHidden = () => hidden;
+  await f.ready(false);
+  const target = f.native.sessionTarget("fixture-session", "fixture-occurrence");
+  hidden = false;
+  f.native.setVisible(true);
+  assert.equal(f.messages.filter((message) => message.kind === "session_target").length, 0);
+  hidden = true;
+  f.native.setVisible(false);
+  f.send("session_target_ready", { generation: 1 });
+  hidden = false;
+  f.native.setVisible(true);
+  f.window.emit("focus");
+  const requests = f.messages.filter((message) => message.kind === "session_target");
+  if (requests.length)
+    f.send("target_settled", { request: requests[0].targetMessage.request, outcome: "opened" });
+  assert.equal(requests.length, 0);
+  assert.equal(await target, "stale");
+  f.native.dispose();
+});
+
 test("retirement fences hidden-app initialization and a new hide fences observed unhide", async () => {
   for (const boundary of ["retire", "navigate", "dispose", "hide-again"]) {
     const f = fixture();
