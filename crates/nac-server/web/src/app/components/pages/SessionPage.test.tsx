@@ -114,7 +114,11 @@ beforeEach(() => {
   Object.assign(Element.prototype, { requestFullscreen: fullscreen });
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 /** Picks a row in the panel's own state and the shared selection, and scrolls its list. */
 function selectInDrawer() {
@@ -159,13 +163,26 @@ describe("full-width session drawer", () => {
     expectSamePanel(list);
   });
 
-  it("is never offered while the drawer is docked beside the chat", () => {
+  it("expands the dock and restores the same panel beside the chat", () => {
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1400);
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe() {}
+        disconnect() {}
+      },
+    );
     fakes.dock = true;
     sessionLayoutStore.setState({ pinned: true });
     mount();
     expect(screen.getByRole("button", { name: "Float drawer" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Full width" })).toBeNull();
     expect(screen.queryByRole("dialog")).toBeNull();
+    const list = selectInDrawer();
+    fireEvent.click(screen.getByRole("button", { name: "Full width" }));
+    expect(screen.getByRole("button", { name: "Exit full width" })).toBeTruthy();
+    expectSamePanel(list);
+    fireEvent.click(screen.getByRole("button", { name: "Exit full width" }));
+    expectSamePanel(list);
   });
 
   it("leaves full width when the session page goes away", () => {
