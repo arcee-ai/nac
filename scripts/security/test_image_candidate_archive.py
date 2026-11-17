@@ -38,7 +38,8 @@ def image_archive(config=CONFIG):
 
 
 def oci_image_archive(*, docker_config=CONFIG, selected_config=CONFIG,
-                      platform="amd64", corrupt_descriptor=False, extra_platform=False):
+                      platform="amd64", corrupt_descriptor=False, extra_platform=False,
+                      wrapper_indexes=0):
     """One selected OCI image with an optional malicious identity seam."""
     def encoded(value):
         return json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
@@ -56,6 +57,13 @@ def oci_image_archive(*, docker_config=CONFIG, selected_config=CONFIG,
         children.append({**children[0], "platform": {"os": "linux", "architecture": "arm64"}})
     index = encoded({"schemaVersion": 2, "mediaType": "application/vnd.oci.image.index.v1+json",
                      "manifests": children})
+    indexes = []
+    for _ in range(wrapper_indexes):
+        child_digest = hashlib.sha256(index).hexdigest()
+        indexes.append((child_digest, index))
+        index = encoded({"schemaVersion": 2, "mediaType": "application/vnd.oci.image.index.v1+json",
+                         "manifests": [{"mediaType": "application/vnd.oci.image.index.v1+json",
+                                        "digest": f"sha256:{child_digest}", "size": len(index)}]})
     image = "sha256:" + hashlib.sha256(index).hexdigest()
     top = encoded({"schemaVersion": 2, "manifests": [{
         "mediaType": "application/vnd.oci.image.index.v1+json",
@@ -66,6 +74,7 @@ def oci_image_archive(*, docker_config=CONFIG, selected_config=CONFIG,
              f"blobs/sha256/{docker_digest}": docker_config,
              f"blobs/sha256/{manifest_digest}": manifest,
              f"blobs/sha256/{image[7:]}": index[:-1] + b" " if corrupt_descriptor else index}
+    blobs.update({f"blobs/sha256/{name}": payload for name, payload in indexes})
     output = io.BytesIO()
     with tarfile.open(fileobj=output, mode="w") as tar:
         for name, payload in blobs.items():
@@ -213,6 +222,18 @@ class CandidateArchiveTests(unittest.TestCase):
                 path = self.root / f"mutated-{index}.tar"
                 path.write_bytes(payload)
                 candidate._check_image_config(path, approved)
+
+    def test_one_wrapper_oci_index_is_supported_but_more_are_rejected(self):
+        wrapped, image = oci_image_archive(wrapper_indexes=1)
+        path = self.root / "wrapped.tar"
+        path.write_bytes(wrapped)
+        candidate._check_image_config(path, image)
+
+        too_deep, image = oci_image_archive(wrapper_indexes=2)
+        path = self.root / "too-deep.tar"
+        path.write_bytes(too_deep)
+        with self.assertRaisesRegex(ApprovalError, "nesting exceeds supported depth"):
+            candidate._check_image_config(path, image)
 
     def test_real_docker_save_control_when_daemon_available(self):
         if not shutil.which("docker") or subprocess.run(

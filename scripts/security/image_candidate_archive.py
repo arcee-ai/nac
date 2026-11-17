@@ -159,7 +159,9 @@ def _descriptor(archive, sha, *, expected_size=None):
 def _selected_manifest(archive, approved, *, architecture):
     """Follow only the approved index/manifest chain to one exact platform."""
     current = _descriptor(archive, approved)
-    for _ in range(2):
+    # Permit one platform-less wrapper index before the selected platform
+    # index, then require its manifest on the final bounded hop.
+    for _ in range(3):
         require(type(current) is dict, "selected OCI descriptor is not an object")
         media = current.get("mediaType")
         if media in {"application/vnd.oci.image.manifest.v1+json",
