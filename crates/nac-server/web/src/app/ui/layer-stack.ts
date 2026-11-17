@@ -19,7 +19,7 @@ export interface LayerHandlers {
   /** Trigger area of a panel: pressing it is not an outside press. */
   anchor?: RefObject<HTMLElement | null>;
   /** Absent: the layer swallows Escape without closing, so nothing below it closes either. */
-  onEscape?: () => void;
+  onEscape?: (event: KeyboardEvent) => void;
   /** Panels only. Absent: presses outside the panel pass on to the layer below it. */
   onOutsidePress?: () => void;
   inertBackground: boolean;
@@ -107,7 +107,7 @@ export function createLayerStack(): LayerStack {
     const handlers = top && handlersOf(top);
     if (!top || !handlers?.ownsKeyboard(event.target)) return;
     top.restoreFocus = true;
-    handlers.onEscape?.();
+    handlers.onEscape?.(event);
   };
 
   const resetPresses = () => {

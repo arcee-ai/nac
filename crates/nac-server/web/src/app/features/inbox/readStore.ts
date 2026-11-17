@@ -13,9 +13,9 @@ const MAX_MARKS = 500;
 
 type Storage = Pick<globalThis.Storage, "getItem" | "setItem">;
 
-function load(storage: Storage, now: number): InboxReadState {
+function load(storage: Storage | undefined, now: number): InboxReadState {
   try {
-    const raw = storage.getItem(KEY);
+    const raw = storage?.getItem(KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<InboxReadState>;
       if (typeof parsed.since === "number" && parsed.runs && typeof parsed.runs === "object") {
@@ -30,20 +30,20 @@ function load(storage: Storage, now: number): InboxReadState {
   return fresh;
 }
 
-function save(storage: Storage, state: InboxReadState): void {
+function save(storage: Storage | undefined, state: InboxReadState): void {
   try {
-    storage.setItem(KEY, JSON.stringify(state));
+    storage?.setItem(KEY, JSON.stringify(state));
   } catch {
     // Read marks are a convenience; the Inbox still works without them.
   }
 }
 
-export function createInboxReadStore(
-  storage: Storage = standalonePreferenceStorage,
-  now = Date.now(),
-) {
+export function createInboxReadStore(storage?: Storage, now = Date.now()) {
   const store = createStore<InboxReadState>(load(storage, now), "inbox-read");
+  const firstSeen = new Map<string, number>();
+  let closed = false;
   const commit = (runs: Record<string, string>) => {
+    if (closed) return;
     const entries = Object.entries(runs);
     const bounded =
       entries.length > MAX_MARKS ? Object.fromEntries(entries.slice(-MAX_MARKS)) : runs;
@@ -52,6 +52,12 @@ export function createInboxReadStore(
     save(storage, next);
   };
   return {
+    firstSeen,
+    release() {
+      closed = true;
+      firstSeen.clear();
+      store.setState({ since: now, runs: {} });
+    },
     useReadState: () => store.useStore(),
     getState: store.getState,
     markRead(sessionId: string, runId: string) {
@@ -75,9 +81,4 @@ export function createInboxReadStore(
 
 export type InboxReadStore = ReturnType<typeof createInboxReadStore>;
 
-let shared: InboxReadStore | null = null;
-/** The app's one read store (created lazily so tests can supply storage). */
-export function inboxReadStore(): InboxReadStore {
-  shared ??= createInboxReadStore();
-  return shared;
-}
+export const standaloneInboxReadStore = createInboxReadStore(standalonePreferenceStorage);

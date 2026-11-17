@@ -1,6 +1,8 @@
 import type { InboxReadState } from "./inboxModel";
 type Storage = Pick<globalThis.Storage, "getItem" | "setItem">;
 export declare function createInboxReadStore(storage?: Storage, now?: number): {
+    firstSeen: Map<string, number>;
+    release(): void;
     useReadState: () => InboxReadState;
     getState: () => InboxReadState;
     markRead(sessionId: string, runId: string): void;
@@ -10,6 +12,15 @@ export declare function createInboxReadStore(storage?: Storage, now?: number): {
     }>): void;
 };
 export type InboxReadStore = ReturnType<typeof createInboxReadStore>;
-/** The app's one read store (created lazily so tests can supply storage). */
-export declare function inboxReadStore(): InboxReadStore;
+export declare const standaloneInboxReadStore: {
+    firstSeen: Map<string, number>;
+    release(): void;
+    useReadState: () => InboxReadState;
+    getState: () => InboxReadState;
+    markRead(sessionId: string, runId: string): void;
+    markAllRead(marks: ReadonlyArray<{
+        sessionId: string;
+        runId: string;
+    }>): void;
+};
 export {};

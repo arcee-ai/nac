@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ToastProvider } from "@/app/providers/ToastProvider";
+import { Drawer } from "@/app/atoms";
 import { api } from "@/app/services/api";
 import { queryKeys } from "@/app/services/queries";
 import { questionKey } from "@/app/features/questions/queries";
@@ -76,7 +77,7 @@ function question(id: string, created: string, choices = ["CSV", "JSON"]): Quest
   };
 }
 
-function mount(props: Partial<ComposerAttentionProps> = {}, search = "") {
+function mount(props: Partial<ComposerAttentionProps> = {}, search = "", drawer = false) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity }, mutations: { retry: false } },
   });
@@ -90,6 +91,11 @@ function mount(props: Partial<ComposerAttentionProps> = {}, search = "") {
       <MemoryRouter initialEntries={[`/session/parent/insights${search}`]}>
         <ToastProvider>
           <ComposerAttention sessionId="parent" permissions questions {...props} />
+          {drawer ? (
+            <Drawer open onClose={() => {}} title="Changes">
+              <p>File changes</p>
+            </Drawer>
+          ) : null}
         </ToastProvider>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -120,6 +126,43 @@ afterEach(() => {
 });
 
 describe("attention card", () => {
+  it("does not answer the background approval while a session drawer owns the keyboard", () => {
+    states.set("parent", state([command("A", "parent", 1)]));
+    mount({}, "", true);
+    const drawer = screen.getByRole("dialog", { name: "Changes" });
+    drawer.focus();
+    fireEvent.keyDown(drawer, { key: "Enter" });
+    fireEvent.keyDown(drawer, { key: "d" });
+    expect(replies).not.toHaveBeenCalled();
+  });
+
+  it("keeps exact question navigation isolated from older permission requests", () => {
+    states.set("parent", state([command("A", "parent", 1)]));
+    questions = [question("Q", "2026-11-16T09:00:00Z")];
+    mount({}, "?question_request=Q");
+    expect(screen.getByRole("dialog", { name: "Question from the agent" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Allow once" })).toBeNull();
+    fireEvent.keyDown(document.body, { key: "Enter" });
+    expect(replies).not.toHaveBeenCalled();
+  });
+
+  it("keeps exact permission navigation isolated from older questions", () => {
+    states.set("parent", state([command("A", "parent", Date.parse("2026-11-16T10:00:00Z"))]));
+    questions = [question("Q", "2026-11-16T09:00:00Z")];
+    mount({}, "?permission_request=A");
+    expect(screen.getByRole("dialog", { name: "Permission required" })).toBeTruthy();
+    expect(screen.queryByText("Which format for Q?")).toBeNull();
+  });
+
+  it("shows a stale exact question notice without offering a replacement decision", () => {
+    states.set("parent", state([command("A", "parent", 1)]));
+    questions = [question("replacement", "2026-11-16T09:00:00Z")];
+    mount({}, "?question_request=gone");
+    expect(screen.getByText(/This task question is no longer pending/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Allow once" })).toBeNull();
+    expect(screen.queryByText("Which format for replacement?")).toBeNull();
+  });
+
   it("asks the tool's own question and shows everything the reply authorizes", () => {
     states.set(
       "parent",

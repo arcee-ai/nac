@@ -351,8 +351,8 @@ final class PreviewSmoke {
             throw PreviewError.message("UI did not create a direct fixture session: \(snapshot)")
         }
         evidence["behavior"] = "direct"
-        // That first run starts before the session page watches it, so the
-        // engine buffers it. Streaming is observed on the watched session.
+        // The first-run handoff waits for the interactive stream. Its distinct
+        // short reply precedes the controlled incremental streaming journey.
         try await waitJS("Home first-run response", "return document.body.innerText.includes('\(FixtureProvider.sessionStartAnswer)') && ![...document.querySelectorAll('button')].some(b => b.getAttribute('aria-label') === 'Stop run');")
         try await sendPrompt("MAC_PREVIEW_STREAM")
         try await waitJS("incremental streamed response", "return __previewEvidence.partial;")

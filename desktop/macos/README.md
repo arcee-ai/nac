@@ -46,9 +46,9 @@ initialize the disposable workspace repository. No second frontend is built.
 The window opens Home's composer ("What should we work on?") for a seeded
 fixture project. Enter any message and click **Start session**; it creates the
 session and sends that message as its first run. The direct session
-answers “Hello from the isolated NAC Mac preview.” That first run starts before
-the session page watches it, so the engine buffers it; later messages sent from
-the session's composer stream. Reloading the document reads the persisted
+streams “Hello from the isolated NAC Mac preview.” The first message waits for
+the session's interactive stream before admission, so an immediate approval
+request can reach its human. Reloading the document reads the persisted
 transcript. The provider never calls a real model or tools.
 
 The app creates a unique mode-0700 temporary directory containing a separate

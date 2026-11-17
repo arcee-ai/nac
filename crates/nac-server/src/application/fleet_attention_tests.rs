@@ -182,18 +182,88 @@ fn deletion_and_project_filters_are_explicit_removals() {
 }
 
 #[test]
-fn unavailable_census_is_reported_and_cleared_by_the_next_publication() {
+fn unavailable_census_survives_live_publication_until_a_new_successful_read() {
     let hub = hub_with(vec![stored("a", true)], None);
     hub.publish(&HashMap::new());
-    hub.mark_unavailable(FleetAttentionUnavailable::Capacity);
+    assert_eq!(
+        hub.accept_census(2, Err(FleetAttentionUnavailable::Capacity)),
+        Err(FleetAttentionUnavailable::Capacity)
+    );
     assert_eq!(
         view(&hub).unavailable,
         Some(FleetAttentionUnavailable::Capacity)
     );
     let revision = view(&hub).revision;
-    hub.mark_unavailable(FleetAttentionUnavailable::Capacity);
+    let _ = hub.accept_census(3, Err(FleetAttentionUnavailable::Capacity));
     assert_eq!(view(&hub).revision, revision);
+    hub.publish(&HashMap::new());
+    assert_eq!(
+        view(&hub).unavailable,
+        Some(FleetAttentionUnavailable::Capacity)
+    );
+    assert_eq!(view(&hub).revision, revision);
+    hub.accept_census(
+        4,
+        Ok(StoreCensus {
+            metadata: vec![stored("a", true)],
+            topology: HashMap::new(),
+        }),
+    )
+    .unwrap();
     hub.publish(&HashMap::new());
     assert!(view(&hub).unavailable.is_none());
     assert!(view(&hub).revision > revision);
+}
+
+#[test]
+fn census_success_failure_and_shutdown_share_one_ordered_frontier() {
+    let hub = hub_with(vec![stored("a", true)], None);
+    hub.publish(&HashMap::new());
+    let _ = hub.accept_census(3, Err(FleetAttentionUnavailable::Store));
+    assert_eq!(
+        hub.accept_census(
+            2,
+            Ok(StoreCensus {
+                metadata: Vec::new(),
+                topology: HashMap::new()
+            })
+        ),
+        Err(FleetAttentionUnavailable::Store)
+    );
+    hub.publish(&HashMap::new());
+    assert_eq!(
+        view(&hub).unavailable,
+        Some(FleetAttentionUnavailable::Store)
+    );
+    hub.accept_census(
+        5,
+        Ok(StoreCensus {
+            metadata: vec![stored("b", true)],
+            topology: HashMap::new(),
+        }),
+    )
+    .unwrap();
+    assert_eq!(
+        hub.accept_census(4, Err(FleetAttentionUnavailable::Capacity)),
+        Ok(())
+    );
+    hub.publish(&HashMap::new());
+    assert!(view(&hub).unavailable.is_none());
+    assert!(view(&hub).entries.contains_key("b"));
+    hub.stop();
+    assert_eq!(
+        hub.accept_census(
+            6,
+            Ok(StoreCensus {
+                metadata: Vec::new(),
+                topology: HashMap::new()
+            })
+        ),
+        Err(FleetAttentionUnavailable::Store)
+    );
+    hub.publish(&HashMap::new());
+    assert_eq!(
+        view(&hub).unavailable,
+        Some(FleetAttentionUnavailable::Store)
+    );
 }

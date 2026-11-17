@@ -1,3 +1,4 @@
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { memo, useId, useMemo, useState } from "react";
 
 import { Icon, IconName } from "@/app/atoms";
@@ -8,7 +9,6 @@ import {
   useInsightsNavigation,
 } from "@/app/features/insights/useInsightsNavigation";
 import { cn } from "@/app/lib/cn";
-import { useTranscriptDensity } from "@/app/store/transcriptDensityStore";
 
 import {
   foldSegments,
@@ -49,6 +49,7 @@ export const WorkFoldView = memo(function WorkFoldView({
   interactive: boolean;
 }) {
   const listId = useId();
+  const { useTranscriptDensity } = useNativeRuntime().stores.transcriptDensityStore;
   const density = useTranscriptDensity();
   const [toggled, setToggled] = useState<boolean | null>(null);
   const { openGroup } = useInsightsNavigation();

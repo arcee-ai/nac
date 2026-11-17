@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { inboxHref } from "./inboxContext";
 
 import {
   decisionKey,
@@ -70,6 +71,8 @@ describe("needs you", () => {
       ["c", "Review blocked"],
     ]);
     expect(model.badge).toBe(3);
+    expect(inboxHref(model.needsYou[1].target)).toContain("question_request=q1");
+    expect(inboxHref(model.needsYou[2].target)).toContain("review_request=r1");
     expect(model.needsYou[0].target).toEqual({ sessionId: "a", permissionRequestId: "p1" });
   });
 
@@ -212,4 +215,21 @@ describe("unknown facets", () => {
     expect(model.needsYou).toHaveLength(1);
     expect(model.unavailable).toHaveLength(0);
   });
+});
+
+it("reports unsupported orchestration coverage as unavailable rather than a clear Inbox", () => {
+  const model = derive(
+    [session("legacy")],
+    [
+      facts("legacy", {
+        availability: {
+          permissions: "unsupported",
+          questions: "unsupported",
+          reviews: "unsupported",
+        },
+      }),
+    ],
+  );
+  expect(model.unavailable.map((row) => row.sessionId)).toEqual(["legacy"]);
+  expect(model.badge).toBe(0);
 });

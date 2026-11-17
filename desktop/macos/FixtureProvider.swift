@@ -222,9 +222,9 @@ final class FixtureProvider {
     }
 
     #if PREVIEW_SMOKE
-    /// Home's Start session sends its prompt before the session page watches the
-    /// run, so that first model call is buffered. The smoke's Home prompt gets its
-    /// own short reply; the streamed answer stays unique to the session composer.
+    /// The smoke's Home prompt gets its own short reply, supporting the exact
+    /// request's buffered or streaming mode. The incremental streamed answer
+    /// stays unique to the later session-composer journey.
     static let sessionStartPrompt = "MAC_PREVIEW_START"
     static let sessionStartAnswer = "Preview session started."
     private static func sessionStartResponse(_ request: [String: Any]) -> String? {

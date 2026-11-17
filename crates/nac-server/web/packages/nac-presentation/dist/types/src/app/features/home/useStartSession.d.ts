@@ -11,9 +11,9 @@ export interface StartRequest {
  * Home's send: create the session (inheriting, or with the composer's model
  * override), deliver the prompt as its first message, then open it.
  *
- * Delivery never replays: a rejected first message is put back in the new
- * session's composer; an uncertain one is reported so the user checks before
- * resending.
+ * The runtime-only first-message intent is consumed by the owning composer
+ * after its interactive stream is live. Reload/replacement retains text only,
+ * never an executable intent.
  */
 export declare function useStartSession(): {
     start: (request: StartRequest) => Promise<boolean>;

@@ -13,8 +13,22 @@ import * as sessionLayoutStore from "../store/sessionLayoutStore";
 import * as sessionNavigationStore from "../store/sessionNavigationStore";
 import * as sidebarLayoutStore from "../store/sidebarLayoutStore";
 import * as sshConnectionStore from "../store/sshConnectionStore";
+import { createInboxReadStore, standaloneInboxReadStore } from "../features/inbox/readStore";
+import { createHomeDraftStore, standaloneHomeDraftStore } from "../features/home/homeDraftStore";
+import {
+  createCommandSurfaceStore,
+  standaloneCommandSurfaceStore,
+} from "../features/command-palette/commandSurfaceStore";
+import {
+  createTranscriptDensityStore,
+  standaloneTranscriptDensityStore,
+} from "../store/transcriptDensityStore";
 
 export interface PresentationStores {
+  inboxReadStore: ReturnType<typeof createInboxReadStore>;
+  homeDraftStore: ReturnType<typeof createHomeDraftStore>;
+  commandSurfaceStore: ReturnType<typeof createCommandSurfaceStore>;
+  transcriptDensityStore: ReturnType<typeof createTranscriptDensityStore>;
   panelWidth: ReturnType<typeof panelWidth.createPanelWidth>;
   threadLogHeight: ReturnType<typeof threadLogHeight.createThreadLogHeight>;
   lastLight: ReturnType<typeof lastLight.createLastLight>;
@@ -37,6 +51,10 @@ export function createPresentationStores(
   draftPersistenceBinding?: PromptDraftPersistenceBinding,
 ): PresentationStores {
   return {
+    inboxReadStore: createInboxReadStore(storage),
+    homeDraftStore: createHomeDraftStore(),
+    commandSurfaceStore: createCommandSurfaceStore(),
+    transcriptDensityStore: createTranscriptDensityStore(storage),
     promptDraftStore: promptDraftStore.createPromptDraftStore(
       scope,
       draftStorage,
@@ -58,6 +76,10 @@ export function createPresentationStores(
 }
 
 export const standalonePresentationStores = {
+  inboxReadStore: standaloneInboxReadStore,
+  homeDraftStore: standaloneHomeDraftStore,
+  commandSurfaceStore: standaloneCommandSurfaceStore,
+  transcriptDensityStore: standaloneTranscriptDensityStore,
   promptDraftStore,
   panelWidth,
   threadLogHeight,

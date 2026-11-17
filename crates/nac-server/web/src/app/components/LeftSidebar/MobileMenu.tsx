@@ -2,7 +2,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 
 import { Icon, IconName, Modal } from "@/app/atoms";
 import { ThemeSegmented } from "@/app/components/ThemeToggle";
-import { openCommandPalette } from "@/app/features/command-palette/paletteSignal";
+import { useCommandSurfaceControls } from "@/app/features/command-palette/paletteSignal";
 import { useManagedHost } from "@/app/features/managed/controller/useManagedHost";
 import { SessionListBody, SessionListSwitch } from "@/app/features/inbox/SessionLists";
 import { cn } from "@/app/lib/cn";
@@ -45,6 +45,7 @@ function MenuRow({
  * same session list (44px rows, actions always visible).
  */
 export function MobileMenu({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { openCommandPalette } = useCommandSurfaceControls();
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const commands = useSidebarCommands();

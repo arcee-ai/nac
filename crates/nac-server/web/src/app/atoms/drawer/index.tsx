@@ -11,6 +11,7 @@ const EXIT_MS = 200;
 export interface DrawerProps {
   open: boolean;
   onClose: () => void;
+  onEscape?: (event: KeyboardEvent) => void;
   /** Accessible name and visible heading. */
   title: React.ReactNode;
   /** Plain-text name when `title` is not a string. */
@@ -38,6 +39,7 @@ export interface DrawerProps {
 export default function Drawer({
   open,
   onClose,
+  onEscape,
   title,
   label,
   headerActions,
@@ -82,7 +84,7 @@ export default function Drawer({
   const name = label ?? (typeof title === "string" ? title : undefined);
 
   return (
-    <Sheet open={open} onOpenChange={(next) => (next ? undefined : onClose())}>
+    <Sheet open={open} onOpenChange={(next) => (next ? undefined : onClose())} onEscape={onEscape}>
       <SheetPortal forceMount>
         <SheetOverlay
           className={cn(
@@ -107,6 +109,8 @@ export default function Drawer({
           }}
           aria-label={name}
           aria-describedby={undefined}
+          aria-hidden={!open || undefined}
+          inert={!open}
           className={cn(
             "z-[61] flex flex-col overflow-hidden bg-elevation-level-1 text-basic-primary shadow-2xl outline-none",
             "transition-transform duration-200 ease-[var(--ease-drawer)] motion-reduce:transition-none",

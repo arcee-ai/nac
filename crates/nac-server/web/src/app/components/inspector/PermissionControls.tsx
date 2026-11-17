@@ -124,6 +124,10 @@ export function PermissionControls({
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const requestedPermission = searchParams.get("permission_request");
+  const requestedReview = searchParams.get("review_request");
+  const [dismissedReview, setDismissedReview] = useState<string | null>(null);
+  const reviewLink = requestedReview ? `${sessionId}:${location.key}:${requestedReview}` : null;
+  const exactReviewLink = reviewLink !== null && dismissedReview !== reviewLink;
   const direct = behavior === "direct" || behavior === "direct-with-orchestrator";
   const queue = usePermissionQueue(sessionId, direct, requesterLabel, {
     poll,
@@ -136,9 +140,13 @@ export function PermissionControls({
   const authorizeRetry = useAuthorizePermissionReviewRetry();
   const { reply, replying } = usePermissionReply();
   const toast = useToast();
-  const requests = queue.requests;
+  const requests = exactReviewLink ? [] : queue.requests;
   const grants = queue.scopes.flatMap((scope) => scope.query.data?.grants ?? []);
-  const reviews = queue.reviews;
+  const reviews = exactReviewLink
+    ? queue.reviews.filter(
+        (entry) => entry.scope.sessionId === sessionId && entry.review.id === requestedReview,
+      )
+    : queue.reviews;
   const authorizableCount = reviews.filter((entry) => entry.authorizable).length;
   const approvalMode = permissions.data?.approval_mode ?? "manual";
   const autoApprove = approvalMode === "auto_approve";
@@ -153,8 +161,9 @@ export function PermissionControls({
         : null;
   const inheritedAutoApproval = approvalMode !== "manual" && !autoApprovalAvailable;
   const [ownOpen, setOwnOpen] = useState(false);
-  const open = sheetOpen ?? ownOpen;
+  const open = exactReviewLink || (sheetOpen ?? ownOpen);
   const setOpen = (next: boolean) => {
+    if (!next && exactReviewLink) setDismissedReview(reviewLink);
     setOwnOpen(next);
     onSheetOpenChange?.(next);
   };
@@ -394,7 +403,7 @@ export function PermissionControls({
           </div>
         ) : null}
 
-        {autoApprovalAvailable ? (
+        {autoApprovalAvailable && !exactReviewLink ? (
           <section aria-label="Approval mode" role="radiogroup" className="flex flex-col gap-3">
             <SectionLabel>Approval mode</SectionLabel>
             {MODE_OPTIONS.map((option) => (
@@ -424,6 +433,12 @@ export function PermissionControls({
 
         {reviewMode ? (
           <PermissionReviewStatus reviews={reviews.map((entry) => entry.review)} />
+        ) : null}
+        {exactReviewLink && reviews.length === 0 ? (
+          <p role="status" className="type-body-chrome text-basic-secondary">
+            This automatic review is no longer available. Refresh the task to inspect its current
+            state.
+          </p>
         ) : null}
         {reviewMode || reviews.length ? (
           <section aria-label="Automatic reviews">

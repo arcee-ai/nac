@@ -1,10 +1,7 @@
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { ThemeSegmented } from "@/app/components/ThemeToggle";
 import { cn } from "@/app/lib/cn";
-import {
-  setTranscriptDensity,
-  useTranscriptDensity,
-  type TranscriptDensity,
-} from "@/app/store/transcriptDensityStore";
+import { type TranscriptDensity } from "@/app/store/transcriptDensityStore";
 import { SettingsGroup, SettingsRow } from "../SettingsRows";
 
 const DENSITIES: readonly { id: TranscriptDensity; label: string }[] = [
@@ -13,6 +10,8 @@ const DENSITIES: readonly { id: TranscriptDensity; label: string }[] = [
 ];
 
 function DensitySegmented() {
+  const { useTranscriptDensity, setTranscriptDensity } =
+    useNativeRuntime().stores.transcriptDensityStore;
   const density = useTranscriptDensity();
   return (
     <div

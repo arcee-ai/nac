@@ -6,6 +6,7 @@ import { useKeyboardShortcuts } from "@/app/hooks/useKeyboardShortcuts";
 import { useSessionTitle } from "@/app/hooks/useSessionTitle";
 import { routes, sessionIdFromPath } from "@/app/lib/routes";
 import { NEXT_NEEDS_YOU_KEYS } from "@/app/lib/shortcuts";
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useFleetAttention, useProjects, useVisibleSessions } from "@/app/services/queries";
 
 import {
@@ -22,10 +23,6 @@ import {
   useInbox,
   type InboxContextValue,
 } from "./inboxContext";
-import { inboxReadStore } from "./readStore";
-
-/** When this device first saw each pending decision; the oldest waits longest. */
-const firstSeen = new Map<string, number>();
 
 /**
  * One fleet attention subscription for the whole app (one stream serves every
@@ -50,7 +47,8 @@ function LiveInboxProvider({ children }: { children: ReactNode }) {
   const { data: sessions = [] } = useVisibleSessions();
   const { data: projectsData } = useProjects();
   const titleOf = useSessionTitle();
-  const reads = inboxReadStore();
+  const reads = useNativeRuntime().stores.inboxReadStore;
+  const { firstSeen } = reads;
   const read = reads.useReadState();
   const facts = useMemo<InboxSessionFacts[]>(() => {
     const projectName = new Map(
@@ -83,14 +81,20 @@ function LiveInboxProvider({ children }: { children: ReactNode }) {
         if (!firstSeen.has(key)) firstSeen.set(key, now);
       }
     }
-  }, [fleet.sessions]);
+    const pending = new Set(
+      [...fleet.sessions].flatMap(([id, session]) =>
+        session.pending.map((decision) => decisionKey(id, decision)),
+      ),
+    );
+    for (const key of firstSeen.keys()) if (!pending.has(key)) firstSeen.delete(key);
+  }, [fleet.sessions, firstSeen]);
 
   const model = useMemo(
     () =>
       usable
         ? deriveInbox({ sessions: facts, attention: fleet.sessions, read, firstSeen })
         : EMPTY_INBOX,
-    [usable, facts, fleet.sessions, read],
+    [usable, facts, fleet.sessions, read, firstSeen],
   );
 
   const open = useCallback(

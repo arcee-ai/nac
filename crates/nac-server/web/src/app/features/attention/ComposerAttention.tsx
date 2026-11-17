@@ -99,7 +99,9 @@ export function ComposerAttention({
     ? queue.requests.filter(
         (entry) => entry.scope.sessionId === sessionId && entry.request.id === requested,
       )
-    : queue.requests;
+    : searchParams.has("question_request") || searchParams.has("review_request")
+      ? []
+      : queue.requests;
   const brokersSettled = queue.scopes.every((scope) => !scope.query.isPending);
 
   const items: AttentionItem[] = [
@@ -109,12 +111,14 @@ export function ComposerAttention({
       at: timeOf(entry.request.created_at_epoch_ms),
       entry,
     })),
-    ...questions.map((question): AttentionItem => ({
-      kind: "question",
-      key: `question:${question.request.request_id}:${question.revision}`,
-      at: timeOf(question.created_at),
-      question,
-    })),
+    ...(exactLink || searchParams.has("review_request") ? [] : questions).map(
+      (question): AttentionItem => ({
+        kind: "question",
+        key: `question:${question.request.request_id}:${question.revision}`,
+        at: timeOf(question.created_at),
+        question,
+      }),
+    ),
   ].sort((left, right) => left.at - right.at);
   if (exactLink && requests.length === 0 && brokersSettled) {
     items.unshift({

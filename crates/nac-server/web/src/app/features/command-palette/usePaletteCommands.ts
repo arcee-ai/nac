@@ -17,9 +17,9 @@ import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
 import { THEMES, useTheme, type Theme } from "@/app/providers/ThemeProvider";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useProjects, useSessionSnapshot, useVisibleSessions } from "@/app/services/queries";
-import { setTranscriptDensity, useTranscriptDensity } from "@/app/store/transcriptDensityStore";
+
 import type { ManagedSessionSummary } from "@/app/types/api";
-import { requestSidebarToggle, useSidebarToggleAvailable } from "./paletteSignal";
+import { useCommandSurfaceControls } from "./paletteSignal";
 
 export type PaletteGroup =
   | "Sessions"
@@ -113,6 +113,9 @@ export function usePaletteCommands(): PaletteItem[] {
   const openNextNeedsYou = inbox.openNext;
   const settings = useProductNavigationOwner();
   const { theme = "system", setTheme } = useTheme();
+  const { useTranscriptDensity, setTranscriptDensity } =
+    useNativeRuntime().stores.transcriptDensityStore;
+  const { requestSidebarToggle, useSidebarToggleAvailable } = useCommandSurfaceControls();
   const density = useTranscriptDensity();
   const sidebarAvailable = useSidebarToggleAvailable();
 
@@ -316,6 +319,8 @@ export function usePaletteCommands(): PaletteItem[] {
     sessions,
     settings,
     setTheme,
+    setTranscriptDensity,
+    requestSidebarToggle,
     sidebarAvailable,
     snapshot?.lineage?.kind,
     theme,

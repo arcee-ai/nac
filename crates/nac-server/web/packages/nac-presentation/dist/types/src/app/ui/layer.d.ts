@@ -7,7 +7,7 @@ export interface LayerOptions {
     kind: LayerKind;
     content: RefObject<HTMLElement | null>;
     anchor?: RefObject<HTMLElement | null>;
-    onEscape?: () => void;
+    onEscape?: (event: KeyboardEvent) => void;
     onOutsidePress?: () => void;
     inertBackground?: boolean;
 }

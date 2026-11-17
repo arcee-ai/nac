@@ -1,8 +1,8 @@
 import { n as e, r as t, t as n } from "./rolldown-runtime-QGRDbDUS.js";
-import { M as r, j as i, k as a, n as o } from "./RuntimeContext-oPcIWcba.js";
-import { a as s } from "./PresentationBoundary-DDOQGn0M.js";
-import { br as c, n as l, o as u, pr as d, r as f, t as p, yr as m } from "./workspaceLink-C1liu8-Z.js";
-import { i as h, q as g, r as _ } from "./Toast-DC-__7JY.js";
+import { A as r, O as i, j as a, n as o } from "./RuntimeContext-vBfe3WXu.js";
+import { a as s } from "./PresentationBoundary-BAUfAcJZ.js";
+import { br as c, n as l, o as u, pr as d, r as f, t as p, yr as m } from "./workspaceLink-CnaMnG2x.js";
+import { i as h, q as g, r as _ } from "./Toast-phk3tngI.js";
 import { a as v, c as y, l as b, o as x, r as S, s as C, t as w } from "./lib-rX7C_D5H.js";
 import { Suspense as T, isValidElement as E, memo as D, use as O, useState as k } from "react";
 import { useQueryClient as ee } from "@tanstack/react-query";
@@ -6524,13 +6524,13 @@ function fl(e, t) {
 var pl = /* @__PURE__ */ e({ default: () => Al }), ml = [Uc], hl = /* @__PURE__ */ new Map();
 function gl(e) {
 	let t = hl.get(e);
-	return t || (t = import("./markdown-mathjax-sbQyNBKL.js").then(({ createMathjaxPlugin: t, remarkMathPlugin: n }) => ({
+	return t || (t = import("./markdown-mathjax-BfJYYNOO.js").then(({ createMathjaxPlugin: t, remarkMathPlugin: n }) => ({
 		remark: [...ml, n],
 		rehype: [t(e)]
 	})), hl.set(e, t)), t;
 }
 function _l(e) {
-	return r(e) ? e : i(e) ? String(e) : Array.isArray(e) ? e.map(_l).join("") : E(e) ? _l(e.props.children) : "";
+	return a(e) ? e : r(e) ? String(e) : Array.isArray(e) ? e.map(_l).join("") : E(e) ? _l(e.props.children) : "";
 }
 function vl(e) {
 	if (!E(e)) return "plaintext";
@@ -6600,7 +6600,7 @@ function Sl(e) {
 			children: /* @__PURE__ */ A("table", { ...e })
 		}),
 		style: ({ children: e }) => {
-			let t = r(e) ? e : "";
+			let t = a(e) ? e : "";
 			return t ? /* @__PURE__ */ A("style", {
 				href: `mathjax-${bl(t)}`,
 				precedence: "mathjax",
@@ -6658,16 +6658,16 @@ function Tl({ source: e, streaming: t }) {
 	}) : i;
 }
 function El({ source: e, components: t }) {
-	let n = o(), i = O(gl(n.assets?.mathjaxFontUrl)), a = s(), c = n.assets ? {
+	let n = o(), r = O(gl(n.assets?.mathjaxFontUrl)), i = s(), c = n.assets ? {
 		...t,
 		style: ({ children: e }) => {
-			let t = r(e) ? e : "";
-			return t && n.id !== void 0 ? /* @__PURE__ */ A("style", { children: nl(t, n.id, a) }) : null;
+			let t = a(e) ? e : "";
+			return t && n.id !== void 0 ? /* @__PURE__ */ A("style", { children: nl(t, n.id, i) }) : null;
 		}
 	} : t;
 	return /* @__PURE__ */ A(Ha, {
-		remarkPlugins: i.remark,
-		rehypePlugins: i.rehype,
+		remarkPlugins: r.remark,
+		rehypePlugins: r.rehype,
 		urlTransform: l,
 		components: c,
 		children: e
@@ -6693,13 +6693,13 @@ function kl(e) {
 	return !1;
 }
 var Al = D(function({ children: e, streaming: t = !1 }) {
-	a("Markdown");
+	i("Markdown");
 	let [n, r] = k(t);
 	t && !n && r(!0);
-	let i = t || n && !kl(e);
+	let a = t || n && !kl(e);
 	return /* @__PURE__ */ A(f, {
 		id: "markdown",
-		children: i ? el(e).map((e, t) => /* @__PURE__ */ A(Dl, { source: e }, t)) : /* @__PURE__ */ A(Tl, {
+		children: a ? el(e).map((e, t) => /* @__PURE__ */ A(Dl, { source: e }, t)) : /* @__PURE__ */ A(Tl, {
 			source: e,
 			streaming: !1
 		})

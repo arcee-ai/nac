@@ -53,6 +53,8 @@ export interface InboxTarget {
   sessionId: string;
   /** The exact permission request to focus on arrival. */
   permissionRequestId?: string;
+  questionRequestId?: string;
+  reviewId?: string;
 }
 
 export interface InboxRow {
@@ -162,7 +164,10 @@ export function deriveInbox({
       waitingByRoot.set(root, list);
     }
     const { permissions, questions, reviews } = facts.availability;
-    if ([permissions, questions, reviews].some((facet) => facet === "unknown")) {
+    if (
+      [permissions, questions, reviews].every((facet) => facet === "unsupported") ||
+      [permissions, questions, reviews].some((facet) => facet === "unknown")
+    ) {
       blindRoots.add(root);
     }
   }
@@ -194,6 +199,9 @@ export function deriveInbox({
         sessionId: first.sessionId,
         permissionRequestId:
           first.decision.kind === "permission" ? first.decision.request_id : undefined,
+        questionRequestId:
+          first.decision.kind === "question" ? first.decision.request_id : undefined,
+        reviewId: first.decision.kind === "review" ? first.decision.review_id : undefined,
       },
       at: first.since,
       approvals,
