@@ -523,3 +523,107 @@ test("persisted opt-in/frontier survives a cold app/new-port restart and retired
         .toBe(false);
   }
 });
+
+test("healthy checkpoint with invalid native notifications permits explicit menu Reset while retaining preferences and drafts", async ({
+  candidate: c,
+}) => {
+  const session = await c.session();
+  const original = await state(c);
+  await stop(c.app);
+  const profile = original.storage.profile,
+    track = original.receipt.identity.track;
+  const binding = [
+    `desktop-${profile}`,
+    profile,
+    "local",
+    "local",
+    profile,
+    track,
+  ];
+  const values = {
+    preferences: { "nac.sidebar.open": "false" },
+    drafts: {
+      ["nac:prompt-drafts:v2:" + JSON.stringify(binding)]: JSON.stringify({
+        version: 2,
+        binding,
+        drafts: [
+          [
+            session,
+            "Private malformed-notification recovery draft; never send.",
+          ],
+        ],
+      }),
+    },
+  };
+  const file = path.join(
+    await fs.realpath(path.join(c.directory, "home")),
+    "Library/Application Support/NAC/Presentation",
+    track,
+    profile,
+    "checkpoint.json",
+  );
+  const source = JSON.stringify({
+    version: 2,
+    profile,
+    values,
+    native: { notifications: { enabled: "invalid", receipts: [] } },
+  });
+  await fs.writeFile(file, source, { mode: 0o600 });
+  let successor: ElectronApplication | undefined;
+  let enginePid = 0;
+  try {
+    const next = await relaunch(c);
+    successor = next.app;
+    const current = { ...c, app: next.app, page: next.page };
+    await expect
+      .poll(async () => (await state(current)).notifications?.resettable)
+      .toBe(true);
+    const before = await state(current);
+    enginePid = before.enginePid;
+    expect(before.storage.available).toBe(true);
+    expect(before.notifications.loaded).toBe(false);
+    expect(before.notifications.enabled).toBe(false);
+    expect(before.notifications.observer?.tasks ?? 0).toBe(0);
+    expect(await fs.readFile(file, "utf8")).toBe(source);
+    expect(
+      await next.app.evaluate(({ Menu }) => ({
+        enable: Menu.getApplicationMenu()!.getMenuItemById(
+          "notifications-enable",
+        )!.enabled,
+        reset: Menu.getApplicationMenu()!.getMenuItemById(
+          "notifications-reset",
+        )!.enabled,
+      })),
+    ).toEqual({ enable: false, reset: true });
+    await menu(current, "notifications-reset");
+    await expect
+      .poll(async () => {
+        const value = (await state(current)).notifications;
+        return (
+          value.loaded && !value.enabled && !value.saving && !value.suspended
+        );
+      })
+      .toBe(true);
+    const saved = JSON.parse(await fs.readFile(file, "utf8"));
+    expect(saved.native?.notifications ?? null).toBeNull();
+    expect(saved.values).toEqual(values);
+    expect(await nativeSubmissions(current)).toEqual([]);
+    expect(c.provider.requests).toHaveLength(0);
+  } finally {
+    if (successor) await stop(successor);
+    if (enginePid)
+      await expect
+        .poll(
+          () => {
+            try {
+              process.kill(enginePid, 0);
+              return true;
+            } catch {
+              return false;
+            }
+          },
+          { timeout: 30000 },
+        )
+        .toBe(false);
+  }
+});
