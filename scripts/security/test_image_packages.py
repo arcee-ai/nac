@@ -18,7 +18,7 @@ def fixture():
     pins = {"schema_version": 1, "downloads": {
         "source.tar.gz": {"url": "https://example.invalid/source.tar.gz", "sha256": "a" * 64},
         "fix.patch": {"url": "https://example.invalid/fix.patch", "sha256": "b" * 64}}}
-    versions = {"krb5": ("1.22.2", "1.22.2-r6"), "curl": ("8.23.0", "8.23.0-r2"),
+    versions = {"krb5": ("1.22.3", "1.22.3-r0"), "curl": ("8.23.0", "8.23.0-r2"),
                 "sasl": ("2.1.28", "2.1.28-r59"), "gcc_headers": ("16.2.0", "16.2.0-r2"),
                 "libssh2": ("1.11.1", "1.11.1-r12")}
     for owner, (version, revision) in versions.items():

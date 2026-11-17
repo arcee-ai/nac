@@ -1,8 +1,9 @@
 #!/bin/sh
 set -eu
 
-# Compile the actual patched functions in the owned source tree.  The negative
-# controls reverse only the two locked upstream patches in disposable copies.
+# Compile the actual release functions in the owned source tree.  The negative
+# controls reverse the NegoEx patch and remove the 1.22.3 KRB-CRED guard from
+# exact-hash source in disposable copies.
 # Nothing here is installed into the runtime package or opens a socket.
 # The managed Wolfi builder uses BusyBox ash, which supports this core limit.
 # shellcheck disable=SC3045
@@ -16,7 +17,26 @@ cp /work/krb5/src/lib/krb5/krb/rd_cred.c \
     "$root/vulnerable/src/lib/krb5/krb/rd_cred.c"
 cd "$root/vulnerable"
 patch --batch --fuzz=0 -R -p1 < /work/downloads/krb5-negoex.patch
-patch --batch --fuzz=0 -R -p1 < /work/downloads/krb5-ticket-info.patch
+python3 - "$root/vulnerable/src/lib/krb5/krb/rd_cred.c" <<'PY_CRED_CONTROL'
+import hashlib
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+source = path.read_bytes()
+expected = "d346ae1225eb545bf7a7013de2dfff07cc94a0590bc7ee94b762345e30ea8eef"
+if hashlib.sha256(source).hexdigest() != expected:
+    raise SystemExit("KRB-CRED negative control source differs from MIT 1.22.3")
+guard = (b"        if (info == NULL || info->client == NULL || info->server == NULL) {\n"
+         b"            /* We unexpectedly reached the end of the encrypted ticket info,\n"
+         b"             * or the ticket info is unexpectedly missing a principal name. */\n"
+         b"            ret = KRB5KRB_AP_ERR_MODIFIED;\n"
+         b"            goto cleanup;\n"
+         b"        }\n")
+if source.count(guard) != 1:
+    raise SystemExit("KRB-CRED negative control guard differs from MIT 1.22.3")
+path.write_bytes(source.replace(guard, b"", 1))
+PY_CRED_CONTROL
 
 cd /work/krb5/src
 compile_negoex() {

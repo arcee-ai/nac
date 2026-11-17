@@ -1,16 +1,13 @@
 {
   "schema_version": 1,
   "krb5": {
-    "version": "1.22.2",
-    "package_version": "1.22.2-r6",
-    "source_commit": "8570e77819563e036027e1da789d08ec9333ed4d",
+    "version": "1.22.3",
+    "package_version": "1.22.3-r0",
+    "source_commit": "f5bee90a501da6c351b3db46c1ae837b033a714c",
     "license": "MIT",
     "archive": "krb5.tar.gz",
     "patches": [
-      "krb5-autoconf.patch",
-      "krb5-c23.patch",
-      "krb5-negoex.patch",
-      "krb5-ticket-info.patch"
+      "krb5-autoconf.patch"
     ],
     "upstream_fixes": [
       {
@@ -19,14 +16,14 @@
           "CVE-2026-40356"
         ],
         "commit": "2e75f0d9362fb979f5fc92829431a590a130929f",
-        "patch": "krb5-negoex.patch"
+        "included_in_release": "1.22.3"
       },
       {
         "advisories": [
           "CVE-2026-107778"
         ],
         "commit": "62196e2b269159a5465f5b8d0ed7cf6f29c3282a",
-        "patch": "krb5-ticket-info.patch"
+        "included_in_release": "1.22.3"
       }
     ],
     "upstream_name": "krb5",
@@ -52,8 +49,8 @@
   },
   "downloads": {
     "krb5.tar.gz": {
-      "url": "https://codeload.github.com/krb5/krb5/tar.gz/8570e77819563e036027e1da789d08ec9333ed4d",
-      "sha256": "27517e59d2759d61222a7321bcd18b92feb04fecc313750cb9075e9a9f1705dd"
+      "url": "https://web.mit.edu/Kerberos/dist/krb5/1.22/krb5-1.22.3.tar.gz",
+      "sha256": "fe90af8441ad9fa9b064b8e53077cefb782a96f8a68276b031dc54af1789ff0b"
     },
     "krb5-ticket-info.patch": {
       "url": "https://github.com/krb5/krb5/commit/62196e2b269159a5465f5b8d0ed7cf6f29c3282a.patch",
