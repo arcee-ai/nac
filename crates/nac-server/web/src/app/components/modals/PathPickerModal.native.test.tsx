@@ -11,6 +11,7 @@ vi.mock("@/app/services/queries", () => ({
   useBrowsePath: browse.local,
   useSshBrowsePath: browse.ssh,
   useResolveBrowsePath: () => vi.fn(),
+  useCreateFolder: () => ({ mutateAsync: vi.fn() }),
 }));
 beforeEach(() => {
   vi.stubGlobal("matchMedia", () => ({
