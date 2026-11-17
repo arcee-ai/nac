@@ -713,6 +713,15 @@ function ue(e, t = {}) {
 			},
 			signal: i
 		}),
+		createFolder: (e, t) => r("POST", "/fs/folders", { body: {
+			parent: e,
+			name: t
+		} }),
+		createSshFolder: (e, t, n) => r("POST", "/ssh/folders", { body: {
+			...e,
+			parent: t,
+			name: n
+		} }),
 		listProviderModels: (e, t) => r("POST", "/providers/models", {
 			body: e,
 			signal: t

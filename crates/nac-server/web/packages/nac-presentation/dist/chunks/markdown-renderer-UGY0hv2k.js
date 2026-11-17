@@ -1,8 +1,8 @@
 import { n as e, r as t, t as n } from "./rolldown-runtime-QGRDbDUS.js";
-import { A as r, D as i, k as a, n as o } from "./RuntimeContext-_YL3aobA.js";
+import { A as r, D as i, k as a, n as o } from "./RuntimeContext-BHnUX92C.js";
 import { a as s } from "./PresentationBoundary-DgJz1GXw.js";
-import { Or as c, a as l, c as u, f as d, g as f, gr as p, i as m, kr as h, l as g, n as _, o as v, p as y, r as b, s as x, t as S } from "./PerfProfiler-wepqwr6z.js";
-import { N as C, i as w, r as T } from "./Toast-y4mFgUIo.js";
+import { Ar as c, _r as l, a as u, c as d, f, g as p, i as m, kr as h, l as g, n as _, o as v, p as y, r as b, s as x, t as S } from "./PerfProfiler-CMTaWqT4.js";
+import { N as C, i as w, r as T } from "./Toast-C1R55pFn.js";
 import { a as E, c as D, l as O, o as k, r as ee, s as te, t as A } from "./lib-rX7C_D5H.js";
 import { Suspense as j, isValidElement as ne, memo as re, use as M, useState as ie } from "react";
 import { useQueryClient as ae } from "@tanstack/react-query";
@@ -6334,8 +6334,8 @@ function Qc(e) {
 			n.push(t.slice(r, e).join("\n")), r = i, o = null, e = i - 1;
 			continue;
 		}
-		let c = l.exec(s);
-		c ? (i = c[1], o ??= "other") : u.test(s) ? (a = !0, o ??= "other") : o ??= x.test(s) ? "list" : v.test(s) ? "code" : "other";
+		let c = u.exec(s);
+		c ? (i = c[1], o ??= "other") : d.test(s) ? (a = !0, o ??= "other") : o ??= x.test(s) ? "list" : v.test(s) ? "code" : "other";
 	}
 	let s = t.slice(r).join("\n");
 	return s.trim() && n.push(s), n;
@@ -6382,7 +6382,7 @@ function el(e, t, n) {
 var tl = /* @__PURE__ */ e({ default: () => vl }), nl = [Xc], rl = /* @__PURE__ */ new Map();
 function il(e) {
 	let t = rl.get(e);
-	return t || (t = import("./markdown-mathjax-BfT1LFbx.js").then(({ createMathjaxPlugin: t, remarkMathPlugin: n }) => ({
+	return t || (t = import("./markdown-mathjax-DLeLe209.js").then(({ createMathjaxPlugin: t, remarkMathPlugin: n }) => ({
 		remark: [...nl, n],
 		rehype: [t(e)]
 	})), rl.set(e, t)), t;
@@ -6419,18 +6419,18 @@ function cl(e) {
 	return `${e.length.toString(36)}-${(t >>> 0).toString(36)}`;
 }
 function ll({ href: e, children: t, ...n }) {
-	let { selectRevision: r, selectFileListing: i, selectFile: a, revealSidePanel: s } = o().stores.sessionLayoutStore, { api: l } = o(), u = le(), m = ce(), g = C(), _ = f(), v = ae(), y = h(m.pathname), b = y ? v.getQueryData(p.sessionSnapshot(y)) : void 0, x = d(e, [
+	let { selectRevision: r, selectFileListing: i, selectFile: a, revealSidePanel: s } = o().stores.sessionLayoutStore, { api: u } = o(), d = le(), m = ce(), g = C(), _ = p(), v = ae(), y = c(m.pathname), b = y ? v.getQueryData(l.sessionSnapshot(y)) : void 0, x = f(e, [
 		b?.workspace?.host_root,
 		b?.metadata.workspace_host_path,
 		b?.metadata.cwd
 	]), S = (e) => {
-		y && (r(null), i("tree"), a(e), s(g), u(c.session(y, "files")));
+		y && (r(null), i("tree"), a(e), s(g), d(h.session(y, "files")));
 	};
 	return x.kind === "workspace" && y ? /* @__PURE__ */ N("a", {
 		...n,
 		href: e,
 		onClick: (e) => {
-			e.preventDefault(), l.openWorkspacePath(y, x.path).catch((e) => {
+			e.preventDefault(), u.openWorkspacePath(y, x.path).catch((e) => {
 				let t = e instanceof Error ? e.message : String(e);
 				/only available for local sessions|lives only inside the sandbox/i.test(t) || _.error(`Could not open file: ${t}`), S(x.path);
 			});
@@ -6544,7 +6544,7 @@ function _l(e) {
 			g(n, t) && (t = null);
 			continue;
 		}
-		let e = l.exec(n);
+		let e = u.exec(n);
 		if (e) t = e[1];
 		else if (gl.test(n)) return !0;
 	}

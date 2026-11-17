@@ -79,7 +79,7 @@ pub use model_resolution::{
     parse_extra_headers_json, resolve_store_path, resolve_store_path_for_track,
 };
 pub use prepared_session::{PreparedSessionResources, PreparedSessionRunConfig};
-pub use remote::browse_ssh_directory;
+pub use remote::{browse_ssh_directory, create_ssh_folder};
 use remote::{canonical_remote_session_cwd, remote_cwd_or_home, trim_ssh_host};
 pub(crate) use resume::pinned_session_model_client;
 pub use resume::{
