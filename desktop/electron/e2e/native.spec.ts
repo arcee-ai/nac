@@ -2,6 +2,7 @@ import { test, expect, root, type Candidate } from './fixture';
 import { execFileSync, spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import path from 'node:path';
+import { FAKE_DEVICE_CODE, ProviderDeviceAuthDouble } from '../../../crates/nac-server/web/e2e/provider-device-auth-double';
 
 async function menu(c: Candidate, label: string) {
   await c.app.evaluate(({ Menu }, label) => {
@@ -131,6 +132,53 @@ test('actual preload admits trusted external anchors while rejecting wrong frame
   expect(new URL(c.page.url()).origin).toBe(c.endpoint);
   expect(c.app.windows()).toHaveLength(1);
   expect(await c.app.evaluate(() => (globalThis as any).__nativeProbe.opened)).toEqual([href]);
+});
+
+test('shared provider device sign-in requires a deliberate native browser handoff and retains the configuration draft', async ({ candidate: c }) => {
+  const verificationUri = 'https://example.test/device?state=fake%2Bvalue%3D';
+  const auth = await ProviderDeviceAuthDouble.install(c.page, c.endpoint, verificationUri);
+  // Observe the real main/preload boundary and double only the OS opener.
+  // No provider credentials, clipboard access or production bridge is involved.
+  await c.app.evaluate(({ app, shell }) => {
+    const actor = { opened: [] as string[], createdWindows: 0 };
+    (globalThis as any).__providerAuthActor = actor;
+    app.on('browser-window-created', () => { actor.createdWindows++; });
+    shell.openExternal = async url => { actor.opened.push(url); };
+  });
+  await c.page.reload();
+  await expect(c.page.getByText('No projects yet', { exact: true })).toBeVisible();
+  await focusWorkspace(c);
+  await menu(c, 'Settings…');
+  const dialog = c.page.getByRole('dialog', { name: 'Configurations', exact: true });
+  await expect(dialog).toBeVisible();
+  const draft = dialog.getByRole('textbox', { name: 'Configuration name', exact: true });
+  await draft.fill('Electron draft survives sign-in');
+  await dialog.getByRole('button', { name: 'OpenAI Responses', exact: true }).click();
+  await c.page.getByRole('button', { name: 'ChatGPT Codex Responses', exact: true }).click();
+  const account = dialog.getByRole('region', { name: 'Provider account', exact: true });
+  await account.getByRole('button', { name: 'Sign in with ChatGPT', exact: true }).click();
+  await expect(account.getByTestId('provider-device-code')).toHaveText(FAKE_DEVICE_CODE);
+  const handoff = account.getByRole('link', { name: 'Open ChatGPT', exact: true });
+  await expect(handoff).toHaveAttribute('href', verificationUri);
+  // The shared flow's asynchronous window.open is refused. It neither opens
+  // a privileged external window nor substitutes a system-browser handoff.
+  expect(await c.app.evaluate(() => (globalThis as any).__providerAuthActor))
+    .toEqual({ opened: [], createdWindows: 0 });
+  expect(c.app.windows()).toHaveLength(1);
+  expect(auth.starts).toEqual(['codex']);
+  await focusWindow(c);
+  await handoff.click();
+  await expect.poll(() => c.app.evaluate(() => (globalThis as any).__providerAuthActor.opened))
+    .toEqual([verificationUri]);
+  auth.approve();
+  await expect(account.getByText('Signed in', { exact: true })).toBeVisible({ timeout: 15000 });
+  await expect(account.getByTestId('provider-device-code')).toHaveCount(0);
+  await expect(draft).toHaveValue('Electron draft survives sign-in');
+  await expect(dialog.getByRole('button', { name: 'ChatGPT Codex Responses', exact: true })).toBeVisible();
+  expect(await c.app.evaluate(() => (globalThis as any).__providerAuthActor))
+    .toEqual({ opened: [verificationUri], createdWindows: 0 });
+  expect(c.app.windows()).toHaveLength(1);
+  expect(auth.logouts).toEqual([]);
 });
 
 test('actual native folder panel cancels on hide and AbortSignal and reaps its exact helper', async ({ candidate: c }) => {
