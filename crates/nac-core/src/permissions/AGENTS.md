@@ -29,7 +29,7 @@ separate owners.
 - Git hard policy identifies the operation through the shared global-option parser.
   Unknown or incomplete global options fail closed as ambiguous. Unrecognized
   operations with protected-word arguments remain denied because they may be
-  aliases. Only the exact `checkout -b <name>` form without a start point is
+  aliases or contain nested commands. Only the exact `checkout -b <name>` form without a start point is
   exempt from the checkout
   rewrite denial; command-scoped `core.quotepath=false` is allowed only for
   `status`. Git add accepts recognized flags and literal operands that can be

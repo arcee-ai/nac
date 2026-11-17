@@ -171,7 +171,7 @@ pub(super) fn hard_shell_denial_inner(
                 .iter()
                 .any(|arg| matches!(arg.as_str(), "clean" | "reset" | "restore" | "checkout"))
         {
-            return Some("Git operation may be an alias with ambiguous arguments".to_string());
+            return Some("Git operation has unsupported or ambiguous nested arguments".to_string());
         }
         let simple_branch = operation == "checkout"
             && args.len() == 2
@@ -204,53 +204,21 @@ pub(super) fn hard_shell_denial_inner(
     None
 }
 
-// Recognized operations whose later arguments are not Git subcommands.
-// Unknown names may be aliases and stay conservative around protected words.
+// These operations have no nested Git command grammar. Other operations may
+// contain aliases or commands such as `bisect reset` and `submodule foreach`.
 fn git_known_operation(operation: &str) -> bool {
     matches!(
         operation,
         "add"
-            | "bisect"
-            | "blame"
-            | "branch"
-            | "cat-file"
             | "checkout"
-            | "cherry"
-            | "cherry-pick"
             | "clean"
-            | "clone"
-            | "commit"
-            | "config"
-            | "describe"
             | "diff"
-            | "fetch"
-            | "fsck"
-            | "gc"
             | "grep"
-            | "init"
             | "log"
-            | "ls-files"
-            | "ls-tree"
-            | "merge"
-            | "mv"
-            | "pull"
-            | "push"
-            | "rebase"
-            | "reflog"
-            | "remote"
             | "reset"
             | "restore"
-            | "rev-parse"
-            | "revert"
-            | "rm"
             | "show"
-            | "show-ref"
-            | "stash"
             | "status"
-            | "submodule"
-            | "switch"
-            | "tag"
-            | "worktree"
             | "--version"
     )
 }

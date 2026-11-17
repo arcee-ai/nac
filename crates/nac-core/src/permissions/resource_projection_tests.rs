@@ -47,6 +47,7 @@ fn git_operands_and_safe_settings_do_not_look_like_destructive_operations() {
             "git --version",
             "env git -C repo log --grep checkout",
             "git checkout -b topic",
+            "git checkout -b reset",
             "git -c core.quotepath=false status",
         ] {
             let resources = shell_resources(command, cwd, backend);
@@ -62,6 +63,9 @@ fn git_operands_and_safe_settings_do_not_look_like_destructive_operations() {
             "git checkout -- reset",
             "git checkout -B topic",
             "git checkout -b topic HEAD~1",
+            "git bisect reset",
+            "git submodule foreach git reset --hard",
+            "git branch -D reset",
             "env git -C repo reset --hard",
             "git -c alias.pwn='!touch marker' pwn",
             "git -c core.hooksPath=hooks status",
