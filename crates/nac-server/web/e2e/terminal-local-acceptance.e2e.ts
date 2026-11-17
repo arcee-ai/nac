@@ -279,8 +279,8 @@ test("connected native shell, less resize, and trusted browser bracketed UTF-8 p
     );
     expect(pasteInputs).toHaveLength(0);
     await page.keyboard.press(shortcut);
-    // The shell writes this file in place, so a read can land on it empty or
-    // partial; poll again until it parses rather than failing the poll.
+    // Wait for a complete capture; missing or malformed JSON cannot satisfy
+    // the exact expected-byte assertion below.
     await expect
       .poll(async () => {
         const text = await fs

@@ -341,6 +341,21 @@ test("automatic renderer recovery is bounded and explicit menu reload retains th
 test("new engine Retry permits fresh terminal input while same-engine reload still requires acknowledgement", async ({
   candidate: c,
 }) => {
+  // The hosted desktop uses the compact list/detail layout. Exercise it
+  // explicitly so a wider local display cannot hide a missed row selection.
+  const compactWindow = async () => {
+    await c.app.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()
+        .find((window) => window.webContents.getURL().startsWith("http:"))!
+        .setSize(1024, 677);
+    });
+    await expect.poll(() => c.page.evaluate(() => innerWidth)).toBe(1024);
+    console.log(
+      "Recovery compact viewport",
+      await c.page.evaluate(() => ({ width: innerWidth, height: innerHeight })),
+    );
+  };
+  await compactWindow();
   const session = await c.session(),
     original = await state(c);
   await c.page.evaluate((id) => {
@@ -361,6 +376,11 @@ test("new engine Retry permits fresh terminal input while same-engine reload sti
   c.ownedPids.push(
     Number((await fs.readFile(path.join(c.workspace, "retry-original-shell.pid"), "utf8")).trim()),
   );
+  const originalTerminals = await c.api<{ terminals: { terminal_id: string }[] }>(
+    `/sessions/${session}/user-terminals`,
+  );
+  expect(originalTerminals.terminals).toHaveLength(1);
+  const originalTerminal = originalTerminals.terminals[0].terminal_id;
   const previousDocument = await c.app.evaluate(({ BrowserWindow, Menu }) => {
     const id = BrowserWindow.getAllWindows()[0].webContents.id;
     Menu.getApplicationMenu()!.getMenuItemById("workspace-reload")!.click();
@@ -368,7 +388,69 @@ test("new engine Retry permits fresh terminal input while same-engine reload sti
   });
   await replacement(c, previousDocument);
   expect((await state(c)).receipt).toEqual(original.receipt);
+  await compactWindow();
   pane = await showTerminalPanel(c.page);
+  expect(
+    (
+      await c.api<{ terminals: { terminal_id: string }[] }>(`/sessions/${session}/user-terminals`)
+    ).terminals.map((terminal) => terminal.terminal_id),
+  ).toEqual([originalTerminal]);
+  const originalExecutions = await c.api<{
+    executions: {
+      id: string;
+      origin: string;
+      representation: string;
+      alive: boolean;
+      input: boolean;
+      process_state: string;
+    }[];
+  }>(`/sessions/${session}/executions`);
+  expect(originalExecutions.executions.map((execution) => execution.id)).toEqual([
+    originalTerminal,
+  ]);
+  const originalExecution = originalExecutions.executions[0];
+  expect(originalExecution).toMatchObject({
+    origin: "human",
+    representation: "pty",
+    alive: true,
+    input: true,
+  });
+  const originalControl = await c.api<{ controller: string }>(
+    `/sessions/${session}/executions/${encodeURIComponent(originalTerminal)}/input-control`,
+  );
+  expect(originalControl.controller).toBe("human");
+  console.log("Recovered terminal facts", {
+    document: await c.page.evaluate(() => ({
+      width: innerWidth,
+      height: innerHeight,
+      hash: location.hash,
+      acknowledgementRequired: Reflect.get(window, "__nacRequireTerminalAcknowledgement"),
+    })),
+    buttons: await pane.locator("button").evaluateAll((buttons) =>
+      buttons.slice(0, 8).map((button) => ({
+        name: (button.getAttribute("aria-label") ?? button.textContent ?? "").trim().slice(0, 100),
+        terminalTab: button.hasAttribute("data-terminal-tab"),
+        visible: button.getClientRects().length > 0,
+      })),
+    ),
+    execution: {
+      id: originalExecution.id,
+      origin: originalExecution.origin,
+      representation: originalExecution.representation,
+      alive: originalExecution.alive,
+      input: originalExecution.input,
+      process_state: originalExecution.process_state,
+    },
+    control: originalControl,
+  });
+  // Opening the Focus drawer starts on its list at compact widths. Select the
+  // retained shell before expecting its detail's acknowledgement control.
+  await pane
+    .getByRole("button", {
+      name: `Shell 1, ${originalExecution.process_state.replaceAll("_", " ")}`,
+      exact: true,
+    })
+    .click();
   const acknowledgement = c.page.getByRole("button", {
     name: "Acknowledge failure and enable fresh input",
     exact: true,
