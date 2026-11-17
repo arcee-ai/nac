@@ -22,7 +22,8 @@ test("Select applies the typed working folder without pressing Enter", async ({
   await page.goto(harness.baseUrl);
   await page.getByRole("button", { name: "Get Started", exact: true }).click();
   const form = page.getByRole("dialog", { name: "New Project" });
-  const folderButton = form.getByRole("button", { name: "Working Folder", exact: true });
+  // The control's accessible name carries the current folder ("Choose Working Folder: <path>").
+  const folderButton = form.getByRole("button", { name: /^Choose Working Folder/ });
   await expect(folderButton).toHaveText(workspaceCanonical);
   const picker = page.getByRole("dialog", { name: "Select Working Folder" });
   const draft = picker.getByPlaceholder("/path/to/directory");
