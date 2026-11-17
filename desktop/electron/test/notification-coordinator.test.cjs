@@ -220,6 +220,85 @@ test("capacity exhaustion suspends truthfully without a notification or frontier
   await f.coordinator.retire();
 });
 
+test("healthy checkpoint with invalid notification state permits explicit null Reset only after exact ACK", async () => {
+  const invalid = { enabled: "invalid", receipts: [] };
+  const f = fixture(invalid);
+  assert.equal(await f.load(), false);
+  assert.equal(f.coordinator.snapshot().loaded, false);
+  assert.equal(f.coordinator.snapshot().resettable, true);
+  assert.equal(f.coordinator.snapshot().enabled, false);
+  assert.deepEqual(f.state, invalid);
+  assert.equal(f.writes.length, 0);
+  assert.equal(await f.coordinator.setEnabled(true), false);
+  assert.equal(await f.coordinator.setMuted(true), false);
+  const gate = deferred();
+  f.write = (value, write) => gate.promise.then(write);
+  const reset = f.coordinator.reset();
+  await tick();
+  assert.equal(f.writes.length, 1);
+  assert.equal(f.writes[0].next, null);
+  assert.equal(f.writes[0].revision, 0);
+  assert.equal(f.coordinator.snapshot().loaded, false);
+  assert.equal(f.coordinator.snapshot().saving, true);
+  assert.equal(f.observer.active, false);
+  assert.deepEqual(f.state, invalid);
+  gate.resolve();
+  assert.equal(await reset, true);
+  assert.equal(f.coordinator.snapshot().loaded, true);
+  assert.equal(f.coordinator.snapshot().suspended, false);
+  assert.equal(f.coordinator.snapshot().enabled, false);
+  assert.deepEqual(f.state, defaults());
+  assert.equal(f.adds.length, 0);
+  await f.coordinator.retire();
+});
+
+test("invalid notification Reset wrong ACK/failure stays suspended and cannot claim saved or enable", async () => {
+  for (const status of ["durable", "unavailable", "stale"]) {
+    const invalid = { enabled: true, receipts: [], frontier: null };
+    const f = fixture(invalid);
+    await f.load();
+    f.write = () => Promise.resolve({ status, revision: 77 });
+    assert.equal(await f.coordinator.reset(), false);
+    assert.equal(f.coordinator.snapshot().loaded, false);
+    assert.equal(f.coordinator.snapshot().suspended, true);
+    assert.equal(f.observer.active, false);
+    assert.deepEqual(f.state, invalid);
+    assert.match(
+      f.coordinator.snapshot().message,
+      /previous saved setting may return/,
+    );
+    await f.coordinator.retire();
+  }
+});
+
+test("unavailable or unrevisioned whole checkpoint cannot be reset; healthy Reset cannot cross retirement", async () => {
+  for (const response of [
+    { status: "unavailable" },
+    { status: "available", revision: -1, state: {} },
+  ]) {
+    const f = fixture({ enabled: "invalid", receipts: [] });
+    f.coordinator.storage.readNotifications = async () => response;
+    await f.load();
+    assert.equal(f.coordinator.snapshot().resettable, false);
+    assert.equal(await f.coordinator.reset(), false);
+    assert.equal(f.writes.length, 0);
+    await f.coordinator.retire();
+  }
+  const f = fixture({ enabled: "invalid", receipts: [] });
+  await f.load();
+  const gate = deferred();
+  f.write = (value, write) => gate.promise.then(write);
+  const reset = f.coordinator.reset();
+  await tick();
+  const retiring = f.coordinator.retire();
+  gate.resolve();
+  assert.equal(await reset, false);
+  await retiring;
+  assert.equal(f.coordinator.snapshot().loaded, false);
+  assert.equal(f.coordinator.snapshot().resettable, false);
+  assert.equal(f.adds.length, 0);
+});
+
 test("default off has no observer; enabling baseline exact ACK precedes OS permission request", async () => {
   const f = fixture();
   await f.load();

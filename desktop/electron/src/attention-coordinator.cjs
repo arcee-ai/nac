@@ -39,6 +39,7 @@ class AttentionCoordinator {
     this.generation = 0;
     this.token = null;
     this.loaded = false;
+    this.resettable = false;
     this.suspended = false;
     this.retired = false;
     this.held = true;
@@ -91,6 +92,7 @@ class AttentionCoordinator {
   snapshot() {
     return Object.freeze({
       loaded: this.loaded,
+      resettable: this.resettable && this.current(this.generation),
       enabled: this.enabledIntent,
       muted: this.saved.muted,
       saving: this.saving || this.enabling,
@@ -176,12 +178,18 @@ class AttentionCoordinator {
       result = null;
     }
     if (!this.current(generation)) return false;
-    const state =
-      result?.status === "available" && uint(result.revision)
-        ? restoredState(result.state)
-        : null;
+    this.resettable =
+      result?.status === "available" &&
+      uint(result.revision) &&
+      Object.hasOwn(result, "state");
+    if (this.resettable) this.revision = result.revision;
+    const state = this.resettable ? restoredState(result.state) : null;
     if (!state) {
-      this.pause("Notifications paused: saved settings unavailable.");
+      this.pause(
+        this.resettable
+          ? "Notifications paused: saved notification state is invalid. Use Reset Notification State to clear only notifications."
+          : "Notifications paused: saved settings unavailable.",
+      );
       return false;
     }
     this.saved = state;
@@ -314,7 +322,10 @@ class AttentionCoordinator {
     return { generation: this.generation, drain: Promise.resolve(drain) };
   }
   async preference(next, enable = false, changeKeys = []) {
-    if (!this.loaded || this.retired) return false;
+    // Only an explicit null Reset may recover semantic notification corruption
+    // after the store admitted a healthy known-version checkpoint and revision.
+    const recovering = !this.loaded && next === null && this.resettable;
+    if ((!this.loaded && !recovering) || this.retired) return false;
     const previous = clone(this.saved);
     const { generation, drain } = this.fence();
     this.enabledIntent = enable || next?.enabled === true;
@@ -347,11 +358,11 @@ class AttentionCoordinator {
       read = null;
     }
     if (!this.current(generation)) return false;
-    if (
-      read?.status !== "available" ||
-      !uint(read.revision) ||
-      !restoredState(read.state)
-    ) {
+    this.resettable =
+      read?.status === "available" &&
+      uint(read.revision) &&
+      Object.hasOwn(read, "state");
+    if (!this.resettable || (!recovering && !restoredState(read.state))) {
       this.saving = false;
       this.pause();
       return false;
@@ -388,6 +399,7 @@ class AttentionCoordinator {
     if (!this.current(generation)) return false;
     this.saving = false;
     this.held = !accepted;
+    if (accepted && recovering) this.loaded = true;
     if (accepted) this.start();
     this.publish();
     return accepted;
@@ -679,6 +691,7 @@ class AttentionCoordinator {
       ? Object.freeze({ ...this.getBinding() })
       : null;
     this.loaded = false;
+    this.resettable = false;
     this.suspended = false;
     this.saved = defaults();
     this.enabledIntent = false;
