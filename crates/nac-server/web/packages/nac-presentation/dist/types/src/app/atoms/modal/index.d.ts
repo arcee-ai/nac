@@ -58,6 +58,12 @@ interface ModalProps {
      * `alertdialog`, described by the `ModalDescription` in its body.
      */
     alert?: boolean;
+    /**
+     * Make the page behind inert on phones too. For a sheet that repeats what
+     * the page under it shows (the phone Menu over Home's session list), so the
+     * hidden copy is out of reach and out of the accessibility tree.
+     */
+    inertOnPhone?: boolean;
     className?: string;
     /** Overrides the body's own padding and scrolling, for full-bleed content. */
     bodyClassName?: string;
