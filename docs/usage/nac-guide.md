@@ -2,8 +2,7 @@
 
 NAC Guide is release-local self-help, available as `$nac-help` in fresh
 installations. Ask a normal product question such as “How do I add MCP?” or
-“Where are my skills?” Primary direct, direct-with-orchestrator and orchestrator
-agents receive a compact routing instruction. Coding requests that merely
+“Where are my skills?” Primary direct agents receive a compact routing instruction. Coding requests that merely
 mention NAC remain coding requests. A help request never authorizes executing
 commands, changing settings, launching work or altering permissions.
 
@@ -40,9 +39,7 @@ each retrieval result. Old transcript excerpts remain historical evidence.
 Guide retrieval runs in the harness, independent of Local, SSH or Podman
 filesystem access. Managed binaries embed the same pack. That portability does
 not prove backend infrastructure, network access, credentials or other tools are
-available. Worker threads receive only selected skill preloads; they have no
-general skill activation/catalog. A selected guide preload carries retrieval
-instructions for its immutable references.
+available.
 
 ## Provenance and collisions
 

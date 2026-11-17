@@ -22,16 +22,16 @@ for (const journey of [
       "Project skills use .nac/skills or .agents/skills. NAC Guide skills#discovery. Your current installed custom skills are unknown.",
   },
   {
-    behavior: "direct-with-orchestrator",
-    question: "What does direct-with-orchestrator mean?",
+    behavior: "direct",
+    question: "How do direct sessions work?",
     document: "session-behaviors",
     section: "overview",
-    excerpt: "separate managed NAC orchestrator",
+    excerpt: "direct coding agent",
     answer:
-      "A direct agent can launch separate managed orchestrators. Traditional children stay distinct. NAC Guide session-behaviors#overview.",
+      "Direct chats support child agents and durable goals. NAC Guide session-behaviors#overview.",
   },
   {
-    behavior: "orchestrator",
+    behavior: "direct",
     question: "Why can't this subagent search?",
     document: "web-retrieval",
     section: "overview",
@@ -128,7 +128,7 @@ for (const journey of [
       ).toBeVisible();
       await expect(page.getByText("Skill expanded: $nac-help", { exact: true })).toBeVisible();
     }
-    // A help read never launches workers, adds sessions or edits MCP settings.
+    // A help read never launches children, adds sessions or edits MCP settings.
     const sessions = await request.get(`${harness.baseUrl}/sessions`);
     expect((await sessions.json()).length).toBe(1);
     if (journey.document === "mcp") {

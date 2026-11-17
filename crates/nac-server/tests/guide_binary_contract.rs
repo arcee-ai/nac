@@ -26,7 +26,7 @@ fn standalone_binary_reads_the_installed_pack_without_home_checkout_or_network()
     for (document, section, expected) in [
         ("mcp", "add-a-server", "mcp_servers"),
         ("skills", "discovery", ".nac/skills"),
-        ("session-behaviors", "overview", "direct-with-orchestrator"),
+        ("session-behaviors", "overview", "direct coding agent"),
         ("web-retrieval", "overview", "Exa"),
     ] {
         let output = run(&["guide", document, section]);

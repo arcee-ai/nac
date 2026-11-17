@@ -1,6 +1,6 @@
 # Skills
 
-Skills are directories that contain a `SKILL.md` file. nac discovers them from project and user skill trees, shows the orchestrator a compact catalog, preloads selected skills into worker threads, and expands `$skillname` references in top-level direct and orchestrator prompts. Workers cannot activate skills themselves: there is no `activate_skill` tool, and workers do not receive an available-skills listing.
+Skills are directories containing a `SKILL.md` file. NAC discovers them from project and user skill trees and expands `$skillname` references in direct prompts.
 
 NAC also bundles the first-party [NAC Guide](nac-guide.md) as `nac-help`, including
 its immutable release-local references. That name is reserved: a filesystem
@@ -37,7 +37,7 @@ description: Run the project's lint workflow.
 compatibility: Optional note shown in the catalog.
 ---
 
-Instructions the worker should follow.
+Instructions the agent should follow.
 ```
 
 `name` and `description` are required. A missing or empty description or body skips the skill with a warning. If `name` does not match the parent directory, nac still loads it and warns. Unquoted `description` values that contain colons are repaired so they parse as YAML.
@@ -48,23 +48,15 @@ Optional files under `scripts/`, `references/`, and `assets/` (at most 64 total)
 
 ## Local direct sessions
 
-A direct session retains its discovered registry at construction. `$skillname` in a submitted prompt expands the selected skill body before the model call. Ordinary prose does not automatically select arbitrary custom skills, and the direct system prompt does not include a general available-skills catalog. There is no `activate_skill` tool. Primary agents receive a compact first-party NAC self-help route and can retrieve the installed guide for ordinary product questions. Generic coding tasks merely mentioning NAC do not request unrelated guidance.
+A direct session retains its discovered registry at construction. `$skillname` in a submitted prompt expands the selected skill body before the model call. Ordinary prose does not automatically select arbitrary custom skills, and the direct system prompt does not include a general available-skills catalog. There is no `activate_skill` tool. Traditional children do not inherit a skill catalog or accept skill selection; provide the instructions they need in the child prompt. Primary agents receive a compact first-party NAC self-help route and can retrieve the installed guide for ordinary product questions. Generic coding tasks merely mentioning NAC do not request unrelated guidance.
 
 Local discovery follows skill-directory symlinks and renders the discovery path as the skill directory. Native resource reads resolve their canonical targets through the normal permission pipeline. A linked package outside the workspace can be discovered and expanded while its resources still require external-directory approval; a link inside the workspace does not grant access to its external target. Hard and configured denials remain effective.
 
 The retained registry contains the loaded body and resource listing. Resource bytes are read from disk when requested and can change independently. Use a reviewed immutable package revision when reproducibility matters. See the [Local linked-skill qualification and supported-use recipe](../qualification/linked-skills.md) for reproducible fixtures, the installed-catalog snapshot, and explicit workflow limits.
 
-## How the orchestrator uses skills
-
-The orchestrator never calls `activate_skill`. When a registry is present, the `thread` tool gains a `skills` array: names from the catalog, with a compact description of each skill (and `compatibility` when set). The orchestrator prompt tells it to pass `skills` when a dispatch clearly matches those names.
-
-Unknown names fail the dispatch. Duplicates are ignored. Selected skills are preloaded as worker system messages (`The orchestrator preloaded this skill for this worker dispatch.`) that include the skill body, optional compatibility, the skill directory, and any resource file list.
-
-On a local unsandboxed session a filesystem skill directory is the real host path. Under sandbox or SSH it is the placeholder `[filepath-not-visible]`, because the model cannot use host paths on those backends. Relative paths in filesystem skills are relative to that directory. A selected `nac-help` worker preload instead enables bounded `nac_guide` retrieval of embedded references; unselected workers receive neither the guide route nor this tool.
-
 ## Referencing skills in a prompt
 
-In a top-level direct or orchestrator prompt you can reference a skill as `$skillname`. Recognized names are resolved from the session's skill registry, and the skill's instructions are appended to the prompt before the first model call — no tool call and no extra round trip.
+In a direct prompt you can reference a skill as `$skillname`. Recognized names are resolved from the session's skill registry, and the skill's instructions are appended to the prompt before the first model call — no tool call and no extra round trip.
 
 The literal `$skillname` stays in your sentence; the skill content is appended after it, wrapped in an `<invoked_skills>` element. You can reference several skills in one prompt: each is included once, in first-reference order.
 
@@ -73,5 +65,3 @@ A `$` token that is not a registered skill is left untouched, so shell variables
 The chat UI and history show the prompt as you typed it; the expanded form is what the model sees. Resend and retry re-expand from the original text, exactly once — the appended block is never nested.
 
 Every non-empty registered name is `$`-referenceable, including names containing punctuation, leading underscores, or Unicode. At each `$`, registry names are compared literally and the longest boundary-delimited match wins: with both `code` and `code-review` registered, `$code-review` resolves to `code-review`; with only `code`, `$code-review` remains untouched rather than invoking the shorter prefix.
-
-This complements worker preloading rather than replacing it: `thread(..., skills: [...])` remains the way to give workers skills, while `$skillname` hands the skill's instructions to the orchestrator for the current prompt.

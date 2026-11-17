@@ -1,10 +1,9 @@
 # NAC repository guide
 
-NAC is a Rust coding-agent harness with a React web client. It supports three
-immutable session behaviors: the established orchestrator/worker topology, a
-persistent direct coding agent with traditional child sessions, and a direct
-agent that can launch separate managed orchestrator sessions. Managed-host
-deployment is additive and opt-in.
+NAC is a Rust coding-agent harness with a React web client. The selected
+product direction is persistent direct sessions, traditional children and
+independent direct tasks. Legacy orchestration internals remain pending removal;
+managed-host deployment remains additive and opt-in.
 
 Read the nearest nested `AGENTS.md` before changing a subsystem. This root file
 defines repository-wide constraints; nested guides add ownership-specific
@@ -60,14 +59,15 @@ and [generated API contract](docs/architecture/0002-generated-api-contract.md).
 
 ## Product and compatibility invariants
 
-- Persisted session behavior is immutable. Preserve the public values
-  `orchestrator`, `direct`, and `direct-with-orchestrator`; omitted legacy values
-  still default to `orchestrator`.
-- Traditional child sessions and managed orchestrators are distinct durable
-  topologies. Do not collapse them into worker roles or a new public taxonomy.
+- The direct-only retirement in [ADR 0009](docs/architecture/0009-direct-only-retirement.md)
+  authorizes removal of legacy modes and their owned session trees in the
+  planned transactional migration. Until cutover, preserve existing wire and
+  stored behavior semantics; do not claim that legacy internals are removed.
+- Preserve direct session IDs, transcripts, children, independent tasks,
+  receipts, workspace ownership, safety, and restart-safe lifecycle state.
 - Preserve prompts, defaults, thread/workset behavior, MCP semantics, API
-  shapes, configuration values, and supported migrations unless a deliberate
-  product decision changes them.
+  shapes, configuration values, and supported migrations except where the
+  deliberate retirement decision authorizes their removal.
 - Durable inbox, goals, transcripts, relationships, leases, recovery,
   cancellation, and completion delivery must remain restart-safe and
   generation-aware.

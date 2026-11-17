@@ -10,6 +10,7 @@ workspace revisions, recovery markers, and cross-process coordination.
 
 - Schema migrations are forward, backward-compatible within the supported
   upgrade direction, transactional, and idempotent where startup can retry.
+  ADR 0009 explicitly authorizes the bounded destructive retirement migration.
   Never rewrite stable IDs, behavior values, relationship generations, or
   historical transcript meaning incidentally.
 - Transcript and event revisions are monotonic. Recovery and delivery markers

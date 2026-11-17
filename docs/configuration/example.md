@@ -37,10 +37,9 @@ image = "python:3.13-bookworm"  # default
 # cpus = 2                      # default
 # memory_mib = 2048             # default
 
+# Current config spelling for command output retention; ALL-615 owns its neutral rename.
 [worker]
-# Worker dispatch timeout in seconds. Default 3600; values below 1800 are raised to 1800.
-thread_timeout_secs = 3600
-# In-memory retention for the producing dispatch only. exec_command keeps stdout
+# In-memory retention for the producing session only. exec_command keeps stdout
 # and stderr separate, returns status/exit_code plus concise previews, and
 # supplies an output_id once the process starts. read_command_output pages
 # combined (emission order), stdout, or stderr; PTY is combined-only.
@@ -48,10 +47,10 @@ thread_timeout_secs = 3600
 # without deleting retained bytes. Nonempty input requires a separate once-only
 # approval that displays the exact input and binds it to the terminal handle.
 # Oldest bytes roll over; reads report overflowed and the retained range.
-# Output IDs expire when the dispatch ends (including error or cancel).
+# Output IDs expire when the producing run ends (including error or cancel).
 # Short commands fit in their previews and need no follow-up read.
 command_output_max_bytes = 8388608           # per command/PTY; 1..=1 GiB; default 8 MiB
-command_output_session_max_bytes = 67108864  # per dispatch; >= per-command, <= 4 GiB; default 64 MiB
+command_output_session_max_bytes = 67108864  # per session; >= per-command, <= 4 GiB; default 64 MiB
 
 # How long a Codex token refresh, sign-in, or logout, or an Arcee token refresh,
 # waits for another NAC process that holds the same credential lock before

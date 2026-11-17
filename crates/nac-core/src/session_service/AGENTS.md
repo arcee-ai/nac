@@ -18,8 +18,9 @@ durable records; runtime/tool modules own execution internals.
   a view. Projection failures must preserve canonical durable state.
 - Recovery distinguishes process-local liveness from durable leases and peer
   ownership. Do not present in-memory task tracking as restart-safe.
-- Orchestrator, direct, traditional-child, and managed-orchestrator paths retain
-  their distinct topology invariants even when sharing lifecycle helpers.
+- Preserve direct and traditional-child lifecycle invariants. Legacy topology
+  remains distinct until the planned retirement cutover; do not collapse it
+  incidentally while sharing lifecycle helpers.
 - Human product intent is issued here after admission through private,
   non-deserializable capabilities. Exact shell submission and human terminal
   launch share prepared policy/binding/revalidation but never create agent Ask

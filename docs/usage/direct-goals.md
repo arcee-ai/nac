@@ -1,10 +1,7 @@
 # Durable direct goals
 
-Durable goals are available only in `direct` and
-`direct-with-orchestrator` sessions. They are opt-in multi-turn work, not the
-default behavior for an ordinary prompt. The existing `orchestrator` behavior
-does not expose goal tools, goal controls, or goal continuation, and remains the
-default for old and omitted session behavior values.
+Durable goals are available in direct primary sessions. They are opt-in
+multi-turn work, not the default behavior for an ordinary prompt.
 
 Open the flag control beside the direct-session composer to create a goal. An
 objective is required; the token budget is optional and has no implicit

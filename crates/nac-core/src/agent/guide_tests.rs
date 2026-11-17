@@ -49,18 +49,8 @@ fn agent(
 }
 
 #[test]
-fn guide_routing_is_bounded_and_available_in_all_primary_behaviors() {
-    for (mode, behavior) in [
-        (AgentMode::Direct, crate::sessions::SessionBehavior::Direct),
-        (
-            AgentMode::Direct,
-            crate::sessions::SessionBehavior::DirectWithOrchestrator,
-        ),
-        (
-            AgentMode::Orchestrator,
-            crate::sessions::SessionBehavior::Orchestrator,
-        ),
-    ] {
+fn direct_guide_routing_is_bounded() {
+    for (mode, behavior) in [(AgentMode::Direct, crate::sessions::SessionBehavior::Direct)] {
         let mut agent = agent(mode, Some(behavior), false);
         let Message::System { content } = &agent.messages[0] else {
             panic!("missing system prompt")
@@ -72,6 +62,13 @@ fn guide_routing_is_bounded_and_available_in_all_primary_behaviors() {
             "corpus must stay out of prompt"
         );
         assert!(crate::guide::primary_prompt().len() < 4000);
+        for retired in [
+            "direct-with-orchestrator",
+            "NAC_ORCHESTRATION",
+            "worker dispatch",
+        ] {
+            assert!(!content.contains(retired));
+        }
         assert!(agent
             .refresh_model_request_capabilities()
             .unwrap()
@@ -95,4 +92,47 @@ fn guide_worker_retrieval_requires_the_selected_preload_and_survives_refresh() {
             .any(|tool| tool.function.name == "activate_skill"));
     }
     assert!(selected.messages.iter().any(|message| matches!(message, Message::System { content } if content.contains("first-party bundled NAC Guide"))));
+}
+
+#[tokio::test]
+async fn resumed_direct_guide_uses_fresh_system_head_without_rewriting_history() {
+    let root = std::env::temp_dir().join(format!("nac-guide-resume-{}", uuid::Uuid::new_v4()));
+    let store_path = root.join("store.db");
+    crate::store::initialize(&store_path).unwrap();
+    crate::store::insert_test_session(&store_path, "session");
+    let old = "Pre-change direct system: direct-with-orchestrator and worker dispatch".to_string();
+    let stored = vec![
+        Message::System { content: old },
+        Message::User {
+            content: "hello".into(),
+        },
+    ];
+    super::transcript_log_tests::store_snapshot_messages(&store_path, &stored);
+    let connection = rusqlite::Connection::open(&store_path).unwrap();
+    let read = || {
+        connection
+            .query_row(
+                "SELECT messages_json FROM sessions WHERE session_id = 'session'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap()
+    };
+    let before = read();
+    let mut agent = super::transcript_log_tests::transcript_test_agent(
+        ModelClient::new_for_test(),
+        store_path.clone(),
+        Some("session"),
+        AgentMode::Direct,
+    );
+    agent
+        .restore_messages_merging_log_tail(stored, None)
+        .await
+        .unwrap();
+    assert_eq!(read(), before);
+    assert!(
+        matches!(&agent.messages[0], Message::System { content } if content.contains("NAC product self-help") && !content.contains("direct-with-orchestrator") && !content.contains("worker dispatch"))
+    );
+    drop(connection);
+    std::fs::remove_dir_all(root).unwrap();
 }

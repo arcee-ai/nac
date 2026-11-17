@@ -1,8 +1,7 @@
 # Traditional child sessions
 
 Traditional children are durable, fresh-context coding sessions launched by a
-`direct` or `direct-with-orchestrator` parent. They are separate from NAC's
-orchestrator workers: a child has its own transcript and generations, while it
+direct parent. A child has its own transcript and generations, while it
 shares the parent's workspace and inherits the parent's model, backend, project,
 sandbox or SSH configuration, and configured permission rules. Remembered
 permission grants are not inherited.
@@ -16,7 +15,6 @@ The parent's approval mode — **Manual** by default, **Approve all**, or
 **Approve for me** — governs the parent and all of its traditional children.
 Approval answers only requests that reach each child's broker after configured
 and hard denials; remembered grants remain child-local.
-Managed orchestrators are a separate topology and do not inherit the mode.
 
 In **Approve for me** mode, the child's permissions dialog retains blocked
 reviews even after the child finishes. **Authorize retry** routes through the
@@ -32,7 +30,7 @@ work. The web UI has no manual launch. Children appear in the parent's Subagents
 panel, where you can inspect, continue, steer, cancel, or open each one. The
 first visible profile is `general`. It exposes exactly `read`, `write`, `edit`,
 `glob`, `grep`, `exec_command`, `write_stdin`, and `read_command_output`; it
-cannot create goals, launch another child, or control orchestrator sessions.
+cannot create goals or launch another child.
 
 The parent's Subagents panel lists each child by description, with the coding-
 agent icon, and marks the ones still running. Selecting a row previews its

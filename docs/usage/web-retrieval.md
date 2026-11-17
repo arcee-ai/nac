@@ -3,11 +3,11 @@
 NAC provides `web_search` and `web_fetch` to top-level direct sessions when a
 nonblank `EXA_API_KEY` is available. Direct sessions prefer a captured managed
 startup credential when present, otherwise resolve the process environment and
-then NAC's credential store. Both direct behaviors inherit these tools to traditional children; a
-`direct-with-orchestrator` parent also inherits them to its managed orchestrator
-subagents and their workers. No child flag or additional credential setup is
-required. The eight native coding tools remain the traditional child baseline;
-nesting, goals and orchestration control remain absent.
+then NAC's credential store. Direct sessions inherit these tools to traditional
+children when the parent has
+an eligible source. No child flag or additional credential setup is required.
+The eight native coding tools remain the child baseline; nesting and goals are
+not available to children.
 
 Only a construction-owned parent source can grant inherited native web.
 Child JSON cannot supply eligibility or credentials. This process binding survives
@@ -21,43 +21,11 @@ closed, even if another host or owner has credentials. Existing active generatio
 retain their admitted snapshot until they finish.
 
 Direct primaries still refresh at every model request. Visible names, allowed
-tools and credentials form one immutable request/tool-round snapshot. Unrelated
-top-level orchestrators remain excluded. Established Managed NAC worker
-provisioning remains independent: it uses the server startup snapshot at dispatch.
-Ordinary local workers gain no ambient credential lookup; eligible inherited
-orchestrators forward only their admitted native snapshot.
-
-The orchestrator removes `EXA_API_KEY` from the worker process environment and
-keeps stdin exclusively for cancellation. On Linux, each credential-bearing dispatch gets
-a mode-0600 filesystem Unix socket. The worker first reapplies the managed
-process hardening, connects without inheriting a credential descriptor, and
-authenticates the server PID with `SO_PEERCRED`; the server likewise accepts
-only the PID of the worker it spawned. The worker announces readiness only
-after MCP construction, then receives one bounded credential frame and closes
-the socket. Credential bytes are therefore neither buffered before MCP startup
-nor available to MCP descendants. Other Unix hosts retain an anonymous
-close-on-exec socket with the same post-MCP readiness ordering. On non-Unix
-hosts, dispatch fails closed when a native credential would need delegation.
-
-On Linux, an explicitly configured Managed NAC server and its workers also
-become non-dumpable and set `no_new_privs` before spawning untrusted
-descendants. This blocks ordinary
-same-UID ptrace, process-memory, proc-environment, and `pidfd_getfd` inspection.
-It is not a defense against a process with `CAP_SYS_PTRACE`, a privileged
-container, kernel compromise, or a fully compromised NAC process. Deployments
-that run untrusted MCP servers must not grant those capabilities; stronger
-mutual isolation requires separate UIDs or a credential-injecting broker.
-
-On macOS, the managed-worker socket inheritance and readiness protections still
-apply, but there is no Linux-equivalent `prctl`/procfs guarantee here. A
-same-user macOS MCP process is therefore outside this isolation claim; use
-privilege separation or an external credential broker for that threat model.
+tools and credentials form one immutable request/tool-round snapshot. Native Exa
+credentials are not inherited from ambient child configuration.
 
 Native Exa credentials cannot be expanded or forwarded through MCP configuration,
 stdio environments, or HTTP-header helpers, including on local hosts.
-
-Exact-value redaction covers retained worker stdout and stderr; the key is
-never included in model-visible tool definitions or durable worker episodes.
 
 `web_search` sends a bounded semantic-search request to Exa Search.
 `web_fetch` validates one public HTTP or HTTPS target and sends that URL to Exa

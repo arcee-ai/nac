@@ -1,5 +1,8 @@
 # 0001 — Dependency boundaries
 
+> The support claims for retired orchestration topologies in this historical
+> decision are superseded by [ADR 0009](0009-direct-only-retirement.md).
+
 Status: accepted
 
 ## Context

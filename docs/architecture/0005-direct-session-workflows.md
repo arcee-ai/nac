@@ -1,5 +1,8 @@
 # Direct session workflow ownership
 
+> The support claims for retired orchestration topologies in this historical
+> decision are superseded by [ADR 0009](0009-direct-only-retirement.md).
+
 ## Decision
 
 The browser's direct-session application boundary is

@@ -277,7 +277,7 @@ pub fn bundled() -> Result<&'static GuidePack> {
 
 /// Small routing instruction for primary agents. The corpus stays out of prompts.
 pub(crate) fn primary_prompt() -> String {
-    format!("\n\n## NAC product self-help\n\nAvailable first-party skill: nac-help — {DESCRIPTION}\nFor ordinary questions about NAC, this app, its setup or capabilities (including MCP, skill locations, direct-with-orchestrator and subagent search), use nac_guide to find and read the installed references before answering. Explicit $nac-help supplies the same router. Generic coding work merely mentioning NAC does not require help. Answer product questions directly with release-local citations; orchestrators may use this read-only tool without a worker dispatch. For delegated help, select skills: [\"nac-help\"] when dispatching a worker. Never invent current configuration or treat help as permission to execute work. {ROUTER}")
+    format!("\n\n## NAC product self-help\n\nAvailable first-party skill: nac-help — {DESCRIPTION}\nFor ordinary questions about NAC, this app, its setup or capabilities (including MCP, skills and child sessions), use nac_guide to find and read installed references before answering. Explicit $nac-help supplies the same router. Generic coding work merely mentioning NAC does not require help. Answer product questions directly with release-local citations. Never invent current configuration or treat help as permission to execute work. {ROUTER}")
 }
 
 #[cfg(test)]

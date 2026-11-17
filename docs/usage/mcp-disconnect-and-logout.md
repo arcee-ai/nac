@@ -15,13 +15,9 @@ changes the chat's execution backend or grants tool approval.
 The control reports the requested revision and, for an attached direct agent,
 the revision applied by its current process incarnation. Before any refresh has
 been requested, status is `not_requested`. Pending means the agent has not
-reached the boundary for a requested refresh yet. Unavailable agents do not report an
-applied revision. Orchestrators schedule refresh for their independently running
-workers at each worker's next model boundary; they do not report an aggregate
-worker acknowledgement. New worker dispatches mount the current configuration.
-Direct-with-orchestrator chats refresh their direct agent. Traditional children
-and managed orchestrators have separate session identities and refresh requests;
-refreshing a parent does not refresh those sessions.
+reached the boundary for a requested refresh yet. Unavailable agents do not report an applied revision. Traditional children have
+separate session identities and refresh requests; refreshing a parent does not
+refresh those sessions.
 
 Explicit mount refresh discards obsolete mounts for future requests. Optional
 servers that fail to mount are omitted and status reports degraded integrations;

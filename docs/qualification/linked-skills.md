@@ -85,8 +85,8 @@ Their committed bytes are identical. All three were discovered,
 expanded and read, with no supporting `scripts/`, `references/` or `assets/`
 files at that revision. Their full workflows were deliberately not executed:
 
-- `qa` describes orchestrator/worker choreography and rootless Podman. Loading
-  its text does not prove direct-mode choreography; ALL-423 owns that adaptation.
+- `qa` describes child-agent choreography and rootless Podman. Loading its text
+  alone does not prove that the live QA workflow ran.
 - `release` describes a stable release workflow tied to historical main/workflow
   assumptions. Reading it supplies no release authority or current release proof.
 - `triage` requires GitHub inventories and authorized issue mutations. None ran.
