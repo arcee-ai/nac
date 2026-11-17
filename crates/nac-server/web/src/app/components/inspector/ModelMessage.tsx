@@ -272,6 +272,7 @@ const ModelMessageBody = memo(function ModelMessageBody({
         <LiveStatusLine label={liveLabel} since={runStartedAt} />
       ) : !active ? (
         <div
+          data-action-slot=""
           className={cn(
             "-ml-1 -mt-2 flex h-8 w-full min-w-0 items-center gap-0.5 max-md:h-11",
             "transition-opacity duration-150 ease-out motion-reduce:transition-none",
@@ -367,7 +368,9 @@ const ModelMessageBody = memo(function ModelMessageBody({
             </span>
           ) : null}
         </div>
-      ) : null}
+      ) : (
+        <div aria-hidden="true" data-action-slot="" className="-mt-2 h-8 w-full max-md:h-11" />
+      )}
     </div>
   );
 });

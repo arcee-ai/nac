@@ -22,6 +22,7 @@ for (const traced of [false, true]) {
     page,
     request,
   }) => {
+    if (traced) await page.setViewportSize({ width: 390, height: 900 });
     const prompt = `Tool activity ${traced}`;
     const callId = `activity-glob-${traced}`;
     const gate = new ScriptGate();
@@ -55,6 +56,9 @@ for (const traced of [false, true]) {
     try {
       const fold = page.locator("[data-work-fold]");
       await expect(fold).toHaveCount(1);
+      const actionSlot = page.locator("[data-turn]").last().locator("[data-action-slot]");
+      const liveSlot = await actionSlot.boundingBox();
+      expect(liveSlot?.height).toBeGreaterThan(0);
       await expect(page.getByRole("status").filter({ hasText: "Thinking" })).toHaveCount(0);
       await fold.getByRole("button").first().click();
       await expect(fold.getByRole("list", { name: "Steps" })).toBeVisible();
@@ -65,6 +69,8 @@ for (const traced of [false, true]) {
       gate.release();
       await waitForRunIdle(request, harness, id);
       await expect(page.getByText(ANSWER, { exact: true })).toBeVisible();
+      const settledSlot = await actionSlot.boundingBox();
+      expect(settledSlot?.height).toBe(liveSlot?.height);
       if (traced)
         await expect(fold.getByText(REASONING.split("\n\n")[0], { exact: true })).toBeVisible();
     } finally {

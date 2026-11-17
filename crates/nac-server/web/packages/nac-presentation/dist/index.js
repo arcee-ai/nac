@@ -20467,7 +20467,12 @@ var iS = so(function({ turn: e, previous: t, date: n, active: r, activity: i, ru
 			j && !M ? /* @__PURE__ */ Q(xy, {
 				label: j,
 				since: a
-			}) : r ? null : /* @__PURE__ */ $("div", {
+			}) : r ? /* @__PURE__ */ Q("div", {
+				"aria-hidden": "true",
+				"data-action-slot": "",
+				className: "-mt-2 h-8 w-full max-md:h-11"
+			}) : /* @__PURE__ */ $("div", {
+				"data-action-slot": "",
 				className: H("-ml-1 -mt-2 flex h-8 w-full min-w-0 items-center gap-0.5 max-md:h-11", "transition-opacity duration-150 ease-out motion-reduce:transition-none", o ? "opacity-100" : "opacity-0 group-hover/turn:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100"),
 				children: [
 					/* @__PURE__ */ Q(mi, {
