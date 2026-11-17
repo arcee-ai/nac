@@ -57,6 +57,11 @@ async function launch(c: Candidate) {
 test("Focus preference keys cross the native bridge and survive Quit on a new serving port", async ({
   candidate: c,
 }) => {
+  await expect(c.page.getByRole("heading", { name: "Add a project", exact: true })).toBeVisible();
+  const project = await c.project();
+  // The API creates fixture data without invalidating the renderer's queries.
+  // Reload Home before observing its runtime; never open either session.
+  await c.page.reload();
   await expect(c.page.locator("#home-composer")).toBeVisible();
   const original = await c.app.evaluate(({ app }) =>
     process
@@ -81,7 +86,6 @@ test("Focus preference keys cross the native bridge and survive Quit on a new se
     });
     return { binding: value.binding, document: value.document };
   });
-  const project = await c.project();
   const session = await c.session("direct", project);
   const unreadSession = await c.session("direct", project);
   const title = "Cold-launch Focus preference fixture";
@@ -531,7 +535,11 @@ test("Swift-compatible v1 fixture imports preference and review-only text after 
   };
   const fields = ["owner", "profile", "organization", "host", "store", "track"] as const;
   const values = {
-    preferences: { "nac.sidebar.open": "false" },
+    preferences: {
+      "nac.sidebar.open": "false",
+      // A complete Focus checkpoint imports without a first-use Inbox write.
+      "nac.inbox.read.v1": JSON.stringify({ since: Date.now(), runs: {} }),
+    },
     drafts: {
       ["nac:prompt-drafts:v2:" + JSON.stringify(fields.map((key) => identity[key]))]:
         JSON.stringify({

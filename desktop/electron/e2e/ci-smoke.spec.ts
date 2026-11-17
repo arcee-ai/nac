@@ -40,6 +40,7 @@ test("normal packaged source, launch identity and private canonical store agree"
 test("current session panel deep links retain the actual shared workspace", async ({
   candidate: c,
 }) => {
+  expect((await c.api("/ui-config")).orchestration_enabled).toBe(true);
   const project = await c.project();
   const direct = await c.session("direct", project);
   const orchestrator = await c.session("orchestrator", project);

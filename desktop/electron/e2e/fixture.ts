@@ -63,6 +63,8 @@ export const test = base.extend<{ candidate: Candidate; developmentPathOverrides
       XDG_CONFIG_HOME: path.join(directory, "xdg"),
       TMPDIR: path.join(directory, "tmp"),
       NAC_E2E_API_KEY: "nac-e2e-dummy-only",
+      // This cohort deliberately covers direct and orchestrator sessions.
+      NAC_ORCHESTRATION: "1",
       MODELS_DEV_URL: `${provider.baseUrl}/models-dev`,
       BROWSER: "none",
       NAC_ELECTRON_ENGINE: path.join(root, "target/release/nac-web"),
