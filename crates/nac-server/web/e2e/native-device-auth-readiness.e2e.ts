@@ -7,7 +7,10 @@ import { expect, test } from "./harness";
 test.use({ orchestration: "0" });
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
-const source = await fs.readFile(path.join(repository, "desktop/macos/DeviceAuthSmoke.swift"), "utf8");
+const source = await fs.readFile(
+  path.join(repository, "desktop/macos/DeviceAuthSmoke.swift"),
+  "utf8",
+);
 const script = source.match(/static let clickScript = #"""([\s\S]*?)"""#/);
 if (!script) throw new Error("Missing actual native device-auth click script");
 const click = new Function("input", `const { title, inCard } = input; ${script[1]!}`) as (input: {
@@ -20,7 +23,9 @@ test("native device fixture waits for the auth check before issuing one sign-in"
   harness,
 }) => {
   let release!: () => void;
-  const released = new Promise<void>((resolve) => { release = resolve; });
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
   let loginRequests = 0;
   await page.route("**/auth", async (route) => {
     const response = await route.fetch();
