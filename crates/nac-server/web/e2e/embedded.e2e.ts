@@ -937,7 +937,7 @@ test("queues, edits, cancels pending input, and stops an active direct run", asy
   await expect(pending).toContainText("queue");
   await expect(pending).toContainText("queued follow-up");
   await pending.getByRole("button", { name: "Change to steer" }).click();
-  await expect(pending).toContainText("steer");
+  await expect(pending.getByRole("button", { name: "Change to queue", exact: true })).toBeVisible();
   await pending.getByRole("button", { name: "Cancel" }).click();
   await expect(page.getByLabel("Pending messages")).toHaveCount(0);
 

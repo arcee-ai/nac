@@ -441,8 +441,9 @@ Run the adjacent fixture contracts with
 
 ## Native command qualification (ALL-346)
 
-The `commands` smoke scenario opens Settings (the Settings page) and New Session
-(Home's composer) through native menus once, checks the return to the session
+The `commands` smoke scenario opens Settings through native menus at its initial and
+compact widths (one dispatch per gesture), and New Session (Home's composer).
+It records actual WebView/media-query dimensions and checks the return to the session
 and its composer focus and Projects routing, rejects a foreign
 key window, exercises malformed/stale/duplicate/iframe/foreign-WebView receipts,
 blocks navigation/popups, and verifies document replacement and retirement.

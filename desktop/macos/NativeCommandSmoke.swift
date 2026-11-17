@@ -36,15 +36,30 @@ final class NativeCommandSmoke {
         }
         let first = commands.smokeSnapshot
         let sessionHash = try await js("return location.hash") as! String
-        try perform(menu: "NAC", title: "Settings…")
-        try await settingsPage()
-        try await capture("settings", trustedInput: trustedInput, directory: captures)
-        guard delta("dispatches", first) == 1 else { throw PreviewError.message("Settings was not dispatched once") }
-        // Settings is a routed page: its Back returns to the same session and
-        // hands the composer its focus again, as closing the dialog did.
-        _ = try await js("[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Back' && b.getClientRects().length)?.click(); return true")
-        try await sessionRoute(sessionHash)
-        try await wait("composer focus restoration") { try await self.js("return document.activeElement?.getAttribute('aria-label') === 'Message'") as? Bool == true }
+        let originalSize = app.webView.bounds.size
+        var settingsDisplays: [[String: Any]] = []
+        do {
+            defer { app.window.setContentSize(originalSize) }
+            // Keep the initial size and also exercise the compact route without
+            // enlarging the owned window beyond the host's existing bounds.
+            for (index, width) in [originalSize.width, min(920, originalSize.width)].enumerated() {
+                app.window.setContentSize(NSSize(width: width, height: originalSize.height))
+                try await wait("current menu focus owner") { self.commands.smokeSnapshot["available"] as? Bool == true }
+                let beforeSettings = commands.smokeSnapshot
+                try perform(menu: "NAC", title: "Settings…")
+                try await settingsPage()
+                let display = try await js("return {inner_width: innerWidth, inner_height: innerHeight, dpr: devicePixelRatio, narrow: matchMedia('(max-width: 1023.98px)').matches}") as! [String: Any]
+                settingsDisplays.append(display.merging(["webview_width": app.webView.bounds.width, "window_content_width": app.window.contentLayoutRect.width]) { _, new in new })
+                try await capture(index == 0 ? "settings" : "settings-compact", trustedInput: trustedInput, directory: captures)
+                guard delta("dispatches", beforeSettings) == 1 else { throw PreviewError.message("Settings was not dispatched once") }
+                try await leaveSettings()
+                try await sessionRoute(sessionHash)
+                try await wait("composer focus restoration") { try await self.js("return document.activeElement?.getAttribute('aria-label') === 'Message'") as? Bool == true }
+            }
+        }
+        guard settingsDisplays.last?["narrow"] as? Bool == true else {
+            throw PreviewError.message("Settings fixture did not exercise compact navigation")
+        }
         let beforeNew = commands.smokeSnapshot
         try perform(menu: "File", title: "New Session")
         try await homeComposer()
@@ -90,7 +105,7 @@ final class NativeCommandSmoke {
         let rejected = delta("rejected", beforeBad)
         commands.retire()
         guard commands.smokeSnapshot["installed"] as? Bool == false else { throw PreviewError.message("Retired bridge remained installed") }
-        return ["menu_dispatch": "programmatic-NSMenu", "settings_once": true, "new_session_once": true,
+        return ["menu_dispatch": "programmatic-NSMenu", "settings_once": true, "settings_displays": settingsDisplays, "new_session_once": true,
                 "shared_focus_restored": true, "projects_once_same_document": true, "foreign_window_rejected": true, "negative_WK_receipts": rejected, "initial_bridge": first, "final_bridge": final,
                 "navigation_popup_restricted": true, "document_replaced": true, "retired": true,
                 "trusted_keyboard_edit_qualified": trustedInput, "input": inputEvidence ?? [:]]
@@ -263,9 +278,28 @@ final class NativeCommandSmoke {
     /// The shared Settings command opens the Settings page on Models & providers.
     private func settingsPage() async throws {
         try await wait("Settings Models & providers page") {
-            try await self.js("return location.hash === '#/settings/models' && !document.querySelector('[role=dialog]') && [...document.querySelectorAll('main[aria-label=\"Models & providers\"]')].some(m => m.getClientRects().length)") as? Bool == true
+            try await self.js("const label = matchMedia('(max-width: 1023.98px)').matches ? 'Settings' : 'Back'; return location.hash === '#/settings/models' && !document.querySelector('[role=dialog]') && [...document.querySelectorAll('main[aria-label=\"Models & providers\"]')].some(m => m.getClientRects().length) && [...document.querySelectorAll('button')].filter(b => b.textContent.trim() === label && !b.disabled && b.getClientRects().length).length === 1") as? Bool == true
         }
     }
+    private static let settingsBackScript = #"""
+    const targets = [...document.querySelectorAll('button')].filter(b =>
+      b.textContent.trim() === label && !b.disabled && b.getClientRects().length);
+    if (targets.length !== 1) return false;
+    targets[0].click(); return true;
+    """#
+
+    /// Compact Settings pushes a section over its list; desktop leaves directly.
+    private func leaveSettings() async throws {
+        if try await js(Self.settingsBackScript, arguments: ["label": "Settings"]) as? Bool == true {
+            try await wait("Settings section list") {
+                try await self.js("return location.hash === '#/settings' && !!document.querySelector('nav[aria-label=\"Settings sections\"]')") as? Bool == true
+            }
+        }
+        guard try await js(Self.settingsBackScript, arguments: ["label": "Back"]) as? Bool == true else {
+            throw PreviewError.message("Settings Back control was not uniquely available")
+        }
+    }
+
     /// The shared New Session command opens Home's composer for the session's project.
     private func homeComposer() async throws {
         try await wait("Home composer for the session's project") {
