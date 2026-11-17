@@ -1,6 +1,7 @@
 import { test, expect } from "./fixture";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { prepareNewShell } from "./ui-readiness";
 
 test("production workspace streams, asks permission and a question, and keeps Mac document on close", async ({
   candidate: c,
@@ -209,6 +210,7 @@ test("trusted Chromium terminal input reaches Rust PTY and protected Stop reaps 
   const pane = c.page.getByRole("region", { name: "Session terminal", exact: true });
   await expect(show.or(pane)).toBeVisible();
   if (await show.isVisible()) await show.click();
+  await prepareNewShell(pane);
   await pane.getByRole("button", { name: /^New shell$/i }).click();
   await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
   await pane.getByRole("region", { name: "Interactive terminal", exact: true }).click();
@@ -253,6 +255,7 @@ test("actual Electron parent death closes its engine channel and settles an open
   const show = c.page.getByRole("button", { name: "Show panel", exact: true });
   await expect(show.or(pane)).toBeVisible();
   if (await show.isVisible()) await show.click();
+  await prepareNewShell(pane);
   await pane.getByRole("button", { name: /^New shell$/i }).click();
   await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
   await pane.getByRole("region", { name: "Interactive terminal", exact: true }).click();

@@ -88,7 +88,7 @@ struct CommandInputDriver {
         let data = try Data(contentsOf: receipt)
         guard let value = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               value["source_head"] as? String == source,
-              value["mode"] as? String == "smoke",
+              ["smoke", "smoke-build"].contains(value["mode"] as? String ?? ""),
               value["smoke_instrumentation"] as? Bool == true,
               value["source_dirty"] as? Bool == false,
               let native = value["native_sha256"] as? String,

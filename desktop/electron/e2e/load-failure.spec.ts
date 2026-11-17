@@ -40,11 +40,21 @@ test("a genuine child-frame load failure preserves the workspace and owned engin
   await expect(c.page.getByText("No projects yet", { exact: true })).toBeVisible();
 });
 
-test("a genuine main-frame load failure retires the original engine", async ({ candidate: c }) => {
+test("a genuine main-frame load failure replaces the document and retains the verified engine", async ({
+  candidate: c,
+}) => {
+  const initial = await c.app.evaluate(({ app }) =>
+    process
+      .getBuiltinModule("module")
+      .createRequire(app.getAppPath() + "/package.json")(app.getAppPath())
+      .getState(),
+  );
+  const originalPage = c.page;
   await c.app.evaluate(({ BrowserWindow, dialog }) => {
     (globalThis as any).__loadFailureRows = [];
     dialog.showMessageBox = async () => ({ response: 0, checkboxChecked: false });
     const contents = BrowserWindow.getAllWindows()[0].webContents;
+    (globalThis as any).__failedMainContents = contents;
     contents.on("did-fail-load", (_event, code, description, url, isMainFrame) => {
       (globalThis as any).__loadFailureRows.push({ code, description, url, isMainFrame });
     });
@@ -53,6 +63,10 @@ test("a genuine main-frame load failure retires the original engine", async ({ c
   await expect
     .poll(() => c.app.evaluate(() => (globalThis as any).__loadFailureRows))
     .toEqual(expect.arrayContaining([expect.objectContaining({ isMainFrame: true, code: -312 })]));
+  await expect.poll(() => c.app.windows().filter((page) => page !== originalPage).length).toBe(1);
+  c.page = c.app.windows().find((page) => page !== originalPage)!;
+  await c.page.waitForURL(/^http:\/\/127\.0\.0\.1:\d+/);
+  await expect(c.page.getByText("No projects yet", { exact: true })).toBeVisible();
   await expect
     .poll(() =>
       c.app.evaluate(
@@ -60,21 +74,23 @@ test("a genuine main-frame load failure retires the original engine", async ({ c
           process
             .getBuiltinModule("module")
             .createRequire(app.getAppPath() + "/package.json")(app.getAppPath())
-            .getState().failure,
+            .getState().recovery.pending,
       ),
     )
-    .toContain("The bundled workspace could not load");
-  await expect
-    .poll(() =>
-      c.app.evaluate(
-        ({ app }) =>
-          process
-            .getBuiltinModule("module")
-            .createRequire(app.getAppPath() + "/package.json")(app.getAppPath())
-            .getState().enginePid,
-      ),
-    )
-    .toBe(0);
-  await expect.poll(async () => c.app.windows().length).toBe(0);
+    .toBe(false);
+  const recovered = await c.app.evaluate(({ app }) =>
+    process
+      .getBuiltinModule("module")
+      .createRequire(app.getAppPath() + "/package.json")(app.getAppPath())
+      .getState(),
+  );
+  expect(recovered.enginePid).toBe(initial.enginePid);
+  expect(recovered.receipt).toEqual(initial.receipt);
+  expect(recovered.failure).toBeNull();
+  expect(await c.app.evaluate(() => (globalThis as any).__failedMainContents.isDestroyed())).toBe(
+    true,
+  );
+  expect(new URL(c.page.url()).origin).toBe(c.endpoint);
+  expect(c.app.windows()).toHaveLength(1);
   expect(c.provider.requests).toHaveLength(0);
 });

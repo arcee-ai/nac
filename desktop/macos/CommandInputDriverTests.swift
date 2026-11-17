@@ -53,6 +53,41 @@ struct CommandInputDriverTests {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false,
                                                 attributes: [.posixPermissions: 0o700])
         defer { try? FileManager.default.removeItem(at: root) }
+        // Both canonical preview builder modes compile the same smoke recipe.
+        // Exercise actual receipt parsing and file hashes without posting input.
+        let app = root.appendingPathComponent("NAC Fixture.app")
+        let native = app.appendingPathComponent("Contents/MacOS/NACPreview")
+        let engine = app.appendingPathComponent("Contents/Resources/nac-web")
+        try FileManager.default.createDirectory(at: native.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: engine.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("private native fixture".utf8).write(to: native)
+        try Data("private engine fixture".utf8).write(to: engine)
+        let nativeDigest = try Driver.fileDigest(native), engineDigest = try Driver.fileDigest(engine)
+        let receipt = engine.deletingLastPathComponent().appendingPathComponent("build-receipt.json")
+        var build: [String: Any] = ["source_head": identity.source, "source_dirty": false,
+            "smoke_instrumentation": true, "native_sha256": nativeDigest, "engine_sha256": engineDigest]
+        func writeBuild(_ value: [String: Any]) throws {
+            try JSONSerialization.data(withJSONObject: value).write(to: receipt)
+        }
+        for mode in ["smoke", "smoke-build"] {
+            build["mode"] = mode
+            try writeBuild(build)
+            let admitted = try Driver.buildIdentity(app: app, source: identity.source)
+            precondition(admitted.source == identity.source && admitted.native == nativeDigest && admitted.engine == engineDigest)
+        }
+        for (key, bad) in [("mode", "build" as Any), ("mode", "app-build"),
+                           ("mode", "auth-build"), ("mode", "smoke-unknown"),
+                           ("source_head", "foreign"), ("source_dirty", true),
+                           ("smoke_instrumentation", false), ("native_sha256", "foreign"),
+                           ("engine_sha256", "foreign")] {
+            var changed = build
+            changed[key] = bad
+            try writeBuild(changed)
+            do {
+                _ = try Driver.buildIdentity(app: app, source: identity.source)
+                preconditionFailure("Unsafe smoke build identity accepted")
+            } catch {}
+        }
         let descriptor = open(root.path, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
         precondition(descriptor >= 0)
         defer { close(descriptor) }
