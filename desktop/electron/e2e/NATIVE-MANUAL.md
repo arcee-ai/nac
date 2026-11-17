@@ -48,7 +48,7 @@ app only:
    call `getApp`, `getAXState` or any app-opening inspection after Quit: those
    calls can relaunch an exited app with a normal personal profile.
 2. On Home, open the composer's project chip and choose **Add project…** to
-   open New Project (File/New Chat opens Home's composer, not the form). Name
+   open New Project (File/New Session opens Home's composer, not the form). Name
    it exactly `folderProjectName` from the receipt. Keep Local, open the
    normal folder picker, choose `selectedFolder` (spaces and Unicode),
    select the seeded model if needed, and create the project. The controller

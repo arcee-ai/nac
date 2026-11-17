@@ -12,7 +12,7 @@ function installMenus({ app, Menu, getNative, show, requestQuit, retry = () => {
       { label: 'Quit NAC', accelerator: 'CmdOrCtrl+Q', click: () => requestQuit() },
     ] },
     { label: 'File', submenu: [
-      { label: 'New Chat', accelerator: 'CmdOrCtrl+N', click: command('newSession') },
+      { label: 'New Session', accelerator: 'CmdOrCtrl+N', click: command('newSession') },
       { label: 'Projects…', accelerator: 'CmdOrCtrl+Shift+P', click: command('projects') },
       { type: 'separator' }, { role: 'close' },
     ] },

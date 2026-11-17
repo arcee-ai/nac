@@ -55,15 +55,15 @@ test('native menu commands enter existing React flows and retain editor/modal gu
   await expect(models).toHaveCount(0);
   expect(await hash()).toBe('#/');
   await c.page.evaluate(() => document.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true })));
-  // With no project for Home's composer to pick, New Chat opens New Project;
+  // With no project for Home's composer to pick, New Session opens New Project;
   // an open modal then refuses commands.
   await focusWorkspace(c);
-  await menu(c, 'New Chat');
+  await menu(c, 'New Session');
   const projectForm = c.page.getByRole('dialog', { name: 'New Project', exact: true });
   await expect(projectForm).toBeVisible();
   await projectForm.locator('input').first().focus();
   await menu(c, 'Settings…');
-  await menu(c, 'New Chat');
+  await menu(c, 'New Session');
   await expect(models).toHaveCount(0);
   await expect(projectForm).toBeVisible();
   expect(await hash()).toBe('#/');
@@ -81,9 +81,9 @@ test('native menu commands enter existing React flows and retain editor/modal gu
   await expect(models).toHaveCount(0);
   await expect(composer).toHaveValue('Retained editor draft');
   expect(await hash()).toBe(`#/session/${session}/files`);
-  // New Chat in a project opens Home's composer preset to it; nothing is sent.
+  // New Session in a project opens Home's composer preset to it; nothing is sent.
   await focusWorkspace(c);
-  await menu(c, 'New Chat');
+  await menu(c, 'New Session');
   await expect.poll(hash).toBe(`#/?project=${project}`);
   await expect(c.page.getByRole('textbox', { name: 'What should we work on?', exact: true })).toBeFocused();
   expect(await c.api('/sessions')).toHaveLength(1);
