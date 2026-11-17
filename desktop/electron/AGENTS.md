@@ -36,6 +36,10 @@ Rust's 20-second settlement watchdog precedes the shell's 23-second fallback.
 The 26-second UI wait never establishes cleanup or resends stop. Retry is explicit
 and requires the prior child to be reaped. Keep Swift and Rune intact.
 
+Unproven custody settlement stays pending. The bridge-free, sandboxed status
+window must remain available even when startup never opened a workspace; never
+resolve an unproven exit merely to dismiss the UI or permit Retry.
+
 Build the release engine and run `npm run prepare:dev` before real-engine
 verification (see README.md). Use `npm ci`, `npm test`, and actual Electron `npm run test:e2e`. Packaging is the
 single writer under `scripts/package.cjs`; resources and manifest must bind the

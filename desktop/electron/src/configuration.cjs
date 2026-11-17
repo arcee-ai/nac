@@ -4,6 +4,19 @@ const path = require("node:path");
 const os = require("node:os");
 const { spawn } = require("node:child_process");
 const { validIdentity, LaunchError } = require("./protocol.cjs");
+function launchPaths({ packaged, resourcesPath, env = process.env }) {
+  const root = path.resolve(__dirname, "../../..");
+  const resources = packaged
+    ? resourcesPath
+    : (env.NAC_ELECTRON_RESOURCES ?? path.join(root, "target/electron-resources"));
+  const executable = packaged
+    ? path.join(resourcesPath, "nac-web")
+    : (env.NAC_ELECTRON_ENGINE ?? path.join(root, "target/release/nac-web"));
+  for (const value of [resources, executable])
+    if (typeof value !== "string" || !path.isAbsolute(value) || value.includes("\0"))
+      throw new Error("Electron engine and resource paths must be absolute.");
+  return { resources, executable };
+}
 const configurationMessages = Object.freeze({
   invalid_configuration:
     "NAC could not read its selected config.toml. Check NAC_HOME, XDG_CONFIG_HOME or HOME, repair the configuration and pending MCP publication, then Retry. The selected store was not opened.",
@@ -138,4 +151,4 @@ async function selectConfiguration(executable, identity, launchOptions, inherite
     throw new Error("The bundled engine returned invalid configuration identity.");
   return { cwd: result.root_cwd, store: result.store, env };
 }
-module.exports = { options, environment, selectConfiguration, capture };
+module.exports = { options, environment, selectConfiguration, capture, launchPaths };

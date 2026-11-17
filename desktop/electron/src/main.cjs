@@ -5,11 +5,12 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 const { Engine } = require("./engine.cjs");
 const { Lifecycle } = require("./lifecycle.cjs");
-const { options, selectConfiguration } = require("./configuration.cjs");
+const { options, selectConfiguration, launchPaths } = require("./configuration.cjs");
 const { validIdentity } = require("./protocol.cjs");
 const { createNativeAdapters } = require("./native.cjs");
 const { installMenus } = require("./menus.cjs");
 const { installWindowVisibility } = require("./window-visibility.cjs");
+const { createStatusWindow, statusURL } = require("./status-window.cjs");
 
 app.enableSandbox();
 // Test/developer-selected shell storage must be bound before Chromium helpers
@@ -39,13 +40,10 @@ let approvedExit = false,
   failureEpisode = null,
   failureDialog = false,
   cleanupPromise = null;
-const resources = app.isPackaged
-  ? process.resourcesPath
-  : path.resolve(process.env.NAC_ELECTRON_RESOURCES ?? path.join(__dirname, "../resources"));
-const executable =
-  !app.isPackaged && process.env.NAC_ELECTRON_ENGINE
-    ? path.resolve(process.env.NAC_ELECTRON_ENGINE)
-    : path.join(resources, "nac-web");
+const { resources, executable } = launchPaths({
+  packaged: app.isPackaged,
+  resourcesPath: process.resourcesPath,
+});
 function reopen() {
   app.show();
   if (window && !window.isDestroyed()) {
@@ -56,16 +54,24 @@ function reopen() {
   }
 }
 function status(message) {
-  if (!window || window.isDestroyed()) return;
+  if (!window || window.isDestroyed()) {
+    const owner = createStatusWindow({ BrowserWindow });
+    window = owner;
+    if (failureEpisode && !failureEpisode.window) failureEpisode.window = owner;
+    owner.on("close", (event) => {
+      if (approvedExit) return;
+      event.preventDefault();
+      if (window === owner && lifecycle.canHide) owner.hide();
+    });
+    owner.on("closed", () => {
+      if (window === owner) window = null;
+    });
+    owner.once("ready-to-show", () => {
+      if (window === owner) reopen();
+    });
+  }
   native?.cancelPending();
-  const html =
-    '<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'"><title>NAC</title><style>body{font:16px -apple-system,sans-serif;max-width:650px;margin:80px auto;padding:30px;color:#ddd;background:#16171a}h1{font-size:24px}p{line-height:1.6}</style><h1>NAC Electron Development</h1><p>' +
-    message.replace(
-      /[&<>"']/g,
-      (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c],
-    ) +
-    "</p>";
-  void window.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(html)).catch(() => {});
+  void window.loadURL(statusURL(message)).catch(() => {});
 }
 function createWindow(partition) {
   window = new BrowserWindow({

@@ -5,11 +5,9 @@ const path = require("node:path");
 const { execFileSync } = require("node:child_process");
 const { createHash } = require("node:crypto");
 const { buildFolderBundle } = require("./folder-bundle.cjs");
+const { launchPaths } = require("../src/configuration.cjs");
 const root = path.resolve(__dirname, "../../..");
-const resources = path.join(root, "target/electron-resources");
-const engine = path.resolve(
-  process.env.NAC_ELECTRON_ENGINE || path.join(root, "target/release/nac-web"),
-);
+const { resources, executable: engine } = launchPaths({ packaged: false });
 fs.mkdirSync(resources, { recursive: true });
 const identity = JSON.parse(execFileSync(engine, ["__desktop-identity"], { encoding: "utf8" }));
 const schema = Number(

@@ -18,6 +18,12 @@ npm --prefix desktop/electron run test:e2e
 NAC_ELECTRON_OUTPUT="$PWD/target/electron-review" npm --prefix desktop/electron run package
 ```
 
+After preparing resources, `npm --prefix desktop/electron start` launches the
+unpackaged development app with `target/release/nac-web` and
+`target/electron-resources`. Optional `NAC_ELECTRON_ENGINE` and
+`NAC_ELECTRON_RESOURCES` overrides must be absolute and match the prepared
+identity. Packaged apps always use their bundled resources.
+
 The package writer refuses to replace an existing app. Select a fresh output
 directory with `NAC_ELECTRON_OUTPUT=/absolute/path` for another candidate.
 It also rejects stale engine revision/version metadata and uncommitted runtime
@@ -57,6 +63,8 @@ owned engine. The existing Rust 20-second watchdog and 23-second shell fallback
 remain; a pending-cleanup message is not a claim that processes have exited.
 Store contention and future schemas remain distinct errors. Retry never adopts
 another engine, changes stores or replays input, and waits for the prior child.
+If custody cannot prove settlement, a sandboxed cleanup status remains visible,
+including before the first workspace opens. Helper exit alone never enables Retry.
 
 Native menus use the existing React command guards and normal Edit roles. Folder
 selection returns form data for Rust to revalidate. Reveal uses the existing

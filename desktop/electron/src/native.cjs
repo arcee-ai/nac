@@ -5,6 +5,7 @@ const { folderPicker, folderExecutable } = require('./folder.cjs');
 const { installMenus } = require('./menus.cjs');
 const { randomUUID } = require('node:crypto');
 const { workspaceVisible } = require('./window-visibility.cjs');
+const { launchPaths } = require('./configuration.cjs');
 
 const uuid = value => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 const integer = value => Number.isSafeInteger(value) && value > 0 && value <= 2147483647;
@@ -14,9 +15,7 @@ const exact = (value, keys) => value && typeof value === 'object' && !Array.isAr
 function createNativeAdapters({ window, endpoint, origin = endpoint, incarnation, onConnectionLost = () => {}, electron, pickFolder }) {
   const { ipcMain, shell, app, Menu, dialog } = electron || require('electron');
   const chooseFolder = pickFolder || (initial => {
-    const path = require('node:path');
-    const resources = app.isPackaged ? process.resourcesPath :
-      process.env.NAC_ELECTRON_RESOURCES || path.join(__dirname, '..', 'build');
+    const { resources } = launchPaths({ packaged: app.isPackaged, resourcesPath: process.resourcesPath });
     return folderPicker(initial, folderExecutable(resources));
   });
   const contents = window.webContents;

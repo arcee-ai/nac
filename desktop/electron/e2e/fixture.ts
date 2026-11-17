@@ -26,8 +26,9 @@ export type Candidate = {
   session: (behavior?: string, project?: string) => Promise<string>;
   api: (route: string, data?: unknown, method?: string) => Promise<any>;
 };
-export const test = base.extend<{ candidate: Candidate }>({
-  candidate: async ({}, use, info) => {
+export const test = base.extend<{ candidate: Candidate; developmentPathOverrides: boolean }>({
+  developmentPathOverrides: [true, { option: true }],
+  candidate: async ({ developmentPathOverrides }, use, info) => {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), "nac-electron-e2e-"));
     const workspace = path.join(directory, "workspace with spaces");
     for (const folder of [workspace, "home", "nac-home", "xdg", "tmp"].map((p) =>
@@ -69,6 +70,10 @@ export const test = base.extend<{ candidate: Candidate }>({
       NAC_ELECTRON_RESOURCES: path.join(root, "target/electron-resources"),
       NAC_ELECTRON_DATA_HOME: path.join(directory, "electron-data"),
     };
+    if (!developmentPathOverrides) {
+      delete env.NAC_ELECTRON_ENGINE;
+      delete env.NAC_ELECTRON_RESOURCES;
+    }
     const launch = _electron.launch({
       ...(executablePath ? { executablePath } : {}),
       args: [
