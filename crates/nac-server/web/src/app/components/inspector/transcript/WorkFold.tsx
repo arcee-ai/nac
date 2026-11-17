@@ -2,7 +2,7 @@ import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { memo, useId, useMemo, useState } from "react";
 
 import { Icon, IconName } from "@/app/atoms";
-import { NativeTaskLink } from "@/app/features/insights/transcript/NativeTaskLink";
+import { NativeTaskLinks } from "@/app/features/insights/transcript/NativeTaskLink";
 import { openOptionsFor } from "@/app/features/insights/transcript/openOptions";
 import {
   INSIGHTS_DETAIL_ID,
@@ -65,9 +65,11 @@ export const WorkFoldView = memo(function WorkFoldView({
     () => (open ? [] : fold.steps.filter((step) => isPinnedStatus(stepStatus(step)))),
     [fold, open],
   );
-  const launched = segments.flatMap((segment) =>
-    segment.kind === "tool" && segment.presentation?.launchedTask
-      ? [{ key: segment.key, task: segment.presentation.launchedTask }]
+  const launched = fold.steps.flatMap((step) =>
+    step.kind === "segment" &&
+    step.segment.kind === "tool" &&
+    step.segment.presentation?.launchedTask
+      ? [{ key: step.key, groupId: step.groupId, task: step.segment.presentation.launchedTask }]
       : [],
   );
   const selected = selectedGroupId !== null && fold.groupIds.includes(selectedGroupId);
@@ -154,9 +156,7 @@ export const WorkFoldView = memo(function WorkFoldView({
 
       {interactive && launched.length > 0 ? (
         <div className="flex flex-col items-start gap-1 pt-2">
-          {launched.map(({ key, task }) => (
-            <NativeTaskLink key={key} task={task} />
-          ))}
+          <NativeTaskLinks candidates={launched} />
         </div>
       ) : null}
     </div>

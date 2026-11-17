@@ -18926,12 +18926,18 @@ function Gy() {
 	return t ? t.sessionId : e ?? null;
 }
 // src/app/features/insights/transcript/NativeTaskLink.tsx
-function Ky({ task: e }) {
-	let t = Gy(), n = hn(0).data?.find(({ summary: t, lineage: n }) => t.session_id === e.sessionId && t.project_id === e.projectId && t.behavior === "direct" && n == null);
-	return t !== e.callerId || !n ? null : /* @__PURE__ */ $(Co, {
-		className: "label-small text-accent-primary",
-		to: F.session(n.summary.session_id),
-		children: ["Open separate task: ", n.summary.title || e.title]
+function Ky({ candidates: e }) {
+	let t = Gy(), n = hn(0), r = /* @__PURE__ */ new Map();
+	return e.flatMap(({ key: e, groupId: i, task: a }) => {
+		if (t !== a.callerId) return [];
+		let o = n.data?.find(({ summary: e, lineage: t }) => e.session_id === a.sessionId && e.project_id === a.projectId && e.behavior === "direct" && t == null);
+		if (!o) return [];
+		let s = r.get(i) ?? /* @__PURE__ */ new Set();
+		return s.has(o.summary.session_id) ? [] : (s.add(o.summary.session_id), r.set(i, s), [/* @__PURE__ */ $(Co, {
+			className: "label-small text-accent-primary",
+			to: F.session(o.summary.session_id),
+			children: ["Open separate task: ", o.summary.title || a.title]
+		}, e)]);
 	});
 }
 // src/app/components/inspector/ToolCallDetail.tsx
@@ -19113,9 +19119,10 @@ var rb = "group/row flex w-full min-w-0 items-center gap-2.5 rounded-md px-1.5 t
 		}) : null]
 	});
 }), sb = "outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus-outline)]", cb = so(function({ fold: e, active: t, turnDurationMs: n, selectedGroupId: r, interactive: i }) {
-	let a = fo(), { useTranscriptDensity: o } = E().stores.transcriptDensityStore, s = o(), [c, l] = X(null), { openGroup: u } = Hh(), d = c ?? s === "detailed", f = J(() => fy(e), [e]), p = t ? Ey(f) : Ty(f, n), m = J(() => e.steps.filter((e) => my(e) === "failed").length, [e]), h = J(() => d ? [] : e.steps.filter((e) => py(my(e))), [e, d]), g = f.flatMap((e) => e.kind === "tool" && e.presentation?.launchedTask ? [{
+	let a = fo(), { useTranscriptDensity: o } = E().stores.transcriptDensityStore, s = o(), [c, l] = X(null), { openGroup: u } = Hh(), d = c ?? s === "detailed", f = J(() => fy(e), [e]), p = t ? Ey(f) : Ty(f, n), m = J(() => e.steps.filter((e) => my(e) === "failed").length, [e]), h = J(() => d ? [] : e.steps.filter((e) => py(my(e))), [e, d]), g = e.steps.flatMap((e) => e.kind === "segment" && e.segment.kind === "tool" && e.segment.presentation?.launchedTask ? [{
 		key: e.key,
-		task: e.presentation.launchedTask
+		groupId: e.groupId,
+		task: e.segment.presentation.launchedTask
 	}] : []), _ = r !== null && e.groupIds.includes(r), v = e.groupIds[0];
 	return /* @__PURE__ */ $("div", {
 		className: "flex w-full min-w-0 flex-col",
@@ -19185,7 +19192,7 @@ var rb = "group/row flex w-full min-w-0 items-center gap-2.5 rounded-md px-1.5 t
 			}) : null,
 			i && g.length > 0 ? /* @__PURE__ */ Q("div", {
 				className: "flex flex-col items-start gap-1 pt-2",
-				children: g.map(({ key: e, task: t }) => /* @__PURE__ */ Q(Ky, { task: t }, e))
+				children: /* @__PURE__ */ Q(Ky, { candidates: g })
 			}) : null
 		]
 	});
