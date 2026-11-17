@@ -1971,10 +1971,6 @@
     max-width: calc(var(--spacing) * 80);
   }
 
-[data-nac-runtime]:is(.max-w-\[40\%\]), [data-nac-runtime] .max-w-\[40\%\] {
-    max-width: 40%;
-  }
-
 [data-nac-runtime]:is(.max-w-\[52ch\]), [data-nac-runtime] .max-w-\[52ch\] {
     max-width: 52ch;
   }
@@ -2528,10 +2524,6 @@
     grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr));
   }
 
-[data-nac-runtime]:is(.grid-cols-\[repeat\(auto-fill\,minmax\(min\(280px\,100\%\)\,1fr\)\)\]),[data-nac-runtime] .grid-cols-\[repeat\(auto-fill\,minmax\(min\(280px\,100\%\)\,1fr\)\)\] {
-    grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
-  }
-
 [data-nac-runtime]:is(.grid-cols-\[repeat\(auto-fill\,minmax\(min\(300px\,100\%\)\,1fr\)\)\]),[data-nac-runtime] .grid-cols-\[repeat\(auto-fill\,minmax\(min\(300px\,100\%\)\,1fr\)\)\] {
     grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr));
   }
@@ -2758,6 +2750,10 @@
 
 [data-nac-runtime]:is(:where(.divide-\[var\(--f-line-soft\)\] > :not(:last-child))), [data-nac-runtime] :where(.divide-\[var\(--f-line-soft\)\] > :not(:last-child)) {
     border-color: var(--f-line-soft);
+  }
+
+[data-nac-runtime]:is(.self-center), [data-nac-runtime] .self-center {
+    align-self: center;
   }
 
 [data-nac-runtime]:is(.self-start), [data-nac-runtime] .self-start {
@@ -3132,6 +3128,10 @@
 
 [data-nac-runtime]:is(.bg-\[var\(--f-amber-wash\)\]), [data-nac-runtime] .bg-\[var\(--f-amber-wash\)\] {
     background-color: var(--f-amber-wash);
+  }
+
+[data-nac-runtime]:is(.bg-\[var\(--f-amber-wash-2\)\]), [data-nac-runtime] .bg-\[var\(--f-amber-wash-2\)\] {
+    background-color: var(--f-amber-wash-2);
   }
 
 [data-nac-runtime]:is(.bg-\[var\(--f-code-bg\)\]), [data-nac-runtime] .bg-\[var\(--f-code-bg\)\] {
@@ -3882,10 +3882,6 @@
 
 [data-nac-runtime]:is(.pl-4), [data-nac-runtime] .pl-4 {
     padding-left: calc(var(--spacing) * 4);
-  }
-
-[data-nac-runtime]:is(.pl-4\.5), [data-nac-runtime] .pl-4\.5 {
-    padding-left: calc(var(--spacing) * 4.5);
   }
 
 [data-nac-runtime]:is(.pl-5), [data-nac-runtime] .pl-5 {
@@ -5123,8 +5119,8 @@
       border-color: var(--color-border-secondary);
     }
 
-    [data-nac-runtime]:is(.hover\:bg-\[var\(--f-amber-wash-2\)\]:hover), [data-nac-runtime] .hover\:bg-\[var\(--f-amber-wash-2\)\]:hover {
-      background-color: var(--f-amber-wash-2);
+    [data-nac-runtime]:is(.hover\:bg-\[var\(--f-amber-wash\)\]:hover), [data-nac-runtime] .hover\:bg-\[var\(--f-amber-wash\)\]:hover {
+      background-color: var(--f-amber-wash);
     }
 
     [data-nac-runtime]:is(.hover\:bg-\[var\(--f-ink-hover\)\]:hover), [data-nac-runtime] .hover\:bg-\[var\(--f-ink-hover\)\]:hover {
@@ -5554,10 +5550,6 @@
       height: calc(var(--spacing) * 11);
     }
 
-    [data-nac-runtime]:is(.max-md\:h-12), [data-nac-runtime] .max-md\:h-12 {
-      height: calc(var(--spacing) * 12);
-    }
-
     [data-nac-runtime]:is(.max-md\:h-auto), [data-nac-runtime] .max-md\:h-auto {
       height: auto;
     }
@@ -5681,10 +5673,6 @@
 @media (min-width: 40rem) {
     [data-nac-runtime]:is(.sm\:col-span-2), [data-nac-runtime] .sm\:col-span-2 {
       grid-column: span 2 / span 2;
-    }
-
-    [data-nac-runtime]:is(.sm\:block), [data-nac-runtime] .sm\:block {
-      display: block;
     }
 
     [data-nac-runtime]:is(.sm\:flex), [data-nac-runtime] .sm\:flex {

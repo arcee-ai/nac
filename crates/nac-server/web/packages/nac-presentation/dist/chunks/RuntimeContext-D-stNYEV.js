@@ -3170,39 +3170,41 @@ function Wi(e) {
 	};
 }
 var { release: Gi, restoreSessionNavigation: Ki, serializeSessionNavigation: qi, sessionNavigationStore: Ji, toggleSessionNavigationPin: Yi, markSessionViewed: Xi, pruneSessionNavigation: Zi, useSessionNavigationPins: Qi, useSessionViewedAt: $i } = Wi(K), ea = /* @__PURE__ */ e({
-	createSidebarLayoutStore: () => ca,
-	release: () => la,
-	revealGroup: () => wa,
-	setColumnOpen: () => ma,
-	setOrganize: () => va,
-	setOverlayOpen: () => ga,
-	setSidebarOffset: () => fa,
-	storeOpen: () => da,
-	storedOpen: () => ua,
-	toggleParentExpanded: () => Sa,
-	toggleProjectCollapsed: () => ba,
-	useCollapsedProjects: () => xa,
-	useColumnOpen: () => ha,
-	useExpandedParents: () => Ca,
-	useOrganize: () => ya,
-	useOverlayOpen: () => _a,
-	useRevealedGroups: () => Ta,
-	useSidebarOffset: () => pa
-}), ta = "nac.sidebar.open", na = "nac.sidebar.organize", ra = "nac.sidebar.collapsed-projects";
-function ia(e, t) {
+	createSidebarLayoutStore: () => la,
+	release: () => ua,
+	revealGroup: () => Da,
+	setColumnOpen: () => ha,
+	setOrganize: () => ya,
+	setOverlayOpen: () => _a,
+	setSidebarOffset: () => pa,
+	setView: () => xa,
+	storeOpen: () => fa,
+	storedOpen: () => da,
+	toggleParentExpanded: () => Ta,
+	toggleProjectCollapsed: () => Ca,
+	useCollapsedProjects: () => wa,
+	useColumnOpen: () => ga,
+	useExpandedParents: () => Ea,
+	useOrganize: () => ba,
+	useOverlayOpen: () => va,
+	useRevealedGroups: () => Oa,
+	useSidebarOffset: () => ma,
+	useView: () => Sa
+}), ta = "nac.sidebar.open", na = "nac.sidebar.organize", ra = "nac.sidebar.view", ia = "nac.sidebar.collapsed-projects";
+function aa(e, t) {
 	try {
 		return e?.getItem(t) ?? null;
 	} catch {
 		return null;
 	}
 }
-function aa(e, t, n) {
+function oa(e, t, n) {
 	try {
 		e?.setItem(t, n);
 	} catch {}
 }
-function oa(e) {
-	let t = ia(e, ra);
+function sa(e) {
+	let t = aa(e, ia);
 	if (!t) return [];
 	try {
 		let e = JSON.parse(t);
@@ -3211,16 +3213,17 @@ function oa(e) {
 		return [];
 	}
 }
-function sa(e, t) {
+function ca(e, t) {
 	return e.includes(t) ? e.filter((e) => e !== t) : [...e, t];
 }
-function ca(e) {
-	let t = ia(e, ta), n = ia(e, na), r = {
+function la(e) {
+	let t = aa(e, ta), n = aa(e, ra), r = {
 		offset: 0,
 		columnOpen: t === "1" || t !== "0" && null,
 		overlayOpen: !1,
-		organize: n === "status" ? "status" : "project",
-		collapsedProjects: oa(e),
+		organize: "project",
+		view: n === "inbox" ? "inbox" : "sessions",
+		collapsedProjects: sa(e),
 		expandedParents: [],
 		revealedGroups: []
 	}, { getState: i, setState: a, useStore: o } = G(r, "sidebar-layout");
@@ -3231,7 +3234,7 @@ function ca(e) {
 		return o((e) => e.offset);
 	}
 	function l(t) {
-		a({ columnOpen: t }), aa(e, ta, t ? "1" : "0");
+		a({ columnOpen: t }), oa(e, ta, t ? "1" : "0");
 	}
 	let u = () => o((e) => e.columnOpen), d = () => i().columnOpen, f = (e) => l(e);
 	function p(e) {
@@ -3239,19 +3242,23 @@ function ca(e) {
 	}
 	let m = () => o((e) => e.overlayOpen);
 	function h(t) {
-		a({ organize: t }), aa(e, na, t);
+		a({ organize: t }), oa(e, na, t);
 	}
 	let g = () => o((e) => e.organize);
 	function _(t) {
-		let n = sa(i().collapsedProjects, t);
-		a({ collapsedProjects: n }), aa(e, ra, JSON.stringify(n));
+		a({ view: t }), oa(e, ra, t);
 	}
-	let v = () => o((e) => e.collapsedProjects);
-	function y(e) {
-		a({ expandedParents: sa(i().expandedParents, e) });
+	let v = () => o((e) => e.view);
+	function y(t) {
+		let n = ca(i().collapsedProjects, t);
+		a({ collapsedProjects: n }), oa(e, ia, JSON.stringify(n));
 	}
-	let b = () => o((e) => e.expandedParents);
+	let b = () => o((e) => e.collapsedProjects);
 	function x(e) {
+		a({ expandedParents: ca(i().expandedParents, e) });
+	}
+	let S = () => o((e) => e.expandedParents);
+	function C(e) {
 		let t = i().revealedGroups;
 		t.includes(e) || a({ revealedGroups: [...t, e] });
 	}
@@ -3270,24 +3277,26 @@ function ca(e) {
 		useOverlayOpen: m,
 		setOrganize: h,
 		useOrganize: g,
-		toggleProjectCollapsed: _,
-		useCollapsedProjects: v,
-		toggleParentExpanded: y,
-		useExpandedParents: b,
-		revealGroup: x,
+		setView: _,
+		useView: v,
+		toggleProjectCollapsed: y,
+		useCollapsedProjects: b,
+		toggleParentExpanded: x,
+		useExpandedParents: S,
+		revealGroup: C,
 		useRevealedGroups: () => o((e) => e.revealedGroups)
 	};
 }
-var { release: la, storedOpen: ua, storeOpen: da, setSidebarOffset: fa, useSidebarOffset: pa, setColumnOpen: ma, useColumnOpen: ha, setOverlayOpen: ga, useOverlayOpen: _a, setOrganize: va, useOrganize: ya, toggleProjectCollapsed: ba, useCollapsedProjects: xa, toggleParentExpanded: Sa, useExpandedParents: Ca, revealGroup: wa, useRevealedGroups: Ta } = ca(K), Ea = /* @__PURE__ */ e({
-	createSshConnectionStore: () => Da,
-	markSshConnected: () => Aa,
-	markSshDisconnected: () => ja,
-	release: () => Oa,
-	sshTargetFromSummary: () => Na,
-	sshTargetKey: () => ka,
-	useSshConnectionStatus: () => Ma
+var { release: ua, storedOpen: da, storeOpen: fa, setSidebarOffset: pa, useSidebarOffset: ma, setColumnOpen: ha, useColumnOpen: ga, setOverlayOpen: _a, useOverlayOpen: va, setOrganize: ya, useOrganize: ba, setView: xa, useView: Sa, toggleProjectCollapsed: Ca, useCollapsedProjects: wa, toggleParentExpanded: Ta, useExpandedParents: Ea, revealGroup: Da, useRevealedGroups: Oa } = la(K), ka = /* @__PURE__ */ e({
+	createSshConnectionStore: () => Aa,
+	markSshConnected: () => Na,
+	markSshDisconnected: () => Pa,
+	release: () => ja,
+	sshTargetFromSummary: () => Ia,
+	sshTargetKey: () => Ma,
+	useSshConnectionStatus: () => Fa
 });
-function Da(e) {
+function Aa(e) {
 	function t(e) {
 		return [
 			e.ssh_host.trim(),
@@ -3331,9 +3340,9 @@ function Da(e) {
 		sshTargetFromSummary: s
 	};
 }
-var { release: Oa, sshTargetKey: ka, markSshConnected: Aa, markSshDisconnected: ja, useSshConnectionStatus: Ma, sshTargetFromSummary: Na } = Da(K);
+var { release: ja, sshTargetKey: Ma, markSshConnected: Na, markSshDisconnected: Pa, useSshConnectionStatus: Fa, sshTargetFromSummary: Ia } = Aa(K);
 // src/app/runtime/presentationStores.ts
-function Pa(e, t, n, r) {
+function La(e, t, n, r) {
 	return {
 		promptDraftStore: Et(t, n, r),
 		panelWidth: Ne(e),
@@ -3346,11 +3355,11 @@ function Pa(e, t, n, r) {
 		sessionFiltersStore: xr(e),
 		sessionLayoutStore: qr(e),
 		sessionNavigationStore: Wi(e),
-		sidebarLayoutStore: ca(e),
-		sshConnectionStore: Da(e)
+		sidebarLayoutStore: la(e),
+		sshConnectionStore: Aa(e)
 	};
 }
-var Fa = {
+var Ra = {
 	promptDraftStore: yt,
 	panelWidth: Oe,
 	threadLogHeight: Re,
@@ -3363,14 +3372,14 @@ var Fa = {
 	sessionLayoutStore: Kr,
 	sessionNavigationStore: Ui,
 	sidebarLayoutStore: ea,
-	sshConnectionStore: Ea
+	sshConnectionStore: ka
 };
-function Ia(e) {
+function za(e) {
 	e.runtimeStore.resetRuntime(null);
 	for (let t of Object.values(e)) t.release();
 }
 // src/app/runtime/requestLifetime.ts
-function La(e, t) {
+function Ba(e, t) {
 	return e.throwIfAborted(), new Promise((n, r) => {
 		let i = () => r(e.reason);
 		e.addEventListener("abort", i, { once: !0 }), Promise.resolve().then(() => (e.throwIfAborted(), t())).then((t) => {
@@ -3380,7 +3389,7 @@ function La(e, t) {
 		});
 	});
 }
-function Ra(e) {
+function Va(e) {
 	if (e instanceof y) return e;
 	if (e instanceof Error && e.name === "ApiError" && "status" in e && typeof e.status == "number" && "method" in e && typeof e.method == "string" && "path" in e && typeof e.path == "string" && "requestId" in e && typeof e.requestId == "string") {
 		let t = new y(e.status, e.method, e.path, "", e.requestId);
@@ -3388,7 +3397,7 @@ function Ra(e) {
 	}
 	return e;
 }
-var za = class extends D {
+var Ha = class extends D {
 	source;
 	lifetime;
 	constructor(e, t) {
@@ -3409,7 +3418,7 @@ var za = class extends D {
 		return this.source.newRequestId();
 	}
 	streamContext() {
-		return La(this.lifetime, () => this.source.streamContext());
+		return Ba(this.lifetime, () => this.source.streamContext());
 	}
 	async admit(e, t, n = {}) {
 		let r = n.signal ? AbortSignal.any([this.lifetime, n.signal]) : this.lifetime, i = n.requestId ?? this.source.newRequestId();
@@ -3419,7 +3428,7 @@ var za = class extends D {
 			reason: "aborted"
 		};
 		try {
-			return await La(r, () => this.source.admit(e, t, {
+			return await Ba(r, () => this.source.admit(e, t, {
 				...n,
 				requestId: i,
 				signal: r
@@ -3430,19 +3439,19 @@ var za = class extends D {
 				requestId: i,
 				error: e
 			};
-			throw Ra(e);
+			throw Va(e);
 		}
 	}
 	request(e, t, n = {}) {
 		let r = n.signal ? AbortSignal.any([this.lifetime, n.signal]) : this.lifetime;
-		return La(r, () => this.source.request(e, t, {
+		return Ba(r, () => this.source.request(e, t, {
 			...n,
 			signal: r
 		})).catch((e) => {
-			throw Ra(e);
+			throw Va(e);
 		});
 	}
-}, Ba = class {
+}, Ua = class {
 	limit;
 	requireAcknowledgement;
 	entries = /* @__PURE__ */ new Map();
@@ -3508,14 +3517,14 @@ var za = class extends D {
 			t.listeners.clear();
 		}
 	}
-}, Va = /* @__PURE__ */ new WeakMap();
-function Ha(e) {
+}, Wa = /* @__PURE__ */ new WeakMap();
+function Ga(e) {
 	if (e.terminalInputRecovery) return e.terminalInputRecovery;
-	let t = Va.get(e);
-	return t || (t = new Ba(), Va.set(e, t)), t;
+	let t = Wa.get(e);
+	return t || (t = new Ua(), Wa.set(e, t)), t;
 }
 // src/app/features/setup/localFolder.ts
-function Ua(e, t) {
+function Ka(e, t) {
 	if (e) return { async chooseDirectory(n, r) {
 		let i = new AbortController(), a = () => i.abort();
 		(r.aborted || t.aborted) && a(), r.addEventListener("abort", a, { once: !0 }), t.addEventListener("abort", a, { once: !0 });
@@ -3528,10 +3537,10 @@ function Ua(e, t) {
 		}
 	} };
 }
-function Wa(e, t, n, r) {
+function qa(e, t, n, r) {
 	return t && n === "directory" && !r ? e : void 0;
 }
-function Ga(e, t, n) {
+function Ja(e, t, n) {
 	let r = new AbortController();
 	return {
 		cancel: () => r.abort(),
@@ -3543,8 +3552,8 @@ function Ga(e, t, n) {
 	};
 }
 // src/app/runtime/nativeRuntime.ts
-var Ka = /* @__PURE__ */ new WeakMap(), qa = 0, Ja = class {
-	id = ++qa;
+var Ya = /* @__PURE__ */ new WeakMap(), Xa = 0, Za = class {
+	id = ++Xa;
 	scope;
 	client;
 	assets;
@@ -3562,7 +3571,7 @@ var Ka = /* @__PURE__ */ new WeakMap(), qa = 0, Ja = class {
 	eventSource;
 	constructor(e) {
 		if (e.scope.endpoint !== e.client.transport.endpoint) throw Error("Runtime scope must name the supplied client's endpoint.");
-		if (this.terminalInputRecovery = new Ba(128, e.requireTerminalAcknowledgement ?? !1), this.queryClient = new h({ defaultOptions: {
+		if (this.terminalInputRecovery = new Ua(128, e.requireTerminalAcknowledgement ?? !1), this.queryClient = new h({ defaultOptions: {
 			queries: {
 				queryKeyHashFn: (e) => g([this.id, ...e]),
 				staleTime: 3e4,
@@ -3571,8 +3580,8 @@ var Ka = /* @__PURE__ */ new WeakMap(), qa = 0, Ja = class {
 				refetchOnWindowFocus: !1
 			},
 			mutations: { retry: !1 }
-		} }), this.assets = e.assets ? Object.freeze({ ...e.assets }) : void 0, this.nativeDirectory = Ua(e.nativeDirectory, this.controller.signal), this.stores = Pa(e.storage, e.scope, e.draftStorage, e.draftPersistenceBinding), this.scope = Object.freeze({ ...e.scope }), this.client = new A(new za(e.client.transport, this.controller.signal)), e.standaloneServingIncarnation !== void 0 && (this.scope.profile !== "standalone" || e.standaloneServingIncarnation !== this.scope.incarnation)) throw Error("Product serving binding must match the standalone runtime scope.");
-		this.api = de(this.client, e.standaloneServingIncarnation), this.productNavigation = new _(this.api.resolveProductDestination, this.isClosed, this.api.getProductContext), this.eventSource = e.eventSource, Ka.set(this.queryClient, this);
+		} }), this.assets = e.assets ? Object.freeze({ ...e.assets }) : void 0, this.nativeDirectory = Ka(e.nativeDirectory, this.controller.signal), this.stores = La(e.storage, e.scope, e.draftStorage, e.draftPersistenceBinding), this.scope = Object.freeze({ ...e.scope }), this.client = new A(new Ha(e.client.transport, this.controller.signal)), e.standaloneServingIncarnation !== void 0 && (this.scope.profile !== "standalone" || e.standaloneServingIncarnation !== this.scope.incarnation)) throw Error("Product serving binding must match the standalone runtime scope.");
+		this.api = de(this.client, e.standaloneServingIncarnation), this.productNavigation = new _(this.api.resolveProductDestination, this.isClosed, this.api.getProductContext), this.eventSource = e.eventSource, Ya.set(this.queryClient, this);
 	}
 	isClosed = () => this.controller.signal.aborted;
 	subscribe = (e) => (this.listeners.add(e), () => {
@@ -3607,26 +3616,26 @@ var Ka = /* @__PURE__ */ new WeakMap(), qa = 0, Ja = class {
 		if (!this.isClosed()) {
 			this.controller.abort(new DOMException("Native runtime was closed.", "AbortError")), this.terminalInputRecovery.close(), this.productNavigation.close();
 			for (let e of this.disposers) e();
-			this.disposers.clear(), this.queryClient.cancelQueries(), this.queryClient.clear(), Ia(this.stores);
+			this.disposers.clear(), this.queryClient.cancelQueries(), this.queryClient.clear(), za(this.stores);
 			for (let e of this.listeners) e();
 		}
 	}
 };
-function Ya(e) {
-	return new Ja(e);
+function Qa(e) {
+	return new Za(e);
 }
-var Xa = {
+var $a = {
 	api: fe,
 	client: M,
-	stores: Fa,
+	stores: Ra,
 	events: (e, t) => De(e, t)
 };
-function Za(e) {
-	return Ka.get(e) ?? Xa;
+function eo(e) {
+	return Ya.get(e) ?? $a;
 }
 // src/app/runtime/RuntimeContext.ts
-var Qa = u(null);
-function $a() {
-	return f(Qa) ?? Xa;
+var to = u(null);
+function no() {
+	return f(to) ?? $a;
 }
-export { ye as A, Fe as C, ge as D, K as E, L as F, R as I, ne as L, pe as M, se as N, _e as O, oe as P, y as R, je as S, G as T, _n as _, Za as a, mn as b, Ha as c, gr as d, mr as f, cr as g, fr as h, Ya as i, me as j, ve as k, Q as l, ur as m, $a as n, Wa as o, vr as p, Ja as r, Ga as s, Qa as t, _r as u, gn as v, Me as w, vn as x, hn as y, x as z };
+export { ye as A, Fe as C, ge as D, K as E, L as F, R as I, ne as L, pe as M, se as N, _e as O, oe as P, y as R, je as S, G as T, _n as _, eo as a, mn as b, Ga as c, gr as d, mr as f, cr as g, fr as h, Qa as i, me as j, ve as k, Q as l, ur as m, no as n, qa as o, vr as p, Za as r, Ja as s, to as t, _r as u, gn as v, Me as w, vn as x, hn as y, x as z };

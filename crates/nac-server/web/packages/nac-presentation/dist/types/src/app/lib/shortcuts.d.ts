@@ -37,6 +37,8 @@ export declare const NEW_SESSION_KEYS: string[];
 export declare const TOGGLE_SIDEBAR_KEYS: string[];
 /** Pin the open drawer as a side column, or float it again. */
 export declare const DOCK_DRAWER_KEYS: string[];
+/** Opens the session that has waited longest for you (Inbox › Needs you). */
+export declare const NEXT_NEEDS_YOU_KEYS: string[];
 export type ShortcutGroup = "General" | "Navigation" | "Session" | "Attention card";
 export interface ShortcutEntry {
     id: string;
