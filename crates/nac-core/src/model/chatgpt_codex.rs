@@ -34,7 +34,6 @@ const AUTH_TYPE: &str = "chatgpt-codex";
 const DEFAULT_EXPIRES_IN_SECS: u64 = 3600;
 const REFRESH_SKEW_MS: u64 = 60_000;
 const AUTH_LOCK_POLL_INTERVAL_MS: u64 = 50;
-const AUTH_LOCK_TIMEOUT_MS: u64 = 15_000;
 const DEVICE_TIMEOUT_SECS: u64 = 15 * 60;
 
 /// The only loopback address OpenAI will redirect this client back to, so the
@@ -1379,12 +1378,9 @@ struct AuthStoreGuard {
 /// and across processes (non-blocking file lock polled until a deadline). No
 /// caller ever waits inside flock(2) on a Tokio worker.
 async fn lock_auth_store() -> Result<AuthStoreGuard> {
+    let timeout = super::auth_store::credential_lock_timeout().await?;
     let gate = auth_gate().lock().await;
-    let lock = acquire_auth_lock_polling(
-        &auth_lock_path()?,
-        Duration::from_millis(AUTH_LOCK_TIMEOUT_MS),
-    )
-    .await?;
+    let lock = acquire_auth_lock_polling(&auth_lock_path()?, timeout).await?;
     Ok(AuthStoreGuard {
         _lock: lock,
         _gate: gate,
@@ -1399,8 +1395,9 @@ async fn acquire_auth_lock_polling(path: &Path, timeout: Duration) -> Result<Fil
         }
         if started.elapsed() >= timeout {
             return Err(anyhow!(
-                "timed out waiting for the Codex auth lock {}; another nac process may be refreshing or replacing the credential",
-                path.display()
+                "timed out waiting for the Codex auth lock {}; another nac process may be refreshing or replacing the credential (waited {} ms; raise [auth] lock_timeout_ms in config.toml to wait longer)",
+                path.display(),
+                timeout.as_millis()
             ));
         }
         sleep(Duration::from_millis(AUTH_LOCK_POLL_INTERVAL_MS)).await;
