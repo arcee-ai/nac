@@ -37,6 +37,33 @@ fn codex_known_model_refreshes_shared_metadata_without_api_limits() {
     assert!(model.image_input);
 }
 
+#[test]
+fn codex_seed_keeps_profile_but_receives_refreshed_shared_fields() {
+    let payload = serde_json::json!({"openai": {"models": {"gpt-5.6-sol": {
+        "name": "Refreshed Seed", "reasoning": false,
+        "cost": {"input": 7.0, "output": 12.0},
+        "limit": {"context": 900000, "output": 100000},
+        "modalities": {"input": ["text", "image"], "output": ["text"]}
+    }}}})
+    .to_string();
+    let mut catalog = baseline_catalog();
+    let (mut providers, _, _) = map_models_dev(&payload, &catalog).unwrap();
+    data::merge_entries(
+        &mut catalog,
+        BackendKind::ChatGptCodexResponses,
+        providers
+            .remove(&BackendKind::ChatGptCodexResponses)
+            .unwrap(),
+        ModelSource::Overlay,
+    );
+    let model = catalog.resolve(BackendKind::ChatGptCodexResponses, "gpt-5.6-sol");
+    assert_eq!(model.display_name.as_deref(), Some("Refreshed Seed"));
+    assert!(!model.reasoning);
+    assert_eq!(model.cost.input, 7.0);
+    assert_eq!(model.context_window, 272_000);
+    assert_eq!(model.max_tokens, 128_000);
+}
+
 fn novel_model_payload() -> String {
     serde_json::json!({
         "deepseek": {

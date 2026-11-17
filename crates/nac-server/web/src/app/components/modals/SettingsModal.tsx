@@ -446,6 +446,10 @@ function SettingsForm({
       );
       if (initial.automatic_compaction && compactionAutoRef.current) {
         delete patch.orchestrator_compaction_threshold;
+      } else if (initial.automatic_compaction) {
+        // Editing an automatic value makes it intentional even when the
+        // entered number happens to equal the current suggestion.
+        patch.orchestrator_compaction_threshold = compaction.trim() ? Number(compaction) : null;
       }
     } catch (validationError) {
       throw new SetupValidation(

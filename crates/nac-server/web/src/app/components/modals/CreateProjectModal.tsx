@@ -415,6 +415,7 @@ function CreateProjectForm({
               reasoning,
               headers,
               compaction,
+              automaticCompaction: compactionAutoRef.current,
               presetCompaction: compactionPresetRef.current,
               savedLight,
               light,

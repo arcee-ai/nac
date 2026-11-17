@@ -189,6 +189,8 @@ async fn switched_codex_model_replays_image_in_normal_run_and_compaction() {
         .into_iter()
         .map(|(_, message)| message)
         .collect();
+    let original_history = serde_json::to_vec(&history).unwrap();
+    let original_len = history.len();
     // Persist the previous model, then switch this same session through the
     // revision-checked configuration path before reconstructing its agent.
     let mut saved = crate::sessions::load_session_config(&store_path, "session").unwrap();
@@ -218,6 +220,12 @@ async fn switched_codex_model_replays_image_in_normal_run_and_compaction() {
     agent.steering_dispatch_id = Some(uuid::Uuid::new_v4().to_string());
     assert_eq!(agent.send("continue").await.unwrap(), "normal");
     let before = serde_json::to_vec(&agent.messages).unwrap();
+    let stored_before: Vec<Message> = writer
+        .read_from("session", 0)
+        .unwrap()
+        .into_iter()
+        .map(|(_, message)| message)
+        .collect();
     assert!(matches!(
         agent.compact().await.unwrap(),
         CompactionResult::Compacted { .. }
@@ -229,7 +237,14 @@ async fn switched_codex_model_replays_image_in_normal_run_and_compaction() {
         .into_iter()
         .map(|(_, message)| message)
         .collect();
-    assert_eq!(serde_json::to_vec(&persisted).unwrap(), before);
+    assert_eq!(
+        serde_json::to_vec(&persisted).unwrap(),
+        serde_json::to_vec(&stored_before).unwrap()
+    );
+    assert_eq!(
+        serde_json::to_vec(&persisted[..original_len]).unwrap(),
+        original_history
+    );
     let requests = server.finish();
     assert_eq!(requests.len(), 2);
     assert_eq!(image_url(&requests[0].body), expected_image);

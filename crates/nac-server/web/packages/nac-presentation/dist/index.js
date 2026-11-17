@@ -3527,7 +3527,7 @@ function Wl(e) {
 		reasoning_effort: e.reasoning === "__clear__" ? null : e.reasoning || t.reasoning_effort || null,
 		light_model: n.orchestrationEnabled ? r.mode === "dual" && r.light ? dc(r.light, t.backend, t.api_key_env) : null : e.savedLight ?? null
 	}, o = e.headers ?? t.extra_headers ?? void 0;
-	return o !== void 0 && (a.extra_headers = o), e.presetCompaction && t.orchestrator_compaction_threshold !== void 0 ? a.orchestrator_compaction_threshold = t.orchestrator_compaction_threshold : vc(e.compaction) !== null && (a.orchestrator_compaction_threshold = Number(e.compaction)), e.execution !== "ssh" && (a.sandbox = {
+	return o !== void 0 && (a.extra_headers = o), e.presetCompaction && t.orchestrator_compaction_threshold !== void 0 ? a.orchestrator_compaction_threshold = t.orchestrator_compaction_threshold : !(t.backend === "chatgpt-codex-responses" && e.automaticCompaction) && vc(e.compaction) !== null && (a.orchestrator_compaction_threshold = Number(e.compaction)), e.execution !== "ssh" && (a.sandbox = {
 		enabled: e.execution === "sandbox",
 		no_mount_cwd: i.noMount,
 		image: vc(i.image),
@@ -3706,6 +3706,7 @@ function Xl({ open: e, defaultCwd: t, onClose: n }) {
 						reasoning: x,
 						headers: e,
 						compaction: C,
+						automaticCompaction: pe.current,
 						presetCompaction: me.current,
 						savedLight: Ie,
 						light: ie,
@@ -9791,7 +9792,7 @@ function vp({ open: e, id: t, initial: n, initialLight: r, initialVersion: i, su
 				api_key_env: e.api_key_env ?? "",
 				extra_headers: ae,
 				orchestrator_compaction_threshold: se
-			}, n, r), n.automatic_compaction && ue.current && delete t.orchestrator_compaction_threshold;
+			}, n, r), n.automatic_compaction && ue.current ? delete t.orchestrator_compaction_threshold : n.automatic_compaction && (t.orchestrator_compaction_threshold = se.trim() ? Number(se) : null);
 		} catch (e) {
 			throw new zl(e instanceof Error ? e.message : String(e));
 		}

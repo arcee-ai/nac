@@ -209,6 +209,10 @@ pub(super) fn merge_entries(
             if let Some(existing) = provider_catalog.models.get_mut(&id) {
                 existing.image_input = entry.image_input;
                 existing.cost = entry.cost;
+                if entry.display_name.is_some() {
+                    existing.display_name = entry.display_name;
+                }
+                existing.reasoning = entry.reasoning;
             }
             continue;
         }
