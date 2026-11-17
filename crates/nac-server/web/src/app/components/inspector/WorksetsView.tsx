@@ -16,30 +16,27 @@ interface StatusToneMap {
   [status: string]: string;
 }
 
+/** Signal colours only where they mean something: done, blocked, in flight. */
 const STATUS_TONE: StatusToneMap = {
-  done: "text-success-primary",
-  completed: "text-success-primary",
-  finished: "text-success-primary",
-  active: "text-info-primary",
-  running: "text-info-primary",
-  in_progress: "text-info-primary",
-  blocked: "text-error-primary",
-  failed: "text-error-primary",
+  done: "bg-success-primary text-success-primary",
+  completed: "bg-success-primary text-success-primary",
+  finished: "bg-success-primary text-success-primary",
+  active: "bg-[var(--f-wash-2)] text-basic-primary",
+  running: "bg-[var(--f-wash-2)] text-basic-primary",
+  in_progress: "bg-[var(--f-wash-2)] text-basic-primary",
+  blocked: "bg-error-primary text-error-primary",
+  failed: "bg-error-primary text-error-primary",
 };
 
-const statusTone = (status: string) => STATUS_TONE[status.toLowerCase()] ?? "text-basic-secondary";
+const statusTone = (status: string) =>
+  STATUS_TONE[status.toLowerCase()] ?? "bg-[var(--f-wash-1)] text-basic-secondary";
 
-/**
- * The design's Plex Mono Medium without tracking, at 14/20 and 12/16. `.code`
- * sets a 1.5 line height and tracking in unlayered CSS, which only `!`
- * utilities outrank.
- */
-const CODE_SMALL = "code text-sm font-medium !leading-5 !tracking-normal";
-const CODE_MICRO = "code text-xs font-medium !leading-4 !tracking-normal";
+/** Focus mono at 12.5px for identifiers the tool wrote. */
+const CODE = "code text-[length:var(--type-mono)] !leading-5 !tracking-normal";
 
 /** A field is labelled with the workset tool's own name for that argument. */
 function Label({ children }: { children: ReactNode }) {
-  return <span className="tag-label text-basic-tertiary">{children}</span>;
+  return <span className="type-meta text-basic-tertiary">{children}</span>;
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
@@ -51,35 +48,54 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
+function StatusPill({ status }: { status: string }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex h-5 items-center self-start rounded-pill px-2 type-tag",
+        statusTone(status),
+      )}
+    >
+      {status.replace(/_/g, " ")}
+    </span>
+  );
+}
+
 function Item({ item }: { item: WorksetItemSnapshot }) {
   return (
-    <div className="flex flex-col gap-4 border-l border-muted py-4 pl-4">
-      {item.role ? <Badge text={item.role} color={BadgeColor.Blue} className="self-start" /> : null}
-      <div className="flex flex-col gap-1">
-        <span className="header-sm text-basic-primary">{item.title}</span>
-        {item.scope ? (
-          <span className={cn(CODE_MICRO, "text-danger-primary break-words")}>{item.scope}</span>
-        ) : null}
+    <div className="flex flex-col gap-3 rounded-card border border-tertiary bg-elevation-level-1 p-4">
+      <div className="flex min-w-0 items-start gap-2">
+        <span className="min-w-0 flex-1 type-strong text-basic-primary break-words">
+          {item.title}
+        </span>
+        {item.role ? <Badge text={item.role} color={BadgeColor.Gray} className="shrink-0" /> : null}
       </div>
+      {item.scope ? (
+        <span className={cn(CODE, "-mt-1.5 text-basic-tertiary break-words")}>{item.scope}</span>
+      ) : null}
       {item.description ? (
-        <p className="text-sm leading-[22px] text-basic-secondary">{item.description}</p>
+        <p className="type-body-chrome text-basic-secondary">{item.description}</p>
       ) : null}
       {item.acceptance ? (
         <Field label="acceptance">
-          <p className="text-sm leading-[22px] text-basic-secondary">{item.acceptance}</p>
+          <p className="type-body-chrome text-basic-secondary">{item.acceptance}</p>
         </Field>
       ) : null}
       {item.depends_on.length > 0 ? (
         <Field label="depends_on">
-          <span className={cn(CODE_MICRO, "text-basic-secondary break-words")}>
+          <span className={cn(CODE, "text-basic-secondary break-words")}>
             {item.depends_on.join(", ")}
           </span>
         </Field>
       ) : null}
       {item.notes ? (
-        <div className="flex items-start gap-1 text-info-secondary">
-          <Icon iconName={IconName.Info} size={16} className="shrink-0" />
-          <p className="flex-1 min-w-0 text-micro">{item.notes}</p>
+        <div className="flex items-start gap-2 rounded-md bg-[var(--f-wash-1)] px-2.5 py-2 text-basic-secondary">
+          <Icon
+            iconName={IconName.Info}
+            size={14}
+            className="mt-0.5 shrink-0 text-basic-tertiary"
+          />
+          <p className="flex-1 min-w-0 type-meta">{item.notes}</p>
         </div>
       ) : null}
     </div>
@@ -92,32 +108,28 @@ function Detail({ workset }: { workset: WorksetSnapshot }) {
   return (
     <div
       className={cn(
-        "flex flex-col gap-6 flex-1 min-h-0 overflow-auto p-4 [&>*]:shrink-0",
-        isMobile && "py-18",
+        "flex flex-col gap-6 flex-1 min-h-0 overflow-auto px-5 py-5 [&>*]:shrink-0",
+        isMobile && "px-4 py-18",
       )}
     >
       <div className="flex flex-col gap-4">
-        <Field label="id">
-          <span className="header-md text-basic-primary break-words">{workset.id}</span>
-        </Field>
+        <div className="flex flex-col gap-2">
+          <span className="type-heading text-basic-primary break-words">{workset.id}</span>
+          {workset.status ? <StatusPill status={workset.status} /> : null}
+        </div>
         {workset.goal ? (
           <Field label="goal">
-            <p className="text-medium text-basic-primary">{workset.goal}</p>
-          </Field>
-        ) : null}
-        {workset.status ? (
-          <Field label="status">
-            <span className={cn(CODE_SMALL, statusTone(workset.status))}>{workset.status}</span>
+            <p className="type-body-chrome text-basic-primary">{workset.goal}</p>
           </Field>
         ) : null}
         {workset.summary ? (
           <Field label="summary">
-            <p className="text-medium text-basic-primary">{workset.summary}</p>
+            <p className="type-body-chrome text-basic-primary">{workset.summary}</p>
           </Field>
         ) : null}
         {workset.verification_recipe ? (
           <Field label="verification_recipe">
-            <p className="text-medium text-basic-primary whitespace-pre-wrap">
+            <p className="type-body-chrome text-basic-primary whitespace-pre-wrap">
               {workset.verification_recipe}
             </p>
           </Field>
@@ -125,7 +137,9 @@ function Detail({ workset }: { workset: WorksetSnapshot }) {
       </div>
       {workset.items.length > 0 ? (
         <div className="flex flex-col gap-2">
-          <Label>workset_items</Label>
+          <Label>
+            workset_items · <span className="tabular">{workset.items.length}</span>
+          </Label>
           {workset.items.map((item) => (
             <Item key={item.position} item={item} />
           ))}

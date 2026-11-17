@@ -37,6 +37,18 @@ export type ProviderRequest = {
   receivedAt: string;
 };
 
+/** Read this response's final tool output, never a matching older transcript item. */
+export function finalFunctionOutput(request: ProviderRequest | undefined, callId: string) {
+  const body = request?.body;
+  if (body == null || typeof body !== "object" || !("input" in body)) return undefined;
+  if (!Array.isArray(body.input)) return undefined;
+  const item: unknown = body.input.at(-1);
+  if (item == null || typeof item !== "object") return undefined;
+  if (!("type" in item) || item.type !== "function_call_output") return undefined;
+  if (!("call_id" in item) || item.call_id !== callId) return undefined;
+  return "output" in item && typeof item.output === "string" ? item.output : undefined;
+}
+
 type Deferred = {
   promise: Promise<void>;
   resolve: () => void;

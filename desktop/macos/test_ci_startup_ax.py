@@ -187,6 +187,8 @@ class GuardProofControls(unittest.TestCase):
             if phase!='form':entry['panel_id']='00000000-0000-0000-0000-000000000002'
             if phase=='goTo':entry['go_to_id']='00000000-0000-0000-0000-000000000003'
             row['rows'].append(entry)
+        from test_ci_startup_interaction import interaction_facts
+        row['interactions'] = interaction_facts(row['rows'])
         return config,witness,row
 
     def test_exact_26_guards_and_all_existing_11_action_phases(self):

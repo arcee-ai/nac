@@ -17,7 +17,7 @@ export interface LayerHandlers {
     /** Trigger area of a panel: pressing it is not an outside press. */
     anchor?: RefObject<HTMLElement | null>;
     /** Absent: the layer swallows Escape without closing, so nothing below it closes either. */
-    onEscape?: () => void;
+    onEscape?: (event: KeyboardEvent) => void;
     /** Panels only. Absent: presses outside the panel pass on to the layer below it. */
     onOutsidePress?: () => void;
     inertBackground: boolean;
@@ -28,6 +28,8 @@ export interface LayerStack {
     subscribe: (listener: () => void) => () => void;
     /** Open modal layers. Global shortcuts stay off while any is open. */
     modalDepth: () => number;
+    /** Open layers of any kind except tooltips: dialogs, sheets, menus and popovers. */
+    openDepth: () => number;
     /** Whether `token` is the topmost layer, hints left out unless asked for. */
     isTop: (token: object, includeHints?: boolean) => boolean;
     /** Whether a modal opened after `token` is still open. */

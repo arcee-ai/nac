@@ -37,7 +37,7 @@ export function ReasoningItem({ segment, active }: { segment: ReasoningSegment; 
       role="group"
       aria-labelledby={`${id}-label`}
       aria-current={active || undefined}
-      className="min-w-0 px-4 py-4"
+      className="min-w-0 px-5 py-4"
     >
       <div className="flex min-w-0 items-center gap-2">
         <button
@@ -45,7 +45,7 @@ export function ReasoningItem({ segment, active }: { segment: ReasoningSegment; 
           id={`${id}-label`}
           aria-expanded={open}
           aria-controls={`${id}-body`}
-          className="flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-[4px] text-left text-small text-basic-secondary hover:text-basic-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-border-focus-outline)]"
+          className="flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-md text-left type-body-chrome text-basic-secondary hover:text-basic-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-border-focus-outline)]"
           onClick={() => {
             choice.current = !open;
             setOpen(!open);
@@ -73,7 +73,7 @@ export function ReasoningItem({ segment, active }: { segment: ReasoningSegment; 
       <div
         id={`${id}-body`}
         hidden={!open}
-        className={cn("min-w-0 border-l border-tertiary pl-4 py-2", !open && "hidden")}
+        className={cn("min-w-0 border-l border-tertiary pl-4 py-1", !open && "hidden")}
       >
         <ReasoningText text={segment.text} streaming={segment.streaming} />
       </div>

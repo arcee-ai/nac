@@ -9,6 +9,47 @@
     "version": "0.1.4"
   },
   "paths": {
+    "/attention": {
+      "get": {
+        "tags": [
+          "sessions"
+        ],
+        "operationId": "get_attention",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Only sessions assigned to this project.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Identity-only attention for every session, from the shared attention classification. Passive: never attaches, wakes, answers or counts as an interactive client.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetAttentionSnapshotDto"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The attention census is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/attention/events": {
       "get": {
         "tags": [
@@ -94,6 +135,47 @@
           },
           "503": {
             "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/attention/stream": {
+      "get": {
+        "tags": [
+          "sessions"
+        ],
+        "operationId": "get_attention_stream",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Only sessions assigned to this project.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Server-sent `fleet_attention` events (FleetAttentionFrame): a snapshot, then coalesced changes. Many concurrent browser streams share one refresher. Every connection starts with a fresh snapshot; the SSE id is informational. Never gzip-compressed.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetAttentionFrame"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The census is unavailable or the stream limit is reached; poll GET /attention instead",
             "content": {
               "application/json": {
                 "schema": {
@@ -696,6 +778,88 @@
           },
           "500": {
             "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fs/folders": {
+      "post": {
+        "tags": [
+          "filesystem"
+        ],
+        "summary": "Create one named folder inside a listed local directory.",
+        "description": "Nothing is created recursively and nothing is replaced: an existing name is\na conflict. Hard and configured Deny apply; this human request never asks\nfor agent approval.",
+        "operationId": "post_fs_folders",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateFolderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedFolder"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid folder name or parent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Denied by permission policy or by the filesystem",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Parent folder no longer exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Name already exists, or the parent moved since it was listed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Outcome could not be confirmed",
             "content": {
               "application/json": {
                 "schema": {
@@ -10544,6 +10708,76 @@
         }
       }
     },
+    "/sessions/{session_id}/workspace/reveal": {
+      "post": {
+        "tags": [
+          "workspace"
+        ],
+        "operationId": "post_sessions_session_id_workspace_reveal",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevealWorkspacePathRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Existing Local path revealed in Finder",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenLocalPathResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or stale workspace path",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session or target unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Reveal rejected or unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/sessions/{session_id}/workspace/revisions": {
       "get": {
         "tags": [
@@ -10905,6 +11139,37 @@
         }
       }
     },
+    "/ssh/aliases": {
+      "get": {
+        "tags": [
+          "ssh-configs"
+        ],
+        "summary": "OpenSSH aliases the NAC server's own user has configured. This reads the\nserver machine's `~/.ssh/config`, never the browser's. Discovery problems\ndegrade to a partial list with warnings rather than an error.",
+        "operationId": "get_ssh_aliases",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenSshAliasList"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/ssh/browse": {
       "post": {
         "tags": [
@@ -10975,6 +11240,97 @@
           },
           "502": {
             "description": "Request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ssh/folders": {
+      "post": {
+        "tags": [
+          "filesystem"
+        ],
+        "summary": "Create one named folder inside a listed directory on an SSH host, never on\nthis machine.",
+        "operationId": "post_ssh_folders",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSshFolderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedFolder"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid folder name, parent or connection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Denied by permission policy or by the host",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Parent folder no longer exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Name already exists, or the parent moved since it was listed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Outcome could not be confirmed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Host unreachable; the outcome is unknown",
             "content": {
               "application/json": {
                 "schema": {
@@ -13050,6 +13406,24 @@
           }
         }
       },
+      "CreateFolderRequest": {
+        "type": "object",
+        "description": "One folder to create inside the directory the picker is listing.",
+        "required": [
+          "parent",
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "One folder name: no separators, no `.`/`..`, no surrounding spaces."
+          },
+          "parent": {
+            "type": "string",
+            "description": "The listed directory, exactly as the listing reported it."
+          }
+        }
+      },
       "CreateGoalRequest": {
         "type": "object",
         "required": [
@@ -13494,6 +13868,54 @@
             ],
             "format": "int32",
             "minimum": 0
+          }
+        }
+      },
+      "CreateSshFolderRequest": {
+        "type": "object",
+        "description": "The same, on the SSH host the picker is browsing.",
+        "required": [
+          "parent",
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "parent": {
+            "type": "string"
+          },
+          "ssh_host": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ssh_identity_file": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ssh_port": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "CreatedFolder": {
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Absolute path of the folder that was created."
           }
         }
       },
@@ -14047,6 +14469,344 @@
             "type": "boolean"
           }
         }
+      },
+      "FleetAttentionActivityDto": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "unknown"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "idle"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "run_id",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "run"
+                ]
+              },
+              "run_id": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "operation_id",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "manual"
+                ]
+              },
+              "operation_id": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "compaction_id",
+              "kind"
+            ],
+            "properties": {
+              "compaction_id": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "compaction"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "Current operation of a cached owner. `unknown` means no owner in this\nprocess can be observed; it never means idle."
+      },
+      "FleetAttentionFrame": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "epoch",
+              "revision",
+              "sessions",
+              "kind"
+            ],
+            "properties": {
+              "epoch": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "snapshot"
+                ]
+              },
+              "revision": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "sessions": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/FleetAttentionSessionDto"
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "epoch",
+              "revision",
+              "upserts",
+              "removed",
+              "kind"
+            ],
+            "properties": {
+              "epoch": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "changes"
+                ]
+              },
+              "removed": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "revision": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "upserts": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/FleetAttentionSessionDto"
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "reason",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "unavailable"
+                ]
+              },
+              "reason": {
+                "$ref": "#/components/schemas/FleetAttentionUnavailableDto"
+              }
+            }
+          }
+        ],
+        "description": "`snapshot` is always first on a connection; `changes` replace whole\nsession entries and list sessions that disappeared; `unavailable` ends the\nstream and the client re-baselines (or polls) later."
+      },
+      "FleetAttentionLineageDto": {
+        "type": "object",
+        "required": [
+          "kind",
+          "parent_session_id",
+          "root_session_id"
+        ],
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/SessionLineageKind"
+          },
+          "parent_session_id": {
+            "type": "string"
+          },
+          "root_session_id": {
+            "type": "string"
+          }
+        }
+      },
+      "FleetAttentionOutcomeDto": {
+        "type": "object",
+        "description": "The latest durable run outcome. History, not a claim the session is idle.",
+        "required": [
+          "run_id",
+          "disposition"
+        ],
+        "properties": {
+          "disposition": {
+            "$ref": "#/components/schemas/FleetAttentionOutcomeKindDto"
+          },
+          "run_id": {
+            "type": "string"
+          }
+        }
+      },
+      "FleetAttentionOutcomeKindDto": {
+        "type": "string",
+        "enum": [
+          "completed",
+          "failed",
+          "cancelled"
+        ]
+      },
+      "FleetAttentionSessionDto": {
+        "type": "object",
+        "description": "Identity-only attention for one session. `pending` holds exact current\nrequest identities; read `availability` before treating an empty list as\n\"nothing pending\" (`unknown` / `unsupported` never mean none).",
+        "required": [
+          "session_id",
+          "revision",
+          "project_id",
+          "lineage",
+          "pending",
+          "work",
+          "availability",
+          "activity",
+          "last_outcome",
+          "queued",
+          "recovery_pending"
+        ],
+        "properties": {
+          "activity": {
+            "$ref": "#/components/schemas/FleetAttentionActivityDto"
+          },
+          "availability": {
+            "$ref": "#/components/schemas/AttentionAvailabilityDto"
+          },
+          "last_outcome": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FleetAttentionOutcomeDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lineage": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FleetAttentionLineageDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pending": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AttentionDecisionDto"
+            }
+          },
+          "project_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "queued": {
+            "type": "boolean",
+            "description": "Durable queued input not yet admitted to a run."
+          },
+          "recovery_pending": {
+            "type": "boolean",
+            "description": "A durable run marker is unsettled (running elsewhere or awaiting recovery)."
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "work": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AttentionWorkDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "FleetAttentionSnapshotDto": {
+        "type": "object",
+        "description": "Every visible session at one fleet revision.",
+        "required": [
+          "epoch",
+          "revision",
+          "sessions"
+        ],
+        "properties": {
+          "epoch": {
+            "type": "string",
+            "description": "Server incarnation of the revision sequence; a change means re-baseline."
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "sessions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FleetAttentionSessionDto"
+            }
+          }
+        }
+      },
+      "FleetAttentionUnavailableDto": {
+        "type": "string",
+        "enum": [
+          "capacity",
+          "store"
+        ]
       },
       "ForkSessionRequest": {
         "type": "object",
@@ -15506,9 +16266,19 @@
           "queue"
         ]
       },
+      "InboxItemOrigin": {
+        "type": "string",
+        "description": "Who admitted an inbox item. `input` is anything a person, MCP client or\nNAC automation submitted; the other values are owned delegated results,\nrecorded durably when their generation settled. Only `input` items accept\nthe public update and cancel operations.",
+        "enum": [
+          "input",
+          "traditional_child",
+          "managed_orchestrator"
+        ]
+      },
       "InboxItemResponse": {
         "type": "object",
         "required": [
+          "origin",
           "id",
           "session_id",
           "delivery",
@@ -15552,6 +16322,9 @@
           "id": {
             "type": "integer",
             "format": "int64"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/InboxItemOrigin"
           },
           "prompt": {
             "type": "string"
@@ -17610,6 +18383,53 @@
           }
         }
       },
+      "OpenSshAliasList": {
+        "type": "object",
+        "description": "Literal `Host` aliases from the NAC server user's `~/.ssh/config` and the\nInclude files it names statically. Only alias names are returned; host\nnames, users, keys and file contents never are.",
+        "required": [
+          "aliases",
+          "undiscoverable_patterns",
+          "warnings"
+        ],
+        "properties": {
+          "aliases": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Aliases in first-seen order, without duplicates."
+          },
+          "undiscoverable_patterns": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Host patterns present but not listed: wildcards, negations and names\nssh cannot take as a destination. They still work through manual entry.",
+            "minimum": 0
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OpenSshAliasWarning"
+            },
+            "description": "Why the list may be incomplete. Never names a path or file contents."
+          }
+        }
+      },
+      "OpenSshAliasWarning": {
+        "type": "string",
+        "enum": [
+          "home_unavailable",
+          "unreadable_file",
+          "oversized_file",
+          "missing_include",
+          "include_cycle",
+          "include_depth_exceeded",
+          "file_limit_reached",
+          "alias_limit_reached",
+          "unsupported_include",
+          "conditional_include_skipped",
+          "malformed_line"
+        ]
+      },
       "OpenUserTerminalRequest": {
         "type": "object",
         "required": [
@@ -19580,6 +20400,29 @@
           }
         }
       },
+      "RevealWorkspacePathRequest": {
+        "type": "object",
+        "required": [
+          "path",
+          "expected_workspace_root",
+          "expected_path_root"
+        ],
+        "properties": {
+          "expected_path_root": {
+            "type": "string",
+            "description": "Coordinate root of the originating Files listing. Ordinary directory\ncallers explicitly use their selected workspace root. Never an OS target."
+          },
+          "expected_workspace_root": {
+            "type": "string",
+            "description": "Root observed in the initiating session snapshot; never a target override."
+          },
+          "path": {
+            "type": "string",
+            "description": "Existing path, relative to the explicitly observed expected_path_root."
+          }
+        },
+        "additionalProperties": false
+      },
       "RevertSessionRequest": {
         "type": "object",
         "required": [
@@ -21317,7 +22160,6 @@
         "type": "object",
         "required": [
           "profile",
-          "description",
           "prompt"
         ],
         "properties": {
@@ -21331,7 +22173,11 @@
             ]
           },
           "description": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Short task label. Required when `child_session_id` is omitted or null;\ncontinuing an existing child may omit it, and a provided label must\nmatch that child's immutable label exactly."
           },
           "profile": {
             "type": "string"
@@ -23828,6 +24674,13 @@
             "items": {
               "type": "string"
             }
+          },
+          "path_root": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Origin of these repository-relative identities, when locally available.\nA missing legacy/remote/revision context cannot authorize Finder reveal."
           },
           "truncated": {
             "type": "boolean",

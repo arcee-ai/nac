@@ -1,5 +1,4 @@
 import { HeartbeatPanel } from "@/app/features/heartbeats/HeartbeatPanel";
-import { useLayoutEffect, useRef, useState, type RefObject } from "react";
 
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
@@ -18,7 +17,6 @@ import { TerminalWorkspace } from "@/app/features/terminal-selection/TerminalWor
 import { InsightsReturnButton } from "@/app/features/insights/presentation/InsightsReturnButton";
 import { InsightsView } from "@/app/features/insights/presentation/InsightsView";
 import { FilesView } from "@/app/components/inspector/FilesView";
-import { PanelCountBadge } from "@/app/components/inspector/PanelCountBadge";
 import { PanelListNote } from "@/app/components/inspector/PanelMessages";
 import { PanelPhoneScreen } from "@/app/components/inspector/PanelPhoneScreen";
 import { panelBadgeCount, PANEL_ICON } from "@/app/components/inspector/sessionPanelIcons";
@@ -44,6 +42,12 @@ interface SessionSideBoxProps {
   behavior?: SessionBehavior | null;
   panel: SessionPanel;
   onPanelChange: (panel: SessionPanel) => void;
+  /** The drawer's way out. Omitted, the header has no Close (a bare test mount). */
+  onClose?: () => void;
+  /** Whether the drawer is docked beside the chat rather than floating. */
+  pinned?: boolean;
+  /** Dock or float the drawer (⌘\); omitted where docking has no room. */
+  onTogglePinned?: () => void;
 }
 
 /**
@@ -63,45 +67,12 @@ function SideBoxProgress({ sessionId }: { sessionId: string }) {
 }
 
 /**
- * Whether the tabs fit between the bar's buttons with their labels. Their
- * labelled width is kept while they show only icons, so the labels come back
- * once the bar has room for that width rather than flickering at the edge. A
- * new set of tabs is measured afresh.
- */
-function useTabLabelsFit(
-  room: RefObject<HTMLElement | null>,
-  strip: RefObject<HTMLElement | null>,
-  tabs: string,
-): boolean {
-  const [fit, setFit] = useState(true);
-  const [measuredTabs, setMeasuredTabs] = useState(tabs);
-  const labelled = useRef(0);
-  if (measuredTabs !== tabs) {
-    setMeasuredTabs(tabs);
-    setFit(true);
-  }
-  useLayoutEffect(() => {
-    const roomElement = room.current;
-    const stripElement = strip.current;
-    if (!roomElement || !stripElement || typeof ResizeObserver === "undefined") return undefined;
-    const measure = () => {
-      if (fit) labelled.current = stripElement.scrollWidth;
-      setFit(labelled.current <= roomElement.clientWidth);
-    };
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(roomElement);
-    return () => observer.disconnect();
-  }, [room, strip, fit, tabs]);
-  return fit;
-}
-
-/**
- * The right column of the session screen: one box with the Insights / Files /
- * Worksets / Subagents panels, sized by the shared layout store. Session
- * switching lives in the left sidebar. On a phone the panels are the body of
- * the modal box that SessionPage puts them in, each screen heading itself with
- * the way out and the tab bar the dialog lends it.
+ * The panels a session's drawer holds: Insights, Files (Changes), Subagents,
+ * Terminal, Schedules, Worksets, History — whichever the session's behavior
+ * has. On a wide screen it heads itself with a 52px bar: a quiet segmented
+ * row to move between the panels, then dock, full width and close. On a
+ * phone the drawer is a bottom sheet and each screen heads itself with the
+ * way out the sheet lends it.
  */
 export function SessionSideBox({
   sessionId,
@@ -109,13 +80,15 @@ export function SessionSideBox({
   behavior: behaviorProp,
   panel,
   onPanelChange,
+  onClose,
+  pinned = false,
+  onTogglePinned,
 }: SessionSideBoxProps) {
   const {
     useSidePanelExpanded,
     useSelectedWorkset,
     useSelectedRevision,
     toggleSidePanelExpanded,
-    toggleSidePanelCollapsed,
     showSidePanelList,
     selectWorkset,
     selectRevision,
@@ -143,12 +116,9 @@ export function SessionSideBox({
   const subagentCount =
     (children.data?.length ?? 0) +
     (policy.orchestrationEnabled ? (orchestrators.data?.length ?? 0) : 0);
-  const tabRoom = useRef<HTMLDivElement>(null);
-  const tabStrip = useRef<HTMLDivElement>(null);
-  const tabLabelsFit = useTabLabelsFit(tabRoom, tabStrip, `${widePanels.join()}|${isTablet}`);
 
-  // History belongs to the phone's bottom bar. On a wide screen the header
-  // chip switches revisions, so a link to that panel lands on the default one.
+  // History is a phone panel. On a wide screen the session menu switches
+  // revisions, so a link to that panel lands on the default one.
   const active =
     panelPolicy == null
       ? null
@@ -219,37 +189,15 @@ export function SessionSideBox({
   }
 
   return (
-    <div
-      className={cn(
-        "flex flex-col min-h-0 h-full overflow-hidden bg-elevation-ground",
-        expanded ? null : "border-l border-tertiary",
-      )}
-    >
-      {/* The design's 52px bar draws its border inside the bottom padding. */}
-      <div className="relative flex items-center gap-2 px-2 pt-2 pb-[7px] shrink-0 border-b border-muted bg-elevation-ground">
+    <div className="flex flex-col min-h-0 h-full overflow-hidden">
+      <div className="relative flex h-[52px] shrink-0 items-center gap-1 border-b border-muted pr-2 pl-3">
         <SideBoxProgress sessionId={sessionId} />
-        {/* Hide/expand live here in the split. Once fullscreen the Modal owns
-            Close at the trailing corner, and equal blanks keep the tabs centred
-            clear of it. */}
-        {expanded ? (
-          <span aria-hidden className="size-9 shrink-0" />
-        ) : (
-          <Tooltip title="Hide panel" position={TooltipPosition.BottomRight} className="shrink-0">
-            <Button
-              size={ButtonSize.Medium}
-              variant={ButtonVariant.Ghost}
-              content={ButtonContent.Icon}
-              aria-label="Hide panel"
-              onClick={toggleSidePanelCollapsed}
-            >
-              <Icon iconName={IconName.HideSidePanel} />
-            </Button>
-          </Tooltip>
-        )}
-        {/* Auto margins rather than `justify-center`: tabs wider than the bar
-            overflow its trailing end instead of losing their first ones. */}
-        <div ref={tabRoom} className="flex flex-1 min-w-0">
-          <div ref={tabStrip} className="flex min-w-0 items-center gap-2 mx-auto" role="tablist">
+        <div className="flex min-w-0 flex-1">
+          <div
+            role="tablist"
+            aria-label="Session panels"
+            className="flex min-w-0 items-center gap-0.5 rounded-pill bg-[var(--f-wash-1)] p-0.5"
+          >
             {widePanels.map((name) => {
               const selected = active === name;
               const badge = panelBadgeCount(
@@ -263,56 +211,98 @@ export function SessionSideBox({
                 showSidePanelList(isTablet && selected && name === "insights");
                 onPanelChange(name);
               };
-              const iconsOnly = isTablet || !tabLabelsFit;
+              // The open panel names itself; the others are glyphs with
+              // tooltips, so any number of panels fits the 560px drawer.
+              const iconsOnly = !selected;
               const tab = (
-                <Button
-                  size={ButtonSize.Medium}
-                  variant={selected ? ButtonVariant.GhostHighlighted : ButtonVariant.Ghost}
-                  content={iconsOnly ? ButtonContent.Icon : ButtonContent.IconLeft}
+                <button
+                  type="button"
                   role="tab"
                   aria-selected={selected}
                   aria-label={SESSION_PANEL_LABEL[name]}
                   onClick={open}
-                >
-                  <Icon iconName={PANEL_ICON[name]} />
-                  {iconsOnly ? null : SESSION_PANEL_LABEL[name]}
-                </Button>
-              );
-              return (
-                <span key={name} className="relative shrink-0">
-                  {/* The tablet's narrower box, and a desktop box too narrow
-                      for the labels, keep only the tabs' icons. */}
-                  {iconsOnly ? (
-                    <Tooltip
-                      title={SESSION_PANEL_LABEL[name]}
-                      position={TooltipPosition.BottomCenter}
-                    >
-                      {tab}
-                    </Tooltip>
-                  ) : (
-                    tab
+                  className={cn(
+                    "type-label flex h-7 shrink-0 items-center gap-1.5 rounded-pill px-2.5 outline-none",
+                    "transition-[background-color,color,box-shadow] duration-150 ease-out motion-reduce:transition-none",
+                    "focus-visible:ring-2 focus-visible:ring-[var(--f-focus)]",
+                    iconsOnly && (badge > 0 ? "px-2" : "w-8 justify-center px-0"),
+                    selected
+                      ? "bg-elevation-level-1 text-basic-primary shadow-sm"
+                      : "text-basic-tertiary hover:text-basic-primary",
                   )}
-                  {badge > 0 ? <PanelCountBadge count={badge} /> : null}
+                >
+                  <Icon iconName={PANEL_ICON[name]} size={16} className="shrink-0" />
+                  {iconsOnly ? null : <span>{SESSION_PANEL_LABEL[name]}</span>}
+                  {badge > 0 ? (
+                    <span className="type-tag tabular text-basic-tertiary">{badge}</span>
+                  ) : null}
+                </button>
+              );
+              return iconsOnly ? (
+                <Tooltip
+                  key={name}
+                  title={SESSION_PANEL_LABEL[name]}
+                  position={TooltipPosition.BottomCenter}
+                >
+                  {tab}
+                </Tooltip>
+              ) : (
+                <span key={name} className="contents">
+                  {tab}
                 </span>
               );
             })}
           </div>
         </div>
-        {expanded ? (
-          <span aria-hidden className="size-9 shrink-0" />
-        ) : (
-          <Tooltip title="Expand panel" position={TooltipPosition.BottomLeft} className="shrink-0">
+        {onTogglePinned ? (
+          <Tooltip
+            title={pinned ? "Float the drawer (⌘\\)" : "Dock beside the conversation (⌘\\)"}
+            position={TooltipPosition.BottomLeft}
+            className="shrink-0"
+          >
+            <Button
+              size={ButtonSize.Medium}
+              variant={pinned ? ButtonVariant.GhostHighlighted : ButtonVariant.Ghost}
+              content={ButtonContent.Icon}
+              aria-label={pinned ? "Float drawer" : "Dock drawer"}
+              aria-pressed={pinned}
+              onClick={onTogglePinned}
+            >
+              <Icon iconName={IconName.ShowSidePanel} />
+            </Button>
+          </Tooltip>
+        ) : null}
+        {pinned ? null : (
+          <Tooltip
+            title={expanded ? "Exit full width" : "Full width"}
+            position={TooltipPosition.BottomLeft}
+            className="shrink-0"
+          >
             <Button
               size={ButtonSize.Medium}
               variant={ButtonVariant.Ghost}
               content={ButtonContent.Icon}
-              aria-label="Expand panel"
+              aria-label={expanded ? "Exit full width" : "Full width"}
+              aria-pressed={expanded}
               onClick={toggleSidePanelExpanded}
             >
-              <Icon iconName={IconName.FullScreen} />
+              <Icon iconName={expanded ? IconName.FullScreenExit : IconName.FullScreen} />
             </Button>
           </Tooltip>
         )}
+        {onClose ? (
+          <Tooltip title="Close (Esc)" position={TooltipPosition.BottomLeft} className="shrink-0">
+            <Button
+              size={ButtonSize.Medium}
+              variant={ButtonVariant.Ghost}
+              content={ButtonContent.Icon}
+              aria-label="Hide panel"
+              onClick={onClose}
+            >
+              <Icon iconName={IconName.Close} />
+            </Button>
+          </Tooltip>
+        ) : null}
       </div>
 
       <div className="flex-1 min-h-0 flex flex-col">{body}</div>

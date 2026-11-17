@@ -9,11 +9,13 @@ interface ModelMessageProps {
     active: boolean;
     /**
      * What the run is doing right now, of which only the compaction status is
-     * shown: live badges and thread waves already name tools and threads. Only
-     * the active turn is given it, so the finished ones are not re-rendered every
+     * shown: the turn's own steps already name tools and threads. Only the
+     * active turn is given it, so the finished ones are not re-rendered every
      * time the line changes.
      */
     activity?: string;
+    /** Wall-clock start of the run behind the active turn, for its live clock. */
+    runStartedAt?: number | null;
     /** Stretches the last bubble so stick-to-bottom lands below the fold. */
     isLast?: boolean;
     /** Episode key of the thread card the panels are pointing at, if any. */
@@ -61,9 +63,9 @@ interface ModelMessageProps {
     interactive?: boolean;
 }
 /**
- * Everything the model did for one prompt, in the order it happened: groups of
- * reasoning and tool calls, prose, the sessions it launched and the waves of
- * threads it ran.
+ * Everything the model did for one prompt, in the order it happened: the work
+ * folded behind one line, the sessions it launched, the waves of threads it
+ * ran and the answer it gave.
  */
 export declare const ModelMessage: import("react").MemoExoticComponent<(props: ModelMessageProps) => import("react").JSX.Element>;
 export {};

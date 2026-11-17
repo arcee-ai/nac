@@ -10,7 +10,7 @@ import type { ChangedFileStat } from "@/app/types/api";
 const MAX_FILES = 8;
 
 const FOCUS_RING =
-  "-outline-offset-2 outline-[var(--color-border-focus-outline)] focus-visible:outline-2";
+  "outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus-outline)]";
 
 function FileChip({
   file,
@@ -25,22 +25,23 @@ function FileChip({
     <button
       type="button"
       className={cn(
-        "flex items-center gap-[6px] max-w-full py-2 md:py-1 px-2 rounded-[4px] shrink-0",
+        "flex h-7 max-w-full shrink-0 items-center gap-2 rounded-md px-2 max-md:min-h-11",
+        "transition-colors duration-150 ease-out hover:bg-[var(--f-wash-1)]",
         FOCUS_RING,
-        active ? "btn-ghost-highlighted" : "btn-ghost",
+        active ? "bg-[var(--f-wash-2)] text-basic-primary" : "text-basic-secondary",
       )}
       aria-pressed={active}
       title={file.path}
       onClick={() => onOpen(file.path)}
     >
       <FileIcon path={file.path} />
-      <span className="text-micro truncate">{fileLabel(file.path)}</span>
+      <span className="type-meta truncate">{fileLabel(file.path)}</span>
       {/* `git diff --numstat` covers only tracked files, so an untracked one
           arrives without counts and the chip simply carries none. */}
       {file.additions != null || file.deletions != null ? (
-        <span className="flex items-center gap-1 shrink-0 code code-micro">
+        <span className="flex shrink-0 items-center gap-1 type-meta tabular">
           <span className="text-success-primary">+{file.additions ?? 0}</span>
-          <span className="text-error-primary">-{file.deletions ?? 0}</span>
+          <span className="text-error-primary">−{file.deletions ?? 0}</span>
         </span>
       ) : null}
     </button>
@@ -69,7 +70,7 @@ export function SnapshotFiles({
   const rest = files.length - shown.length;
 
   return (
-    <div className="flex flex-col gap-1 md:gap-0 w-full pl-2 pr-4 pb-1 items-start">
+    <div className="flex w-full flex-col items-start pb-1">
       {shown.map((file) => (
         <FileChip key={file.path} file={file} active={selected === file.path} onOpen={onOpen} />
       ))}
@@ -77,7 +78,7 @@ export function SnapshotFiles({
         <button
           type="button"
           className={cn(
-            "btn-ghost flex items-center shrink-0 py-1 px-2 rounded-[4px] label-micro text-basic-muted shrink-0",
+            "flex h-7 shrink-0 items-center rounded-md px-2 type-meta text-basic-muted hover:bg-[var(--f-wash-1)] hover:text-basic-primary max-md:min-h-11",
             FOCUS_RING,
           )}
           onClick={onOpenAll}

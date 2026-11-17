@@ -218,7 +218,7 @@ class ReaderDiagnosticControls(unittest.TestCase):
         modes = [(None, 'chat', ['Hello from the isolated NAC Mac preview']),
             ('--terminal', 'terminal', ['NAC354_TRUSTED_XY']),
             ('--workspace', 'workspace', ['WK_RICH_COMPLETE']),
-            ('--approval', 'approval', ['Permission required']),
+            ('--approval', 'approval', ['Approval needed']),
             ('--instance-empty', 'instance-empty', ['No projects yet', 'Get Started']),
             ('--instance-conflict', 'instance-conflict', ['Another NAC process', 'Retry', 'store-path']),
             ('--instance-drain', 'instance-drain', ['Native instance', 'drain']),

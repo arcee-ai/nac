@@ -9,7 +9,9 @@ interface ChatSessionActionsProps {
     onPin?: () => void;
     onRename?: () => void;
     onDelete?: () => void;
+    /** Files a session that belongs to no project. */
+    onAssign?: () => void;
 }
 /** Shared row actions; callers choose whether pinning is server or browser presentation. */
-export declare function ChatSessionActions({ title, pinned, isMobile, onPin, onRename, onDelete, }: ChatSessionActionsProps): import("react").JSX.Element;
+export declare function ChatSessionActions({ title, pinned, isMobile, onPin, onRename, onDelete, onAssign, }: ChatSessionActionsProps): import("react").JSX.Element;
 export {};

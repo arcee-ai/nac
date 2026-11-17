@@ -1,16 +1,17 @@
 import React from "react";
+/** Soft washes with the matching signal text. No borders: the wash is the shape. */
 export declare enum BadgeColor {
-    Neutral = "bg-elevation-sublevel-variant-B text-basic-tertiary border-tertiary",
-    Green = "bg-success-secondary text-success-primary border-success-secondary",
-    Blue = "bg-info-secondary text-info-primary border-info-secondary",
-    Red = "bg-error-secondary text-error-primary border-error-secondary",
-    Yellow = "bg-danger-secondary text-danger-primary border-danger-secondary",
-    Gray = "bg-elevation-sublevel-variant-A text-basic-secondary border-muted"
+    Neutral = "bg-elevation-sublevel-variant-B text-basic-tertiary",
+    Green = "bg-success-primary text-success-primary",
+    Blue = "bg-info-primary text-info-primary",
+    Red = "bg-error-primary text-error-primary",
+    Yellow = "bg-danger-primary text-danger-primary",
+    Gray = "bg-elevation-sublevel-variant-A text-basic-secondary"
 }
 interface BadgeProps {
     text: string;
     color?: BadgeColor;
-    /** Filled pill. Off leaves only the uppercase label. */
+    /** Filled pill. Off leaves only the coloured label. */
     background?: boolean;
     className?: string;
 }

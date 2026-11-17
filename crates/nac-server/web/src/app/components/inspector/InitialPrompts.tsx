@@ -43,13 +43,15 @@ export function InitialPrompts() {
   const { sendPrompt } = useNativeRuntime().stores.composerStore;
 
   return (
-    <div className="flex flex-1 flex-col justify-center gap-2">
-      <p className="text-[10px] leading-[12px] font-medium uppercase text-input-placeholder">
-        Get started
-      </p>
-      {/* Columns are 360px at minimum, so the chat is 2-up beside the side box
-          at the design's desktop width and 1-up wherever it is narrower. */}
-      <div className="grid gap-2 grid-cols-[repeat(auto-fill,minmax(min(360px,100%),1fr))]">
+    <div className="flex flex-1 flex-col justify-center gap-5">
+      <div className="flex flex-col gap-1">
+        <h2 className="type-heading text-basic-primary">Get started</h2>
+        <p className="type-body-chrome text-basic-tertiary">
+          Send a message below, or start with one of these.
+        </p>
+      </div>
+      {/* Two up across the 720px column, one up on a phone. */}
+      <div className="grid gap-2 grid-cols-[repeat(auto-fill,minmax(min(300px,100%),1fr))]">
         {PROMPTS.map((entry) => (
           <InitialPromptBox
             key={entry.title}

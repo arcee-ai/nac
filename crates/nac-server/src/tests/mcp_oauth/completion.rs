@@ -122,6 +122,7 @@ async fn complete(outcome: Outcome) {
     };
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let issuer = format!("http://{}/", listener.local_addr().unwrap());
+    let endpoint = format!("{issuer}mcp");
     let token_server = tokio::spawn(async move {
         axum::serve(
             listener,
@@ -138,7 +139,7 @@ async fn complete(outcome: Outcome) {
             "/mcp_library/servers",
             serde_json::json!({
                 "name": "slack", "enabled": true, "transport": "streamable_http",
-                "url": "https://mcp.slack.com/mcp", "headers": {}, "args": [], "env": {}
+                "url": &endpoint, "headers": {}, "args": [], "env": {}
             }),
         )
         .await
@@ -167,7 +168,7 @@ async fn complete(outcome: Outcome) {
         let session = nac_core::mcp_configurations::begin_mcp_oauth_authorization(
             manager.root_cwd(),
             "slack",
-            "https://mcp.slack.com/mcp",
+            &endpoint,
             "https://nac.example.test/mcp_library/servers/slack/oauth/callback",
             &["mcp:pending-only".into()],
         )
@@ -303,7 +304,7 @@ async fn complete(outcome: Outcome) {
         nac_core::mcp_configurations::mcp_oauth_pending_authorization_url(
             manager.root_cwd(),
             "slack",
-            "https://mcp.slack.com/mcp",
+            &endpoint,
         )
         .unwrap()
         .is_none(),

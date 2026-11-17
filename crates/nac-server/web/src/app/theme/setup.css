@@ -345,7 +345,7 @@ Prevent resizing textareas horizontally by default.
   input::placeholder,
   textarea::placeholder {
     opacity: 1; /* 1 */
-    color: theme("colors.gray.400", #9ca3af); /* 2 */
+    color: var(--color-text-input-placeholder, #9ca3af); /* 2: the theme's placeholder ink */
   }
 
   /*
@@ -401,13 +401,6 @@ Constrain images and videos to the parent width and preserve their intrinsic asp
 }
 
 :root {
-  /* ... existing variables ... */
-
-  /* Input outline colors */
-  --color-outline-input-focus: var(--color-accent-primary);
-  --color-outline-input-hovered: var(--color-accent-secondary);
-  --color-outline-input-error: var(--color-error-primary);
-
-  /* Figma "Interaction_rounded": the corner shared by buttons, inputs and tabs. */
+  /* Legacy corner for `rounded-interaction`; now the Focus row radius. */
   --interaction-rounded: 8px;
 }

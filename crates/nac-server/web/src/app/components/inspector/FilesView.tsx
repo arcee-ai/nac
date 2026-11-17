@@ -1,7 +1,10 @@
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
+import { RevealInFinder } from "@/app/features/workspace-reveal/RevealInFinder";
+import { useRevealSelection } from "@/app/features/workspace-reveal/selection";
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
+import { DIFF_CODE_TYPE, DIFF_GUTTER, DiffLineRow } from "@/app/atoms/code-displayer";
 import {
   CodeChangesBadge,
   CodeChangesBadgeSize,
@@ -15,16 +18,19 @@ import {
   LoaderSize,
 } from "@/app/atoms";
 import { FilesBranchRow, FilesListToolbar } from "@/app/components/inspector/FilesListControls";
+import { FilesSourceLabel } from "@/app/components/inspector/FilesSource";
 import {
   PanelEmptyState,
   PanelFailure,
   PanelListNote,
 } from "@/app/components/inspector/PanelMessages";
-import { PanelEmpty, PanelLoading, PanelSplit } from "@/app/components/inspector/PanelSplit";
+import { PanelQuiet } from "@/app/components/inspector/PanelQuiet";
+import { PanelLoading, PanelSplit } from "@/app/components/inspector/PanelSplit";
 import { useLiveWorkspace } from "@/app/hooks/useLiveWorkspace";
 import { useIsDesktop, useIsMobile } from "@/app/hooks/useMediaQuery";
 import { usePanelListMarksOpen } from "@/app/hooks/usePanelListMarksOpen";
 import { cn } from "@/app/lib/cn";
+import { describeFilesSource, filesSourceState } from "@/app/lib/filesSource";
 import {
   buildFileTree,
   changedDirPaths,
@@ -32,7 +38,7 @@ import {
   type FileNode,
   type FileTreeDir,
 } from "@/app/lib/fileTree";
-import { highlightCode, highlightDiff, tokenStyle, type CodeToken } from "@/app/lib/highlight";
+import { highlightCode, highlightDiff, type CodeToken } from "@/app/lib/highlight";
 import { errorMessage } from "@/app/providers/ToastProvider";
 import {
   queryKeys,
@@ -40,6 +46,7 @@ import {
   useWorkspaceFile,
   useWorkspaceFiles,
   useWorkspaceRevisionChanges,
+  useWorkspaceRevisions,
 } from "@/app/services/queries";
 import type {
   ChangedFileStat,
@@ -71,6 +78,8 @@ function FileRow({
       size={size}
       active={selected === file.path}
       status={gitStatusOf(file.status)}
+      additions={file.additions}
+      deletions={file.deletions}
       title={file.path}
       onClick={() => onSelect(file.path)}
     />
@@ -90,11 +99,16 @@ interface TreeProps {
 function Tree({ dir, depth, open, selected, onToggle, onSelect }: TreeProps) {
   const isMobile = useIsMobile();
   return (
-    <div className={cn("flex flex-col gap-[2px]", depth > 0 && "mb-2 border-l border-muted pl-2")}>
+    <div
+      className={cn(
+        "flex flex-col gap-px",
+        depth > 0 && "ml-[15px] border-l border-tertiary pl-1.5",
+      )}
+    >
       {dir.dirs.map((child) => {
         const expanded = open.has(child.path);
         return (
-          <div key={child.path} className="flex flex-col gap-[2px] w-full">
+          <div key={child.path} className="flex flex-col gap-px w-full">
             <FileListTabButton
               name={child.name}
               variant={FileListTabButtonVariant.Folder}
@@ -144,7 +158,7 @@ function ChangedList({
   if (files.length === 0) return <PanelListNote>Nothing has changed here yet.</PanelListNote>;
 
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex flex-col gap-px">
       {files.map((file) => (
         <FileRow
           key={file.path}
@@ -157,14 +171,6 @@ function ChangedList({
     </div>
   );
 }
-
-/**
- * The design's Plex Mono Medium 12/16 without tracking. `.code` sets a 1.5
- * line height and tracking in unlayered CSS, which only `!` utilities outrank.
- */
-const CODE_TYPE = "code code-small font-medium !leading-4 !tracking-normal";
-
-const GUTTER = cn(CODE_TYPE, "shrink-0 w-12 text-right opacity-50 text-basic-muted select-none");
 
 function CodeLine({
   lineNo,
@@ -180,33 +186,15 @@ function CodeLine({
   trailing?: React.ReactNode;
 }) {
   return (
-    <div
-      className={cn(
-        "flex items-start w-full border-l-2 border-solid",
-        tone === "add"
-          ? "bg-success-primary border-success-primary"
-          : tone === "delete"
-            ? "bg-error-primary border-error-primary"
-            : "border-transparent",
-      )}
-    >
-      <span className={GUTTER}>{lineNo ?? ""}</span>
-      <span
-        className={cn(
-          CODE_TYPE,
-          "flex-1 min-w-0 px-2 text-basic-primary whitespace-pre-wrap break-words",
-        )}
-      >
-        {tokens
-          ? tokens.map((token, index) => (
-              <span key={index} style={tokenStyle(token)}>
-                {token.text}
-              </span>
-            ))
-          : content}
-        {trailing}
-      </span>
-    </div>
+    <DiffLineRow
+      line={{
+        kind: tone === "add" ? "insert" : tone === "delete" ? "delete" : "context",
+        number: lineNo,
+        content,
+        tokens,
+        trailing,
+      }}
+    />
   );
 }
 
@@ -223,25 +211,28 @@ function DiffLine({ line, tokens }: { line: WorkspaceDiffLine; tokens: CodeToken
       tone={line.kind === "insert" ? "add" : isDel ? "delete" : undefined}
       trailing={
         line.has_trailing_newline === false ? (
-          <span className="italic text-basic-muted"> No newline at end of file</span>
+          <span className="select-none font-sans italic text-basic-muted">
+            {" "}
+            No newline at end of file
+          </span>
         ) : null
       }
     />
   );
 }
 
+/** One quiet line in the pane: a fact about the diff, or why it failed. */
 function Notice({ tone, children }: { tone?: "error"; children: React.ReactNode }) {
   return (
-    <div
+    <p
+      role={tone === "error" ? "alert" : undefined}
       className={cn(
-        "mx-4 my-2 rounded-md px-3 py-2 code code-small",
-        tone === "error"
-          ? "text-error-primary bg-error-tertiary border border-error-muted"
-          : "text-basic-muted bg-elevation-level-0-5",
+        "mx-4 my-3 type-meta",
+        tone === "error" ? "text-error-primary" : "text-basic-tertiary",
       )}
     >
       {children}
-    </div>
+    </p>
   );
 }
 
@@ -265,11 +256,20 @@ function Section({
     <>
       {section.hunks.map((hunk, index) => (
         <div key={index} className="flex flex-col w-full">
-          <div className="flex items-start w-full border-l-2 border-transparent bg-info-tertiary">
-            <span className={GUTTER}>@@</span>
-            <span className={cn(CODE_TYPE, "flex-1 min-w-0 px-2 text-info-primary truncate")}>
-              {`-${hunk.old_start},${hunk.old_lines} +${hunk.new_start},${hunk.new_lines}`}
-              {hunk.function_context ? ` ${hunk.function_context}` : ""}
+          <div
+            className={cn(
+              "flex items-start w-full bg-[var(--f-wash-1)] text-basic-tertiary",
+              index > 0 && "mt-2 border-t border-muted",
+            )}
+          >
+            <span aria-hidden className={DIFF_GUTTER}>
+              ⋯
+            </span>
+            <span className={cn(DIFF_CODE_TYPE, "flex-1 min-w-0 pl-4 pr-3 truncate")}>
+              {`@@ -${hunk.old_start},${hunk.old_lines} +${hunk.new_start},${hunk.new_lines} @@`}
+              {hunk.function_context ? (
+                <span className="text-basic-secondary"> {hunk.function_context}</span>
+              ) : null}
             </span>
           </div>
           {hunk.lines.map((line, lineIndex) => (
@@ -283,12 +283,19 @@ function Section({
 }
 
 /** The open file as the design heads it on every size: its type icon, then its name. */
-function FileTitle({ path }: { path: string }) {
+function FileTitle({ path, withFolder = false }: { path: string; withFolder?: boolean }) {
   const isMobile = useIsMobile();
+  const label = fileLabel(path);
+  const parent = withFolder
+    ? path.slice(0, Math.max(0, path.length - label.length)).replace(/\/$/, "")
+    : "";
   return (
-    <span className="flex min-w-0 items-center gap-[10px]" title={path}>
-      <FileIcon path={path} size={isMobile ? 24 : 20} />
-      <span className="min-w-0 truncate">{fileLabel(path)}</span>
+    <span className="flex min-w-0 items-center gap-2" title={path}>
+      <FileIcon path={path} size={isMobile ? 20 : 16} />
+      <span className="min-w-0 shrink-0 max-w-full truncate">{label}</span>
+      {parent ? (
+        <span className="min-w-0 truncate type-meta font-normal text-basic-muted">{parent}</span>
+      ) : null}
     </span>
   );
 }
@@ -300,8 +307,9 @@ function PaneHeader({ path, trailing }: { path: string; trailing: React.ReactNod
   if (!isDesktop) return null;
 
   return (
-    <div className="flex items-center gap-[10px] h-12 px-4 shrink-0 border-b border-muted bg-elevation-ground header-sm text-basic-primary">
-      <FileTitle path={path} />
+    <div className="flex items-center gap-3 h-11 px-4 shrink-0 border-b border-tertiary type-strong text-basic-primary">
+      <FileTitle path={path} withFolder />
+      <span className="flex-1" />
       {trailing}
     </div>
   );
@@ -313,7 +321,7 @@ function Scroller({ children }: { children: React.ReactNode }) {
   return (
     <div
       className={cn(
-        "flex flex-col flex-1 min-h-0 overflow-auto [&>*]:shrink-0",
+        "flex flex-col flex-1 min-h-0 overflow-auto bg-[var(--color-code-bg)] [&>*]:shrink-0",
         isMobile ? "py-16" : "py-2",
       )}
     >
@@ -365,11 +373,14 @@ function DiffPane({
   file,
   counts,
   revision,
+  action,
 }: {
   sessionId: string;
   file: FileNode;
   counts: ChangeCounts | null;
   revision: number | null;
+  /** The file's own control at the header's end, e.g. Reveal in Finder. */
+  action?: React.ReactNode;
 }) {
   const {
     data: diff,
@@ -382,14 +393,21 @@ function DiffPane({
       <PaneHeader
         path={file.path}
         trailing={
-          counts ? (
-            <CodeChangesBadge additions={counts.additions} deletions={counts.deletions} />
-          ) : null
+          <>
+            {counts ? (
+              <CodeChangesBadge
+                additions={counts.additions}
+                deletions={counts.deletions}
+                className="tabular"
+              />
+            ) : null}
+            {action}
+          </>
         }
       />
       <Scroller>
         {isFetching && !diff ? (
-          <div className="flex items-center gap-2 px-4 py-2 code code-small text-basic-muted">
+          <div className="flex items-center gap-2 px-4 py-3 type-meta text-basic-tertiary">
             <Loader size={LoaderSize.Small} /> Loading diff…
           </div>
         ) : null}
@@ -436,10 +454,12 @@ function FilePane({
   sessionId,
   path,
   revision,
+  action,
 }: {
   sessionId: string;
   path: string;
   revision: number | null;
+  action?: React.ReactNode;
 }) {
   const { data, isFetching, error } = useWorkspaceFile(sessionId, path, revision);
   // Kept next to the text it describes, so a refetch that changes the file
@@ -471,16 +491,19 @@ function FilePane({
       <PaneHeader
         path={path}
         trailing={
-          data ? (
-            <span className={cn(CODE_TYPE, "shrink-0 text-basic-muted")}>
-              {formatBytes(data.size)}
-            </span>
-          ) : null
+          <>
+            {data ? (
+              <span className="shrink-0 type-meta font-normal tabular text-basic-muted">
+                {formatBytes(data.size)}
+              </span>
+            ) : null}
+            {action}
+          </>
         }
       />
       <Scroller>
         {isFetching && !data ? (
-          <div className="flex items-center gap-2 px-4 py-2 code code-small text-basic-muted">
+          <div className="flex items-center gap-2 px-4 py-3 type-meta text-basic-tertiary">
             <Loader size={LoaderSize.Small} /> Loading file…
           </div>
         ) : null}
@@ -506,6 +529,11 @@ function FilePane({
  *
  * With a revision selected the same lists describe the checkout as it stood at
  * the end of that run, and "changed" means what that run changed.
+ *
+ * Which of the two is on screen is always labelled above the list. The label
+ * follows the rows actually drawn, not the selection: while a switch is still
+ * fetching, the other source's rows are held back rather than shown under the
+ * new name, and a capture that cannot be read says so instead of looking empty.
  */
 export function FilesView({
   sessionId,
@@ -518,11 +546,12 @@ export function FilesView({
   revision?: number | null;
   readOnly?: boolean;
 }) {
-  const { useToggledFolders, useSelectedFile, useFileListing, toggleFolder, selectFile } =
+  const { useToggledFolders, useSelectedFile, useFileListing, toggleFolder, selectRevision } =
     useNativeRuntime().stores.sessionLayoutStore;
 
   const client = useQueryClient();
   const isMobile = useIsMobile();
+  const isDesktop = useIsDesktop();
   const marksOpen = usePanelListMarksOpen();
   // Shared rather than local: the same panel also renders inside the
   // full-screen dialog, and it has to open on the file you were reading.
@@ -530,8 +559,13 @@ export function FilesView({
   const toggled = useToggledFolders();
   const fileListing = useFileListing();
 
-  const { data: listing, error } = useWorkspaceFiles(sessionId, revision);
+  const {
+    data: listing,
+    error,
+    isPlaceholderData: listingHeldOver,
+  } = useWorkspaceFiles(sessionId, revision);
   const revisionChanges = useWorkspaceRevisionChanges(sessionId, revision);
+  const revisions = useWorkspaceRevisions(revision == null ? null : sessionId);
 
   // Workspace stats are computed when the snapshot is built, so entering the
   // panel has to refetch it to show changes made since the last event. A
@@ -580,24 +614,67 @@ export function FilesView({
   );
   // Landing on the first change keeps the panel useful the moment it opens.
   const current = selected ?? changedNodes[0]?.path ?? null;
+  const { origin, selectFile } = useRevealSelection({
+    sessionId,
+    snapshot,
+    listing,
+    selected,
+    current,
+    active: revision == null && !readOnly && !listingHeldOver,
+  });
   const currentChange = current ? changedByPath.get(current) : undefined;
   const counts = useChangeCounts(sessionId, currentChange, revision);
   const marked = marksOpen ? current : null;
 
   const failure = error ?? (revision != null ? revisionChanges.error : null);
+  const source = useMemo(
+    () => describeFilesSource(revision, revisions.data),
+    [revision, revisions.data],
+  );
+  const state = filesSourceState({
+    revision,
+    listing,
+    listingHeldOver,
+    error: revision != null && failure ? errorMessage(failure) : null,
+    snapshotLoaded: snapshot != null,
+    changes: revisionChanges.data,
+    changesHeldOver: revisionChanges.isPlaceholderData,
+    captureMissing: source.kind === "revision" && revisions.isSuccess && !source.capture,
+  });
+  const sourceLabel = (
+    <FilesSourceLabel
+      source={source}
+      state={state}
+      autoSelected={marksOpen && selected == null && current != null}
+      onReturn={() => selectRevision(null)}
+    />
+  );
+
   if (revision == null && workspace?.error) {
     return <PanelFailure listTitle="Files">{workspace.error}</PanelFailure>;
   }
-  if (failure) {
-    return <PanelFailure listTitle="Files">{errorMessage(failure)}</PanelFailure>;
+  if (revision == null && error) {
+    return <PanelFailure listTitle="Files">{errorMessage(error)}</PanelFailure>;
   }
-  // Only when there is nothing to show at all. A listing already on screen —
-  // this revision's, or the one before it while the switch is fetched — stays
-  // put, and the bar above the panel carries the news that a fetch is running.
-  if (!listing) {
-    return <PanelLoading listTitle="Files" />;
+  if (state.status === "unavailable") {
+    return (
+      <PanelSplit listTitle="Files" listHeader={sourceLabel} list={null}>
+        <PanelQuiet title="This capture cannot be shown.">{state.reason}</PanelQuiet>
+      </PanelSplit>
+    );
+  }
+  // Rows held over from the other source while this one is fetched would sit
+  // under this source's name, so nothing is drawn until its own rows arrive.
+  // A refetch of the same source keeps its rows, and the bar above the panel
+  // carries the news that it is running.
+  if (state.status === "pending" || !listing) {
+    return <PanelLoading listTitle="Files" listHeader={sourceLabel} />;
   }
 
+  const reveal =
+    current && revision == null && !readOnly ? (
+      <RevealInFinder sessionId={sessionId} snapshot={snapshot} path={current} origin={origin} />
+    ) : null;
   const branch = workspace?.branch;
   // A phone's only branch switcher, so an empty checkout keeps it as well.
   const branchRow =
@@ -605,7 +682,22 @@ export function FilesView({
       <FilesBranchRow sessionId={sessionId} branch={branch} readOnly={readOnly} />
     ) : null;
   if (nodes.length === 0) {
-    return <PanelEmptyState listTitle="Files" title="No Files" phoneLead={branchRow} />;
+    // An empty capture still says which run it is and leads back from it.
+    if (revision != null) {
+      return (
+        <PanelSplit listTitle="Files" listHeader={sourceLabel} list={branchRow}>
+          <PanelQuiet title="No files">This capture holds no files.</PanelQuiet>
+        </PanelSplit>
+      );
+    }
+    return (
+      <PanelEmptyState
+        listTitle="Files"
+        title="No files"
+        description="This checkout has no files yet."
+        phoneLead={branchRow}
+      />
+    );
   }
 
   return (
@@ -622,6 +714,7 @@ export function FilesView({
           />
         ) : null
       }
+      listHeader={sourceLabel}
       listToolbar={
         <FilesListToolbar
           sessionId={sessionId}
@@ -629,6 +722,8 @@ export function FilesView({
           changed={changed}
           revision={revision}
           readOnly={readOnly}
+          // A desktop heads the open file with it instead, beside its name.
+          reveal={isDesktop ? null : reveal}
         />
       }
       list={
@@ -637,33 +732,42 @@ export function FilesView({
           {fileListing === "changed" ? (
             <ChangedList files={changedNodes} selected={marked} onSelect={selectFile} />
           ) : (
-            <>
-              <Tree
-                dir={tree}
-                depth={0}
-                open={open}
-                selected={marked}
-                onToggle={toggleFolder}
-                onSelect={selectFile}
-              />
-              {listing.truncated ? <PanelListNote>Listing truncated.</PanelListNote> : null}
-            </>
+            <Tree
+              dir={tree}
+              depth={0}
+              open={open}
+              selected={marked}
+              onToggle={toggleFolder}
+              onSelect={selectFile}
+            />
           )}
+          {/* Either list leans on the listing: an untracked folder's files are
+              only known through it, so a cut-off listing can drop them here too. */}
+          {listing.truncated ? <PanelListNote>Listing truncated.</PanelListNote> : null}
         </>
       }
     >
       {!current ? (
-        <PanelEmpty>Select a file to see it.</PanelEmpty>
+        <PanelQuiet>Select a file to see it.</PanelQuiet>
       ) : currentChange ? (
         <DiffPane
-          key={current}
+          // Keyed by source as well as path: a pane kept across a switch would
+          // show the other source's diff while this one's loads.
+          key={`${revision ?? "working-tree"}:${current}`}
           sessionId={sessionId}
           file={currentChange}
           counts={counts}
           revision={revision}
+          action={isDesktop ? reveal : null}
         />
       ) : (
-        <FilePane key={current} sessionId={sessionId} path={current} revision={revision} />
+        <FilePane
+          key={`${revision ?? "working-tree"}:${current}`}
+          sessionId={sessionId}
+          path={current}
+          revision={revision}
+          action={isDesktop ? reveal : null}
+        />
       )}
     </PanelSplit>
   );

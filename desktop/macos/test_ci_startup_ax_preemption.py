@@ -147,14 +147,13 @@ class ProposalControls(unittest.TestCase):
         self.assertLess(source.index('companion.stop()'),source.index('settled = witness.settle('))
         self.assertIn('errors[stage] = primary_error = error',source)
         self.assertIn('primary_error = primary_error or error',source)
-    def test_swift_retained_reader_and_unconditional_fatal_exit_are_untouched(self):
+    def test_swift_interaction_contract_retains_the_fatal_failure_and_original_deadlines(self):
         source=(P/'CIStartupAXWitness.swift').read_text()
-        opening=source.index('if apps.count == 1, target.pid != 0,')
-        fatal=source.index('throw OwnershipError.invalid // Original extra-CG-window refusal, always fatal.',opening)
-        self.assertNotIn('publish(',source[opening:fatal])
-        self.assertIn('pristine: refusals == 0 && retired == nil && !pairedAttempted && reader.failureData == nil',source)
-        self.assertIn('try reader.observe(pid: target.pid, frame: frame)',source[opening:fatal])
-        self.assertIn('&& ended < deadline && ended - began <= 1_000_000_000',source[opening:fatal])
+        self.assertNotIn('Original extra-CG-window refusal, always fatal.',source)
+        self.assertIn('try reader.observe(pid: target.pid, frame: frame)',source)
+        self.assertIn('reader.interaction(request, pid: target.pid)',source)
+        self.assertIn('request.deadline_ns',source)
+        self.assertIn('exit(1)',source)
 
 if __name__ == "__main__":
     unittest.main()

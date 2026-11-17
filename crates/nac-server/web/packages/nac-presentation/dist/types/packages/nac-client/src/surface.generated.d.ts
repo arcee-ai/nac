@@ -1,6 +1,7 @@
 export declare const NAC_API_SURFACE: {
     readonly "GET /sessions/{session_id}/integrations": "private:standalone session integration status";
     readonly "POST /sessions/{session_id}/integrations/refresh": "private:standalone explicit session integration refresh";
+    readonly "POST /sessions/{session_id}/workspace/reveal": "api.revealWorkspacePath";
     readonly "GET /product-context": "api.getProductContext";
     readonly "POST /product-destinations/resolve": "api.resolveProductDestination";
     readonly "POST /sessions/{session_id}/task-followup-delegations": "private:human task follow-up delegation issuance";
@@ -16,6 +17,8 @@ export declare const NAC_API_SURFACE: {
     readonly "POST /sessions/{session_id}/heartbeats/preview": "private:passive existing-chat calendar preview";
     readonly "POST /sessions/{session_id}/heartbeats/attention": "private:standalone human result acknowledgement";
     readonly "GET /attention/events": "private:native opt-in metadata attention stream";
+    readonly "GET /attention": "private:standalone passive fleet attention snapshot";
+    readonly "GET /attention/stream": "private:standalone passive fleet attention stream";
     readonly "GET /projects/{project_id}/task-schedules": "private:standalone Local interval task inventory";
     readonly "GET /projects/{project_id}/task-schedules/{schedule_id}": "private:standalone passive interval task history and retained resources";
     readonly "POST /projects/{project_id}/task-schedules/control": "private:standalone human interval task control";
@@ -62,6 +65,7 @@ export declare const NAC_API_SURFACE: {
     readonly "PUT /credentials/{name}": "api.storeCredential";
     readonly "DELETE /credentials/{name}": "api.deleteCredential";
     readonly "GET /fs/browse": "api.browsePath";
+    readonly "POST /fs/folders": "api.createFolder";
     readonly "GET /health": "api.health";
     readonly "GET /healthz": "private:liveness probe for infrastructure";
     readonly "GET /managed/github": "api.getManagedGitHub";
@@ -172,6 +176,8 @@ export declare const NAC_API_SURFACE: {
     readonly "DELETE /ssh-configs/{config_id}": "api.deleteSshConfig";
     readonly "PATCH /ssh-configs/{config_id}": "api.updateSshConfig";
     readonly "POST /ssh/browse": "api.browseSshPath";
+    readonly "POST /ssh/folders": "api.createSshFolder";
+    readonly "GET /ssh/aliases": "api.listSshAliases";
     readonly "GET /store": "api.getStore";
     readonly "GET /ui-config": "client.getUiConfiguration";
 };

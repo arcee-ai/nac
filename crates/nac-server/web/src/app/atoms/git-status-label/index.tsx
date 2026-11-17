@@ -30,51 +30,51 @@ interface GitStatusTone {
 export const GIT_STATUS_TONE: Record<GitStatus, GitStatusTone> = {
   [GitStatus.Changed]: {
     title: "Modified",
-    name: "text-danger-primary",
+    name: "text-basic-primary",
     fill: "text-fill-danger-primary",
     letter: "text-danger-primary",
   },
   [GitStatus.Added]: {
     title: "Added",
-    name: "text-info-primary",
-    fill: "text-fill-info-primary",
-    letter: "text-info-primary",
+    name: "text-basic-primary",
+    fill: "text-fill-success-primary",
+    letter: "text-success-primary",
   },
   [GitStatus.Deleted]: {
     title: "Deleted",
-    name: "text-error-primary",
+    name: "text-basic-tertiary line-through decoration-[var(--f-ink-5)]",
     fill: "text-fill-error-primary",
     letter: "text-error-primary",
   },
   [GitStatus.ChangedName]: {
     title: "Renamed",
-    name: "text-accent-primary",
-    fill: "text-fill-accent-primary",
-    letter: "text-accent-primary",
+    name: "text-basic-primary",
+    fill: "text-fill-basic-secondary",
+    letter: "text-basic-secondary",
   },
   [GitStatus.Copied]: {
     title: "Copied",
-    name: "text-info-secondary",
-    fill: "text-fill-info-secondary",
-    letter: "text-info-secondary",
+    name: "text-basic-primary",
+    fill: "text-fill-basic-secondary",
+    letter: "text-basic-secondary",
   },
   [GitStatus.ChangedType]: {
     title: "Type changed",
-    name: "text-danger-secondary",
-    fill: "text-fill-danger-secondary",
-    letter: "text-danger-secondary",
+    name: "text-basic-primary",
+    fill: "text-fill-danger-primary",
+    letter: "text-danger-primary",
   },
   [GitStatus.Conflict]: {
     title: "Conflict",
-    name: "text-error-secondary",
-    fill: "text-fill-error-secondary",
-    letter: "text-error-secondary",
+    name: "text-error-primary",
+    fill: "text-fill-error-primary",
+    letter: "text-error-primary",
   },
   [GitStatus.NotTracked]: {
     title: "Untracked",
-    name: "text-basic-tertiary",
-    fill: "text-fill-basic-tertiary",
-    letter: "text-basic-muted",
+    name: "text-basic-primary",
+    fill: "text-fill-success-primary",
+    letter: "text-success-primary",
   },
   [GitStatus.Ignored]: {
     title: "Ignored",
@@ -117,7 +117,7 @@ export default function GitStatusLabel({
       aria-hidden
       title={tone.title}
       className={cn(
-        "header-2xs inline-flex size-4 shrink-0 items-center justify-center",
+        "code text-[11px] font-semibold !leading-4 inline-flex size-4 shrink-0 items-center justify-center",
         tone.letter,
         className,
       )}

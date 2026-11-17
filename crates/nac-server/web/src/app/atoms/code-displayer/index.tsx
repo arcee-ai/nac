@@ -29,17 +29,38 @@ interface CodeDisplayerProps {
 }
 
 /**
- * The design's Plex Mono Medium 12/16 without tracking. `.code` sets a 1.5
- * line height and tracking in unlayered CSS, which only `!` utilities outrank.
+ * Focus mono: IBM Plex Mono at 12.5/20 without tracking, the GitHub diff
+ * rhythm. `.code` sets its own line height and tracking in unlayered CSS,
+ * which only `!` utilities outrank.
  */
-const CODE_TYPE = "code code-small font-medium !leading-4 !tracking-normal";
+export const DIFF_CODE_TYPE =
+  "code text-[length:var(--type-mono)] !leading-5 !tracking-normal tabular";
 
-const GUTTER = cn(CODE_TYPE, "w-12 shrink-0 select-none text-right text-basic-muted opacity-50");
+/** The line-number column: muted, right-aligned, never selected with the code. */
+export const DIFF_GUTTER = cn(
+  DIFF_CODE_TYPE,
+  "w-11 shrink-0 select-none pr-2 text-right text-basic-muted",
+);
 
 const ROW_TONE: Record<CodeDisplayerLineKind, string> = {
-  insert: "bg-success-primary border-success-primary",
-  delete: "bg-error-primary border-error-primary",
-  context: "border-transparent",
+  insert: "bg-[var(--f-green-wash)]",
+  delete: "bg-[var(--f-red-wash)]",
+  context: "",
+};
+
+/** GitHub's deeper gutter tint on a changed line. */
+const GUTTER_TONE: Record<CodeDisplayerLineKind, string> = {
+  insert: "bg-[var(--f-green-wash)] text-[var(--f-green-text)]",
+  delete: "bg-[var(--f-red-wash)] text-[var(--f-red-text)]",
+  context: "",
+};
+
+const SIGN: Record<CodeDisplayerLineKind, string> = { insert: "+", delete: "−", context: "" };
+
+const SIGN_TONE: Record<CodeDisplayerLineKind, string> = {
+  insert: "text-[var(--f-green-text)]",
+  delete: "text-[var(--f-red-text)]",
+  context: "",
 };
 
 /** The tint alone marks a change, so a screen reader hears it before the number. */
@@ -48,19 +69,30 @@ const SPOKEN_KIND: Partial<Record<CodeDisplayerLineKind, string>> = {
   delete: "Deleted",
 };
 
-function Line({ line }: { line: CodeDisplayerLine }) {
+/**
+ * One line of a diff or a file: number, a `+`/`−` sign column and the code,
+ * on a green or red wash when it changed. Long lines wrap, so the pane stays
+ * the only scroller. Shared by the Changes panel and the Insights items.
+ */
+export function DiffLineRow({ line }: { line: CodeDisplayerLine }) {
   const kind = line.kind ?? "context";
   const spoken = SPOKEN_KIND[kind];
   return (
-    <div className={cn("flex min-h-4 w-full items-start border-l-2 border-solid", ROW_TONE[kind])}>
-      <span className={GUTTER}>
+    <div className={cn("flex min-h-5 w-full min-w-0 items-start", ROW_TONE[kind])}>
+      <span className={cn(DIFF_GUTTER, GUTTER_TONE[kind])}>
         {spoken ? <span className="sr-only">{spoken} </span> : null}
-        {line.number ?? null}
+        <span className={kind === "context" ? undefined : "opacity-70"}>{line.number ?? null}</span>
+      </span>
+      <span
+        aria-hidden
+        className={cn(DIFF_CODE_TYPE, "w-4 shrink-0 select-none text-center", SIGN_TONE[kind])}
+      >
+        {SIGN[kind]}
       </span>
       <span
         className={cn(
-          CODE_TYPE,
-          "min-w-0 flex-1 whitespace-pre-wrap break-words px-2 text-basic-primary",
+          DIFF_CODE_TYPE,
+          "min-w-0 flex-1 whitespace-pre-wrap break-words pr-3 text-basic-primary",
         )}
       >
         {line.tokens
@@ -78,11 +110,10 @@ function Line({ line }: { line: CodeDisplayerLine }) {
 
 /**
  * A diff with line numbers, as the Create and Edit Insights items draw it
- * under their file button. An inserted line sits on the success tint and a
- * deleted one on the error tint, each behind a 2px rule of its tone; a context
- * line keeps a clear rule so every line's code starts at the same place. Long
- * lines wrap instead of scrolling sideways. The caller passes the hunks, with
- * tokens when it wants syntax colours.
+ * under their file button: GitHub-like green and red washes on the code
+ * surface, a muted gutter and a sign column so every line's code starts at
+ * the same place. Long lines wrap instead of scrolling sideways. The caller
+ * passes the hunks, with tokens when it wants syntax colours.
  *
  * It is a named group rather than a region: a transcript can show many diffs,
  * and each would otherwise become a landmark.
@@ -96,21 +127,21 @@ const CodeDisplayer: React.FC<CodeDisplayerProps> = ({
     role="group"
     aria-label={ariaLabel}
     className={cn(
-      "flex w-full min-w-0 flex-col overflow-clip rounded-lg py-2 [&>*]:shrink-0",
+      "flex w-full min-w-0 flex-col overflow-clip rounded-lg border border-tertiary bg-[var(--color-code-bg)] py-1.5 [&>*]:shrink-0",
       className,
     )}
   >
     {hunks.map((hunk, hunkIndex) => (
       <Fragment key={hunkIndex}>
         {hunkIndex > 0 ? (
-          <div role="separator" className="flex w-full border-l-2 border-solid border-transparent">
-            <span aria-hidden className={GUTTER}>
+          <div role="separator" className="flex w-full bg-[var(--f-wash-1)]">
+            <span aria-hidden className={DIFF_GUTTER}>
               …
             </span>
           </div>
         ) : null}
         {hunk.map((line, lineIndex) => (
-          <Line key={lineIndex} line={line} />
+          <DiffLineRow key={lineIndex} line={line} />
         ))}
       </Fragment>
     ))}

@@ -84,7 +84,7 @@ for (const [name, viewport, mobile] of [
     // Open closes the phone's panel, so it does not cover the chat it opened.
     if (mobile) await expect(page.getByRole("dialog")).toHaveCount(0);
     await expect(page.getByRole("textbox", { name: "Send a message" })).toHaveValue("");
-    await page.getByRole("button", { name: "Parent chat" }).click();
+    await page.getByRole("button", { name: /, parent chat$/ }).click();
     await expect(page).toHaveURL(new RegExp(`/session/${parentId}/delegated$`));
     if (mobile) {
       // Parent return restores this exact phone panel and selected coordinator.

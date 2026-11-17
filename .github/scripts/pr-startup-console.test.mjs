@@ -61,11 +61,15 @@ test('required Mac workflow runs the exact nominated geometry and AX lifetime co
   assert.equal(job.if, undefined);
   assert.equal(job['continue-on-error'], undefined);
   assert.equal(job.steps[0].with.ref, '${{ inputs.source-sha }}');
+  assert.equal(job.steps[0].with.path, 'ci-harness');
   assert.equal(job.steps[2].with.ref, '${{ steps.policy-source.outputs.revision }}');
+  assert.equal(job.steps[2].with.path, 'qualification-tests');
+  assert.deepEqual(job.defaults, { run: { 'working-directory': 'ci-harness' } });
+  assert.deepEqual(job.env, { DEVELOPER_DIR: '/Applications/Xcode_26.6.app/Contents/Developer' });
   const controls = job.steps[3];
   const expectedEnv = { NAC342_SWIFT_PANEL_PROOF: '1', NAC342_AX_WITNESS_PROOF: '1' };
-  const expectedRun = 'python3 -B desktop/macos/ci_startup_console_check.py --source-root .startup-panel-q --panel\n'
-    + 'NAC342_AX_Q_ROOT="$GITHUB_WORKSPACE/.startup-panel-q" python3 -B desktop/macos/test_ci_startup_ax_lifetime.py\n';
+  const expectedRun = 'python3 -B desktop/macos/ci_startup_console_check.py --source-root "$GITHUB_WORKSPACE/qualification-tests" --panel\n'
+    + 'NAC342_AX_Q_ROOT="$GITHUB_WORKSPACE/qualification-tests" python3 -B desktop/macos/test_ci_startup_ax_lifetime.py\n';
   const verify = step => {
     assert.deepEqual(step.env, expectedEnv);
     assert.equal(step.run, expectedRun);
@@ -75,13 +79,19 @@ test('required Mac workflow runs the exact nominated geometry and AX lifetime co
     s => { delete s.env.NAC342_AX_WITNESS_PROOF; },
     s => { s.env.NAC342_SWIFT_PANEL_PROOF = '0'; },
     s => { s.run = s.run.split('\n')[0]; },
-    s => { s.run = s.run.replace('$GITHUB_WORKSPACE/.startup-panel-q', '/foreign'); },
+    s => { s.run = s.run.replace('$GITHUB_WORKSPACE/qualification-tests', '/foreign'); },
     s => { s.run = s.run.replace('test_ci_startup_ax_lifetime.py', 'other.py'); },
   ]) {
     const changed = structuredClone(controls); mutate(changed);
     assert.throws(() => verify(changed));
   }
-  for (const step of job.steps) {
+  const sdk = job.steps[4], artifact = job.steps[5];
+  assert.deepEqual(sdk.env, { EXPECTED_SHA: '${{ inputs.source-sha }}' });
+  assert.equal(sdk.run, 'python3 -B desktop/macos/ci_startup_sdk.py --expected-sha "$EXPECTED_SHA" --source-root "$GITHUB_WORKSPACE/qualification-tests" --output "$RUNNER_TEMP/startup-sdk-evidence"');
+  assert.equal(artifact.if, 'always()');
+  assert.equal(artifact.uses, 'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02');
+  assert.deepEqual(artifact.with, { name: 'startup-sdk-${{ inputs.source-sha }}', path: '${{ runner.temp }}/startup-sdk-evidence', 'if-no-files-found': 'error', 'retention-days': 7 });
+  for (const step of job.steps.slice(0, 5)) {
     assert.equal(step.if, undefined);
     assert.equal(step['continue-on-error'], undefined);
     if (step.uses) {

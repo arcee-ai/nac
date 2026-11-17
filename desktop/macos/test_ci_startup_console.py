@@ -10,7 +10,7 @@ import unittest
 from ci_startup_attachments import StartupAttachmentError, collect, require_observation
 from ci_startup_fixture import CASES, TEST_FILES, operations
 from ci_xctest_attachments import digest
-from test_ci_startup_attachments import StartupAttachmentTests
+import test_ci_startup_attachments as attachment_controls
 
 
 class StartupConsoleTests(unittest.TestCase):
@@ -26,13 +26,22 @@ class StartupConsoleTests(unittest.TestCase):
         self.assertEqual(title.count('verify()'), 1)
         self.assertIn('frame.intersects(bounds) && verify()', title)
         window = source.split('private func guardWindow(', 1)[1].split('private func queryDiagnostic(', 1)[0]
-        self.assertEqual(window.count('observations.append(try console())'), 1)
+        self.assertIn('number: Int, record: Bool = true) throws {', window)
+        self.assertEqual(window.count('try console()'), 1)
+        self.assertIn('let state = try console()\n        if record { observations.append(state) }', window)
+        self.assertEqual(window.count('observations.append('), 1)
         main = source.split('func testOrdinaryStartup() throws {', 1)[1]
         self.assertEqual(main.count('observations.append(try console())'), 1)
         guard = main.split('func guardTarget() throws {', 1)[1].split('func dispatch(', 1)[0]
         self.assertEqual(guard.count('try guardWindow('), 1)
+        self.assertIn('try guardWindow(ui, running: running, paths: paths, launch: launch, number: number)\n', guard)
         dispatch = main.split('func dispatch(', 1)[1].split('func text(', 1)[0]
         self.assertEqual(dispatch.count('try guardTarget()'), 2)
+        # Each of the eleven configured-local inputs repeats the checked console
+        # guard immediately before dispatch without adding an exported observation.
+        self.assertEqual(main.count('try guardWindow('), 2)
+        self.assertEqual(main.count('record: false'), 1)
+        self.assertIn('try guardWindow(ui, running: running, paths: paths, launch: launch, number: number, record: false)\n', dispatch)
         for anchor in ('try guardTarget()\n        if ["invalidConfig", "futureStore"]',
                        'try guardTarget()\n        let screenshot',
                        'try guardTarget()\n        if let axClient'):
@@ -53,7 +62,7 @@ class StartupConsoleTests(unittest.TestCase):
         return trace + ['before-screenshot', 'after-screenshot']
 
     def producer_fixture(self, case):
-        fixture = StartupAttachmentTests()
+        fixture = attachment_controls.StartupAttachmentTests()
         config, config_hash, witness, rows = fixture.fixture(case)
         observation = json.loads(rows[-2][1])
         # Pure exporter controls use the local fixture, independent of external Q.

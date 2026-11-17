@@ -167,7 +167,7 @@ export function HeartbeatForm({
             />
             {mode === "weekdays" ? (
               <fieldset className="flex flex-wrap gap-3">
-                <legend className="label-small mb-2">Weekdays</legend>
+                <legend className="type-label mb-2 text-basic-secondary">Weekdays</legend>
                 {weekdays.map((label, index) => (
                   <Checkbox
                     key={label}
@@ -196,11 +196,17 @@ export function HeartbeatForm({
               />
             ) : null}
             {!draft ? (
-              <p role="alert">Choose a local time and an explicit IANA timezone.</p>
+              <p role="alert" className="type-meta text-[var(--f-amber-text)]">
+                Choose a local time and an explicit IANA timezone.
+              </p>
             ) : preview.error ? (
-              <p role="alert">{preview.error.message}</p>
+              <p role="alert" className="type-meta text-error-primary">
+                {preview.error.message}
+              </p>
             ) : preview.isFetching ? (
-              <p role="status">Calculating upcoming checks…</p>
+              <p role="status" className="type-meta text-basic-tertiary">
+                Calculating upcoming checks…
+              </p>
             ) : preview.data ? (
               <CalendarPreview preview={preview.data} />
             ) : null}
@@ -269,7 +275,10 @@ export function HeartbeatForm({
             hintText="Leave empty for an ordinary check. A goal must already be active in this chat."
           />
         )}
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
+          <Button variant={ButtonVariant.Ghost} onClick={onCancel}>
+            Cancel
+          </Button>
           <Button type="submit" variant={ButtonVariant.Primary} disabled={!ready}>
             {freshTasks
               ? initial
@@ -279,7 +288,6 @@ export function HeartbeatForm({
                 ? "Save heartbeat"
                 : "Create heartbeat"}
           </Button>
-          <Button onClick={onCancel}>Cancel</Button>
         </div>
       </fieldset>
     </form>

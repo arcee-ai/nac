@@ -11,5 +11,6 @@ interface ToastProps {
     dismissing: boolean;
     onClose: () => void;
 }
+/** A small floating pill: 13px, one icon, the message and a quiet dismiss. */
 declare const Toast: React.FC<ToastProps>;
 export default Toast;

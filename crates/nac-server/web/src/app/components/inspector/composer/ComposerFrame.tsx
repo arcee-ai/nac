@@ -4,9 +4,10 @@ import { Button, ButtonContent, ButtonSize } from "@/app/atoms";
 import { cn } from "@/app/lib/cn";
 
 /**
- * The ground fades in under a 656px column of controls, so the transcript
- * scrolls out beneath the composer instead of stopping at a card edge. Only
- * the controls take the pointer; the faded margin lets it through.
+ * The ground fades in under a 720px column — the transcript's own measure —
+ * so the conversation runs out beneath the floating composer instead of
+ * stopping at a card edge. Only the controls take the pointer; the faded
+ * margin lets it through.
  */
 export function ComposerFrame({
   compact,
@@ -18,8 +19,8 @@ export function ComposerFrame({
   return (
     <form
       className={cn(
-        "pointer-events-none flex flex-col items-center gap-4 py-4 [&>*]:pointer-events-auto [&>*]:w-full [&>*]:max-w-[656px]",
-        compact ? "px-2" : "px-4",
+        "pointer-events-none flex flex-col items-center gap-2 [&>*]:pointer-events-auto [&>*]:w-full [&>*]:max-w-[720px]",
+        compact ? "px-2 pt-3 pb-[max(8px,env(safe-area-inset-bottom))]" : "px-4 pt-4 pb-4",
         faded && "fade-from-bottom",
         className,
       )}
@@ -31,10 +32,11 @@ export function ComposerFrame({
 }
 
 /**
- * The level-1 card both composers share: the field row over the session
- * controls. A focused field draws a hairline inside the edge, in the border
- * token `outline` names, and the goal editor washes the whole card in accent.
- * Rows that should paint over the wash are `relative`.
+ * The level-1 card both composers share: the field over its one row of
+ * controls, 22px round with a hairline and a soft floating shadow. A focused
+ * field firms the hairline, in the border token `outline` names, and the goal
+ * editor lays a faint ink wash over the card. Rows that should paint over the
+ * wash are `relative`.
  */
 export function ComposerCard({
   compact,
@@ -52,8 +54,8 @@ export function ComposerCard({
   return (
     <div
       className={cn(
-        "relative flex flex-col gap-4 bg-elevation-level-1 pb-4 shadow-xl",
-        compact ? "rounded-[24px] px-1 pt-1" : "rounded-[32px] px-2 pt-2",
+        "relative flex flex-col gap-1 rounded-composer border border-tertiary bg-elevation-level-1 shadow-lg transition-[border-color] duration-150 ease-out",
+        compact ? "p-1.5" : "p-2",
         className,
       )}
     >
@@ -63,10 +65,10 @@ export function ComposerCard({
           className={cn(
             "pointer-events-none absolute inset-0 rounded-[inherit]",
             surface === "goal"
-              ? "bg-accent-primary"
+              ? "bg-[var(--f-wash-1)]"
               : outline === "tertiary"
-                ? "border border-tertiary"
-                : "border border-muted",
+                ? "-m-px border border-[var(--f-line-ink)]"
+                : "-m-px border border-secondary",
           )}
         />
       ) : null}

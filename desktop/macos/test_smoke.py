@@ -1,4 +1,5 @@
 import json
+import plistlib
 from contextlib import ExitStack
 import hashlib
 import io
@@ -10,6 +11,53 @@ from unittest.mock import Mock, patch
 
 import smoke
 from smoke import cleanup_failed_case
+
+
+class ConsoleLockTests(unittest.TestCase):
+    def observe(self, record):
+        with patch('smoke.subprocess.check_output', return_value=plistlib.dumps(record)):
+            return smoke.session_lock_state()
+
+    def test_hosted_root_lock_fact_survives_omitted_optional_cgs_flags(self):
+        record = [dict(IOConsoleLocked=False, IOConsoleUsers=[dict(kCGSessionLoginDoneKey=True)])]
+        self.assertEqual(self.observe(record), dict(observed=True, locked=False))
+
+    def test_any_explicit_lock_overrides_conflicting_unlocked_facts(self):
+        for root, cgs in [(False, True), (True, False), (True, True)]:
+            with self.subTest(root=root, cgs=cgs):
+                record = [dict(IOConsoleLocked=root, IOConsoleUsers=[dict(CGSSessionScreenIsLocked=cgs)])]
+                self.assertEqual(self.observe(record), dict(observed=True, locked=True))
+
+    def test_existing_positive_cgs_observation_remains_supported(self):
+        self.assertEqual(self.observe(dict(IOConsoleUsers=[dict(CGSSessionScreenIsLocked=False)])),
+                         dict(observed=True, locked=False))
+
+    def test_child_only_root_named_fact_cannot_qualify_the_console(self):
+        record = [dict(IORegistryEntryChildren=[dict(IOConsoleLocked=False)])]
+        self.assertEqual(self.observe(record), dict(observed=False, locked=None))
+
+    def test_nested_explicit_cgs_lock_overrides_the_actual_root(self):
+        record = [dict(IOConsoleLocked=False, IORegistryEntryChildren=[
+            dict(IOConsoleUsers=[dict(CGSSessionScreenIsLocked=True)])])]
+        self.assertEqual(self.observe(record), dict(observed=True, locked=True))
+
+    def test_absent_or_malformed_facts_remain_unknown(self):
+        for record in [[], {}, [dict(IOConsoleUsers=[{}])], [dict(IOConsoleLocked=0)],
+                       [dict(IOConsoleLocked='false')], [dict(IOConsoleLocked=False, IOConsoleUsers={})],
+                       [dict(IOConsoleLocked=False, IOConsoleUsers=[dict(CGSSessionScreenIsLocked=0)])],
+                       [dict(IOConsoleLocked=False, IOConsoleUsers=['invalid'])],
+                       [dict(IOConsoleLocked=False, IORegistryEntryChildren={})]]:
+            with self.subTest(record=record):
+                self.assertEqual(self.observe(record), dict(observed=False, locked=None))
+
+    def test_explicit_lock_remains_locked_even_beside_malformed_facts(self):
+        record = [dict(IOConsoleLocked=True, IOConsoleUsers=[dict(CGSSessionScreenIsLocked='false')])]
+        self.assertEqual(self.observe(record), dict(observed=True, locked=True))
+
+    def test_unavailable_or_invalid_observations_remain_unknown(self):
+        for options in [dict(side_effect=OSError('unavailable')), dict(return_value=b'invalid plist')]:
+            with self.subTest(options=options), patch('smoke.subprocess.check_output', **options):
+                self.assertEqual(smoke.session_lock_state(), dict(observed=False, locked=None))
 
 
 class CleanupTests(unittest.TestCase):
@@ -52,7 +100,8 @@ class CleanupTests(unittest.TestCase):
 
 class MainCustodyTests(unittest.TestCase):
     def exercise(self, *, receipt='complete', actor_error=None, launch_error='timeout',
-                 wrapper_error=False, wrapper_timeout=False, passed=True, stderr_error=None):
+                 wrapper_error=False, wrapper_timeout=False, passed=True, stderr_error=None,
+                 prepare_error=False):
         with tempfile.TemporaryDirectory(prefix='nac-smoke-main-control-') as sandbox:
             sandbox = Path(sandbox)
             app = sandbox / 'Source.app'
@@ -146,6 +195,8 @@ class MainCustodyTests(unittest.TestCase):
                 ]:
                     stack.enter_context(patch.object(smoke, target, replacement) if '.' not in target
                                         else patch('smoke.' + target, replacement))
+                if prepare_error:
+                    stack.enter_context(patch('smoke.os.link', side_effect=primary))
                 stack.enter_context(patch.dict('os.environ', {'NAC_MAC_SMOKE_SCENARIOS': 'normal'}))
                 sink = Mock(write=Mock(side_effect=stderr_error)) if stderr_error else io.StringIO()
                 stack.enter_context(patch('sys.stderr', sink))
@@ -176,6 +227,12 @@ class MainCustodyTests(unittest.TestCase):
         result['launcher'].terminate.assert_called_once()
         self.assertEqual(result['teardown_waits'], [5])
         self.assertIn('mismatched actor ownership', '\n'.join(result['failure'].__notes__))
+
+    def test_prelaunch_failure_keeps_primary_without_unbound_driver(self):
+        result = self.exercise(prepare_error=True)
+        self.assertIs(result['failure'], result['primary'])
+        self.assertFalse(result['retained'])
+        result['launcher'].terminate.assert_not_called()
 
     def test_incomplete_actor_receipts_never_establish_cleanup(self):
         for receipt in ('missing', 'malformed', 'partial', 'bool-pid', 'zero-engine'):

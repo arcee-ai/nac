@@ -2,8 +2,29 @@
 <html lang="en" class="dark" data-theme="dark" style="color-scheme: dark">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="color-scheme" content="dark" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <!-- Applies the saved theme (or the system's) before first paint, so the
+         page never flashes the other mode. ThemeProvider keeps it current. -->
+    <script>
+      (function () {
+        var theme = "system";
+        try {
+          var saved = localStorage.getItem("nac-theme");
+          if (saved === "light" || saved === "dark" || saved === "system") theme = saved;
+        } catch (_) {}
+        var dark =
+          theme === "dark" ||
+          (theme === "system" &&
+            (!window.matchMedia || window.matchMedia("(prefers-color-scheme: dark)").matches));
+        var mode = dark ? "dark" : "light";
+        var root = document.documentElement;
+        root.classList.remove("light", "dark");
+        root.classList.add(mode);
+        root.setAttribute("data-theme", mode);
+        root.style.colorScheme = mode;
+      })();
+    </script>
     <!-- Referenced from `src/` rather than a `public/` copy: the embedded server
          serves only `/assets/*`, so an icon at the dist root would 404. -->
     <link rel="icon" type="image/svg+xml" href="/src/app/assets/img/favicon.svg" />

@@ -15,6 +15,86 @@ from ci_xctest_attachments import bounded_file
 from ci_xctest_attachments import digest as data_digest
 
 
+_PRODUCER_FAILURE_STAGES = frozenset((
+    'unspecified', 'configuration', 'initial_empty', 'ready_emit',
+    'resources_candidates', 'resources_pinned', 'resources_count', 'resources_urls',
+    'include_probe', 'include_admission', 'process_list',
+    'pending_limit', 'children', 'arguments', 'arguments_absence',
+    'environment', 'detail_probe', 'arguments_hash', 'app_binding',
+    'app_launch', 'current_app', 'ancestry', 'known_coverage',
+    'known_limit', 'snapshot_record', 'snapshot_emit',
+))
+_PRODUCER_FAILURE_KINDS = frozenset((
+    'process_probe', 'ownership_invalid', 'arguments_unavailable', 'other',
+))
+_ENVIRONMENT_FIELDS = frozenset((
+    'HOME', 'NAC_HOME', 'PATH', 'LANG', 'NAC_TELEMETRY', 'NAC_ORCHESTRATION',
+    'GIT_CONFIG_NOSYSTEM', 'GIT_CONFIG_GLOBAL', 'BROWSER', 'MODELS_DEV_URL', 'other',
+))
+
+
+def _environment_rejection(value):
+    """No subject identity, arbitrary field names or values become diagnostic authority."""
+    common = {'executable_class', 'previously_known', 'predicate'}
+    if not (type(value) is dict and common <= set(value)
+            and type(value['executable_class']) is str
+            and value['executable_class'] in ('native', 'bundled_engine', 'descendant')
+            and type(value['previously_known']) is bool and type(value['predicate']) is str):
+        return None
+    predicate = value['predicate']
+    if predicate == 'contract':
+        valid = (set(value) == common | {'contract_check'} and type(value['contract_check']) is str
+                 and value['contract_check'] in ('key_set', 'empty_launcher', 'non_path_value'))
+    elif predicate == 'prohibited':
+        valid = (set(value) == common | {'category'} and type(value['category']) is str
+                 and value['category'] in ('token', 'api_key', 'managed_config'))
+    elif predicate in ('native_argv', 'engine_argv'):
+        valid = (set(value) == common | {'argv0_matches', 'helper_present', 'serving_present'}
+                 and all(type(value[key]) is bool for key in ('argv0_matches', 'helper_present', 'serving_present'))
+                 and value['executable_class'] == ('native' if predicate == 'native_argv' else 'bundled_engine'))
+        if valid:
+            valid = not (value['argv0_matches'] and (
+                not value['helper_present'] and not value['serving_present'] if predicate == 'native_argv'
+                else value['helper_present'] != value['serving_present']))
+    elif predicate == 'controlled_value':
+        valid = (set(value) == common | {'field', 'difference'} and type(value['field']) is str
+                 and value['field'] in _ENVIRONMENT_FIELDS and type(value['difference']) is str
+                 and value['difference'] in ('absent', 'different'))
+    else:
+        valid = False
+    return dict(value) if valid else None
+
+
+def _producer_failure(record):
+    """Closed passive projection; malformed annotations never replace original failure."""
+    value = record.get('producer_failure')
+    if (type(value) is dict and {'stage', 'kind'} <= set(value) <= {'stage', 'kind', 'environment_rejection', 'bsd_read'}
+            and type(value['stage']) is str and value['stage'] in _PRODUCER_FAILURE_STAGES
+            and type(value['kind']) is str and value['kind'] in _PRODUCER_FAILURE_KINDS
+            and ((value['kind'] == 'process_probe') == bool(record.get('unresolved')))):
+        projection = {'stage': value['stage'], 'kind': value['kind']}
+        if 'environment_rejection' in value:
+            detail = _environment_rejection(value['environment_rejection'])
+            if value['stage'] != 'environment' or value['kind'] != 'ownership_invalid' or detail is None:
+                return None
+            projection['environment_rejection'] = detail
+        if 'bsd_read' in value:
+            detail = value['bsd_read']
+            stamp = record.get('observed_uptime_ns')
+            unresolved = record.get('unresolved')
+            if not (value['kind'] == 'process_probe' and type(detail) is dict
+                    and set(detail) == {'returned_count', 'expected_count', 'errno'}
+                    and all(type(detail[key]) is int and -(2**31) <= detail[key] < 2**31 for key in detail)
+                    and 0 < detail['expected_count'] <= 65536 and detail['returned_count'] != detail['expected_count']
+                    and type(stamp) is str and re.fullmatch(r'0|[1-9][0-9]{0,19}', stamp) and int(stamp) < 2**64
+                    and type(unresolved) is list and len(unresolved) == 1 and type(unresolved[0]) is dict
+                    and unresolved[0].get('reason') in ('bsd_denied', 'bsd_unavailable')):
+                return None
+            projection['bsd_read'] = dict(detail, failure_record_uptime_ns=stamp)
+        return projection
+    return None
+
+
 def require(condition, code='invalid_record'):
     if not condition:
         error = RuntimeError('Startup process ownership unavailable or ambiguous; preserve fixture')
@@ -112,8 +192,10 @@ class OwnerWitness:
             observed = int(stamp) / 1e9
             self.last_uptime_ns = int(stamp)
             if record.get('event') == 'failed':
-                require(set(record) == {'schema', 'event', 'complete', 'reason', 'retained_identities',
-                                        'unresolved', 'observed_uptime_ns'}
+                require({'schema', 'event', 'complete', 'reason', 'retained_identities',
+                         'unresolved', 'observed_uptime_ns'} <= set(record)
+                        <= {'schema', 'event', 'complete', 'reason', 'retained_identities',
+                            'unresolved', 'observed_uptime_ns', 'producer_failure'}
                         and record['complete'] is False and record['reason'] == 'ownership_observation_unavailable')
                 retained, unresolved = record['retained_identities'], record['unresolved']
                 require(isinstance(retained, list) and len(retained) <= 128
@@ -248,7 +330,12 @@ class OwnerWitness:
                 windows = apps[0]['windows']
                 if self.ui_root is None and not self.ui_failure and not self.ui_terminal and len(windows) == 1:
                     self.ui_root = windows[0]
-                if len(windows) > 1 or (self.ui_root is not None and windows and windows != [self.ui_root]):
+                interaction_contract = (self.config.get('scenario') == 'configuredLocal'
+                                        and type(self.config.get('ax_witness')) is dict)
+                invalid_inventory = (self.ui_root is None and len(windows) > 1) or (
+                    self.ui_root is not None and windows and (
+                        self.ui_root not in windows if interaction_contract else windows != [self.ui_root]))
+                if invalid_inventory:
                     self.ui_failure = self.ui_failure or 'app_windows'
                 if self.ui_root is not None and not windows:
                     self.ui_terminal = True
@@ -361,6 +448,10 @@ class OwnerWitness:
                     clock_basis='time.monotonic', observed_uptime_ns=str(observed),
                     last_accepted_uptime_ns=str(self.last_accepted_uptime_ns),
                     byte_count=min(byte_count, 65537), shape=shape)
+                if code == 'typed_failure' and type(record) is dict and record.get('event') == 'failed':
+                    projection = _producer_failure(record)
+                    if projection is not None:
+                        self.stream_diagnostic['producer_failure'] = projection
         except BaseException:
             pass  # Missing diagnostics cannot change the original failure/custody.
 

@@ -1,5 +1,5 @@
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
-import { visibleSessions, firstChatAdmission } from "@/app/features/ui-policy/policy";
+import { visibleSessions } from "@/app/features/ui-policy/policy";
 import { useEffect, useMemo, useState } from "react";
 import { Navigate, useParams } from "react-router-dom";
 
@@ -10,17 +10,11 @@ import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
 import { useProjects, useSessions } from "@/app/services/queries";
 
 /**
- * One in-flight create per project, so React StrictMode replaying the mount
- * effect cannot POST two chats before the session list refreshes.
- */
-const firstChatByProject = new Map<string, Promise<void>>();
-
-/**
  * `/project/:id` is an address for a project, but every screen that shows one is
- * really a chat inside it, so this lands on the project's newest chat.
+ * really a session inside it, so this lands on the project's newest session.
  *
- * A project with no chats yet starts one instead — which is also what happens
- * right after it is created.
+ * A project with no sessions yet opens Home's composer pointed at it (the one
+ * new-session flow), replacing this entry so Back does not bounce here.
  */
 export default function ProjectRedirectPage() {
   const { projectId = "" } = useParams();
@@ -69,20 +63,10 @@ export default function ProjectRedirectPage() {
     project != null &&
     newest == null;
 
-  const startChat = actions.newChat;
+  const startSession = actions.newChat;
   useEffect(() => {
-    if (!needsFirstChat) return;
-    let pending = firstChatByProject.get(projectId);
-    if (!pending) {
-      pending = startChat(
-        projectId,
-        firstChatAdmission(policy, sessionsQuery.data ?? [], projectId),
-      ).finally(() => {
-        firstChatByProject.delete(projectId);
-      });
-      firstChatByProject.set(projectId, pending);
-    }
-  }, [needsFirstChat, startChat, projectId, policy, sessionsQuery.data]);
+    if (needsFirstChat) void startSession(projectId, true);
+  }, [needsFirstChat, startSession, projectId]);
 
   // Deleted, or a stale link — the listing is the only honest place to land.
   const ownershipConfirmed = confirmedProjectId === projectId;

@@ -1,5 +1,6 @@
 import { cn } from "@/app/lib/cn";
 import { SESSION_BEHAVIORS } from "@/app/lib/sessionBehavior";
+import { behaviorLabel } from "@/app/features/home/behaviors";
 import type { SessionBehavior } from "@/app/types/api";
 
 export function SessionBehaviorPicker({
@@ -13,7 +14,7 @@ export function SessionBehaviorPicker({
 }) {
   return (
     <fieldset className="flex flex-col gap-2">
-      <legend className="label-small text-basic-primary">How should this chat work?</legend>
+      <legend className="type-label mb-1 text-basic-primary">How should this session work?</legend>
       <div className="grid grid-cols-1 gap-2 md:grid-cols-3" role="radiogroup">
         {SESSION_BEHAVIORS.map((option, index) => {
           const selected = option.id === value;
@@ -26,10 +27,12 @@ export function SessionBehaviorPicker({
               tabIndex={selected ? 0 : -1}
               disabled={disabled}
               className={cn(
-                "flex min-h-[196px] cursor-pointer flex-col gap-2 rounded-[6px] border p-3 text-left transition-colors",
+                "flex cursor-pointer flex-col gap-1.5 rounded-card border p-3.5 text-left outline-none md:min-h-[188px]",
+                "transition-[border-color,background-color] duration-150 ease-out motion-reduce:transition-none",
+                "focus-visible:ring-2 focus-visible:ring-[var(--f-focus)]",
                 selected
-                  ? "border-accent-primary bg-accent-secondary"
-                  : "border-border-primary bg-elevation-level-1 hover:bg-elevation-level-2",
+                  ? "border-[var(--f-line-ink)] bg-[var(--f-wash-1)]"
+                  : "border-tertiary bg-elevation-level-1 hover:border-secondary",
                 disabled && "cursor-not-allowed opacity-60",
               )}
               onClick={() => onChange(option.id)}
@@ -59,21 +62,21 @@ export function SessionBehaviorPicker({
               }}
             >
               <span className="flex items-center justify-between gap-2">
-                <span className="text-small font-medium text-basic-primary">{option.label}</span>
+                <span className="type-strong text-basic-primary">{behaviorLabel(option.id)}</span>
                 {option.id === "orchestrator" ? (
-                  <span className="tag-label shrink-0 text-basic-tertiary">Default</span>
+                  <span className="type-tag shrink-0 text-basic-tertiary">Default</span>
                 ) : null}
               </span>
-              <span className="text-xs text-basic-secondary">{option.topLevel}</span>
-              <span className="text-xs text-basic-secondary">{option.editing}</span>
-              <span className="text-xs text-basic-secondary">{option.delegation}</span>
-              <span className="mt-auto text-xs text-basic-muted">{option.inspection}</span>
+              <span className="type-meta text-basic-secondary">{option.topLevel}</span>
+              <span className="type-meta text-basic-secondary">{option.editing}</span>
+              <span className="type-meta text-basic-secondary">{option.delegation}</span>
+              <span className="type-meta mt-auto pt-1 text-basic-muted">{option.inspection}</span>
             </button>
           );
         })}
       </div>
-      <p className="text-micro text-basic-muted">
-        Behavior is fixed for the lifetime of this chat. Start a new chat to choose a different
+      <p className="type-meta mt-1 text-basic-muted">
+        Behavior is fixed for the lifetime of a session. Start a new session to choose a different
         behavior.
       </p>
     </fieldset>

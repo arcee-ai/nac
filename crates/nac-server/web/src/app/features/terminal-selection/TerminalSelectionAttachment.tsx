@@ -15,19 +15,19 @@ export function TerminalSelectionAttachment({ evidence, canonicalText, sessionId
   return (
     <section
       aria-labelledby={`${id}-title`}
-      className="w-full min-w-0 max-w-full rounded-lg border border-border-primary p-3 text-small text-basic-primary"
+      className="type-body-chrome w-full min-w-0 max-w-full rounded-card border border-tertiary bg-elevation-level-1 p-3 text-basic-primary"
     >
-      <h3 id={`${id}-title`} className="font-medium">
+      <h3 id={`${id}-title`} className="type-strong">
         Terminal selection
       </h3>
-      <p className="text-basic-secondary mt-1">
+      <p className="type-meta mt-1 text-basic-secondary">
         Reviewed rendered text · frozen capture. Live source availability is not checked.
         {inherited ? " Original source from another chat; no live access is granted." : ""}
       </p>
       <pre
         aria-label="Attached terminal output"
         tabIndex={0}
-        className="mt-3 max-h-64 max-w-full overflow-auto whitespace-pre-wrap break-words rounded bg-bg-elevation-level-1 p-3 font-mono"
+        className="code mt-3 max-h-64 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-lg bg-[var(--f-code-bg)] p-3 text-[12.5px]"
       >
         {evidence.text}
       </pre>

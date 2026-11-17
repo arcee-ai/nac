@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 import { useManagedHostStatus } from "@/app/features/managed/queries";
 import {
@@ -6,12 +7,21 @@ import {
   type ManagedHostActions,
 } from "@/app/features/managed/controller/useManagedHost";
 import type { ManagedTab } from "@/app/features/managed/model";
-import { ManagedHostModal } from "@/app/features/managed/presentation/ManagedHostModal";
+import {
+  ManagedSettingsContext,
+  type ManagedSettingsState,
+} from "@/app/features/managed/presentation/managedSettingsContext";
 import { ManagedRepositoryModal } from "@/app/features/managed/presentation/ManagedRepositoryModal";
+import { routes } from "@/app/lib/routes";
 
+/**
+ * Managed host product state. Host settings (status, GitHub device auth,
+ * secrets) live at Settings › Managed host; "Add repository" stays a dialog and
+ * may detour through GitHub authorization before reopening itself.
+ */
 export function ManagedHostProvider({ children }: { children: React.ReactNode }) {
   const statusQuery = useManagedHostStatus();
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const navigate = useNavigate();
   const [settingsTab, setSettingsTab] = useState<ManagedTab>("status");
   const [repositoryOpen, setRepositoryOpen] = useState(false);
   const [resumeRepositoryAfterConnect, setResumeRepositoryAfterConnect] = useState(false);
@@ -20,14 +30,14 @@ export function ManagedHostProvider({ children }: { children: React.ReactNode })
   const openSettings = useCallback(() => {
     setResumeRepositoryAfterConnect(false);
     setSettingsTab("status");
-    setSettingsOpen(true);
-  }, []);
+    navigate(routes.settings("managed"));
+  }, [navigate]);
   const authorizeForRepository = useCallback(() => {
     setRepositoryOpen(false);
     setResumeRepositoryAfterConnect(true);
     setSettingsTab("github");
-    setSettingsOpen(true);
-  }, []);
+    navigate(routes.settings("managed"));
+  }, [navigate]);
   const addRepository = useCallback(() => {
     if (status?.github_status === "connected") {
       setRepositoryOpen(true);
@@ -38,9 +48,13 @@ export function ManagedHostProvider({ children }: { children: React.ReactNode })
   const handleGitHubConnected = useCallback(() => {
     if (!resumeRepositoryAfterConnect) return;
     setResumeRepositoryAfterConnect(false);
-    setSettingsOpen(false);
     setRepositoryOpen(true);
   }, [resumeRepositoryAfterConnect]);
+  const selectTab = useCallback((tab: ManagedTab) => {
+    // Picking another part of the page by hand ends the repository detour.
+    setResumeRepositoryAfterConnect(false);
+    setSettingsTab(tab);
+  }, []);
   const value = useMemo<ManagedHostActions>(
     () => ({
       status,
@@ -50,27 +64,23 @@ export function ManagedHostProvider({ children }: { children: React.ReactNode })
     }),
     [addRepository, openSettings, status],
   );
+  const settings = useMemo<ManagedSettingsState>(
+    () => ({ tab: settingsTab, setTab: selectTab, onGitHubConnected: handleGitHubConnected }),
+    [handleGitHubConnected, selectTab, settingsTab],
+  );
 
   return (
     <ManagedHostContext.Provider value={value}>
-      {children}
-      <ManagedHostModal
-        open={settingsOpen}
-        tab={settingsTab}
-        onTabChange={setSettingsTab}
-        onClose={() => {
-          setSettingsOpen(false);
-          setResumeRepositoryAfterConnect(false);
-        }}
-        onGitHubConnected={handleGitHubConnected}
-      />
-      {repositoryOpen ? (
-        <ManagedRepositoryModal
-          open
-          onClose={() => setRepositoryOpen(false)}
-          onConnect={authorizeForRepository}
-        />
-      ) : null}
+      <ManagedSettingsContext.Provider value={settings}>
+        {children}
+        {repositoryOpen ? (
+          <ManagedRepositoryModal
+            open
+            onClose={() => setRepositoryOpen(false)}
+            onConnect={authorizeForRepository}
+          />
+        ) : null}
+      </ManagedSettingsContext.Provider>
     </ManagedHostContext.Provider>
   );
 }

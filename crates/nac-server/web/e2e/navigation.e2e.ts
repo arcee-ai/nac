@@ -9,6 +9,12 @@ import {
   waitForRunIdle,
   startForegroundChild,
 } from "./harness";
+import {
+  openPhoneMenu,
+  openPhonePanel,
+  openSessionRowAction,
+  sessionRowMenu,
+} from "./nav-focus-helpers";
 import { ScriptGate } from "./scripted-provider";
 
 test.use({ orchestration: "0" });
@@ -150,7 +156,11 @@ test("project navigation, overflow, phone actions and notification feedback", as
     }
   };
   const notify = async () => {
-    await page.getByRole("button", { name: `Rename ${LONG_TITLE}`, exact: true }).click();
+    const menu = page.getByRole("dialog", { name: "Menu", exact: true });
+    // Row actions live in the row's "⋯" menu (a bottom sheet on phones).
+    await (
+      await openSessionRowAction(menu, page, LONG_TITLE, `Rename ${LONG_TITLE}`)
+    ).action.click();
     const dialog = page.getByRole("dialog", { name: "Rename session", exact: true });
     await dialog.getByRole("button", { name: "Save", exact: true }).click();
     await expect(page.getByText("Session presentation saved", { exact: true })).toBeVisible();
@@ -158,7 +168,9 @@ test("project navigation, overflow, phone actions and notification feedback", as
     await page.route(endpoint, async (route) =>
       route.fulfill({ status: 503, json: { error: "Navigation fixture could not update pin" } }),
     );
-    await page.getByRole("button", { name: `Unpin ${LONG_TITLE}`, exact: true }).click();
+    await (
+      await openSessionRowAction(menu, page, LONG_TITLE, `Unpin ${LONG_TITLE}`)
+    ).action.click();
     await expect(page.getByText(/Failed to update pin: Navigation fixture/)).toBeVisible();
     await page.unroute(endpoint);
   };
@@ -171,26 +183,44 @@ test("project navigation, overflow, phone actions and notification feedback", as
           `${harness.baseUrl}/?navigation=${width}-${version}#/session/${ids[0]}/insights`,
         );
         await expect(page.getByRole("combobox", { name: "Message" })).toBeVisible();
-        if (width < 768) {
+        await expect(page.getByText("Get started", { exact: true })).toBeVisible();
+        const phone = width < 768;
+        // Phones have no sidebar: the session header goes back Home, whose
+        // header opens the navigation sheet. Wider screens reveal the sidebar.
+        if (phone) {
+          await page.getByRole("button", { name: "Home", exact: true }).click();
           await page.getByRole("button", { name: "Open the menu", exact: true }).click();
         } else {
           const expand = page.getByRole("button", { name: "Show sidebar", exact: true });
           if (await expand.isVisible()) await expand.click();
         }
-        await expect(page.getByText("Get started", { exact: true })).toBeVisible();
-        const selected = page.getByRole("button", { name: LONG_TITLE, exact: true }).first();
-        await expect(selected).toHaveAttribute("aria-current", "page");
-        const reveal = page.getByRole("button", { name: /^See \d+ more$/ });
+        const nav = phone
+          ? page.getByRole("dialog", { name: "Menu", exact: true })
+          : page.locator('[data-sidebar="true"]');
+        const selected = nav.getByRole("button", { name: LONG_TITLE, exact: true }).first();
+        await expect(selected).toBeVisible();
+        // Only a sidebar shown beside the session marks it as the current page.
+        if (!phone) await expect(selected).toHaveAttribute("aria-current", "page");
+        const reveal = nav.getByRole("button", { name: /^See \d+ more$/ });
         if (await reveal.isVisible()) await reveal.click();
         await expect(
-          page.getByRole("button", { name: "Review cache inputs 1", exact: true }),
+          nav.getByRole("button", { name: "Review cache inputs 1", exact: true }),
         ).toBeVisible();
         await selected.focus();
         await settleCapture(page, selected);
         await page.mouse.move(0, 0);
         await capture(`${version}-${width}-navigation-dark`);
-        const rename = page.getByRole("button", { name: `Rename ${LONG_TITLE}`, exact: true });
-        await rename.focus();
+        // Keyboard: the row's "⋯" trigger opens its menu on the first item (Rename).
+        const { trigger: options, menu: rowMenu } = sessionRowMenu(nav, page, LONG_TITLE);
+        const rename = rowMenu.getByRole("menuitem", { name: `Rename ${LONG_TITLE}`, exact: true });
+        await options.focus();
+        if (!before && width === 390) {
+          const box = await options.boundingBox();
+          expect(box!.width).toBeGreaterThanOrEqual(44);
+          expect(box!.height).toBeGreaterThanOrEqual(44);
+        }
+        await page.keyboard.press("Enter");
+        await expect(rename).toBeFocused();
         if (!before && width === 390) {
           const box = await rename.boundingBox();
           expect(box!.width).toBeGreaterThanOrEqual(44);
@@ -202,48 +232,76 @@ test("project navigation, overflow, phone actions and notification feedback", as
           LONG_TITLE,
         );
         await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
-        await expect(rename).toBeFocused();
-        await settleCapture(page, rename);
+        await expect(options).toBeFocused();
+        await settleCapture(page, options);
         await capture(`${version}-${width}-keyboard-focus`);
-        const runningRow = page.getByRole("button", { name: "Review cache inputs 1", exact: true });
+        const runningRow = nav.getByRole("button", { name: "Review cache inputs 1", exact: true });
         await runningRow.focus();
         await settleCapture(page, runningRow);
         await capture(`${version}-${width}-running-navigation`);
-        if (width < 768) {
+        if (phone) {
           await notify();
-          await settleCapture(
-            page,
-            page.getByRole("button", { name: `Unpin ${LONG_TITLE}`, exact: true }),
-          );
+          await settleCapture(page, options);
           await capture(`${version}-${width}-notification-stack`);
-          await page
-            .getByRole("dialog", { name: "Menu", exact: true })
-            .getByRole("button", { name: LONG_TITLE, exact: true })
-            .click();
-          await expect(page.getByRole("dialog", { name: "Menu", exact: true })).toBeHidden();
+          await nav.getByRole("button", { name: LONG_TITLE, exact: true }).click();
+          await expect(nav).toBeHidden();
+          await expect(page).toHaveURL(new RegExp(`/session/${ids[0]}`));
         } else {
-          await page.getByRole("button", { name: "Search chats", exact: true }).click();
-          const searchDialog = page.getByRole("dialog", { name: "Search Chats", exact: true });
-          await searchDialog
-            .getByRole("button", { name: "Review cache inputs 8", exact: true })
+          // Search is the command palette; its session rows navigate.
+          await nav.getByRole("button", { name: "Search", exact: true }).click();
+          const palette = page.getByRole("dialog", { name: "Command palette", exact: true });
+          await palette
+            .getByRole("combobox", { name: "Search commands", exact: true })
+            .fill("Review cache inputs 8");
+          await palette
+            .getByRole("option")
+            .filter({ hasText: "Review cache inputs 8" })
+            .first()
             .click();
+          await expect(palette).toBeHidden();
           await expect(page).toHaveURL(new RegExp(`/session/${ids[8]}`));
           await page.goBack();
           await expect(page).toHaveURL(new RegExp(`/session/${ids[0]}`));
         }
         await page.goto(`${harness.baseUrl}/?navigationCards=${width}-${version}#/`);
         await expect(
-          page.getByText("Navigation verification — repository maintenance", { exact: true }),
+          page.getByRole("textbox", { name: "What should we work on?", exact: true }),
         ).toBeVisible();
-        await expect(page.getByText("9 Sessions", { exact: true })).toBeVisible();
-        if (width >= 768) {
+        if (phone) {
+          // A phone has no sidebar, so Home is its session list (under the
+          // Inbox · Sessions switch) instead of project tiles; project actions
+          // stay on each project's header there.
+          const list = page.getByRole("region", { name: "Sessions and Inbox", exact: true });
           await expect(
-            page.getByRole("button", { name: "Configurations", exact: true }),
+            list.getByRole("button", {
+              name: "Navigation verification — repository maintenance, 9 sessions",
+              exact: true,
+            }),
           ).toBeVisible();
-          await expect(page.getByText("Sort by", { exact: true })).toBeVisible();
           await expect(
-            page.getByRole("button", { name: "Copy the store path", exact: true }),
-          ).toBeVisible();
+            list.getByRole("button", {
+              name: "Navigation verification — repository maintenance options",
+              exact: true,
+            }),
+          ).toBeAttached();
+          await expect(list.getByRole("link", { name: "Interval tasks" })).toBeVisible();
+        } else {
+          const projects = page.getByRole("region", { name: "Projects", exact: true });
+          const tile = projects.getByRole("button", {
+            name: "Navigation verification — repository maintenance",
+            exact: true,
+          });
+          await expect(tile).toBeVisible();
+          await expect(tile).toContainText("9 sessions");
+          // Project actions stay reachable from the tile; app-wide configuration
+          // moved to Settings, which stays one control away.
+          await expect(
+            tile.getByRole("button", {
+              name: "Navigation verification — repository maintenance options",
+              exact: true,
+            }),
+          ).toBeAttached();
+          await expect(projects.getByRole("link", { name: "Interval tasks" })).toBeVisible();
         }
         await capture(`${version}-${width}-projects-dark`);
       }
@@ -252,8 +310,12 @@ test("project navigation, overflow, phone actions and notification feedback", as
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(`${harness.baseUrl}/#/session/${ids[0]}/insights`);
+    await page.getByRole("button", { name: "Home", exact: true }).click();
     await page.getByRole("button", { name: "Open the menu", exact: true }).click();
-    await page.getByRole("button", { name: `Rename ${LONG_TITLE}`, exact: true }).click();
+    const menu = page.getByRole("dialog", { name: "Menu", exact: true });
+    await (
+      await openSessionRowAction(menu, page, LONG_TITLE, `Rename ${LONG_TITLE}`)
+    ).action.click();
     const dialog = page.getByRole("dialog", { name: "Rename session", exact: true });
     await dialog.getByRole("button", { name: "Save", exact: true }).click();
     await expect(
@@ -262,7 +324,7 @@ test("project navigation, overflow, phone actions and notification feedback", as
     await page.route(`${harness.baseUrl}/sessions/${ids[0]}/presentation`, async (route) =>
       route.fulfill({ status: 503, json: { error: "Navigation fixture could not update pin" } }),
     );
-    const pin = page.getByRole("button", { name: `Unpin ${LONG_TITLE}`, exact: true });
+    const pin = (await openSessionRowAction(menu, page, LONG_TITLE, `Unpin ${LONG_TITLE}`)).action;
     await pin.click();
     await expect(page.getByRole("alert").filter({ hasText: "Failed to update pin" })).toBeVisible();
     await capture("after-390-notification-stack-reduced-motion");
@@ -373,12 +435,22 @@ test("phone navigation and project actions remain reachable at real 200 percent 
         await page.goto(
           `${harness.baseUrl}/?navigationZoom=${width}-${version}#/session/${id}/insights`,
         );
-        await page.getByRole("button", { name: "Open the menu", exact: true }).click();
-        const menu = page.getByRole("dialog", { name: "Menu", exact: true });
+        // 200% zoom makes every width a phone: back Home, then the menu.
+        await expect(page.getByRole("combobox", { name: "Message" })).toBeVisible();
+        const menu = await openPhoneMenu(page);
         const row = menu.getByRole("button", { name: LONG_TITLE, exact: true });
         await row.focus();
-        const rename = menu.getByRole("button", { name: `Rename ${LONG_TITLE}`, exact: true });
-        await rename.focus();
+        // The row's "⋯" trigger (after its subagent pill) opens its menu on Rename.
+        const { trigger: options, menu: rowMenu } = sessionRowMenu(menu, page, LONG_TITLE);
+        const rename = rowMenu.getByRole("menuitem", { name: `Rename ${LONG_TITLE}`, exact: true });
+        await options.focus();
+        const trigger = await options.boundingBox();
+        if (!before) {
+          expect(trigger!.width).toBeGreaterThanOrEqual(44);
+          expect(trigger!.height).toBeGreaterThanOrEqual(44);
+        }
+        await page.keyboard.press("Enter");
+        await expect(rename).toBeFocused();
         await page.evaluate(() =>
           (
             globalThis as unknown as { document: { fonts: { ready: Promise<unknown> } } }
@@ -411,20 +483,23 @@ test("phone navigation and project actions remain reachable at real 200 percent 
           LONG_TITLE,
         );
         await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
-        await expect(rename).toBeFocused();
-        await menu.getByRole("button", { name: "Search Chats", exact: true }).click();
-        const search = page.getByRole("dialog", { name: "Search Chats", exact: true });
-        const searchRow = search.getByRole("button", { name: LONG_TITLE, exact: true });
-        await searchRow.focus();
+        await expect(options).toBeFocused();
+        // Search is the command palette: its session rows keep a readable title.
+        await menu.getByRole("button", { name: "Search", exact: true }).click();
+        const search = page.getByRole("dialog", { name: "Command palette", exact: true });
+        await search
+          .getByRole("combobox", { name: "Search commands", exact: true })
+          .fill("Investigate");
+        const searchRow = search.getByRole("option").filter({ hasText: LONG_TITLE }).first();
+        await expect(searchRow).toBeVisible();
         await settleCapture(page, searchRow);
         if (!before) {
           const title = await searchRow.locator("span.truncate").first().boundingBox();
           expect(title!.width).toBeGreaterThan(40);
-          const action = await search
-            .getByRole("button", { name: `Rename ${LONG_TITLE}`, exact: true })
-            .boundingBox();
-          expect(action!.width).toBeGreaterThanOrEqual(44);
-          expect(action!.height).toBeGreaterThanOrEqual(44);
+          const option = await searchRow.boundingBox();
+          expect(option!.height).toBeGreaterThanOrEqual(44);
+          expect(option!.x).toBeGreaterThanOrEqual(0);
+          expect(option!.x + option!.width).toBeLessThanOrEqual(innerWidth + 1);
         }
         const searchFile = info.outputPath(`${version}-${width}-zoom200-search.png`);
         await captureFrame(page, searchFile);
@@ -436,11 +511,7 @@ test("phone navigation and project actions remain reachable at real 200 percent 
         await page.goto(
           `${harness.baseUrl}/?navigationSubagents=${width}-${version}#/session/${id}/delegated`,
         );
-        const subagentsTab = page.getByRole("tab", { name: "Subagents", exact: true }).last();
-        if (!(await subagentsTab.isVisible()))
-          await page.getByRole("button", { name: "Open panel", exact: true }).click();
-        await subagentsTab.click();
-        const subagents = page.getByRole("dialog", { name: "Subagents", exact: true });
+        const subagents = await openPhonePanel(page, "Subagents");
         const childRow = subagents.getByRole("button", {
           name: "Review nested cache inputs",
           exact: true,

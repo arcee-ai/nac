@@ -18,8 +18,9 @@ export enum PopoverSize {
   TriggerWidth = "min-w-[var(--radix-popover-trigger-width)]",
 }
 
+/** Focus popover: the overlay surface, a 12px corner, ring + soft drop, 13px chrome. */
 const PANEL_BASE =
-  "flex flex-col gap-1 p-2 rounded-[12px] bg-elevation-level-3 shadow-2xl fade motion-reduce:!animate-none [&>*]:shrink-0";
+  "type-body-chrome flex flex-col gap-0.5 p-1.5 rounded-xl bg-elevation-level-3 shadow-lg fade motion-reduce:!animate-none [&>*]:shrink-0";
 
 interface PopoverProps {
   open: boolean;

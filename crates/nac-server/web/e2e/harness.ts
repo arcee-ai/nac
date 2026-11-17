@@ -8,6 +8,7 @@ import {
   expect,
   test as base,
   type APIRequestContext,
+  type Locator,
   type Page,
   type TestInfo,
 } from "@playwright/test";
@@ -888,22 +889,230 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: str
   }
 }
 
+const PANEL_LABELS: Record<string, string> = {
+  sessions: "Sessions",
+  insights: "Insights",
+  threads: "Threads",
+  delegated: "Subagents",
+  files: "Files",
+  terminal: "Terminal",
+  heartbeats: "Heartbeats",
+  worksets: "Worksets",
+  history: "History",
+};
+
+/** The panel the session route names (`#/session/<id>/<panel>`), as its tab label. */
+function routePanelLabel(url: string): string | null {
+  const match = /#\/session\/[^/?#]+\/([a-z]+)/.exec(url);
+  return match ? (PANEL_LABELS[match[1]] ?? null) : null;
+}
+
+/** The app's ⌘/⌃ modifier: it follows the page's user agent, not the host OS. */
+export async function appModifier(page: Page): Promise<"Meta" | "Control"> {
+  const mac = await page.evaluate(() => /Mac|iPhone|iPad|iPod/.test(navigator.userAgent));
+  return mac ? "Meta" : "Control";
+}
+
+/** Whether the page lays out as a phone (the client's `useIsMobile` breakpoint). */
+export async function isPhoneLayout(page: Page): Promise<boolean> {
+  return (await page.evaluate("matchMedia('(max-width: 767.98px)').matches")) === true;
+}
+
 /**
- * The right sidebar starts collapsed, so panel tabs and rows sit behind this.
- * A saved open preference can remove the button after the first paint, which
- * makes a click that already saw it wait until the test times out.
+ * The drawer slides in (and docks with a width tween) a couple of frames after
+ * it mounts. Geometry and hit tests must wait for the surface to come to rest
+ * inside the viewport rather than read a half-entered sheet.
  */
-export async function showSidePanel(page: Page) {
-  const show = page.getByRole("button", { name: "Show panel" });
-  const open = page.getByRole("tab", { name: "Files" });
-  await expect(show.or(open).first()).toBeVisible();
+export async function waitForPanelSettled(surface: Locator) {
+  await expect
+    .poll(() =>
+      surface.evaluate((element) => {
+        const view = element.ownerDocument.defaultView!;
+        const root = element.closest('[role="dialog"], aside') ?? element;
+        const rect = root.getBoundingClientRect();
+        const resting = root
+          .getAnimations()
+          .every((animation: { playState: string }) => animation.playState !== "running");
+        return (
+          resting &&
+          rect.width > 0 &&
+          rect.left >= -1 &&
+          rect.right <= view.innerWidth + 1 &&
+          rect.bottom <= view.innerHeight + 1
+        );
+      }),
+    )
+    .toBe(true);
+}
+
+/**
+ * Focus has no permanent right column: a session's panels live in one drawer
+ * whose tabs are the "Session panels" tablist. The drawer starts closed, and a
+ * saved open preference can open it after the first paint, so every attempt
+ * first re-observes the tablist. Where the drawer can dock (≥1280px) the
+ * documented ⌘\ docks it beside the chat on the route's own panel — the
+ * equivalent of the old column, leaving the conversation usable. Narrower, the
+ * header's one control, the Session menu, lists the panels: its row for the
+ * route's panel opens the floating drawer on it directly; a panel the menu
+ * does not list (it lists only those with something to say) is reached through
+ * its Insights row and then the drawer's tab. No path ever closes an open
+ * drawer. `dock: false` always takes the floating drawer — for journeys that
+ * resize across the docking width, where the app moves the panel between
+ * surfaces.
+ */
+export async function showSidePanel(page: Page, { dock = true }: { dock?: boolean } = {}) {
+  const open = page.getByRole("tablist", { name: "Session panels", exact: true });
+  const menu = page.getByRole("button", { name: "Session menu", exact: true });
+  const details = page.getByRole("dialog", { name: "Session", exact: true });
+  await expect(menu.or(open).first()).toBeVisible();
+  const label = routePanelLabel(page.url());
   await expect(async () => {
-    if (await open.isVisible()) return;
-    // Hydrating an open preference may detach Show between the read and click.
-    // Yield to the outer retry so it can observe the now-visible Files tab.
-    if (await show.isVisible()) await show.click({ timeout: 1_000 });
-    await expect(open).toBeVisible();
+    const { state, detail } = await drawerDiagnosis(open);
+    // A drawer that is sliding in or out decides nothing yet.
+    if (state === "moving") throw new Error(`The session drawer is still moving: ${detail}`);
+    if (state === "open") return;
+    const dockable =
+      dock && (await page.evaluate("matchMedia('(min-width: 1280px)').matches")) === true;
+    if (dockable) {
+      await page.keyboard.press(`${await appModifier(page)}+Backslash`);
+    } else {
+      // Hydrating an open preference may detach the menu between the read and
+      // click; yield to the outer retry so it can observe the open drawer.
+      if (!(await details.isVisible())) await menu.click({ timeout: 1_000 });
+      await expect(details).toBeVisible({ timeout: 1_000 });
+      const row = sessionMenuPanel(details, label ?? "Insights");
+      const direct = label != null && (await row.count()) > 0;
+      await (direct ? row : sessionMenuPanel(details, "Insights")).click({ timeout: 1_000 });
+      await expect(open).toBeVisible({ timeout: 2_000 });
+      const tab = open.getByRole("tab", { name: label ?? "Insights", exact: true });
+      if (!direct && label && label !== "Insights" && (await tab.count()) > 0)
+        await tab.click({ timeout: 1_000 });
+    }
+    await expect.poll(() => drawerState(open), { timeout: 2_000 }).toBe("open");
   }).toPass();
+}
+
+/**
+ * The Session menu's row for a panel. Rows are named by the panel, with its
+ * live fact after the name ("Files +12 −3", "Subagents 2, 1 running").
+ */
+function sessionMenuPanel(menu: Locator, label: string): Locator {
+  return menu.getByRole("button", { name: new RegExp(`^${label}(?![A-Za-z])`) }).first();
+}
+
+/**
+ * Whether the drawer holding the "Session panels" tabs is open and at rest,
+ * closed (unmounted), or moving. Closing keeps the drawer mounted while it
+ * slides away (and a docked column shrinks to nothing), and a dock/float
+ * switch briefly mounts both surfaces, so visibility of the tabs alone is not
+ * an open drawer.
+ */
+async function drawerState(tablist: Locator): Promise<"open" | "closed" | "moving"> {
+  return (await drawerDiagnosis(tablist)).state;
+}
+
+async function drawerDiagnosis(
+  tablist: Locator,
+): Promise<{ state: "open" | "closed" | "moving"; detail: string }> {
+  const count = await tablist.count();
+  if (count === 0) return { state: "closed", detail: "no tabs" };
+  if (count > 1) return { state: "moving", detail: `${count} drawers mounted` };
+  // Mounted but not shown is a drawer on its way out; it unmounts shortly.
+  if (!(await tablist.isVisible())) return { state: "moving", detail: "tabs hidden" };
+  return await tablist
+    .evaluate((element) => {
+      const view = element.ownerDocument.defaultView!;
+      const root = element.closest('[role="dialog"], aside') ?? element;
+      const running = root
+        .getAnimations()
+        .filter((animation: { playState: string }) => animation.playState === "running")
+        .map((animation: { playState: string }) => animation.constructor.name);
+      const rect = root.getBoundingClientRect();
+      const detail = JSON.stringify({
+        root: root.tagName,
+        state: root.getAttribute("data-state"),
+        running,
+        rect: [rect.left, rect.right, rect.bottom, rect.width],
+        viewport: [view.innerWidth, view.innerHeight],
+      });
+      if (running.length > 0) return { state: "moving" as const, detail };
+      const resting =
+        root.getAttribute("data-state") !== "closed" &&
+        rect.width > 0 &&
+        rect.left >= -1 &&
+        rect.right <= view.innerWidth + 1 &&
+        rect.bottom <= view.innerHeight + 1;
+      // A mounted drawer that is not at rest in view is leaving: closing keeps
+      // it mounted off-screen (or a docked column at no width) until it
+      // unmounts, and only an unmounted drawer may be opened again — a second
+      // ⌘\ on a live drawer would toggle its docking instead.
+      return { state: resting ? ("open" as const) : ("moving" as const), detail };
+    })
+    .catch((error: Error) => ({ state: "moving" as const, detail: error.message }));
+}
+
+/**
+ * Lets the drawer fill the window. Full width belongs to the floating drawer,
+ * so a docked one (the wide default of `showSidePanel`) is floated first.
+ */
+export async function expandSidePanel(page: Page) {
+  await showSidePanel(page);
+  const float = page.getByRole("button", { name: "Float drawer", exact: true });
+  if (await float.isVisible()) await float.click();
+  await page.getByRole("button", { name: "Full width", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Exit full width", exact: true })).toBeVisible();
+  await waitForPanelSettled(page.getByRole("tablist", { name: "Session panels", exact: true }));
+}
+
+/**
+ * A phone has one "Open panel" button: its sheet lists the session's panels as
+ * rows, and a row opens that panel as a bottom sheet (a dialog named for it).
+ */
+export async function showPhonePanel(page: Page, label: string) {
+  const sheet = page.getByRole("dialog", { name: label, exact: true });
+  if (await sheet.isVisible()) return sheet;
+  // One panel sheet at a time: leave another panel before picking this one.
+  for (const other of new Set(Object.values(PANEL_LABELS).concat("Goal"))) {
+    const open = page.getByRole("dialog", { name: other, exact: true });
+    if (other === label || !(await open.isVisible())) continue;
+    await page.keyboard.press("Escape");
+    await expect(open).toHaveCount(0);
+  }
+  const details = page.getByRole("dialog", { name: "Session", exact: true });
+  if (!(await details.isVisible()))
+    await page.getByRole("button", { name: "Open panel", exact: true }).click();
+  // A row's name carries its count ("Subagents 2, 1 running").
+  await sessionMenuPanel(details, label).click();
+  await expect(sheet).toBeVisible();
+  await waitForPanelSettled(sheet);
+  return sheet;
+}
+
+/**
+ * Opens the panel the route names (`#/session/<id>/<panel>`) at any width: the
+ * drawer on a wide screen, that panel's sheet on a phone. Returns the scope that
+ * holds it (the sheet on a phone, the page otherwise).
+ */
+export async function showRoutePanel(page: Page) {
+  if (await isPhoneLayout(page)) {
+    const label = routePanelLabel(page.url());
+    if (!label) throw new Error(`The route names no session panel: ${page.url()}`);
+    return await showPhonePanel(page, label);
+  }
+  await showSidePanel(page);
+  return page.locator("body");
+}
+
+/** Opens one session panel at any width: a drawer tab, or a phone sheet. */
+export async function showSessionPanel(page: Page, label: string) {
+  if (await isPhoneLayout(page)) return await showPhonePanel(page, label);
+  await showSidePanel(page);
+  const tab = page
+    .getByRole("tablist", { name: "Session panels", exact: true })
+    .getByRole("tab", { name: label, exact: true });
+  if ((await tab.getAttribute("aria-selected")) !== "true") await tab.click();
+  await expect(tab).toHaveAttribute("aria-selected", "true");
+  return page.locator("body");
 }
 
 /** Starts a foreground child the way the parent's subagent tool does; the reply waits for its outcome. */
@@ -919,14 +1128,8 @@ export function startForegroundChild(
   });
 }
 
-/** Opens the Subagents panel at any width; on a phone it is a dialog over the chat. */
+/** Opens the Subagents panel at any width; on a phone it is a sheet over the chat. */
 export async function showSubagents(page: Page, mobile: boolean) {
-  const tab = page.getByRole("tab", { name: "Subagents" });
-  if (mobile) {
-    if (!(await tab.first().isVisible()))
-      await page.getByRole("button", { name: "Open panel", exact: true }).click();
-  } else {
-    await showSidePanel(page);
-  }
-  await tab.last().click();
+  if (mobile) await showPhonePanel(page, "Subagents");
+  else await showSessionPanel(page, "Subagents");
 }

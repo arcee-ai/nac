@@ -2,10 +2,11 @@ import React from "react";
 import { DialogDescription } from "../../ui/dialog";
 import { IconName } from "../icon";
 export declare enum ModalSize {
-    Small = "max-w-[400px]",
-    /** Figma ModalBox default width. */
-    Medium = "max-w-[604px]",
-    Wide = "max-w-[600px]",
+    /** Confirmations: one question, two answers. */
+    Small = "max-w-[420px]",
+    /** The default form dialog. */
+    Medium = "max-w-[600px]",
+    Wide = "max-w-[640px]",
     Large = "max-w-[760px]"
 }
 interface ModalProps {
@@ -57,6 +58,12 @@ interface ModalProps {
      * `alertdialog`, described by the `ModalDescription` in its body.
      */
     alert?: boolean;
+    /**
+     * Make the page behind inert on phones too. For a sheet that repeats what
+     * the page under it shows (the phone Menu over Home's session list), so the
+     * hidden copy is out of reach and out of the accessibility tree.
+     */
+    inertOnPhone?: boolean;
     className?: string;
     /** Overrides the body's own padding and scrolling, for full-bleed content. */
     bodyClassName?: string;
@@ -64,9 +71,11 @@ interface ModalProps {
     footer?: React.ReactNode;
 }
 /**
- * Generic dialog: scrim + centered card on desktop, or a full-screen panel
- * that slides in from the right on a phone (same pattern as ArceeFM's
- * ModalBoxMobile). Overlay tap dismisses only on desktop.
+ * Generic dialog. Desktop: a soft scrim and a centred 20px-radius card with
+ * a 52px header (quiet title, close), a padded body and a footer of pill
+ * actions. Phone: a full-height sheet that pushes in from the right like an
+ * iOS navigation step, with its back/close control leading the header and
+ * safe-area insets top and bottom. Overlay tap dismisses only on desktop.
  */
 declare const Modal: React.FC<ModalProps> & {
     Size: typeof ModalSize;

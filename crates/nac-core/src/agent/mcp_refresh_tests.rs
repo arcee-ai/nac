@@ -607,7 +607,7 @@ async fn mcp_mount_refresh_during_compaction_applies_before_the_following_model_
     let mut agent = direct(&home, crate::sessions::SessionBehavior::Direct).await;
     let store = agent.tool_runtime.store_path.clone();
     let session = agent.tool_runtime.session_id.clone().unwrap();
-    let mut history = agent.messages.clone();
+    let mut history = agent.messages.to_vec();
     history.extend([
         Message::User {
             content: "older request".to_string(),
@@ -627,7 +627,7 @@ async fn mcp_mount_refresh_during_compaction_applies_before_the_following_model_
     ]);
     agent.restore_messages(history);
     let mut snapshot = crate::sessions::load_session(&store, &session).unwrap();
-    snapshot.messages = agent.messages.clone();
+    snapshot.messages = agent.messages.to_vec();
     crate::sessions::save_session(&store, &snapshot).unwrap();
     agent.compaction = Some(CompactionState::new(
         store.clone(),
@@ -822,7 +822,7 @@ async fn mcp_mount_refresh_manual_compaction_does_not_inherit_a_cancelled_run() 
     let mut agent = direct(&home, crate::sessions::SessionBehavior::Direct).await;
     let prior_run = agent.begin_run_cancellation();
     prior_run.cancel();
-    let mut history = agent.messages.clone();
+    let mut history = agent.messages.to_vec();
     history.extend([
         Message::User {
             content: "older request".to_string(),
@@ -847,7 +847,7 @@ async fn mcp_mount_refresh_manual_compaction_does_not_inherit_a_cancelled_run() 
     let store = agent.tool_runtime.store_path.clone();
     let session = agent.tool_runtime.session_id.clone().unwrap();
     let mut saved = crate::sessions::load_session(&store, &session).unwrap();
-    saved.messages = agent.messages.clone();
+    saved.messages = agent.messages.to_vec();
     crate::sessions::save_session(&store, &saved).unwrap();
     configure(&home, &server.url, "approval = \"allow\"");
     request(&agent, 0);

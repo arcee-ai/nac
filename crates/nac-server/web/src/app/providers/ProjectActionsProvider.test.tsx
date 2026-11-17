@@ -45,29 +45,14 @@ vi.mock("@/app/components/modals/DeleteProjectModal", () => ({
 vi.mock("@/app/components/modals/RenameProjectModal", () => ({
   RenameProjectModal: () => null,
 }));
-vi.mock("@/app/components/modals/NewChatModal", () => ({
-  NewChatModal: ({
-    projectId,
-    onClose,
-  }: {
-    projectId: string | null;
-    firstChat?: boolean;
-    onClose: () => void;
-  }) =>
-    projectId ? (
-      <button data-project-id={projectId} onClick={onClose}>
-        Close required chat
-      </button>
-    ) : null,
-}));
-
 function Harness() {
   const actions = useProjectActions();
   const location = useLocation();
   return (
     <>
-      <button onClick={() => void actions.newChat("project-1")}>Open required chat</button>
-      <output data-testid="location">{location.pathname}</output>
+      <button onClick={() => void actions.newChat("project-1")}>New session</button>
+      <button onClick={() => void actions.newChat("project-1", true)}>Replace with composer</button>
+      <output data-testid="location">{`${location.pathname}${location.search}`}</output>
     </>
   );
 }
@@ -108,17 +93,17 @@ afterEach(() => {
 });
 
 describe("project actions", () => {
-  it("treats a delegated-only project as empty when the required chat is closed", () => {
-    fakes.sessions = [
-      {
-        summary: { session_id: "child", project_id: "project-1" },
-        lineage: { parent_session_id: "parent", relationship_kind: "traditional-child" },
-      },
-    ];
+  it("opens Home's composer pointed at the project instead of a dialog", () => {
     mount();
-    fireEvent.click(screen.getByRole("button", { name: "Open required chat" }));
-    fireEvent.click(screen.getByRole("button", { name: "Close required chat" }));
-    expect(screen.getByTestId("location").textContent).toBe("/");
+    fireEvent.click(screen.getByRole("button", { name: "New session" }));
+    expect(screen.getByTestId("location").textContent).toBe("/?project=project-1");
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("can replace an empty project's redirect entry with the composer", () => {
+    mount();
+    fireEvent.click(screen.getByRole("button", { name: "Replace with composer" }));
+    expect(screen.getByTestId("location").textContent).toBe("/?project=project-1");
   });
 });
 
@@ -153,7 +138,7 @@ it("keeps hidden orchestration navigation memory while pruning genuinely deleted
 });
 
 it.each(["orchestrator", "direct-with-orchestrator"])(
-  "keeps the new-chat shortcut in the project of a hidden %s deep link",
+  "keeps the new-session shortcut in the project of a hidden %s deep link",
   (behavior) => {
     fakes.projects = [{ project_id: "project-1" }];
     fakes.sessions = [{ summary: { session_id: "legacy", behavior, project_id: "project-1" } }];
@@ -164,9 +149,6 @@ it.each(["orchestrator", "direct-with-orchestrator"])(
       ctrlKey: MOD === "ctrl",
       metaKey: MOD === "meta",
     });
-    expect(
-      screen.getByRole("button", { name: "Close required chat" }).getAttribute("data-project-id"),
-    ).toBe("project-1");
-    expect(screen.getByTestId("location").textContent).toBe("/session/legacy/threads");
+    expect(screen.getByTestId("location").textContent).toBe("/?project=project-1");
   },
 );

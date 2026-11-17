@@ -4,8 +4,10 @@ import { expect, startForegroundChild, waitForRunIdle } from "./harness";
 import { frontendHash } from "./frontend-assets";
 import type { ManagedSessionSummary } from "../src/app/types/api";
 import {
+  menuAction,
+  openInsightsPanel,
+  openSessionSettings,
   primaryModelTrigger,
-  revealDesktopSidebar,
   type Journey,
 } from "./presentation-composed-fixture";
 
@@ -17,11 +19,9 @@ async function click(control: Locator) {
   await control.scrollIntoViewIfNeeded();
   await control.click();
 }
+/** The Focus shell's destinations for the old menu entries, without geometry oracles. */
 async function menu(j: CaptureJourney, name: RegExp) {
-  if (j.width < 768)
-    await click(j.root.getByRole("button", { name: "Open the menu", exact: true }));
-  else await revealDesktopSidebar(j.root);
-  await click(j.root.getByRole("button", { name }).first());
+  await menuAction(j, name, click);
 }
 
 /** Observe the actual old view, without requiring the new behavior or geometry. */
@@ -201,7 +201,7 @@ export async function settingsView(
   capture: () => Promise<void>,
   stopAtDraft = false,
 ) {
-  await click(j.root.getByRole("button", { name: "Session settings", exact: true }));
+  await openSessionSettings(j, click);
   const modal = j.root.getByRole("dialog", { name: "Session settings", exact: true });
   await modal
     .getByRole("textbox", { name: "Session title", exact: true })
@@ -223,12 +223,13 @@ export async function managedView(j: CaptureJourney, capture: () => Promise<void
   j.fixture.state.managed = true;
   j.fixture.state.connected = true;
   await menu(j, /^(Managed host|Manage Host)$/);
-  const modal = j.root.getByRole("dialog", { name: "Managed host", exact: true });
+  // Settings › Managed host is a page section.
+  const modal = j.root.getByRole("main", { name: "Managed host", exact: true }).first();
   await expect(modal.getByTestId("managed-host-status")).toContainText(
     "Controlled host readiness",
     { timeout: 25_000 },
   );
-  await click(modal.getByRole("button", { name: "secrets", exact: true }));
+  await click(modal.getByRole("button", { name: "Secrets", exact: true }));
   const name = modal.getByLabel("Variable name", { exact: true });
   const value = modal.getByLabel("New value", { exact: true });
   await name.fill("QUALIFICATION_SUBMITTED");
@@ -249,8 +250,15 @@ export async function managedView(j: CaptureJourney, capture: () => Promise<void
   if (j.width <= 390 && (await name.inputValue()) !== "QUALIFICATION_NEWER_DRAFT")
     j.notes.push("expected-old-failure: newer secret draft erased; not refilled");
   await capture();
-  await click(modal.getByRole("button", { name: "Close", exact: true }));
-  await expect(modal).toHaveCount(0);
+  // Settings is a page: return to the project's session through Home.
+  await menu(j, /All projects/);
+  await click(
+    j.root
+      .getByRole("region", { name: "Projects", exact: true })
+      .getByRole("button", { name: /Composed qualification project/ })
+      .first(),
+  );
+  await expect(j.root.getByRole("combobox", { name: "Message", exact: true })).toBeVisible();
 }
 
 export async function inspectorView(j: CaptureJourney, id: string) {
@@ -309,11 +317,7 @@ export async function inspectorView(j: CaptureJourney, id: string) {
   });
   expect(later.status()).toBe(202);
   await waitForRunIdle(j.request, j.harness, id);
-  if (j.width < 768) await click(j.root.getByRole("button", { name: "Open panel", exact: true }));
-  const show = j.root.getByRole("button", { name: "Show panel", exact: true });
-  if (await show.isVisible()) await click(show);
-  const insights = j.root.getByRole("tab", { name: "Insights", exact: true });
-  await click(insights);
+  await openInsightsPanel(j, click);
   const list = j.root.getByRole("button", { name: "Open list", exact: true });
   if (await list.isVisible()) await click(list);
   await click(

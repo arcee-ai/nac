@@ -117,6 +117,7 @@ impl crate::SessionManager {
 
     pub(crate) async fn stop_local_run_admission(&self) {
         self.inner.attention.stop();
+        self.inner.fleet_attention.stop();
         self.inner.task_preparations.stop();
         let services = self
             .inner
@@ -227,6 +228,7 @@ impl crate::SessionManager {
     /// acknowledgement or an explicitly lost acknowledgement.
     pub async fn drain_persistence(&self) -> Result<()> {
         self.inner.attention.stop();
+        self.inner.fleet_attention.stop();
         self.inner._store_ownership.drain().await
     }
 }

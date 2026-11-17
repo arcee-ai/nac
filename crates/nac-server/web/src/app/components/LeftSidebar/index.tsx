@@ -1,104 +1,12 @@
-import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
-import { useCallback, useLayoutEffect, useState } from "react";
+import { Sidebar } from "@/app/features/sidebar/Sidebar";
 
-import { useIsDesktop, useIsMobile } from "@/app/hooks/useMediaQuery";
-import { useKeyboardShortcuts } from "@/app/hooks/useKeyboardShortcuts";
-import { cn } from "@/app/lib/cn";
-import { MOD } from "@/app/lib/shortcuts";
-
-import { LeftSidebarPanel } from "./LeftSidebarPanel";
-import { LeftSidebarRail } from "./LeftSidebarRail";
-import { MobileSearchModal } from "./MobileSearchModal";
-import { useSidebarCommands } from "./useSidebarCommands.tsx";
-
-/** Collapsed icon column, matching the Figma rail. */
-export const SIDEBAR_RAIL_WIDTH = 52;
-/** Expanded panel, matching the Figma sidebar. */
-export const SIDEBAR_PANEL_WIDTH = 280;
-
-const TOGGLE_KEYS = [MOD, "h"];
+export { SIDEBAR_WIDTH } from "@/app/features/sidebar/useSidebar";
 
 /**
- * Collapsible session navigation, in the ArceeFM arrangement: a 52px rail stays
- * put, and the 280px panel slides over it. The rail's width is what the rest of
- * the row lays out against, so opening the panel pushes the chat aside.
+ * The app's navigation sidebar (Focus): see `features/sidebar/Sidebar.tsx`.
+ * `variant` is accepted for existing route owners; every page now shows the
+ * same sidebar.
  */
-export function LeftSidebar({ variant = "session" }: { variant?: "session" | "projects" }) {
-  const { setSidebarOffset, storedOpen, storeOpen } = useNativeRuntime().stores.sidebarLayoutStore;
-
-  const isMobile = useIsMobile();
-  const isDesktop = useIsDesktop();
-  // A phone-sized first paint must not freeze a closed value into storage or
-  // into later desktop layout. Until the user toggles, follow the stored
-  // preference or the xl default.
-  const [userOpen, setUserOpen] = useState<boolean | null>(null);
-  const isOpen = userOpen ?? storedOpen() ?? isDesktop;
-  const toggle = useCallback(() => {
-    setUserOpen((current) => {
-      const next = !(current ?? storedOpen() ?? isDesktop);
-      storeOpen(next);
-      return next;
-    });
-  }, [isDesktop, storedOpen, storeOpen]);
-  const commands = useSidebarCommands();
-  const [searching, setSearching] = useState(false);
-
-  useLayoutEffect(() => {
-    setSidebarOffset(isMobile ? 0 : isOpen ? SIDEBAR_PANEL_WIDTH : SIDEBAR_RAIL_WIDTH);
-  }, [isMobile, isOpen, setSidebarOffset]);
-
-  useLayoutEffect(() => {
-    return () => setSidebarOffset(0);
-  }, [setSidebarOffset]);
-
-  useKeyboardShortcuts([{ keys: TOGGLE_KEYS, onTrigger: toggle, enabled: !isMobile }]);
-
-  // A phone has no room for the rail: the chat takes the screen.
-  if (isMobile) return null;
-
-  return (
-    <div
-      data-sidebar="true"
-      className={cn(
-        "relative h-full shrink-0 transition-[width] duration-300 ease-out",
-        isOpen ? "w-[280px]" : "w-[52px]",
-      )}
-    >
-      {isOpen ? null : (
-        <div className="absolute inset-y-0 left-0 w-[52px]">
-          <LeftSidebarRail
-            commands={commands}
-            onToggle={toggle}
-            onSearch={() => setSearching(true)}
-            toggleKeys={TOGGLE_KEYS}
-            variant={variant}
-          />
-        </div>
-      )}
-      <div
-        className={cn(
-          "absolute inset-y-0 z-[1] h-full w-[280px] transition-[left] duration-300 ease-out",
-          isOpen ? "left-0" : "left-[-280px]",
-        )}
-        aria-hidden={!isOpen}
-        inert={!isOpen}
-      >
-        <LeftSidebarPanel
-          isOpen={isOpen}
-          commands={commands}
-          onToggle={toggle}
-          onSearch={() => setSearching(true)}
-          toggleKeys={TOGGLE_KEYS}
-          variant={variant}
-        />
-      </div>
-      <MobileSearchModal
-        open={searching}
-        onClose={() => setSearching(false)}
-        kind={variant === "projects" ? "projects" : "chats"}
-        activeSessionId={commands.sessionId}
-        activeProjectId={commands.projectId}
-      />
-    </div>
-  );
+export function LeftSidebar(_props: { variant?: "session" | "projects" }) {
+  return <Sidebar />;
 }

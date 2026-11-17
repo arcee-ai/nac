@@ -142,13 +142,22 @@ async function qualifyInstances(page: Page, info: TestInfo, label: string, id: s
   await rightComposer.fill("Right draft — separate binding with the same session ID");
   const host = page.getByRole("textbox", { name: "Host draft", exact: true });
   await host.fill("Host draft remains independent");
+  // Session settings sits behind the header's session menu (one "Open panel"
+  // sheet on phones); dismissing the dialog returns focus to that trigger.
   const openers = [left, right].map((view) =>
-    view.getByRole("button", { name: "Session settings", exact: true }),
+    view.getByRole("button", { name: phone ? "Open panel" : "Session menu", exact: true }),
   );
+  const openSettings = async (index: number) => {
+    await openers[index].click();
+    await [left, right][index]
+      .getByRole("dialog", { name: "Session", exact: true })
+      .getByRole("button", { name: "Session settings", exact: true })
+      .click();
+  };
   const dialogs = [left, right].map((view) =>
     view.getByRole("dialog", { name: "Session settings", exact: true }),
   );
-  await openers[0].click();
+  await openSettings(0);
   await expect(dialogs[0]).toBeVisible();
   // ADR0007: phone panels cover the view without background inertness.
   if (phone) await expect(left.locator("[data-nac-content]")).not.toHaveAttribute("inert", "");
@@ -159,7 +168,7 @@ async function qualifyInstances(page: Page, info: TestInfo, label: string, id: s
     .getByRole("textbox", { name: "Session title", exact: true })
     .fill("Left long unsaved title / preserve the complete error and action context");
   await expect(dialogs[0].getByRole("button", { name: "Save", exact: true })).toBeEnabled();
-  await openers[1].click();
+  await openSettings(1);
   await expect(dialogs[1]).toBeVisible();
   await dialogs[1]
     .getByRole("textbox", { name: "Session title", exact: true })
@@ -326,25 +335,33 @@ async function qualifyInstances(page: Page, info: TestInfo, label: string, id: s
   await expect(openers[1]).toBeFocused();
   const menu = right.getByRole("dialog", { name: "Menu", exact: true });
   if (phone) {
+    // Phone navigation lives on Home's header, not the session screen.
+    await right.getByRole("button", { name: "Home", exact: true }).tap();
     await right.getByRole("button", { name: "Open the menu", exact: true }).tap();
     await expect(menu).toHaveAttribute("data-modal-open", "true");
   }
   if (!phone) await revealDesktopSidebar(right);
-  const pin = (phone ? menu : right).getByRole("button", { name: /^Pin / }).first();
-  // Compact navigation reveals its row actions on hover or keyboard focus.
-  // A clipped sr-only button can satisfy Playwright's visibility geometry.
-  await recordSessionAction(pin, info, `${label}-pin-before-hover`);
+  // A row's actions live in its one "⋯" menu; Pin is an item there. On touch
+  // the trigger is always exposed (no hover needed) as a 44px target.
+  const options = (phone ? menu : right)
+    .locator("[data-session-row]")
+    .getByRole("button", { name: / options$/ })
+    .first();
+  const pin = right.getByRole("menuitem", { name: /^(Pin|Unpin) / });
+  await recordSessionAction(options, info, `${label}-pin-before-hover`);
   if (phone) {
-    await pin.tap({ timeout: 5000 });
+    await options.tap({ timeout: 5000 });
     // At effective 195px, an ordinary tap may use the visible part of a
     // partly clipped button. Preserve that input oracle and report its center.
-    expectExposedRowAction(await recordSessionAction(pin, info, `${label}-pin-after-tap`));
+    expectExposedRowAction(await recordSessionAction(options, info, `${label}-pin-after-tap`));
+    await pin.tap({ timeout: 5000 });
   } else {
-    await pin.locator("xpath=ancestor::div[contains(@class, 'group relative')][1]").hover();
-    const geometry = await recordSessionAction(pin, info, `${label}-pin-after-hover`);
+    await options.locator("xpath=ancestor::*[@data-session-row][1]").hover();
+    const geometry = await recordSessionAction(options, info, `${label}-pin-after-hover`);
     expectExposedRowAction(geometry);
     expect(geometry.centerHit).toBe(true);
     await capture(page, info, `${label}-packed-pin-target`);
+    await options.click({ timeout: 5000 });
     await pin.click({ timeout: 5000 });
   }
   const notifications = right.getByRole("region", { name: "Notifications", exact: true });
@@ -359,6 +376,17 @@ async function qualifyInstances(page: Page, info: TestInfo, label: string, id: s
   if (phone) {
     await menu.getByRole("button", { name: "Close", exact: true }).tap();
     await expect(menu).toHaveCount(0); // retained 300ms phone exit is part of the contract
+    // The menu lives on Home: reopen the session so its stream is live again.
+    // A phone's Home is its session list (no project tiles).
+    await right
+      .getByRole("region", { name: "Sessions and Inbox", exact: true })
+      .getByRole("region", { name: "Embedded E2E project", exact: true })
+      // The project's one session row: not its header, "New session in …" or a "… options" menu.
+      .getByRole("button", { name: /^(?!Embedded E2E project|New session in ).*(?<! options)$/ })
+      .first()
+      .tap();
+    await expect(rightComposer).toBeVisible();
+    await expect.poll(async () => (await cacheState(page)).Right.openStreams).toBeGreaterThan(0);
   }
   await page.unroute(endpoint);
   await left.getByRole("button", { name: "Close packed runtime", exact: true }).click();
@@ -587,13 +615,21 @@ test("packed retired responses, timers and shortcuts stay within their binding",
     const rightComposer = right.getByRole("combobox", { name: "Message", exact: true });
     await expect(rightComposer).toBeVisible();
     expect(oldReads).toBe(0);
-    await left.getByRole("button", { name: "Session settings", exact: true }).click();
+    await left.getByRole("button", { name: "Session menu", exact: true }).click();
+    await left
+      .getByRole("dialog", { name: "Session", exact: true })
+      .getByRole("button", { name: "Session settings", exact: true })
+      .click();
     await expect.poll(() => oldReads).toBe(1);
     await rightComposer.fill("Sibling draft survives retirement and timers");
     const initial = await cacheState(page);
     const host = page.getByRole("textbox", { name: "Host draft", exact: true });
     await host.fill("Caller remains independent");
-    await right.getByRole("button", { name: "Session settings", exact: true }).click();
+    await right.getByRole("button", { name: "Session menu", exact: true }).click();
+    await right
+      .getByRole("dialog", { name: "Session", exact: true })
+      .getByRole("button", { name: "Session settings", exact: true })
+      .click();
     const dialog = right.getByRole("dialog", { name: "Session settings", exact: true });
     await expect(dialog.getByRole("textbox", { name: "Session title" })).toBeVisible();
     await left.getByRole("button", { name: "Replace packed runtime", exact: true }).click();
@@ -613,10 +649,10 @@ test("packed retired responses, timers and shortcuts stay within their binding",
         ? "Meta"
         : "Control",
     );
-    await expect(left.locator("[data-sidebar]")).toHaveCSS("width", "280px");
-    await page.keyboard.press(`${modifier}+h`);
-    await expect(left.locator("[data-sidebar]")).toHaveCSS("width", "52px");
-    await expect(right.locator("[data-sidebar]")).toHaveCSS("width", "280px");
+    await expect(left.locator("[data-sidebar]")).toHaveCSS("width", "256px");
+    await page.keyboard.press(`${modifier}+b`);
+    await expect(left.locator("[data-sidebar]")).toHaveCSS("width", "0px");
+    await expect(right.locator("[data-sidebar]")).toHaveCSS("width", "256px");
     await expect(dialog).toBeVisible();
     await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(dialog).toHaveCount(0);
@@ -628,14 +664,18 @@ test("packed retired responses, timers and shortcuts stay within their binding",
       writes += 1;
       await route.fulfill({ status: 503, json: { error: "Local lifetime notification" } });
     });
-    const pin = right.getByRole("button", { name: /^Pin / }).first();
-    await recordSessionAction(pin, info, "lifetime-pin-before-hover");
-    await pin.locator("xpath=ancestor::div[contains(@class, 'group relative')][1]").hover();
-    const geometry = await recordSessionAction(pin, info, "lifetime-pin-after-hover");
+    const options = right
+      .locator("[data-session-row]")
+      .getByRole("button", { name: / options$/ })
+      .first();
+    await recordSessionAction(options, info, "lifetime-pin-before-hover");
+    await options.locator("xpath=ancestor::*[@data-session-row][1]").hover();
+    const geometry = await recordSessionAction(options, info, "lifetime-pin-after-hover");
     expectExposedRowAction(geometry);
     expect(geometry.centerHit).toBe(true);
     await capture(page, info, "lifetime-packed-pin-target");
-    await pin.click();
+    await options.click();
+    await right.getByRole("menuitem", { name: /^(Pin|Unpin) / }).click();
     const notices = right.getByRole("region", { name: "Notifications", exact: true });
     await expect(notices.getByRole("alert")).toContainText("Local lifetime notification");
     await expect(

@@ -50,9 +50,11 @@ test("delegated phone header retains intrinsic change counts and its parent rout
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`${harness.baseUrl}/#/session/${child}/insights`);
   const heading = page.locator("header");
-  // Measure the actual buttons, not StickyButton's elevated outer wrappers.
-  for (const name of ["All projects", "Open panel", "Open the menu"]) {
-    const button = heading.getByRole("button", { name, exact: true });
+  // The phone session header is back (the parent crumb) plus one "Open panel"
+  // button. Measure the actual buttons, not any elevated outer wrapper.
+  const parentLink = heading.getByRole("button", { name: /, parent chat$/ });
+  const openPanel = heading.getByRole("button", { name: "Open panel", exact: true });
+  for (const button of [parentLink, openPanel]) {
     await expect(button).toBeVisible();
     const box = await button.boundingBox();
     expect(box!.width).toBeGreaterThanOrEqual(44);
@@ -60,14 +62,20 @@ test("delegated phone header retains intrinsic change counts and its parent rout
     expect(box!.x).toBeGreaterThanOrEqual(0);
     expect(box!.x + box!.width).toBeLessThanOrEqual(390);
   }
-  const parentLink = heading.getByRole("button", { name: /, parent chat$/ });
-  await expect(parentLink).toBeVisible();
-  await expect(heading.getByText("1234 additions, 5678 deletions", { exact: true })).toHaveCount(1);
-  const badge = heading.getByText("1234 additions, 5678 deletions", { exact: true }).locator("..");
+  // A phone has no room for header pills: the intrinsic totals ride on the
+  // panel sheet's Files row and must fit there without clipping.
+  await openPanel.click();
+  const sheet = page.getByRole("dialog", { name: "Session", exact: true });
+  const files = sheet.getByRole("button").filter({ hasText: /^Files/ });
+  await expect(files).toBeVisible();
+  await expect(files.getByText("+1234", { exact: true })).toHaveCount(1);
+  await expect(files.getByText("−5678", { exact: true })).toHaveCount(1);
+  const badge = files.getByText("+1234", { exact: true }).locator("..");
   await expect.poll(() => badge.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
   const badgeBox = await badge.boundingBox();
-  const headingBox = await heading.boundingBox();
-  expect(badgeBox!.x + badgeBox!.width).toBeLessThanOrEqual(headingBox!.x + headingBox!.width);
+  const rowBox = await files.boundingBox();
+  expect(badgeBox!.x + badgeBox!.width).toBeLessThanOrEqual(rowBox!.x + rowBox!.width);
+  expect(rowBox!.x + rowBox!.width).toBeLessThanOrEqual(390);
   await page.evaluate(() =>
     (
       globalThis as unknown as { document: { fonts: { ready: Promise<unknown> } } }
@@ -83,6 +91,8 @@ test("delegated phone header retains intrinsic change counts and its parent rout
     await fs.mkdir(process.env.NAC_NAVIGATION_CAPTURE_DIR, { recursive: true });
     await fs.copyFile(file, path.join(process.env.NAC_NAVIGATION_CAPTURE_DIR, path.basename(file)));
   }
+  await page.keyboard.press("Escape");
+  await expect(sheet).toBeHidden();
   await parentLink.click();
   await expect(page).toHaveURL(new RegExp(`/session/${parent}/delegated`));
   harness.provider.assertConsumed();

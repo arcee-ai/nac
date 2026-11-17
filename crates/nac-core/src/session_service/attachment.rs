@@ -7,7 +7,7 @@ impl SessionService {
         let behavior = run_config.session.behavior();
         let store_path = run_config.session.store_path();
         let session_id = run_config.session.session_id().map(str::to_string);
-        let restored_messages = run_config.agent.messages.clone();
+        let restored_messages = run_config.agent.messages.to_vec();
         let transcript_recovery_warning = run_config
             .agent
             .transcript_recovery_warning()
@@ -130,6 +130,7 @@ impl SessionService {
             reconciled_recovery_run_id: Arc::new(StdMutex::new(None)),
             transcript_log,
             transcript_scan: Arc::new(StdMutex::new(transcript_scan)),
+            tool_call_index: Arc::default(),
             event_bus,
             active_operation: Arc::new(StdMutex::new(None)),
             published_operation: Arc::new(StdMutex::new(None)),

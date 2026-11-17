@@ -624,6 +624,17 @@ async fn interleave(behavior: &str) {
     );
     retire_feed(&manager, replay).await.unwrap();
     let service_active_after_replay = service.has_active_operation();
+    // Close admission and fence the continuation caller before its store retires.
+    tokio::time::timeout(Duration::from_secs(5), async {
+        service.stop_run_admission().await.unwrap();
+        assert!(service
+            .start_next_direct_inbox_item()
+            .await
+            .unwrap()
+            .is_none());
+    })
+    .await
+    .unwrap();
     drop(barrier);
     drop(service);
     drop(app);
@@ -638,6 +649,7 @@ async fn interleave(behavior: &str) {
             "behavior":behavior,"session":id,"run_a":a,"run_b":b,
             "original_feed_retirement_returned":true,"replay_feed_retirement_returned":true,
             "service_active_after_replay":service_active_after_replay,
+            "stopped_wake_fence_returned":true,
             "quiesce_returned":true,"typed_drain_acknowledged":true,
             "physical_seat_after_drain":physical_seat_after_drain,
             "provider_listener_abort_join_returned":true,

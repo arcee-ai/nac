@@ -29,39 +29,40 @@ const buttonSizeFor = {
   [InputSize.Large]: ButtonSize.Large,
 } satisfies Record<InputSize, ButtonSize>;
 const iconSizeFor = {
-  [InputSize.Small]: 16,
-  [InputSize.Medium]: 20,
-  [InputSize.Large]: 24,
+  [InputSize.Small]: 14,
+  [InputSize.Medium]: 16,
+  [InputSize.Large]: 18,
 } satisfies Record<InputSize, number>;
 const padLeft = {
-  [InputSize.Small]: "pl-1",
-  [InputSize.Medium]: "pl-2",
+  [InputSize.Small]: "pl-2",
+  [InputSize.Medium]: "pl-2.5",
   [InputSize.Large]: "pl-3",
 } satisfies Record<InputSize, string>;
 const padRight = {
-  [InputSize.Small]: "pr-1",
-  [InputSize.Medium]: "pr-2",
+  [InputSize.Small]: "pr-2",
+  [InputSize.Medium]: "pr-2.5",
   [InputSize.Large]: "pr-3",
 } satisfies Record<InputSize, string>;
 const padLeftIcon = {
   [InputSize.Small]: "pl-6",
-  [InputSize.Medium]: "pl-9",
-  [InputSize.Large]: "pl-12",
+  [InputSize.Medium]: "pl-8",
+  [InputSize.Large]: "pl-10",
 } satisfies Record<InputSize, string>;
 const padRightIcon = {
   [InputSize.Small]: "pr-6",
   [InputSize.Medium]: "pr-9",
-  [InputSize.Large]: "pr-12",
+  [InputSize.Large]: "pr-11",
 } satisfies Record<InputSize, string>;
+// Glyphs are centred on the field, so a phone's taller field keeps them aligned.
 const leadingIconPos = {
-  [InputSize.Small]: "top-1 left-1",
-  [InputSize.Medium]: "top-2 left-2",
-  [InputSize.Large]: "top-3 left-3",
+  [InputSize.Small]: "top-1/2 -translate-y-1/2 left-1.5",
+  [InputSize.Medium]: "top-1/2 -translate-y-1/2 left-2.5",
+  [InputSize.Large]: "top-1/2 -translate-y-1/2 left-3",
 } satisfies Record<InputSize, string>;
 const trailingIconPos = {
-  [InputSize.Small]: "top-1 right-1",
-  [InputSize.Medium]: "top-2 right-2",
-  [InputSize.Large]: "top-3 right-3",
+  [InputSize.Small]: "top-1/2 -translate-y-1/2 right-1.5",
+  [InputSize.Medium]: "top-1/2 -translate-y-1/2 right-2.5",
+  [InputSize.Large]: "top-1/2 -translate-y-1/2 right-3",
 } satisfies Record<InputSize, string>;
 
 interface InputProps extends Omit<React.ComponentPropsWithRef<"input">, "size"> {
@@ -128,7 +129,7 @@ const Input: React.FC<InputProps> & {
     "w-full input font-normal",
     inputSize,
     inputClassName,
-    rounded ? "rounded-full" : "rounded-interaction",
+    rounded ? "rounded-pill" : "rounded-lg",
     !hasLeading ? padLeft[inputSize] : largeSearch ? "input-pad-search" : padLeftIcon[inputSize],
     !hasTrailing ? padRight[inputSize] : padRightIcon[inputSize],
     isDisabled && "input-disabled",
@@ -153,10 +154,7 @@ const Input: React.FC<InputProps> & {
       <div className="input-wrapper relative w-full h-fit">
         {leadingSlot ? (
           <div
-            className={cn(
-              "absolute flex items-center justify-center",
-              largeSearch ? "top-3 left-1.5" : leadingIconPos[inputSize],
-            )}
+            className={cn("absolute flex items-center justify-center", leadingIconPos[inputSize])}
             style={{
               width: iconSizeFor[inputSize],
               height: iconSizeFor[inputSize],
@@ -169,7 +167,7 @@ const Input: React.FC<InputProps> & {
           <Icon
             iconName={leadingIconName}
             size={iconSizeFor[inputSize]}
-            className={cn("absolute", largeSearch ? "top-3 left-1.5" : leadingIconPos[inputSize])}
+            className={cn("pointer-events-none absolute", leadingIconPos[inputSize])}
             color={iconColor}
           />
         ) : null}
@@ -203,7 +201,7 @@ const Input: React.FC<InputProps> & {
           <Icon
             iconName={trailingIconName}
             size={iconSizeFor[inputSize]}
-            className={cn("absolute", trailingIconPos[inputSize])}
+            className={cn("pointer-events-none absolute", trailingIconPos[inputSize])}
             color={iconColor}
           />
         ) : null}

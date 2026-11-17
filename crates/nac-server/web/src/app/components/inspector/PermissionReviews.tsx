@@ -40,10 +40,10 @@ export function PermissionReviewStatus({ reviews }: { reviews: PermissionReview[
     <section
       aria-label="Review service status"
       role="status"
-      className="rounded-[6px] bg-elevation-level-2 p-3"
+      className="rounded-md border border-tertiary p-3"
     >
-      <div className="text-small font-medium text-basic-primary">{title}</div>
-      <div className="mt-1 text-small text-basic-secondary">
+      <div className="type-label text-basic-primary">{title}</div>
+      <div className="type-meta mt-1 text-basic-secondary">
         {!latest
           ? "Enabling this mode checks credentials only. Model access, credits and connectivity are checked when an eligible action is reviewed."
           : !latest.outcome
@@ -90,19 +90,17 @@ export function PermissionReviewRow({
     review.outcome === "approved"
       ? "text-basic-secondary"
       : review.outcome === undefined || review.outcome === null
-        ? "text-accent-primary"
+        ? "text-[var(--f-amber-text)]"
         : "text-error-primary";
   return (
-    <div className="rounded-[4px] bg-elevation-level-2 px-3 py-2">
+    <div className="rounded-md border border-muted px-3 py-2">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <span className="tag-label uppercase text-basic-secondary">{review.tool}</span>
-        <span className="tag-label uppercase text-basic-tertiary">{review.backend}</span>
+        <span className="type-tag text-basic-secondary">{review.tool}</span>
+        <span className="type-tag text-basic-tertiary">{review.backend}</span>
         {review.backend === "local" || review.backend === "ssh" ? (
-          <span className="tag-label uppercase text-basic-tertiary">unsandboxed host</span>
+          <span className="type-tag text-basic-tertiary">unsandboxed host</span>
         ) : review.backend === "podman_with_host_mounts" ? (
-          <span className="tag-label uppercase text-basic-tertiary">
-            container with writable host mounts
-          </span>
+          <span className="type-tag text-basic-tertiary">container with writable host mounts</span>
         ) : null}
         <span className={`text-small ${tone}`}>{reviewOutcomeLabel(review)}</span>
       </div>
@@ -111,7 +109,7 @@ export function PermissionReviewRow({
           key={`${resource.action}:${resource.resource}:${index}`}
           className="mt-1 break-words text-small text-basic-primary"
         >
-          <span className="tag-label uppercase text-basic-secondary">{resource.action}</span>{" "}
+          <span className="type-tag text-basic-secondary">{resource.action}</span>{" "}
           {resource.display || resource.resource}
         </div>
       ))}

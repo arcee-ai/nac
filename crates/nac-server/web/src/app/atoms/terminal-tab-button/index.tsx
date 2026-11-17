@@ -37,10 +37,10 @@ const SIZE_STYLE: Record<
   { box: string; name: string; label: string; icon: number }
 > = {
   [TerminalTabButtonSize.Small]: {
-    box: "h-7 gap-1 p-1 pl-2",
-    name: "gap-1",
-    label: "label-micro",
-    icon: 16,
+    box: "h-7 gap-1 pl-2.5 pr-1",
+    name: "gap-1.5",
+    label: "type-body-chrome",
+    icon: 14,
   },
   [TerminalTabButtonSize.Large]: {
     box: "h-12 gap-3 px-3 py-2",
@@ -50,26 +50,23 @@ const SIZE_STYLE: Record<
   },
 };
 
+/** Quiet pills: ink on paper, an alpha wash on hover and for the open terminal. */
 const TONE = {
   regular: cn(
-    "bg-btn-ghost text-btn-secondary",
-    "hover:bg-btn-ghost-hovered hover:text-btn-secondary-hovered",
-    "active:bg-btn-ghost-pressed active:text-btn-secondary-pressed",
+    "text-basic-secondary",
+    "hover:bg-[var(--f-wash-1)] hover:text-basic-primary",
+    "active:bg-[var(--f-wash-2)]",
   ),
-  highlighted: cn(
-    "bg-btn-ghost-highlighted text-btn-secondary-highlighted",
-    "hover:bg-btn-ghost-highlighted-hovered",
-    "active:bg-btn-ghost-highlighted-pressed active:text-btn-secondary-pressed-highlighted",
-  ),
-  disabled: "bg-btn-ghost-disabled text-btn-secondary-disabled",
-  disabledHighlighted: "bg-btn-ghost-highlighted-disabled text-btn-secondary-disabled-highlighted",
+  highlighted: cn("bg-[var(--f-wash-2)] text-basic-primary", "hover:bg-[var(--f-wash-3)]"),
+  disabled: "text-basic-muted",
+  disabledHighlighted: "bg-[var(--f-wash-1)] text-basic-muted",
 };
 
 const REMOVE_TONE = cn(
-  "text-fill-btn-destructive",
-  "hover:text-fill-btn-destructive-hovered",
-  "active:text-fill-btn-destructive-pressed",
-  "disabled:text-fill-btn-destructive-disabled",
+  "text-basic-muted",
+  "hover:bg-[var(--f-red-wash)] hover:text-error-primary",
+  "active:bg-[var(--f-red-wash-2)]",
+  "disabled:opacity-50",
 );
 
 /**
@@ -97,7 +94,8 @@ const TerminalTabButton: React.FC<TerminalTabButtonProps> = ({
   return (
     <div
       className={cn(
-        "group/terminal-tab-button relative flex w-full min-w-0 items-center rounded-interaction",
+        "group/terminal-tab-button relative flex w-full min-w-0 items-center",
+        small ? "rounded-pill" : "rounded-md",
         "transition-colors duration-150 ease-out",
         style.box,
         disabled
@@ -118,15 +116,13 @@ const TerminalTabButton: React.FC<TerminalTabButtonProps> = ({
         onClick={onClick}
         className={cn(
           "flex min-w-0 flex-1 items-center self-stretch text-left outline-none",
-          "after:absolute after:inset-0 after:rounded-interaction disabled:cursor-not-allowed",
-          "before:pointer-events-none before:absolute before:-inset-1 before:hidden before:rounded-[6px] before:border-2 before:border-[var(--color-border-focus-outline)] focus-visible:before:block",
+          "after:absolute after:inset-0 after:rounded-[inherit] disabled:cursor-not-allowed",
+          "before:pointer-events-none before:absolute before:inset-0 before:hidden before:rounded-[inherit] before:border-2 before:border-[var(--color-border-focus-outline)] focus-visible:before:block",
           style.name,
         )}
       >
         <span className={cn("min-w-0 truncate", style.label)}>{label}</span>
-        {agent ? (
-          <Badge text="Agent" color={BadgeColor.Blue} background={false} className="shrink-0" />
-        ) : null}
+        {agent ? <Badge text="Agent" color={BadgeColor.Gray} className="shrink-0" /> : null}
       </button>
       {remove ? (
         <button
@@ -136,7 +132,8 @@ const TerminalTabButton: React.FC<TerminalTabButtonProps> = ({
           disabled={remove.disabled}
           onClick={remove.onClick}
           className={cn(
-            "relative z-10 flex shrink-0 items-center justify-center rounded-[8px]",
+            "relative z-10 flex shrink-0 items-center justify-center rounded-pill",
+            small ? "size-5" : "-mr-2 size-11",
             "transition-opacity duration-150 ease-out disabled:cursor-not-allowed",
             "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-border-focus-outline)]",
             small &&

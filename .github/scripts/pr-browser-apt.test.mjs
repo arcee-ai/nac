@@ -17,8 +17,8 @@ const workflow=YAML.parse(fs.readFileSync('.github/workflows/stable-release.yml'
 const sort=v=>Array.isArray(v)?v.map(sort):v&&typeof v==='object'?Object.fromEntries(Object.entries(v).sort(([a],[b])=>a.localeCompare(b)).map(([k,x])=>[k,sort(x)])):v;
 const hash=v=>createHash('sha256').update(JSON.stringify(sort(v))).digest('hex');
 // Full pre-relay graph from parent914782659a6183b89070a3516e2e44776b1eeb06,
-// composed with this layer's required startup-custody control.
-const parentHash='363778dde3000bacc7771f6e0fbf23680c73bfc4ad65a0f383af30ddfa686e85';
+// composed with the required startup-custody and native-auth fixture controls.
+const parentHash='f799f1ec07a7600fa690d9f31c9c87e8bee082926cadc6cf06ce91a157ec0567';
 function validate(value) {
   const old=structuredClone(value);reverseAssetTokens(old);reverseBrowserApt(old);reverseElapsedEvidence(old);assert.equal(hash(old),parentHash);
   assert.equal(value.permissions.contents,'read');

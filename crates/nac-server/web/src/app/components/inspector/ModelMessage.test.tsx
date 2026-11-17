@@ -35,7 +35,7 @@ describe("transcript topology badge navigation", () => {
     expect(refresh).toHaveBeenCalledWith(0);
   });
 
-  it("sums the workset up in a badge and selects the thread episode", () => {
+  it("folds the workset into one line and selects the thread episode", () => {
     const onSelectThread = vi.fn();
     const turn: ModelTurn = {
       kind: "model",
@@ -74,7 +74,11 @@ describe("transcript topology badge navigation", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Workset" }));
+    const fold = screen.getByRole("button", { name: "Worked for <1s · Defined 1 workset" });
+    expect(fold.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(fold);
+    expect(fold.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("Defined workset")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: /api/i }));
     expect(onSelectThread).toHaveBeenCalledWith("api", "api:0", { focusDetail: true });

@@ -200,11 +200,19 @@ async function unobscuredPageTarget(target: Locator) {
       const document = element.ownerDocument;
       const view = document.defaultView!;
       const rect = element.getBoundingClientRect();
+      // Hit testing follows rounded corners (the Home link is a pill), so
+      // sample each corner just inside its curve rather than the bounding box.
+      const radius = Math.min(
+        Number.parseFloat(view.getComputedStyle(element).borderTopLeftRadius) || 0,
+        rect.width / 2,
+        rect.height / 2,
+      );
+      const inset = radius * (1 - Math.SQRT1_2) + 1;
       const points = [
-        [rect.left + 1, rect.top + 1],
-        [rect.right - 1, rect.top + 1],
-        [rect.left + 1, rect.bottom - 1],
-        [rect.right - 1, rect.bottom - 1],
+        [rect.left + inset, rect.top + inset],
+        [rect.right - inset, rect.top + inset],
+        [rect.left + inset, rect.bottom - inset],
+        [rect.right - inset, rect.bottom - inset],
         [rect.left + rect.width / 2, rect.top + rect.height / 2],
       ];
       const fixedHeaders = [...document.querySelectorAll("header")]
@@ -386,7 +394,7 @@ test("standalone human interval schedule retries one intent and retains two inde
     await controls.setViewportSize(viewport);
     const heading = controls.getByRole("heading", { name: "Interval tasks", exact: true });
     const pageHeader = controls.locator("header").filter({ has: heading });
-    const back = pageHeader.getByRole("link", { name: "All projects", exact: true });
+    const back = pageHeader.getByRole("link", { name: "Home", exact: true });
     // Only reset the owning page scroll, as a user returning to its top would.
     await heading.evaluate((element) => {
       element.closest("main")!.scrollTop = 0;

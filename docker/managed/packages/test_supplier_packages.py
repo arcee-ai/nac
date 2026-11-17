@@ -17,7 +17,7 @@ LOCK = json.loads((ROOT / "sources.lock.json").read_text())
 PREDECESSORS = {"krb5-libs": "1.22.2-r5", "curl": "8.23.0-r1",
                 "libcurl-openssl4": "8.23.0-r1", "cyrus-sasl-heimdal-libs": "2.1.28-r58",
                 "gcc": "16.2.0-r1", "libgcc": "16.2.0-r1", "libstdc++": "16.2.0-r1",
-                "libstdc++-dev": "16.2.0-r1"}
+                "libstdc++-dev": "16.2.0-r1", "libssh2": "1.11.1-r11"}
 DATABASE = "\n\n".join(f"P:{name}\nV:{version}\nA:x86_64" for name, version in PREDECESSORS.items())
 
 

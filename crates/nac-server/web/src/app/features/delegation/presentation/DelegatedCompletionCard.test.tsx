@@ -52,7 +52,7 @@ describe("delegated completion card", () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByRole("status", { name: "Coding agent completed" })).toBeTruthy();
+    expect(screen.getByRole("status", { name: "Subagent completed" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Regenerate from original prompt" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Revert to this snapshot" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Create fork" })).toBeNull();
@@ -62,7 +62,7 @@ describe("delegated completion card", () => {
 
     fireEvent.click(
       screen.getByRole("button", {
-        name: "Open Audit persistence in Subagents, Coding agent",
+        name: "Open Audit persistence in Subagents, Subagent",
       }),
     );
     expect(focusPanel).toHaveBeenCalledWith("delegated");

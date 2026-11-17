@@ -1,6 +1,7 @@
 import { useState } from "react";
 import {
   Button,
+  ButtonContent,
   ButtonSize,
   ButtonVariant,
   Icon,
@@ -36,12 +37,12 @@ export function SessionIntegrations({ sessionId }: { sessionId: string }) {
       size="w-[320px]"
       content={
         <div className="flex flex-col gap-3 p-3">
-          <p className="label-small text-basic-primary">Chat integrations</p>
-          <p className="text-micro text-basic-tertiary">
+          <p className="type-strong text-basic-primary">Chat integrations</p>
+          <p className="type-meta text-basic-tertiary">
             Apply newly connected, changed or removed MCP servers to this chat. Other chats keep
             their own integrations.
           </p>
-          <p className="text-micro text-basic-primary" role="status">
+          <p className="type-meta text-basic-primary" role="status">
             {data
               ? STATE_LABEL[data.state]
               : status.isError
@@ -49,14 +50,14 @@ export function SessionIntegrations({ sessionId }: { sessionId: string }) {
                 : "Loading integrations…"}
           </p>
           {data?.revision ? (
-            <p className="text-micro text-basic-tertiary">
+            <p className="type-meta text-basic-tertiary">
               Refresh {data.revision}
               {data.applied_revision != null ? ` · Applied ${data.applied_revision}` : ""}
             </p>
           ) : null}
-          {data?.message ? <p className="text-micro text-basic-tertiary">{data.message}</p> : null}
+          {data?.message ? <p className="type-meta text-basic-tertiary">{data.message}</p> : null}
           {refresh.error ? (
-            <p className="text-micro text-danger-primary" role="alert">
+            <p className="type-meta text-error-primary" role="alert">
               {refresh.error.message}
             </p>
           ) : null}
@@ -83,13 +84,12 @@ export function SessionIntegrations({ sessionId }: { sessionId: string }) {
       <Button
         size={ButtonSize.Small}
         variant={ButtonVariant.Tertiary}
-        aria-label="Chat integrations"
-        title="Chat integrations"
+        content={ButtonContent.IconLeft}
         aria-expanded={open}
         onClick={() => setOpen(!open)}
       >
-        <Icon iconName={IconName.Server} size={16} className="@sm:!hidden" />
-        <span className="@max-sm:hidden">Integrations</span>
+        <Icon iconName={IconName.Server} size={16} />
+        <span>Chat integrations</span>
       </Button>
     </Popover>
   );

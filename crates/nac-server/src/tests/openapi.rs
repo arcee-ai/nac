@@ -60,7 +60,9 @@ const EXPECTED_OPENAPI_OPERATIONS: &[(&str, &str)] = &[
     ("POST", "/sessions/{session_id}/heartbeats/attention"),
     ("GET", "/sessions/{session_id}/integrations"),
     ("POST", "/sessions/{session_id}/integrations/refresh"),
+    ("GET", "/attention"),
     ("GET", "/attention/events"),
+    ("GET", "/attention/stream"),
 
     ("POST", "/sessions/{session_id}/task-followup-delegations"),
     ("GET", "/sessions/{session_id}/task-followup-delegations/{delegation_id}"),
@@ -204,6 +206,7 @@ const EXPECTED_OPENAPI_OPERATIONS: &[(&str, &str)] = &[
         "/sessions/{session_id}/workspace/revisions/{revision_id}/changes",
     ),
     ("GET", "/ssh-configs"),
+    ("GET", "/ssh/aliases"),
     ("GET", "/store"),
     ("PATCH", "/mcp_library/servers/{server_name}"),
     ("PATCH", "/model-configs/{config_id}"),
@@ -214,6 +217,7 @@ const EXPECTED_OPENAPI_OPERATIONS: &[(&str, &str)] = &[
     ("PATCH", "/ssh-configs/{config_id}"),
     ("POST", "/auth/{provider}/login"),
     ("POST", "/credentials"),
+    ("POST", "/fs/folders"),
     ("POST", "/managed/github/login"),
     ("POST", "/managed/github/clone-operations"),
     ("POST", "/mcp_library/servers"),
@@ -299,8 +303,10 @@ const EXPECTED_OPENAPI_OPERATIONS: &[(&str, &str)] = &[
     ("POST", "/sessions/{session_id}/workspace/branches"),
     ("POST", "/sessions/{session_id}/workspace/commit"),
     ("POST", "/sessions/{session_id}/workspace/open"),
+    ("POST", "/sessions/{session_id}/workspace/reveal"),
     ("POST", "/ssh-configs"),
     ("POST", "/ssh/browse"),
+    ("POST", "/ssh/folders"),
     ("PUT", "/credentials/{name}"),
     ("PUT", "/managed/github/git-identity"),
     ("PUT", "/sessions/{session_id}/permissions/mode"),
@@ -405,6 +411,23 @@ async fn openapi_document_matches_the_running_api_router() {
         .unwrap()
         .iter()
         .any(|parameter| parameter["name"] == "project_id"));
+    let reveal = &document["components"]["schemas"]["RevealWorkspacePathRequest"];
+    assert_eq!(reveal["additionalProperties"], false);
+    let required: std::collections::BTreeSet<_> = reveal["required"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|field| field.as_str().unwrap())
+        .collect();
+    assert_eq!(
+        required,
+        std::collections::BTreeSet::from(["path", "expected_workspace_root", "expected_path_root"])
+    );
+    assert_eq!(
+        document["paths"]["/sessions/{session_id}/workspace/reveal"]["post"]["requestBody"]
+            ["content"]["application/json"]["schema"]["$ref"],
+        "#/components/schemas/RevealWorkspacePathRequest"
+    );
 
     let mut documented = std::collections::BTreeSet::new();
     for (path, item) in document["paths"].as_object().expect("OpenAPI paths") {
