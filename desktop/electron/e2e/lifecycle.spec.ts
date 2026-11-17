@@ -379,3 +379,84 @@ test("native application Hide/Show and minimize/restore preserve hidden activity
     });
   }
 });
+
+test("explicit Retry waits for original document retirement after engine exit", async ({
+  candidate: c,
+}) => {
+  const originalDocument = await c.app.evaluate(({ BrowserWindow, dialog }) => {
+    const win = BrowserWindow.getAllWindows()[0];
+    const frame = win.webContents.mainFrame;
+    const send = frame.send.bind(frame);
+    const pending = { args: null as any[] | null, released: false };
+    (globalThis as any).__retirementFixture = {
+      pending,
+      release: () => {
+        if (pending.released) return;
+        pending.released = true;
+        frame.send = send;
+        if (pending.args) send(...pending.args);
+      },
+    };
+    // Trusted controller holds only this exact document's retirement delivery.
+    // The production two-second deadline and engine custody remain unchanged.
+    frame.send = ((...args: any[]) => {
+      if (args[0] === "nac:document" && args[1]?.kind === "retire") {
+        pending.args = args;
+        return;
+      }
+      send(...args);
+    }) as typeof frame.send;
+    dialog.showMessageBox = async () => ({ response: 0, checkboxChecked: false });
+    return win.webContents.id;
+  });
+  try {
+    process.kill(c.enginePid, "SIGKILL");
+    await expect
+      .poll(
+        () =>
+          c.app.evaluate(({ app, BrowserWindow }) => {
+            const main = process
+              .getBuiltinModule("module")
+              .createRequire(app.getAppPath() + "/package.json")(app.getAppPath());
+            const held = !!(globalThis as any).__retirementFixture.pending.args;
+            if (held && main.getState().enginePid === 0) {
+              void main.retry();
+              void main.retry();
+              return {
+                held,
+                enginePid: main.getState().enginePid,
+                windows: BrowserWindow.getAllWindows().map((win) => win.webContents.id),
+              };
+            }
+            return null;
+          }),
+        { intervals: [10], timeout: 1500 },
+      )
+      .toEqual({ held: true, enginePid: 0, windows: [originalDocument] });
+    const early = await state(c);
+    expect(early.failure).not.toBeNull();
+    // Let the unmodified adapter receive its held retirement request/ACK.
+    await c.app.evaluate(() => (globalThis as any).__retirementFixture.release());
+    await expect.poll(async () => c.app.windows().length).toBe(0);
+    expect((await state(c)).enginePid).toBe(0);
+    expect(c.provider.requests).toHaveLength(0);
+    const successorWindow = c.app.waitForEvent("window");
+    await retry(c);
+    c.page = await successorWindow;
+    await c.page.waitForURL(/^http:\/\/127\.0\.0\.1:\d+/);
+    await expect(c.page.getByText("No projects yet", { exact: true })).toBeVisible();
+    retainEngineCustody(c, (await state(c)).enginePid);
+    expect(await c.app.windows()).toHaveLength(1);
+    expect(c.provider.requests).toHaveLength(0);
+  } finally {
+    await c.app.evaluate(() => (globalThis as any).__retirementFixture.release()).catch(() => {});
+    const current = await state(c).catch(() => null);
+    if (
+      current?.enginePid &&
+      current.enginePid !== c.enginePid &&
+      !c.ownedPids.includes(current.enginePid)
+    ) {
+      retainEngineCustody(c, current.enginePid);
+    }
+  }
+});

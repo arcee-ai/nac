@@ -156,7 +156,7 @@ function createWindow(partition) {
 async function fail(error) {
   if (failure || !["running", "confirming"].includes(lifecycle.phase)) return;
   failure = error;
-  const episode = { error, window, engine, retired: false, settlement: null };
+  const episode = { error, window, engine, retired: false, settled: false, settlement: null };
   failureEpisode = episode;
   const retiring = native;
   retiring?.cancelPending();
@@ -176,6 +176,7 @@ async function fail(error) {
     )
       status("The workspace connection was lost. Waiting for the owned engine to finish cleanup…");
     await episode.engine?.stop();
+    episode.settled = true;
   })();
   await episode.settlement;
   if (failureEpisode === episode && failure === error) await presentFailure();
@@ -227,11 +228,14 @@ async function presentFailure() {
   }
 }
 async function retry() {
+  // Child reap alone does not retire its document or dispose the Quit owner.
   if (
     !bundleVerified ||
     startupPromise ||
     lifecycle.phase !== "running" ||
-    (engine && !engine.exited)
+    (engine && !engine.exited) ||
+    (failureEpisode &&
+      (!failureEpisode.settled || (failureEpisode.window && !failureEpisode.window.isDestroyed())))
   )
     return;
   failure = null;
