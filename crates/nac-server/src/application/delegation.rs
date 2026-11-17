@@ -53,20 +53,14 @@ impl<'a> DelegationApplication<'a> {
                 "traditional children are available only for direct behaviors"
             ));
         }
-        if nac_core::store::load_traditional_child(
-            &self.manager.inner.store_path,
-            parent_session_id,
-        )?
-        .is_some()
-        {
-            return Err(anyhow!(
-                "traditional child nesting limit reached (1): child sessions cannot launch children"
-            ));
-        }
-        nac_core::store::list_traditional_children(
-            &self.manager.inner.store_path,
-            parent_session_id,
-        )
+        let path = self.manager.inner.store_path.clone();
+        let parent = parent_session_id.to_owned();
+        self.manager.inner._store_ownership.call_legacy(move || {
+            if nac_core::store::load_traditional_child(&path, &parent)?.is_some() {
+                return Err(anyhow!("traditional child nesting limit reached (1): child sessions cannot launch children"));
+            }
+            nac_core::store::list_traditional_children(&path, &parent)
+        }).await?
     }
 
     pub(crate) async fn start_traditional_child(
@@ -116,6 +110,21 @@ impl<'a> DelegationApplication<'a> {
         .ok_or_else(|| anyhow!("traditional child was not found"))
     }
 
+    pub(crate) async fn traditional_child_async(
+        &self,
+        parent_session_id: &str,
+        child_session_id: &str,
+    ) -> Result<TraditionalChildRecord> {
+        let manager = self.manager.clone();
+        let parent = parent_session_id.to_owned();
+        let child = child_session_id.to_owned();
+        self.manager
+            .inner
+            ._store_ownership
+            .call_legacy(move || manager.delegation().traditional_child(&parent, &child))
+            .await?
+    }
+
     pub(crate) async fn authorize_child_permission_review_retry(
         &self,
         parent_session_id: &str,
@@ -152,7 +161,9 @@ impl<'a> DelegationApplication<'a> {
         parent_session_id: &str,
         child_session_id: &str,
     ) -> Result<TraditionalChildRecord> {
-        let child = self.traditional_child(parent_session_id, child_session_id)?;
+        let child = self
+            .traditional_child_async(parent_session_id, child_session_id)
+            .await?;
         nac_core::traditional_children::controller_for(&self.manager.inner.store_path)?
             .cancel(parent_session_id, child_session_id, child.generation)
             .await

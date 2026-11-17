@@ -596,6 +596,10 @@ pub fn router(manager: SessionManager) -> Router {
     // The registry answer takes a few seconds, so it is warmed in the
     // background rather than on the first picker open.
     tokio::spawn(mcp_catalog_api::warm_library_cache());
+    build_router(manager)
+}
+
+pub(crate) fn build_router(manager: SessionManager) -> Router {
     let (api, openapi) = api_router(manager.clone());
     let docs = Router::new()
         .merge(

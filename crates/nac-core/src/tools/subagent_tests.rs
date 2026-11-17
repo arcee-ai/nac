@@ -860,3 +860,86 @@ async fn native_foreground_deadline_and_cancel_use_request_previews() {
         }
     }
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn owned_current_thread_status_and_cancel_preserve_parent_binding() {
+    let root = std::env::temp_dir().join(format!("nac_subagent_owned_{}", uuid::Uuid::new_v4()));
+    let path = root.join("store.db");
+    crate::store::initialize(&path).unwrap();
+    for id in ["parent-a", "parent-b", "child-a"] {
+        crate::store::insert_test_session(&path, id);
+    }
+    let connection = crate::store::open_runtime_connection(&path).unwrap();
+    connection.execute("UPDATE sessions SET behavior = 'direct' WHERE session_id IN ('parent-a', 'parent-b', 'child-a')", []).unwrap();
+    drop(connection);
+    crate::store::create_traditional_child_relationship(
+        &path,
+        "parent-a",
+        "child-a",
+        GENERAL_CHILD_PROFILE,
+        "owned fixture",
+    )
+    .unwrap();
+    let owned_path = path.clone();
+    let owner = crate::store::spawn_blocking_store_caller(move || {
+        crate::store::StoreCoordinator::acquire(&owned_path)
+    })
+    .await
+    .unwrap()
+    .unwrap();
+    let store_path = owner.store_path().to_path_buf();
+    crate::traditional_children::register_controller(
+        store_path.clone(),
+        Arc::new(FakeController {
+            starts: Mutex::new(Vec::new()),
+        }),
+    );
+    let mut runtime = crate::tools::test_runtime();
+    runtime.store_path = store_path;
+    runtime.session_id = Some("parent-a".into());
+    runtime.allowed_tools = Some(Arc::new(
+        crate::tools::DIRECT_TOOL_NAMES
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+    ));
+    let client = crate::model::ModelClient::new_for_test();
+    for tool in ["subagent_status", "subagent_cancel"] {
+        let owned = crate::tools::execute_tool(
+            tool,
+            json!({"child_session_id":"child-a"}),
+            &runtime,
+            &client,
+        )
+        .await;
+        if tool == "subagent_status" {
+            assert!(!owned.is_error, "{}", owned.content);
+        } else {
+            assert!(!owned.is_error, "{}", owned.content);
+            assert_eq!(
+                owned.delegation_outcome,
+                Some(crate::events::DelegationOutcome::Cancelled)
+            );
+        }
+        runtime.session_id = Some("parent-b".into());
+        let foreign = crate::tools::execute_tool(
+            tool,
+            json!({"child_session_id":"child-a"}),
+            &runtime,
+            &client,
+        )
+        .await;
+        let missing = crate::tools::execute_tool(
+            tool,
+            json!({"child_session_id":"missing"}),
+            &runtime,
+            &client,
+        )
+        .await;
+        assert!(foreign.is_error && missing.is_error);
+        assert_eq!(foreign.content.as_text(), missing.content.as_text());
+        runtime.session_id = Some("parent-a".into());
+    }
+    owner.shutdown().await.unwrap();
+    let _ = std::fs::remove_dir_all(root);
+}

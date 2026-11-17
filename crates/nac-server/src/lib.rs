@@ -1770,11 +1770,17 @@ impl SessionManager {
         nac_core::traditional_children::validate_general_profile(profile)?;
         let gate = self.lifecycle_gate(parent_session_id);
         let _lifecycle = gate.lock().await;
-        let _relationship_lease = sessions::SessionRelationshipLease::try_acquire(
-            &self.inner.store_path,
-            parent_session_id,
-        )?;
-        let parent = sessions::load_session(&self.inner.store_path, parent_session_id)?;
+        let path = self.inner.store_path.clone();
+        let parent_id = parent_session_id.to_owned();
+        let (relationship_lease, parent) = self
+            .inner
+            ._store_ownership
+            .call_legacy(move || {
+                let lease = sessions::SessionRelationshipLease::try_acquire(&path, &parent_id)?;
+                let parent = sessions::load_session(&path, &parent_id)?;
+                Ok::<_, anyhow::Error>((lease, parent))
+            })
+            .await??;
         if parent.behavior == sessions::SessionBehavior::Orchestrator {
             return Err(anyhow!(
                 "traditional children are available only to direct parent sessions"
@@ -1788,9 +1794,15 @@ impl SessionManager {
                 ));
             }
         }
-        if nac_core::store::load_traditional_child(&self.inner.store_path, parent_session_id)?
-            .is_some()
-        {
+        let path = self.inner.store_path.clone();
+        let parent_id = parent_session_id.to_owned();
+        let is_child = self
+            .inner
+            ._store_ownership
+            .call_legacy(move || nac_core::store::load_traditional_child(&path, &parent_id))
+            .await??
+            .is_some();
+        if is_child {
             return Err(anyhow!(
                 "traditional child nesting limit reached (1): child sessions cannot launch children"
             ));
@@ -1822,13 +1834,25 @@ impl SessionManager {
         child.project_id = parent.project_id;
         child.orchestrator_compaction_threshold = parent.orchestrator_compaction_threshold;
         child.automatic_compaction = parent.automatic_compaction;
-        nac_core::store::create_traditional_child_session(
-            &self.inner.store_path,
-            &child,
-            parent_session_id,
-            profile,
-            description,
-        )?;
+        let path = self.inner.store_path.clone();
+        let parent_id = parent_session_id.to_owned();
+        let profile = profile.to_owned();
+        let description = description.to_owned();
+        self.inner
+            ._store_ownership
+            .call_legacy(move || {
+                let _relationship_lease = relationship_lease;
+                #[cfg(test)]
+                tests::pause_child_creation_for_test(&path, &parent_id);
+                nac_core::store::create_traditional_child_session(
+                    &path,
+                    &child,
+                    &parent_id,
+                    &profile,
+                    &description,
+                )
+            })
+            .await??;
         Ok(child_session_id)
     }
 }
