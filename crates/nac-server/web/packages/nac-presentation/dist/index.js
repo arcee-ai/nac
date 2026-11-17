@@ -9679,7 +9679,8 @@ function hp(e) {
 		api_key_env: e.api_key_env || null,
 		extra_headers: t.headers,
 		extra_headers_invalid: t.invalid,
-		orchestrator_compaction_threshold: e.orchestrator_compaction_threshold
+		orchestrator_compaction_threshold: e.orchestrator_compaction_threshold,
+		automatic_compaction: e.automatic_compaction ?? !1
 	};
 }
 function gp({ open: e, onClose: t, footer: n, titleExtra: r, children: i }) {
@@ -9730,7 +9731,7 @@ function vp({ open: e, id: t, initial: n, initialLight: r, initialVersion: i, su
 		let e = p.current, t = e?.ownerDocument.defaultView, n = d ? e : e?.parentElement;
 		if (t && n instanceof t.HTMLDivElement) return fp(n);
 	}, [d]);
-	let m = So(), h = Rl(e), g = Ko(), _ = Qn(), v = Me(), [y, b] = X(!1), x = gn(), S = x.data ?? null, C = pn(), w = Yt(), [T] = X(a), [D] = X(i), O = Pn(), k = T.title ?? "", [A, j] = X(k), [M, ee] = X(n.model), [te, ne] = X(n.backend), [N, re] = X(n.reasoning_effort ?? ""), [, ie] = X(n.base_url), [ae, oe] = X(pp(n.extra_headers)), [se, ce] = X(n.orchestrator_compaction_threshold == null ? "" : String(n.orchestrator_compaction_threshold)), le = Y(n.orchestrator_compaction_threshold == null ? "" : String(n.orchestrator_compaction_threshold)), ue = Y(!1), de = Y(!1), [fe, pe] = X(""), [me, he] = X(null), [ge, _e] = X({
+	let m = So(), h = Rl(e), g = Ko(), _ = Qn(), v = Me(), [y, b] = X(!1), x = gn(), S = x.data ?? null, C = pn(), w = Yt(), [T] = X(a), [D] = X(i), O = Pn(), k = T.title ?? "", [A, j] = X(k), [M, ee] = X(n.model), [te, ne] = X(n.backend), [N, re] = X(n.reasoning_effort ?? ""), [, ie] = X(n.base_url), [ae, oe] = X(pp(n.extra_headers)), [se, ce] = X(n.orchestrator_compaction_threshold == null ? "" : String(n.orchestrator_compaction_threshold)), le = Y(n.orchestrator_compaction_threshold == null ? "" : String(n.orchestrator_compaction_threshold)), ue = Y(n.automatic_compaction ?? !1), de = Y(!1), [fe, pe] = X(""), [me, he] = X(null), [ge, _e] = X({
 		mode: r ? "dual" : "single",
 		light: r
 	}), [ve, ye] = X(r), [be, xe] = X(!1), [Se, Ce] = X(!1), P = o.some((e) => e.startsWith("malformed stored light model")), we = Y(null), Te = K((e, t) => {
@@ -9790,7 +9791,7 @@ function vp({ open: e, id: t, initial: n, initialLight: r, initialVersion: i, su
 				api_key_env: e.api_key_env ?? "",
 				extra_headers: ae,
 				orchestrator_compaction_threshold: se
-			}, n, r);
+			}, n, r), n.automatic_compaction && ue.current && delete t.orchestrator_compaction_threshold;
 		} catch (e) {
 			throw new zl(e instanceof Error ? e.message : String(e));
 		}

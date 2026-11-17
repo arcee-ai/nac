@@ -208,6 +208,7 @@ pub(super) fn merge_entries(
         if codex_seed_ids.as_ref().is_some_and(|ids| ids.contains(&id)) {
             if let Some(existing) = provider_catalog.models.get_mut(&id) {
                 existing.image_input = entry.image_input;
+                existing.cost = entry.cost;
             }
             continue;
         }

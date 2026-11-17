@@ -110,6 +110,7 @@ function initialFromConfig(config: RawSessionConfig): SettingsInitialValues {
     extra_headers: headers.headers,
     extra_headers_invalid: headers.invalid,
     orchestrator_compaction_threshold: config.orchestrator_compaction_threshold,
+    automatic_compaction: config.automatic_compaction ?? false,
   };
 }
 
@@ -278,7 +279,7 @@ function SettingsForm({
       : "",
   );
   // A persisted null is disabled, not an invitation to change it on mount.
-  const compactionAutoRef = useRef(false);
+  const compactionAutoRef = useRef(initial.automatic_compaction ?? false);
   // An explicitly selected saved preset owns even a disabled (`null`)
   // compaction policy. Keep an empty explicit value from being replaced by
   // the catalog's automatic 70% suggestion until the user edits it.
@@ -443,6 +444,9 @@ function SettingsForm({
         initial,
         allowsCredentiallessSelection,
       );
+      if (initial.automatic_compaction && compactionAutoRef.current) {
+        delete patch.orchestrator_compaction_threshold;
+      }
     } catch (validationError) {
       throw new SetupValidation(
         validationError instanceof Error ? validationError.message : String(validationError),

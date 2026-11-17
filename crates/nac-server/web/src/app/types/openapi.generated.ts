@@ -1396,6 +1396,7 @@ export interface components {
     RawSessionConfig: {
       allow_insecure_http: boolean;
       api_key_env: string | null;
+      automatic_compaction?: boolean;
       backend: string | null;
       base_url: string;
       config_version: number;

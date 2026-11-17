@@ -451,10 +451,12 @@ pub(super) fn parse_index(body: &str) -> Result<Vec<CodexCapabilities>, &'static
 pub(super) fn merge_entries(catalog: &mut ModelCatalog, entries: &[CodexCapabilities]) {
     for observed in entries {
         let shared = catalog.resolve(BackendKind::OpenAiResponses, &observed.id);
-        let codex = catalog
+        let Some(codex) = catalog
             .providers
             .get_mut(&BackendKind::ChatGptCodexResponses)
-            .expect("Codex default exists");
+        else {
+            return;
+        };
         let mut metadata = codex.resolve_entry(&observed.id);
         if metadata.source == ModelSource::ProviderDefault && shared.source.is_authoritative() {
             metadata.display_name = shared.display_name;

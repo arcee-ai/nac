@@ -782,6 +782,19 @@ fn map_model(
         .filter(|inputs| !inputs.is_empty())
         .map(|inputs| inputs.iter().any(|input| input == "image"));
     if let Some(mut entry) = seed_model(baseline, provider, id) {
+        if provider == BackendKind::ChatGptCodexResponses {
+            // Shared fields can evolve after the embedded catalog was built;
+            // retain the Codex-specific limits and transport profile.
+            if let Some(name) = &model.name {
+                entry.display_name = Some(name.clone());
+            }
+            if let Some(reasoning) = model.reasoning {
+                entry.reasoning = reasoning;
+            }
+            if model.cost.is_some() {
+                entry.cost = map_cost(model.cost.as_ref())?;
+            }
+        }
         if let Some(image_input) = image_input {
             entry.image_input = image_input;
         }

@@ -33,8 +33,8 @@ const ALL_EFFORTS: [ReasoningEffort; 7] = [
 #[test]
 fn input_limit_is_not_reduced_by_output_a_second_time() {
     let mut model = ModelMetadata::sparse(
-        BackendKind::OpenAiResponses,
-        ApiKind::OpenAiResponses,
+        BackendKind::ChatGptCodexResponses,
+        ApiKind::ChatGptCodexResponses,
         "example",
         ModelSource::Fallback,
     );
@@ -53,8 +53,25 @@ fn input_limit_is_not_reduced_by_output_a_second_time() {
         Some(190_400)
     );
     model.max_input_tokens = None;
-    assert_eq!(model.resolved_limits().effective_input_tokens, 272_000);
-    assert_eq!(model.resolved_limits().input_origin, LimitOrigin::Estimated);
+    assert_eq!(model.resolved_limits().effective_input_tokens, 380_000);
+    assert_eq!(model.resolved_limits().input_origin, LimitOrigin::Profile);
+}
+
+#[test]
+fn non_codex_default_compaction_keeps_the_context_window() {
+    let mut model = ModelMetadata::sparse(
+        BackendKind::OpenAiResponses,
+        ApiKind::OpenAiResponses,
+        "example",
+        ModelSource::Fallback,
+    );
+    model.context_window = 400_000;
+    model.max_tokens = 128_000;
+    model.max_input_tokens = Some(272_000);
+    assert_eq!(
+        model.resolved_limits().automatic_compaction_threshold,
+        Some(280_000)
+    );
 }
 
 #[test]

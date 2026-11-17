@@ -61,6 +61,7 @@ if (process.env.NAC_VISUAL_DIR && process.env.NAC_VISUAL_LABEL) {
         /of (the model's effective input budget|chatgpt-codex-responses's default window)/,
       );
       await expect(reading).toBeVisible();
+      await expect(reading).toContainText(process.env.NAC_VISUAL_LABEL === "before" ? "32%" : "9%");
       await reading.scrollIntoViewIfNeeded();
       await page.screenshot({
         path: path.join(

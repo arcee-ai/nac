@@ -261,6 +261,7 @@ fn persist_fork(
     fork.behavior = source_behavior;
     fork.light_model = source.light_model;
     fork.orchestrator_compaction_threshold = source.orchestrator_compaction_threshold;
+    fork.automatic_compaction = source.automatic_compaction;
     if let Some(spec) = fork.sandbox_spec.as_mut() {
         spec.worktree = None;
     }

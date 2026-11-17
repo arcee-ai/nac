@@ -405,6 +405,7 @@ pub fn update_session_config(
             extra_headers_json,
             light_model: snapshot.light_model.clone(),
             orchestrator_compaction_threshold: snapshot.orchestrator_compaction_threshold,
+            automatic_compaction: snapshot.automatic_compaction,
             config_version: snapshot.config_version,
             diagnostics: Vec::new(),
         },
@@ -446,7 +447,8 @@ pub fn update_raw_session_config(
              extra_headers_json = ?7,
              light_model_json = ?8,
              orchestrator_compaction_threshold = ?9,
-             config_version = ?10
+             config_version = ?10,
+             automatic_compaction = ?13
          WHERE session_id = ?11 AND config_version = ?12",
         params![
             config.model,
@@ -461,6 +463,7 @@ pub fn update_raw_session_config(
             next_version,
             config.session_id,
             expected_version,
+            config.automatic_compaction,
         ],
     )?;
     if updated == 0 {
@@ -527,7 +530,7 @@ pub fn load_session(path: &Path, session_id: &str) -> Result<SessionSnapshot> {
                     s.created_at, s.updated_at, s.host_id, s.api_key_env,
                     s.extra_headers_json, s.token_usages_json, s.config_version,
                     s.orchestrator_compaction_threshold, s.ssh_port,
-                    s.ssh_identity_file, s.light_model_json, sp.project_id, s.behavior
+                    s.ssh_identity_file, s.light_model_json, sp.project_id, s.behavior, s.automatic_compaction
              FROM sessions s
              LEFT JOIN session_projects sp ON sp.session_id = s.session_id
              WHERE s.session_id = ?1",
@@ -608,7 +611,7 @@ pub fn load_session_config(path: &Path, session_id: &str) -> Result<RawSessionCo
     let conn = crate::store::open_connection(path)?;
     let row = conn
         .query_row(
-            "SELECT session_id, model, base_url, allow_insecure_http, backend, reasoning_effort, api_key_env, extra_headers_json, config_version, orchestrator_compaction_threshold, light_model_json
+            "SELECT session_id, model, base_url, allow_insecure_http, backend, reasoning_effort, api_key_env, extra_headers_json, config_version, orchestrator_compaction_threshold, light_model_json, automatic_compaction
              FROM sessions
              WHERE session_id = ?1",
             params![session_id],
@@ -626,6 +629,7 @@ pub fn load_session_config(path: &Path, session_id: &str) -> Result<RawSessionCo
                         light_model: None,
                         config_version: row.get(8)?,
                         orchestrator_compaction_threshold: row.get(9)?,
+                        automatic_compaction: row.get(11)?,
                         diagnostics: Vec::new(),
                     },
                     row.get::<_, Option<String>>(10)?,
@@ -982,7 +986,7 @@ pub fn load_last_session(path: &Path) -> Result<SessionSnapshot> {
                     s.created_at, s.updated_at, s.host_id, s.api_key_env,
                     s.extra_headers_json, s.token_usages_json, s.config_version,
                     s.orchestrator_compaction_threshold, s.ssh_port,
-                    s.ssh_identity_file, s.light_model_json, sp.project_id, s.behavior
+                    s.ssh_identity_file, s.light_model_json, sp.project_id, s.behavior, s.automatic_compaction
              FROM sessions s
              LEFT JOIN session_projects sp ON sp.session_id = s.session_id
              ORDER BY s.updated_at DESC, s.created_at DESC
@@ -1069,6 +1073,7 @@ fn map_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow> {
         light_model_json: row.get(22)?,
         project_id: row.get(23)?,
         behavior: row.get(24)?,
+        automatic_compaction: row.get(25)?,
     })
 }
 
@@ -1592,10 +1597,10 @@ pub(crate) fn insert_or_replace_session(
              response_durations_ms_json, created_at, updated_at, host_id, api_key_env,
              extra_headers_json, token_usages_json, config_version,
              orchestrator_compaction_threshold, ssh_port, ssh_identity_file,
-             light_model_json, behavior
+             light_model_json, behavior, automatic_compaction
          ) VALUES (
              ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
-             ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27
+             ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28
          )
          ON CONFLICT(session_id) DO UPDATE SET
              cwd = excluded.cwd,
@@ -1642,6 +1647,7 @@ pub(crate) fn insert_or_replace_session(
             stored_ssh_identity_file(snapshot.ssh.as_ref()),
             light_model_json,
             snapshot.behavior.as_str(),
+            snapshot.automatic_compaction,
         ],
     )?;
     Ok(())
@@ -1673,6 +1679,7 @@ struct SessionRow {
     ssh_identity_file: Option<String>,
     light_model_json: Option<String>,
     behavior: String,
+    automatic_compaction: bool,
 }
 
 impl SessionRow {
@@ -1709,6 +1716,7 @@ impl SessionRow {
             orchestrator_compaction_threshold: validate_stored_compaction_threshold(
                 self.orchestrator_compaction_threshold,
             )?,
+            automatic_compaction: self.automatic_compaction,
             config_version: self.config_version,
             messages,
             last_response_duration_ms: self.last_response_duration_ms,

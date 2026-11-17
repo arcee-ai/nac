@@ -486,6 +486,13 @@ pub fn api_listing() -> ModelListing {
     api_listing_for_invocation("nac-web")
 }
 
+/// Resolve the local planning budget without fetching provider metadata.
+pub fn automatic_compaction_threshold(provider: BackendKind, model: &str) -> Option<u64> {
+    resolve(provider, model)
+        .resolved_limits()
+        .automatic_compaction_threshold
+}
+
 /// Build the model listing while rendering actionable login hints with the
 /// exact executable name the caller is running. Product and protocol identity
 /// remain `nac-web`; only commands intended for copy/paste are invocation-aware.

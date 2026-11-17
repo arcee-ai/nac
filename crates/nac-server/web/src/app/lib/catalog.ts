@@ -124,18 +124,23 @@ export function resolveCatalogModel(
       provider,
       model: entry,
       contextWindow: budget,
-      automaticThreshold: entry.limits?.automatic_compaction_threshold ?? (budget ? Math.round(budget * 0.7) : null),
+      automaticThreshold:
+        entry.limits?.automatic_compaction_threshold ?? (budget ? Math.round(budget * 0.7) : null),
       supportedEfforts: entry.supported_efforts,
       estimated: entry.limits?.input_origin === "estimated",
       inputOrigin: entry.limits?.input_origin ?? null,
     };
   }
-  const budget = provider.default_limits.limits?.effective_input_tokens ?? (provider.default_limits.context_window || null);
+  const budget =
+    provider.default_limits.limits?.effective_input_tokens ??
+    (provider.default_limits.context_window || null);
   return {
     provider,
     model: null,
     contextWindow: budget,
-    automaticThreshold: provider.default_limits.limits?.automatic_compaction_threshold ?? (budget ? Math.round(budget * 0.7) : null),
+    automaticThreshold:
+      provider.default_limits.limits?.automatic_compaction_threshold ??
+      (budget ? Math.round(budget * 0.7) : null),
     supportedEfforts: provider.default_limits.supported_efforts,
     estimated: true,
     inputOrigin: "estimated",

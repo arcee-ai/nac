@@ -311,10 +311,14 @@ fn apply_patch(config: &mut sessions::RawSessionConfig, request: SessionConfigPa
     }
     match request.orchestrator_compaction_threshold {
         Field::Unchanged => {}
-        Field::Clear => config.orchestrator_compaction_threshold = None,
+        Field::Clear => {
+            config.orchestrator_compaction_threshold = None;
+            config.automatic_compaction = false;
+        }
         Field::Set(threshold) => {
             let threshold = validated_compaction_threshold(threshold)?;
             config.orchestrator_compaction_threshold = (threshold != 0).then_some(threshold);
+            config.automatic_compaction = false;
         }
     }
     config.diagnostics.clear();

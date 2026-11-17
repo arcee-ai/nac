@@ -156,7 +156,10 @@ fn apply_sibling_model_defaults(
         &mut request.extra_headers,
         Field::Set(sibling.extra_headers),
     );
-    if let Some(threshold) = sibling.orchestrator_compaction_threshold {
+    if let Some(threshold) = sibling
+        .orchestrator_compaction_threshold
+        .filter(|_| !sibling.automatic_compaction)
+    {
         inherit_project_field(
             &mut request.orchestrator_compaction_threshold,
             Field::Set(threshold),

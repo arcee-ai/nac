@@ -101,18 +101,42 @@ fn next_operation_refreshes_codex_capability_and_read_definition() {
         client,
         store_path,
         Some("session"),
-        Some(1),
+        None,
         EventSink::none(),
         AgentMode::Direct,
     );
+    agent.enable_automatic_compaction();
+    let before_threshold = agent.compaction.as_ref().unwrap().threshold_for_test();
     assert!(!agent.client.supports_image_tool_results());
-    agent.client.model = "gpt-6.1-sol".into();
+    agent.client.model = "gpt-5.6-sol".into();
+    let mut light = agent.client.clone();
+    light.model = "gpt-6.1-sol".into();
+    let previous_light = std::sync::Arc::new(light);
+    agent.tool_runtime.light_client = Some(previous_light.clone());
     assert!(
         !agent.client.supports_image_tool_results(),
         "the current operation keeps its snapshot"
     );
     agent.refresh_model_at_operation_boundary();
     assert!(agent.client.supports_image_tool_results());
+    assert!(agent
+        .tool_runtime
+        .light_client
+        .as_ref()
+        .unwrap()
+        .supports_image_tool_results());
+    assert!(
+        !previous_light.supports_image_tool_results(),
+        "in-flight clients keep their snapshot"
+    );
+    assert_ne!(
+        agent.compaction.as_ref().unwrap().threshold_for_test(),
+        before_threshold
+    );
+    assert_eq!(
+        agent.compaction.as_ref().unwrap().threshold_for_test(),
+        agent.client.automatic_compaction_threshold()
+    );
     let read = agent
         .base_tool_defs
         .iter()
@@ -165,15 +189,34 @@ async fn switched_codex_model_replays_image_in_normal_run_and_compaction() {
         .into_iter()
         .map(|(_, message)| message)
         .collect();
-    client.send_turn(history.clone(), vec![]).await.unwrap();
-    let mut agent = compaction_test_agent(
+    // Persist the previous model, then switch this same session through the
+    // revision-checked configuration path before reconstructing its agent.
+    let mut saved = crate::sessions::load_session_config(&store_path, "session").unwrap();
+    saved.backend = Some(
+        crate::model::BackendKind::ChatGptCodexResponses
+            .as_str()
+            .into(),
+    );
+    saved.model = "gpt-5.6-sol".into();
+    saved.base_url = crate::model::CHATGPT_CODEX_CANONICAL_BASE_URL.into();
+    crate::sessions::update_raw_session_config(&store_path, &saved).unwrap();
+    let mut saved = crate::sessions::load_session_config(&store_path, "session").unwrap();
+    saved.model = "gpt-6.1-sol".into();
+    crate::sessions::update_raw_session_config(&store_path, &saved).unwrap();
+    let switched = crate::sessions::load_session_config(&store_path, "session").unwrap();
+    assert_eq!(switched.model, "gpt-6.1-sol");
+    let client = ModelClient::new_for_codex_test_server(server.base_url.clone(), &switched.model);
+    let mut agent = compaction_test_agent_with_mode(
         client,
         store_path,
         Some("session"),
-        Some(1),
+        None,
         EventSink::none(),
+        AgentMode::Direct,
     );
-    agent.messages = history.into();
+    agent.restore_messages(history);
+    agent.steering_dispatch_id = Some(uuid::Uuid::new_v4().to_string());
+    assert_eq!(agent.send("continue").await.unwrap(), "normal");
     let before = serde_json::to_vec(&agent.messages).unwrap();
     assert!(matches!(
         agent.compact().await.unwrap(),

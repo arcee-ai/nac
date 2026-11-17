@@ -298,14 +298,6 @@ impl ModelMetadata {
                 },
                 self.input_origin,
             )
-        } else if matches!(
-            self.provider,
-            BackendKind::AnthropicMessages | BackendKind::ArceeAuth | BackendKind::ArceeApi
-        ) {
-            // These adapters have historically treated their reported window
-            // as the input planning budget. Preserve that behavior when the
-            // provider has not supplied a separate input limit.
-            (self.context_window, self.context_origin)
         } else if self.provider == BackendKind::ChatGptCodexResponses {
             (
                 (self.context_window.saturating_mul(95) / 100).max(1),
@@ -316,10 +308,19 @@ impl ModelMetadata {
                 },
             )
         } else {
-            (
-                self.context_window.saturating_sub(self.max_tokens).max(1),
-                LimitOrigin::Estimated,
-            )
+            (self.context_window, self.context_origin)
+        };
+        // Other backends historically compact against their context window;
+        // reporting a separate input cap must not silently change that default.
+        let planning_budget = if self.provider == BackendKind::ChatGptCodexResponses {
+            input
+        } else {
+            self.context_window
+        };
+        let planning_origin = if self.provider == BackendKind::ChatGptCodexResponses {
+            origin
+        } else {
+            self.context_origin
         };
         ResolvedLimits {
             context_window: self.context_window,
@@ -328,18 +329,18 @@ impl ModelMetadata {
             effective_input_tokens: input,
             automatic_compaction_threshold: Some(
                 self.auto_compact_token_limit
-                    .map_or((input as f64 * 0.7).round() as u64, |limit| {
-                        limit.min((input as f64 * 0.7).round() as u64)
+                    .map_or((planning_budget as f64 * 0.7).round() as u64, |limit| {
+                        limit.min((planning_budget as f64 * 0.7).round() as u64)
                     }),
             ),
             automatic_compaction_origin: Some(
                 if self
                     .auto_compact_token_limit
-                    .is_some_and(|limit| limit < (input as f64 * 0.7).round() as u64)
+                    .is_some_and(|limit| limit < (planning_budget as f64 * 0.7).round() as u64)
                 {
                     LimitOrigin::Observed
                 } else {
-                    origin
+                    planning_origin
                 },
             ),
             context_origin: self.context_origin,

@@ -418,6 +418,12 @@ impl ModelClient {
             self.resolved_model = catalog::resolve(self.backend, &self.model);
         }
     }
+
+    pub(crate) fn automatic_compaction_threshold(&self) -> Option<u64> {
+        self.resolved_model
+            .resolved_limits()
+            .automatic_compaction_threshold
+    }
     pub(crate) fn supports_image_tool_results(&self) -> bool {
         self.resolved_model.image_input
             && matches!(

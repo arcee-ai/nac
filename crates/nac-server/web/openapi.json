@@ -19592,6 +19592,10 @@
               "null"
             ]
           },
+          "automatic_compaction": {
+            "type": "boolean",
+            "description": "New sessions may follow the locally resolved model's automatic budget.\nOlder sessions retain their saved threshold as an explicit setting."
+          },
           "backend": {
             "type": [
               "string",

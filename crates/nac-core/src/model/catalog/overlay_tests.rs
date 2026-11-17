@@ -18,6 +18,25 @@ use std::time::{Duration, Instant};
 
 const NOVEL_MODEL: &str = "deepseek-v9-overlay-test";
 
+#[test]
+fn codex_known_model_refreshes_shared_metadata_without_api_limits() {
+    let payload = serde_json::json!({"openai": {"models": {"gpt-6.1-sol": {
+        "name": "Updated shared name", "reasoning": true,
+        "cost": {"input": 7.0, "output": 12.0},
+        "limit": {"context": 900000, "output": 100000},
+        "modalities": {"input": ["text", "image"], "output": ["text"]}
+    }}}})
+    .to_string();
+    let (providers, _, _) = map_models_dev(&payload, &baseline_catalog()).unwrap();
+    let model = &providers[&BackendKind::ChatGptCodexResponses].models["gpt-6.1-sol"];
+    assert_eq!(model.display_name.as_deref(), Some("Updated shared name"));
+    assert_eq!(model.cost.input, 7.0);
+    assert_eq!(model.cost.output, 12.0);
+    assert_eq!(model.context_window, FALLBACK_CONTEXT_WINDOW);
+    assert_eq!(model.max_tokens, FALLBACK_MAX_TOKENS);
+    assert!(model.image_input);
+}
+
 fn novel_model_payload() -> String {
     serde_json::json!({
         "deepseek": {
