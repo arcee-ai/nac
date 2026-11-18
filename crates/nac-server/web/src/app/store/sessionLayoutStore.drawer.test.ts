@@ -65,16 +65,17 @@ describe("session drawer state", () => {
     expect(layout.sessionLayoutStore.getState()).toMatchObject({ collapsed: false, pinned: false });
   });
 
-  it("closes a floating drawer on moving to another session but keeps a docked one", () => {
+  it("docks by default and keeps a docked drawer open across sessions, but closes a floating one", () => {
     const layout = createSessionLayoutStore();
+    expect(layout.sessionLayoutStore.getState()).toMatchObject({ collapsed: true, pinned: true });
     layout.activateSessionSelection("one");
     layout.openDrawer();
     layout.activateSessionSelection("two");
-    expect(layout.sessionLayoutStore.getState().collapsed).toBe(true);
+    expect(layout.sessionLayoutStore.getState()).toMatchObject({ collapsed: false, pinned: true });
 
     layout.toggleDrawerPinned();
     layout.activateSessionSelection("three");
-    expect(layout.sessionLayoutStore.getState()).toMatchObject({ collapsed: false, pinned: true });
+    expect(layout.sessionLayoutStore.getState()).toMatchObject({ collapsed: true, pinned: false });
   });
 
   it("lets a desktop command open the drawer on its panel's list", () => {

@@ -2871,7 +2871,7 @@ function ai(e, { rememberPerProject: t = !1 } = {}) {
 		sidePanelAnimate: !0,
 		sidePanelProjectId: null,
 		expanded: !1,
-		pinned: !1,
+		pinned: !0,
 		drawerContent: "panel",
 		panelList: !1,
 		selectedThread: null,

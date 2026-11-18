@@ -33,6 +33,7 @@ describe("inspector return context", () => {
 
   it("restores the exact parent panel after opening the child's own page, even via browser back", () => {
     const layout = createSessionLayoutStore();
+    layout.sessionLayoutStore.setState({ pinned: false });
     layout.activateSessionSelection("parent");
     layout.revealSidePanel(true);
     layout.selectSubagent("parent", "child:two");

@@ -62,7 +62,10 @@ interface SessionLayoutState {
   sidePanelProjectId: string | null;
   /** The floating drawer fills the window instead of its 560px column. */
   expanded: boolean;
-  /** The drawer docks as a column beside the chat instead of floating (⌘\). */
+  /**
+   * The drawer docks as a column beside the chat instead of floating (⌘\).
+   * Docked by default; a window too narrow to dock floats it regardless.
+   */
   pinned: boolean;
   /** What the open drawer holds: the route's panel, or the session goal. */
   drawerContent: DrawerContent;
@@ -131,7 +134,7 @@ export function createSessionLayoutStore(
     sidePanelAnimate: true,
     sidePanelProjectId: null,
     expanded: false,
-    pinned: false,
+    pinned: true,
     drawerContent: "panel",
     panelList: false,
     selectedThread: null,
