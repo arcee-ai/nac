@@ -1516,7 +1516,7 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
   await openSessionPanel(page, "Subagents");
   const tabs = sessionPanelTabs(page);
   const parentCrumb = page.getByRole("button", { name: /, parent chat$/ });
-  await page.getByRole("button", { name: "Open Subagent in Subagents", exact: true }).click();
+  await page.getByRole("button", { name: "Inspect the child lifecycle", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "Send a message" })).toBeVisible();
   await page.getByRole("button", { name: "Open", exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/session/${childId}/`));
