@@ -9035,6 +9035,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "occurrence",
+            "in": "query",
+            "description": "Stable transcript occurrence token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -18184,6 +18193,15 @@
             "items": {
               "$ref": "#/components/schemas/TerminalSelectionMessageReference"
             }
+          },
+          "tool_call_occurrences": {
+            "type": "array",
+            "items": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         }
       },
@@ -21801,6 +21819,15 @@
                 "type": "array",
                 "items": {
                   "$ref": "#/components/schemas/TerminalSelectionMessageReference"
+                }
+              },
+              "tool_call_occurrences": {
+                "type": "array",
+                "items": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 }
               }
             }

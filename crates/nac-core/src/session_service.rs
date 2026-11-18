@@ -344,6 +344,9 @@ pub struct MessagesPageSnapshot {
     /// Internal projection metadata; existing serialized page/snapshot shapes stay unchanged.
     #[serde(skip)]
     pub canonical_message_indices: Vec<u64>,
+    /// Version-bound occurrence identities aligned with the returned messages.
+    #[serde(skip)]
+    pub tool_call_occurrences: Vec<Option<String>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub terminal_selection_attributions: Vec<crate::store::TerminalSelectionReference>,
     pub messages: Vec<Message>,
@@ -360,6 +363,9 @@ pub struct SessionFrontendSnapshotLoad {
     /// Internal projection metadata; existing serialized page/snapshot shapes stay unchanged.
     #[serde(skip)]
     pub canonical_message_indices: Vec<u64>,
+    /// Stable log-row identities aligned with the returned messages; legacy blobs have none.
+    #[serde(skip)]
+    pub tool_call_occurrences: Vec<Option<String>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub terminal_selection_attributions: Vec<crate::store::TerminalSelectionReference>,
     #[serde(flatten)]
@@ -1112,6 +1118,7 @@ pub struct RevertOutcome {
 
 struct LoadedFrontendMessages {
     canonical_message_indices: Vec<u64>,
+    tool_call_occurrences: Vec<Option<String>>,
     terminal_selection_attributions: Vec<crate::store::TerminalSelectionReference>,
     messages: Vec<Message>,
     created_at: Vec<Option<String>>,
@@ -1201,7 +1208,7 @@ fn page_messages(messages: &[Message], request: MessagePageRequest) -> MessagesP
     let end = request.before.unwrap_or(total).min(total);
     let limit = request.limit.max(1);
     let start = end.saturating_sub(limit);
-    let (canonical_message_indices, messages) = messages
+    let (canonical_message_indices, messages): (Vec<u64>, Vec<Message>) = messages
         .iter()
         .enumerate()
         .filter(|(_, message)| request.include_system || !matches!(message, Message::System { .. }))
@@ -1211,6 +1218,7 @@ fn page_messages(messages: &[Message], request: MessagePageRequest) -> MessagesP
         .unzip();
     MessagesPageSnapshot {
         canonical_message_indices,
+        tool_call_occurrences: vec![None; messages.len()],
         messages,
         created_at: Vec::new(),
         terminal_selection_attributions: Vec::new(),

@@ -658,6 +658,7 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         message_cycle?: import("./openapi.generated.js").components["schemas"]["MessageCycleMetadata"] | null;
         message_page?: import("./openapi.generated.js").components["schemas"]["MessagePageMetadata"] | null;
         terminal_selection_attributions?: import("./openapi.generated.js").components["schemas"]["TerminalSelectionMessageReference"][];
+        tool_call_occurrences?: (string | null)[];
     }>;
     createSession: (payload: CreateSessionRequest) => Promise<{
         active_compaction?: import("./openapi.generated.js").components["schemas"]["ActiveCompactionSnapshot"] | null;
@@ -687,6 +688,7 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         message_cycle?: import("./openapi.generated.js").components["schemas"]["MessageCycleMetadata"] | null;
         message_page?: import("./openapi.generated.js").components["schemas"]["MessagePageMetadata"] | null;
         terminal_selection_attributions?: import("./openapi.generated.js").components["schemas"]["TerminalSelectionMessageReference"][];
+        tool_call_occurrences?: (string | null)[];
     }>;
     deleteSession: (id: string) => Promise<void>;
     launchDefaults: (payload: LaunchModelDefaultsRequest, signal?: AbortSignal) => Promise<{
@@ -1055,6 +1057,7 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         messages: import("./openapi.generated.js").components["schemas"]["Message"][];
         page: import("./openapi.generated.js").components["schemas"]["MessagePageMetadata"];
         terminal_selection_attributions?: import("./openapi.generated.js").components["schemas"]["TerminalSelectionMessageReference"][];
+        tool_call_occurrences?: (string | null)[];
     }>;
     getThreadEvents: (id: string, threadName: string, options?: ThreadEventsOptions) => Promise<{
         diagnostics?: import("./openapi.generated.js").components["schemas"]["ThreadEventDecodeDiagnostic"][];
@@ -1063,7 +1066,7 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         next_before_id?: number | null;
         thread_event_boundary?: import("./openapi.generated.js").components["schemas"]["SessionEventBoundary"] | null;
     }>;
-    getToolCallContent: (id: string, callId: string, signal?: AbortSignal) => Promise<{
+    getToolCallContent: (id: string, callId: string, signal?: AbortSignal, occurrence?: string) => Promise<{
         arguments: string;
         arguments_truncated: boolean;
         call_id: string;

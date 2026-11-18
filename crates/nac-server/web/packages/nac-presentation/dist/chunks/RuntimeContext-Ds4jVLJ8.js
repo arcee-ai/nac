@@ -819,7 +819,10 @@ function le(e, t = {}) {
 			let a = i.toString();
 			return r("GET", `${W(e)}/threads/${encodeURIComponent(t)}/events${a ? `?${a}` : ""}`, { signal: n.signal });
 		},
-		getToolCallContent: (e, t, n) => r("GET", `${W(e)}/tool-calls/${encodeURIComponent(t)}`, { signal: n }),
+		getToolCallContent: (e, t, n, i) => {
+			let a = i ? `?${new URLSearchParams({ occurrence: i })}` : "";
+			return r("GET", `${W(e)}/tool-calls/${encodeURIComponent(t)}${a}`, { signal: n });
+		},
 		getWorkspaceDiff: (e, t, { stage: n = "all", context: i = 3, revision: a, signal: o } = {}) => {
 			let s = new URLSearchParams({
 				path: t,

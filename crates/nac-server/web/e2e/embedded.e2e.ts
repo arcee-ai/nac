@@ -345,11 +345,10 @@ for (const behavior of ["direct", "direct-with-orchestrator"] as const) {
     await expect(page.getByText("Delegation accepted")).toBeVisible();
     await waitForRunIdle(request, harness, sessionId);
     const assertReceipt = async () => {
-      await expect(page.getByText("Subagent started · Current:")).toBeVisible();
-      await expect(page.getByRole("link", { name: "Go to session Review store" })).toBeVisible();
-      await page.getByText("Invocation details").click();
-      await expect(page.getByText("Running in background", { exact: true })).toBeVisible();
-      await expect(page.getByText("Subagent started in background", { exact: true })).toBeVisible();
+      await expect(page.getByText("Subagent · Start · Outcome unavailable")).toBeVisible();
+      await expect(page.getByRole("button", { name: "Open Subagent in Subagents" })).toBeVisible();
+      await page.getByText("Invocation result").click();
+      await expect(page.getByText(/Response reports Generation 1 · Running/)).toBeVisible();
       await expect(page.locator("main")).not.toContainText("parent_session_id");
     };
     await assertReceipt();
@@ -358,7 +357,7 @@ for (const behavior of ["direct", "direct-with-orchestrator"] as const) {
       contentType: "image/png",
     });
     await page.setViewportSize({ width: 390, height: 844 });
-    await expect(page.getByText("Subagent started · Current:")).toBeVisible();
+    await expect(page.getByText("Subagent · Start · Outcome unavailable")).toBeVisible();
     await testInfo.attach("subagent-invocation-mobile", {
       body: await page.screenshot(),
       contentType: "image/png",
@@ -1194,7 +1193,7 @@ test("shows live background delegated work, terminal events, cancellation, and g
   harness,
   page,
   request,
-}) => {
+}, testInfo) => {
   const success = new ScriptGate();
   const cancelled = new ScriptGate();
   const continued = new ScriptGate();
@@ -1259,7 +1258,9 @@ test("shows live background delegated work, terminal events, cancellation, and g
     const response = await request.post(`${harness.baseUrl}/sessions/${parentId}/children`, {
       data: { profile: "general", description, prompt, background: true },
     });
-    expect(response.ok()).toBe(true);
+    expect(response.ok(), `launch failed: ${response.status()} ${await response.text()}`).toBe(
+      true,
+    );
     return (await response.json()) as { child_session_id: string };
   };
   const successChild = await launch("Background success", "E2E_BACKGROUND_SUCCESS");
@@ -1269,7 +1270,8 @@ test("shows live background delegated work, terminal events, cancellation, and g
   await launch("Background failure", "E2E_BACKGROUND_FAILURE");
   await awaitParentReceipt("observe-failure");
 
-  const subagent = (name: string) => page.getByRole("button", { name, exact: true });
+  const subagent = (name: string) =>
+    page.getByRole("button", { name, exact: true }).and(page.locator("button[aria-description]"));
   const composer = page.locator("form").filter({
     has: page.getByRole("textbox", { name: "Send a message" }),
   });
@@ -1336,11 +1338,61 @@ test("shows live background delegated work, terminal events, cancellation, and g
   const completed = page.getByLabel("Subagent completed");
   await expect(completed).toHaveCount(2);
   await expect(completed.last()).toContainText("Background success");
-  await expect(
-    completed.last().getByRole("link", { name: "Go to session Background success" }),
-  ).toHaveAttribute("href", `#/session/${successChild.child_session_id}/insights`);
-  expect(successChild.child_session_id).toBeTruthy();
+  await completed.first().getByText("Generation 1 result").click();
+  await expect(completed.first().getByText("background child completed")).toBeVisible();
+  await completed.last().getByText("Generation 2 result").click();
+  await expect(completed.last().getByText("second generation completed")).toBeVisible();
+  await subagent("Background failure").click();
+  await completed
+    .last()
+    .getByRole("button", { name: "Open Background success in Subagents" })
+    .click();
+  await expect(page).toHaveURL(new RegExp(parentId));
+  const dock = page.getByRole("complementary").filter({ has: sessionPanelTabs(page) });
+  await expect(dock.getByText("second generation completed", { exact: true })).toBeVisible();
   await awaitParentReceipt("observe-generation-2");
+  // Repeat the receipt checks with the shared Detailed transcript preference.
+  await page.evaluate(() => localStorage.setItem("nac.transcriptDensity", "detailed"));
+  await page.reload();
+  await expect(page.getByLabel("Subagent completed")).toHaveCount(2);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const historicalResult = page
+    .getByLabel("Subagent completed")
+    .first()
+    .getByText("Generation 1 result");
+  await historicalResult.focus();
+  await page.keyboard.press("Enter");
+  await expect(
+    page.getByLabel("Subagent completed").first().getByText("background child completed"),
+  ).toBeVisible();
+  const receiptTarget = page
+    .getByLabel("Subagent completed")
+    .first()
+    .getByRole("button", { name: "Open Background success in Subagents" });
+  await receiptTarget.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath("narrow-generation-result.png") });
+  await receiptTarget.focus();
+  await page.keyboard.press("Enter");
+  const mobilePanel = page.getByRole("dialog", { name: "Subagents" });
+  await expect(mobilePanel).toBeVisible();
+  const mobileResult = mobilePanel.getByText("second generation completed", { exact: true });
+  await expect(mobileResult).toBeVisible();
+  await expect
+    .poll(() =>
+      mobileResult.evaluate((element) => {
+        let opacity = 1;
+        for (let node: typeof element | null = element; node; node = node.parentElement) {
+          opacity *= Number.parseFloat(
+            node.ownerDocument.defaultView?.getComputedStyle(node).opacity ?? "1",
+          );
+        }
+        return opacity;
+      }),
+    )
+    .toBeGreaterThan(0.95);
+  await page.screenshot({ path: testInfo.outputPath("narrow-child-panel.png") });
+  await expect(page).toHaveURL(new RegExp(parentId));
   expect(harness.provider.requests.map((entry) => entry.matchedStep)).toEqual([
     "background-success",
     "background-cancel",
@@ -1464,7 +1516,10 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
   await openSessionPanel(page, "Subagents");
   const tabs = sessionPanelTabs(page);
   const parentCrumb = page.getByRole("button", { name: /, parent chat$/ });
-  await page.getByRole("button", { name: "Inspect the child lifecycle", exact: true }).click();
+  await page
+    .getByRole("complementary", { name: "Subagents" })
+    .getByRole("button", { name: "Inspect the child lifecycle", exact: true })
+    .click();
   await expect(page.getByRole("textbox", { name: "Send a message" })).toBeVisible();
   await page.getByRole("button", { name: "Open", exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/session/${childId}/`));

@@ -138,6 +138,73 @@ describe("raw message windows", () => {
     ]);
   });
 
+  it("keeps occurrence tokens aligned across pagination and rejects replaced rows", () => {
+    const current = snapshot([user("u-4"), assistant("a-5")], 4, 6);
+    current.tool_call_occurrences = [null, "log:session:store:10:digest1:11"];
+    const incoming = page([assistant("a-5"), user("u-6")], 5, 7);
+    incoming.tool_call_occurrences = ["log:session:store:10:digest2:12", null];
+    const merged = mergeMessageTail(current, incoming);
+    expect(merged.kind).toBe("accepted");
+    if (merged.kind !== "accepted") return;
+    expect(merged.snapshot.tool_call_occurrences).toEqual([
+      null,
+      "log:session:store:10:digest2:12",
+      null,
+    ]);
+    const older = page([assistant("a-3")], 3, 7);
+    older.tool_call_occurrences = ["blob:session:digest:3"];
+    expect(prependMessagePage(merged.snapshot, older, 4)?.tool_call_occurrences).toEqual([
+      "blob:session:digest:3",
+      null,
+      "log:session:store:10:digest2:12",
+      null,
+    ]);
+    incoming.tool_call_occurrences = ["log:session:store:20:digest3:21", null];
+    expect(mergeMessageTail(current, incoming).kind).toBe("snapshot-required");
+  });
+
+  it("keeps loaded history but invalidates an omitted assistant token when its batch grows", () => {
+    const current = snapshot([assistant("call"), tool("one")], 0, 2);
+    current.tool_call_occurrences = ["log:session:store:10:digest1:11", null];
+    const incoming = page([tool("one"), tool("two")], 1, 3);
+    incoming.tool_call_occurrences = [null, null];
+    const merged = mergeMessageTail(current, incoming);
+    expect(merged.kind).toBe("accepted");
+    if (merged.kind !== "accepted") return;
+    expect(merged.snapshot.messages).toEqual([assistant("call"), tool("one"), tool("two")]);
+    expect(merged.snapshot.tool_call_occurrences).toEqual([null, null, null]);
+    const refreshed = page([assistant("call"), tool("one"), tool("two")], 0, 3);
+    refreshed.tool_call_occurrences = ["log:session:store:10:digest2:12", null, null];
+    const updated = mergeMessageTail(merged.snapshot, refreshed);
+    expect(updated.kind).toBe("accepted");
+    if (updated.kind === "accepted") {
+      expect(updated.snapshot.tool_call_occurrences?.[0]).toBe("log:session:store:10:digest2:12");
+    }
+
+    // A later assistant boundary closes the old batch; growing a different
+    // batch must not discard an otherwise valid retained history prefix.
+    const closed = page([tool("one"), assistant("next"), tool("next")], 1, 4);
+    closed.tool_call_occurrences = [null, "log:session:store:12:digest2:13", null];
+    expect(mergeMessageTail(current, closed).kind).toBe("accepted");
+  });
+
+  it("preserves a loaded prefix when a batch grows beyond the newest-page window", () => {
+    const prior = [assistant("call"), ...Array.from({ length: 25 }, (_, i) => tool(`call-${i}`))];
+    const current = snapshot(prior, 0, prior.length);
+    current.tool_call_occurrences = [
+      "log:session:store:10:digest1:35",
+      ...prior.slice(1).map(() => null),
+    ];
+    const newest = [...prior.slice(3), tool("new")];
+    const incoming = page(newest, 3, 27);
+    incoming.tool_call_occurrences = newest.map(() => null);
+    const merged = mergeMessageTail(current, incoming);
+    expect(merged.kind).toBe("accepted");
+    if (merged.kind !== "accepted") return;
+    expect(merged.snapshot.messages).toEqual([...prior, tool("new")]);
+    expect(merged.snapshot.tool_call_occurrences?.[0]).toBeNull();
+  });
+
   it("prepends only the page that still joins the captured cursor", () => {
     const current = snapshot([user("u-4"), assistant("a-5")], 4, 6);
     const older = page([system("s-2"), user("u-3")], 2, 6);

@@ -13,6 +13,7 @@ const RESULT_POLL_MS = 2_000;
 export interface ToolCallRef {
   id: string;
   blockKey: string;
+  occurrence?: string;
 }
 
 /**
@@ -23,16 +24,31 @@ export interface ToolCallRef {
  * failure, also of one of those asks, is not retried on its own; the surface
  * that asked offers the retry.
  */
-export function useToolCallContent(sessionId: string, call: ToolCallRef | null, enabled = true) {
+export function useToolCallContent(
+  sessionId: string,
+  call: ToolCallRef | null,
+  enabled = true,
+  pollPending = true,
+) {
   const { api } = useNativeRuntime();
 
   const query = useQuery({
-    queryKey: queryKeys.toolCallContent(sessionId, call?.id ?? "", call?.blockKey ?? ""),
-    queryFn: ({ signal }) => api.getToolCallContent(sessionId, call!.id, signal),
+    queryKey: queryKeys.toolCallContent(
+      sessionId,
+      call?.id ?? "",
+      call?.blockKey ?? "",
+      call?.occurrence,
+    ),
+    queryFn: ({ signal }) =>
+      call!.occurrence
+        ? api.getToolCallContent(sessionId, call!.id, signal, call!.occurrence)
+        : api.getToolCallContent(sessionId, call!.id, signal),
     enabled: enabled && call != null,
     staleTime: (query) => (query.state.data?.output === null ? 0 : Infinity),
     refetchInterval: (query) =>
-      query.state.status !== "error" && query.state.data?.output === null ? RESULT_POLL_MS : false,
+      pollPending && query.state.status !== "error" && query.state.data?.output === null
+        ? RESULT_POLL_MS
+        : false,
     // Returning to an errored item must leave its explicit Retry in charge.
     retryOnMount: false,
     refetchOnMount: (query) => query.state.status !== "error",

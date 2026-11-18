@@ -728,12 +728,14 @@ export function createNacApi(
       );
     },
 
-    getToolCallContent: (id: string, callId: string, signal?: AbortSignal) =>
-      request<ToolCallContentResponse>(
+    getToolCallContent: (id: string, callId: string, signal?: AbortSignal, occurrence?: string) => {
+      const query = occurrence ? `?${new URLSearchParams({ occurrence })}` : "";
+      return request<ToolCallContentResponse>(
         "GET",
-        `${sessionPath(id)}/tool-calls/${encodeURIComponent(callId)}`,
+        `${sessionPath(id)}/tool-calls/${encodeURIComponent(callId)}${query}`,
         { signal },
-      ),
+      );
+    },
 
     getWorkspaceDiff: (
       id: string,

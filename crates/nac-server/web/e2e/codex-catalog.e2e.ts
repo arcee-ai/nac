@@ -117,6 +117,12 @@ test("selects a discovered Codex model and agrees with runtime input budget", as
   );
   await settings.getByRole("textbox", { name: "Context limit", exact: true }).fill("123456");
   await settings.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(settings).toBeHidden();
+  await expect
+    .poll(
+      async () => (await (await request.get(configUrl)).json()).orchestrator_compaction_threshold,
+    )
+    .toBe(123_456);
   await page.reload();
   expect((await (await request.get(configUrl)).json()).orchestrator_compaction_threshold).toBe(
     123_456,

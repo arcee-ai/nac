@@ -1898,10 +1898,6 @@
     width: 320px;
   }
 
-[data-nac-runtime]:is(.w-\[360px\]), [data-nac-runtime] .w-\[360px\] {
-    width: 360px;
-  }
-
 [data-nac-runtime]:is(.w-\[380px\]), [data-nac-runtime] .w-\[380px\] {
     width: 380px;
   }
@@ -4944,22 +4940,6 @@
     opacity: 1;
   }
 
-[data-nac-runtime] .marker\:text-basic-muted ::marker {
-    color: var(--color-text-basic-muted);
-  }
-
-[data-nac-runtime] .marker\:text-basic-muted::marker {
-    color: var(--color-text-basic-muted);
-  }
-
-[data-nac-runtime] .marker\:text-basic-muted ::-webkit-details-marker {
-    color: var(--color-text-basic-muted);
-  }
-
-[data-nac-runtime] .marker\:text-basic-muted::-webkit-details-marker {
-    color: var(--color-text-basic-muted);
-  }
-
 [data-nac-runtime] .placeholder\:whitespace-nowrap::placeholder {
     white-space: nowrap;
   }
@@ -5096,10 +5076,6 @@
 
 [data-nac-runtime]:is(.last\:pb-0:last-child), [data-nac-runtime] .last\:pb-0:last-child {
     padding-bottom: 0;
-  }
-
-[data-nac-runtime]:is(.open\:bg-\[var\(--f-wash-1\)\]:is([open], :popover-open, :open)), [data-nac-runtime] .open\:bg-\[var\(--f-wash-1\)\]:is([open], :popover-open, :open) {
-    background-color: var(--f-wash-1);
   }
 
 [data-nac-runtime]:is(.empty\:hidden:empty), [data-nac-runtime] .empty\:hidden:empty {

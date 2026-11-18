@@ -1,5 +1,5 @@
 import type { AgentEvent, SessionSnapshotResponse, ToolCall } from "../types/api";
-export type ToolPresentationStatus = "pending" | "running" | "awaiting-approval" | "success" | "error" | "timed-out" | "cancelled" | "interrupted";
+export type ToolPresentationStatus = "pending" | "running" | "awaiting-approval" | "success" | "error" | "timed-out" | "cancelled" | "interrupted" | "unknown";
 export interface ToolPresentation {
     callId: string;
     /** Bounded transport name retained for diagnostics and safe fallbacks. */
@@ -26,6 +26,16 @@ export interface ToolPresentation {
      * consumers must resolve it against the delegation queries before trusting it.
      */
     spawnedSessionId?: string;
+    /** Server-issued occurrence for a specific retained assistant row. */
+    occurrence?: string;
+    /** Whether a delegation call addressed an existing session. */
+    delegationContinuation?: boolean;
+    /** A live turn can still commit its result with the rest of its tool batch. */
+    resultMayBePending?: boolean;
+    /** This invocation cannot be distinguished from another call in its batch. */
+    resultAmbiguous?: boolean;
+    /** A live delegation turn may change parent inventory, without binding its events. */
+    inventoryMayChange?: boolean;
     /** Native launch identity hint; consumers validate it against passive session inventory. */
     launchedTask?: {
         sessionId: string;
@@ -50,6 +60,8 @@ export interface ToolResultRecord {
 }
 /** Collect only the contiguous result rows owned by one assistant turn. */
 export declare function collectToolResults(messages: SessionSnapshotResponse["messages"], assistantIndex: number): Map<string, ToolResultRecord>;
+/** IDs repeated among result rows cannot be paired to one call. */
+export declare function ambiguousToolResultIds(messages: SessionSnapshotResponse["messages"], assistantIndex: number): Set<string>;
 export declare function assistantTurnCancelled(messages: SessionSnapshotResponse["messages"], assistantIndex: number, cancellationMarker: string): boolean;
 /**
  * Pair sanitized durable and live lifecycle events by call id. Later events
@@ -57,7 +69,7 @@ export declare function assistantTurnCancelled(messages: SessionSnapshotResponse
  * can replace the overlay without changing semantic identity.
  */
 export declare function indexToolEvents(events: AgentEvent[]): Map<string, ToolEventPair>;
-export declare function presentToolCall({ call, events, hasResult, resultText, resultHasImage, active, awaitingApproval, turnCancelled, }: {
+export declare function presentToolCall({ call, events, hasResult, resultText, resultHasImage, active, awaitingApproval, turnCancelled, occurrence, ambiguousResult, unboundEvents, }: {
     call: ToolCall;
     events?: ToolEventPair;
     hasResult: boolean;
@@ -68,5 +80,9 @@ export declare function presentToolCall({ call, events, hasResult, resultText, r
     /** Canonical pending permission state correlated by the backend call id. */
     awaitingApproval?: boolean;
     turnCancelled: boolean;
+    occurrence?: string | null;
+    ambiguousResult?: boolean;
+    /** Event IDs cannot be bound to this transcript invocation. */
+    unboundEvents?: boolean;
 }): ToolPresentation;
 export {};

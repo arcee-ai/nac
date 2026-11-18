@@ -1241,6 +1241,7 @@ export interface components {
             messages: components["schemas"]["Message"][];
             page: components["schemas"]["MessagePageMetadata"];
             terminal_selection_attributions?: components["schemas"]["TerminalSelectionMessageReference"][];
+            tool_call_occurrences?: (string | null)[];
         };
         ModelConfigFromFileRequest: {
             path: string;
@@ -1879,6 +1880,7 @@ export interface components {
             message_cycle?: components["schemas"]["MessageCycleMetadata"] | null;
             message_page?: components["schemas"]["MessagePageMetadata"] | null;
             terminal_selection_attributions?: components["schemas"]["TerminalSelectionMessageReference"][];
+            tool_call_occurrences?: (string | null)[];
         };
         SessionSummarySnapshot: {
             backend: string;

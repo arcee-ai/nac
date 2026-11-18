@@ -5,6 +5,7 @@
 export interface ToolCallRef {
     id: string;
     blockKey: string;
+    occurrence?: string;
 }
 /**
  * The full arguments and output of one tool call, redacted and size-bounded by
@@ -14,7 +15,7 @@ export interface ToolCallRef {
  * failure, also of one of those asks, is not retried on its own; the surface
  * that asked offers the retry.
  */
-export declare function useToolCallContent(sessionId: string, call: ToolCallRef | null, enabled?: boolean): {
+export declare function useToolCallContent(sessionId: string, call: ToolCallRef | null, enabled?: boolean, pollPending?: boolean): {
     data: NoInfer<{
         arguments: string;
         arguments_truncated: boolean;

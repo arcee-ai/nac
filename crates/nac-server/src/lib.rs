@@ -1320,6 +1320,17 @@ impl SessionManager {
             .await
     }
 
+    pub async fn tool_call_content_at(
+        &self,
+        session_id: &str,
+        call_id: &str,
+        occurrence: Option<&str>,
+    ) -> Result<Option<ToolCallContent>> {
+        self.session_state()
+            .tool_call_content_at(session_id, call_id, occurrence)
+            .await
+    }
+
     pub async fn list_direct_inbox(&self, session_id: &str) -> Result<Vec<SessionInboxRecord>> {
         self.session_state().direct_inbox(session_id).await
     }

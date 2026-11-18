@@ -1,6 +1,7 @@
 import type { APIRequestContext } from "@playwright/test";
 
 import { createDirectSession, expect, type EmbeddedHarness, test, waitForRunIdle } from "./harness";
+import { ScriptGate } from "./scripted-provider";
 
 const label = "Audit the store";
 
@@ -127,6 +128,18 @@ test("continues a subagent without repeating its label and explains a mismatch t
   });
   await page.goto(`${harness.baseUrl}/#/session/${parentId}/insights`);
   await expect(page.getByText("parent continued the same subagent")).toBeVisible();
+  await expect(page.getByText(/Subagent · Start · Outcome unavailable/)).toBeVisible();
+  await expect(page.getByText(/Subagent · Continue · Outcome unavailable/)).toBeVisible();
+  const invocationResults = page.getByText("Invocation result", { exact: true });
+  await invocationResults.nth(0).click();
+  await expect(invocationResults.nth(0).locator("..")).toContainText("first child pass finished");
+  await expect(invocationResults.nth(0).locator("..")).not.toContainText("child_session_id");
+  await invocationResults.nth(0).locator("..").getByText("Show retained result").click();
+  await expect(invocationResults.nth(0).locator("..")).toContainText("child_session_id");
+  await invocationResults.nth(0).locator("..").getByText("Show retained result").click();
+  await invocationResults.nth(1).click();
+  await expect(invocationResults.nth(1).locator("..")).toContainText("second child pass finished");
+  await expect(page.getByRole("button", { name: "Open Subagent in Subagents" })).toHaveCount(2);
   await page.screenshot({ path: testInfo.outputPath("parent-continuation.png"), fullPage: true });
 
   // A different label for the same child is refused before any child turn,
@@ -166,8 +179,190 @@ test("continues a subagent without repeating its label and explains a mismatch t
 
   await page.reload();
   await expect(page.getByText("parent read the label guidance")).toBeVisible();
+  const mismatchTurn = page
+    .locator("[data-turn]")
+    .filter({ hasText: "parent read the label guidance" });
+  await expect(mismatchTurn.getByText(/Subagent · Continue · Outcome unavailable/)).toBeVisible();
+  await mismatchTurn.getByText("Invocation result", { exact: true }).click();
+  await expect(mismatchTurn.getByText(/traditional child description is immutable/)).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("parent-mismatch.png"), fullPage: true });
   await page.goto(`${harness.baseUrl}/#/session/${childId}/insights`);
   await expect(page.getByText("second child pass finished")).toBeVisible();
   await expect(page.getByText("first child pass finished")).toBeVisible();
+});
+
+test("groups adjacent continuations for one child in both transcript densities", async ({
+  harness,
+  page,
+  request,
+}, testInfo) => {
+  harness.provider.enqueue(
+    "group-seed",
+    { token: "E2E_GROUP_SEED" },
+    {
+      kind: "function_call",
+      name: "subagent",
+      callId: "group-seed-call",
+      arguments: {
+        profile: "general",
+        description: label,
+        prompt: "E2E_GROUP_CHILD_SEED",
+        child_session_id: null,
+        background: false,
+      },
+      stream: "request",
+    },
+  );
+  harness.provider.enqueue(
+    "group-seed-child",
+    { token: "E2E_GROUP_CHILD_SEED", forbiddenTools: ["subagent"] },
+    { kind: "text", text: "seed complete", stream: "request" },
+  );
+  harness.provider.enqueue(
+    "group-seed-answer",
+    { functionOutputCallId: "group-seed-call" },
+    { kind: "text", text: "seed acknowledged", stream: "request" },
+  );
+  const parentId = await createDirectSession(request, harness);
+  await parentTurn(request, harness, parentId, "E2E_GROUP_SEED", "group-seed-answer");
+  const [child] = await children(request, harness, parentId);
+  const secondGate = new ScriptGate();
+  const answerGate = new ScriptGate();
+  harness.provider.enqueue(
+    "group-first",
+    { token: "E2E_GROUP_PARENT" },
+    {
+      kind: "function_call",
+      name: "subagent",
+      callId: "group-first-call",
+      arguments: {
+        profile: "general",
+        child_session_id: child.child_session_id,
+        prompt: "E2E_GROUP_CHILD_FIRST",
+        background: false,
+      },
+      stream: "request",
+    },
+  );
+  harness.provider.enqueue(
+    "group-first-child",
+    { token: "E2E_GROUP_CHILD_FIRST", forbiddenTools: ["subagent"] },
+    { kind: "text", text: "group first report", stream: "request" },
+  );
+  harness.provider.enqueue(
+    "group-second",
+    { functionOutputCallId: "group-first-call", afterStep: "group-first-child" },
+    {
+      kind: "function_call",
+      name: "subagent",
+      callId: "group-second-call",
+      arguments: {
+        profile: "general",
+        child_session_id: child.child_session_id,
+        prompt: "E2E_GROUP_CHILD_SECOND",
+        background: false,
+      },
+      stream: "request",
+    },
+    secondGate,
+  );
+  harness.provider.enqueue(
+    "group-second-child",
+    { token: "E2E_GROUP_CHILD_SECOND", forbiddenTools: ["subagent"] },
+    { kind: "text", text: "group second report", stream: "request" },
+  );
+  harness.provider.enqueue(
+    "group-answer",
+    { functionOutputCallId: "group-second-call", afterStep: "group-second-child" },
+    {
+      kind: "text",
+      text: "grouped parent answer",
+      reasoning: "Compared the two child reports before answering.",
+      stream: "request",
+    },
+    answerGate,
+  );
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto(`${harness.baseUrl}/#/session/${parentId}/insights`);
+  const run = await request.post(`${harness.baseUrl}/sessions/${parentId}/runs`, {
+    data: { prompt: "E2E_GROUP_PARENT" },
+  });
+  expect(run.status()).toBe(202);
+  try {
+    await secondGate.accepted;
+    const liveTurn = page.locator("[data-turn]").last();
+    const control = liveTurn.getByRole("button", { name: "Open Subagent in Subagents" });
+    await expect(control).toBeVisible();
+    await control.focus();
+    secondGate.release();
+    await answerGate.accepted;
+    await expect(liveTurn.getByText("Invocation result", { exact: true })).toHaveCount(2);
+    await expect(control).toBeFocused();
+    answerGate.release();
+    await waitForRunIdle(request, harness, parentId);
+    harness.provider.assertConsumed();
+  } finally {
+    secondGate.release();
+    answerGate.release();
+  }
+
+  await page.goto(`${harness.baseUrl}/#/session/${parentId}/insights`);
+  for (const density of ["compact", "detailed"] as const) {
+    await page.goto(`${harness.baseUrl}/#/session/${parentId}/insights`);
+    await page.evaluate((value) => localStorage.setItem("nac.transcriptDensity", value), density);
+    await page.reload();
+    const turn = page.locator("[data-turn]").filter({ hasText: "grouped parent answer" });
+    await expect(turn).toBeVisible();
+    const target = turn.getByRole("button", { name: "Open Subagent in Subagents" });
+    await expect(target).toHaveCount(1);
+    const results = turn.getByText("Invocation result", { exact: true });
+    await expect(results).toHaveCount(2);
+    await results.nth(0).click();
+    await expect(results.nth(0).locator("..")).toContainText("group first report");
+    await results.nth(1).click();
+    await expect(results.nth(1).locator("..")).toContainText("group second report");
+    await expect(results.nth(0).locator("..")).toContainText("Generation 2");
+    await expect(results.nth(1).locator("..")).toContainText("Generation 3");
+    // Keep one result open in the matched screenshots so the group, the
+    // second result control, and the density-controlled activity all fit.
+    await results.nth(1).click();
+    const prompt = page.getByText("E2E_GROUP_PARENT", { exact: true }).last();
+    await expect(async () => {
+      await prompt.evaluate((element) => {
+        element.scrollIntoView({ block: "start" });
+        for (
+          let node: typeof element | null = element.parentElement;
+          node;
+          node = node.parentElement
+        ) {
+          if (node.scrollHeight > node.clientHeight && node.scrollTop > 0) {
+            node.scrollTop = Math.max(0, node.scrollTop - 80);
+            break;
+          }
+        }
+      });
+      await expect(prompt).toBeInViewport({ timeout: 1000 });
+      await expect(target).toBeInViewport({ timeout: 1000 });
+    }).toPass({ timeout: 10000 });
+    await page.screenshot({ path: testInfo.outputPath(`group-${density}.png`) });
+    await target.focus();
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(new RegExp(parentId));
+    await expect(page.getByRole("tab", { name: "Subagents" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await expect(page.getByText("group second report", { exact: true }).last()).toBeVisible();
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`${harness.baseUrl}/#/session/${parentId}/insights`);
+  await page.reload();
+  const mobileTurn = page.locator("[data-turn]").filter({ hasText: "grouped parent answer" });
+  const mobileTarget = mobileTurn.getByRole("button", { name: "Open Subagent in Subagents" });
+  await expect(mobileTarget).toHaveCount(1);
+  await mobileTarget.scrollIntoViewIfNeeded();
+  await mobileTarget.focus();
+  await page.screenshot({ path: testInfo.outputPath("group-mobile.png") });
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("dialog", { name: "Subagents" })).toBeVisible();
 });

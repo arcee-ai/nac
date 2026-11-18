@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  collectToolResults,
   indexToolEvents,
   presentToolCall,
   type ToolPresentationStatus,
@@ -595,4 +596,89 @@ describe("tool durations and spawned sessions", () => {
     ).not.toHaveProperty("durationMs");
     expect(present("read", [started("read", "file.rs")], true)).not.toHaveProperty("durationMs");
   });
+
+  it("does not pair duplicate results within a single assistant batch", () => {
+    const messages: Parameters<typeof collectToolResults>[0] = [
+      { role: "assistant", content: null, tool_calls: [call("subagent")] },
+      { role: "tool", tool_call_id: "call-subagent", content: "first" },
+      { role: "tool", tool_call_id: "call-subagent", content: "second" },
+    ];
+    expect(collectToolResults(messages, 0).has("call-subagent")).toBe(false);
+  });
+
+  it("keeps a finished call pending while its live batch has not recorded a result", () => {
+    const input = {
+      call: call("subagent"),
+      events: { finished: finished("subagent") },
+      hasResult: false,
+      resultText: null,
+      resultHasImage: false,
+      active: true,
+      turnCancelled: false,
+    };
+    expect(presentToolCall(input)).toMatchObject({ status: "success", resultMayBePending: true });
+    expect(presentToolCall({ ...input, active: false })).toMatchObject({
+      resultMayBePending: false,
+    });
+    expect(presentToolCall({ ...input, hasResult: true })).toMatchObject({
+      resultMayBePending: false,
+    });
+  });
+
+  it("does not apply a later reused call ID's lifecycle event to a delegation occurrence", () => {
+    const input = {
+      call: call("subagent"),
+      events: { finished: finished("subagent", { content_preview: "later result" }) },
+      hasResult: true,
+      resultText: "Error: foreground subagent failed: private detail",
+      resultHasImage: false,
+      active: false,
+      turnCancelled: false,
+      occurrence: "log:parent:1:2",
+    };
+    const earlier = presentToolCall(input);
+    const later = presentToolCall({ ...input, occurrence: "log:parent:3:4", resultText: "ok" });
+    expect(earlier).toMatchObject({ status: "unknown", resultPreview: null });
+    expect(later).toMatchObject({ status: "unknown", resultPreview: null });
+    expect(JSON.stringify(earlier)).not.toContain("private detail");
+    expect(JSON.stringify(earlier)).not.toContain("later result");
+    for (const childStatus of ["failed", "cancelled", "interrupted"] as const) {
+      expect(
+        presentToolCall({ ...input, resultText: JSON.stringify({ status: childStatus }) }),
+      ).toMatchObject({ status: "unknown", resultPreview: null });
+    }
+  });
+
+  it("does not infer a managed invocation outcome from an unbound response", () => {
+    for (const childStatus of ["completed", "failed", "cancelled", "interrupted"]) {
+      const presentation = presentToolCall({
+        call: call("orchestrator_launch"),
+        hasResult: true,
+        resultText: JSON.stringify({ status: childStatus }),
+        resultHasImage: false,
+        active: false,
+        turnCancelled: false,
+        occurrence: "log:parent:1:2",
+      });
+      expect(presentation).toMatchObject({ status: "unknown", statusLabel: "Outcome unavailable" });
+    }
+  });
+
+  it.each(["subagent", "orchestrator_launch"])(
+    "does not attach unbound %s events without an occurrence token",
+    (name) => {
+      const presentation = presentToolCall({
+        call: call(name),
+        events: { finished: finished(name, { content_preview: "other generation" }) },
+        hasResult: true,
+        resultText: '{"status":"failed"}',
+        resultHasImage: false,
+        active: false,
+        turnCancelled: false,
+        unboundEvents: true,
+      });
+      expect(presentation).toMatchObject({ status: "unknown", summary: null, resultPreview: null });
+      expect(JSON.stringify(presentation)).not.toContain("other generation");
+    },
+  );
 });
