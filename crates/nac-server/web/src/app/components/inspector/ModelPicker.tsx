@@ -55,8 +55,13 @@ export function ModelPicker({
     () => reasoningOptionsFor(resolved.supportedEfforts, shownEffort, EFFORT_LEVEL_OPTIONS),
     [resolved.supportedEfforts, shownEffort],
   );
+  const noEfforts = Boolean(catalog.data) && resolved.supportedEfforts.length === 0;
   const selectedEffort = effortItems.find((item) => item.id === shownEffort)?.label;
-  const effortLabel = typeof selectedEffort === "string" ? selectedEffort : "not set";
+  const effortLabel = noEfforts
+    ? "not available"
+    : typeof selectedEffort === "string"
+      ? selectedEffort
+      : "not set";
   const [effortOpen, setEffortOpen] = useState(false);
 
   // A session with no level, on a model that accepts levels, runs at the
@@ -151,28 +156,30 @@ export function ModelPicker({
         value={currentPick}
         onSelect={(pick) => void chooseModel(pick)}
       />
-      {resolved.supportedEfforts.length ? (
-        <Tooltip
-          title={`Effort: ${effortLabel}`}
-          description="How much the model reasons before it answers."
-          position={TooltipPosition.TopCenter}
-          sticky
-          disabled={effortOpen}
-        >
-          <SmallSelect
-            items={effortItems}
-            value={shownEffort}
-            placeholder="Effort"
-            disabled={disabled || !metadata || updateConfig.isPending}
-            size={ButtonSize.Small}
-            trailingIcon={null}
-            triggerClassName="!pl-1 [--color-text-btn-secondary:var(--color-text-basic-tertiary)]"
-            placement={PopoverPlacement.TopCenter}
-            onOpenChange={setEffortOpen}
-            onValueChange={(effort) => void chooseEffort(effort)}
-          />
-        </Tooltip>
-      ) : null}
+      <Tooltip
+        title={`Effort: ${effortLabel}`}
+        description={
+          noEfforts
+            ? "This model has no reasoning levels to choose from."
+            : "How much the model reasons before it answers."
+        }
+        position={TooltipPosition.TopCenter}
+        sticky
+        disabled={effortOpen}
+      >
+        <SmallSelect
+          items={noEfforts ? [] : effortItems}
+          value={noEfforts ? "" : shownEffort}
+          placeholder={noEfforts ? "Not available" : "Effort"}
+          disabled={noEfforts || disabled || !metadata || updateConfig.isPending}
+          size={ButtonSize.Small}
+          trailingIcon={null}
+          triggerClassName="!pl-1 [--color-text-btn-secondary:var(--color-text-basic-tertiary)]"
+          placement={PopoverPlacement.TopCenter}
+          onOpenChange={setEffortOpen}
+          onValueChange={(effort) => void chooseEffort(effort)}
+        />
+      </Tooltip>
     </div>
   );
 }

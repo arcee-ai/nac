@@ -7,6 +7,7 @@ import { modelsForProvider } from "@/app/components/modals/catalogModelOverlay";
 import { EFFORT_LEVEL_OPTIONS, reasoningOptionsFor } from "@/app/components/modals/options";
 import { Menu, MenuItem, MenuLabel, MenuSeparator } from "@/app/features/sidebar/MenuItem";
 import { catalogBaseUrl, type CatalogPick } from "@/app/lib/catalog";
+import { cn } from "@/app/lib/cn";
 import { providerAccountLabel, providerOrder } from "@/app/lib/providers";
 import { routes } from "@/app/lib/routes";
 import { useModelCatalog, useReadyProviderModels } from "@/app/services/queries";
@@ -32,21 +33,33 @@ function SettingRow({
 }: {
   label: string;
   value: ReactNode;
-  onOpen: () => void;
+  /** Absent when there is nothing to choose. */
+  onOpen?: () => void;
 }) {
   return (
     <button
       type="button"
       role="menuitem"
-      aria-haspopup="menu"
+      aria-haspopup={onOpen ? "menu" : undefined}
+      aria-disabled={onOpen ? undefined : true}
       onClick={onOpen}
-      className="flex min-h-9 w-full min-w-0 items-center gap-3 rounded-md px-2.5 text-left outline-none transition-colors duration-150 ease-out hover:bg-[var(--f-wash-1)] focus-visible:bg-[var(--f-wash-1)] motion-reduce:transition-none max-md:min-h-11"
+      className={cn(
+        "flex min-h-9 w-full min-w-0 items-center gap-3 rounded-md px-2.5 text-left outline-none transition-colors duration-150 ease-out motion-reduce:transition-none max-md:min-h-11",
+        onOpen ? "hover:bg-[var(--f-wash-1)] focus-visible:bg-[var(--f-wash-1)]" : "cursor-default",
+      )}
     >
       <span className="type-label shrink-0 text-basic-primary">{label}</span>
-      <span className="type-label min-w-0 flex-1 truncate text-right text-basic-tertiary">
+      <span
+        className={cn(
+          "type-label min-w-0 flex-1 truncate text-right",
+          onOpen ? "text-basic-tertiary" : "text-basic-muted",
+        )}
+      >
         {value}
       </span>
-      <Icon iconName={IconName.Right} size={12} className="shrink-0 text-basic-muted" />
+      {onOpen ? (
+        <Icon iconName={IconName.Right} size={12} className="shrink-0 text-basic-muted" />
+      ) : null}
     </button>
   );
 }
@@ -141,9 +154,12 @@ export function ModelPicker({
     : undefined;
   const name = current ? modelName(current) : fallbackLabel;
   const efforts = reasoningOptionsFor(supportedEfforts, effort, EFFORT_LEVEL_OPTIONS);
-  const effortLabel = effort
-    ? String(efforts.find((option) => option.id === effort)?.label ?? effort)
-    : null;
+  const noEfforts = Boolean(catalog.data) && supportedEfforts.length === 0;
+  const effortLabel = noEfforts
+    ? "Not available"
+    : effort
+      ? String(efforts.find((option) => option.id === effort)?.label ?? effort)
+      : null;
 
   const close = () => {
     setOpen(false);
@@ -167,12 +183,14 @@ export function ModelPicker({
 
   const overview = (
     <Menu label="Model settings" autoFocus>
-      {value && supportedEfforts.length ? (
-        <>
-          <SettingRow label="Effort" value={effortLabel} onOpen={() => setView("effort")} />
-          <MenuSeparator />
-        </>
+      {value ? (
+        <SettingRow
+          label="Effort"
+          value={effortLabel}
+          onOpen={noEfforts ? undefined : () => setView("effort")}
+        />
       ) : null}
+      {value ? <MenuSeparator /> : null}
       <SettingRow label="Model" value={name ?? "Choose"} onOpen={() => setView("model")} />
     </Menu>
   );
@@ -306,7 +324,13 @@ export function ModelPicker({
         className="text-basic-primary"
         aria-label={
           name
-            ? `Model: ${name}${effortLabel ? `, ${effortLabel} reasoning` : ""}`
+            ? `Model: ${name}${
+                noEfforts
+                  ? ", reasoning not available"
+                  : effortLabel
+                    ? `, ${effortLabel} reasoning`
+                    : ""
+              }`
             : "Choose a model"
         }
         aria-haspopup="menu"

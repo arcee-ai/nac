@@ -12032,23 +12032,24 @@ function qm({ label: e, value: t, onOpen: n }) {
 	return /* @__PURE__ */ $("button", {
 		type: "button",
 		role: "menuitem",
-		"aria-haspopup": "menu",
+		"aria-haspopup": n ? "menu" : void 0,
+		"aria-disabled": !n || void 0,
 		onClick: n,
-		className: "flex min-h-9 w-full min-w-0 items-center gap-3 rounded-md px-2.5 text-left outline-none transition-colors duration-150 ease-out hover:bg-[var(--f-wash-1)] focus-visible:bg-[var(--f-wash-1)] motion-reduce:transition-none max-md:min-h-11",
+		className: U("flex min-h-9 w-full min-w-0 items-center gap-3 rounded-md px-2.5 text-left outline-none transition-colors duration-150 ease-out motion-reduce:transition-none max-md:min-h-11", n ? "hover:bg-[var(--f-wash-1)] focus-visible:bg-[var(--f-wash-1)]" : "cursor-default"),
 		children: [
 			/* @__PURE__ */ Q("span", {
 				className: "type-label shrink-0 text-basic-primary",
 				children: e
 			}),
 			/* @__PURE__ */ Q("span", {
-				className: "type-label min-w-0 flex-1 truncate text-right text-basic-tertiary",
+				className: U("type-label min-w-0 flex-1 truncate text-right", n ? "text-basic-tertiary" : "text-basic-muted"),
 				children: t
 			}),
-			/* @__PURE__ */ Q(L, {
+			n ? /* @__PURE__ */ Q(L, {
 				iconName: z.Right,
 				size: 12,
 				className: "shrink-0 text-basic-muted"
-			})
+			}) : null
 		]
 	});
 }
@@ -12074,25 +12075,29 @@ function Ym({ fallbackLabel: e, pending: t, value: n, effort: r, supportedEffort
 			...t,
 			models: t.models.filter((t) => `${t.id} ${t.display_name ?? ""}`.toLowerCase().includes(e))
 		})).filter((e) => e.models.length > 0) : C.filter((e) => e.models.length > 0);
-	}, [C, _]), T = n ? C.find((e) => e.provider.id === n.backend)?.models.find((e) => e.id === n.model) : void 0, D = T ? Km(T) : e, O = Ec(i, r, Sc), k = r ? String(O.find((e) => e.id === r)?.label ?? r) : null, A = () => {
+	}, [C, _]), T = n ? C.find((e) => e.provider.id === n.backend)?.models.find((e) => e.id === n.model) : void 0, D = T ? Km(T) : e, O = Ec(i, r, Sc), k = !!x.data && i.length === 0, A = k ? "Not available" : r ? String(O.find((e) => e.id === r)?.label ?? r) : null, j = () => {
 		m(!1), g("overview"), v("");
-	}, j = (e) => {
-		x.data && (c(Wm(x.data, e)), A());
 	}, M = (e) => {
+		x.data && (c(Wm(x.data, e)), j());
+	}, N = (e) => {
 		e.key === "ArrowDown" ? (e.preventDefault(), y.current?.querySelector("[role^=\"menuitem\"]")?.focus()) : e.key === "Enter" && !e.nativeEvent.isComposing && (e.preventDefault(), y.current?.querySelector("[role^=\"menuitem\"]")?.click());
-	}, N = /* @__PURE__ */ $(Np, {
+	}, ee = /* @__PURE__ */ $(Np, {
 		label: "Model settings",
 		autoFocus: !0,
-		children: [n && i.length ? /* @__PURE__ */ $(Z, { children: [/* @__PURE__ */ Q(qm, {
-			label: "Effort",
-			value: k,
-			onOpen: () => g("effort")
-		}), /* @__PURE__ */ Q(Pp, {})] }) : null, /* @__PURE__ */ Q(qm, {
-			label: "Model",
-			value: D ?? "Choose",
-			onOpen: () => g("model")
-		})]
-	}), ee = /* @__PURE__ */ $("div", {
+		children: [
+			n ? /* @__PURE__ */ Q(qm, {
+				label: "Effort",
+				value: A,
+				onOpen: k ? void 0 : () => g("effort")
+			}) : null,
+			n ? /* @__PURE__ */ Q(Pp, {}) : null,
+			/* @__PURE__ */ Q(qm, {
+				label: "Model",
+				value: D ?? "Choose",
+				onOpen: () => g("model")
+			})
+		]
+	}), te = /* @__PURE__ */ $("div", {
 		className: "flex flex-col gap-0.5",
 		children: [/* @__PURE__ */ Q(Jm, {
 			label: "Effort",
@@ -12108,7 +12113,7 @@ function Ym({ fallbackLabel: e, pending: t, value: n, effort: r, supportedEffort
 				}
 			}, e.id))
 		})]
-	}), te = /* @__PURE__ */ $("div", {
+	}), P = /* @__PURE__ */ $("div", {
 		className: "flex max-h-[min(480px,65vh)] flex-col gap-1",
 		children: [
 			/* @__PURE__ */ Q(Jm, {
@@ -12125,7 +12130,7 @@ function Ym({ fallbackLabel: e, pending: t, value: n, effort: r, supportedEffort
 				spellCheck: !1,
 				value: _,
 				onChange: (e) => v(e.target.value),
-				onKeyDown: M,
+				onKeyDown: N,
 				className: "type-body-chrome h-8 w-full shrink-0 rounded-lg border border-tertiary bg-elevation-level-1 px-2.5 text-basic-primary outline-none placeholder:text-basic-muted focus:border-secondary max-md:h-11 max-md:text-base"
 			}),
 			/* @__PURE__ */ Q("div", {
@@ -12138,7 +12143,7 @@ function Ym({ fallbackLabel: e, pending: t, value: n, effort: r, supportedEffort
 						hint: "Project default",
 						checked: o,
 						onSelect: () => {
-							u(), A();
+							u(), j();
 						}
 					}), /* @__PURE__ */ Q(Pp, {})] }) : null, x.isPending ? /* @__PURE__ */ Q("p", {
 						className: "type-meta px-2.5 py-2 text-basic-muted",
@@ -12155,7 +12160,7 @@ function Ym({ fallbackLabel: e, pending: t, value: n, effort: r, supportedEffort
 							label: Km(t),
 							checked: !o && n?.backend === e.id && n.model === t.id,
 							trailing: /* @__PURE__ */ Q(Ks, { model: t }),
-							onSelect: () => j({
+							onSelect: () => M({
 								backend: e.id,
 								model: t.id,
 								baseUrl: Os(e)
@@ -12171,13 +12176,13 @@ function Ym({ fallbackLabel: e, pending: t, value: n, effort: r, supportedEffort
 					icon: z.Controls,
 					label: "Light model and presets…",
 					onSelect: () => {
-						A(), d();
+						j(), d();
 					}
 				}) : null, /* @__PURE__ */ Q(Ap, {
 					icon: z.Key,
 					label: "Connect more providers",
 					onSelect: () => {
-						A(), f(I.settings("accounts"));
+						j(), f(I.settings("accounts"));
 					}
 				})]
 			})
@@ -12185,21 +12190,21 @@ function Ym({ fallbackLabel: e, pending: t, value: n, effort: r, supportedEffort
 	});
 	return /* @__PURE__ */ Q(di, {
 		open: p,
-		onClose: A,
+		onClose: j,
 		sticky: !0,
 		placement: ci.BottomLeft,
 		size: h === "model" ? "w-[360px]" : "w-[280px]",
-		content: h === "effort" ? ee : h === "model" ? te : N,
+		content: h === "effort" ? te : h === "model" ? P : ee,
 		children: /* @__PURE__ */ Q(Hm, {
 			disabled: s,
 			className: "text-basic-primary",
-			"aria-label": D ? `Model: ${D}${k ? `, ${k} reasoning` : ""}` : "Choose a model",
+			"aria-label": D ? `Model: ${D}${k ? ", reasoning not available" : A ? `, ${A} reasoning` : ""}` : "Choose a model",
 			"aria-haspopup": "menu",
 			"aria-expanded": p,
-			onClick: () => p ? A() : m(!0),
-			children: t ? "Model…" : /* @__PURE__ */ $(Z, { children: [D ?? "Choose a model", k ? /* @__PURE__ */ Q("span", {
+			onClick: () => p ? j() : m(!0),
+			children: t ? "Model…" : /* @__PURE__ */ $(Z, { children: [D ?? "Choose a model", A ? /* @__PURE__ */ Q("span", {
 				className: "ml-1.5 text-basic-muted",
-				children: k
+				children: A
 			}) : null] })
 		})
 	});
@@ -15859,9 +15864,9 @@ function i_({ sessionId: e, metadata: t, label: n, disabled: r }) {
 		backend: t.backend,
 		model: t.model,
 		baseUrl: t.base_url ?? ""
-	} : null, f = Is(a.data, t?.backend, l), p = wc(f.supportedEfforts), m = u || p || "", h = J(() => Ec(f.supportedEfforts, m, Sc), [f.supportedEfforts, m]), g = h.find((e) => e.id === m)?.label, _ = typeof g == "string" ? g : "not set", [v, y] = X(!1), { mutate: b, isPending: x } = c, S = Y(null);
+	} : null, f = Is(a.data, t?.backend, l), p = wc(f.supportedEfforts), m = u || p || "", h = J(() => Ec(f.supportedEfforts, m, Sc), [f.supportedEfforts, m]), g = !!a.data && f.supportedEfforts.length === 0, _ = h.find((e) => e.id === m)?.label, v = g ? "not available" : typeof _ == "string" ? _ : "not set", [y, b] = X(!1), { mutate: x, isPending: S } = c, C = Y(null);
 	q(() => {
-		t && a.data && !u && p && (r || x || S.current !== e && (S.current = e, b({
+		t && a.data && !u && p && (r || S || C.current !== e && (C.current = e, x({
 			id: e,
 			patch: { reasoning_effort: p }
 		})));
@@ -15871,11 +15876,11 @@ function i_({ sessionId: e, metadata: t, label: n, disabled: r }) {
 		u,
 		p,
 		r,
-		x,
+		S,
 		e,
-		b
+		x
 	]);
-	let C = async (n) => {
+	let w = async (n) => {
 		if (!t || n.backend === t.backend && n.model === t.model) return;
 		let r = a.data?.providers.find((e) => e.id === n.backend), s = n.backend === t.backend, l = !!(r?.auth_status === "ready" || o.matches(n) && o.credentialReady);
 		if (!s && !l) {
@@ -15905,7 +15910,7 @@ function i_({ sessionId: e, metadata: t, label: n, disabled: r }) {
 		} catch (e) {
 			i.error(`The model was not switched: ${vs(as(e), n.backend)}`);
 		}
-	}, w = async (n) => {
+	}, T = async (n) => {
 		if (t && n !== u) try {
 			await c.mutateAsync({
 				id: e,
@@ -15925,26 +15930,26 @@ function i_({ sessionId: e, metadata: t, label: n, disabled: r }) {
 			disabled: r || !t || c.isPending,
 			liveByBackend: s,
 			value: d,
-			onSelect: (e) => void C(e)
-		}), f.supportedEfforts.length ? /* @__PURE__ */ Q(wi, {
-			title: `Effort: ${_}`,
-			description: "How much the model reasons before it answers.",
+			onSelect: (e) => void w(e)
+		}), /* @__PURE__ */ Q(wi, {
+			title: `Effort: ${v}`,
+			description: g ? "This model has no reasoning levels to choose from." : "How much the model reasons before it answers.",
 			position: ci.TopCenter,
 			sticky: !0,
-			disabled: v,
+			disabled: y,
 			children: /* @__PURE__ */ Q(Cs, {
-				items: h,
-				value: m,
-				placeholder: "Effort",
-				disabled: r || !t || c.isPending,
+				items: g ? [] : h,
+				value: g ? "" : m,
+				placeholder: g ? "Not available" : "Effort",
+				disabled: g || r || !t || c.isPending,
 				size: B.Small,
 				trailingIcon: null,
 				triggerClassName: "!pl-1 [--color-text-btn-secondary:var(--color-text-basic-tertiary)]",
 				placement: ci.TopCenter,
-				onOpenChange: y,
-				onValueChange: (e) => void w(e)
+				onOpenChange: b,
+				onValueChange: (e) => void T(e)
 			})
-		}) : null]
+		})]
 	});
 }
 // src/app/features/direct-session/browserAdapters.ts

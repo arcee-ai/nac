@@ -266,7 +266,7 @@ it("waits for the run to end before giving a session its standard level", async 
   }
 });
 
-it("offers and sends no level for a model that accepts none", async () => {
+it("shows effort as Not available and sends none for a model that accepts none", async () => {
   const update = vi.spyOn(api, "updateConfig").mockResolvedValue(undefined);
   const { client, view } = renderPicker({
     backend: "arcee-auth",
@@ -302,7 +302,8 @@ it("offers and sends no level for a model that accepts none", async () => {
   try {
     const modelButton = await screen.findByRole("button", { name: "Model" });
     await waitFor(() => expect((modelButton as HTMLButtonElement).disabled).toBe(false));
-    expect(screen.queryByRole("button", { name: /^(Effort|Low|Medium|High)$/ })).toBeNull();
+    const effort = await screen.findByRole("button", { name: "Not available" });
+    expect((effort as HTMLButtonElement).disabled).toBe(true);
     expect(update).not.toHaveBeenCalled();
   } finally {
     second.view.unmount();
