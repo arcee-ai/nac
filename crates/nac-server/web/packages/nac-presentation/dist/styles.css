@@ -2126,10 +2126,6 @@
     max-width: var(--column-width);
   }
 
-[data-nac-runtime]:is(.max-w-fit), [data-nac-runtime] .max-w-fit {
-    max-width: fit-content;
-  }
-
 [data-nac-runtime]:is(.max-w-full), [data-nac-runtime] .max-w-full {
     max-width: 100%;
   }
@@ -2216,10 +2212,6 @@
 
 [data-nac-runtime]:is(.basis-48), [data-nac-runtime] .basis-48 {
     flex-basis: calc(var(--spacing) * 48);
-  }
-
-[data-nac-runtime]:is(.basis-\[140px\]), [data-nac-runtime] .basis-\[140px\] {
-    flex-basis: 140px;
   }
 
 [data-nac-runtime]:is(.basis-full), [data-nac-runtime] .basis-full {

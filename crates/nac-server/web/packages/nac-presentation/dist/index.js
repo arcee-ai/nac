@@ -15923,15 +15923,6 @@ function a_({ sessionId: e, behavior: t, compact: n, menu: r, metadata: i, model
 				compact: n,
 				...r
 			}),
-			/* @__PURE__ */ Q("div", {
-				className: "flex min-w-0 grow basis-[140px] max-w-fit items-center",
-				children: /* @__PURE__ */ Q(Ng, {
-					sessionId: e,
-					metadata: i,
-					label: a,
-					disabled: o
-				})
-			}),
 			s ? /* @__PURE__ */ Q(Tf, {
 				className: "mx-1",
 				state: s.connected ? "connected" : "reconnect",
@@ -15963,13 +15954,22 @@ function a_({ sessionId: e, behavior: t, compact: n, menu: r, metadata: i, model
 				})
 			}) : null,
 			/* @__PURE__ */ $("div", {
-				className: "ml-auto flex shrink-0 items-center gap-1.5",
+				className: "ml-auto flex min-w-0 items-center gap-1.5",
 				children: [
+					/* @__PURE__ */ Q("div", {
+						className: "flex min-w-0 items-center",
+						children: /* @__PURE__ */ Q(Ng, {
+							sessionId: e,
+							metadata: i,
+							label: a,
+							disabled: o
+						})
+					}),
 					_ && d ? /* @__PURE__ */ Q(H, {
 						type: "button",
 						size: n ? B.Large : B.Small,
 						variant: z.Ghost,
-						className: "!text-[var(--f-amber-text)]",
+						className: "shrink-0 !text-[var(--f-amber-text)]",
 						"aria-label": "Compact context",
 						loading: f,
 						disabled: f,
@@ -15980,6 +15980,7 @@ function a_({ sessionId: e, behavior: t, compact: n, menu: r, metadata: i, model
 						type: "button",
 						size: n ? B.Large : B.Medium,
 						variant: z.Secondary,
+						className: "shrink-0",
 						"aria-label": "Queue Next",
 						title: "Send after this run finishes",
 						disabled: !p.canSend,

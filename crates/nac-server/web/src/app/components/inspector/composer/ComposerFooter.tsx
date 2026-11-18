@@ -98,16 +98,6 @@ export function ComposerFooter({
     // on a phone, where Queue and the model label compete for the width.
     <div className="flex min-h-10 flex-wrap items-center gap-x-1 gap-y-1">
       <ComposerMenu sessionId={sessionId} compact={compact} {...menu} />
-      {/* Breaks the line at a fixed width and grows back to its own, so a
-          run's Queue shortens the model label instead of moving the row. */}
-      <div className="flex min-w-0 grow basis-[140px] max-w-fit items-center">
-        <ModelPicker
-          sessionId={sessionId}
-          metadata={metadata}
-          label={modelLabel}
-          disabled={modelDisabled}
-        />
-      </div>
       {ssh ? (
         <SshBadge
           className="mx-1"
@@ -139,13 +129,23 @@ export function ComposerFooter({
         </Tooltip>
       ) : null}
 
-      <div className="ml-auto flex shrink-0 items-center gap-1.5">
+      <div className="ml-auto flex min-w-0 items-center gap-1.5">
+        {/* The model sits beside Send, as on Home. It shrinks first, so a
+            run's Queue shortens the label instead of moving the row. */}
+        <div className="flex min-w-0 items-center">
+          <ModelPicker
+            sessionId={sessionId}
+            metadata={metadata}
+            label={modelLabel}
+            disabled={modelDisabled}
+          />
+        </div>
         {nearlyFull && onCompact ? (
           <Button
             type="button"
             size={compact ? ButtonSize.Large : ButtonSize.Small}
             variant={ButtonVariant.Ghost}
-            className="!text-[var(--f-amber-text)]"
+            className="shrink-0 !text-[var(--f-amber-text)]"
             aria-label="Compact context"
             loading={compacting}
             disabled={compacting}
@@ -160,6 +160,7 @@ export function ComposerFooter({
             type="button"
             size={compact ? ButtonSize.Large : ButtonSize.Medium}
             variant={ButtonVariant.Secondary}
+            className="shrink-0"
             aria-label="Queue Next"
             title="Send after this run finishes"
             disabled={!submit.canSend}
