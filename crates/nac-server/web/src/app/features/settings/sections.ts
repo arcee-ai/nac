@@ -47,6 +47,15 @@ export const SETTINGS_SECTION_META: readonly SettingsSectionMeta[] = [
     ],
   },
   {
+    id: "accounts",
+    label: "Accounts & keys",
+    group: "Agents",
+    icon: IconName.Key,
+    description:
+      "The subscriptions and API keys NAC uses to reach model providers. Projects and chats never ask for them.",
+    rows: ["Subscriptions", "ChatGPT", "Arcee", "Sign in", "API keys", "Provider key"],
+  },
+  {
     id: "models",
     label: "Models & providers",
     group: "Agents",

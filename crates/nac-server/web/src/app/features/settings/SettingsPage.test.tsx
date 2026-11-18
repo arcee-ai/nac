@@ -86,6 +86,7 @@ it("shows grouped sections beside the open one and switches between them", () =>
   expect(labels).toEqual([
     "General",
     "Appearance",
+    "Accounts & keys",
     "Models & providers",
     "MCP servers",
     "Capabilities",

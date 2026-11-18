@@ -21,6 +21,7 @@ import {
   type SectionMatch,
 } from "./sections";
 import { AboutSection } from "./sections/AboutSection";
+import { AccountsSection } from "./sections/AccountsSection";
 import { AppearanceSection } from "./sections/AppearanceSection";
 import { GeneralSection } from "./sections/GeneralSection";
 import { useSettingsReturn } from "./settingsReturn";
@@ -33,6 +34,8 @@ function SectionBody({ section }: { section: SettingsSection }) {
       return <GeneralSection />;
     case "appearance":
       return <AppearanceSection />;
+    case "accounts":
+      return <AccountsSection />;
     case "models":
       return <ConfigurationsSettings />;
     case "mcp":
