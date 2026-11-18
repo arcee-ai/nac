@@ -207,19 +207,15 @@ describe("Home composer", () => {
     );
   });
 
-  it("shows effort as Not available and sends none for a model that accepts none", async () => {
+  it("shows effort as None and sends none for a model that accepts no level", async () => {
     fakes.inheritedEffort = null;
     fakes.inheritedModel = "no-levels";
     mount("/", false);
-    const chip = screen.getByRole("button", { name: /^Model: / });
-    expect(chip.getAttribute("aria-label")).not.toContain("reasoning");
-    expect(chip.textContent).not.toContain("Not available");
+    const chip = screen.getByRole("button", { name: /, None reasoning$/ });
     fireEvent.click(chip);
-    const effort = screen.getByRole("menuitem", { name: /^Effort/ });
-    expect(effort.getAttribute("aria-disabled")).toBe("true");
-    expect(effort.textContent).toContain("Not available");
-    fireEvent.click(effort);
-    expect(screen.queryByRole("menuitemradio")).toBeNull();
+    fireEvent.click(screen.getByRole("menuitem", { name: /^Effort\s*None/ }));
+    expect(screen.getAllByRole("menuitemradio").map((item) => item.textContent)).toEqual(["None"]);
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "None" }));
     fireEvent.change(prompt(), { target: { value: "Go" } });
     fireEvent.keyDown(prompt(), { key: "Enter" });
     await vi.waitFor(() => expect(fakes.start).toHaveBeenCalled());

@@ -11958,24 +11958,23 @@ function Wm({ label: e, value: t, onOpen: n }) {
 	return /* @__PURE__ */ $("button", {
 		type: "button",
 		role: "menuitem",
-		"aria-haspopup": n ? "menu" : void 0,
-		"aria-disabled": !n || void 0,
+		"aria-haspopup": "menu",
 		onClick: n,
-		className: U("flex min-h-9 w-full min-w-0 items-center gap-3 rounded-md px-2.5 text-left outline-none transition-colors duration-150 ease-out motion-reduce:transition-none max-md:min-h-11", n ? "hover:bg-[var(--f-wash-1)] focus-visible:bg-[var(--f-wash-1)]" : "cursor-default"),
+		className: "flex min-h-9 w-full min-w-0 items-center gap-3 rounded-md px-2.5 text-left outline-none transition-colors duration-150 ease-out hover:bg-[var(--f-wash-1)] focus-visible:bg-[var(--f-wash-1)] motion-reduce:transition-none max-md:min-h-11",
 		children: [
 			/* @__PURE__ */ Q("span", {
 				className: "type-label shrink-0 text-basic-primary",
 				children: e
 			}),
 			/* @__PURE__ */ Q("span", {
-				className: U("type-label min-w-0 flex-1 truncate text-right", n ? "text-basic-tertiary" : "text-basic-muted"),
+				className: "type-label min-w-0 flex-1 truncate text-right text-basic-tertiary",
 				children: t
 			}),
-			n ? /* @__PURE__ */ Q(L, {
+			/* @__PURE__ */ Q(L, {
 				iconName: z.Right,
 				size: 12,
 				className: "shrink-0 text-basic-muted"
-			}) : null
+			})
 		]
 	});
 }
@@ -12006,7 +12005,10 @@ function qm({ fallbackLabel: e, pending: t, value: n, effort: r, supportedEffort
 			...t,
 			models: t.models.filter((t) => `${t.id} ${t.display_name ?? ""}`.toLowerCase().includes(e))
 		})).filter((e) => e.models.length > 0) : T.filter((e) => e.models.length > 0);
-	}, [T, y]), O = n ? T.find((e) => e.provider.id === n.backend)?.models.find((e) => e.id === n.model) : void 0, k = O ? Um(O) : e, A = Ec(i, r, Sc), j = !!C.data && i.length === 0, M = j ? "Not available" : r ? String(A.find((e) => e.id === r)?.label ?? r) : null, N = () => {
+	}, [T, y]), O = n ? T.find((e) => e.provider.id === n.backend)?.models.find((e) => e.id === n.model) : void 0, k = O ? Um(O) : e, A = !!C.data && i.length === 0, j = A ? [{
+		id: "",
+		label: "None"
+	}] : Ec(i, r, Sc), M = A ? "None" : r ? String(j.find((e) => e.id === r)?.label ?? r) : null, N = () => {
 		g(!1), v("overview"), x("");
 	}, ee = (e) => {
 		u(e), N();
@@ -12019,7 +12021,7 @@ function qm({ fallbackLabel: e, pending: t, value: n, effort: r, supportedEffort
 			n ? /* @__PURE__ */ Q(Wm, {
 				label: "Effort",
 				value: M,
-				onOpen: j ? void 0 : () => v("effort")
+				onOpen: () => v("effort")
 			}) : null,
 			n ? /* @__PURE__ */ Q(Pp, {}) : null,
 			/* @__PURE__ */ Q(Wm, {
@@ -12036,11 +12038,11 @@ function qm({ fallbackLabel: e, pending: t, value: n, effort: r, supportedEffort
 		}), /* @__PURE__ */ Q(Np, {
 			label: "Effort",
 			autoFocus: !0,
-			children: A.map((e) => /* @__PURE__ */ Q(Ap, {
+			children: j.map((e) => /* @__PURE__ */ Q(Ap, {
 				label: e.label,
 				checked: e.id === r,
 				onSelect: () => {
-					d(String(e.id)), v("overview");
+					A || d(String(e.id)), v("overview");
 				}
 			}, e.id))
 		})]
@@ -12129,11 +12131,11 @@ function qm({ fallbackLabel: e, pending: t, value: n, effort: r, supportedEffort
 		children: /* @__PURE__ */ Q(Hm, {
 			disabled: s,
 			className: "text-basic-primary",
-			"aria-label": k ? `Model: ${k}${M && !j ? `, ${M} reasoning` : ""}` : "Choose a model",
+			"aria-label": k ? `Model: ${k}${M ? `, ${M} reasoning` : ""}` : "Choose a model",
 			"aria-haspopup": "menu",
 			"aria-expanded": h,
 			onClick: () => h ? N() : g(!0),
-			children: t ? "Model…" : /* @__PURE__ */ $(Z, { children: [k ?? "Choose a model", M && !j ? /* @__PURE__ */ Q("span", {
+			children: t ? "Model…" : /* @__PURE__ */ $(Z, { children: [k ?? "Choose a model", M ? /* @__PURE__ */ Q("span", {
 				className: "ml-1.5 text-basic-muted",
 				children: M
 			}) : null] })

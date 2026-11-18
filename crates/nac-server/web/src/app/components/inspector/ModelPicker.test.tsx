@@ -267,7 +267,7 @@ it("waits for the run to end before giving a session its standard level", async 
   }
 });
 
-it("shows effort as Not available and sends none for a model that accepts none", async () => {
+it("shows effort as None and sends none for a model that accepts no level", async () => {
   const update = vi.spyOn(api, "updateConfig").mockResolvedValue(undefined);
   const { client, view } = renderPicker({
     ...trinity,
@@ -293,11 +293,9 @@ it("shows effort as Not available and sends none for a model that accepts none",
     reasoning_effort: null,
   } as SessionMetadata);
   try {
-    const chip = await openChip("Model: DeepSeek Flash");
-    expect(chip.textContent).not.toContain("Not available");
-    const effort = screen.getByRole("menuitem", { name: /^Effort/ });
-    expect(effort.getAttribute("aria-disabled")).toBe("true");
-    expect(effort.textContent).toContain("Not available");
+    await openChip("Model: DeepSeek Flash, None reasoning");
+    fireEvent.click(screen.getByRole("menuitem", { name: /^Effort\s*None/ }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "None" }));
     expect(update).not.toHaveBeenCalled();
   } finally {
     second.view.unmount();

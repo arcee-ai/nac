@@ -7,7 +7,6 @@ import { modelsForProvider } from "@/app/components/modals/catalogModelOverlay";
 import { EFFORT_LEVEL_OPTIONS, reasoningOptionsFor } from "@/app/components/modals/options";
 import { Menu, MenuItem, MenuLabel, MenuSeparator } from "@/app/features/sidebar/MenuItem";
 import { catalogBaseUrl, type CatalogPick } from "@/app/lib/catalog";
-import { cn } from "@/app/lib/cn";
 import { providerAccountLabel, providerOrder } from "@/app/lib/providers";
 import { routes } from "@/app/lib/routes";
 import { useModelCatalog, useReadyProviderModels } from "@/app/services/queries";
@@ -31,33 +30,21 @@ function SettingRow({
 }: {
   label: string;
   value: ReactNode;
-  /** Absent when there is nothing to choose. */
-  onOpen?: () => void;
+  onOpen: () => void;
 }) {
   return (
     <button
       type="button"
       role="menuitem"
-      aria-haspopup={onOpen ? "menu" : undefined}
-      aria-disabled={onOpen ? undefined : true}
+      aria-haspopup="menu"
       onClick={onOpen}
-      className={cn(
-        "flex min-h-9 w-full min-w-0 items-center gap-3 rounded-md px-2.5 text-left outline-none transition-colors duration-150 ease-out motion-reduce:transition-none max-md:min-h-11",
-        onOpen ? "hover:bg-[var(--f-wash-1)] focus-visible:bg-[var(--f-wash-1)]" : "cursor-default",
-      )}
+      className="flex min-h-9 w-full min-w-0 items-center gap-3 rounded-md px-2.5 text-left outline-none transition-colors duration-150 ease-out hover:bg-[var(--f-wash-1)] focus-visible:bg-[var(--f-wash-1)] motion-reduce:transition-none max-md:min-h-11"
     >
       <span className="type-label shrink-0 text-basic-primary">{label}</span>
-      <span
-        className={cn(
-          "type-label min-w-0 flex-1 truncate text-right",
-          onOpen ? "text-basic-tertiary" : "text-basic-muted",
-        )}
-      >
+      <span className="type-label min-w-0 flex-1 truncate text-right text-basic-tertiary">
         {value}
       </span>
-      {onOpen ? (
-        <Icon iconName={IconName.Right} size={12} className="shrink-0 text-basic-muted" />
-      ) : null}
+      <Icon iconName={IconName.Right} size={12} className="shrink-0 text-basic-muted" />
     </button>
   );
 }
@@ -160,10 +147,14 @@ export function ModelPicker({
         ?.models.find((model) => model.id === value.model)
     : undefined;
   const name = current ? modelName(current) : fallbackLabel;
-  const efforts = reasoningOptionsFor(supportedEfforts, effort, EFFORT_LEVEL_OPTIONS);
+  // A model that accepts no explicit level runs without one, shown as None;
+  // the server rejects even "none" for it, so choosing None sends nothing.
   const noEfforts = Boolean(catalog.data) && supportedEfforts.length === 0;
+  const efforts = noEfforts
+    ? [{ id: "", label: "None" }]
+    : reasoningOptionsFor(supportedEfforts, effort, EFFORT_LEVEL_OPTIONS);
   const effortLabel = noEfforts
-    ? "Not available"
+    ? "None"
     : effort
       ? String(efforts.find((option) => option.id === effort)?.label ?? effort)
       : null;
@@ -190,11 +181,7 @@ export function ModelPicker({
   const overview = (
     <Menu label="Model settings" autoFocus>
       {value ? (
-        <SettingRow
-          label="Effort"
-          value={effortLabel}
-          onOpen={noEfforts ? undefined : () => setView("effort")}
-        />
+        <SettingRow label="Effort" value={effortLabel} onOpen={() => setView("effort")} />
       ) : null}
       {value ? <MenuSeparator /> : null}
       <SettingRow label="Model" value={name ?? "Choose"} onOpen={() => setView("model")} />
@@ -211,7 +198,7 @@ export function ModelPicker({
             label={option.label}
             checked={option.id === effort}
             onSelect={() => {
-              onEffort(String(option.id));
+              if (!noEfforts) onEffort(String(option.id));
               setView("overview");
             }}
           />
@@ -330,7 +317,7 @@ export function ModelPicker({
         className="text-basic-primary"
         aria-label={
           name
-            ? `Model: ${name}${effortLabel && !noEfforts ? `, ${effortLabel} reasoning` : ""}`
+            ? `Model: ${name}${effortLabel ? `, ${effortLabel} reasoning` : ""}`
             : "Choose a model"
         }
         aria-haspopup="menu"
@@ -342,9 +329,7 @@ export function ModelPicker({
         ) : (
           <>
             {name ?? "Choose a model"}
-            {effortLabel && !noEfforts ? (
-              <span className="ml-1.5 text-basic-muted">{effortLabel}</span>
-            ) : null}
+            {effortLabel ? <span className="ml-1.5 text-basic-muted">{effortLabel}</span> : null}
           </>
         )}
       </Chip>
