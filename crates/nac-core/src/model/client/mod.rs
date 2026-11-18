@@ -216,6 +216,51 @@ async fn read_response_body(
     })
 }
 
+/// The opt-in browser fixture may only redirect a canonical native request to
+/// an explicitly addressed loopback endpoint using its synthetic credential.
+#[cfg(feature = "openai-e2e-fixture")]
+fn validate_openai_e2e_fixture(
+    configured: Option<&str>,
+    backend: BackendKind,
+    metadata: &ModelMetadata,
+    base_url: &str,
+    api_key: &str,
+) -> Result<Option<String>> {
+    let Some(raw) = configured else {
+        if api_key == "e2e-only" {
+            return Err(model_configuration_error(
+                "synthetic OpenAI E2E credential requires the loopback fixture",
+            ));
+        }
+        return Ok(None);
+    };
+    let port = raw
+        .strip_prefix("http://127.0.0.1:")
+        .and_then(|rest| rest.strip_suffix("/v1"))
+        .filter(|port| !port.is_empty() && port.bytes().all(|b| b.is_ascii_digit()))
+        .and_then(|port| port.parse::<u16>().ok())
+        .filter(|port| *port != 0)
+        .ok_or_else(|| {
+            model_configuration_error("OpenAI E2E fixture URL must be http://127.0.0.1:<port>/v1")
+        })?;
+    // Reject noncanonical spellings, additional path, userinfo, query and fragment.
+    if raw != format!("http://127.0.0.1:{port}/v1") {
+        return Err(model_configuration_error("invalid OpenAI E2E fixture URL"));
+    }
+    if api_key != "e2e-only"
+        || metadata.provider != backend
+        || !super::service_tier::native_openai_supported(
+            backend,
+            metadata,
+            base_url,
+            crate::model::ServiceTier::Standard,
+        )
+    {
+        return Err(model_configuration_error("OpenAI E2E fixture requires the synthetic credential and canonical native OpenAI route"));
+    }
+    Ok(Some(raw.to_string()))
+}
+
 #[derive(Debug, Clone)]
 pub struct ModelClient {
     client: Client,
@@ -344,6 +389,9 @@ impl ModelClient {
         // S5 reasoning discipline: same-model gate, orphan reconciliation.
         // Runs once here so every adapter (and the compaction summary call)
         // inherits it; operates on the send-time copy, never the transcript.
+        // Check fixture configuration before dispatch or any HTTP request.
+        #[cfg(feature = "openai-e2e-fixture")]
+        self.openai_e2e_fixture_transport()?;
         let messages = normalize_history(messages, &self.model_origin());
         self.validate_image_history(&messages)?;
         if self.backend != BackendKind::ChatGptCodexResponses && self.service_tier.is_some() {
@@ -434,12 +482,34 @@ impl ModelClient {
         &self.base_url
     }
 
-    fn transport_base_url(&self) -> &str {
+    fn transport_base_url(&self) -> Result<String> {
         #[cfg(test)]
         if let Some(url) = self.base_url.strip_prefix("test-openai:") {
-            return url;
+            return Ok(url.to_string());
         }
-        &self.base_url
+        #[cfg(feature = "openai-e2e-fixture")]
+        if let Some(url) = self.openai_e2e_fixture_transport()? {
+            return Ok(url);
+        }
+        Ok(self.base_url.clone())
+    }
+
+    #[cfg(feature = "openai-e2e-fixture")]
+    fn openai_e2e_fixture_transport(&self) -> Result<Option<String>> {
+        let configured = std::env::var_os("NAC_OPENAI_E2E_FIXTURE_BASE_URL")
+            .map(|value| {
+                value
+                    .into_string()
+                    .map_err(|_| model_configuration_error("invalid OpenAI E2E fixture URL"))
+            })
+            .transpose()?;
+        validate_openai_e2e_fixture(
+            configured.as_deref(),
+            self.backend,
+            &self.resolved_model,
+            &self.base_url,
+            &self.api_key,
+        )
     }
 
     fn add_native_service_tier(&self, request: &mut Value) {
@@ -652,7 +722,7 @@ impl ModelClient {
             }
             _ => format!(
                 "{}/chat/completions",
-                self.transport_base_url().trim_end_matches('/')
+                self.transport_base_url()?.trim_end_matches('/')
             ),
         };
         let reasoning_field = compat
@@ -770,7 +840,7 @@ impl ModelClient {
     ) -> Result<ModelTurnResponse> {
         let url = format!(
             "{}/responses",
-            self.transport_base_url().trim_end_matches('/')
+            self.transport_base_url()?.trim_end_matches('/')
         );
         let mut request = openai_responses_request(
             &self.model,

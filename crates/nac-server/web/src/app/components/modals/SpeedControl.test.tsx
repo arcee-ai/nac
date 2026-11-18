@@ -53,6 +53,7 @@ it("offers three-way choices only when discovery includes Ultrafast", () => {
 it("explains native API accelerated pricing, access and a documented context limit", () => {
   const view = render(
     <SpeedControl
+      form
       openAiApi
       fastContextLimit={272000}
       tiers={[priority]}
@@ -74,7 +75,7 @@ it("does not display an accelerated pricing note when acceleration is unavailabl
   expect(screen.queryByRole("link", { name: "OpenAI pricing" })).toBeNull();
 });
 
-it("keeps mobile composer pricing in an accessible disclosure", () => {
+it("keeps composer speed choices and pricing in one compact mobile disclosure", () => {
   vi.stubGlobal("matchMedia", () => ({
     matches: true,
     addEventListener: vi.fn(),
@@ -92,11 +93,14 @@ it("keeps mobile composer pricing in an accessible disclosure", () => {
     </MemoryRouter>,
   );
   expect(screen.queryByText(/Higher token cost/)).toBeNull();
-  const disclosure = screen.getByRole("button", { name: "Speed pricing and access" });
+  const disclosure = screen.getByRole("button", { name: "Speed: Standard" });
   expect(disclosure.getAttribute("aria-expanded")).toBe("false");
   fireEvent.click(disclosure);
   expect(screen.getByText(/Higher token cost/)).toBeTruthy();
   expect(screen.getByText(/fewer than 272,000 input tokens/)).toBeTruthy();
   expect(screen.getByRole("link", { name: "OpenAI pricing" })).toBeTruthy();
   expect(disclosure.getAttribute("aria-expanded")).toBe("true");
+  expect(screen.getByRole("button", { name: "Fast" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Fast" }));
+  expect(disclosure.getAttribute("aria-expanded")).toBe("false");
 });

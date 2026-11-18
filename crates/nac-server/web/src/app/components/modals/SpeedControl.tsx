@@ -1,17 +1,13 @@
 import {
   Button,
-  ButtonContent,
   ButtonSize,
   ButtonVariant,
-  Icon,
-  IconName,
   Popover,
   PopoverPlacement,
   PopoverSize,
   type SelectItem,
 } from "@/app/atoms";
 import { SmallSelect } from "@/app/components/modals/SmallSelect";
-import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { useState, type ReactNode } from "react";
 import {
   speedLabel,
@@ -39,7 +35,6 @@ export function SpeedControl({
   /** Exclusive input-token limit documented for Fast mode, when applicable. */
   fastContextLimit?: number | null;
 }) {
-  const isMobile = useIsMobile();
   const [noteOpen, setNoteOpen] = useState(false);
   const fast = supportsSpeed(tiers, "fast");
   const ultra = supportsSpeed(tiers, "ultrafast");
@@ -58,36 +53,61 @@ export function SpeedControl({
     note ? (
       <div className="flex flex-wrap items-center gap-2">
         {control}
-        {!form && isMobile ? (
-          <Popover
-            open={noteOpen}
-            onClose={() => setNoteOpen(false)}
-            sticky
-            placement={PopoverPlacement.TopCenter}
-            size={PopoverSize.Medium}
-            focusScope="Speed pricing and access"
-            content={<div className="p-3 leading-normal">{note}</div>}
-          >
-            <Button
-              variant={ButtonVariant.Ghost}
-              size={ButtonSize.Small}
-              content={ButtonContent.Icon}
-              className="min-h-11 min-w-11"
-              aria-label="Speed pricing and access"
-              aria-expanded={noteOpen}
-              onClick={() => setNoteOpen(!noteOpen)}
-            >
-              <Icon iconName={IconName.Info} size={16} />
-            </Button>
-          </Popover>
-        ) : (
-          note
-        )}
+        {note}
       </div>
     ) : (
       control
     );
   if (!form && !fast && !ultra) return null;
+  if (!form && openAiApi) {
+    const choices: { value: ServiceTier | null; label: string }[] = [
+      { value: null, label: "Use provider default" },
+      { value: "standard", label: "Standard" },
+      ...(fast ? [{ value: "fast" as const, label: "Fast" }] : []),
+      ...(ultra ? [{ value: "ultrafast" as const, label: "Ultrafast" }] : []),
+    ];
+    return (
+      <Popover
+        open={noteOpen}
+        onClose={() => setNoteOpen(false)}
+        sticky
+        placement={PopoverPlacement.TopCenter}
+        size={PopoverSize.Medium}
+        focusScope="Speed and pricing"
+        content={
+          <div className="flex flex-col gap-1 p-3 leading-normal">
+            {choices.map((choice) => (
+              <Button
+                key={choice.value ?? "default"}
+                variant={ButtonVariant.Ghost}
+                size={ButtonSize.Small}
+                aria-pressed={value === choice.value}
+                onClick={() => {
+                  onChange(choice.value);
+                  setNoteOpen(false);
+                }}
+              >
+                {choice.label}
+              </Button>
+            ))}
+            {note}
+          </div>
+        }
+      >
+        <Button
+          className="max-md:min-h-11 max-md:min-w-11"
+          size={ButtonSize.Small}
+          variant={ButtonVariant.Ghost}
+          disabled={disabled}
+          aria-label={`Speed: ${speedLabel(value)}`}
+          aria-expanded={noteOpen}
+          onClick={() => setNoteOpen(!noteOpen)}
+        >
+          {value ? speedLabel(value) : "Default"}
+        </Button>
+      </Popover>
+    );
+  }
   if (!form && fast && !ultra) {
     return withNote(
       <Button

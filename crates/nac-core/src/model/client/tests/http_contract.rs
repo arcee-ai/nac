@@ -1214,50 +1214,78 @@ async fn native_speed_requests_preserve_reasoning_and_omit_only_unset() {
         BackendKind::OpenAiResponses,
         BackendKind::OpenAiChatCompletions,
     ] {
-        let mut baseline_reasoning = None;
-        for (tier, expected) in [
-            (None, None),
-            (Some(ServiceTier::Standard), Some("default")),
-            (Some(ServiceTier::Fast), Some("priority")),
-            (Some(ServiceTier::Ultrafast), Some("ultrafast")),
+        for effort in [
+            None,
+            Some(ReasoningEffort::None),
+            Some(ReasoningEffort::Minimal),
+            Some(ReasoningEffort::Low),
+            Some(ReasoningEffort::Medium),
+            Some(ReasoningEffort::High),
+            Some(ReasoningEffort::Xhigh),
         ] {
-            if backend == BackendKind::OpenAiChatCompletions && tier == Some(ServiceTier::Ultrafast)
-            {
-                continue;
-            }
-            let response = if backend == BackendKind::OpenAiResponses {
-                s5_openai_response()
-            } else {
-                s5_completions_response()
-            };
-            let server = ScriptedServer::start(vec![response]);
-            let client = native_speed_client(backend, &server.base_url, tier);
-            client
-                .send_turn(
-                    vec![Message::User {
-                        content: "hello".into(),
-                    }],
-                    vec![],
-                )
-                .await
-                .unwrap();
-            let requests = server.finish();
-            let body: Value = serde_json::from_slice(&requests[0].body).unwrap();
-            assert_eq!(
-                body.get("service_tier").and_then(Value::as_str),
-                expected,
-                "{backend}"
-            );
-            let reasoning = if backend == BackendKind::OpenAiResponses {
-                body.get("reasoning")
-            } else {
-                body.get("reasoning_effort")
-            };
-            assert!(reasoning.is_some(), "missing reasoning for {backend}");
-            if let Some(ref previous) = baseline_reasoning {
-                assert_eq!(reasoning, Some(previous));
-            } else {
-                baseline_reasoning = reasoning.cloned();
+            let mut baseline_body = None;
+            for (tier, expected) in [
+                (None, None),
+                (Some(ServiceTier::Standard), Some("default")),
+                (Some(ServiceTier::Fast), Some("priority")),
+                (Some(ServiceTier::Ultrafast), Some("ultrafast")),
+            ] {
+                if backend == BackendKind::OpenAiChatCompletions
+                    && tier == Some(ServiceTier::Ultrafast)
+                {
+                    continue;
+                }
+                let response = if backend == BackendKind::OpenAiResponses {
+                    s5_openai_response()
+                } else {
+                    s5_completions_response()
+                };
+                let server = ScriptedServer::start(vec![response]);
+                let mut client = native_speed_client(backend, &server.base_url, tier);
+                client.reasoning_effort = effort;
+                client
+                    .send_turn(
+                        vec![Message::User {
+                            content: "hello".into(),
+                        }],
+                        vec![],
+                    )
+                    .await
+                    .unwrap();
+                let requests = server.finish();
+                assert_eq!(requests.len(), 1);
+                let path = if backend == BackendKind::OpenAiResponses {
+                    "/responses"
+                } else {
+                    "/chat/completions"
+                };
+                assert_eq!(requests[0].path, path, "{backend} {effort:?} {tier:?}");
+                let mut body: Value = serde_json::from_slice(&requests[0].body).unwrap();
+                assert_eq!(body["model"], "gpt-6.1-sol");
+                assert_eq!(
+                    body.get("service_tier").and_then(Value::as_str),
+                    expected,
+                    "{backend} {effort:?} {tier:?}"
+                );
+                let wire_effort = if backend == BackendKind::OpenAiResponses {
+                    body.pointer("/reasoning/effort").and_then(Value::as_str)
+                } else {
+                    body.get("reasoning_effort").and_then(Value::as_str)
+                };
+                assert_eq!(
+                    wire_effort,
+                    effort.map(ReasoningEffort::as_str),
+                    "{backend} {effort:?} {tier:?}"
+                );
+                body.as_object_mut().unwrap().remove("service_tier");
+                if let Some(ref previous) = baseline_body {
+                    assert_eq!(
+                        &body, previous,
+                        "speed changed another request field: {backend} {effort:?} {tier:?}"
+                    );
+                } else {
+                    baseline_body = Some(body);
+                }
             }
         }
     }
@@ -1349,4 +1377,112 @@ async fn native_transient_rate_limit_retries_without_changing_requested_tier() {
         let body: Value = serde_json::from_slice(&request.body).unwrap();
         assert_eq!(body["service_tier"], "priority");
     }
+}
+
+#[cfg(feature = "openai-e2e-fixture")]
+#[test]
+fn openai_e2e_fixture_requires_exact_loopback_and_native_tuple() {
+    let model = catalog::resolve(BackendKind::OpenAiResponses, "gpt-6.1-sol");
+    let validate = |url, backend, metadata: &ModelMetadata, base, key| {
+        validate_openai_e2e_fixture(url, backend, metadata, base, key)
+    };
+    assert_eq!(
+        validate(
+            Some("http://127.0.0.1:8081/v1"),
+            BackendKind::OpenAiResponses,
+            &model,
+            "https://api.openai.com/v1",
+            "e2e-only"
+        )
+        .unwrap()
+        .as_deref(),
+        Some("http://127.0.0.1:8081/v1")
+    );
+    for url in [
+        "http://127.0.0.1/v1",
+        "https://127.0.0.1:8081/v1",
+        "http://localhost:8081/v1",
+        "http://127.0.0.2:8081/v1",
+        "http://user@127.0.0.1:8081/v1",
+        "http://127.0.0.1:0/v1",
+        "http://127.0.0.1:8081/v1/",
+        "http://127.0.0.1:8081/v1?x=1",
+        "http://127.0.0.1:8081/v1#x",
+        "http://127.0.0.1:8081/v1/responses",
+        "http://127.0.0.1:65536/v1",
+    ] {
+        assert!(
+            validate(
+                Some(url),
+                BackendKind::OpenAiResponses,
+                &model,
+                "https://api.openai.com/v1",
+                "e2e-only"
+            )
+            .is_err(),
+            "accepted {url}"
+        );
+    }
+    assert!(validate(
+        Some("http://127.0.0.1:8081/v1"),
+        BackendKind::OpenAiResponses,
+        &model,
+        "https://api.openai.com/v1",
+        "real-key"
+    )
+    .is_err());
+    assert!(validate(
+        None,
+        BackendKind::OpenAiResponses,
+        &model,
+        "https://api.openai.com/v1",
+        "e2e-only"
+    )
+    .is_err());
+    assert_eq!(
+        validate(
+            None,
+            BackendKind::OpenAiResponses,
+            &model,
+            "https://api.openai.com/v1",
+            "real-key"
+        )
+        .unwrap(),
+        None
+    );
+    assert!(validate(
+        Some("http://127.0.0.1:8081/v1"),
+        BackendKind::OpenAiResponses,
+        &model,
+        "https://compatible.example/v1",
+        "e2e-only"
+    )
+    .is_err());
+    assert!(validate(
+        Some("http://127.0.0.1:8081/v1"),
+        BackendKind::OpenAiChatCompletions,
+        &model,
+        "https://api.openai.com/v1",
+        "e2e-only"
+    )
+    .is_err());
+    let mut mismatched = model.clone();
+    mismatched.provider = BackendKind::ArceeApi;
+    assert!(validate(
+        Some("http://127.0.0.1:8081/v1"),
+        BackendKind::OpenAiResponses,
+        &mismatched,
+        "https://api.openai.com/v1",
+        "e2e-only"
+    )
+    .is_err());
+    let chat = catalog::resolve(BackendKind::OpenAiChatCompletions, "gpt-6.1-sol");
+    assert!(validate(
+        Some("http://127.0.0.1:8081/v1"),
+        BackendKind::OpenAiChatCompletions,
+        &chat,
+        "https://api.openai.com/v1",
+        "e2e-only"
+    )
+    .is_ok());
 }

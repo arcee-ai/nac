@@ -261,7 +261,8 @@ const ModelMessageBody = memo(function ModelMessageBody({
         const requested =
           receipt.requested == null ? "Provider default" : receiptSpeedLabel(receipt.requested);
         const downgraded =
-          (requested === "Fast" || requested === "Ultrafast") && served === "Standard";
+          ((requested === "Fast" || requested === "Ultrafast") && served === "Standard") ||
+          (requested === "Ultrafast" && served === "Fast");
         return (
           <p key={index} className="type-meta text-basic-muted">
             Requested speed: {requested}; served tier: {served}

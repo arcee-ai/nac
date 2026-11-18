@@ -25,6 +25,8 @@ describe("transcript topology badge navigation", () => {
       serviceTierReceipts: [
         { requested: "fast", served: "priority" },
         { requested: "ultrafast", served: "default" },
+        { requested: "ultrafast", served: "fast" },
+        { requested: "ultrafast", served: "priority" },
         { requested: null, served: "fast" },
         { requested: "standard", served: null },
         { requested: "fast", served: "future-tier" },
@@ -44,6 +46,9 @@ describe("transcript topology badge navigation", () => {
     expect(
       screen.getByText("Requested speed: Ultrafast; served tier: Standard (provider downgrade)"),
     ).toBeTruthy();
+    expect(
+      screen.getAllByText("Requested speed: Ultrafast; served tier: Fast (provider downgrade)"),
+    ).toHaveLength(2);
     expect(screen.getByText("Requested speed: Provider default; served tier: Fast")).toBeTruthy();
     expect(screen.getByText("Requested speed: Standard; served tier: Unknown")).toBeTruthy();
     expect(

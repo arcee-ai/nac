@@ -2689,7 +2689,7 @@ function il(e) {
 }
 // src/app/components/modals/SpeedControl.tsx
 function al({ tiers: e, value: t, onChange: n, disabled: r, form: i = !1, openAiApi: a = !1, fastContextLimit: o }) {
-	let s = bi(), [c, l] = X(!1), u = rl(e, "fast"), d = rl(e, "ultrafast"), f = a && (u || d) && /* @__PURE__ */ $("span", {
+	let [s, c] = X(!1), l = rl(e, "fast"), u = rl(e, "ultrafast"), d = a && (l || u) && /* @__PURE__ */ $("span", {
 		className: "text-xs text-muted-foreground",
 		children: [
 			"Higher token cost; subject to your OpenAI project’s access.",
@@ -2700,42 +2700,68 @@ function al({ tiers: e, value: t, onChange: n, disabled: r, form: i = !1, openAi
 				rel: "noreferrer",
 				children: "OpenAI pricing"
 			}),
-			u && o != null && /* @__PURE__ */ $(Z, { children: [
+			l && o != null && /* @__PURE__ */ $(Z, { children: [
 				". Fast mode supports fewer than ",
 				o.toLocaleString(),
 				" input tokens."
 			] })
 		]
-	}), p = (e) => f ? /* @__PURE__ */ $("div", {
+	}), f = (e) => d ? /* @__PURE__ */ $("div", {
 		className: "flex flex-wrap items-center gap-2",
-		children: [e, !i && s ? /* @__PURE__ */ Q(ui, {
-			open: c,
-			onClose: () => l(!1),
+		children: [e, d]
+	}) : e;
+	if (!i && !l && !u) return null;
+	if (!i && a) {
+		let e = [
+			{
+				value: null,
+				label: "Use provider default"
+			},
+			{
+				value: "standard",
+				label: "Standard"
+			},
+			...l ? [{
+				value: "fast",
+				label: "Fast"
+			}] : [],
+			...u ? [{
+				value: "ultrafast",
+				label: "Ultrafast"
+			}] : []
+		];
+		return /* @__PURE__ */ Q(ui, {
+			open: s,
+			onClose: () => c(!1),
 			sticky: !0,
 			placement: oi.TopCenter,
 			size: Si.Medium,
-			focusScope: "Speed pricing and access",
-			content: /* @__PURE__ */ Q("div", {
-				className: "p-3 leading-normal",
-				children: f
+			focusScope: "Speed and pricing",
+			content: /* @__PURE__ */ $("div", {
+				className: "flex flex-col gap-1 p-3 leading-normal",
+				children: [e.map((e) => /* @__PURE__ */ Q(V, {
+					variant: L.Ghost,
+					size: z.Small,
+					"aria-pressed": t === e.value,
+					onClick: () => {
+						n(e.value), c(!1);
+					},
+					children: e.label
+				}, e.value ?? "default")), d]
 			}),
 			children: /* @__PURE__ */ Q(V, {
-				variant: L.Ghost,
+				className: "max-md:min-h-11 max-md:min-w-11",
 				size: z.Small,
-				content: B.Icon,
-				className: "min-h-11 min-w-11",
-				"aria-label": "Speed pricing and access",
-				"aria-expanded": c,
-				onClick: () => l(!c),
-				children: /* @__PURE__ */ Q(R, {
-					iconName: U.Info,
-					size: 16
-				})
+				variant: L.Ghost,
+				disabled: r,
+				"aria-label": `Speed: ${il(t)}`,
+				"aria-expanded": s,
+				onClick: () => c(!s),
+				children: t ? il(t) : "Default"
 			})
-		}) : f]
-	}) : e;
-	if (!i && !u && !d) return null;
-	if (!i && u && !d) return p(/* @__PURE__ */ Q(V, {
+		});
+	}
+	if (!i && l && !u) return f(/* @__PURE__ */ Q(V, {
 		className: "max-md:min-h-11 max-md:min-w-11",
 		size: z.Small,
 		variant: L.Ghost,
@@ -2745,7 +2771,7 @@ function al({ tiers: e, value: t, onChange: n, disabled: r, form: i = !1, openAi
 		onClick: () => n(t === "fast" ? "standard" : "fast"),
 		children: t ? il(t) : "Default"
 	}));
-	let m = [
+	let p = [
 		{
 			id: "",
 			label: "Use provider default"
@@ -2754,24 +2780,24 @@ function al({ tiers: e, value: t, onChange: n, disabled: r, form: i = !1, openAi
 			id: "standard",
 			label: "Standard"
 		},
-		...u ? [{
+		...l ? [{
 			id: "fast",
 			label: "Fast"
 		}] : [],
-		...d ? [{
+		...u ? [{
 			id: "ultrafast",
 			label: "Ultrafast"
 		}] : []
 	];
-	return t && !rl(e, t) && m.push({
+	return t && !rl(e, t) && p.push({
 		id: t,
 		label: `${il(t)} (unavailable)`
-	}), p(/* @__PURE__ */ Q(Ss, {
+	}), f(/* @__PURE__ */ Q(Ss, {
 		"aria-label": `Speed: ${il(t)}`,
 		checkedChoices: !0,
 		triggerClassName: "max-md:min-h-11 max-md:min-w-11",
 		presentation: i ? "form" : void 0,
-		items: m,
+		items: p,
 		value: t ?? "",
 		placeholder: "Provider default",
 		triggerLabel: !i && !t ? "Default" : void 0,
@@ -20754,7 +20780,7 @@ var fS = so(function({ turn: e, previous: t, date: n, active: r, activity: i, ru
 						r,
 						"; served tier: ",
 						n,
-						(r === "Fast" || r === "Ultrafast") && n === "Standard" ? " (provider downgrade)" : ""
+						(r === "Fast" || r === "Ultrafast") && n === "Standard" || r === "Ultrafast" && n === "Fast" ? " (provider downgrade)" : ""
 					]
 				}, t);
 			}),
