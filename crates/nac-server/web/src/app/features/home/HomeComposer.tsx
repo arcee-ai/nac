@@ -62,7 +62,7 @@ function recentProjectId(
 }
 
 /**
- * Home's hero composer — the app's one new-session flow. The strip on top picks
+ * Home's hero composer — the app's one new-session flow. The strip under it picks
  * the project, grouped by where it runs (this computer or an SSH host); its "⋯" button holds the isolated-checkout choice and ref,
  * out of the way of a plain session. The composer's chips pick the behavior and
  * model. Sending creates the session with the prompt as its first message.
@@ -225,34 +225,7 @@ export function HomeComposer({
 
   return (
     <div className="flex w-full flex-col gap-2">
-      <div className="rounded-[calc(var(--radius-composer)+4px)] bg-[var(--f-wash-1)] p-1 pt-0">
-        <div
-          role="group"
-          aria-label="Workspace"
-          className="flex min-w-0 items-center gap-1 py-1 pr-1 pl-2 max-md:pl-1"
-        >
-          <ProjectPicker
-            projects={projects}
-            value={project}
-            disabled={busy}
-            addLabel={managed.isManaged ? "Add repository…" : "Add project…"}
-            onAddProject={addProject}
-            onChange={chooseProject}
-          />
-          {project ? (
-            <span className="shrink-0">
-              <WorkspaceSettings
-                isolated={useIsolation}
-                available={isolationAvailable}
-                onIsolatedChange={setIsolated}
-                gitRef={gitRef}
-                defaultRef={source.data?.default_ref ?? null}
-                onRefChange={(ref) => setRefFor({ projectId, ref })}
-                disabled={busy}
-              />
-            </span>
-          ) : null}
-        </div>
+      <div className="rounded-[calc(var(--radius-composer)+4px)] bg-[var(--f-wash-1)] p-1 pb-0">
         <div
           className={cn(
             "rounded-composer border border-tertiary bg-elevation-level-1",
@@ -347,6 +320,33 @@ export function HomeComposer({
               </button>
             </Tooltip>
           </div>
+        </div>
+        <div
+          role="group"
+          aria-label="Workspace"
+          className="flex min-w-0 items-center gap-1 py-1 pr-1 pl-2 max-md:pl-1"
+        >
+          <ProjectPicker
+            projects={projects}
+            value={project}
+            disabled={busy}
+            addLabel={managed.isManaged ? "Add repository…" : "Add project…"}
+            onAddProject={addProject}
+            onChange={chooseProject}
+          />
+          {project ? (
+            <span className="shrink-0">
+              <WorkspaceSettings
+                isolated={useIsolation}
+                available={isolationAvailable}
+                onIsolatedChange={setIsolated}
+                gitRef={gitRef}
+                defaultRef={source.data?.default_ref ?? null}
+                onRefChange={(ref) => setRefFor({ projectId, ref })}
+                disabled={busy}
+              />
+            </span>
+          ) : null}
         </div>
       </div>
       <div className="px-5 md:min-h-5" aria-live="polite">

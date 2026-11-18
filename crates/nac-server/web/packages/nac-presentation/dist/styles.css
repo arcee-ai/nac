@@ -3756,6 +3756,10 @@
     padding-right: calc(var(--spacing) * 12);
   }
 
+[data-nac-runtime]:is(.pb-0), [data-nac-runtime] .pb-0 {
+    padding-bottom: 0;
+  }
+
 [data-nac-runtime]:is(.pb-0\.5), [data-nac-runtime] .pb-0\.5 {
     padding-bottom: calc(var(--spacing) * .5);
   }

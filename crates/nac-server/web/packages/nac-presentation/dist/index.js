@@ -11799,7 +11799,7 @@ function Im({ isolated: e, available: t, onIsolatedChange: n, gitRef: r, default
 		onClose: m,
 		sticky: !0,
 		focusScope: "Additional settings",
-		placement: Ur.TopRight,
+		placement: Ur.BottomRight,
 		size: hi.Medium,
 		content: l === "main" ? /* @__PURE__ */ $(Z, { children: [
 			/* @__PURE__ */ Q("p", {
@@ -12364,39 +12364,8 @@ function ih({ projects: e, sessions: t, compact: n = !1 }) {
 		className: "flex w-full flex-col gap-2",
 		children: [
 			/* @__PURE__ */ $("div", {
-				className: "rounded-[calc(var(--radius-composer)+4px)] bg-[var(--f-wash-1)] p-1 pt-0",
+				className: "rounded-[calc(var(--radius-composer)+4px)] bg-[var(--f-wash-1)] p-1 pb-0",
 				children: [/* @__PURE__ */ $("div", {
-					role: "group",
-					"aria-label": "Workspace",
-					className: "flex min-w-0 items-center gap-1 py-1 pr-1 pl-2 max-md:pl-1",
-					children: [/* @__PURE__ */ Q(Pm, {
-						projects: e,
-						value: b,
-						disabled: Ee,
-						addLabel: i.isManaged ? "Add repository…" : "Add project…",
-						onAddProject: ke,
-						onChange: (e) => {
-							if (m(e), C && S.update(C, e), f) {
-								let e = new URLSearchParams(c);
-								e.delete("project"), l(e, { replace: !0 });
-							}
-						}
-					}), b ? /* @__PURE__ */ Q("span", {
-						className: "shrink-0",
-						children: /* @__PURE__ */ Q(Im, {
-							isolated: Ce,
-							available: Se,
-							onIsolatedChange: re,
-							gitRef: se,
-							defaultRef: xe.data?.default_ref ?? null,
-							onRefChange: (e) => oe({
-								projectId: x,
-								ref: e
-							}),
-							disabled: Ee
-						})
-					}) : null]
-				}), /* @__PURE__ */ $("div", {
 					className: U("rounded-composer border border-tertiary bg-elevation-level-1", "transition-[border-color,box-shadow] duration-150 ease-out motion-reduce:transition-none", "focus-within:border-secondary focus-within:shadow-sm"),
 					children: [
 						/* @__PURE__ */ Q("label", {
@@ -12468,6 +12437,37 @@ function ih({ projects: e, sessions: t, compact: n = !1 }) {
 							]
 						})
 					]
+				}), /* @__PURE__ */ $("div", {
+					role: "group",
+					"aria-label": "Workspace",
+					className: "flex min-w-0 items-center gap-1 py-1 pr-1 pl-2 max-md:pl-1",
+					children: [/* @__PURE__ */ Q(Pm, {
+						projects: e,
+						value: b,
+						disabled: Ee,
+						addLabel: i.isManaged ? "Add repository…" : "Add project…",
+						onAddProject: ke,
+						onChange: (e) => {
+							if (m(e), C && S.update(C, e), f) {
+								let e = new URLSearchParams(c);
+								e.delete("project"), l(e, { replace: !0 });
+							}
+						}
+					}), b ? /* @__PURE__ */ Q("span", {
+						className: "shrink-0",
+						children: /* @__PURE__ */ Q(Im, {
+							isolated: Ce,
+							available: Se,
+							onIsolatedChange: re,
+							gitRef: se,
+							defaultRef: xe.data?.default_ref ?? null,
+							onRefChange: (e) => oe({
+								projectId: x,
+								ref: e
+							}),
+							disabled: Ee
+						})
+					}) : null]
 				})]
 			}),
 			/* @__PURE__ */ Q("div", {
