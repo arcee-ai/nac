@@ -31,6 +31,16 @@ impl TaskPreparations {
         Ok(guard)
     }
 
+    /// Reserve a serving-lifetime effect without waiting behind shutdown.
+    pub(crate) fn try_admit(&self) -> Result<OwnedRwLockReadGuard<()>> {
+        self.git.check_running()?;
+        let guard = Arc::clone(&self.work)
+            .try_read_owned()
+            .map_err(|_| anyhow::anyhow!("task preparation is stopping"))?;
+        self.git.check_running()?;
+        Ok(guard)
+    }
+
     pub(crate) fn stop(&self) {
         self.git.stop();
     }

@@ -138,16 +138,19 @@ impl nac_core::traditional_children::TraditionalChildController
                 &relation,
                 request.description.as_deref(),
             )?;
-            let service = manager.attach_session(&child_session_id).await?;
-            // The service reauthorizes each actual mutation. Do not retain a
-            // host admission lease throughout a foreground delivery wait.
-            drop(_host_admission);
-            service
-                .submit_or_steer_traditional_child_with_origin(
-                    &request.parent_session_id,
+            let reservation = manager.reserve_continuation(&child_session_id).await?;
+            // Transfer attachment and its host lease to the owned actor; the
+            // actor drops the host lease before any foreground delivery wait.
+            manager
+                .submit_owned_child_input(
+                    None,
+                    _host_admission,
+                    request.parent_session_id,
+                    child_session_id,
                     request.prompt,
                     request.execution_mode,
                     request.origin,
+                    reservation,
                 )
                 .await
         })
@@ -259,6 +262,20 @@ impl nac_core::traditional_children::TraditionalChildController
                 .await??
                 .ok_or_else(|| anyhow!("traditional child disappeared after cancellation"))
         })
+    }
+
+    fn retain_wake(&self, session_id: &str) -> Option<anyhow::Result<()>> {
+        Some(
+            self.manager()
+                .and_then(|manager| manager.schedule_continuation(session_id)),
+        )
+    }
+
+    fn retain_recovery(&self, session_id: &str) -> Option<anyhow::Result<()>> {
+        Some(
+            self.manager()
+                .and_then(|manager| manager.schedule_recovery(session_id)),
+        )
     }
 
     fn wake<'a>(

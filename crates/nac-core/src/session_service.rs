@@ -43,8 +43,11 @@ pub use attention_test_support::{
     AttentionPublicationBarrier, AttentionPublicationSelection, QuestionSettlementBarrier,
 };
 mod cancellation;
+mod child_continuation;
 mod creation;
 mod delegated_input;
+#[doc(hidden)]
+pub use delegated_input::OwnedChildInputResult;
 #[cfg(any(test, feature = "test-support"))]
 mod delegated_input_test_support;
 mod direct_interaction;

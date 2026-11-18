@@ -5,6 +5,75 @@ use crate::session_service::tests::test_direct_active_service;
 
 const QUEUED_PROMPT: &str = "foreground input sent before peer exit";
 
+#[tokio::test]
+async fn owned_continuation_rejects_a_lease_for_another_session() {
+    let (service, path, original) =
+        abandoned_child("owned_continuation_wrong_lease", Some("relationship-run"));
+    let lease = sessions::SessionOperationLease::try_acquire(&path, "parent").unwrap();
+    assert!(service
+        .continue_owned_inbox_with_lease(lease)
+        .await
+        .is_err());
+    assert_eq!(
+        crate::store::load_traditional_child(&path, "child").unwrap(),
+        Some(original)
+    );
+    assert!(crate::store::list_session_inbox(&path, "child")
+        .unwrap()
+        .is_empty());
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn owned_foreground_cancellation_releases_waiter_and_preserves_queued_input() {
+    let (service, path, original) =
+        abandoned_child("owned_foreground_cancel", Some("relationship-run"));
+    let owner = crate::store::StoreCoordinator::acquire(&path).unwrap();
+    let peer = sessions::SessionOperationLease::try_acquire(&path, "child").unwrap();
+    let cancellation = sessions::ChildInputWaitCancellation::default();
+    let owned_service = service.clone();
+    let signal = cancellation.clone();
+    let task = tokio::spawn(async move {
+        owned_service
+            .submit_child_input_with_cancellation(
+                "parent",
+                QUEUED_PROMPT.into(),
+                TraditionalChildExecutionMode::Foreground,
+                crate::store::InputOrigin::Automation,
+                signal,
+                Arc::new(|| {}),
+                true,
+                Arc::new(|| {}),
+            )
+            .await
+    });
+    let item = queued_input(&owner).await;
+    let wait_id = item.child_wait_id.as_deref().unwrap();
+    assert!(matches!(
+        sessions::ChildInputWaitLease::try_acquire(&path, wait_id),
+        Err(sessions::SessionOperationLeaseError::Busy(_))
+    ));
+    cancellation.cancel();
+    let error = tokio::time::timeout(Duration::from_secs(5), task)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap_err();
+    assert!(error.to_string().contains("requester was cancelled"));
+    assert!(sessions::ChildInputWaitLease::try_acquire(&path, wait_id).is_ok());
+    assert_eq!(
+        owner.list_session_inbox("child".into()).await.unwrap(),
+        vec![item]
+    );
+    assert_eq!(
+        owner.load_traditional_child("child".into()).await.unwrap(),
+        Some(original)
+    );
+    drop(peer);
+    owner.shutdown().await.unwrap();
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
 #[cfg(feature = "managed-fault-fixture")]
 #[tokio::test]
 async fn private_child_read_fault_retains_generation_for_exactly_once_settlement() {
@@ -798,3 +867,66 @@ async fn child_input_recovery_accepts_a_terminal_pre_prompt_projection() {
 
 #[path = "delegated_input_wait_tests.rs"]
 mod waiter_tests;
+
+#[tokio::test]
+async fn saturated_inbox_admission_preserves_public_error_but_erases_overload_type() {
+    struct Noop;
+    impl crate::store::coordinator::PersistenceCommand for Noop {
+        type Output = ();
+        fn correlation(&self) -> crate::telemetry::Correlation {
+            crate::telemetry::Correlation::default()
+        }
+        fn execute(self, _: &std::path::Path) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+
+    let (parts, path) = test_direct_active_service(
+        "child_inbox_overload_source",
+        "child",
+        ModelClient::new_for_test(),
+    );
+    let item = crate::store::create_session_inbox_item(
+        &path,
+        "child",
+        crate::store::InboxDelivery::Queue,
+        "queued input",
+        None,
+        None,
+    )
+    .unwrap();
+    let owner = crate::store::StoreCoordinator::acquire(&path).unwrap();
+    let (gate, release, _) = crate::store::coordinator::block_executor(&owner);
+    let queued = (0..owner.stats().capacity)
+        .map(|_| owner.submit(Noop).unwrap())
+        .collect::<Vec<_>>();
+    let service = parts.service.clone();
+    let error = crate::store::spawn_blocking_store_caller(move || {
+        service.admitted_inbox_prompt(Some(item.id), "queued input")
+    })
+    .await
+    .unwrap()
+    .unwrap_err();
+    match &error {
+        SessionSubmitError::Coordination {
+            message: SessionCoordinationError::Store { detail },
+        } => {
+            assert!(detail.contains("persistence queue is full"));
+        }
+        other => panic!("expected the existing public coordination error, got {other:?}"),
+    }
+    assert_eq!(error.to_string(), "session operation coordination failed");
+    assert!(anyhow::Error::new(error)
+        .downcast_ref::<crate::store::PersistenceAdmissionError>()
+        .is_none());
+    release.send(()).unwrap();
+    gate.acknowledge().await.unwrap();
+    for command in queued {
+        command.acknowledge().await.unwrap();
+    }
+    let inbox = owner.list_session_inbox("child".into()).await.unwrap();
+    assert_eq!(inbox.len(), 1);
+    assert_eq!(inbox[0].status, crate::store::InboxStatus::Pending);
+    owner.shutdown().await.unwrap();
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}

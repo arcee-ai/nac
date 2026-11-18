@@ -88,6 +88,17 @@ impl<'a> SessionConfigurationApplication<'a> {
         // Hold the write lock through validation and persistence so other
         // attachment paths cannot observe or insert a stale service.
         let mut active = self.manager.inner.active_sessions.write().await;
+        let continuation_active = self
+            .manager
+            .inner
+            .continuation_owners
+            .reservations()
+            .contains_key(session_id);
+        if continuation_active {
+            return Err(anyhow!(
+                "session is busy with an active operation; wait for it before updating config"
+            ));
+        }
         if let Some(service) = active.get(session_id) {
             if let Some(conflict) =
                 config_replacement_conflict(service.has_active_operation(), service.has_sandbox())

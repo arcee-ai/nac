@@ -90,11 +90,6 @@ impl SessionService {
         let reconciled_run_id = recovered_record
             .as_ref()
             .map(|record| record.run_id.clone());
-        *self
-            .reconciled_recovery_run_id
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = reconciled_run_id;
-
         match &recovery {
             crate::store::ActiveRunReconciliation::CanonicalTerminal => {
                 if let Some(record) = recovered_record {
@@ -107,7 +102,7 @@ impl SessionService {
                                 crate::store::TraditionalChildStatus::Cancelled
                             }
                         };
-                        self.settle_traditional_child_run(
+                        self.try_settle_traditional_child_run(
                             &SessionRunId::from_stored(record.run_id),
                             status,
                             (disposition == crate::store::RunTerminalDisposition::Completed)
@@ -115,7 +110,7 @@ impl SessionService {
                                 .flatten(),
                             None,
                         )
-                        .await;
+                        .await?;
                     }
                 }
             }
@@ -133,13 +128,13 @@ impl SessionService {
                         None,
                     )
                     .await?;
-                self.settle_traditional_child_run(
+                self.try_settle_traditional_child_run(
                     &SessionRunId::from_stored(run_id.clone()),
                     crate::store::TraditionalChildStatus::Failed,
                     None,
                     Some(failure.diagnostic),
                 )
-                .await;
+                .await?;
             }
             crate::store::ActiveRunReconciliation::Interrupted { run_id } => {
                 self.event_bus
@@ -154,16 +149,21 @@ impl SessionService {
                         None,
                     )
                     .await?;
-                self.settle_traditional_child_run(
+                self.try_settle_traditional_child_run(
                     &SessionRunId::from_stored(run_id.clone()),
                     crate::store::TraditionalChildStatus::Interrupted,
                     None,
                     Some(INTERRUPTED_RUN_WARNING.to_string()),
                 )
-                .await;
+                .await?;
             }
             crate::store::ActiveRunReconciliation::None => {}
         }
+        *self
+            .reconciled_recovery_run_id
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = reconciled_run_id;
+
         Ok(recovery)
     }
 
@@ -242,7 +242,7 @@ impl SessionService {
                         "running traditional child has no bound run id"
                     ));
                 };
-                self.settle_traditional_child_run(
+                self.try_settle_traditional_child_run(
                     &SessionRunId::from_stored(run_id.to_string()),
                     crate::store::TraditionalChildStatus::Interrupted,
                     None,
@@ -251,7 +251,7 @@ impl SessionService {
                             .to_string(),
                     ),
                 )
-                .await;
+                .await?;
                 return match owner {
                     Some(owner) => owner.load_traditional_child(session_id.to_owned()).await,
                     None => {
@@ -298,13 +298,13 @@ impl SessionService {
                 ),
             }
         };
-        self.settle_traditional_child_run(
+        self.try_settle_traditional_child_run(
             &SessionRunId::from_stored(recovery.run_id),
             status,
             report,
             (!failure.is_empty()).then_some(failure),
         )
-        .await;
+        .await?;
         match owner {
             Some(owner) => owner.load_traditional_child(session_id.to_owned()).await,
             None => crate::store::load_traditional_child(&self.metadata.store_path, session_id),

@@ -13,6 +13,16 @@ enum ChildInputTransition {
     ),
     Finishing(watch::Receiver<bool>),
     Recovering(sessions::SessionOperationLease),
+    NeedsCanonical,
+}
+
+/// Result of the composition-owned continuation; the handoff contains no
+/// committed prompt and must be revalidated through the current service.
+#[doc(hidden)]
+#[derive(Debug)]
+pub enum OwnedChildInputResult {
+    Completed(Box<TraditionalChildRecord>),
+    NeedsCanonical,
 }
 
 impl SessionService {
@@ -43,36 +53,162 @@ impl SessionService {
         execution_mode: TraditionalChildExecutionMode,
         origin: crate::store::InputOrigin,
     ) -> Result<TraditionalChildRecord> {
+        self.submit_child_input_owned(
+            parent_session_id,
+            prompt,
+            execution_mode,
+            origin,
+            None,
+            None,
+            true,
+            None,
+        )
+        .await
+        .map(|result| match result {
+            OwnedChildInputResult::Completed(child) => *child,
+            OwnedChildInputResult::NeedsCanonical => {
+                unreachable!("ordinary submission is canonical")
+            }
+        })
+    }
+
+    /// A composition owner may keep this future alive after its requester is
+    /// cancelled. The signal releases the exact foreground wait authority;
+    /// admitted persistence calls still run through their acknowledgement.
+    #[doc(hidden)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the composition port carries the caller and gate authorities together"
+    )]
+    pub async fn submit_child_input_with_cancellation(
+        &self,
+        parent_session_id: &str,
+        prompt: String,
+        execution_mode: TraditionalChildExecutionMode,
+        origin: crate::store::InputOrigin,
+        cancellation: sessions::ChildInputWaitCancellation,
+        notify_owner: Arc<dyn Fn() + Send + Sync>,
+        canonical: bool,
+        release_admission_gate: Arc<dyn Fn() + Send + Sync>,
+    ) -> Result<OwnedChildInputResult> {
+        self.submit_child_input_owned(
+            parent_session_id,
+            prompt,
+            execution_mode,
+            origin,
+            Some(cancellation),
+            Some(notify_owner),
+            canonical,
+            Some(release_admission_gate),
+        )
+        .await
+    }
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "ordinary and composition-owned admission share one mutation path"
+    )]
+    async fn submit_child_input_owned(
+        &self,
+        parent_session_id: &str,
+        prompt: String,
+        execution_mode: TraditionalChildExecutionMode,
+        origin: crate::store::InputOrigin,
+        cancellation: Option<sessions::ChildInputWaitCancellation>,
+        notify_owner: Option<Arc<dyn Fn() + Send + Sync>>,
+        canonical: bool,
+        release_admission_gate: Option<Arc<dyn Fn() + Send + Sync>>,
+    ) -> Result<OwnedChildInputResult> {
+        struct WaitCleanup(Option<sessions::ChildInputWaitCancellation>);
+        impl Drop for WaitCleanup {
+            fn drop(&mut self) {
+                if let Some(wait) = &self.0 {
+                    wait.finish();
+                }
+            }
+        }
+        let _cleanup = WaitCleanup(cancellation.clone());
         loop {
+            if let Some(wait) = cancellation.as_ref().filter(|wait| wait.is_cancelled()) {
+                return Err(wait.cancellation_error());
+            }
             let service = self.clone();
             let parent = parent_session_id.to_owned();
             let input = prompt.clone();
+            let wait = cancellation.clone();
             let transition =
                 crate::store::call_legacy_store(&self.metadata.store_path, move || {
-                    service.admit_child_input(&parent, input, execution_mode, origin)
+                    service.admit_child_input(
+                        &parent,
+                        input,
+                        execution_mode,
+                        origin,
+                        wait,
+                        canonical,
+                    )
                 })
                 .await??;
             match transition {
                 ChildInputTransition::Accepted(child) => {
-                    return Ok(child);
+                    if let Some(release) = &release_admission_gate {
+                        release();
+                    }
+                    return Ok(OwnedChildInputResult::Completed(Box::new(child)));
                 }
                 ChildInputTransition::Queued(child, item_id, _wait_lease) => {
-                    self.start_next_direct_inbox_item().await?;
-                    if execution_mode == TraditionalChildExecutionMode::Background {
-                        return Ok(child);
+                    if let Some(release) = &release_admission_gate {
+                        release();
                     }
-                    return self.wait_for_child_input_delivery(item_id).await;
+                    if let Some(notify) = &notify_owner {
+                        notify();
+                    } else {
+                        self.start_next_direct_inbox_item().await?;
+                    }
+                    if let Some(wait) = cancellation.as_ref().filter(|wait| wait.is_cancelled()) {
+                        return Err(wait.cancellation_error());
+                    }
+                    if execution_mode == TraditionalChildExecutionMode::Background {
+                        return Ok(OwnedChildInputResult::Completed(Box::new(child)));
+                    }
+                    return self
+                        .wait_for_child_input_delivery_owned(
+                            item_id,
+                            cancellation.as_ref(),
+                            notify_owner.is_some(),
+                        )
+                        .await
+                        .map(|child| OwnedChildInputResult::Completed(Box::new(child)));
                 }
                 ChildInputTransition::Recovering(lease) => {
                     self.recover_child_input_for_admission(&lease).await?;
                 }
+                ChildInputTransition::NeedsCanonical => {
+                    if let Some(release) = &release_admission_gate {
+                        release();
+                    }
+                    return Ok(OwnedChildInputResult::NeedsCanonical);
+                }
                 ChildInputTransition::Finishing(mut settlement) => {
+                    if let Some(release) = &release_admission_gate {
+                        release();
+                    }
                     if !*settlement.borrow_and_update() {
-                        settlement.changed().await.map_err(|_| {
+                        let changed = if let Some(wait) = &cancellation {
+                            tokio::select! {
+                                _ = wait.cancelled() => return Err(wait.cancellation_error()),
+                                result = settlement.changed() => result,
+                            }
+                        } else {
+                            settlement.changed().await
+                        };
+                        changed.map_err(|_| {
                             anyhow::anyhow!(
                                 "child run settlement ended without releasing admission"
                             )
                         })?;
+                    }
+                    if release_admission_gate.is_some() {
+                        return Ok(OwnedChildInputResult::NeedsCanonical);
                     }
                 }
             }
@@ -83,7 +219,13 @@ impl SessionService {
         &self,
         lease: &sessions::SessionOperationLease,
     ) -> Result<()> {
-        self.reconcile_durable_run_recovery(lease).await?;
+        self.reconcile_durable_run_recovery(lease).await.map_err(|error| {
+            if let Some(mismatch) = error.downcast_ref::<super::child_continuation::ChildSettlementMismatch>() {
+                anyhow::anyhow!("traditional child generation {} remains running after recovery; input was not admitted", mismatch.generation)
+            } else {
+                error
+            }
+        })?;
         let child = self
             .reconcile_traditional_child_terminal_with_lease(lease)
             .await?
@@ -100,8 +242,22 @@ impl SessionService {
         Ok(())
     }
 
+    #[cfg(test)]
     async fn wait_for_child_input_delivery(&self, item_id: i64) -> Result<TraditionalChildRecord> {
+        self.wait_for_child_input_delivery_owned(item_id, None, false)
+            .await
+    }
+
+    async fn wait_for_child_input_delivery_owned(
+        &self,
+        item_id: i64,
+        cancellation: Option<&sessions::ChildInputWaitCancellation>,
+        externally_driven: bool,
+    ) -> Result<TraditionalChildRecord> {
         loop {
+            if let Some(wait) = cancellation.filter(|wait| wait.is_cancelled()) {
+                return Err(wait.cancellation_error());
+            }
             let service = self.clone();
             let delivered = crate::store::call_legacy_store(&self.metadata.store_path, move || {
                 let session_id = service
@@ -153,7 +309,9 @@ impl SessionService {
                     "session is shutting down before child input delivery was confirmed"
                 ));
             }
-            self.start_next_direct_inbox_item().await?;
+            if !externally_driven {
+                self.start_next_direct_inbox_item().await?;
+            }
             tokio::time::sleep(Duration::from_millis(25)).await;
         }
     }
@@ -164,6 +322,8 @@ impl SessionService {
         prompt: String,
         execution_mode: TraditionalChildExecutionMode,
         origin: crate::store::InputOrigin,
+        cancellation: Option<sessions::ChildInputWaitCancellation>,
+        canonical: bool,
     ) -> Result<ChildInputTransition> {
         if prompt.trim().is_empty() {
             return Err(anyhow::anyhow!("traditional child prompt is empty"));
@@ -218,13 +378,20 @@ impl SessionService {
                 return Ok(ChildInputTransition::Finishing(run.settlement.subscribe()));
             }
             Some(ActiveSessionOperation::Run(run)) => {
-                let wait_lease = (execution_mode == TraditionalChildExecutionMode::Foreground)
+                let mut wait_lease = (execution_mode == TraditionalChildExecutionMode::Foreground)
                     .then(|| sessions::ChildInputWaitLease::new(&self.metadata.store_path))
                     .transpose()?;
-                let input = queue(
-                    Some(run.snapshot.run_id.as_str()),
-                    wait_lease.as_ref().map(sessions::ChildInputWaitLease::id),
-                )?;
+                let wait_id = wait_lease.as_ref().map(|lease| lease.id().to_owned());
+                if let Some(cancellation) = &cancellation {
+                    if let Some(lease) = wait_lease.take() {
+                        cancellation.install(lease);
+                    }
+                }
+                let input = queue(Some(run.snapshot.run_id.as_str()), wait_id.as_deref())?;
+                #[cfg(any(test, feature = "test-support"))]
+                if self.take_child_enqueue_ack_loss_for_test() {
+                    return Err(crate::store::PersistenceAdmissionError::ExecutorStopped.into());
+                }
                 return Ok(ChildInputTransition::Queued(child, input.id, wait_lease));
             }
             None if child.status == crate::store::TraditionalChildStatus::Running => {
@@ -235,23 +402,40 @@ impl SessionService {
                     session_id,
                 ) {
                     Err(sessions::SessionOperationLeaseError::Busy(_)) => {
-                        let wait_lease = (execution_mode
+                        let mut wait_lease = (execution_mode
                             == TraditionalChildExecutionMode::Foreground)
                             .then(|| sessions::ChildInputWaitLease::new(&self.metadata.store_path))
                             .transpose()?;
-                        let input = queue(
-                            child.run_id.as_deref(),
-                            wait_lease.as_ref().map(sessions::ChildInputWaitLease::id),
-                        )?;
+                        let wait_id = wait_lease.as_ref().map(|lease| lease.id().to_owned());
+                        if let Some(cancellation) = &cancellation {
+                            if let Some(lease) = wait_lease.take() {
+                                cancellation.install(lease);
+                            }
+                        }
+                        let input = queue(child.run_id.as_deref(), wait_id.as_deref())?;
+                        #[cfg(any(test, feature = "test-support"))]
+                        if self.take_child_enqueue_ack_loss_for_test() {
+                            return Err(
+                                crate::store::PersistenceAdmissionError::ExecutorStopped.into()
+                            );
+                        }
                         return Ok(ChildInputTransition::Queued(child, input.id, wait_lease));
                     }
                     Err(error) => return Err(error.into()),
                     Ok(lease) => {
+                        if !canonical {
+                            // The manager will reacquire gate-first and revalidate.
+                            drop(lease);
+                            return Ok(ChildInputTransition::NeedsCanonical);
+                        }
                         return Ok(ChildInputTransition::Recovering(lease));
                     }
                 }
             }
             _ => {}
+        }
+        if !canonical {
+            return Ok(ChildInputTransition::NeedsCanonical);
         }
         let generation = child.generation + 1;
         let review_intent = (origin == crate::store::InputOrigin::Person).then(|| prompt.clone());

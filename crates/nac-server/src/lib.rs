@@ -335,6 +335,7 @@ struct SessionManagerInner {
     attention: application::attention_runtime::AttentionRuntime,
     fleet_attention: application::fleet_attention::FleetAttentionHub,
     task_preparations: application::task_preparations::TaskPreparations,
+    continuation_owners: Arc<application::continuation_owner::ContinuationOwners>,
     lifecycle_gates: StdMutex<HashMap<String, Weak<Mutex<()>>>>,
     workspace_diff_cache: RwLock<HashMap<GitTargetKey, WorkspaceDiffCacheEntry>>,
     git_probe_cache: RwLock<HashMap<GitTargetKey, GitProbeCacheEntry>>,
@@ -596,6 +597,9 @@ impl SessionManager {
                 attention: application::attention_runtime::AttentionRuntime::default(),
                 fleet_attention: application::fleet_attention::FleetAttentionHub::default(),
                 task_preparations: application::task_preparations::TaskPreparations::default(),
+                continuation_owners: Arc::new(
+                    application::continuation_owner::ContinuationOwners::default(),
+                ),
                 terminal_observations:
                     application::terminal_observation::TerminalObservationHub::default(),
 
@@ -1137,10 +1141,14 @@ impl SessionManager {
     /// use.
     async fn sweep_idle_sessions(&self, except: Option<&str>) {
         let mut active = self.inner.active_sessions.write().await;
+        // Hold this lock through removal so a new accepted reservation cannot
+        // race the idle census and lose its canonical service.
+        let reservations = self.inner.continuation_owners.reservations();
         let idle: Vec<String> = active
             .iter()
             .filter(|(session_id, service)| {
                 Some(session_id.as_str()) != except
+                    && !reservations.contains_key(session_id.as_str())
                     && !service.has_active_operation()
                     && Arc::strong_count(service) == 1
                     && !service.has_event_subscribers()

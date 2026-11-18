@@ -1,6 +1,7 @@
 use std::fs::{self, File};
 use std::io;
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 use fs2::FileExt;
 
@@ -13,6 +14,123 @@ use super::SessionOperationLeaseError;
 pub(crate) struct ChildInputWaitLease {
     file: File,
     id: String,
+}
+
+/// Shared cancellation authority for an owned child-input admission. It can
+/// release the exact waiter lease even while the admitted store call continues
+/// to completion on a blocking caller. Selection still probes the OS lease.
+#[doc(hidden)]
+#[derive(Clone, Default)]
+pub struct ChildInputWaitCancellation {
+    inner: Arc<WaitCancellationInner>,
+}
+
+#[derive(Default)]
+struct WaitCancellationInner {
+    state: Mutex<WaitCancellationState>,
+    notify: tokio::sync::Notify,
+}
+
+#[doc(hidden)]
+#[derive(Clone)]
+pub struct WeakChildInputWaitCancellation {
+    inner: std::sync::Weak<WaitCancellationInner>,
+}
+
+impl WeakChildInputWaitCancellation {
+    pub fn upgrade(&self) -> Option<ChildInputWaitCancellation> {
+        self.inner
+            .upgrade()
+            .map(|inner| ChildInputWaitCancellation { inner })
+    }
+}
+
+#[derive(Default)]
+struct WaitCancellationState {
+    cancelled: bool,
+    lease: Option<ChildInputWaitLease>,
+    failure: Option<String>,
+}
+
+impl ChildInputWaitCancellation {
+    pub fn downgrade(&self) -> WeakChildInputWaitCancellation {
+        WeakChildInputWaitCancellation {
+            inner: Arc::downgrade(&self.inner),
+        }
+    }
+
+    pub(crate) fn install(&self, lease: ChildInputWaitLease) -> String {
+        let id = lease.id().to_owned();
+        let mut state = self
+            .inner
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !state.cancelled {
+            state.lease = Some(lease);
+        }
+        id
+    }
+
+    pub fn cancel(&self) {
+        let mut state = self
+            .inner
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.cancelled = true;
+        drop(state.lease.take());
+        drop(state);
+        self.inner.notify.notify_one();
+    }
+
+    pub fn fail(&self, message: String) {
+        let mut state = self
+            .inner
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.failure = Some(message);
+        state.cancelled = true;
+        drop(state.lease.take());
+        drop(state);
+        self.inner.notify.notify_one();
+    }
+
+    pub(crate) fn cancellation_error(&self) -> anyhow::Error {
+        let state = self
+            .inner
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        anyhow::anyhow!(state
+            .failure
+            .clone()
+            .unwrap_or_else(|| "child input requester was cancelled".to_owned()))
+    }
+
+    pub(crate) fn is_cancelled(&self) -> bool {
+        self.inner
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .cancelled
+    }
+
+    pub(crate) fn finish(&self) {
+        let mut state = self
+            .inner
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        drop(state.lease.take());
+    }
+
+    pub(crate) async fn cancelled(&self) {
+        if !self.is_cancelled() {
+            self.inner.notify.notified().await;
+        }
+    }
 }
 
 impl ChildInputWaitLease {
@@ -87,5 +205,27 @@ mod tests {
         drop(waiter);
         assert!(ChildInputWaitLease::try_acquire(&path, &id).is_ok());
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn cancellation_before_or_after_install_releases_exact_wait_authority() {
+        let root =
+            std::env::temp_dir().join(format!("nac-child-wait-cancel-{}", uuid::Uuid::new_v4()));
+        let path = root.join("store.db");
+        crate::store::initialize(&path).unwrap();
+        let cancelled_first = ChildInputWaitCancellation::default();
+        cancelled_first.cancel();
+        let id = cancelled_first.install(ChildInputWaitLease::new(&path).unwrap());
+        assert!(ChildInputWaitLease::try_acquire(&path, &id).is_ok());
+
+        let installed_first = ChildInputWaitCancellation::default();
+        let id = installed_first.install(ChildInputWaitLease::new(&path).unwrap());
+        assert!(matches!(
+            ChildInputWaitLease::try_acquire(&path, &id),
+            Err(SessionOperationLeaseError::Busy(_))
+        ));
+        installed_first.clone().cancel();
+        assert!(ChildInputWaitLease::try_acquire(&path, &id).is_ok());
+        let _ = std::fs::remove_dir_all(root);
     }
 }

@@ -101,15 +101,62 @@ async fn foreign_child_attachment_is_uncached_until_peer_lease_retires() {
     drop(first);
     drop(second);
     drop(peer);
-    let canonical = manager.attach_session("child").await.unwrap();
-    assert!(manager
-        .inner
-        .active_sessions
-        .read()
-        .await
-        .get("child")
-        .is_some_and(|cached| Arc::ptr_eq(cached, &canonical)));
+    let canonical = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if let Some(service) = manager
+                .inner
+                .active_sessions
+                .read()
+                .await
+                .get("child")
+                .cloned()
+            {
+                break service;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the owner must attach the child without another request");
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let child = nac_core::store::load_traditional_child(&path, "child")
+                .unwrap()
+                .unwrap();
+            if child.generation == original.generation + 1 && child.status.is_terminal() {
+                assert_eq!(
+                    child.execution_mode,
+                    Some(TraditionalChildExecutionMode::Background)
+                );
+                let inbox = nac_core::store::list_session_inbox(&path, "child").unwrap();
+                assert_eq!(inbox.len(), 1);
+                assert_eq!(inbox[0].status, nac_core::store::InboxStatus::Delivered);
+                assert_eq!(inbox[0].delivered_run_id, child.run_id);
+                let receipt = nac_core::store::load_traditional_child_terminal_receipt(
+                    &path,
+                    "child",
+                    child.generation,
+                )
+                .unwrap()
+                .unwrap();
+                let completions = nac_core::store::list_session_inbox(&path, "parent").unwrap();
+                assert_eq!(completions.len(), 1);
+                assert_eq!(receipt.completion_inbox_id, Some(completions[0].id));
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the abandoned input must settle once");
     drop(canonical);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while manager.inner.continuation_owners.contains("child") {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the delivered child obligation must retire");
     manager.stop_local_run_admission().await;
     manager.quiesce_persistence_callers().await;
     drop(manager);
@@ -420,6 +467,809 @@ async fn owned_current_thread_child_cancel_endpoint_preserves_generation() {
     manager.stop_local_run_admission().await;
     manager.cancel_local_active_runs_for_shutdown().await;
     manager.drain_persistence().await.unwrap();
+    drop(manager);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn uncached_inbox_wake_survives_a_busy_peer_without_another_request() {
+    check_parent_peer_wake(true).await;
+}
+
+#[tokio::test]
+async fn cached_inbox_wake_survives_a_busy_peer_without_another_request() {
+    check_parent_peer_wake(false).await;
+}
+
+async fn check_parent_peer_wake(with_recovery: bool) {
+    let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("owned_wake_busy_peer");
+    let home = root.join("nac-home");
+    std::fs::create_dir_all(&home).unwrap();
+    let _env = ScopedModelEnv::isolated(&home, Some("owned-wake-fixture-key"));
+    let (base, _requests) = scripted_direct_responses(&["continued"]);
+    seed_direct_session_with_base_url(&root, "parent", base);
+    let path = root.join("store.db");
+    let item = nac_core::store::create_session_inbox_item(
+        &path,
+        "parent",
+        nac_core::store::InboxDelivery::Queue,
+        "continue",
+        None,
+        None,
+    )
+    .unwrap();
+    if with_recovery {
+        let start = sessions::load_session(&path, "parent")
+            .unwrap()
+            .messages
+            .len() as u64;
+        nac_core::store::TranscriptLogWriter::new(&path)
+            .unwrap()
+            .append_run_prompt(
+                "parent",
+                start,
+                &Message::User {
+                    content: "peer run".into(),
+                },
+                "foreign-parent-run",
+            )
+            .unwrap();
+    }
+    let peer = sessions::SessionOperationLease::try_acquire(&path, "parent").unwrap();
+    let manager = test_manager(&root);
+    let first = manager.attach_session("parent").await.unwrap();
+    let second = manager.attach_session("parent").await.unwrap();
+    assert_eq!(Arc::ptr_eq(&first, &second), !with_recovery);
+
+    drop(first);
+    drop(second);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(
+        nac_core::store::load_session_inbox_item(&path, "parent", item.id)
+            .unwrap()
+            .status,
+        nac_core::store::InboxStatus::Pending
+    );
+    drop(peer);
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let item = nac_core::store::load_session_inbox_item(&path, "parent", item.id).unwrap();
+            if item.status == nac_core::store::InboxStatus::Delivered {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the serving owner must retry after the peer exits");
+    assert_eq!(
+        nac_core::store::list_session_inbox(&path, "parent")
+            .unwrap()
+            .len(),
+        1
+    );
+    manager.stop_local_run_admission().await;
+    manager.quiesce_persistence_callers().await;
+    drop(manager);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn peer_exit_before_admission_uses_canonical_child_service() {
+    let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("child_peer_exit_before_admission");
+    let home = root.join("nac-home");
+    std::fs::create_dir_all(&home).unwrap();
+    let _env = ScopedModelEnv::isolated(&home, Some("owned-child-fixture-key"));
+    let (base, _requests) = scripted_direct_responses(&["canonical response"]);
+    seed_direct_session_with_base_url(&root, "parent", base.clone());
+    seed_direct_session_with_base_url(&root, "child", base);
+    let path = root.join("store.db");
+    nac_core::store::create_traditional_child_relationship(
+        &path,
+        "parent",
+        "child",
+        "general",
+        "uncached child",
+    )
+    .unwrap();
+    let original = nac_core::store::begin_traditional_child_run(
+        &path,
+        "child",
+        "foreign-run",
+        TraditionalChildExecutionMode::Foreground,
+    )
+    .unwrap();
+    let start = sessions::load_session(&path, "child")
+        .unwrap()
+        .messages
+        .len() as u64;
+    nac_core::store::TranscriptLogWriter::new(&path)
+        .unwrap()
+        .append_run_prompt(
+            "child",
+            start,
+            &Message::User {
+                content: "foreign prompt".into(),
+            },
+            "foreign-run",
+        )
+        .unwrap();
+    let peer = sessions::SessionOperationLease::try_acquire(&path, "child").unwrap();
+    let manager = test_manager(&root);
+    let reservation = manager.reserve_continuation("child").await.unwrap();
+    let observer = manager.attach_session("child").await.unwrap();
+    assert!(!manager
+        .inner
+        .active_sessions
+        .read()
+        .await
+        .contains_key("child"));
+    drop(peer);
+    let result = manager
+        .submit_owned_child_input(
+            Some(observer.clone()),
+            None,
+            "parent".into(),
+            "child".into(),
+            "continue".into(),
+            TraditionalChildExecutionMode::Foreground,
+            nac_core::store::InputOrigin::Automation,
+            reservation,
+        )
+        .await
+        .unwrap();
+    assert_eq!(result.generation, original.generation + 1);
+    let canonical = manager
+        .inner
+        .active_sessions
+        .read()
+        .await
+        .get("child")
+        .cloned()
+        .expect("successor must belong to a canonical cached service");
+    assert!(!Arc::ptr_eq(&observer, &canonical));
+    drop(observer);
+    manager.stop_local_run_admission().await;
+    manager.quiesce_persistence_callers().await;
+    drop(manager);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn shutdown_joins_child_retry_while_foreign_peer_remains_alive() {
+    let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("child_retry_shutdown_foreign_peer");
+    let home = root.join("nac-home");
+    std::fs::create_dir_all(&home).unwrap();
+    let _env = ScopedModelEnv::isolated(&home, Some("owned-child-fixture-key"));
+    seed_direct_session(&root, "parent");
+    seed_direct_session(&root, "child");
+    let path = root.join("store.db");
+    nac_core::store::create_traditional_child_relationship(
+        &path,
+        "parent",
+        "child",
+        "general",
+        "uncached child",
+    )
+    .unwrap();
+    let original = nac_core::store::begin_traditional_child_run(
+        &path,
+        "child",
+        "foreign-run",
+        TraditionalChildExecutionMode::Foreground,
+    )
+    .unwrap();
+    let start = sessions::load_session(&path, "child")
+        .unwrap()
+        .messages
+        .len() as u64;
+    nac_core::store::TranscriptLogWriter::new(&path)
+        .unwrap()
+        .append_run_prompt(
+            "child",
+            start,
+            &Message::User {
+                content: "foreign prompt".into(),
+            },
+            "foreign-run",
+        )
+        .unwrap();
+    let peer = sessions::SessionOperationLease::try_acquire(&path, "child").unwrap();
+    let manager = test_manager(&root);
+    let controller = nac_core::traditional_children::controller_for(&path).unwrap();
+    let waiting = tokio::spawn(async move {
+        controller
+            .start(
+                nac_core::traditional_children::TraditionalChildStartRequest {
+                    parent_session_id: "parent".into(),
+                    child_session_id: Some("child".into()),
+                    profile: "general".into(),
+                    description: Some("uncached child".into()),
+                    prompt: "retain through shutdown".into(),
+                    origin: nac_core::store::InputOrigin::Automation,
+                    execution_mode: TraditionalChildExecutionMode::Foreground,
+                },
+            )
+            .await
+    });
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while nac_core::store::list_session_inbox(&path, "child")
+            .unwrap()
+            .is_empty()
+        {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    manager.stop_local_run_admission().await;
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        manager.quiesce_persistence_callers(),
+    )
+    .await
+    .expect("shutdown must join child admission and retry owners");
+    assert!(waiting.await.unwrap().is_err());
+    let inbox = nac_core::store::list_session_inbox(&path, "child").unwrap();
+    assert_eq!(inbox.len(), 1);
+    assert_eq!(inbox[0].status, nac_core::store::InboxStatus::Pending);
+    assert_eq!(
+        nac_core::store::load_traditional_child(&path, "child")
+            .unwrap()
+            .unwrap(),
+        original
+    );
+    drop(peer);
+    drop(manager);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn shutdown_joins_owner_waiting_for_a_lifecycle_gate() {
+    let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("owned_wake_shutdown_gate");
+    let home = root.join("nac-home");
+    std::fs::create_dir_all(&home).unwrap();
+    let _env = ScopedModelEnv::isolated(&home, Some("owned-wake-fixture-key"));
+    seed_direct_session(&root, "parent");
+    let path = root.join("store.db");
+    nac_core::store::create_session_inbox_item(
+        &path,
+        "parent",
+        nac_core::store::InboxDelivery::Queue,
+        "retained",
+        None,
+        None,
+    )
+    .unwrap();
+    let manager = test_manager(&root);
+    let gate = manager.lifecycle_gate("parent");
+    let held = gate.lock().await;
+    manager.schedule_continuation("parent").unwrap();
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        manager.inner.continuation_owners.wait_for_gate_attempt(),
+    )
+    .await
+    .expect("owner must reach the held gate");
+    manager.stop_local_run_admission().await;
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        manager.quiesce_persistence_callers(),
+    )
+    .await
+    .expect("a waiting owner must stop without taking the held gate");
+    assert_eq!(
+        nac_core::store::list_session_inbox(&path, "parent").unwrap()[0].status,
+        nac_core::store::InboxStatus::Pending
+    );
+    drop(held);
+    drop(manager);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn delivered_inbox_wake_retires_while_peer_run_remains_active() {
+    let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("owned_wake_delivered_active_peer");
+    let home = root.join("nac-home");
+    std::fs::create_dir_all(&home).unwrap();
+    let _env = ScopedModelEnv::isolated(&home, Some("owned-wake-fixture-key"));
+    seed_direct_session(&root, "parent");
+    let path = root.join("store.db");
+    let item = nac_core::store::create_session_inbox_item(
+        &path,
+        "parent",
+        nac_core::store::InboxDelivery::Queue,
+        "delivered",
+        None,
+        None,
+    )
+    .unwrap();
+    let idx = sessions::load_session(&path, "parent")
+        .unwrap()
+        .messages
+        .len() as u64;
+    nac_core::store::TranscriptLogWriter::new(&path)
+        .unwrap()
+        .append_run_prompt(
+            "parent",
+            idx,
+            &Message::User {
+                content: "peer prompt".into(),
+            },
+            "peer-run",
+        )
+        .unwrap();
+    let peer = sessions::SessionOperationLease::try_acquire(&path, "parent").unwrap();
+    let manager = test_manager(&root);
+    manager.schedule_continuation("parent").unwrap();
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        manager.inner.continuation_owners.wait_for_gate_attempt(),
+    )
+    .await
+    .expect("owner must observe the live peer");
+    // Simulate the peer's committed delivery while its OS run lease stays held.
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    assert_eq!(connection.execute(
+        "UPDATE session_inbox SET status='delivered', delivered_run_id='peer-run', delivered_at=created_at, version=version+1 WHERE id=?1 AND status='pending'",
+        [item.id],
+    ).unwrap(), 1);
+    drop(connection);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while manager.inner.continuation_owners.contains("parent") {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("durably delivered work must retire without waiting for the peer run");
+    assert_eq!(
+        nac_core::store::load_session_inbox_item(&path, "parent", item.id)
+            .unwrap()
+            .status,
+        nac_core::store::InboxStatus::Delivered
+    );
+    drop(peer);
+    manager.stop_local_run_admission().await;
+    manager.quiesce_persistence_callers().await;
+    drop(manager);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn recovery_owner_settles_a_bound_generation_without_an_inbox_row() {
+    let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("owned_recovery_without_inbox");
+    let home = root.join("nac-home");
+    std::fs::create_dir_all(&home).unwrap();
+    let _env = ScopedModelEnv::isolated(&home, Some("owned-wake-fixture-key"));
+    seed_direct_session(&root, "parent");
+    seed_direct_session(&root, "child");
+    let path = root.join("store.db");
+    nac_core::store::create_traditional_child_relationship(
+        &path,
+        "parent",
+        "child",
+        "general",
+        "uncertain admission",
+    )
+    .unwrap();
+    let running = nac_core::store::begin_traditional_child_run(
+        &path,
+        "child",
+        "bound-before-prompt",
+        TraditionalChildExecutionMode::Foreground,
+    )
+    .unwrap();
+    let manager = test_manager(&root);
+    manager.schedule_recovery("child").unwrap();
+    let terminal = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let child = nac_core::store::load_traditional_child(&path, "child")
+                .unwrap()
+                .unwrap();
+            if child.status.is_terminal() {
+                break child;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("bound generation must be recovered without a second input");
+    assert_eq!(terminal.generation, running.generation);
+    assert_eq!(terminal.run_id.as_deref(), Some("bound-before-prompt"));
+    assert_eq!(
+        terminal.status,
+        nac_core::store::TraditionalChildStatus::Interrupted
+    );
+    assert!(nac_core::store::list_session_inbox(&path, "child")
+        .unwrap()
+        .is_empty());
+    assert!(nac_core::store::load_traditional_child_terminal_receipt(
+        &path,
+        "child",
+        running.generation,
+    )
+    .unwrap()
+    .is_some());
+    manager.stop_local_run_admission().await;
+    manager.quiesce_persistence_callers().await;
+    drop(manager);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn pending_child_retry_retains_cached_service_during_idle_sweep() {
+    let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("child_retry_retains_cache");
+    let home = root.join("nac-home");
+    std::fs::create_dir_all(&home).unwrap();
+    let _env = ScopedModelEnv::isolated(&home, Some("owned-child-fixture-key"));
+    seed_direct_session(&root, "parent");
+    seed_direct_session(&root, "child");
+    let path = root.join("store.db");
+    nac_core::store::create_traditional_child_relationship(
+        &path,
+        "parent",
+        "child",
+        "general",
+        "uncached child",
+    )
+    .unwrap();
+    let manager = test_manager(&root);
+    let cached = manager.attach_session("child").await.unwrap();
+    let identity = Arc::downgrade(&cached);
+    drop(cached);
+    let original = nac_core::store::begin_traditional_child_run(
+        &path,
+        "child",
+        "foreign-run",
+        TraditionalChildExecutionMode::Foreground,
+    )
+    .unwrap();
+    let peer = sessions::SessionOperationLease::try_acquire(&path, "child").unwrap();
+    let controller = nac_core::traditional_children::controller_for(&path).unwrap();
+    let waiting = tokio::spawn(async move {
+        controller
+            .start(
+                nac_core::traditional_children::TraditionalChildStartRequest {
+                    parent_session_id: "parent".into(),
+                    child_session_id: Some("child".into()),
+                    profile: "general".into(),
+                    description: Some("uncached child".into()),
+                    prompt: "retain cached owner".into(),
+                    origin: nac_core::store::InputOrigin::Automation,
+                    execution_mode: TraditionalChildExecutionMode::Foreground,
+                },
+            )
+            .await
+    });
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while nac_core::store::list_session_inbox(&path, "child")
+            .unwrap()
+            .is_empty()
+        {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    waiting.abort();
+    assert!(waiting.await.unwrap_err().is_cancelled());
+    manager.sweep_idle_sessions(None).await;
+    let current = manager
+        .inner
+        .active_sessions
+        .read()
+        .await
+        .get("child")
+        .cloned()
+        .expect("pending retry must retain the cached service");
+    assert!(Arc::ptr_eq(&current, &identity.upgrade().unwrap()));
+    assert_eq!(
+        nac_core::store::load_traditional_child(&path, "child")
+            .unwrap()
+            .unwrap(),
+        original
+    );
+    drop(current);
+    manager.stop_local_run_admission().await;
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        manager.quiesce_persistence_callers(),
+    )
+    .await
+    .unwrap();
+    drop(peer);
+    drop(manager);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn controller_wake_reports_attachment_failure_to_caller() {
+    let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("child_wake_missing_session");
+    let home = root.join("nac-home");
+    std::fs::create_dir_all(&home).unwrap();
+    let _env = ScopedModelEnv::isolated(&home, Some("owned-child-fixture-key"));
+    seed_direct_session(&root, "parent");
+    let manager = test_manager(&root);
+    let controller =
+        nac_core::traditional_children::controller_for(&root.join("store.db")).unwrap();
+    assert!(controller.wake("missing").await.is_err());
+    manager.stop_local_run_admission().await;
+    manager.quiesce_persistence_callers().await;
+    drop(manager);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn foreground_waiter_receives_permanent_recovery_error_without_losing_input() {
+    let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("child_wake_terminal_error");
+    let home = root.join("nac-home");
+    std::fs::create_dir_all(&home).unwrap();
+    let _env = ScopedModelEnv::isolated(&home, Some("owned-child-fixture-key"));
+    seed_direct_session(&root, "parent");
+    seed_direct_session(&root, "child");
+    let path = root.join("store.db");
+    nac_core::store::create_traditional_child_relationship(
+        &path,
+        "parent",
+        "child",
+        "general",
+        "mismatched recovery",
+    )
+    .unwrap();
+    let original = nac_core::store::begin_traditional_child_run(
+        &path,
+        "child",
+        "relationship-run",
+        TraditionalChildExecutionMode::Foreground,
+    )
+    .unwrap();
+    let idx = sessions::load_session(&path, "child")
+        .unwrap()
+        .messages
+        .len() as u64;
+    nac_core::store::TranscriptLogWriter::new(&path)
+        .unwrap()
+        .append_run_prompt(
+            "child",
+            idx,
+            &Message::User {
+                content: "different run".into(),
+            },
+            "different-recovery-run",
+        )
+        .unwrap();
+    let peer = sessions::SessionOperationLease::try_acquire(&path, "child").unwrap();
+    let manager = test_manager(&root);
+    let controller = nac_core::traditional_children::controller_for(&path).unwrap();
+    let waiting = tokio::spawn(async move {
+        controller
+            .start(
+                nac_core::traditional_children::TraditionalChildStartRequest {
+                    parent_session_id: "parent".into(),
+                    child_session_id: Some("child".into()),
+                    profile: "general".into(),
+                    description: Some("mismatched recovery".into()),
+                    prompt: "retain this input".into(),
+                    origin: nac_core::store::InputOrigin::Automation,
+                    execution_mode: TraditionalChildExecutionMode::Foreground,
+                },
+            )
+            .await
+    });
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while nac_core::store::list_session_inbox(&path, "child")
+            .unwrap()
+            .is_empty()
+        {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    drop(peer);
+    let error = tokio::time::timeout(Duration::from_secs(5), waiting)
+        .await
+        .expect("permanent selector failure must reach the live waiter")
+        .unwrap()
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("child input wake failed"),
+        "{error:#}"
+    );
+    let inbox = nac_core::store::list_session_inbox(&path, "child").unwrap();
+    assert_eq!(inbox.len(), 1);
+    assert_eq!(inbox[0].status, nac_core::store::InboxStatus::Pending);
+    assert_eq!(
+        nac_core::store::load_traditional_child(&path, "child")
+            .unwrap()
+            .unwrap(),
+        original
+    );
+    manager.stop_local_run_admission().await;
+    manager.quiesce_persistence_callers().await;
+    drop(manager);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn continuation_reservation_fences_config_replacement() {
+    let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("continuation_config_replacement");
+    let home = root.join("nac-home");
+    std::fs::create_dir_all(&home).unwrap();
+    let _env = ScopedModelEnv::isolated(&home, Some("owned-child-fixture-key"));
+    seed_direct_session(&root, "parent");
+    let manager = test_manager(&root);
+    let before = sessions::load_session(&root.join("store.db"), "parent").unwrap();
+    let reservation = manager.reserve_continuation("parent").await.unwrap();
+    manager
+        .update_session_config("parent", UpdateConfigRequest::default())
+        .await
+        .unwrap();
+    let error = manager
+        .update_session_config(
+            "parent",
+            UpdateConfigRequest {
+                model: RequestField::Value("must-not-commit".into()),
+                ..UpdateConfigRequest::default()
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("active operation"));
+    assert_eq!(
+        sessions::load_session(&root.join("store.db"), "parent")
+            .unwrap()
+            .config_version,
+        before.config_version
+    );
+    drop(reservation);
+    manager.stop_local_run_admission().await;
+    manager.quiesce_persistence_callers().await;
+    drop(manager);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn formatted_overload_returns_to_waiter_and_owned_input_runs_once() {
+    check_owned_input_failure_recovery(false).await;
+}
+
+#[tokio::test]
+async fn lost_enqueue_ack_rechecks_input_without_reinserting() {
+    check_owned_input_failure_recovery(true).await;
+}
+
+async fn check_owned_input_failure_recovery(lost_ack: bool) {
+    let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("child_owned_overload_retry");
+    let home = root.join("nac-home");
+    std::fs::create_dir_all(&home).unwrap();
+    let _env = ScopedModelEnv::isolated(&home, Some("owned-child-fixture-key"));
+    let (base, _requests) =
+        scripted_direct_responses(&["child completed", "parent received child"]);
+    seed_direct_session_with_base_url(&root, "parent", base.clone());
+    seed_direct_session_with_base_url(&root, "child", base);
+    let path = root.join("store.db");
+    nac_core::store::create_traditional_child_relationship(
+        &path,
+        "parent",
+        "child",
+        "general",
+        "overloaded admission",
+    )
+    .unwrap();
+    let original = nac_core::store::begin_traditional_child_run(
+        &path,
+        "child",
+        "foreign-run",
+        TraditionalChildExecutionMode::Foreground,
+    )
+    .unwrap();
+    let idx = sessions::load_session(&path, "child")
+        .unwrap()
+        .messages
+        .len() as u64;
+    nac_core::store::TranscriptLogWriter::new(&path)
+        .unwrap()
+        .append_run_prompt(
+            "child",
+            idx,
+            &Message::User {
+                content: "peer prompt".into(),
+            },
+            "foreign-run",
+        )
+        .unwrap();
+    let peer = sessions::SessionOperationLease::try_acquire(&path, "child").unwrap();
+    let manager = test_manager(&root);
+    let observer = manager.attach_session("child").await.unwrap();
+    if lost_ack {
+        observer.lose_next_child_enqueue_ack_for_test();
+    } else {
+        observer.reject_next_child_inbox_admission_for_test();
+    }
+    drop(observer);
+    let controller = nac_core::traditional_children::controller_for(&path).unwrap();
+    let waiting = tokio::spawn(async move {
+        controller
+            .start(
+                nac_core::traditional_children::TraditionalChildStartRequest {
+                    parent_session_id: "parent".into(),
+                    child_session_id: Some("child".into()),
+                    profile: "general".into(),
+                    description: Some("overloaded admission".into()),
+                    prompt: "one durable input".into(),
+                    origin: nac_core::store::InputOrigin::Automation,
+                    execution_mode: TraditionalChildExecutionMode::Foreground,
+                },
+            )
+            .await
+    });
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while nac_core::store::list_session_inbox(&path, "child")
+            .unwrap()
+            .is_empty()
+        {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    drop(peer);
+    let error = tokio::time::timeout(Duration::from_secs(5), waiting)
+        .await
+        .expect("the existing foreground error must be returned")
+        .unwrap()
+        .unwrap_err();
+    let expected = if lost_ack {
+        "persistence executor stopped before acknowledgement"
+    } else {
+        "session operation coordination failed"
+    };
+    assert!(error.to_string().contains(expected), "{error:#}");
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let child = nac_core::store::load_traditional_child(&path, "child")
+                .unwrap()
+                .unwrap();
+            if child.generation == original.generation + 1 && child.status.is_terminal() {
+                assert_eq!(
+                    child.execution_mode,
+                    Some(TraditionalChildExecutionMode::Background)
+                );
+                let inbox = nac_core::store::list_session_inbox(&path, "child").unwrap();
+                assert_eq!(inbox.len(), 1, "retry must not reinsert the input");
+                assert_eq!(inbox[0].status, nac_core::store::InboxStatus::Delivered);
+                assert_eq!(inbox[0].delivered_run_id, child.run_id);
+                let receipt = nac_core::store::load_traditional_child_terminal_receipt(
+                    &path,
+                    "child",
+                    child.generation,
+                )
+                .unwrap()
+                .unwrap();
+                let completions = nac_core::store::list_session_inbox(&path, "parent").unwrap();
+                assert_eq!(completions.len(), 1);
+                assert_eq!(receipt.completion_inbox_id, Some(completions[0].id));
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the owner must recheck and deliver the original input");
+    manager.stop_local_run_admission().await;
+    manager.quiesce_persistence_callers().await;
     drop(manager);
     let _ = std::fs::remove_dir_all(root);
 }
