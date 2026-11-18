@@ -3,11 +3,11 @@ import type { SessionPanel } from "../../lib/routes";
 /** What a Session menu row opens: one of the drawer's panels, or the goal. */
 export type SessionPanelTarget = SessionPanel | "goal";
 /**
- * The panels the Session menu lists, among those the session's behavior
- * allows. A wide screen lists only the panels with something to say (changes,
- * subagents, a goal, schedules), the terminal and Insights; the drawer's own
- * tab strip reaches the rest. A phone's sheet has no tab strip, so it lists
- * every panel the behavior has. The goal is listed only while one exists.
+ * The panels the Session menu lists. A wide screen reaches the drawer's panels
+ * from the header's panel toggle and the drawer's own tabs, so it lists only
+ * the goal, which has a drawer of its own. A phone has neither, so its sheet
+ * lists every panel the behavior allows. The goal is listed only while one
+ * exists.
  */
 export declare function sessionPanelEntries(facts: SessionFacts, phone: boolean): SessionPanelTarget[];
 /**

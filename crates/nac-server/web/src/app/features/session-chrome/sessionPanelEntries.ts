@@ -5,7 +5,7 @@ import type { SessionPanel } from "@/app/lib/routes";
 /** What a Session menu row opens: one of the drawer's panels, or the goal. */
 export type SessionPanelTarget = SessionPanel | "goal";
 
-/** The Session menu's panel rows, in one fixed order on every width. */
+/** The Session menu's panel rows on a phone, in one fixed order. */
 const ORDER: readonly SessionPanelTarget[] = [
   "files",
   "delegated",
@@ -18,30 +18,17 @@ const ORDER: readonly SessionPanelTarget[] = [
 ];
 
 /**
- * The panels the Session menu lists, among those the session's behavior
- * allows. A wide screen lists only the panels with something to say (changes,
- * subagents, a goal, schedules), the terminal and Insights; the drawer's own
- * tab strip reaches the rest. A phone's sheet has no tab strip, so it lists
- * every panel the behavior has. The goal is listed only while one exists.
+ * The panels the Session menu lists. A wide screen reaches the drawer's panels
+ * from the header's panel toggle and the drawer's own tabs, so it lists only
+ * the goal, which has a drawer of its own. A phone has neither, so its sheet
+ * lists every panel the behavior allows. The goal is listed only while one
+ * exists.
  */
 export function sessionPanelEntries(facts: SessionFacts, phone: boolean): SessionPanelTarget[] {
-  const allowed = (phone ? facts.policy?.mobilePanels : facts.policy?.widePanels) ?? [];
-  return ORDER.filter((target) => {
-    if (target === "goal") return facts.goal != null;
-    if (!allowed.includes(target)) return false;
-    if (phone) return true;
-    switch (target) {
-      case "files":
-        return facts.additions > 0 || facts.deletions > 0;
-      case "delegated":
-      case "worksets":
-        return facts.agents?.panel === target;
-      case "heartbeats":
-        return facts.schedules > 0;
-      default:
-        return true;
-    }
-  });
+  const allowed = phone ? (facts.policy?.mobilePanels ?? []) : [];
+  return ORDER.filter((target) =>
+    target === "goal" ? facts.goal != null : allowed.includes(target),
+  );
 }
 
 /**

@@ -21502,19 +21502,8 @@ var pC = [
 	"history"
 ];
 function mC(e, t) {
-	let n = (t ? e.policy?.mobilePanels : e.policy?.widePanels) ?? [];
-	return pC.filter((r) => {
-		if (r === "goal") return e.goal != null;
-		if (!n.includes(r)) return !1;
-		if (t) return !0;
-		switch (r) {
-			case "files": return e.additions > 0 || e.deletions > 0;
-			case "delegated":
-			case "worksets": return e.agents?.panel === r;
-			case "heartbeats": return e.schedules > 0;
-			default: return !0;
-		}
-	});
+	let n = t ? e.policy?.mobilePanels ?? [] : [];
+	return pC.filter((t) => t === "goal" ? e.goal != null : n.includes(t));
 }
 function hC(e) {
 	let t = [], n = e.agents;
@@ -21745,7 +21734,7 @@ function DC({ sessionId: e, snapshot: t, entry: n, facts: r, drawer: i, phone: a
 		className: "flex flex-col",
 		children: [
 			S.length > 0 ? /* @__PURE__ */ Q(wC, {
-				title: "Panels",
+				title: a ? "Panels" : void 0,
 				children: S.map((e) => /* @__PURE__ */ Q(EC, {
 					icon: e === "goal" ? I.Goal : lC[e],
 					label: e === "goal" ? "Goal" : mn[e],
@@ -21853,7 +21842,7 @@ function OC(e) {
 			c,
 			l
 		]
-	}), d = ["Panels, details and actions", ...a].join(" · ");
+	}), d = ["Details and actions", ...a].join(" · ");
 	return /* @__PURE__ */ Q(ri, {
 		open: n,
 		onClose: i,

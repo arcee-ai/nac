@@ -145,9 +145,9 @@ function ActionRow({
 
 /**
  * Everything the session header used to spread across pills and ⋯, in one
- * list: the session's panels with their live facts (a row opens the drawer on
- * it), then where it runs, its branch and snapshot, integrations and usage,
- * then settings, fork, rename and delete. The same content is a popover on a
+ * list: the goal, and on a phone every panel, with their live facts (a row
+ * opens the drawer on it), then where it runs, its branch and snapshot,
+ * integrations and usage, then settings, fork, rename and delete. The same content is a popover on a
  * wide screen and a bottom sheet on a phone.
  */
 function SessionMenuContent({
@@ -216,7 +216,7 @@ function SessionMenuContent({
   return (
     <div className="flex flex-col">
       {entries.length > 0 ? (
-        <Section title="Panels">
+        <Section title={phone ? "Panels" : undefined}>
           {entries.map((target) => (
             <ActionRow
               key={target}
@@ -361,7 +361,7 @@ export function SessionMenu(props: {
       {description}
     </button>
   );
-  const tooltip = ["Panels, details and actions", ...live].join(" · ");
+  const tooltip = ["Details and actions", ...live].join(" · ");
   return (
     <Popover
       open={open}

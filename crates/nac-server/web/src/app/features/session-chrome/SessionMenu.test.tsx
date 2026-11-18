@@ -129,25 +129,19 @@ function openMenu(name = "Session menu") {
 }
 
 describe("session panel entries", () => {
-  it("lists a quiet wide session's terminal and Insights only", () => {
-    expect(sessionPanelEntries(facts(), false)).toEqual(["terminal", "insights"]);
-  });
-
-  it("adds the panels with something to say, in one fixed order", () => {
+  it("lists nothing for a wide session without a goal: its drawer tabs reach the panels", () => {
     const busy = facts({
       additions: 12,
       deletions: 3,
       agents: { count: 2, running: 1, panel: "delegated", noun: "agent" },
-      goal: goal("paused"),
       schedules: 1,
     });
-    expect(sessionPanelEntries(busy, false)).toEqual([
-      "files",
-      "delegated",
-      "terminal",
+    expect(sessionPanelEntries(busy, false)).toEqual([]);
+  });
+
+  it("lists only the goal on a wide screen, which has a drawer of its own", () => {
+    expect(sessionPanelEntries(facts({ additions: 1, goal: goal("paused") }), false)).toEqual([
       "goal",
-      "heartbeats",
-      "insights",
     ]);
   });
 
@@ -169,7 +163,6 @@ describe("session panel entries", () => {
       additions: 1,
       schedules: 3,
     });
-    expect(sessionPanelEntries(child, false)).toEqual(["files", "insights"]);
     expect(sessionPanelEntries(child, true)).toEqual(["files", "insights", "history"]);
   });
 });
@@ -209,7 +202,7 @@ describe("session menu", () => {
     expect(screen.getByText("1 subagent running")).toBeTruthy();
   });
 
-  it("lists panels with their live facts, then details and actions", () => {
+  it("lists only the goal with its state, then details and actions", () => {
     renderMenu(
       facts({
         additions: 12,
@@ -220,22 +213,10 @@ describe("session menu", () => {
       }),
     );
     const menu = openMenu();
-    const panels = within(menu)
-      .getByRole("heading", { name: "Panels" })
-      .closest("section") as HTMLElement;
-    const names = within(panels)
-      .getAllByRole("button")
-      .map((button) => button.textContent);
-    expect(names).toEqual([
-      "Files+12−3",
-      "Subagents2, 1 running",
-      "Terminal",
-      "Goalpaused",
-      "Heartbeats2",
-      "Insights",
-    ]);
-    // Insights keeps its bare name: helpers and native journeys press it exactly.
-    expect(within(menu).getByRole("button", { name: "Insights" })).toBeTruthy();
+    expect(within(menu).queryByRole("heading", { name: "Panels" })).toBeNull();
+    for (const panel of ["Files", "Subagents", "Terminal", "Heartbeats", "Insights"])
+      expect(within(menu).queryByRole("button", { name: new RegExp(`^${panel}`) })).toBeNull();
+    expect(within(menu).getByRole("button", { name: /^Goal/ }).textContent).toBe("Goalpaused");
     expect(within(menu).getByText("ux/focus")).toBeTruthy();
     expect(within(menu).getByText("integrations")).toBeTruthy();
     expect(within(menu).getByText("usage readings")).toBeTruthy();
@@ -243,19 +224,14 @@ describe("session menu", () => {
       expect(within(menu).getByRole("button", { name: action })).toBeTruthy();
   });
 
-  it("opens the drawer on the chosen panel and closes itself", () => {
-    const controls = renderMenu(facts({ goal: goal("active") }), drawer("insights"));
+  it("opens the goal drawer and closes itself", () => {
+    const controls = renderMenu(facts({ goal: goal("active") }), drawer("goal"));
     let menu = openMenu();
-    expect(
-      within(menu).getByRole("button", { name: "Insights" }).getAttribute("aria-current"),
-    ).toBe("true");
-    fireEvent.click(within(menu).getByRole("button", { name: "Terminal" }));
-    expect(controls.show).toHaveBeenCalledWith("terminal");
-    expect(screen.queryByRole("dialog", { name: "Session" })).toBeNull();
-
-    menu = openMenu();
-    fireEvent.click(within(menu).getByRole("button", { name: /^Goal/ }));
+    const row = within(menu).getByRole("button", { name: /^Goal/ });
+    expect(row.getAttribute("aria-current")).toBe("true");
+    fireEvent.click(row);
     expect(controls.show).toHaveBeenCalledWith("goal");
+    expect(screen.queryByRole("dialog", { name: "Session" })).toBeNull();
 
     menu = openMenu();
     fireEvent.click(within(menu).getByRole("button", { name: "Session settings" }));
