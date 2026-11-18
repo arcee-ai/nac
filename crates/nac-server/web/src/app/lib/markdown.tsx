@@ -10,10 +10,16 @@ interface MarkdownProps {
   /** Fade newly painted prose while the turn is still streaming. */
   streaming?: boolean;
   className?: string;
+  taskReferences?: boolean;
 }
 
 /** Markdown block used by transcript messages and thread episodes. */
-export function Markdown({ children, streaming = false, className }: MarkdownProps) {
+export function Markdown({
+  children,
+  streaming = false,
+  className,
+  taskReferences = false,
+}: MarkdownProps) {
   return (
     <div
       className={cn(
@@ -24,7 +30,9 @@ export function Markdown({ children, streaming = false, className }: MarkdownPro
       )}
     >
       <Suspense fallback={<pre className="whitespace-pre-wrap font-sans">{children}</pre>}>
-        <MarkdownRenderer streaming={streaming}>{children}</MarkdownRenderer>
+        <MarkdownRenderer streaming={streaming} taskReferences={taskReferences}>
+          {children}
+        </MarkdownRenderer>
       </Suspense>
     </div>
   );
