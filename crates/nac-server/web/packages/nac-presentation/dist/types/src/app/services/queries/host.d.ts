@@ -4,26 +4,6 @@ export declare function useStoreInfo(): import("@tanstack/react-query").UseQuery
     worker_executable: string;
 }>, Error>;
 /**
- * Whether this host can run sandboxed sessions. Probing spawns podman
- * subprocesses, so it runs only while a caller asks for it — today that is
- * the launch form with sandbox mode selected.
- */
-export declare function useSandboxAvailability(enabled: boolean): import("@tanstack/react-query").UseQueryResult<NoInfer<{
-    detail?: string | null;
-    guidance?: string | null;
-    status: import("../../types/openapi.generated").components["schemas"]["SandboxAvailabilityStatus"];
-}>, Error>;
-/**
- * Sandbox setup in progress for one launch (image pull, container start),
- * polled while the launch request is in flight so a minutes-long first pull
- * shows movement instead of a frozen button. Keyed by the launch id sent
- * with the create request, so concurrent launches stay independent.
- */
-export declare function useSandboxActivity(enabled: boolean, key: string | null): import("@tanstack/react-query").UseQueryResult<NoInfer<{
-    phase: string;
-    since_epoch_ms: number;
-} | null>, Error>;
-/**
  * Which API key names have a value stored in NAC home. Used to tell the user
  * whether a session can authenticate without the environment variable being
  * set; failures are non-fatal because the environment may well supply the key.

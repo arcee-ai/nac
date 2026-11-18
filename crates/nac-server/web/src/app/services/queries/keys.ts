@@ -13,8 +13,6 @@ export const queryKeys = {
   managedHostStatus: ["managed-host-status"] as const,
   managedGitHub: ["managed-github"] as const,
   managedSecrets: ["managed-secrets"] as const,
-  sandboxAvailability: ["sandbox-availability"] as const,
-  sandboxActivity: ["sandbox-activity"] as const,
   credentials: ["credentials"] as const,
   managedAuth: ["managed-auth"] as const,
   modelConfigs: ["model-configs"] as const,
