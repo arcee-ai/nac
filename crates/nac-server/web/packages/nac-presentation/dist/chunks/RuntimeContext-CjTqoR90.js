@@ -367,33 +367,33 @@ var M = j(), N = 65536, P = 16384, F = 18446744073709551615n, I = class extends 
 		super("Terminal input delivery is unconfirmed. These bytes must not be retried automatically."), this.name = "TerminalInputUncertainError", this.cause = e;
 	}
 };
-function ee(e) {
+function z(e) {
 	if (e !== 1) throw new I("Unsupported terminal protocol version");
 }
-function z(e) {
+function B(e) {
 	if (e.length > 20 || !/^(0|[1-9][0-9]*)$/.test(e)) throw new I("Invalid terminal cursor");
 	let t = BigInt(e);
 	if (t > F) throw new I("Terminal cursor exceeds u64");
 	return t;
 }
-function B(e, t, n, r) {
+function V(e, t, n, r) {
 	if (!Number.isInteger(e) || e < t || e > n) throw new I(`Invalid ${r}`);
 }
-function V(e) {
+function H(e) {
 	e.throwIfAborted();
 }
-async function te(e, t) {
-	V(t);
+async function ee(e, t) {
+	H(t);
 	let n = () => {};
 	try {
 		await Promise.race([e, new Promise((e, r) => {
 			n = () => r(t.reason), t.addEventListener("abort", n, { once: !0 }), t.aborted && n();
-		})]), V(t);
+		})]), H(t);
 	} finally {
 		t.removeEventListener("abort", n);
 	}
 }
-var ne = class {
+var te = class {
 	api;
 	sessionId;
 	terminalId;
@@ -412,7 +412,7 @@ var ne = class {
 	inputUncertain = !1;
 	inputSender;
 	constructor(e, t, n, r, i = {}) {
-		this.api = e, this.sessionId = t, this.terminalId = n, this.renderer = r, this.inputSender = e.inputUserTerminal, this.pageLimit = i.pageLimit ?? N, this.waitMs = i.waitMs ?? 1e3, B(this.pageLimit, 1, N, "terminal page limit"), B(this.waitMs, 0, 1e3, "terminal wait");
+		this.api = e, this.sessionId = t, this.terminalId = n, this.renderer = r, this.inputSender = e.inputUserTerminal, this.pageLimit = i.pageLimit ?? N, this.waitMs = i.waitMs ?? 1e3, V(this.pageLimit, 1, N, "terminal page limit"), V(this.waitMs, 0, 1e3, "terminal wait");
 	}
 	get observerId() {
 		return this.observer;
@@ -424,19 +424,19 @@ var ne = class {
 		return e ? AbortSignal.any([this.lifetime.signal, e]) : this.lifetime.signal;
 	}
 	status(e) {
-		if (ee(e.protocol_version), e.terminal_id !== this.terminalId) throw new I("Terminal identity changed");
+		if (z(e.protocol_version), e.terminal_id !== this.terminalId) throw new I("Terminal identity changed");
 	}
 	async attach(e, t = "attach") {
 		if (this.observer || this.attaching || this.reading) throw new I("Observer already active");
 		this.attaching = !0, this.lifetime.signal.aborted && (this.lifetime = new AbortController());
 		let n = this.signal(e);
 		try {
-			V(n), await this.cleanupObservers(), await te(this.renderer.reset(t, n), n);
+			H(n), await this.cleanupObservers(), await ee(this.renderer.reset(t, n), n);
 			let e = await this.api.attachUserTerminal(this.sessionId, this.terminalId, {
 				protocol_version: 1,
 				page_limit: this.pageLimit
 			}, n);
-			if (typeof e.observer_id == "string" && e.observer_id && (this.observer = e.observer_id), V(n), ee(e.protocol_version), this.status(e.terminal), typeof e.observer_id != "string" || !e.observer_id) throw new I("Missing terminal observer identity");
+			if (typeof e.observer_id == "string" && e.observer_id && (this.observer = e.observer_id), H(n), z(e.protocol_version), this.status(e.terminal), typeof e.observer_id != "string" || !e.observer_id) throw new I("Missing terminal observer identity");
 			return this.observer = e.observer_id, this.acknowledgement = void 0, this.expectedOffset = "0", this.needsReset = !1, e.terminal;
 		} catch (e) {
 			throw await this.detach().catch(() => {}), e;
@@ -448,8 +448,8 @@ var ne = class {
 		return await this.detach(e), this.attach(e, "reconnect");
 	}
 	validate(e, t) {
-		if (ee(e.protocol_version), this.status(e.terminal), e.observer_id !== t) throw new I("Observer identity changed");
-		let n = z(e.offset), r = z(e.next_offset), i = z(e.retained_start), a = z(e.retained_end), o = z(this.expectedOffset);
+		if (z(e.protocol_version), this.status(e.terminal), e.observer_id !== t) throw new I("Observer identity changed");
+		let n = B(e.offset), r = B(e.next_offset), i = B(e.retained_start), a = B(e.retained_end), o = B(this.expectedOffset);
 		if (i > a || r > a || e.bytes.length > this.pageLimit || e.bytes.some((e) => !Number.isInteger(e) || e < 0 || e > 255)) throw new I("Invalid terminal frame bounds or continuity");
 		if (e.gap) {
 			if (e.bytes.length !== 0 || !e.requires_ack || r !== i || n !== i || o >= i) throw new I("Invalid terminal gap frame");
@@ -462,20 +462,20 @@ var ne = class {
 		this.reading = !0;
 		let n = this.signal(e);
 		try {
-			V(n);
+			H(n);
 			let e = await this.api.pullUserTerminal(this.sessionId, this.terminalId, t, {
 				protocol_version: 1,
 				acknowledge_offset: this.acknowledgement?.offset,
 				acknowledge_reset: this.acknowledgement?.reset ?? !1,
 				wait_ms: this.waitMs
 			}, n);
-			V(n), this.validate(e, t);
+			H(n), this.validate(e, t);
 			try {
-				e.gap ? await te(this.renderer.reset("gap", n), n) : e.bytes.length && await te(this.renderer.write(Uint8Array.from(e.bytes), n), n);
+				e.gap ? await ee(this.renderer.reset("gap", n), n) : e.bytes.length && await ee(this.renderer.write(Uint8Array.from(e.bytes), n), n);
 			} catch (e) {
 				throw this.needsReset = !0, e;
 			}
-			return V(n), e.requires_ack && (this.acknowledgement = {
+			return H(n), e.requires_ack && (this.acknowledgement = {
 				offset: e.next_offset,
 				reset: e.gap
 			}, this.expectedOffset = e.next_offset), e;
@@ -499,10 +499,10 @@ var ne = class {
 		this.inputSender = e;
 	}
 	async input(e, t) {
-		if (B(e.length, 1, P, "terminal input length"), this.inputUncertain) throw new R(void 0);
+		if (V(e.length, 1, P, "terminal input length"), this.inputUncertain) throw new R(void 0);
 		if (this.sendingInput) throw new I("Terminal input already in flight; input was not queued");
 		let n = this.signal(t);
-		V(n), this.sendingInput = !0;
+		H(n), this.sendingInput = !0;
 		try {
 			await this.inputSender(this.sessionId, this.terminalId, {
 				protocol_version: 1,
@@ -519,9 +519,9 @@ var ne = class {
 		this.inputUncertain = !1;
 	}
 	async resize(e, t, n) {
-		B(e, 2, 500, "terminal columns"), B(t, 1, 300, "terminal rows");
+		V(e, 2, 500, "terminal columns"), V(t, 1, 300, "terminal rows");
 		let r = this.signal(n);
-		V(r), await this.api.resizeUserTerminal(this.sessionId, this.terminalId, {
+		H(r), await this.api.resizeUserTerminal(this.sessionId, this.terminalId, {
 			protocol_version: 1,
 			cols: e,
 			rows: t
@@ -529,7 +529,7 @@ var ne = class {
 	}
 };
 // packages/nac-client/src/terminalControlApi.ts
-function re(e) {
+function ne(e) {
 	let t = e.transport.request.bind(e.transport), n = (e, t) => `/sessions/${encodeURIComponent(e)}/executions/${encodeURIComponent(t)}`;
 	return {
 		getTerminalInputControl: (e, r, i) => t("GET", `${n(e, r)}/input-control`, { signal: i }),
@@ -543,7 +543,7 @@ function re(e) {
 		})
 	};
 }
-function ie(e, t) {
+function re(e, t) {
 	if (!/^[1-9][0-9]*$/.test(t) || BigInt(t) > 18446744073709551615n) throw new I("Invalid terminal controller revision");
 	return async (n, r, i, a) => {
 		try {
@@ -566,7 +566,7 @@ function ie(e, t) {
 	};
 }
 // packages/nac-client/src/executionApi.ts
-function ae(e) {
+function ie(e) {
 	let t = e.transport.request.bind(e.transport), n = (e, t) => `/sessions/${encodeURIComponent(e)}/executions${t ? `/${encodeURIComponent(t)}` : ""}`, r = (e, t, r) => `${n(e, t)}/observers/${encodeURIComponent(r)}`;
 	return {
 		listExecutions: (e, r) => t("GET", n(e), { signal: r }),
@@ -583,9 +583,9 @@ function ae(e) {
 		stopExecution: (e, r) => t("POST", `${n(e, r)}/stop`)
 	};
 }
-function oe(e, t, n, r, i = {}, a) {
-	let o = () => Promise.reject(new L("This execution is read-only")), s = se(e, n, a, i.readonly);
-	return new ne({
+function ae(e, t, n, r, i = {}, a) {
+	let o = () => Promise.reject(new L("This execution is read-only")), s = oe(e, n, a, i.readonly);
+	return new te({
 		attachUserTerminal: e.attachExecution,
 		pullUserTerminal: e.pullExecution,
 		detachUserTerminal: e.detachExecution,
@@ -593,17 +593,17 @@ function oe(e, t, n, r, i = {}, a) {
 		resizeUserTerminal: !i.readonly && n.origin === "human" && n.resize ? e.resizeUserTerminal : o
 	}, t, n.id, r, i);
 }
-function se(e, t, n, r = !1) {
+function oe(e, t, n, r = !1) {
 	let i = () => Promise.reject(new L("This execution is read-only")), a = !r && t.origin === "human" && t.input ? e.inputUserTerminal : i;
-	return n !== void 0 && !r && (a = i, t.representation === "pty" && t.backend === "local" && (t.origin === "human" || t.origin === "agent" && t.retained) && n && n.controller === "human" && !n.frozen && e.inputControlledTerminal && (a = ie({ inputControlledTerminal: e.inputControlledTerminal }, n.revision))), a;
+	return n !== void 0 && !r && (a = i, t.representation === "pty" && t.backend === "local" && (t.origin === "human" || t.origin === "agent" && t.retained) && n && n.controller === "human" && !n.frozen && e.inputControlledTerminal && (a = re({ inputControlledTerminal: e.inputControlledTerminal }, n.revision))), a;
 }
 // packages/nac-client/src/userTerminalApi.ts
-var H = (e, t) => `/sessions/${encodeURIComponent(e)}/user-terminals${t === void 0 ? "" : `/${encodeURIComponent(t)}`}`, ce = (e, t, n) => `${H(e, t)}/observers/${encodeURIComponent(n)}`;
-function le(e) {
+var U = (e, t) => `/sessions/${encodeURIComponent(e)}/user-terminals${t === void 0 ? "" : `/${encodeURIComponent(t)}`}`, se = (e, t, n) => `${U(e, t)}/observers/${encodeURIComponent(n)}`;
+function ce(e) {
 	let t = e.transport.request.bind(e.transport);
 	return {
 		submitUserTerminalSelection: async (e, n, r, i) => {
-			let a = await t("POST", `${H(e, n)}/selection-submissions`, {
+			let a = await t("POST", `${U(e, n)}/selection-submissions`, {
 				body: r,
 				signal: i
 			});
@@ -611,41 +611,41 @@ function le(e) {
 			return a;
 		},
 		previewUserTerminalSelection: async (e, n, r, i) => {
-			let a = await t("POST", `${H(e, n)}/selection-preview`, {
+			let a = await t("POST", `${U(e, n)}/selection-preview`, {
 				body: r,
 				signal: i
 			});
 			if (a.protocol_version !== 1 || a.source_kind !== "user_supplied_rendered_selection" || a.source_session_id !== e || a.terminal_id !== n || a.capture_id !== r.capture_id.toLowerCase() || a.truncated !== !1) throw new I("Terminal selection preview identity/version changed");
 			return a;
 		},
-		openUserTerminal: (e, n, r) => t("POST", H(e), {
+		openUserTerminal: (e, n, r) => t("POST", U(e), {
 			body: n,
 			signal: r
 		}),
-		listUserTerminals: (e, n) => t("GET", H(e), { signal: n }),
-		getUserTerminal: (e, n, r) => t("GET", H(e, n), { signal: r }),
-		attachUserTerminal: (e, n, r, i) => t("POST", `${H(e, n)}/observers`, {
+		listUserTerminals: (e, n) => t("GET", U(e), { signal: n }),
+		getUserTerminal: (e, n, r) => t("GET", U(e, n), { signal: r }),
+		attachUserTerminal: (e, n, r, i) => t("POST", `${U(e, n)}/observers`, {
 			body: r,
 			signal: i
 		}),
-		pullUserTerminal: (e, n, r, i, a) => t("POST", `${ce(e, n, r)}/read`, {
+		pullUserTerminal: (e, n, r, i, a) => t("POST", `${se(e, n, r)}/read`, {
 			body: i,
 			signal: a
 		}),
-		detachUserTerminal: (e, n, r, i) => t("DELETE", ce(e, n, r), { signal: i }),
-		inputUserTerminal: (e, n, r, i) => t("POST", `${H(e, n)}/input`, {
+		detachUserTerminal: (e, n, r, i) => t("DELETE", se(e, n, r), { signal: i }),
+		inputUserTerminal: (e, n, r, i) => t("POST", `${U(e, n)}/input`, {
 			body: r,
 			signal: i
 		}),
-		resizeUserTerminal: (e, n, r, i) => t("POST", `${H(e, n)}/resize`, {
+		resizeUserTerminal: (e, n, r, i) => t("POST", `${U(e, n)}/resize`, {
 			body: r,
 			signal: i
 		})
 	};
 }
 // packages/nac-client/src/api.ts
-var U = (e) => `/sessions/${encodeURIComponent(e)}`;
-function ue(e, t = {}) {
+var W = (e) => `/sessions/${encodeURIComponent(e)}`;
+function le(e, t = {}) {
 	let n = t.productContextBinding == null ? void 0 : { "X-NAC-Presentation-Incarnation": t.productContextBinding };
 	async function r(t, n, { body: r, headers: i, signal: a } = {}) {
 		return e.transport.request(t, n, {
@@ -664,9 +664,9 @@ function ue(e, t = {}) {
 			signal: t,
 			headers: n
 		}),
-		...le(e),
-		...ae(e),
-		...re(e),
+		...ce(e),
+		...ie(e),
+		...ne(e),
 		submitShellCommand: (t, n, r) => e.submitShellCommand(t, n, r),
 		getShellCommand: (t, n, r) => e.getShellCommand(t, n, r),
 		cancelShellCommand: (t, n, r) => e.cancelShellCommand(t, n, r),
@@ -686,7 +686,7 @@ function ue(e, t = {}) {
 		startManagedClone: (e) => r("POST", "/managed/github/clone-operations", { body: e }),
 		getManagedClone: (e, t) => r("GET", `/managed/github/clone-operations/${encodeURIComponent(e)}`, { signal: t }),
 		cancelManagedClone: (e) => r("DELETE", `/managed/github/clone-operations/${encodeURIComponent(e)}`),
-		terminateTerminal: (e, t) => r("DELETE", `${U(e)}/terminals/${encodeURIComponent(t)}`),
+		terminateTerminal: (e, t) => r("DELETE", `${W(e)}/terminals/${encodeURIComponent(t)}`),
 		listManagedSecrets: (e) => r("GET", "/managed/secrets", { signal: e }),
 		putManagedSecret: (e, t) => r("PUT", `/managed/secrets/${encodeURIComponent(e)}`, { body: { value: t } }),
 		deleteManagedSecret: (e) => r("DELETE", `/managed/secrets/${encodeURIComponent(e)}`),
@@ -770,58 +770,58 @@ function ue(e, t = {}) {
 		},
 		getSession: (t, n = {}) => e.getSession(t, n),
 		createSession: (e) => r("POST", "/sessions", { body: e }),
-		deleteSession: (e) => r("DELETE", U(e)),
+		deleteSession: (e) => r("DELETE", W(e)),
 		launchDefaults: (e, t) => r("POST", "/sessions/launch-defaults", {
 			body: e,
 			signal: t
 		}),
-		updatePresentation: (e, t) => r("PUT", `${U(e)}/presentation`, { body: t }),
+		updatePresentation: (e, t) => r("PUT", `${W(e)}/presentation`, { body: t }),
 		reorderSessions: (e) => r("PUT", "/sessions/order", { body: e }),
-		getConfig: (e, t) => r("GET", `${U(e)}/config`, { signal: t }),
-		getPermissions: (e, t) => r("GET", `${U(e)}/permissions`, { signal: t }),
-		replyPermission: (e, t, n) => r("POST", `${U(e)}/permissions/${encodeURIComponent(t)}`, { body: { reply: n } }),
-		authorizePermissionReviewRetry: (e, t) => r("POST", `${U(e)}/permissions/reviews/${encodeURIComponent(t)}/authorize-retry`),
-		authorizeChildPermissionReviewRetry: (e, t, n) => r("POST", `${U(e)}/children/${encodeURIComponent(t)}/permissions/reviews/${encodeURIComponent(n)}/authorize-retry`),
-		setPermissionApprovalMode: (e, t) => r("PUT", `${U(e)}/permissions/mode`, { body: { mode: t } }),
-		deletePermissionGrant: (e, t) => r("DELETE", `${U(e)}/permissions/grants/${encodeURIComponent(t)}`),
-		getGoal: (e, t) => r("GET", `${U(e)}/goal`, { signal: t }),
-		createGoal: (e, t) => r("POST", `${U(e)}/goal`, { body: t }),
-		updateGoal: (e, t, n) => r("PATCH", `${U(e)}/goal/${encodeURIComponent(t)}`, { body: n }),
-		clearGoal: (e, t, n) => r("DELETE", `${U(e)}/goal/${encodeURIComponent(t)}`, { body: { expected_version: n } }),
-		listInbox: (e, t) => r("GET", `${U(e)}/inbox`, { signal: t }),
-		createInboxItem: (e, t, n) => r("POST", `${U(e)}/inbox`, { body: {
+		getConfig: (e, t) => r("GET", `${W(e)}/config`, { signal: t }),
+		getPermissions: (e, t) => r("GET", `${W(e)}/permissions`, { signal: t }),
+		replyPermission: (e, t, n) => r("POST", `${W(e)}/permissions/${encodeURIComponent(t)}`, { body: { reply: n } }),
+		authorizePermissionReviewRetry: (e, t) => r("POST", `${W(e)}/permissions/reviews/${encodeURIComponent(t)}/authorize-retry`),
+		authorizeChildPermissionReviewRetry: (e, t, n) => r("POST", `${W(e)}/children/${encodeURIComponent(t)}/permissions/reviews/${encodeURIComponent(n)}/authorize-retry`),
+		setPermissionApprovalMode: (e, t) => r("PUT", `${W(e)}/permissions/mode`, { body: { mode: t } }),
+		deletePermissionGrant: (e, t) => r("DELETE", `${W(e)}/permissions/grants/${encodeURIComponent(t)}`),
+		getGoal: (e, t) => r("GET", `${W(e)}/goal`, { signal: t }),
+		createGoal: (e, t) => r("POST", `${W(e)}/goal`, { body: t }),
+		updateGoal: (e, t, n) => r("PATCH", `${W(e)}/goal/${encodeURIComponent(t)}`, { body: n }),
+		clearGoal: (e, t, n) => r("DELETE", `${W(e)}/goal/${encodeURIComponent(t)}`, { body: { expected_version: n } }),
+		listInbox: (e, t) => r("GET", `${W(e)}/inbox`, { signal: t }),
+		createInboxItem: (e, t, n) => r("POST", `${W(e)}/inbox`, { body: {
 			delivery: t,
 			prompt: n
 		} }),
-		updateInboxItem: (e, t, n, i) => r("PATCH", `${U(e)}/inbox/${t}`, { body: {
+		updateInboxItem: (e, t, n, i) => r("PATCH", `${W(e)}/inbox/${t}`, { body: {
 			expected_version: n,
 			delivery: i
 		} }),
-		cancelInboxItem: (e, t, n) => r("DELETE", `${U(e)}/inbox/${t}`, { body: { expected_version: n } }),
-		listTraditionalChildren: (e, t) => r("GET", `${U(e)}/children`, { signal: t }),
-		startTraditionalChild: (e, t) => r("POST", `${U(e)}/children`, { body: t }),
-		getTraditionalChild: (e, t, n) => r("GET", `${U(e)}/children/${encodeURIComponent(t)}`, { signal: n }),
-		cancelTraditionalChild: (e, t) => r("POST", `${U(e)}/children/${encodeURIComponent(t)}/cancel`),
-		listManagedOrchestrators: (e, t) => r("GET", `${U(e)}/orchestrators`, { signal: t }),
-		startManagedOrchestrator: (e, t) => r("POST", `${U(e)}/orchestrators`, { body: t }),
-		getManagedOrchestrator: (e, t, n) => r("GET", `${U(e)}/orchestrators/${encodeURIComponent(t)}`, { signal: n }),
-		cancelManagedOrchestrator: (e, t) => r("POST", `${U(e)}/orchestrators/${encodeURIComponent(t)}/cancel`),
-		updateConfig: (e, t) => r("PATCH", `${U(e)}/config`, { body: t }),
+		cancelInboxItem: (e, t, n) => r("DELETE", `${W(e)}/inbox/${t}`, { body: { expected_version: n } }),
+		listTraditionalChildren: (e, t) => r("GET", `${W(e)}/children`, { signal: t }),
+		startTraditionalChild: (e, t) => r("POST", `${W(e)}/children`, { body: t }),
+		getTraditionalChild: (e, t, n) => r("GET", `${W(e)}/children/${encodeURIComponent(t)}`, { signal: n }),
+		cancelTraditionalChild: (e, t) => r("POST", `${W(e)}/children/${encodeURIComponent(t)}/cancel`),
+		listManagedOrchestrators: (e, t) => r("GET", `${W(e)}/orchestrators`, { signal: t }),
+		startManagedOrchestrator: (e, t) => r("POST", `${W(e)}/orchestrators`, { body: t }),
+		getManagedOrchestrator: (e, t, n) => r("GET", `${W(e)}/orchestrators/${encodeURIComponent(t)}`, { signal: n }),
+		cancelManagedOrchestrator: (e, t) => r("POST", `${W(e)}/orchestrators/${encodeURIComponent(t)}/cancel`),
+		updateConfig: (e, t) => r("PATCH", `${W(e)}/config`, { body: t }),
 		getMessages: (e, t = {}) => {
 			let n = new URLSearchParams();
 			t.before !== void 0 && n.set("before", String(t.before)), t.limit !== void 0 && n.set("limit", String(t.limit)), t.includeSystem && n.set("include_system", "true");
 			let i = n.toString();
-			return r("GET", `${U(e)}/messages${i ? `?${i}` : ""}`, { signal: t.signal });
+			return r("GET", `${W(e)}/messages${i ? `?${i}` : ""}`, { signal: t.signal });
 		},
 		getThreadEvents: (e, t, n = {}) => {
 			let i = new URLSearchParams();
 			n.beforeId !== void 0 && i.set("before_id", String(n.beforeId)), n.limit !== void 0 && i.set("limit", String(n.limit));
 			let a = i.toString();
-			return r("GET", `${U(e)}/threads/${encodeURIComponent(t)}/events${a ? `?${a}` : ""}`, { signal: n.signal });
+			return r("GET", `${W(e)}/threads/${encodeURIComponent(t)}/events${a ? `?${a}` : ""}`, { signal: n.signal });
 		},
 		getToolCallContent: (e, t, n, i) => {
 			let a = i ? `?${new URLSearchParams({ occurrence: i })}` : "";
-			return r("GET", `${U(e)}/tool-calls/${encodeURIComponent(t)}${a}`, { signal: n });
+			return r("GET", `${W(e)}/tool-calls/${encodeURIComponent(t)}${a}`, { signal: n });
 		},
 		getWorkspaceDiff: (e, t, { stage: n = "all", context: i = 3, revision: a, signal: o } = {}) => {
 			let s = new URLSearchParams({
@@ -829,18 +829,18 @@ function ue(e, t = {}) {
 				stage: n,
 				context: String(i)
 			});
-			return a != null && s.set("revision", String(a)), r("GET", `${U(e)}/workspace/diff?${s.toString()}`, { signal: o });
+			return a != null && s.set("revision", String(a)), r("GET", `${W(e)}/workspace/diff?${s.toString()}`, { signal: o });
 		},
 		getWorkspaceFiles: (e, t, n) => {
 			let i = t == null ? "" : `?revision=${t}`;
-			return r("GET", `${U(e)}/workspace/files${i}`, { signal: n });
+			return r("GET", `${W(e)}/workspace/files${i}`, { signal: n });
 		},
 		getWorkspaceFile: (e, t, n, i) => {
 			let a = new URLSearchParams({ path: t });
-			return n != null && a.set("revision", String(n)), r("GET", `${U(e)}/workspace/file?${a.toString()}`, { signal: i });
+			return n != null && a.set("revision", String(n)), r("GET", `${W(e)}/workspace/file?${a.toString()}`, { signal: i });
 		},
-		openWorkspacePath: (e, t) => r("POST", `${U(e)}/workspace/open`, { body: { path: t } }),
-		revealWorkspacePath: (e, t, n, i, a) => r("POST", `${U(e)}/workspace/reveal`, {
+		openWorkspacePath: (e, t) => r("POST", `${W(e)}/workspace/open`, { body: { path: t } }),
+		revealWorkspacePath: (e, t, n, i, a) => r("POST", `${W(e)}/workspace/reveal`, {
 			body: {
 				path: t,
 				expected_workspace_root: n,
@@ -848,29 +848,29 @@ function ue(e, t = {}) {
 			},
 			signal: a
 		}),
-		getWorkspaceRevisions: (e, t) => r("GET", `${U(e)}/workspace/revisions`, { signal: t }),
-		getWorkspaceRevisionChanges: (e, t, n) => r("GET", `${U(e)}/workspace/revisions/${t}/changes`, { signal: n }),
-		getBranches: (e, t) => r("GET", `${U(e)}/workspace/branches`, { signal: t }),
-		switchBranch: (e, t) => r("POST", `${U(e)}/workspace/branches`, { body: t }),
-		commitWorkspace: (e, t) => r("POST", `${U(e)}/workspace/commit`, { body: t }),
+		getWorkspaceRevisions: (e, t) => r("GET", `${W(e)}/workspace/revisions`, { signal: t }),
+		getWorkspaceRevisionChanges: (e, t, n) => r("GET", `${W(e)}/workspace/revisions/${t}/changes`, { signal: n }),
+		getBranches: (e, t) => r("GET", `${W(e)}/workspace/branches`, { signal: t }),
+		switchBranch: (e, t) => r("POST", `${W(e)}/workspace/branches`, { body: t }),
+		commitWorkspace: (e, t) => r("POST", `${W(e)}/workspace/commit`, { body: t }),
 		submitRun: (t, n, r) => e.submitPrompt(t, n, r),
-		cancelActiveRun: (e) => r("POST", `${U(e)}/cancel-active-run`),
-		cancelExactRun: (e, t) => r("POST", `${U(e)}/runs/${encodeURIComponent(t)}/cancel`),
-		compactSession: (e) => r("POST", `${U(e)}/compact`),
-		revertSession: (e, t) => r("POST", `${U(e)}/revert`, { body: { message_idx: t } }),
-		regenerateRun: (e, t) => r("POST", `${U(e)}/regenerate`, { body: { message_idx: t } }),
-		forkSession: (e, t) => r("POST", `${U(e)}/fork`, { body: { message_idx: t } }),
-		dismissSessionFork: (e, t) => r("DELETE", `${U(e)}/forks/${encodeURIComponent(t)}`),
-		steerOrchestrator: (e, t) => r("POST", `${U(e)}/steering`, { body: { instruction: t } }),
-		steerThread: (e, t, n) => r("POST", `${U(e)}/threads/${encodeURIComponent(t)}/steering`, { body: { instruction: n } }),
+		cancelActiveRun: (e) => r("POST", `${W(e)}/cancel-active-run`),
+		cancelExactRun: (e, t) => r("POST", `${W(e)}/runs/${encodeURIComponent(t)}/cancel`),
+		compactSession: (e) => r("POST", `${W(e)}/compact`),
+		revertSession: (e, t) => r("POST", `${W(e)}/revert`, { body: { message_idx: t } }),
+		regenerateRun: (e, t) => r("POST", `${W(e)}/regenerate`, { body: { message_idx: t } }),
+		forkSession: (e, t) => r("POST", `${W(e)}/fork`, { body: { message_idx: t } }),
+		dismissSessionFork: (e, t) => r("DELETE", `${W(e)}/forks/${encodeURIComponent(t)}`),
+		steerOrchestrator: (e, t) => r("POST", `${W(e)}/steering`, { body: { instruction: t } }),
+		steerThread: (e, t, n) => r("POST", `${W(e)}/threads/${encodeURIComponent(t)}/steering`, { body: { instruction: n } }),
 		getRecentEvents: (t, n = {}) => e.getRecentEvents(t, n)
 	};
 }
 // src/app/services/api.ts
-function de(e, t) {
+function ue(e, t) {
 	let n = e.transport.request.bind(e.transport);
 	return {
-		...ue(e, { productContextBinding: t }),
+		...le(e, { productContextBinding: t }),
 		fleetAttention: (e, t) => n("GET", `/attention${e ? `?project_id=${encodeURIComponent(e)}` : ""}`, { signal: t }),
 		taskQuestions: (e, t) => n("GET", `/sessions/${encodeURIComponent(e)}/questions`, { signal: t }),
 		answerTaskQuestion: (e, t) => n("POST", `/sessions/${encodeURIComponent(e)}/questions/${encodeURIComponent(t.request_id)}/answer`, { body: t }),
@@ -902,55 +902,55 @@ function de(e, t) {
 		generateOverview: (e) => n("POST", `/sessions/${encodeURIComponent(e)}/overview`)
 	};
 }
-var fe = de(M);
+var de = ue(M);
 // src/app/lib/primitive.ts
-function pe(e) {
+function fe(e) {
 	return e != null && Object(e) !== e && e.constructor === String;
 }
-function me(e) {
+function pe(e) {
 	return e != null && Object(e) !== e && e.constructor === Number;
 }
 // src/app/lib/perfDebug.ts
-var he = !1;
-function ge() {
-	return he;
+var me = !1;
+function he() {
+	return me;
 }
-function _e(e, t = {}) {}
-function ve(e, t = 1e3) {
+function ge(e, t = {}) {}
+function _e(e, t = 1e3) {
 	`${e}`;
 }
-function ye(e, t, n = 4) {
+function ve(e, t, n = 4) {
 	return t();
 }
 // packages/nac-client/src/eventStream.ts
-var be = 500, xe = 1e4, Se = 4, Ce = 256;
-function W(e) {
+var ye = 500, be = 1e4, xe = 4, Se = 256;
+function G(e) {
 	try {
 		return JSON.parse(e.data);
 	} catch {
 		return null;
 	}
 }
-function we(e) {
+function Ce(e) {
 	return {
 		epoch_id: e.epoch_id,
 		sequence_id: e.sequence_id
 	};
 }
-function Te(e, t) {
+function we(e, t) {
 	return t !== null && e.epoch_id === t.epoch_id && e.sequence_id <= t.sequence_id;
 }
-function Ee(e, t, n = {}) {
-	let r = n.client ?? M, i = n.eventSource, a = i ? null : r.transport.eventSourceInit(), o = Math.max(1, n.maxPendingEvents ?? Ce), s = null, c = null, l = null, u = be, d = null, f = null, p = null, m = !1, h = !1, g = 0, _ = !1, v = 0, y = [], b = (e) => {
+function Te(e, t, n = {}) {
+	let r = n.client ?? M, i = n.eventSource, a = i ? null : r.transport.eventSourceInit(), o = Math.max(1, n.maxPendingEvents ?? Se), s = null, c = null, l = null, u = ye, d = null, f = null, p = null, m = !1, h = !1, g = 0, _ = !1, v = 0, y = [], b = (e) => {
 		m || t.onStatus?.(e);
-	}, x = () => y.length > 0 ? we(y[y.length - 1]) : f, S = () => {
+	}, x = () => y.length > 0 ? Ce(y[y.length - 1]) : f, S = () => {
 		c && clearTimeout(c), c = null, s?.close(), s = null;
 	}, C = () => {
 		m || l !== null || (b("reconnecting"), S(), l = setTimeout(() => {
 			l = null, O();
-		}, u), u = Math.min(u * 2, xe));
+		}, u), u = Math.min(u * 2, be));
 	}, w = (e) => {
-		m || (e !== void 0 && t.onTransportError?.(e), g += 1, !h && g >= Se ? (b("error"), S()) : C());
+		m || (e !== void 0 && t.onTransportError?.(e), g += 1, !h && g >= xe ? (b("error"), S()) : C());
 	}, T = (e) => {
 		t.onBackpressure?.(e), v += 1, y.length = 0, d = f ?? p, C();
 	}, E = async () => {
@@ -971,7 +971,7 @@ function Ee(e, t, n = {}) {
 					return;
 				}
 				if (e !== v) return;
-				y.shift(), f = we(n), d = f;
+				y.shift(), f = Ce(n), d = f;
 			}
 		} finally {
 			_ = !1, !m && y.length > 0 && E();
@@ -990,13 +990,13 @@ function Ee(e, t, n = {}) {
 		n.maxConnectionMs !== void 0 && (c = setTimeout(C, Math.max(1, n.maxConnectionMs)));
 		let D = s, O = () => !m && s === D;
 		s.onopen = () => {
-			O() && (h = !0, g = 0, u = be, b("live"));
+			O() && (h = !0, g = 0, u = ye, b("live"));
 		}, s.addEventListener("session_event", (e) => {
 			if (!O() || !(e instanceof MessageEvent)) return;
-			let r = W(e);
+			let r = G(e);
 			if (!r) return;
-			let i = we(r), a = x();
-			Te(i, a) ? t.onDuplicate?.(r) : a !== null && i.epoch_id === a.epoch_id && i.sequence_id !== a.sequence_id + 1 ? (t.onSequenceGap?.({
+			let i = Ce(r), a = x();
+			we(i, a) ? t.onDuplicate?.(r) : a !== null && i.epoch_id === a.epoch_id && i.sequence_id !== a.sequence_id + 1 ? (t.onSequenceGap?.({
 				epochId: i.epoch_id,
 				expectedSequenceId: a.sequence_id + 1,
 				receivedSequenceId: i.sequence_id
@@ -1006,22 +1006,22 @@ function Ee(e, t, n = {}) {
 			}) : (y.push(r), n.instrumentation?.onSessionEvent?.(r), E());
 		}), s.addEventListener("assistant_delta", (e) => {
 			if (!O() || !(e instanceof MessageEvent)) return;
-			let r = W(e);
+			let r = G(e);
 			r && (n.instrumentation?.onAssistantDelta?.(r), t.onAssistantDelta?.(r));
 		}), s.addEventListener("replay_boundary", (e) => {
 			if (!O() || !(e instanceof MessageEvent)) return;
-			let n = W(e);
+			let n = G(e);
 			n && (p = {
 				epoch_id: n.epoch_id,
 				sequence_id: n.replay_boundary_sequence_id
 			}, d !== null && d.epoch_id !== n.epoch_id && (d = p, f = null, v += 1, y.length = 0), t.onReplayBoundary?.(n));
 		}), s.addEventListener("replay_gap", (e) => {
 			if (!O() || !(e instanceof MessageEvent)) return;
-			let n = W(e);
+			let n = G(e);
 			n && t.onReplayGap?.(n);
 		}), s.addEventListener("lagged", (e) => {
 			if (!O() || !(e instanceof MessageEvent)) return;
-			let n = W(e);
+			let n = G(e);
 			n && t.onLagged?.(n);
 		}), s.onerror = () => {
 			O() && w();
@@ -1037,9 +1037,9 @@ function Ee(e, t, n = {}) {
 	};
 }
 // src/app/services/eventStream.ts
-function De(e, t, n = {}) {
+function Ee(e, t, n = {}) {
 	let r = n.instrumentation;
-	return Ee(e, t, {
+	return Te(e, t, {
 		...n,
 		instrumentation: {
 			onSessionEvent: (e) => {
@@ -1052,7 +1052,7 @@ function De(e, t, n = {}) {
 	});
 }
 // src/app/lib/store.ts
-function G(e, t = "store") {
+function K(e, t = "store") {
 	let n = e, r = /* @__PURE__ */ new Set(), i = () => n, a = (e) => {
 		let i = e instanceof Function ? e(n) : e;
 		i && i !== n && (n = {
@@ -1072,22 +1072,22 @@ function G(e, t = "store") {
 		}
 	};
 }
-var K = {
+var q = {
 	getItem: (e) => globalThis.localStorage.getItem(e),
 	setItem: (e, t) => globalThis.localStorage.setItem(e, t)
-}, Oe = /* @__PURE__ */ e({
+}, De = /* @__PURE__ */ e({
 	CHAT_MIN_WIDTH: () => 460,
 	DOCK_DEFAULT_WIDTH: () => 560,
 	DOCK_MIN_WIDTH: () => 480,
-	createDockWidth: () => Ae,
-	release: () => Ne,
-	setDockWidth: () => Me,
-	useDockWidth: () => je
-}), ke = "nac-session-dock-width";
-function Ae(e) {
+	createDockWidth: () => ke,
+	release: () => Me,
+	setDockWidth: () => je,
+	useDockWidth: () => Ae
+}), Oe = "nac-session-dock-width";
+function ke(e) {
 	let t = 560;
 	try {
-		let n = e?.getItem(ke);
+		let n = e?.getItem(Oe);
 		n != null && Number.isFinite(Number(n)) && (t = Math.max(480, Math.round(Number(n))));
 	} catch {}
 	let n = /* @__PURE__ */ new Set(), r = (e) => (n.add(e), () => {
@@ -1099,7 +1099,7 @@ function Ae(e) {
 			if (Number.isFinite(r)) {
 				t = Math.max(480, Math.round(r));
 				try {
-					e?.setItem(ke, String(t));
+					e?.setItem(Oe, String(t));
 				} catch {}
 				n.forEach((e) => e());
 			}
@@ -1109,25 +1109,25 @@ function Ae(e) {
 		}
 	};
 }
-var { useDockWidth: je, setDockWidth: Me, release: Ne } = Ae(K), Pe = /* @__PURE__ */ e({
-	PANEL_LIST_DEFAULT_RATIO: () => Ie,
+var { useDockWidth: Ae, setDockWidth: je, release: Me } = ke(q), Ne = /* @__PURE__ */ e({
+	PANEL_LIST_DEFAULT_RATIO: () => Fe,
 	PANEL_LIST_DEFAULT_WIDTH: () => 208,
-	PANEL_LIST_MAX_RATIO: () => Le,
+	PANEL_LIST_MAX_RATIO: () => Ie,
 	PANEL_LIST_MIN_WIDTH: () => 180,
-	clampPanelListWidth: () => Ve,
-	createPanelWidth: () => ze,
-	defaultPanelListWidth: () => Re,
-	release: () => Be,
-	setPanelListWidth: () => He,
-	usePanelListWidth: () => Ue
-}), Fe = "nac-panel-list-width", Ie = 1 / 3, Le = .75;
-function Re(e) {
-	return Math.max(208, Math.round(e * Ie));
+	clampPanelListWidth: () => Be,
+	createPanelWidth: () => Re,
+	defaultPanelListWidth: () => Le,
+	release: () => ze,
+	setPanelListWidth: () => Ve,
+	usePanelListWidth: () => He
+}), Pe = "nac-panel-list-width", Fe = 1 / 3, Ie = .75;
+function Le(e) {
+	return Math.max(208, Math.round(e * Fe));
 }
-function ze(e) {
+function Re(e) {
 	function t() {
 		try {
-			let t = e?.getItem(Fe), n = t == null ? NaN : Number(t);
+			let t = e?.getItem(Pe), n = t == null ? NaN : Number(t);
 			return Number.isFinite(n) ? Math.max(180, Math.round(n)) : null;
 		} catch {
 			return null;
@@ -1153,7 +1153,7 @@ function ze(e) {
 		if (i !== n) {
 			n = i;
 			try {
-				e?.setItem(Fe, String(i));
+				e?.setItem(Pe, String(i));
 			} catch {}
 			r.forEach((e) => e());
 		}
@@ -1170,23 +1170,23 @@ function ze(e) {
 		usePanelListWidth: l
 	};
 }
-var { release: Be, clampPanelListWidth: Ve, setPanelListWidth: He, usePanelListWidth: Ue } = ze(K), We = /* @__PURE__ */ e({
-	THREAD_LOG_DEFAULT_RATIO: () => q,
-	THREAD_LOG_MAX_RATIO: () => qe,
-	THREAD_LOG_MIN_RATIO: () => Ke,
-	clampThreadLogRatio: () => Xe,
-	createThreadLogHeight: () => Je,
-	release: () => Ye,
-	setThreadLogHeightRatio: () => Ze,
-	useThreadLogHeightRatio: () => Qe
-}), Ge = "nac-thread-log-height-ratio", Ke = .2, qe = .8, q = .4;
-function Je(e) {
+var { release: ze, clampPanelListWidth: Be, setPanelListWidth: Ve, usePanelListWidth: He } = Re(q), Ue = /* @__PURE__ */ e({
+	THREAD_LOG_DEFAULT_RATIO: () => J,
+	THREAD_LOG_MAX_RATIO: () => Ke,
+	THREAD_LOG_MIN_RATIO: () => Ge,
+	clampThreadLogRatio: () => Ye,
+	createThreadLogHeight: () => qe,
+	release: () => Je,
+	setThreadLogHeightRatio: () => Xe,
+	useThreadLogHeightRatio: () => Ze
+}), We = "nac-thread-log-height-ratio", Ge = .2, Ke = .8, J = .4;
+function qe(e) {
 	function t() {
 		try {
-			let t = e?.getItem(Ge), n = t == null ? NaN : Number(t);
-			return Number.isFinite(n) ? s(n) : q;
+			let t = e?.getItem(We), n = t == null ? NaN : Number(t);
+			return Number.isFinite(n) ? s(n) : J;
 		} catch {
-			return q;
+			return J;
 		}
 	}
 	let n = t(), r = /* @__PURE__ */ new Set();
@@ -1199,17 +1199,17 @@ function Je(e) {
 		return n;
 	}
 	function o() {
-		return q;
+		return J;
 	}
 	function s(e) {
-		return Math.min(qe, Math.max(Ke, Math.round(e * 1e3) / 1e3));
+		return Math.min(Ke, Math.max(Ge, Math.round(e * 1e3) / 1e3));
 	}
 	function c(t) {
 		let i = s(t);
 		if (i !== n) {
 			n = i;
 			try {
-				e?.setItem(Ge, String(i));
+				e?.setItem(We, String(i));
 			} catch {}
 			r.forEach((e) => e());
 		}
@@ -1219,29 +1219,29 @@ function Je(e) {
 	}
 	return {
 		release: () => {
-			n = q, r.forEach((e) => e());
+			n = J, r.forEach((e) => e());
 		},
 		clampThreadLogRatio: s,
 		setThreadLogHeightRatio: c,
 		useThreadLogHeightRatio: l
 	};
 }
-var { release: Ye, clampThreadLogRatio: Xe, setThreadLogHeightRatio: Ze, useThreadLogHeightRatio: Qe } = Je(K), $e = /* @__PURE__ */ e({
-	createLastLight: () => tt,
-	loadLastLight: () => rt,
-	release: () => nt,
-	storeLastLight: () => it
-}), et = "nac.last-light-model";
-function tt(e) {
+var { release: Je, clampThreadLogRatio: Ye, setThreadLogHeightRatio: Xe, useThreadLogHeightRatio: Ze } = qe(q), Qe = /* @__PURE__ */ e({
+	createLastLight: () => et,
+	loadLastLight: () => nt,
+	release: () => tt,
+	storeLastLight: () => rt
+}), $e = "nac.last-light-model";
+function et(e) {
 	let t = null;
 	function n() {
 		try {
-			let n = e?.getItem(et);
+			let n = e?.getItem($e);
 			if (!n) return t;
 			let r = JSON.parse(n);
 			if (Object(r) !== r || Array.isArray(r)) return null;
 			let i = r;
-			return !pe(i.model) || !pe(i.backend) ? null : r;
+			return !fe(i.model) || !fe(i.backend) ? null : r;
 		} catch {
 			return null;
 		}
@@ -1249,7 +1249,7 @@ function tt(e) {
 	function r(n) {
 		t = n;
 		try {
-			n ? e?.setItem(et, JSON.stringify(n)) : e?.setItem(et, "");
+			n ? e?.setItem($e, JSON.stringify(n)) : e?.setItem($e, "");
 		} catch {}
 	}
 	return {
@@ -1260,19 +1260,19 @@ function tt(e) {
 		storeLastLight: r
 	};
 }
-var { release: nt, loadLastLight: rt, storeLastLight: it } = tt(K), at = /* @__PURE__ */ e({
-	acknowledgeSucceeded: () => mt,
-	attentionStore: () => ct,
-	clearAttention: () => ut,
-	clearAttentionAll: () => pt,
-	createAttentionStore: () => ot,
-	release: () => st,
-	trackAttention: () => lt,
-	useAnyAttention: () => ft,
-	useAttention: () => dt
+var { release: tt, loadLastLight: nt, storeLastLight: rt } = et(q), it = /* @__PURE__ */ e({
+	acknowledgeSucceeded: () => pt,
+	attentionStore: () => st,
+	clearAttention: () => lt,
+	clearAttentionAll: () => ft,
+	createAttentionStore: () => at,
+	release: () => ot,
+	trackAttention: () => ct,
+	useAnyAttention: () => dt,
+	useAttention: () => ut
 });
-function ot(e) {
-	let t = G({
+function at(e) {
+	let t = K({
 		flagged: {},
 		acknowledgements: {}
 	}), { getState: n, setState: r, useStore: i } = t, o = {}, s = {}, c = {};
@@ -1332,18 +1332,18 @@ function ot(e) {
 		acknowledgeSucceeded: f
 	};
 }
-var { release: st, attentionStore: ct, trackAttention: lt, clearAttention: ut, useAttention: dt, useAnyAttention: ft, clearAttentionAll: pt, acknowledgeSucceeded: mt } = ot(K), ht = /* @__PURE__ */ e({
-	chatTabsStore: () => vt,
-	createChatTabsStore: () => gt,
-	dismissChatTab: () => yt,
-	pruneChatTabs: () => St,
-	release: () => _t,
-	restoreChatTab: () => bt,
-	setChatTabOrder: () => xt,
-	useChatTabOrder: () => wt,
-	useDismissedChatTabs: () => Ct
+var { release: ot, attentionStore: st, trackAttention: ct, clearAttention: lt, useAttention: ut, useAnyAttention: dt, clearAttentionAll: ft, acknowledgeSucceeded: pt } = at(q), mt = /* @__PURE__ */ e({
+	chatTabsStore: () => _t,
+	createChatTabsStore: () => ht,
+	dismissChatTab: () => vt,
+	pruneChatTabs: () => xt,
+	release: () => gt,
+	restoreChatTab: () => yt,
+	setChatTabOrder: () => bt,
+	useChatTabOrder: () => Ct,
+	useDismissedChatTabs: () => St
 });
-function gt(e) {
+function ht(e) {
 	let t = "nac.chatTabs", n = () => ({
 		dismissed: /* @__PURE__ */ new Set(),
 		order: {}
@@ -1363,7 +1363,7 @@ function gt(e) {
 			return n();
 		}
 	}
-	let a = G(i(), "chatTabs"), o = a.getState(), { getState: s, setState: c, subscribe: l, useStore: u } = a, d = l(() => {
+	let a = K(i(), "chatTabs"), o = a.getState(), { getState: s, setState: c, subscribe: l, useStore: u } = a, d = l(() => {
 		let { dismissed: n, order: r } = s();
 		try {
 			e?.setItem(t, JSON.stringify({
@@ -1417,40 +1417,40 @@ function gt(e) {
 		useChatTabOrder: (e) => u((t) => e ? t.order[e] ?? _ : _)
 	};
 }
-var { release: _t, chatTabsStore: vt, dismissChatTab: yt, restoreChatTab: bt, setChatTabOrder: xt, pruneChatTabs: St, useDismissedChatTabs: Ct, useChatTabOrder: wt } = gt(K), Tt = /* @__PURE__ */ e({
-	acknowledge: () => rn,
-	claimCancellation: () => en,
-	claimSubmission: () => nn,
-	createPromptDraftStore: () => Mt,
-	dismissRecovery: () => Xt,
-	dismissUnretainedSubmission: () => Gt,
-	get: () => Nt,
-	getRecoveries: () => Kt,
-	getUnretainedSubmission: () => Ht,
-	getUnreviewed: () => Lt,
-	hasSubmission: () => Vt,
-	isRetentionLimited: () => zt,
-	isSubmitting: () => Qt,
-	noteUnretainedSubmission: () => Wt,
-	purgeAll: () => on,
-	purgeSessions: () => an,
-	release: () => sn,
-	restoreRecovery: () => Zt,
-	retainSubmission: () => Jt,
-	settleSubmission: () => Yt,
-	subscribe: () => Ft,
-	update: () => Pt,
-	useCancelling: () => $t,
-	useDraft: () => It,
-	useRecoveries: () => qt,
-	useRetentionLimited: () => Bt,
-	useSubmitting: () => tn,
-	useUnretainedSubmission: () => Ut,
-	useUnreviewed: () => Rt
-}), J = Object.freeze([]), Et = Object.freeze({
+var { release: gt, chatTabsStore: _t, dismissChatTab: vt, restoreChatTab: yt, setChatTabOrder: bt, pruneChatTabs: xt, useDismissedChatTabs: St, useChatTabOrder: Ct } = ht(q), wt = /* @__PURE__ */ e({
+	acknowledge: () => nn,
+	claimCancellation: () => $t,
+	claimSubmission: () => tn,
+	createPromptDraftStore: () => jt,
+	dismissRecovery: () => Yt,
+	dismissUnretainedSubmission: () => Wt,
+	get: () => Mt,
+	getRecoveries: () => Gt,
+	getUnretainedSubmission: () => Vt,
+	getUnreviewed: () => It,
+	hasSubmission: () => Bt,
+	isRetentionLimited: () => Rt,
+	isSubmitting: () => Zt,
+	noteUnretainedSubmission: () => Ut,
+	purgeAll: () => an,
+	purgeSessions: () => rn,
+	release: () => on,
+	restoreRecovery: () => Xt,
+	retainSubmission: () => qt,
+	settleSubmission: () => Jt,
+	subscribe: () => Pt,
+	update: () => Nt,
+	useCancelling: () => Qt,
+	useDraft: () => Ft,
+	useRecoveries: () => Kt,
+	useRetentionLimited: () => zt,
+	useSubmitting: () => en,
+	useUnretainedSubmission: () => Ht,
+	useUnreviewed: () => Lt
+}), Y = Object.freeze([]), Tt = Object.freeze({
 	text: "",
 	revision: 0
-}), Y = 100, X = 1e6, Dt = [
+}), X = 100, Z = 1e6, Et = [
 	"owner",
 	"profile",
 	"organization",
@@ -1458,36 +1458,36 @@ var { release: _t, chatTabsStore: vt, dismissChatTab: yt, restoreChatTab: bt, se
 	"incarnation",
 	"endpoint",
 	"release"
-], Ot = [
+], Dt = [
 	"owner",
 	"profile",
 	"organization",
 	"host",
 	"store",
 	"track"
-], kt = 4096, At = 4194304, Z = (e) => typeof e == "string" && e.length > 0 && e.length <= kt;
-function jt(e, t) {
+], Ot = 4096, kt = 4194304, Q = (e) => typeof e == "string" && e.length > 0 && e.length <= Ot;
+function At(e, t) {
 	if (t !== void 0 && !Array.isArray(t)) return !1;
 	let n = t ?? [];
-	if (e.length > Y || n.length > Y) return !1;
+	if (e.length > X || n.length > X) return !1;
 	let r = 0, i = /* @__PURE__ */ new Set(), a = /* @__PURE__ */ new Set();
 	for (let t of e) {
-		if (!Array.isArray(t) || t.length !== 2 && (t.length !== 3 || t[2] !== "unreviewed") || !Z(t[0]) || typeof t[1] != "string" || t.length === 2 && i.has(t[0])) return !1;
+		if (!Array.isArray(t) || t.length !== 2 && (t.length !== 3 || t[2] !== "unreviewed") || !Q(t[0]) || typeof t[1] != "string" || t.length === 2 && i.has(t[0])) return !1;
 		t.length === 2 && i.add(t[0]), r += t[1].length;
 	}
 	for (let e of n) {
-		if (!Array.isArray(e) || e.length !== 3 || !Z(e[0]) || !Z(e[1]) || typeof e[2] != "string" || a.has(e[1])) return !1;
+		if (!Array.isArray(e) || e.length !== 3 || !Q(e[0]) || !Q(e[1]) || typeof e[2] != "string" || a.has(e[1])) return !1;
 		a.add(e[1]), r += e[2].length;
 	}
-	return r <= X;
+	return r <= Z;
 }
-function Mt(e, t, n) {
-	let r = e && Dt.every((t) => typeof e[t] == "string") ? Dt.map((t) => e[t]) : null, i = n !== void 0, a = i ? 2 : 1, o = i && t?.coldImports === !0, s = i ? r && r.every(Z) && n && Ot.every((e) => Z(n[e])) ? Ot.map((e) => n[e]) : null : r, c = s ? `nac:prompt-drafts:v${a}:${JSON.stringify(s)}` : null, l = /* @__PURE__ */ new Map(), u = /* @__PURE__ */ new Map(), d = /* @__PURE__ */ new Set(), f = /* @__PURE__ */ new Map(), p = /* @__PURE__ */ new Map(), h = 0, g = 0, _ = !1, v = !1, y = c ? t : void 0;
+function jt(e, t, n) {
+	let r = e && Et.every((t) => typeof e[t] == "string") ? Et.map((t) => e[t]) : null, i = n !== void 0, a = i ? 2 : 1, o = i && t?.coldImports === !0, s = i ? r && r.every(Q) && n && Dt.every((e) => Q(n[e])) ? Dt.map((e) => n[e]) : null : r, c = s ? `nac:prompt-drafts:v${a}:${JSON.stringify(s)}` : null, l = /* @__PURE__ */ new Map(), u = /* @__PURE__ */ new Map(), d = /* @__PURE__ */ new Set(), f = /* @__PURE__ */ new Map(), p = /* @__PURE__ */ new Map(), h = 0, g = 0, _ = !1, v = !1, y = c ? t : void 0;
 	try {
 		let e = c ? y?.getItem(c) : null;
-		if (e && (!i || e.length <= At && new TextEncoder().encode(e).length <= At)) {
+		if (e && (!i || e.length <= kt && new TextEncoder().encode(e).length <= kt)) {
 			let t = JSON.parse(e);
-			if (t?.version === a && JSON.stringify(t.binding) === JSON.stringify(s) && Array.isArray(t.drafts) && t.drafts.length <= Y && t.drafts.every((e) => Array.isArray(e) && (e.length === 2 || i && e.length === 3 && e[2] === "unreviewed") && typeof e[0] == "string" && typeof e[1] == "string") && (!i || jt(t.drafts, t.recoveries))) {
+			if (t?.version === a && JSON.stringify(t.binding) === JSON.stringify(s) && Array.isArray(t.drafts) && t.drafts.length <= X && t.drafts.every((e) => Array.isArray(e) && (e.length === 2 || i && e.length === 3 && e[2] === "unreviewed") && typeof e[0] == "string" && typeof e[1] == "string") && (!i || At(t.drafts, t.recoveries))) {
 				for (let [e, n, r] of t.drafts) {
 					if (!n) continue;
 					let t = l.get(e);
@@ -1510,7 +1510,7 @@ function Mt(e, t, n) {
 							text: n,
 							revision: ++h
 						}),
-						unreviewed: t?.unreviewed ?? J
+						unreviewed: t?.unreviewed ?? Y
 					});
 				}
 				if (Array.isArray(t.recoveries)) {
@@ -1518,7 +1518,7 @@ function Mt(e, t, n) {
 					for (let r of t.recoveries) {
 						if (!Array.isArray(r) || r.length !== 3 || !r.every((e) => typeof e == "string")) continue;
 						let [t, i, a] = r;
-						if (!a || ++e > Y || (n += a.length) > X) break;
+						if (!a || ++e > X || (n += a.length) > Z) break;
 						u.set(t, Object.freeze([...u.get(t) ?? [], Object.freeze({
 							id: i,
 							text: a,
@@ -1549,7 +1549,7 @@ function Mt(e, t, n) {
 							n
 						])) } : {}
 					}, t = JSON.stringify(e);
-					if (i && (!jt(e.drafts, e.recoveries) || new TextEncoder().encode(t).length > At)) {
+					if (i && (!At(e.drafts, e.recoveries) || new TextEncoder().encode(t).length > kt)) {
 						if (o || [...l.values()].some((e) => e.unreviewed?.length)) {
 							v = !0;
 							return;
@@ -1565,8 +1565,8 @@ function Mt(e, t, n) {
 				} catch {}
 			}
 		}
-	}, S = (e) => l.get(e)?.value ?? Et, C = (e) => l.get(e)?.unreviewed ?? J, w = (e, t, n) => {
-		if (_) return Et;
+	}, S = (e) => l.get(e)?.value ?? Tt, C = (e) => l.get(e)?.unreviewed ?? Y, w = (e, t, n) => {
+		if (_) return Tt;
 		let r = l.get(e), i = r?.unreviewed.filter((e) => e !== n), a = Object.freeze({
 			text: t,
 			revision: ++h
@@ -1574,17 +1574,17 @@ function Mt(e, t, n) {
 		l.delete(e), l.set(e, {
 			...r,
 			value: a,
-			unreviewed: i?.length ? Object.freeze(i) : J
+			unreviewed: i?.length ? Object.freeze(i) : Y
 		});
 		let o = [...l.values()].reduce((e, t) => e + t.value.text.length + (t.unreviewed ?? []).reduce((e, t) => e + t.text.length, 0), 0) + [...u.values()].flat().reduce((e, t) => e + t.text.length, 0);
 		for (let [t, r] of l) {
-			if (n || l.size <= Y && o <= X) break;
+			if (n || l.size <= X && o <= Z) break;
 			t === e || r.unreviewed.length || f.has(t) || (l.delete(t), o -= r.value.text.length);
 		}
 		return x(), b(), a;
 	}, T = (e) => (d.add(e), () => {
 		d.delete(e);
-	}), E = (e) => u.get(e) ?? J, D = (e, t) => {
+	}), E = (e) => u.get(e) ?? Y, D = (e, t) => {
 		if (_ || e.has(t)) return null;
 		let n = {};
 		return e.set(t, n), b(), () => {
@@ -1645,7 +1645,7 @@ function Mt(e, t, n) {
 		retainSubmission: (e, t) => {
 			if (_ || S(e) !== t) return null;
 			let n = [...u.values()].flat(), r = [...l].reduce((t, [n, r]) => t + (n === e ? 0 : r.value.text.length) + (r.unreviewed ?? []).reduce((e, t) => e + t.text.length, 0), 0);
-			if (n.length >= Y || n.reduce((e, t) => e + t.text.length, r) + t.text.length > X) throw Error("Unconfirmed message storage is full. Resolve earlier messages before sending more.");
+			if (n.length >= X || n.reduce((e, t) => e + t.text.length, r) + t.text.length > Z) throw Error("Unconfirmed message storage is full. Resolve earlier messages before sending more.");
 			let i;
 			do
 				i = `message-${++g}`;
@@ -1690,9 +1690,9 @@ function Mt(e, t, n) {
 		}
 	};
 }
-var { get: Nt, update: Pt, subscribe: Ft, useDraft: It, getUnreviewed: Lt, useUnreviewed: Rt, isRetentionLimited: zt, useRetentionLimited: Bt, hasSubmission: Vt, getUnretainedSubmission: Ht, useUnretainedSubmission: Ut, noteUnretainedSubmission: Wt, dismissUnretainedSubmission: Gt, getRecoveries: Kt, useRecoveries: qt, retainSubmission: Jt, settleSubmission: Yt, dismissRecovery: Xt, restoreRecovery: Zt, isSubmitting: Qt, useCancelling: $t, claimCancellation: en, useSubmitting: tn, claimSubmission: nn, acknowledge: rn, purgeSessions: an, purgeAll: on, release: sn } = Mt();
+var { get: Mt, update: Nt, subscribe: Pt, useDraft: Ft, getUnreviewed: It, useUnreviewed: Lt, isRetentionLimited: Rt, useRetentionLimited: zt, hasSubmission: Bt, getUnretainedSubmission: Vt, useUnretainedSubmission: Ht, noteUnretainedSubmission: Ut, dismissUnretainedSubmission: Wt, getRecoveries: Gt, useRecoveries: Kt, retainSubmission: qt, settleSubmission: Jt, dismissRecovery: Yt, restoreRecovery: Xt, isSubmitting: Zt, useCancelling: Qt, claimCancellation: $t, useSubmitting: en, claimSubmission: tn, acknowledge: nn, purgeSessions: rn, purgeAll: an, release: on } = jt();
 // src/app/features/human-shell/intents.ts
-function cn() {
+function sn() {
 	let e = /* @__PURE__ */ new Map(), t = !1, n = (e) => new TextEncoder().encode(e).byteLength;
 	return {
 		get: (t) => e.get(t),
@@ -1733,25 +1733,25 @@ function cn() {
 	};
 }
 // src/app/store/composerStore.ts
-var ln = /* @__PURE__ */ e({
-	cancelFirstPrompt: () => bn,
-	consumeDraftRequests: () => hn,
-	consumePromptRequests: () => pn,
-	createComposerStore: () => un,
-	draftPrompt: () => mn,
-	release: () => dn,
-	scheduleFirstPrompt: () => _n,
-	sendPrompt: () => fn,
-	shellIntents: () => gn,
-	takeFirstPrompt: () => yn,
-	useFirstPrompt: () => vn
+var cn = /* @__PURE__ */ e({
+	cancelFirstPrompt: () => yn,
+	consumeDraftRequests: () => mn,
+	consumePromptRequests: () => fn,
+	createComposerStore: () => ln,
+	draftPrompt: () => pn,
+	release: () => un,
+	scheduleFirstPrompt: () => gn,
+	sendPrompt: () => dn,
+	shellIntents: () => hn,
+	takeFirstPrompt: () => vn,
+	useFirstPrompt: () => _n
 });
-function un(e) {
-	let t = G({
+function ln(e) {
+	let t = K({
 		pending: null,
 		draft: null,
 		firstPrompt: null
-	}, "composer"), n = t.getState(), r = cn(), i = !1;
+	}, "composer"), n = t.getState(), r = sn(), i = !1;
 	function a(e) {
 		t.setState({ pending: e });
 	}
@@ -1799,11 +1799,11 @@ function un(e) {
 		consumeDraftRequests: c
 	};
 }
-var { release: dn, sendPrompt: fn, consumePromptRequests: pn, draftPrompt: mn, consumeDraftRequests: hn, shellIntents: gn, scheduleFirstPrompt: _n, useFirstPrompt: vn, takeFirstPrompt: yn, cancelFirstPrompt: bn } = un(K), xn = "Command timed out after";
-function Sn(e) {
-	return e.completion_status == null ? e.command_status == null ? e.is_error || e.content_preview.startsWith(xn) : e.is_error || e.command_status !== "completed" : e.completion_status !== "success";
+var { release: un, sendPrompt: dn, consumePromptRequests: fn, draftPrompt: pn, consumeDraftRequests: mn, shellIntents: hn, scheduleFirstPrompt: gn, useFirstPrompt: _n, takeFirstPrompt: vn, cancelFirstPrompt: yn } = ln(q), bn = "Command timed out after";
+function xn(e) {
+	return e.completion_status == null ? e.command_status == null ? e.is_error || e.content_preview.startsWith(bn) : e.is_error || e.command_status !== "completed" : e.completion_status !== "success";
 }
-function Cn(e, t) {
+function Sn(e, t) {
 	switch (e.type) {
 		case "tool_call_started": {
 			let t = e.key_arg_preview || e.args_preview;
@@ -1818,7 +1818,7 @@ function Cn(e, t) {
 			};
 		}
 		case "tool_call_finished": {
-			let t = Sn(e), n = e.completion_status === "timed_out" ? "◷" : e.completion_status === "cancelled" ? "■" : t ? "✕" : "✓";
+			let t = xn(e), n = e.completion_status === "timed_out" ? "◷" : e.completion_status === "cancelled" ? "■" : t ? "✕" : "✓";
 			return {
 				key: `result-${e.call_id}`,
 				text: `${n} ${e.name}: ${e.content_preview}`,
@@ -1865,14 +1865,14 @@ function Cn(e, t) {
 		default: return null;
 	}
 }
-function wn(e) {
+function Cn(e) {
 	let t = [];
 	return (e ?? []).forEach((e, n) => {
-		let r = Cn(e, n);
+		let r = Sn(e, n);
 		r && t.push(r);
 	}), t;
 }
-function Tn(e, t) {
+function wn(e, t) {
 	if (!t.length) return e;
 	if (!e.length) return t;
 	let n = new Set(e.map((e) => e.key)), r = -1, i = -1;
@@ -1884,12 +1884,12 @@ function Tn(e, t) {
 		...t.slice(i + 1)
 	];
 }
-function En(e) {
+function Tn(e) {
 	let t = /* @__PURE__ */ new Map();
 	for (let n of e) for (let e of n.events) t.set(e.id, e.event);
 	return [...t.entries()].sort(([e], [t]) => e - t).map(([, e]) => e);
 }
-function Dn(e) {
+function En(e) {
 	let t = [], n = /* @__PURE__ */ new Map();
 	for (let r of e) if (r.key.startsWith("call-")) {
 		let e = r.key.slice(5), i = {
@@ -1922,7 +1922,7 @@ function Dn(e) {
 	});
 	return t;
 }
-function On(e, t) {
+function Dn(e, t) {
 	if (!e) return !1;
 	let n = /* @__PURE__ */ new Set();
 	for (let e of t) e.key.startsWith("result-") && n.add(e.key.slice(7));
@@ -1930,46 +1930,46 @@ function On(e, t) {
 	return !0;
 }
 // src/app/store/runtimeStore.ts
-var kn = /* @__PURE__ */ e({
-	applyAssistantDelta: () => Rn,
-	applyEnvelope: () => Gn,
-	captureRuntimeActivation: () => Nn,
-	clearRuntimeThreads: () => Fn,
-	createRuntimeStore: () => An,
-	finishRunCancel: () => Wn,
-	getRuntimeState: () => dr,
-	liftSessionSpend: () => In,
-	pushLocalEvent: () => Vn,
-	release: () => jn,
-	requestRunCancel: () => Hn,
-	resetRuntime: () => Pn,
-	restoreRunCancel: () => Un,
-	runtimeStore: () => Mn,
-	setOptimisticUserPrompt: () => Ln,
-	setStreamStatus: () => zn,
-	syncRunFromSnapshot: () => Bn,
-	useActivity: () => Jn,
-	useCancelArmed: () => qn,
-	useFinishedToolCalls: () => tr,
-	useLastElapsedMs: () => or,
-	useLiveEvents: () => Qn,
-	useLiveThreads: () => er,
-	useModelRetryAttempt: () => Zn,
-	useOptimisticUserPrompt: () => ur,
-	usePrimaryToolEvents: () => nr,
-	useRunError: () => Yn,
-	useRunFailure: () => Xn,
-	useRunStartedAt: () => ar,
-	useRunUsage: () => rr,
-	useRunning: () => Kn,
-	useSessionSpend: () => ir,
-	useStreamReasoning: () => lr,
-	useStreamStatus: () => $n,
-	useStreamText: () => cr,
-	useWorkspaceEpoch: () => sr
+var On = /* @__PURE__ */ e({
+	applyAssistantDelta: () => Ln,
+	applyEnvelope: () => Wn,
+	captureRuntimeActivation: () => Mn,
+	clearRuntimeThreads: () => Pn,
+	createRuntimeStore: () => kn,
+	finishRunCancel: () => Un,
+	getRuntimeState: () => ur,
+	liftSessionSpend: () => Fn,
+	pushLocalEvent: () => Bn,
+	release: () => An,
+	requestRunCancel: () => Vn,
+	resetRuntime: () => Nn,
+	restoreRunCancel: () => Hn,
+	runtimeStore: () => jn,
+	setOptimisticUserPrompt: () => In,
+	setStreamStatus: () => Rn,
+	syncRunFromSnapshot: () => zn,
+	useActivity: () => qn,
+	useCancelArmed: () => Kn,
+	useFinishedToolCalls: () => er,
+	useLastElapsedMs: () => ar,
+	useLiveEvents: () => Zn,
+	useLiveThreads: () => $n,
+	useModelRetryAttempt: () => Xn,
+	useOptimisticUserPrompt: () => lr,
+	usePrimaryToolEvents: () => tr,
+	useRunError: () => Jn,
+	useRunFailure: () => Yn,
+	useRunStartedAt: () => ir,
+	useRunUsage: () => nr,
+	useRunning: () => Gn,
+	useSessionSpend: () => rr,
+	useStreamReasoning: () => cr,
+	useStreamStatus: () => Qn,
+	useStreamText: () => sr,
+	useWorkspaceEpoch: () => or
 });
-function An(e) {
-	let t = G({
+function kn(e) {
+	let t = K({
 		sessionId: null,
 		running: !1,
 		activity: "",
@@ -2177,7 +2177,7 @@ function An(e) {
 	function A(e, t) {
 		if (!e) return;
 		k += 1;
-		let n = Cn(t, k);
+		let n = Sn(t, k);
 		n && s((t) => {
 			let r = t.threads[e] ?? x(e), i = [...r.log, n].slice(-200);
 			return { threads: {
@@ -2312,7 +2312,7 @@ function An(e) {
 				}), "none";
 			}
 			case "tool_call_finished": {
-				let n = Sn(t);
+				let n = xn(t);
 				A(t.thread_name, t), t.thread_name || P(t), b({
 					seq: e,
 					kind: "tool",
@@ -2467,34 +2467,34 @@ function An(e) {
 		getRuntimeState: c
 	};
 }
-var { release: jn, runtimeStore: Mn, captureRuntimeActivation: Nn, resetRuntime: Pn, clearRuntimeThreads: Fn, liftSessionSpend: In, setOptimisticUserPrompt: Ln, applyAssistantDelta: Rn, setStreamStatus: zn, syncRunFromSnapshot: Bn, pushLocalEvent: Vn, requestRunCancel: Hn, restoreRunCancel: Un, finishRunCancel: Wn, applyEnvelope: Gn, useRunning: Kn, useCancelArmed: qn, useActivity: Jn, useRunError: Yn, useRunFailure: Xn, useModelRetryAttempt: Zn, useLiveEvents: Qn, useStreamStatus: $n, useLiveThreads: er, useFinishedToolCalls: tr, usePrimaryToolEvents: nr, useRunUsage: rr, useSessionSpend: ir, useRunStartedAt: ar, useLastElapsedMs: or, useWorkspaceEpoch: sr, useStreamText: cr, useStreamReasoning: lr, useOptimisticUserPrompt: ur, getRuntimeState: dr } = An(K), fr = /* @__PURE__ */ new Map();
-function pr(e) {
-	let t = fr.get(e);
+var { release: An, runtimeStore: jn, captureRuntimeActivation: Mn, resetRuntime: Nn, clearRuntimeThreads: Pn, liftSessionSpend: Fn, setOptimisticUserPrompt: In, applyAssistantDelta: Ln, setStreamStatus: Rn, syncRunFromSnapshot: zn, pushLocalEvent: Bn, requestRunCancel: Vn, restoreRunCancel: Hn, finishRunCancel: Un, applyEnvelope: Wn, useRunning: Gn, useCancelArmed: Kn, useActivity: qn, useRunError: Jn, useRunFailure: Yn, useModelRetryAttempt: Xn, useLiveEvents: Zn, useStreamStatus: Qn, useLiveThreads: $n, useFinishedToolCalls: er, usePrimaryToolEvents: tr, useRunUsage: nr, useSessionSpend: rr, useRunStartedAt: ir, useLastElapsedMs: ar, useWorkspaceEpoch: or, useStreamText: sr, useStreamReasoning: cr, useOptimisticUserPrompt: lr, getRuntimeState: ur } = kn(q), dr = /* @__PURE__ */ new Map();
+function fr(e) {
+	let t = dr.get(e);
 	return t || (t = {
 		now: Date.now(),
 		listeners: /* @__PURE__ */ new Set(),
 		timer: null
-	}, fr.set(e, t)), t;
+	}, dr.set(e, t)), t;
 }
-function mr(e, t) {
-	let n = pr(e);
+function pr(e, t) {
+	let n = fr(e);
 	return n.listeners.add(t), n.timer ??= setInterval(() => {
 		n.now = Date.now(), n.listeners.forEach((e) => e());
 	}, e), () => {
 		n.listeners.delete(t), n.listeners.size === 0 && n.timer && (clearInterval(n.timer), n.timer = null);
 	};
 }
-function hr(e) {
-	return pr(e).now;
+function mr(e) {
+	return fr(e).now;
 }
 // src/app/hooks/useNow.ts
-var gr = () => () => {}, _r = () => 0;
-function vr(e = 1e3, t = !0) {
-	let n = d((n) => t ? mr(e, n) : gr(), [e, t]), r = d(() => t ? hr(e) : 0, [e, t]);
-	return m(n, r, t ? r : _r);
+var hr = () => () => {}, gr = () => 0;
+function _r(e = 1e3, t = !0) {
+	let n = d((n) => t ? pr(e, n) : hr(), [e, t]), r = d(() => t ? mr(e) : 0, [e, t]);
+	return m(n, r, t ? r : gr);
 }
 // src/app/lib/providers.ts
-var yr = {
+var vr = {
 	"openai-responses": "OpenAI Responses",
 	"openai-chat-completions": "OpenAI Chat Completions",
 	"chatgpt-codex-responses": "ChatGPT Codex Responses",
@@ -2504,7 +2504,7 @@ var yr = {
 	"together-chat": "Together Chat",
 	"arcee-auth": "Arcee API (Sign in)",
 	"arcee-api": "Arcee API (Key)"
-}, br = [
+}, yr = [
 	"arcee-api",
 	"arcee-auth",
 	"openai-responses",
@@ -2515,11 +2515,11 @@ var yr = {
 	"fireworks-chat",
 	"together-chat"
 ];
-function xr(e) {
-	let t = br.indexOf(e);
-	return t === -1 ? br.length : t;
+function br(e) {
+	let t = yr.indexOf(e);
+	return t === -1 ? yr.length : t;
 }
-var Sr = /* @__PURE__ */ new Set([
+var xr = /* @__PURE__ */ new Set([
 	"openai-responses",
 	"openai-chat-completions",
 	"anthropic-messages",
@@ -2528,29 +2528,29 @@ var Sr = /* @__PURE__ */ new Set([
 	"together-chat",
 	"arcee-api"
 ]);
-function Cr(e) {
-	return Sr.has(e);
+function Sr(e) {
+	return xr.has(e);
 }
-var wr = {
+var Cr = {
 	"arcee-auth": "arcee",
 	"chatgpt-codex-responses": "codex"
 };
-function Tr(e) {
-	return wr[e] ?? null;
+function wr(e) {
+	return Cr[e] ?? null;
 }
-var Er = {
+var Tr = {
 	arcee: "Arcee",
 	codex: "ChatGPT"
 };
-function Dr(e) {
-	return Er[e];
+function Er(e) {
+	return Tr[e];
 }
-function Q(e) {
-	return e in yr;
+function Dr(e) {
+	return e in vr;
 }
 function Or(e) {
 	let t = (e ?? "").trim();
-	return t ? Q(t) ? yr[t] : t : "";
+	return t ? Dr(t) ? vr[t] : t : "";
 }
 var kr = {
 	"arcee-auth": "Arcee",
@@ -2564,7 +2564,7 @@ var kr = {
 	"together-chat": "Together AI"
 };
 function Ar(e) {
-	return Q(e) ? kr[e] : Or(e);
+	return Dr(e) ? kr[e] : Or(e);
 }
 function jr(e) {
 	let t = /* @__PURE__ */ new Set();
@@ -2572,7 +2572,7 @@ function jr(e) {
 		let e = (n ?? "").trim();
 		e && t.add(e);
 	}
-	let n = br.filter((e) => t.has(e)), r = Array.from(t).filter((e) => !Q(e)).sort();
+	let n = yr.filter((e) => t.has(e)), r = Array.from(t).filter((e) => !Dr(e)).sort();
 	return [...n, ...r];
 }
 // src/app/store/sessionFiltersStore.ts
@@ -2648,7 +2648,7 @@ function Nr(e) {
 		"24h": 864e5,
 		"7d": 6048e5,
 		"30d": 2592e6
-	}, u = G({
+	}, u = K({
 		query: "",
 		sort: $,
 		createdRange: "any",
@@ -2693,7 +2693,7 @@ function Nr(e) {
 		updated_desc: (e, t) => l(t.updated_at) - l(e.updated_at)
 	};
 	function O(e) {
-		let n = h(), r = vr(i);
+		let n = h(), r = _r(i);
 		return p(() => {
 			let i = s(e), a = n.query.trim().toLowerCase(), o = e.filter(({ summary: e }) => !(!E(e, a, i) || !T(e.created_at, n.createdRange, r) || !T(e.updated_at, n.modifiedRange, r) || n.envs.length > 0 && !n.envs.includes(c(e)) || n.providers.length > 0 && !n.providers.includes(e.backend)));
 			if (n.sort === "title_asc") o.sort((e, n) => t(e.summary, i).localeCompare(t(n.summary, i), void 0, { sensitivity: "base" }));
@@ -2732,7 +2732,7 @@ function Nr(e) {
 		};
 	}
 	function N(e) {
-		let t = h(), n = vr(i);
+		let t = h(), n = _r(i);
 		return p(() => {
 			let r = s(A(e)), i = t.query.trim().toLowerCase(), a = (e) => t.envs.length > 0 && !t.envs.includes(c(e)) ? !1 : t.providers.length === 0 || t.providers.includes(e.backend), o = t.envs.length > 0 || t.providers.length > 0, u = e.filter((e) => {
 				let { createdAt: s, updatedAt: c } = M(e);
@@ -2807,7 +2807,7 @@ function Nr(e) {
 		useIsDefaultSort: () => h((e) => e.sort === $)
 	};
 }
-var { release: Pr, SORT_ITEMS: Fr, RANGE_ITEMS: Ir, sessionFiltersStore: Lr, setQuery: Rr, setSort: zr, setCreatedRange: Br, setModifiedRange: Vr, toggleEnv: Hr, toggleProvider: Ur, resetFilters: Wr, hasActiveFilters: Gr, useVisibleSessions: Kr, useVisibleProjectItems: qr, useSessionProviders: Jr, useSessionEnvs: Yr, pruneUnavailableFacets: Xr, useFilterQuery: Zr, useSort: Qr, useCreatedRange: $r, useModifiedRange: ei, useSelectedEnvs: ti, useSelectedProviders: ni, useIsDefaultSort: ri } = Nr(K), ii = /* @__PURE__ */ e({
+var { release: Pr, SORT_ITEMS: Fr, RANGE_ITEMS: Ir, sessionFiltersStore: Lr, setQuery: Rr, setSort: zr, setCreatedRange: Br, setModifiedRange: Vr, toggleEnv: Hr, toggleProvider: Ur, resetFilters: Wr, hasActiveFilters: Gr, useVisibleSessions: Kr, useVisibleProjectItems: qr, useSessionProviders: Jr, useSessionEnvs: Yr, pruneUnavailableFacets: Xr, useFilterQuery: Zr, useSort: Qr, useCreatedRange: $r, useModifiedRange: ei, useSelectedEnvs: ti, useSelectedProviders: ni, useIsDefaultSort: ri } = Nr(q), ii = /* @__PURE__ */ e({
 	activateSessionSelection: () => Mi,
 	bindSidePanelProject: () => ci,
 	closeDrawer: () => hi,
@@ -2861,7 +2861,7 @@ var { release: Pr, SORT_ITEMS: Fr, RANGE_ITEMS: Ir, sessionFiltersStore: Lr, set
 	useToggledFolders: () => ea
 });
 function ai(e, { rememberPerProject: t = !1 } = {}) {
-	let n = G({
+	let n = K({
 		insightSelectionEpoch: 0,
 		activeSessionId: null,
 		insightsReturns: /* @__PURE__ */ new Map(),
@@ -3057,7 +3057,7 @@ function ai(e, { rememberPerProject: t = !1 } = {}) {
 		let t = a();
 		if (t.activeSessionId === e) return;
 		let n = t.activeSessionId ? t.subagentPageReturns.get(t.activeSessionId) : null, r = t.activeSessionId != null;
-		V(), o({ activeSessionId: e }), n && n.parentSessionId === e ? o({
+		H(), o({ activeSessionId: e }), n && n.parentSessionId === e ? o({
 			...n.context,
 			expanded: n.expanded,
 			collapsed: n.collapsed,
@@ -3080,19 +3080,19 @@ function ai(e, { rememberPerProject: t = !1 } = {}) {
 	function R(e) {
 		o({ selectedFile: e }), e && S(!1);
 	}
-	function ee(e) {
+	function z(e) {
 		o((t) => {
 			let n = new Set(t.toggledFolders);
 			return n.delete(e) || n.add(e), { toggledFolders: n };
 		});
 	}
-	function z(e) {
+	function B(e) {
 		o({ fileListing: e });
 	}
-	function B(e) {
+	function V(e) {
 		a().sidePanelAnimate !== e && o({ sidePanelAnimate: e });
 	}
-	function V() {
+	function H() {
 		o({
 			insightSelectionEpoch: ++i,
 			selectedThread: null,
@@ -3133,10 +3133,10 @@ function ai(e, { rememberPerProject: t = !1 } = {}) {
 		selectSubagent: I,
 		selectRevision: L,
 		selectFile: R,
-		toggleFolder: ee,
-		selectFileListing: z,
-		setSidePanelAnimate: B,
-		resetSessionSelection: V,
+		toggleFolder: z,
+		selectFileListing: B,
+		setSidePanelAnimate: V,
+		resetSessionSelection: H,
 		activateSessionSelection: P,
 		rememberInsightsReturn: A,
 		restoreInsightsReturn: j,
@@ -3163,7 +3163,7 @@ function ai(e, { rememberPerProject: t = !1 } = {}) {
 		useFileListing: () => s((e) => e.fileListing)
 	};
 }
-var { release: oi, sessionLayoutStore: si, bindSidePanelProject: ci, unbindSidePanelProject: li, toggleSidePanelExpanded: ui, leaveFocusedSidePanel: di, openSidePanelList: fi, toggleSidePanelCollapsed: pi, openDrawer: mi, closeDrawer: hi, toggleDrawerPinned: gi, showSidePanelList: _i, toggleSidePanelList: vi, revealSidePanel: yi, selectThread: bi, selectInsight: xi, toggleInsightGroup: Si, selectInsightsFilter: Ci, selectWorkset: wi, selectSubagent: Ti, selectRevision: Ei, selectFile: Di, toggleFolder: Oi, selectFileListing: ki, setSidePanelAnimate: Ai, resetSessionSelection: ji, activateSessionSelection: Mi, rememberInsightsReturn: Ni, restoreInsightsReturn: Pi, rememberInsightListPosition: Fi, rememberSubagentPage: Ii, useInsightsReturn: Li, useSidePanelCollapsed: Ri, useSidePanelAnimate: zi, useSidePanelExpanded: Bi, useDrawerPinned: Vi, useDrawerContent: Hi, useSidePanelList: Ui, useSelectedThread: Wi, useSelectedThreadEpisode: Gi, useSelectedInsight: Ki, useInsightFocusNonce: qi, useExpandedInsightGroups: Ji, useInsightsFilter: Yi, useSelectedWorkset: Xi, useSelectedSubagent: Zi, useSelectedRevision: Qi, useSelectedFile: $i, useToggledFolders: ea, useFileListing: ta } = ai(K), na = /* @__PURE__ */ e({
+var { release: oi, sessionLayoutStore: si, bindSidePanelProject: ci, unbindSidePanelProject: li, toggleSidePanelExpanded: ui, leaveFocusedSidePanel: di, openSidePanelList: fi, toggleSidePanelCollapsed: pi, openDrawer: mi, closeDrawer: hi, toggleDrawerPinned: gi, showSidePanelList: _i, toggleSidePanelList: vi, revealSidePanel: yi, selectThread: bi, selectInsight: xi, toggleInsightGroup: Si, selectInsightsFilter: Ci, selectWorkset: wi, selectSubagent: Ti, selectRevision: Ei, selectFile: Di, toggleFolder: Oi, selectFileListing: ki, setSidePanelAnimate: Ai, resetSessionSelection: ji, activateSessionSelection: Mi, rememberInsightsReturn: Ni, restoreInsightsReturn: Pi, rememberInsightListPosition: Fi, rememberSubagentPage: Ii, useInsightsReturn: Li, useSidePanelCollapsed: Ri, useSidePanelAnimate: zi, useSidePanelExpanded: Bi, useDrawerPinned: Vi, useDrawerContent: Hi, useSidePanelList: Ui, useSelectedThread: Wi, useSelectedThreadEpisode: Gi, useSelectedInsight: Ki, useInsightFocusNonce: qi, useExpandedInsightGroups: Ji, useInsightsFilter: Yi, useSelectedWorkset: Xi, useSelectedSubagent: Zi, useSelectedRevision: Qi, useSelectedFile: $i, useToggledFolders: ea, useFileListing: ta } = ai(q), na = /* @__PURE__ */ e({
 	createSessionNavigationStore: () => ra,
 	markSessionViewed: () => la,
 	pruneSessionNavigation: () => ua,
@@ -3208,7 +3208,7 @@ function ra(e) {
 			return n();
 		}
 	}
-	let s = G(o(), "sessionNavigation"), c = s.getState(), { getState: u, setState: d, subscribe: f, useStore: p } = s, m = f(() => {
+	let s = K(o(), "sessionNavigation"), c = s.getState(), { getState: u, setState: d, subscribe: f, useStore: p } = s, m = f(() => {
 		try {
 			e?.setItem(t, a(u()));
 		} catch {}
@@ -3253,7 +3253,7 @@ function ra(e) {
 		useSessionViewedAt: (e) => p((t) => t.lastViewedAt[e])
 	};
 }
-var { release: ia, restoreSessionNavigation: aa, serializeSessionNavigation: oa, sessionNavigationStore: sa, toggleSessionNavigationPin: ca, markSessionViewed: la, pruneSessionNavigation: ua, useSessionNavigationPins: da, useSessionViewedAt: fa } = ra(K), pa = /* @__PURE__ */ e({
+var { release: ia, restoreSessionNavigation: aa, serializeSessionNavigation: oa, sessionNavigationStore: sa, toggleSessionNavigationPin: ca, markSessionViewed: la, pruneSessionNavigation: ua, useSessionNavigationPins: da, useSessionViewedAt: fa } = ra(q), pa = /* @__PURE__ */ e({
 	createSidebarLayoutStore: () => Sa,
 	release: () => Ca,
 	revealGroup: () => Ba,
@@ -3310,7 +3310,7 @@ function Sa(e) {
 		collapsedProjects: ba(e),
 		expandedParents: [],
 		revealedGroups: []
-	}, { getState: i, setState: a, useStore: o } = G(r, "sidebar-layout");
+	}, { getState: i, setState: a, useStore: o } = K(r, "sidebar-layout");
 	function s(e) {
 		a({ offset: e });
 	}
@@ -3371,7 +3371,7 @@ function Sa(e) {
 		useRevealedGroups: () => o((e) => e.revealedGroups)
 	};
 }
-var { release: Ca, storedOpen: wa, storeOpen: Ta, setSidebarOffset: Ea, useSidebarOffset: Da, setColumnOpen: Oa, useColumnOpen: ka, setOverlayOpen: Aa, useOverlayOpen: ja, setOrganize: Ma, useOrganize: Na, setView: Pa, useView: Fa, toggleProjectCollapsed: Ia, useCollapsedProjects: La, toggleParentExpanded: Ra, useExpandedParents: za, revealGroup: Ba, useRevealedGroups: Va } = Sa(K), Ha = /* @__PURE__ */ e({
+var { release: Ca, storedOpen: wa, storeOpen: Ta, setSidebarOffset: Ea, useSidebarOffset: Da, setColumnOpen: Oa, useColumnOpen: ka, setOverlayOpen: Aa, useOverlayOpen: ja, setOrganize: Ma, useOrganize: Na, setView: Pa, useView: Fa, toggleProjectCollapsed: Ia, useCollapsedProjects: La, toggleParentExpanded: Ra, useExpandedParents: za, revealGroup: Ba, useRevealedGroups: Va } = Sa(q), Ha = /* @__PURE__ */ e({
 	createSshConnectionStore: () => Ua,
 	markSshConnected: () => Ka,
 	markSshDisconnected: () => qa,
@@ -3388,7 +3388,7 @@ function Ua(e) {
 			(e.ssh_identity_file ?? "").trim()
 		].join("\0");
 	}
-	let n = G({ byKey: {} }, "sshConnection"), r = n.getState();
+	let n = K({ byKey: {} }, "sshConnection"), r = n.getState();
 	function i(e) {
 		let r = t(e);
 		n.setState((e) => ({ byKey: {
@@ -3424,7 +3424,7 @@ function Ua(e) {
 		sshTargetFromSummary: s
 	};
 }
-var { release: Wa, sshTargetKey: Ga, markSshConnected: Ka, markSshDisconnected: qa, useSshConnectionStatus: Ja, sshTargetFromSummary: Ya } = Ua(K), Xa = "nac.inbox.read.v1", Za = 500;
+var { release: Wa, sshTargetKey: Ga, markSshConnected: Ka, markSshDisconnected: qa, useSshConnectionStatus: Ja, sshTargetFromSummary: Ya } = Ua(q), Xa = "nac.inbox.read.v1", Za = 500;
 function Qa(e, t) {
 	try {
 		let t = e?.getItem(Xa);
@@ -3448,7 +3448,7 @@ function $a(e, t) {
 	} catch {}
 }
 function eo(e, t = Date.now()) {
-	let n = G(Qa(e, t), "inbox-read"), r = /* @__PURE__ */ new Map(), i = !1, a = (t) => {
+	let n = K(Qa(e, t), "inbox-read"), r = /* @__PURE__ */ new Map(), i = !1, a = (t) => {
 		if (i) return;
 		let r = Object.entries(t), a = r.length > Za ? Object.fromEntries(r.slice(-500)) : t, o = {
 			...n.getState(),
@@ -3479,40 +3479,44 @@ function eo(e, t = Date.now()) {
 		}
 	};
 }
-var to = eo(K);
-// src/app/features/home/homeDraftStore.ts
-function no() {
-	let e = G({
-		text: "",
+var to = eo(q), no = {
+	text: "",
+	projectId: null
+};
+function ro() {
+	let e = K({
+		...no,
 		revision: 0
 	}, "home-draft"), t = !1;
 	return {
 		get: e.getState,
 		usePrompt: () => e.useStore((e) => e.text),
-		update(n) {
+		useProjectId: () => e.useStore((e) => e.projectId),
+		update(n, r = e.getState().projectId) {
 			t || e.setState({
 				text: n,
+				projectId: r,
 				revision: e.getState().revision + 1
 			});
 		},
 		acknowledge(n) {
 			!t && e.getState().revision === n && e.setState({
-				text: "",
+				...no,
 				revision: n + 1
 			});
 		},
 		release() {
 			t = !0, e.setState({
-				text: "",
+				...no,
 				revision: e.getState().revision + 1
 			});
 		}
 	};
 }
-var ro = no();
+var io = ro();
 // src/app/features/command-palette/commandSurfaceStore.ts
-function io() {
-	let e = G({
+function ao() {
+	let e = K({
 		surface: null,
 		sidebarAvailable: !1
 	}, "command-surfaces"), t = /* @__PURE__ */ new Set(), n = !1, r = (t) => {
@@ -3541,20 +3545,20 @@ function io() {
 		}
 	};
 }
-var ao = io(), oo = "nac.transcriptDensity";
-function so(e) {
+var oo = ao(), so = "nac.transcriptDensity";
+function co(e) {
 	try {
-		return e?.getItem(oo) === "detailed" ? "detailed" : "compact";
+		return e?.getItem(so) === "detailed" ? "detailed" : "compact";
 	} catch {
 		return "compact";
 	}
 }
-function co(e) {
-	let t = G({ density: so(e) }, "transcriptDensity"), n = !1, r = (r) => {
+function lo(e) {
+	let t = K({ density: co(e) }, "transcriptDensity"), n = !1, r = (r) => {
 		if (!n) {
 			t.setState({ density: r });
 			try {
-				e?.setItem(oo, r);
+				e?.setItem(so, r);
 			} catch {}
 		}
 	};
@@ -3567,23 +3571,23 @@ function co(e) {
 		}
 	};
 }
-var lo = co(K);
+var uo = lo(q);
 // src/app/runtime/presentationStores.ts
-function uo(e, t, n, r) {
+function fo(e, t, n, r) {
 	return {
 		inboxReadStore: eo(e),
-		homeDraftStore: no(),
-		commandSurfaceStore: io(),
-		transcriptDensityStore: co(e),
-		promptDraftStore: Mt(t, n, r),
-		dockWidth: Ae(e),
-		panelWidth: ze(e),
-		threadLogHeight: Je(e),
-		lastLight: tt(e),
-		attentionStore: ot(e),
-		chatTabsStore: gt(e),
-		composerStore: un(e),
-		runtimeStore: An(e),
+		homeDraftStore: ro(),
+		commandSurfaceStore: ao(),
+		transcriptDensityStore: lo(e),
+		promptDraftStore: jt(t, n, r),
+		dockWidth: ke(e),
+		panelWidth: Re(e),
+		threadLogHeight: qe(e),
+		lastLight: et(e),
+		attentionStore: at(e),
+		chatTabsStore: ht(e),
+		composerStore: ln(e),
+		runtimeStore: kn(e),
 		sessionFiltersStore: Nr(e),
 		sessionLayoutStore: ai(e),
 		sessionNavigationStore: ra(e),
@@ -3591,32 +3595,32 @@ function uo(e, t, n, r) {
 		sshConnectionStore: Ua(e)
 	};
 }
-var fo = {
+var po = {
 	inboxReadStore: to,
-	homeDraftStore: ro,
-	commandSurfaceStore: ao,
-	transcriptDensityStore: lo,
-	promptDraftStore: Tt,
-	dockWidth: Oe,
-	panelWidth: Pe,
-	threadLogHeight: We,
-	lastLight: $e,
-	attentionStore: at,
-	chatTabsStore: ht,
-	composerStore: ln,
-	runtimeStore: kn,
+	homeDraftStore: io,
+	commandSurfaceStore: oo,
+	transcriptDensityStore: uo,
+	promptDraftStore: wt,
+	dockWidth: De,
+	panelWidth: Ne,
+	threadLogHeight: Ue,
+	lastLight: Qe,
+	attentionStore: it,
+	chatTabsStore: mt,
+	composerStore: cn,
+	runtimeStore: On,
 	sessionFiltersStore: Mr,
 	sessionLayoutStore: ii,
 	sessionNavigationStore: na,
 	sidebarLayoutStore: pa,
 	sshConnectionStore: Ha
 };
-function po(e) {
+function mo(e) {
 	e.runtimeStore.resetRuntime(null);
 	for (let t of Object.values(e)) t.release();
 }
 // src/app/runtime/requestLifetime.ts
-function mo(e, t) {
+function ho(e, t) {
 	return e.throwIfAborted(), new Promise((n, r) => {
 		let i = () => r(e.reason);
 		e.addEventListener("abort", i, { once: !0 }), Promise.resolve().then(() => (e.throwIfAborted(), t())).then((t) => {
@@ -3626,7 +3630,7 @@ function mo(e, t) {
 		});
 	});
 }
-function ho(e) {
+function go(e) {
 	if (e instanceof y) return e;
 	if (e instanceof Error && e.name === "ApiError" && "status" in e && typeof e.status == "number" && "method" in e && typeof e.method == "string" && "path" in e && typeof e.path == "string" && "requestId" in e && typeof e.requestId == "string") {
 		let t = new y(e.status, e.method, e.path, "", e.requestId);
@@ -3634,7 +3638,7 @@ function ho(e) {
 	}
 	return e;
 }
-var go = class extends D {
+var _o = class extends D {
 	source;
 	lifetime;
 	constructor(e, t) {
@@ -3655,7 +3659,7 @@ var go = class extends D {
 		return this.source.newRequestId();
 	}
 	streamContext() {
-		return mo(this.lifetime, () => this.source.streamContext());
+		return ho(this.lifetime, () => this.source.streamContext());
 	}
 	async admit(e, t, n = {}) {
 		let r = n.signal ? AbortSignal.any([this.lifetime, n.signal]) : this.lifetime, i = n.requestId ?? this.source.newRequestId();
@@ -3665,7 +3669,7 @@ var go = class extends D {
 			reason: "aborted"
 		};
 		try {
-			return await mo(r, () => this.source.admit(e, t, {
+			return await ho(r, () => this.source.admit(e, t, {
 				...n,
 				requestId: i,
 				signal: r
@@ -3676,19 +3680,19 @@ var go = class extends D {
 				requestId: i,
 				error: e
 			};
-			throw ho(e);
+			throw go(e);
 		}
 	}
 	request(e, t, n = {}) {
 		let r = n.signal ? AbortSignal.any([this.lifetime, n.signal]) : this.lifetime;
-		return mo(r, () => this.source.request(e, t, {
+		return ho(r, () => this.source.request(e, t, {
 			...n,
 			signal: r
 		})).catch((e) => {
-			throw ho(e);
+			throw go(e);
 		});
 	}
-}, _o = class {
+}, vo = class {
 	limit;
 	requireAcknowledgement;
 	entries = /* @__PURE__ */ new Map();
@@ -3754,14 +3758,14 @@ var go = class extends D {
 			t.listeners.clear();
 		}
 	}
-}, vo = /* @__PURE__ */ new WeakMap();
-function yo(e) {
+}, yo = /* @__PURE__ */ new WeakMap();
+function bo(e) {
 	if (e.terminalInputRecovery) return e.terminalInputRecovery;
-	let t = vo.get(e);
-	return t || (t = new _o(), vo.set(e, t)), t;
+	let t = yo.get(e);
+	return t || (t = new vo(), yo.set(e, t)), t;
 }
 // src/app/features/setup/localFolder.ts
-function bo(e, t) {
+function xo(e, t) {
 	if (e) return { async chooseDirectory(n, r) {
 		let i = new AbortController(), a = () => i.abort();
 		(r.aborted || t.aborted) && a(), r.addEventListener("abort", a, { once: !0 }), t.addEventListener("abort", a, { once: !0 });
@@ -3774,10 +3778,10 @@ function bo(e, t) {
 		}
 	} };
 }
-function xo(e, t, n, r) {
+function So(e, t, n, r) {
 	return t && n === "directory" && !r ? e : void 0;
 }
-function So(e, t, n) {
+function Co(e, t, n) {
 	let r = new AbortController();
 	return {
 		cancel: () => r.abort(),
@@ -3789,8 +3793,8 @@ function So(e, t, n) {
 	};
 }
 // src/app/runtime/nativeRuntime.ts
-var Co = /* @__PURE__ */ new WeakMap(), wo = 0, To = class {
-	id = ++wo;
+var wo = /* @__PURE__ */ new WeakMap(), To = 0, Eo = class {
+	id = ++To;
 	scope;
 	client;
 	assets;
@@ -3808,7 +3812,7 @@ var Co = /* @__PURE__ */ new WeakMap(), wo = 0, To = class {
 	eventSource;
 	constructor(e) {
 		if (e.scope.endpoint !== e.client.transport.endpoint) throw Error("Runtime scope must name the supplied client's endpoint.");
-		if (this.terminalInputRecovery = new _o(128, e.requireTerminalAcknowledgement ?? !1), this.queryClient = new h({ defaultOptions: {
+		if (this.terminalInputRecovery = new vo(128, e.requireTerminalAcknowledgement ?? !1), this.queryClient = new h({ defaultOptions: {
 			queries: {
 				queryKeyHashFn: (e) => g([this.id, ...e]),
 				staleTime: 3e4,
@@ -3817,8 +3821,8 @@ var Co = /* @__PURE__ */ new WeakMap(), wo = 0, To = class {
 				refetchOnWindowFocus: !1
 			},
 			mutations: { retry: !1 }
-		} }), this.assets = e.assets ? Object.freeze({ ...e.assets }) : void 0, this.nativeDirectory = bo(e.nativeDirectory, this.controller.signal), this.stores = uo(e.storage, e.scope, e.draftStorage, e.draftPersistenceBinding), this.scope = Object.freeze({ ...e.scope }), this.client = new A(new go(e.client.transport, this.controller.signal)), e.standaloneServingIncarnation !== void 0 && (this.scope.profile !== "standalone" || e.standaloneServingIncarnation !== this.scope.incarnation)) throw Error("Product serving binding must match the standalone runtime scope.");
-		this.api = de(this.client, e.standaloneServingIncarnation), this.productNavigation = new _(this.api.resolveProductDestination, this.isClosed, this.api.getProductContext), this.eventSource = e.eventSource, Co.set(this.queryClient, this);
+		} }), this.assets = e.assets ? Object.freeze({ ...e.assets }) : void 0, this.nativeDirectory = xo(e.nativeDirectory, this.controller.signal), this.stores = fo(e.storage, e.scope, e.draftStorage, e.draftPersistenceBinding), this.scope = Object.freeze({ ...e.scope }), this.client = new A(new _o(e.client.transport, this.controller.signal)), e.standaloneServingIncarnation !== void 0 && (this.scope.profile !== "standalone" || e.standaloneServingIncarnation !== this.scope.incarnation)) throw Error("Product serving binding must match the standalone runtime scope.");
+		this.api = ue(this.client, e.standaloneServingIncarnation), this.productNavigation = new _(this.api.resolveProductDestination, this.isClosed, this.api.getProductContext), this.eventSource = e.eventSource, wo.set(this.queryClient, this);
 	}
 	isClosed = () => this.controller.signal.aborted;
 	subscribe = (e) => (this.listeners.add(e), () => {
@@ -3826,7 +3830,7 @@ var Co = /* @__PURE__ */ new WeakMap(), wo = 0, To = class {
 	});
 	events = (e, t) => {
 		this.controller.signal.throwIfAborted();
-		let n = De(e, t, {
+		let n = Ee(e, t, {
 			client: this.client,
 			eventSource: this.eventSource,
 			maxConnectionMs: 299e3
@@ -3853,26 +3857,26 @@ var Co = /* @__PURE__ */ new WeakMap(), wo = 0, To = class {
 		if (!this.isClosed()) {
 			this.controller.abort(new DOMException("Native runtime was closed.", "AbortError")), this.terminalInputRecovery.close(), this.productNavigation.close();
 			for (let e of this.disposers) e();
-			this.disposers.clear(), this.queryClient.cancelQueries(), this.queryClient.clear(), po(this.stores);
+			this.disposers.clear(), this.queryClient.cancelQueries(), this.queryClient.clear(), mo(this.stores);
 			for (let e of this.listeners) e();
 		}
 	}
 };
-function Eo(e) {
-	return new To(e);
+function Do(e) {
+	return new Eo(e);
 }
-var Do = {
-	api: fe,
+var Oo = {
+	api: de,
 	client: M,
-	stores: fo,
-	events: (e, t) => De(e, t)
+	stores: po,
+	events: (e, t) => Ee(e, t)
 };
-function Oo(e) {
-	return Co.get(e) ?? Do;
+function ko(e) {
+	return wo.get(e) ?? Oo;
 }
 // src/app/runtime/RuntimeContext.ts
-var ko = u(null);
-function Ao() {
-	return f(ko) ?? Do;
+var Ao = u(null);
+function jo() {
+	return f(Ao) ?? Oo;
 }
-export { ve as A, x as B, On as C, K as D, Re as E, oe as F, L as I, R as L, me as M, pe as N, ge as O, se as P, ne as R, wn as S, Ve as T, Cr as _, Oo as a, En as b, yo as c, Q as d, Dr as f, xr as g, Or as h, Eo as i, ye as j, _e as k, ao as l, Ar as m, Ao as n, xo as o, Tr as p, To as r, So as s, ko as t, br as u, vr as v, Le as w, Tn as x, Dn as y, y as z };
+export { _e as A, x as B, Dn as C, q as D, Le as E, ae as F, L as I, R as L, pe as M, fe as N, he as O, oe as P, te as R, Cn as S, Be as T, Sr as _, ko as a, Tn as b, bo as c, Dr as d, Er as f, br as g, Or as h, Do as i, ve as j, ge as k, oo as l, Ar as m, jo as n, So as o, wr as p, Eo as r, Co as s, Ao as t, yr as u, _r as v, Ie as w, wn as x, En as y, y as z };

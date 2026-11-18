@@ -21,6 +21,9 @@ vi.mock("@/app/features/inbox/InboxProvider", () => ({
 vi.mock("@/app/providers/ProjectActionsProvider", () => ({
   ProjectActionsProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
+vi.mock("@/app/components/LeftSidebar/NewSessionShortcut", () => ({
+  NewSessionShortcut: () => null,
+}));
 vi.mock("@/app/providers/SessionActionsProvider", () => ({
   SessionActionsProvider: ({ children }: { children: React.ReactNode }) => children,
 }));

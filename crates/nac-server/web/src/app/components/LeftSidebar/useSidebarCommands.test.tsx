@@ -2,7 +2,7 @@
 
 import { act, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { beforeEach, expect, it, vi } from "vitest";
 
 import { routes } from "@/app/lib/routes";
@@ -96,7 +96,7 @@ it("sends a project-less new session to Home's composer instead of a new project
   expect(state.newChat).not.toHaveBeenCalled();
 });
 
-it("starts New Project when there is no project for Home's composer to pick", () => {
+it("never starts project creation, even with no projects", () => {
   state.sessions = [];
   state.projects = [];
   const { result } = renderHook(useSidebarCommands, {
@@ -105,18 +105,22 @@ it("starts New Project when there is no project for Home's composer to pick", ()
     ),
   });
   act(() => expect(result.current.newSession()).toBe(true));
-  expect(state.create).toHaveBeenCalledOnce();
+  expect(state.create).not.toHaveBeenCalled();
   expect(state.newChat).not.toHaveBeenCalled();
 });
 
-it("refuses a project-less new session until the project list has loaded", () => {
+it("stays on Home's composer and its project when already Home", () => {
   state.sessions = [];
-  state.projects = undefined;
-  const { result } = renderHook(useSidebarCommands, {
-    wrapper: ({ children }: { children: ReactNode }) => (
-      <MemoryRouter initialEntries={["/"]}>{children}</MemoryRouter>
-    ),
-  });
-  act(() => expect(result.current.newSession()).toBe(false));
+  const { result } = renderHook(
+    () => ({ commands: useSidebarCommands(), location: useLocation() }),
+    {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <MemoryRouter initialEntries={["/?project=project"]}>{children}</MemoryRouter>
+      ),
+    },
+  );
+  act(() => expect(result.current.commands.newSession()).toBe(true));
+  expect(result.current.location.search).toBe("?project=project");
+  expect(result.current.location.state).toMatchObject({ focusComposer: expect.any(Number) });
   expect(state.create).not.toHaveBeenCalled();
 });

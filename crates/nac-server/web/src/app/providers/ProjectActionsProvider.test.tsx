@@ -6,7 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { UiPolicyContext } from "@/app/features/ui-policy/UiPolicyContext";
 import { DIRECT_UI_POLICY, ORCHESTRATION_UI_POLICY } from "@/app/features/ui-policy/policy";
-import { MOD } from "@/app/lib/shortcuts";
 import { chatTabsStore, dismissChatTab, setChatTabOrder } from "@/app/store/chatTabsStore";
 import {
   sessionNavigationStore,
@@ -136,19 +135,3 @@ it("keeps hidden orchestration navigation memory while pruning genuinely deleted
   view.rerender(tree(true));
   assertRetained();
 });
-
-it.each(["orchestrator", "direct-with-orchestrator"])(
-  "keeps the new-session shortcut in the project of a hidden %s deep link",
-  (behavior) => {
-    fakes.projects = [{ project_id: "project-1" }];
-    fakes.sessions = [{ summary: { session_id: "legacy", behavior, project_id: "project-1" } }];
-    render(tree(false, "/session/legacy/threads"));
-    fireEvent.keyDown(window, {
-      key: "o",
-      shiftKey: true,
-      ctrlKey: MOD === "ctrl",
-      metaKey: MOD === "meta",
-    });
-    expect(screen.getByTestId("location").textContent).toBe("/?project=project-1");
-  },
-);

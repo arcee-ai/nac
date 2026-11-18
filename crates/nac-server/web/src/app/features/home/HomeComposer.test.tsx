@@ -9,6 +9,7 @@ import { DIRECT_UI_POLICY, ORCHESTRATION_UI_POLICY } from "@/app/features/ui-pol
 import type { ManagedSessionSummary, ProjectRecord } from "@/app/types/api";
 
 import { HomeComposer } from "./HomeComposer";
+import { standaloneHomeDraftStore } from "./homeDraftStore";
 
 const fakes = vi.hoisted(() => ({
   start: vi.fn(),
@@ -111,6 +112,7 @@ beforeEach(() => {
   fakes.addRepository.mockReset();
   fakes.managed = false;
   fakes.eligible = false;
+  standaloneHomeDraftStore.update("", null);
 });
 afterEach(() => {
   cleanup();
@@ -190,6 +192,33 @@ describe("Home composer", () => {
     fireEvent.change(prompt(), { target: { value: "   " } });
     const send = screen.getByRole("button", { name: "Start session" }) as HTMLButtonElement;
     expect(send.disabled).toBe(true);
+  });
+
+  it("leaves an unknown requested project unchosen rather than starting elsewhere", () => {
+    mount("/?project=gone");
+    expect(prompt().getAttribute("placeholder")).toBe(
+      "That project is no longer available. Choose a project.",
+    );
+    fireEvent.change(prompt(), { target: { value: "Anything" } });
+    const send = screen.getByRole("button", { name: "Start session" }) as HTMLButtonElement;
+    expect(send.disabled).toBe(true);
+    expect(screen.queryByRole("button", { name: /^Project: (Atlas|Borealis)/ })).toBeNull();
+  });
+
+  it("says where a kept draft will start when New session points it at another project", () => {
+    mount("/?project=p1");
+    fireEvent.change(prompt(), { target: { value: "Plan the release" } });
+    expect(screen.queryByText(/Your draft will start in/)).toBeNull();
+    cleanup();
+    mount("/?project=p2");
+    expect((prompt() as HTMLTextAreaElement).value).toBe("Plan the release");
+    expect(document.activeElement).toBe(prompt());
+    expect(screen.getByText(/Your draft will start in/).textContent).toBe(
+      "Your draft will start in Borealis, not Atlas.",
+    );
+    fireEvent.change(prompt(), { target: { value: "Plan the release notes" } });
+    expect(screen.queryByText(/Your draft will start in/)).toBeNull();
+    expect(fakes.start).not.toHaveBeenCalled();
   });
 
   it("routes an isolated-checkout send through the isolated task form", () => {

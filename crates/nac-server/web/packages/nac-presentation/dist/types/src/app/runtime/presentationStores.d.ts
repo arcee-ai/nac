@@ -52,12 +52,10 @@ export declare const standalonePresentationStores: {
         }>): void;
     };
     homeDraftStore: {
-        get: () => {
-            text: string;
-            revision: number;
-        };
+        get: () => import("../features/home/homeDraftStore").HomeDraft;
         usePrompt: () => string;
-        update(text: string): void;
+        useProjectId: () => string | null;
+        update(text: string, projectId?: string | null): void;
         acknowledge(revision: number): void;
         release(): void;
     };

@@ -2,6 +2,8 @@ import { lazy, Suspense } from "react";
 import { DesktopVisibility } from "@/app/features/desktop-commands/DesktopVisibility";
 import { DesktopCommandOwner } from "@/app/features/desktop-commands/DesktopCommandOwner";
 import type { DesktopCommandPort } from "@/app/features/desktop-commands/adapter";
+import { NativeMenuContext } from "@/app/features/desktop-commands/nativeMenu";
+import { NewSessionShortcut } from "@/app/components/LeftSidebar/NewSessionShortcut";
 import { ProductNavigationProvider } from "@/app/features/product-context/ProductNavigationProvider";
 import { CommandSurfaces } from "@/app/features/command-palette/CommandSurfaces";
 import { InboxProvider } from "@/app/features/inbox/InboxProvider";
@@ -69,52 +71,55 @@ function DesignRoute() {
 export default function App({ desktopCommands }: { desktopCommands?: DesktopCommandPort }) {
   return (
     <DesktopVisibility port={desktopCommands}>
-      <UiPolicyProvider>
-        <ToastProvider>
-          {/* Projects sit outside sessions: deleting a project reaches its chats,
+      <NativeMenuContext.Provider value={desktopCommands != null}>
+        <UiPolicyProvider>
+          <ToastProvider>
+            {/* Projects sit outside sessions: deleting a project reaches its chats,
             never the other way round. */}
-          <SessionActionsProvider>
-            <ProjectActionsProvider>
-              <ManagedHostProvider>
-                <ProductNavigationProvider>
-                  <InboxProvider>
-                    {desktopCommands && <DesktopCommandOwner port={desktopCommands} />}
-                    {desktopCommands?.connectSessionTarget && (
-                      <Suspense fallback={null}>
-                        <DesktopSessionTargetOwner port={desktopCommands} />
-                      </Suspense>
-                    )}
-                    {/* ⌘K palette and ⌘/ sheet: one owner, on every route. */}
-                    <CommandSurfaces />
-                    <SettingsReturnProvider>
-                      <Routes>
-                        <Route element={<AppShell />}>
-                          <Route path="/" element={<ProjectsListPage />} />
-                          <Route path="/project/:projectId" element={<ProjectRedirectPage />} />
-                          <Route
-                            path="/project/:projectId/task-schedules"
-                            element={<ProjectTaskSchedulesPage />}
-                          />
-                          <Route path="/task-schedules" element={<ProjectTaskSchedulesPage />} />
-                          <Route
-                            path="/session/:sessionId/:panel?"
-                            element={<KeyedSessionPage />}
-                          />
-                        </Route>
-                        {/* Settings take over the window: outside the shell and sidebar. */}
-                        <Route path="/settings" element={<SettingsPage />} />
-                        <Route path="/settings/:section" element={<SettingsPage />} />
-                        <Route path="/design" element={<DesignRoute />} />
-                        <Route path="*" element={<Navigate to={routes.list()} replace />} />
-                      </Routes>
-                    </SettingsReturnProvider>
-                  </InboxProvider>
-                </ProductNavigationProvider>
-              </ManagedHostProvider>
-            </ProjectActionsProvider>
-          </SessionActionsProvider>
-        </ToastProvider>
-      </UiPolicyProvider>
+            <SessionActionsProvider>
+              <ProjectActionsProvider>
+                <ManagedHostProvider>
+                  <ProductNavigationProvider>
+                    <InboxProvider>
+                      {desktopCommands && <DesktopCommandOwner port={desktopCommands} />}
+                      <NewSessionShortcut />
+                      {desktopCommands?.connectSessionTarget && (
+                        <Suspense fallback={null}>
+                          <DesktopSessionTargetOwner port={desktopCommands} />
+                        </Suspense>
+                      )}
+                      {/* ⌘K palette and ⌘/ sheet: one owner, on every route. */}
+                      <CommandSurfaces />
+                      <SettingsReturnProvider>
+                        <Routes>
+                          <Route element={<AppShell />}>
+                            <Route path="/" element={<ProjectsListPage />} />
+                            <Route path="/project/:projectId" element={<ProjectRedirectPage />} />
+                            <Route
+                              path="/project/:projectId/task-schedules"
+                              element={<ProjectTaskSchedulesPage />}
+                            />
+                            <Route path="/task-schedules" element={<ProjectTaskSchedulesPage />} />
+                            <Route
+                              path="/session/:sessionId/:panel?"
+                              element={<KeyedSessionPage />}
+                            />
+                          </Route>
+                          {/* Settings take over the window: outside the shell and sidebar. */}
+                          <Route path="/settings" element={<SettingsPage />} />
+                          <Route path="/settings/:section" element={<SettingsPage />} />
+                          <Route path="/design" element={<DesignRoute />} />
+                          <Route path="*" element={<Navigate to={routes.list()} replace />} />
+                        </Routes>
+                      </SettingsReturnProvider>
+                    </InboxProvider>
+                  </ProductNavigationProvider>
+                </ManagedHostProvider>
+              </ProjectActionsProvider>
+            </SessionActionsProvider>
+          </ToastProvider>
+        </UiPolicyProvider>
+      </NativeMenuContext.Provider>
     </DesktopVisibility>
   );
 }

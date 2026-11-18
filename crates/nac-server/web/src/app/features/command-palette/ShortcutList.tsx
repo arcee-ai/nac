@@ -1,7 +1,8 @@
 import { useId } from "react";
 
 import { KeyboardShortcut } from "@/app/atoms";
-import { SHORTCUT_GROUPS, SHORTCUTS, type ShortcutEntry } from "@/app/lib/shortcuts";
+import { useNativeMenu } from "@/app/features/desktop-commands/nativeMenu";
+import { SHORTCUT_GROUPS, shortcutsFor, type ShortcutEntry } from "@/app/lib/shortcuts";
 import { cn } from "@/app/lib/cn";
 
 function Keys({ entry }: { entry: ShortcutEntry }) {
@@ -38,10 +39,11 @@ function Group({ name, entries }: { name: string; entries: ShortcutEntry[] }) {
 
 /** The single shortcut catalog, grouped. Used by the ⌘/ sheet and Settings › Shortcuts. */
 export function ShortcutList({ className }: { className?: string }) {
+  const shortcuts = shortcutsFor(useNativeMenu());
   return (
     <div className={cn("flex min-w-0 flex-col gap-6", className)}>
       {SHORTCUT_GROUPS.map((group) => {
-        const entries = SHORTCUTS.filter((entry) => entry.group === group);
+        const entries = shortcuts.filter((entry) => entry.group === group);
         return entries.length ? <Group key={group} name={group} entries={entries} /> : null;
       })}
     </div>

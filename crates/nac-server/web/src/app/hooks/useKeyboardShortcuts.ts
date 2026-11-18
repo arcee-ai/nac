@@ -43,7 +43,8 @@ export function useKeyboardShortcuts(bindings: KeyboardShortcutBinding[]): void 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       // A held key repeats; opening one modal per repeat is not the intent.
-      if (event.repeat || !ownsKeyboard(event.target)) return;
+      // Keys inside an IME composition belong to the input method.
+      if (event.repeat || event.isComposing || !ownsKeyboard(event.target)) return;
       for (const binding of latest.current) {
         if (binding.enabled === false) continue;
         if (!matchesShortcut(event, binding.keys)) continue;

@@ -21,7 +21,8 @@ import { SessionListBody, SessionListSwitch } from "@/app/features/inbox/Session
 import { useKeyboardShortcuts } from "@/app/hooks/useKeyboardShortcuts";
 import { cn } from "@/app/lib/cn";
 import { routes } from "@/app/lib/routes";
-import { MOD, NEW_CHAT_KEYS } from "@/app/lib/shortcuts";
+import { MOD } from "@/app/lib/shortcuts";
+import { useNewSessionKeys } from "@/app/features/desktop-commands/nativeMenu";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useProjects, useVisibleSessions } from "@/app/services/queries";
 
@@ -80,6 +81,7 @@ function SidebarBody({ onHide }: { onHide: () => void }) {
   const { data: sessions = [] } = useVisibleSessions();
   const { data: projectList } = useProjects();
   const go = (to: string) => navigate(to);
+  const newSessionKeys = useNewSessionKeys();
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -109,10 +111,15 @@ function SidebarBody({ onHide }: { onHide: () => void }) {
 
       <nav aria-label="Primary" className="flex shrink-0 flex-col gap-px px-2 pb-2">
         <NavRow
+          icon={IconName.Home}
+          label="Home"
+          active={pathname === routes.list()}
+          onClick={() => go(routes.list())}
+        />
+        <NavRow
           icon={IconName.AddChat}
           label="New session"
-          shortcut={NEW_CHAT_KEYS}
-          active={pathname === routes.list()}
+          shortcut={newSessionKeys}
           onClick={() => void commands.newSession()}
         />
         <button

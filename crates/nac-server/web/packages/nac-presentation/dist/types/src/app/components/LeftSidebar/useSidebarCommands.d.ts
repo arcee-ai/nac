@@ -1,9 +1,15 @@
 /**
- * The desktop command contract (and the sidebar's "New session"): settings
- * destinations plus a new session in the project on screen, or Home's
- * composer when no project is on screen. With no projects at all, Home has
- * no composer, so the gesture starts New Project instead.
+ * The one New session action that the sidebar, the shortcut, the palette and
+ * the native menu share: Home's composer for the project on screen, focused.
+ * It never creates a session or a project. Returns false while the screen's
+ * project cannot be known yet.
  */
+export declare function useNewSession(): {
+    projectId: string | null;
+    sessionId: string | null;
+    newSession: () => boolean;
+};
+/** The desktop command contract and the sidebar's destinations. */
 export declare function useSidebarCommands(): {
     projectId: string | null;
     sessionId: string | null;

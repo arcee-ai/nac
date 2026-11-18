@@ -68,17 +68,17 @@ export function MobileMenu({ open, onClose }: { open: boolean; onClose: () => vo
     >
       <nav aria-label="Menu" className="flex flex-col gap-px border-b border-muted px-2 py-2">
         <MenuRow
-          icon={IconName.AddChat}
-          label="New session"
-          onClick={closeAnd(() => void commands.newSession())}
-        />
-        <MenuRow icon={IconName.Search} label="Search" onClick={closeAnd(openCommandPalette)} />
-        <MenuRow
           icon={IconName.Home}
           label="Home"
           active={pathname === routes.list()}
           onClick={closeAnd(() => navigate(routes.list()))}
         />
+        <MenuRow
+          icon={IconName.AddChat}
+          label="New session"
+          onClick={closeAnd(() => void commands.newSession())}
+        />
+        <MenuRow icon={IconName.Search} label="Search" onClick={closeAnd(openCommandPalette)} />
         <MenuRow
           icon={IconName.Add}
           label={commands.createLabel === "New Project" ? "Add project" : commands.createLabel}

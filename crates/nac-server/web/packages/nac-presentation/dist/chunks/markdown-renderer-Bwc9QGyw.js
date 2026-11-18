@@ -1,8 +1,8 @@
 import { n as e, r as t, t as n } from "./rolldown-runtime-QGRDbDUS.js";
-import { A as r, M as i, N as a, n as o } from "./RuntimeContext-BsMmtN1E.js";
+import { A as r, M as i, N as a, n as o } from "./RuntimeContext-CjTqoR90.js";
 import { a as s } from "./PresentationBoundary-BAUfAcJZ.js";
-import { _r as c, ct as l, dr as u, n as d, o as f, r as p, t as m, vr as h } from "./workspaceLink-DTvwvlHD.js";
-import { i as g, q as _, r as v } from "./Toast-J9CfluTU.js";
+import { _r as c, ct as l, dr as u, n as d, o as f, r as p, t as m, vr as h } from "./workspaceLink-7FUiJB4G.js";
+import { K as g, i as _, r as v } from "./Toast-BhG2VZ3V.js";
 import { a as y, c as b, l as x, o as S, r as C, s as w, t as T } from "./lib-rX7C_D5H.js";
 import { Suspense as E, createContext as D, isValidElement as O, memo as k, use as ee, useCallback as te, useLayoutEffect as A, useMemo as j, useRef as M, useState as ne } from "react";
 import { isCancelledError as N, useQueryClient as re } from "@tanstack/react-query";
@@ -6658,7 +6658,7 @@ function Cl(e) {
 var wl = /* @__PURE__ */ e({ default: () => Hl }), Tl = [Xc], El = /* @__PURE__ */ new Map();
 function Dl(e) {
 	let t = El.get(e);
-	return t || (t = import("./markdown-mathjax-Cm8cmZGe.js").then(({ createMathjaxPlugin: t, remarkMathPlugin: n }) => ({
+	return t || (t = import("./markdown-mathjax-D-gsk5-u.js").then(({ createMathjaxPlugin: t, remarkMathPlugin: n }) => ({
 		remark: [...Tl, n],
 		rehype: [t(e)]
 	})), El.set(e, t)), t;
@@ -6677,7 +6677,7 @@ function Al({ children: e }) {
 		code: t,
 		language: n === "plaintext" ? void 0 : n,
 		title: n,
-		size: g.Medium,
+		size: _.Medium,
 		copyable: !0,
 		expandable: !0,
 		className: "my-4"
@@ -6696,7 +6696,7 @@ function jl(e) {
 }
 var Ml = D(!1);
 function Nl({ href: e, children: t, ...n }) {
-	let r = ee(Ml), { selectRevision: i, selectFileListing: a, selectFile: s, revealSidePanel: l } = o().stores.sessionLayoutStore, { api: d } = o(), p = se(), g = oe(), v = _(), y = f(), b = re(), x = h(g.pathname), S = x ? b.getQueryData(u.sessionSnapshot(x)) : void 0, C = m(e, [
+	let r = ee(Ml), { selectRevision: i, selectFileListing: a, selectFile: s, revealSidePanel: l } = o().stores.sessionLayoutStore, { api: d } = o(), p = se(), _ = oe(), v = g(), y = f(), b = re(), x = h(_.pathname), S = x ? b.getQueryData(u.sessionSnapshot(x)) : void 0, C = m(e, [
 		S?.workspace?.host_root,
 		S?.metadata.workspace_host_path,
 		S?.metadata.cwd

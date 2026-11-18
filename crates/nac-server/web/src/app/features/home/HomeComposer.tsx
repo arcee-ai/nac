@@ -96,15 +96,26 @@ export function HomeComposer({
   }
   const fallback = useMemo(() => recentProjectId(projects, sessions), [projects, sessions]);
   const candidate = chosen ?? requested ?? fallback;
-  const project =
-    projects.find((entry) => entry.project_id === candidate) ??
-    projects.find((entry) => entry.project_id === fallback) ??
-    null;
+  // A requested project that no longer exists leaves the choice to the user
+  // rather than quietly starting somewhere else.
+  const requestedMissing =
+    !chosen && requested != null && !projects.some((entry) => entry.project_id === requested);
+  const project = requestedMissing
+    ? null
+    : (projects.find((entry) => entry.project_id === candidate) ??
+      projects.find((entry) => entry.project_id === fallback) ??
+      null);
   const projectId = project?.project_id ?? null;
 
   const draft = useNativeRuntime().stores.homeDraftStore;
   const prompt = draft.usePrompt();
-  const setPrompt = draft.update;
+  const draftProjectId = draft.useProjectId();
+  const setPrompt = (text: string) => draft.update(text, projectId);
+  // The draft was written for another project and New session pointed it here.
+  const movedFrom =
+    prompt.trim() && project && draftProjectId && draftProjectId !== project.project_id
+      ? (projects.find((entry) => entry.project_id === draftProjectId)?.name ?? null)
+      : undefined;
   const [behavior, setBehavior] = useState<SessionBehavior>(() => defaultBehavior(policy));
   // An override belongs to the project it was chosen for; another project
   // inherits its own model.
@@ -157,7 +168,8 @@ export function HomeComposer({
   useLayoutEffect(() => {
     const field = textarea.current;
     if (!field || (!requested && focusToken === undefined)) return;
-    field.focus();
+    field.scrollIntoView?.({ block: "center" });
+    field.focus({ preventScroll: true });
     field.setSelectionRange(field.value.length, field.value.length);
   }, [requested, focusToken]);
 
@@ -218,7 +230,11 @@ export function HomeComposer({
           value={prompt}
           disabled={busy}
           placeholder={
-            project ? `Describe a task for ${project.name}…` : "Add a project to start a session"
+            project
+              ? `Describe a task for ${project.name}…`
+              : requestedMissing
+                ? "That project is no longer available. Choose a project."
+                : "Add a project to start a session"
           }
           onChange={(event) => {
             setPrompt(event.target.value);
@@ -247,6 +263,7 @@ export function HomeComposer({
               onAddProject={addProject}
               onChange={(id) => {
                 setChosen(id);
+                if (prompt) draft.update(prompt, id);
                 if (requested) {
                   const next = new URLSearchParams(params);
                   next.delete("project");
@@ -321,6 +338,12 @@ export function HomeComposer({
             {starter.needsReview
               ? " Reload Home to review what was created before trying again."
               : ""}
+          </p>
+        ) : project && movedFrom !== undefined ? (
+          <p className="type-meta text-basic-tertiary">
+            Your draft will start in{" "}
+            <span className="type-meta-strong text-basic-primary">{project.name}</span>
+            {movedFrom ? `, not ${movedFrom}` : ""}.
           </p>
         ) : null}
       </div>

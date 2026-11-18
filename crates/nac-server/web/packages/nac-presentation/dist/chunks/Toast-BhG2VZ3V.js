@@ -7800,20 +7800,20 @@ var mp = [
 	sp,
 	"shift",
 	"o"
-], hp = mp, gp = mp, _p = [sp, "k"], vp = [sp, "/"], yp = [sp, "n"], bp = [sp, "b"], xp = [sp, "\\"], Sp = [
+], hp = [sp, "n"], gp = [sp, "k"], _p = [sp, "/"], vp = [sp, "b"], yp = [sp, "\\"], bp = [
 	sp,
 	"shift",
 	"e"
-], Cp = [
+], xp = [
 	{
 		id: "palette",
-		keys: _p,
+		keys: gp,
 		label: "Open the command palette",
 		group: "General"
 	},
 	{
 		id: "shortcuts",
-		keys: vp,
+		keys: _p,
 		label: "Show keyboard shortcuts",
 		group: "General"
 	},
@@ -7826,25 +7826,19 @@ var mp = [
 	},
 	{
 		id: "new-session",
-		keys: yp,
-		label: "New session",
-		group: "Navigation"
-	},
-	{
-		id: "new-in-project",
-		keys: gp,
-		label: "New session in this project (new project elsewhere)",
+		keys: mp,
+		label: "New session (in the current project)",
 		group: "Navigation"
 	},
 	{
 		id: "sidebar",
-		keys: bp,
+		keys: vp,
 		label: "Toggle the sidebar",
 		group: "Navigation"
 	},
 	{
 		id: "next-needs-you",
-		keys: Sp,
+		keys: bp,
 		label: "Next session that needs you",
 		group: "Navigation"
 	},
@@ -7857,7 +7851,7 @@ var mp = [
 	},
 	{
 		id: "dock",
-		keys: xp,
+		keys: yp,
 		label: "Dock or float the drawer",
 		group: "Session"
 	},
@@ -7880,7 +7874,22 @@ var mp = [
 		group: "Attention card",
 		spelled: !0
 	}
-], wp = [
+], Sp = [{
+	id: "native-new-session",
+	keys: hp,
+	label: "New session (app menu)",
+	group: "Navigation"
+}];
+function Cp(e) {
+	if (!e) return xp;
+	let t = xp.findIndex((e) => e.id === "new-session") + 1;
+	return [
+		...xp.slice(0, t),
+		...Sp,
+		...xp.slice(t)
+	];
+}
+var wp = [
 	"General",
 	"Navigation",
 	"Session",
@@ -9077,4 +9086,4 @@ var ch = /* @__PURE__ */ function(e) {
 		})
 	});
 };
-export { K as $, xp as A, dp as B, Hp as C, zp as D, Pp as E, Sp as F, us as G, rp as H, Cp as I, Ro as J, Io as K, wp as L, hp as M, mp as N, Tp as O, yp as P, Ao as Q, vp as R, Kp as S, Ip as T, ap as U, pp as V, ip as W, Mo as X, Fo as Y, jo as Z, am as _, th as a, Qp as b, Tm as c, gm as d, ko as et, hm as f, im as g, om as h, ah as i, sp as j, _p as k, Em as l, dm as m, ch as n, _n as nt, ih as o, mm as p, Lo as q, sh as r, U as rt, jm as s, fh as t, G as tt, wm as u, sm as v, Up as w, Xp as x, rm as y, bp as z };
+export { ko as $, yp as A, Cp as B, Hp as C, zp as D, Pp as E, wp as F, Io as G, ap as H, _p as I, Fo as J, Lo as K, vp as L, hp as M, mp as N, Tp as O, bp as P, K as Q, dp as R, Kp as S, Ip as T, ip as U, rp as V, us as W, jo as X, Mo as Y, Ao as Z, am as _, th as a, Qp as b, Tm as c, gm as d, G as et, hm as f, im as g, om as h, ah as i, sp as j, gp as k, Em as l, dm as m, ch as n, U as nt, ih as o, mm as p, Ro as q, sh as r, jm as s, fh as t, _n as tt, wm as u, sm as v, Up as w, Xp as x, rm as y, pp as z };
