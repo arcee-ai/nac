@@ -141,10 +141,7 @@ use nac_core::{
         ToolCallContent,
     },
     sessions,
-    store::{
-        ManagedOrchestratorExecutionMode, ManagedOrchestratorStatus, SessionGoalRecord,
-        SessionInboxRecord,
-    },
+    store::{ManagedOrchestratorStatus, SessionGoalRecord, SessionInboxRecord},
     view::{self, SessionSummarySnapshot},
     workspace::GitTarget,
 };
@@ -351,19 +348,6 @@ struct SessionManagerInner {
 
 struct ServerTraditionalChildController {
     manager: Weak<SessionManagerInner>,
-}
-
-struct ServerOrchestrationController {
-    manager: Weak<SessionManagerInner>,
-}
-
-impl ServerOrchestrationController {
-    fn manager(&self) -> Result<SessionManager> {
-        self.manager
-            .upgrade()
-            .map(|inner| SessionManager { inner })
-            .ok_or_else(|| anyhow!("session manager is no longer available"))
-    }
 }
 
 impl ServerTraditionalChildController {
@@ -639,14 +623,8 @@ impl SessionManager {
             }),
         );
         nac_core::peer_goal_control::register_controller(
-            store_path.clone(),
-            Arc::new(application::peer_goals::ServerPeerGoalController {
-                manager: Arc::downgrade(&manager.inner),
-            }),
-        );
-        nac_core::orchestration_control::register_controller(
             store_path,
-            Arc::new(ServerOrchestrationController {
+            Arc::new(application::peer_goals::ServerPeerGoalController {
                 manager: Arc::downgrade(&manager.inner),
             }),
         );
@@ -1498,23 +1476,6 @@ impl SessionManager {
         })
     }
 
-    async fn submit_managed_orchestrator_prompt(
-        &self,
-        session_id: &str,
-        request: SubmitPromptRequest,
-        execution_mode: ManagedOrchestratorExecutionMode,
-    ) -> Result<SubmitPromptResponse> {
-        let submitted = self
-            .session_runs()
-            .submit_managed_orchestrator(session_id, request.prompt, execution_mode)
-            .await?;
-        Ok(SubmitPromptResponse {
-            run_id: submitted.run_id,
-            client_id: submitted.client_id,
-            display_prompt: submitted.display_prompt,
-        })
-    }
-
     pub async fn queue_thread_steering(
         &self,
         session_id: &str,
@@ -1534,31 +1495,6 @@ impl SessionManager {
         })
     }
 
-    async fn queue_thread_steering_unchecked(
-        &self,
-        session_id: &str,
-        thread_name: &str,
-        request: ThreadSteeringRequest,
-        expected_run_id: Option<&str>,
-    ) -> Result<ThreadSteeringResponse> {
-        let steering = self
-            .session_runs()
-            .queue_thread_steering_for_run(
-                session_id,
-                thread_name,
-                request.instruction,
-                expected_run_id,
-                nac_core::store::InputOrigin::Automation,
-            )
-            .await?;
-        Ok(ThreadSteeringResponse {
-            steering_id: steering.steering_id,
-            thread_name: steering.thread_name,
-            status: steering.status,
-            instruction_preview: steering.instruction_preview,
-        })
-    }
-
     pub async fn queue_orchestrator_steering(
         &self,
         session_id: &str,
@@ -1569,24 +1505,6 @@ impl SessionManager {
             .session_runs()
             .queue_orchestrator_steering(session_id, request.instruction, origin)
             .await?;
-        Ok(OrchestratorSteeringResponse {
-            steering_id: steering.steering_id,
-            status: steering.status,
-            instruction_preview: steering.instruction_preview,
-        })
-    }
-
-    fn queue_managed_orchestrator_steering(
-        &self,
-        parent_session_id: &str,
-        orchestrator_session_id: &str,
-        instruction: &str,
-    ) -> Result<OrchestratorSteeringResponse> {
-        let steering = self.session_runs().queue_managed_orchestrator_steering(
-            parent_session_id,
-            orchestrator_session_id,
-            instruction,
-        )?;
         Ok(OrchestratorSteeringResponse {
             steering_id: steering.steering_id,
             status: steering.status,
@@ -1624,16 +1542,6 @@ impl SessionManager {
 
     pub async fn cancel_active_run(&self, session_id: &str) -> Result<()> {
         self.session_runs().cancel(session_id).await
-    }
-
-    async fn cancel_active_run_exact_unchecked(
-        &self,
-        session_id: &str,
-        run_id: &str,
-    ) -> Result<application::session_runs::ExactCancelOutcome> {
-        self.session_runs()
-            .cancel_exact_unchecked(session_id, run_id)
-            .await
     }
 
     /// Cancel every run owned by this process before a graceful server stop.
@@ -1682,58 +1590,6 @@ impl SessionManager {
         self.session_configuration()
             .update_session_config(session_id, request.into_application())
             .await
-    }
-
-    async fn create_managed_orchestrator_session(
-        &self,
-        parent_session_id: &str,
-        description: &str,
-    ) -> Result<String> {
-        let gate = self.lifecycle_gate(parent_session_id);
-        let _lifecycle = gate.lock().await;
-        let _relationship_lease = sessions::SessionRelationshipLease::try_acquire(
-            &self.inner.store_path,
-            parent_session_id,
-        )?;
-        let parent = sessions::load_session(&self.inner.store_path, parent_session_id)?;
-        if parent.behavior != sessions::SessionBehavior::DirectWithOrchestrator {
-            return Err(anyhow!(
-                "managed orchestrators require direct-with-orchestrator behavior"
-            ));
-        }
-        if nac_core::store::load_managed_orchestrator(&self.inner.store_path, parent_session_id)?
-            .is_some()
-        {
-            return Err(anyhow!(
-                "managed orchestrator sessions cannot launch orchestrators"
-            ));
-        }
-        let orchestrator_session_id = uuid::Uuid::new_v4().to_string();
-        let mut orchestrator = sessions::new_snapshot(
-            orchestrator_session_id.clone(),
-            parent.cwd,
-            parent.model,
-            parent.base_url,
-            parent.backend,
-            parent.reasoning_effort,
-            parent.sandbox_spec,
-            parent.ssh,
-            Vec::new(),
-            parent.api_key_env,
-            parent.extra_headers,
-        );
-        orchestrator.behavior = sessions::SessionBehavior::Orchestrator;
-        orchestrator.project_id = parent.project_id;
-        orchestrator.light_model = parent.light_model;
-        orchestrator.orchestrator_compaction_threshold = parent.orchestrator_compaction_threshold;
-        orchestrator.automatic_compaction = parent.automatic_compaction;
-        nac_core::store::create_managed_orchestrator_session(
-            &self.inner.store_path,
-            &orchestrator,
-            parent_session_id,
-            description,
-        )?;
-        Ok(orchestrator_session_id)
     }
 
     async fn create_traditional_child_session(

@@ -42,10 +42,6 @@ struct Cli {
 }
 
 #[derive(Subcommand)]
-#[expect(
-    clippy::large_enum_variant,
-    reason = "Clap owns the closed root command payloads and boxing would complicate derive wiring"
-)]
 enum RootCommand {
     /// Resolve local Mac launch paths without opening the selected store.
     #[cfg(unix)]

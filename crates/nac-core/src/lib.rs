@@ -13,7 +13,6 @@ pub mod light_model;
 pub mod managed_fault_fixture;
 mod mcp;
 pub mod model;
-pub mod orchestration_control;
 pub mod peer_goal_control;
 pub mod task_followups;
 pub mod task_launch_control;

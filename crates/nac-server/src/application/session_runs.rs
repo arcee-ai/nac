@@ -78,22 +78,6 @@ impl<'a> SessionRunApplication<'a> {
             .await
     }
 
-    pub(crate) async fn submit_managed_orchestrator(
-        &self,
-        session_id: &str,
-        prompt: String,
-        execution_mode: ManagedOrchestratorExecutionMode,
-    ) -> Result<SubmittedRun> {
-        self.manager
-            .validate_operation_session(
-                session_id,
-                super::persistence::OperationSessionScope::Persisted,
-            )
-            .await?;
-        self.submit_with_admission(session_id, prompt, Some(execution_mode), None)
-            .await
-    }
-
     async fn submit_with_admission(
         &self,
         session_id: &str,
@@ -245,25 +229,6 @@ impl<'a> SessionRunApplication<'a> {
             ._store_ownership
             .call_legacy(move || service.queue_orchestrator_steering(&instruction, origin))
             .await??;
-        Ok(OrchestratorSteering {
-            steering_id: record.id,
-            status: record.status,
-            instruction_preview: record.instruction.chars().take(160).collect(),
-        })
-    }
-
-    pub(crate) fn queue_managed_orchestrator_steering(
-        &self,
-        parent_session_id: &str,
-        orchestrator_session_id: &str,
-        instruction: &str,
-    ) -> Result<OrchestratorSteering> {
-        let record = nac_core::store::queue_managed_orchestrator_steering(
-            &self.manager.inner.store_path,
-            parent_session_id,
-            orchestrator_session_id,
-            instruction,
-        )?;
         Ok(OrchestratorSteering {
             steering_id: record.id,
             status: record.status,

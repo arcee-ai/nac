@@ -161,35 +161,6 @@ impl<'a> DelegationApplication<'a> {
             .cancel(parent_session_id, child_session_id, child.generation)
             .await
     }
-
-    pub(crate) async fn managed_orchestrator_async(
-        &self,
-        parent_session_id: &str,
-        orchestrator_session_id: &str,
-    ) -> Result<ManagedOrchestratorRecord> {
-        let manager = self.manager.clone();
-        let parent_session_id = parent_session_id.to_owned();
-        let orchestrator_session_id = orchestrator_session_id.to_owned();
-        nac_core::store::spawn_blocking_store_caller(move || {
-            manager
-                .delegation()
-                .managed_orchestrator(&parent_session_id, &orchestrator_session_id)
-        })
-        .await?
-    }
-
-    pub(crate) fn managed_orchestrator(
-        &self,
-        parent_session_id: &str,
-        orchestrator_session_id: &str,
-    ) -> Result<ManagedOrchestratorRecord> {
-        nac_core::store::load_managed_orchestrator_for_parent(
-            &self.manager.inner.store_path,
-            parent_session_id,
-            orchestrator_session_id,
-        )?
-        .ok_or_else(|| anyhow!("managed orchestrator was not found"))
-    }
 }
 
 impl SessionManager {
