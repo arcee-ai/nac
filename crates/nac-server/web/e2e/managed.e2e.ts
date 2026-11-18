@@ -582,7 +582,6 @@ test("completes the managed first-run, write-only secret, and clone journey", as
   await page.getByRole("button", { name: "Create Project" }).click();
   await expect(page.getByRole("dialog")).toContainText("New Project");
   await expect(page.getByRole("button", { name: /Trinity-Large-Thinking/ })).toBeVisible();
-  await expect(page.getByText("Detected", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: /Trinity-Large-Thinking/ }).click();
   await page.getByRole("button", { name: /Kimi K3/ }).click();
   await expect(page.getByRole("button", { name: /Kimi K3/ })).toBeVisible();

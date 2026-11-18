@@ -71,18 +71,18 @@ for (const width of [1440, 768, 390]) {
       await search.press("ArrowDown");
       await search.press("Enter");
       await expect(dialog.getByRole("button").filter({ hasText: longModel }).first()).toBeVisible();
-      await dialog
-        .getByRole("button", { name: "Advanced presets and provider setup", exact: true })
-        .click();
-      await expect(dialog.getByRole("button", { name: "Create New", exact: true })).toBeVisible();
-      await captureSetup(
-        page,
-        info,
-        width,
-        "advanced",
-        dialog.getByText("Configurations", { exact: true }),
-      );
-      await dialog.getByRole("button", { name: "Back to unified models", exact: true }).click();
+      if (setupBaseline()) {
+        await dialog.getByRole("button", { name: "Advanced presets and provider setup", exact: true }).click();
+        await expect(dialog.getByRole("button", { name: "Create New", exact: true })).toBeVisible();
+        await captureSetup(page, info, width, "advanced", dialog.getByText("Configurations", { exact: true }));
+        await dialog.getByRole("button", { name: "Back to unified models", exact: true }).click();
+      } else {
+        await dialog.getByRole("button", { name: "Provider connections", exact: true }).click();
+        const connections = dialog.getByRole("region", { name: "Provider connections", exact: true }).last();
+        await expect(connections.getByRole("button", { name: "Sign in with ChatGPT", exact: true })).toBeVisible();
+        await captureSetup(page, info, width, "provider-connections", connections);
+        await dialog.getByRole("button", { name: "Provider connections", exact: true }).click();
+      }
       const folderButton = dialog
         .getByRole("button", { name: new RegExp(`Working Folder|${folder}`) })
         .first();
