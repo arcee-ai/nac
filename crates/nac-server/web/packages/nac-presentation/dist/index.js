@@ -12129,11 +12129,11 @@ function qm({ fallbackLabel: e, pending: t, value: n, effort: r, supportedEffort
 		children: /* @__PURE__ */ Q(Hm, {
 			disabled: s,
 			className: "text-basic-primary",
-			"aria-label": k ? `Model: ${k}${j ? ", reasoning not available" : M ? `, ${M} reasoning` : ""}` : "Choose a model",
+			"aria-label": k ? `Model: ${k}${M && !j ? `, ${M} reasoning` : ""}` : "Choose a model",
 			"aria-haspopup": "menu",
 			"aria-expanded": h,
 			onClick: () => h ? N() : g(!0),
-			children: t ? "Model…" : /* @__PURE__ */ $(Z, { children: [k ?? "Choose a model", M ? /* @__PURE__ */ Q("span", {
+			children: t ? "Model…" : /* @__PURE__ */ $(Z, { children: [k ?? "Choose a model", M && !j ? /* @__PURE__ */ Q("span", {
 				className: "ml-1.5 text-basic-muted",
 				children: M
 			}) : null] })

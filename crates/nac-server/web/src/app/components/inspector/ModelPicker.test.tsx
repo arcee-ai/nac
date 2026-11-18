@@ -293,10 +293,11 @@ it("shows effort as Not available and sends none for a model that accepts none",
     reasoning_effort: null,
   } as SessionMetadata);
   try {
-    const chip = await openChip("Model: DeepSeek Flash, reasoning not available");
-    expect(chip.textContent).toContain("Not available");
+    const chip = await openChip("Model: DeepSeek Flash");
+    expect(chip.textContent).not.toContain("Not available");
     const effort = screen.getByRole("menuitem", { name: /^Effort/ });
     expect(effort.getAttribute("aria-disabled")).toBe("true");
+    expect(effort.textContent).toContain("Not available");
     expect(update).not.toHaveBeenCalled();
   } finally {
     second.view.unmount();

@@ -211,8 +211,9 @@ describe("Home composer", () => {
     fakes.inheritedEffort = null;
     fakes.inheritedModel = "no-levels";
     mount("/", false);
-    const chip = screen.getByRole("button", { name: /, reasoning not available$/ });
-    expect(chip.textContent).toContain("Not available");
+    const chip = screen.getByRole("button", { name: /^Model: / });
+    expect(chip.getAttribute("aria-label")).not.toContain("reasoning");
+    expect(chip.textContent).not.toContain("Not available");
     fireEvent.click(chip);
     const effort = screen.getByRole("menuitem", { name: /^Effort/ });
     expect(effort.getAttribute("aria-disabled")).toBe("true");

@@ -330,13 +330,7 @@ export function ModelPicker({
         className="text-basic-primary"
         aria-label={
           name
-            ? `Model: ${name}${
-                noEfforts
-                  ? ", reasoning not available"
-                  : effortLabel
-                    ? `, ${effortLabel} reasoning`
-                    : ""
-              }`
+            ? `Model: ${name}${effortLabel && !noEfforts ? `, ${effortLabel} reasoning` : ""}`
             : "Choose a model"
         }
         aria-haspopup="menu"
@@ -348,7 +342,9 @@ export function ModelPicker({
         ) : (
           <>
             {name ?? "Choose a model"}
-            {effortLabel ? <span className="ml-1.5 text-basic-muted">{effortLabel}</span> : null}
+            {effortLabel && !noEfforts ? (
+              <span className="ml-1.5 text-basic-muted">{effortLabel}</span>
+            ) : null}
           </>
         )}
       </Chip>
