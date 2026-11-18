@@ -1,12 +1,13 @@
 /** @vitest-environment jsdom */
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { ModelPicker } from "@/app/components/inspector/ModelPicker";
 import { ToastProvider } from "@/app/providers/ToastProvider";
 import { api } from "@/app/services/api";
+import { queryKeys } from "@/app/services/queries/keys";
 import type { ManagedHostStatus, ModelCatalog, SessionMetadata } from "@/app/types/api";
 
 const cost = { input: 0, output: 0, cache_read: 0, cache_write: 0 };
@@ -230,5 +231,62 @@ it("atomically resets Fast to Standard when the target Codex capability is unkno
   } finally {
     view.unmount();
     client.clear();
+  }
+});
+
+it("keeps controls locked when the accepted change cannot refresh the snapshot", async () => {
+  const update = vi.spyOn(api, "updateConfig").mockResolvedValue(undefined);
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  const metadata = {
+    backend: "arcee-auth",
+    model: "trinity-large-thinking",
+    base_url: "https://api.arcee.ai/api/v1",
+    api_key_env: null,
+    reasoning_effort: "high",
+  } as SessionMetadata;
+  function ActiveSnapshot() {
+    useQuery({
+      queryKey: queryKeys.sessionSnapshot("session"),
+      queryFn: () => Promise.reject(new Error("offline")),
+      initialData: { metadata },
+      staleTime: Infinity,
+      retry: false,
+    });
+    return (
+      <ModelPicker
+        sessionId="session"
+        metadata={metadata}
+        label={metadata.model}
+        disabled={false}
+      />
+    );
+  }
+  const view = render(
+    <QueryClientProvider client={client}>
+      <ToastProvider>
+        <ActiveSnapshot />
+      </ToastProvider>
+    </QueryClientProvider>,
+  );
+  try {
+    const button = await screen.findByRole("button", { name: "Model" });
+    await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(button);
+    fireEvent.change(screen.getByPlaceholderText("Search models…"), {
+      target: { value: "GPT-5.6 Sol" },
+    });
+    fireEvent.click(await screen.findByText("GPT-5.6 Sol"));
+    await waitFor(() => expect(update).toHaveBeenCalledOnce());
+    await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(true));
+    expect(
+      await screen.findByText(/Settings were saved, but the latest session could not be loaded/),
+    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Retry settings refresh" })).toBeTruthy();
+  } finally {
+    view.unmount();
+    client.clear();
+    update.mockRestore();
   }
 });

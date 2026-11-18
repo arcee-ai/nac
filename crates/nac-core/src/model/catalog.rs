@@ -55,6 +55,13 @@ pub(super) fn codex_refresh_after_login() {
     codex_overlay::request_refresh(true);
 }
 
+#[cfg(feature = "codex-e2e-fixture")]
+pub(super) fn codex_e2e_models(
+    fingerprint: &str,
+) -> Result<Vec<crate::model::ProviderModel>, String> {
+    codex_overlay::fixture_models(fingerprint)
+}
+
 pub(super) fn record_codex_discovery(account: &str, body: &str) {
     codex_overlay::record_discovery(account, body);
 }

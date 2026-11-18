@@ -99,6 +99,23 @@ pub(super) fn merge_cache(catalog: &mut ModelCatalog, home: &Path) {
     }
 }
 
+#[cfg(feature = "codex-e2e-fixture")]
+pub(super) fn fixture_models(
+    fingerprint: &str,
+) -> Result<Vec<crate::model::ProviderModel>, String> {
+    let home = crate::paths::nac_home_dir().ok_or("Codex fixture home is unavailable")?;
+    let cache = read_cache(&cache_path(&home, fingerprint), fingerprint)
+        .ok_or("Codex fixture discovery cache is unavailable")?;
+    Ok(cache
+        .models
+        .into_iter()
+        .map(|model| crate::model::ProviderModel {
+            id: model.id,
+            display_name: model.display_name,
+        })
+        .collect())
+}
+
 fn cache_path(home: &Path, fingerprint: &str) -> std::path::PathBuf {
     super::overlay::overlay_dir(home).join(format!("codex-{fingerprint}.json"))
 }

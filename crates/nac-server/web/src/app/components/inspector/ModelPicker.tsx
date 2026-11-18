@@ -1,7 +1,10 @@
 import { useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 
 import {
+  Button,
   ButtonSize,
+  ButtonVariant,
   PopoverPlacement,
   Tooltip,
   TooltipPosition,
@@ -23,7 +26,13 @@ import { resolveCatalogModel, type CatalogPick } from "@/app/lib/catalog";
 import { cn } from "@/app/lib/cn";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { useToast } from "@/app/providers/ToastProvider";
-import { useModelCatalog, useReadyProviderModels, useUpdateConfig } from "@/app/services/queries";
+import {
+  queryKeys,
+  useModelCatalog,
+  useReadyProviderModels,
+  useSessionSnapshot,
+  useUpdateConfig,
+} from "@/app/services/queries";
 import type { BackendKind, ReasoningEffort, SessionMetadata } from "@/app/types/api";
 
 const EFFORT_ROW_HINTS: Record<string, { title: string; description: string }> = {
@@ -98,7 +107,21 @@ export function ModelPicker({
   const catalog = useModelCatalog();
   const managedModel = useManagedModelProfile();
   const liveByBackend = useReadyProviderModels(catalog.data);
+  const queryClient = useQueryClient();
   const updateConfig = useUpdateConfig();
+  // Observe the existing snapshot without starting a separate fetch. A failed
+  // refresh leaves cached metadata visible, but it is unsafe for another edit.
+  const snapshot = useSessionSnapshot(sessionId, { enabled: false, retry: false });
+  const controlsDisabled = disabled || !metadata || updateConfig.isPending || snapshot.isError;
+  const reportRefreshFailure = () => {
+    // Read the query after the mutation's awaited invalidation has settled.
+    // React state can still be from the preceding render at this point.
+    const state = queryClient.getQueryState(queryKeys.sessionSnapshot(sessionId));
+    if (state?.status === "error")
+      toast.error(
+        "Settings were saved, but the latest session could not be loaded. Retry the refresh before making another change.",
+      );
+  };
   const currentModel = metadata?.model ?? label;
   const currentEffort = metadata?.reasoning_effort ?? "";
   const currentSpeed = (metadata?.service_tier ?? null) as ServiceTier | null;
@@ -170,6 +193,7 @@ export function ModelPicker({
         };
     try {
       await updateConfig.mutateAsync({ id: sessionId, patch });
+      reportRefreshFailure();
       toast.success(
         `Model switched to ${pick.model}${speed !== currentSpeed ? "; speed reset to Standard" : ""}`,
       );
@@ -185,6 +209,7 @@ export function ModelPicker({
         id: sessionId,
         patch: { reasoning_effort: effort || null },
       });
+      reportRefreshFailure();
       toast.success(`Reasoning set to ${effort || "the model default"}`);
     } catch (error) {
       toast.error(
@@ -197,6 +222,7 @@ export function ModelPicker({
     if (!metadata || speed === currentSpeed) return;
     try {
       await updateConfig.mutateAsync({ id: sessionId, patch: { service_tier: speed } });
+      reportRefreshFailure();
       toast.success(`Speed set to ${speedLabel(speed)}`);
     } catch (error) {
       toast.error(`Speed was not changed: ${humanErrorText(toRunError(error), metadata.backend)}`);
@@ -210,7 +236,7 @@ export function ModelPicker({
         loading={catalog.isLoading}
         failed={catalog.isError}
         compact
-        disabled={disabled || !metadata || updateConfig.isPending}
+        disabled={controlsDisabled}
         liveByBackend={liveByBackend}
         value={currentPick}
         onSelect={(pick) => void chooseModel(pick)}
@@ -226,7 +252,7 @@ export function ModelPicker({
           items={effortItems}
           value={currentEffort}
           placeholder="Default"
-          disabled={disabled || !metadata || updateConfig.isPending}
+          disabled={controlsDisabled}
           size={ButtonSize.Small}
           trailingIcon={null}
           placement={PopoverPlacement.TopCenter}
@@ -234,6 +260,16 @@ export function ModelPicker({
           onValueChange={(effort) => void chooseEffort(effort)}
         />
       </Tooltip>
+      {snapshot.isError ? (
+        <Button
+          size={ButtonSize.Small}
+          variant={ButtonVariant.Ghost}
+          disabled={snapshot.isFetching}
+          onClick={() => void snapshot.refetch()}
+        >
+          Retry settings refresh
+        </Button>
+      ) : null}
       <SpeedControl
         tiers={
           metadata?.backend === "chatgpt-codex-responses"
@@ -241,7 +277,7 @@ export function ModelPicker({
             : null
         }
         value={currentSpeed}
-        disabled={disabled || !metadata || updateConfig.isPending}
+        disabled={controlsDisabled}
         onChange={(speed) => void chooseSpeed(speed)}
       />
     </div>

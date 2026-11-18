@@ -6763,9 +6763,11 @@ function yT() {
 	return h({
 		retry: !1,
 		mutationFn: ({ id: t, patch: n }) => e.updateConfig(t, n),
-		onSuccess: (e, { id: r }) => {
-			n.invalidateQueries({ queryKey: y.sessionConfig(r) }), t.session(r), t.sessions();
-		}
+		onSuccess: (e, { id: r }) => Promise.all([
+			n.invalidateQueries({ queryKey: y.sessionConfig(r) }),
+			t.session(r),
+			t.sessions()
+		])
 	});
 }
 function bT() {

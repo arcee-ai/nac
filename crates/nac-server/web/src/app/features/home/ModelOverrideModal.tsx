@@ -88,7 +88,19 @@ function ModelOverrideForm({
       ? { ...current.selection, extra_headers: current.selection.extra_headers ?? {} }
       : inherited?.initial;
 
+  const selectedValues = selection?.kind === "resolved" ? selection : selection?.request;
+  const needsSpeedReconciliation = Boolean(
+    inherited?.initial.service_tier &&
+    selectedValues &&
+    selectedValues.service_tier === undefined &&
+    selectedValues.backend !== "chatgpt-codex-responses",
+  );
+
   const apply = () => {
+    if (needsSpeedReconciliation) {
+      setError("Clear the inherited speed preference before choosing this model.");
+      return;
+    }
     if (!selection) {
       setError("Choose the primary model first.");
       return;
@@ -156,6 +168,27 @@ function ModelOverrideForm({
             invalid={Boolean(error)}
             errorText={error || undefined}
           />
+          {needsSpeedReconciliation ? (
+            <div role="alert" className="text-small text-basic-secondary">
+              <p>Clear the inherited speed preference before choosing this model.</p>
+              <Button
+                variant={ButtonVariant.Secondary}
+                className="min-h-11"
+                onClick={() => {
+                  setSelection((value) =>
+                    value?.kind === "resolved"
+                      ? { ...value, service_tier: null }
+                      : value?.kind === "save"
+                        ? { ...value, request: { ...value.request, service_tier: null } }
+                        : value,
+                  );
+                  setError("");
+                }}
+              >
+                Use provider default for speed
+              </Button>
+            </div>
+          ) : null}
           {policy.orchestrationEnabled ? (
             <LightModelSection
               key={JSON.stringify(selectedLight)}

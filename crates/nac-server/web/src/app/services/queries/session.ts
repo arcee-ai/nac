@@ -425,11 +425,14 @@ export function useUpdateConfig() {
     retry: false,
     mutationFn: ({ id, patch }: { id: string; patch: UpdateConfigRequest }) =>
       api.updateConfig(id, patch),
-    onSuccess: (_data, { id }) => {
-      void client.invalidateQueries({ queryKey: queryKeys.sessionConfig(id) });
-      void invalidate.session(id);
-      void invalidate.sessions();
-    },
+    // Keep callers disabled while active snapshot and configuration refreshes
+    // settle, so another change cannot use stale values during the refetch.
+    onSuccess: (_data, { id }) =>
+      Promise.all([
+        client.invalidateQueries({ queryKey: queryKeys.sessionConfig(id) }),
+        invalidate.session(id),
+        invalidate.sessions(),
+      ]),
   });
 }
 

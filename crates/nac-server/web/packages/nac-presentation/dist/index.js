@@ -1,9 +1,9 @@
 import { A as e, C as t, D as n, F as r, I as i, L as a, M as o, N as s, O as c, P as l, R as u, S as d, T as f, _ as p, a as m, b as h, c as g, d as _, f as v, g as y, h as b, i as x, j as S, k as C, l as w, m as T, n as E, o as D, p as O, r as k, s as A, t as j, u as M, v as ee, w as N, x as te, y as ne } from "./chunks/RuntimeContext-Dt_ZSus9.js";
 import { C as re, D as P, E as ie, O as ae, S as oe, b as se, d as ce, f as le, g as ue, h as de, i as fe, l as pe, m as me, n as he, p as ge, r as _e, t as ve, u as ye, v as be, w as xe, x as Se, y as F } from "./chunks/PresentationBoundary-wIna-o0Q.js";
 import { n as Ce, t as we } from "./chunks/visibility-Cy5NeKga.js";
-import { $ as Te, $n as Ee, $t as De, A as Oe, An as ke, At as Ae, B as je, Bn as Me, Bt as Ne, C as Pe, Cn as Fe, Ct as Ie, D as Le, Dn as Re, Dt as ze, E as Be, En as Ve, Et as He, F as Ue, Fn as We, Ft as Ge, G as Ke, Gn as qe, Gt as Je, H as Ye, Hn as Xe, Ht as Ze, I as Qe, In as $e, It as et, J as tt, Jn as nt, Jt as rt, K as it, Kn as at, Kt as ot, L as st, Ln as ct, Lt as lt, M as ut, Mn as dt, Mt as ft, N as pt, Nn as mt, Nt as ht, O as gt, On as _t, Ot as vt, P as yt, Pn as bt, Pt as xt, Q as St, Qn as Ct, Qt as wt, R as Tt, Rn as Et, Rt as Dt, S as Ot, Sn as kt, St as At, T as jt, Tn as Mt, Tt as Nt, U as Pt, Un as Ft, Ut as It, V as Lt, Vn as Rt, Vt as zt, W as Bt, Wn as Vt, Wt as Ht, X as Ut, Xn as Wt, Xt as Gt, Y as Kt, Yn as qt, Yt as Jt, Z as Yt, Zn as Xt, Zt, _ as Qt, _n as $t, _r as en, _t as tn, a as nn, an as rn, ar as an, at as on, b as sn, bn as cn, br as ln, bt as un, c as dn, cn as fn, cr as pn, ct as mn, d as hn, dn as gn, dr as _n, dt as vn, en as yn, er as bn, et as xn, f as Sn, fn as Cn, fr as wn, ft as Tn, g as En, gn as Dn, gr as On, gt as kn, h as An, hn as jn, hr as Mn, ht as Nn, i as Pn, in as Fn, ir as In, it as Ln, j as Rn, jn as zn, jt as Bn, k as Vn, kn as Hn, kt as Un, l as Wn, ln as Gn, lr as Kn, lt as qn, m as Jn, mn as Yn, mr as Xn, mt as Zn, nn as Qn, nr as $n, nt as er, o as tr, on as nr, or as rr, ot as ir, p as ar, pn as or, pr as sr, pt as cr, q as lr, qn as ur, qt as dr, r as fr, rn as pr, rr as mr, rt as hr, s as gr, sn as _r, sr as vr, st as yr, t as br, tn as xr, tr as Sr, tt as Cr, u as wr, un as Tr, ur as Er, ut as Dr, v as Or, vn as kr, vr as Ar, vt as jr, w as Mr, wn as Nr, wt as Pr, x as Fr, xn as Ir, xt as Lr, y as Rr, yn as zr, yr as I, yt as Br, z as Vr, zn as Hr, zt as Ur } from "./chunks/workspaceLink-BaySEfc4.js";
+import { $ as Te, $n as Ee, $t as De, A as Oe, An as ke, At as Ae, B as je, Bn as Me, Bt as Ne, C as Pe, Cn as Fe, Ct as Ie, D as Le, Dn as Re, Dt as ze, E as Be, En as Ve, Et as He, F as Ue, Fn as We, Ft as Ge, G as Ke, Gn as qe, Gt as Je, H as Ye, Hn as Xe, Ht as Ze, I as Qe, In as $e, It as et, J as tt, Jn as nt, Jt as rt, K as it, Kn as at, Kt as ot, L as st, Ln as ct, Lt as lt, M as ut, Mn as dt, Mt as ft, N as pt, Nn as mt, Nt as ht, O as gt, On as _t, Ot as vt, P as yt, Pn as bt, Pt as xt, Q as St, Qn as Ct, Qt as wt, R as Tt, Rn as Et, Rt as Dt, S as Ot, Sn as kt, St as At, T as jt, Tn as Mt, Tt as Nt, U as Pt, Un as Ft, Ut as It, V as Lt, Vn as Rt, Vt as zt, W as Bt, Wn as Vt, Wt as Ht, X as Ut, Xn as Wt, Xt as Gt, Y as Kt, Yn as qt, Yt as Jt, Z as Yt, Zn as Xt, Zt, _ as Qt, _n as $t, _r as en, _t as tn, a as nn, an as rn, ar as an, at as on, b as sn, bn as cn, br as ln, bt as un, c as dn, cn as fn, cr as pn, ct as mn, d as hn, dn as gn, dr as _n, dt as vn, en as yn, er as bn, et as xn, f as Sn, fn as Cn, fr as wn, ft as Tn, g as En, gn as Dn, gr as On, gt as kn, h as An, hn as jn, hr as Mn, ht as Nn, i as Pn, in as Fn, ir as In, it as Ln, j as Rn, jn as zn, jt as Bn, k as Vn, kn as Hn, kt as Un, l as Wn, ln as Gn, lr as Kn, lt as qn, m as Jn, mn as Yn, mr as Xn, mt as Zn, nn as Qn, nr as $n, nt as er, o as tr, on as nr, or as rr, ot as ir, p as ar, pn as or, pr as sr, pt as cr, q as lr, qn as ur, qt as dr, r as fr, rn as pr, rr as mr, rt as hr, s as gr, sn as _r, sr as vr, st as yr, t as br, tn as xr, tr as Sr, tt as Cr, u as wr, un as Tr, ur as Er, ut as Dr, v as Or, vn as kr, vr as Ar, vt as jr, w as Mr, wn as Nr, wt as Pr, x as Fr, xn as Ir, xt as Lr, y as Rr, yn as zr, yr as I, yt as Br, z as Vr, zn as Hr, zt as Ur } from "./chunks/workspaceLink-XZS7Mu_n.js";
 import { $ as Wr, A as Gr, B as Kr, F as qr, I as Jr, J as Yr, K as Xr, L as Zr, M as Qr, N as $r, O as ei, P as ti, Q as ni, R as ri, S as ii, V as ai, X as oi, Y as si, Z as ci, _ as L, a as li, b as ui, c as di, d as fi, et as R, f as pi, g as z, h as B, j as mi, k as hi, l as gi, m as V, nt as _i, o as vi, p as yi, q as bi, rt as H, tt as U, u as xi, x as Si, y as Ci, z as wi } from "./chunks/Toast-yzKsUEOg.js";
-import { A as Ti, At as Ei, B as Di, Bt as Oi, Ct as ki, D as Ai, Dt as ji, E as Mi, Et as Ni, F as Pi, Ft as Fi, G as Ii, H as Li, Ht as Ri, I as zi, J as Bi, K as Vi, Kt as Hi, L as Ui, Mt as Wi, N as Gi, Ot as Ki, P as qi, Pt as Ji, Q as Yi, S as Xi, St as Zi, T as Qi, U as $i, V as ea, Vt as ta, W as na, X as ra, Xt as ia, Y as W, Z as aa, Zt as oa, _ as sa, _t as ca, a as la, an as ua, at as da, b as fa, bt as pa, c as ma, d as ha, dt as ga, en as _a, et as va, f as ya, ft as ba, h as xa, i as Sa, in as Ca, it as wa, kt as Ta, l as Ea, m as Da, mt as Oa, n as ka, nn as Aa, nt as ja, o as Ma, on as Na, p as Pa, pt as Fa, q as G, qt as Ia, r as La, rn as Ra, rt as za, s as Ba, sn as Va, st as Ha, t as Ua, tn as Wa, tt as Ga, u as Ka, ut as qa, v as Ja, vt as Ya, w as Xa, x as Za, xt as Qa, z as $a, zt as eo } from "./chunks/ChatSessionActions-slvq_Ad8.js";
+import { A as Ti, At as Ei, B as Di, Bt as Oi, Ct as ki, D as Ai, Dt as ji, E as Mi, Et as Ni, F as Pi, Ft as Fi, G as Ii, H as Li, Ht as Ri, I as zi, J as Bi, K as Vi, Kt as Hi, L as Ui, Mt as Wi, N as Gi, Ot as Ki, P as qi, Pt as Ji, Q as Yi, S as Xi, St as Zi, T as Qi, U as $i, V as ea, Vt as ta, W as na, X as ra, Xt as ia, Y as W, Z as aa, Zt as oa, _ as sa, _t as ca, a as la, an as ua, at as da, b as fa, bt as pa, c as ma, d as ha, dt as ga, en as _a, et as va, f as ya, ft as ba, h as xa, i as Sa, in as Ca, it as wa, kt as Ta, l as Ea, m as Da, mt as Oa, n as ka, nn as Aa, nt as ja, o as Ma, on as Na, p as Pa, pt as Fa, q as G, qt as Ia, r as La, rn as Ra, rt as za, s as Ba, sn as Va, st as Ha, t as Ua, tn as Wa, tt as Ga, u as Ka, ut as qa, v as Ja, vt as Ya, w as Xa, x as Za, xt as Qa, z as $a, zt as eo } from "./chunks/ChatSessionActions-D0-bFBPw.js";
 import { Activity as to, Fragment as no, Suspense as ro, createContext as io, forwardRef as ao, lazy as oo, memo as so, use as co, useCallback as K, useContext as lo, useEffect as q, useEffectEvent as uo, useId as fo, useLayoutEffect as po, useMemo as J, useRef as Y, useState as X, useSyncExternalStore as mo } from "react";
 import { QueryClientProvider as ho, QueryObserver as go, replaceEqualDeep as _o, useIsFetching as vo, useMutation as yo, useQueries as bo, useQuery as xo, useQueryClient as So } from "@tanstack/react-query";
 import { Fragment as Z, jsx as Q, jsxs as $ } from "react/jsx-runtime";
@@ -11981,7 +11981,7 @@ function Hm({ behavior: e, inherited: t, inheritancePending: n, inheritanceError
 	}, []), _ = l?.kind === "resolved" && l.light_model !== void 0 ? l.light_model : t?.light, v = i?.selection.kind === "resolved" ? {
 		...i.selection,
 		extra_headers: i.selection.extra_headers ?? {}
-	} : t?.initial;
+	} : t?.initial, y = l?.kind === "resolved" ? l : l?.request, b = !!(t?.initial.service_tier && y && y.service_tier === void 0 && y.backend !== "chatgpt-codex-responses");
 	return /* @__PURE__ */ Q(di, {
 		open: !0,
 		onClose: s,
@@ -12002,7 +12002,7 @@ function Hm({ behavior: e, inherited: t, inheritancePending: n, inheritanceError
 				className: "max-md:min-h-11",
 				disabled: !l || n,
 				onClick: () => {
-					l ? c.orchestrationEnabled && d.mode === "dual" && !d.light ? m("Pick the light model, or switch back to a single model.") : a({
+					b ? m("Clear the inherited speed preference before choosing this model.") : l ? c.orchestrationEnabled && d.mode === "dual" && !d.light ? m("Pick the light model, or switch back to a single model.") : a({
 						selection: l,
 						light: d,
 						selectedLight: _
@@ -12036,6 +12036,27 @@ function Hm({ behavior: e, inherited: t, inheritancePending: n, inheritanceError
 					invalid: !!p,
 					errorText: p || void 0
 				}),
+				b ? /* @__PURE__ */ $("div", {
+					role: "alert",
+					className: "text-small text-basic-secondary",
+					children: [/* @__PURE__ */ Q("p", { children: "Clear the inherited speed preference before choosing this model." }), /* @__PURE__ */ Q(V, {
+						variant: L.Secondary,
+						className: "min-h-11",
+						onClick: () => {
+							u((e) => e?.kind === "resolved" ? {
+								...e,
+								service_tier: null
+							} : e?.kind === "save" ? {
+								...e,
+								request: {
+									...e.request,
+									service_tier: null
+								}
+							} : e), m("");
+						},
+						children: "Use provider default for speed"
+					})]
+				}) : null,
 				c.orchestrationEnabled ? /* @__PURE__ */ Q(Qc, {
 					initial: i?.light.light ?? _,
 					behavior: e,
@@ -12069,7 +12090,7 @@ function Um() {
 				allow_insecure_http: n.allow_insecure_http ?? !1,
 				api_key_env: n.api_key_env ?? null,
 				reasoning_effort: n.reasoning_effort ?? null,
-				...n.service_tier == null ? {} : { service_tier: n.service_tier },
+				...e.request.service_tier === null ? { service_tier: null } : n.service_tier == null ? {} : { service_tier: n.service_tier },
 				extra_headers: n.extra_headers,
 				orchestrator_compaction_threshold: n.orchestrator_compaction_threshold ?? null
 			};
@@ -15350,11 +15371,16 @@ var Ag = {
 	}
 }))];
 function Mg({ sessionId: e, metadata: t, label: n, disabled: r }) {
-	let i = bi(), a = tr(), o = $t(), s = Hc(), c = Qt(o.data), l = Zn(), u = t?.model ?? n, d = t?.reasoning_effort ?? "", f = t?.service_tier ?? null, p = t ? {
+	let i = bi(), a = tr(), o = $t(), s = Hc(), c = Qt(o.data), l = So(), u = Zn(), d = ir(e, {
+		enabled: !1,
+		retry: !1
+	}), f = r || !t || u.isPending || d.isError, p = () => {
+		l.getQueryState(sr.sessionSnapshot(e))?.status === "error" && a.error("Settings were saved, but the latest session could not be loaded. Retry the refresh before making another change.");
+	}, m = t?.model ?? n, h = t?.reasoning_effort ?? "", g = t?.service_tier ?? null, _ = t ? {
 		backend: t.backend,
 		model: t.model,
 		baseUrl: t.base_url ?? ""
-	} : null, m = Fs(o.data, t?.backend, u), h = J(() => Cc(m.supportedEfforts, d, jg), [m.supportedEfforts, d]), g = h.find((e) => e.id === d)?.label, _ = typeof g == "string" ? g : "Default", [v, y] = X(!1), b = async (n) => {
+	} : null, v = Fs(o.data, t?.backend, m), y = J(() => Cc(v.supportedEfforts, h, jg), [v.supportedEfforts, h]), b = y.find((e) => e.id === h)?.label, x = typeof b == "string" ? b : "Default", [S, C] = X(!1), w = async (n) => {
 		if (!t || n.backend === t.backend && n.model === t.model) return;
 		let r = o.data?.providers.find((e) => e.id === n.backend), i = n.backend === t.backend, c = !!(r?.auth_status === "ready" || s.matches(n) && s.credentialReady);
 		if (!i && !c) {
@@ -15365,48 +15391,48 @@ function Mg({ sessionId: e, metadata: t, label: n, disabled: r }) {
 			a.error(`Configure an endpoint for ${n.backend} in session settings first.`);
 			return;
 		}
-		let u = Fs(o.data, n.backend, n.model).supportedEfforts, p = d && u.includes(d) ? d : null, m = $c(Fs(o.data, n.backend, n.model).model, n.model), h = f;
-		if (h && n.backend !== "chatgpt-codex-responses") {
+		let l = Fs(o.data, n.backend, n.model).supportedEfforts, d = h && l.includes(h) ? h : null, f = $c(Fs(o.data, n.backend, n.model).model, n.model), m = g;
+		if (m && n.backend !== "chatgpt-codex-responses") {
 			a.error("Choose a compatible speed before switching to this model.");
 			return;
 		}
-		h && !el(m, h) && (h = "standard");
-		let g = i ? {
+		m && !el(f, m) && (m = "standard");
+		let _ = i ? {
 			model: n.model,
-			reasoning_effort: p,
-			...h === f ? {} : { service_tier: h }
+			reasoning_effort: d,
+			...m === g ? {} : { service_tier: m }
 		} : {
 			backend: n.backend,
 			model: n.model,
 			base_url: n.baseUrl,
 			api_key_env: r?.connection?.api_key_env ?? null,
-			reasoning_effort: p,
-			...h === f ? {} : { service_tier: h },
+			reasoning_effort: d,
+			...m === g ? {} : { service_tier: m },
 			extra_headers: null
 		};
 		try {
-			await l.mutateAsync({
+			await u.mutateAsync({
 				id: e,
-				patch: g
-			}), a.success(`Model switched to ${n.model}${h === f ? "" : "; speed reset to Standard"}`);
+				patch: _
+			}), p(), a.success(`Model switched to ${n.model}${m === g ? "" : "; speed reset to Standard"}`);
 		} catch (e) {
 			a.error(`The model was not switched: ${_s(is(e), n.backend)}`);
 		}
-	}, x = async (n) => {
-		if (t && n !== d) try {
-			await l.mutateAsync({
+	}, T = async (n) => {
+		if (t && n !== h) try {
+			await u.mutateAsync({
 				id: e,
 				patch: { reasoning_effort: n || null }
-			}), a.success(`Reasoning set to ${n || "the model default"}`);
+			}), p(), a.success(`Reasoning set to ${n || "the model default"}`);
 		} catch (e) {
 			a.error(`Reasoning was not changed: ${_s(is(e), t.backend)}`);
 		}
-	}, S = async (n) => {
-		if (t && n !== f) try {
-			await l.mutateAsync({
+	}, E = async (n) => {
+		if (t && n !== g) try {
+			await u.mutateAsync({
 				id: e,
 				patch: { service_tier: n }
-			}), a.success(`Speed set to ${tl(n)}`);
+			}), p(), a.success(`Speed set to ${tl(n)}`);
 		} catch (e) {
 			a.error(`Speed was not changed: ${_s(is(e), t.backend)}`);
 		}
@@ -15419,34 +15445,41 @@ function Mg({ sessionId: e, metadata: t, label: n, disabled: r }) {
 				loading: o.isLoading,
 				failed: o.isError,
 				compact: !0,
-				disabled: r || !t || l.isPending,
+				disabled: f,
 				liveByBackend: c,
-				value: p,
-				onSelect: (e) => void b(e)
+				value: _,
+				onSelect: (e) => void w(e)
 			}),
 			/* @__PURE__ */ Q(Ci, {
-				title: `Effort: ${_}`,
+				title: `Effort: ${x}`,
 				description: "How much the model reasons before it answers.",
 				position: oi.TopCenter,
 				sticky: !0,
-				disabled: v,
+				disabled: S,
 				children: /* @__PURE__ */ Q(Ss, {
-					items: h,
-					value: d,
+					items: y,
+					value: h,
 					placeholder: "Default",
-					disabled: r || !t || l.isPending,
+					disabled: f,
 					size: z.Small,
 					trailingIcon: null,
 					placement: oi.TopCenter,
-					onOpenChange: y,
-					onValueChange: (e) => void x(e)
+					onOpenChange: C,
+					onValueChange: (e) => void T(e)
 				})
 			}),
+			d.isError ? /* @__PURE__ */ Q(V, {
+				size: z.Small,
+				variant: L.Ghost,
+				disabled: d.isFetching,
+				onClick: () => void d.refetch(),
+				children: "Retry settings refresh"
+			}) : null,
 			/* @__PURE__ */ Q(nl, {
-				tiers: t?.backend === "chatgpt-codex-responses" ? $c(m.model, u) : null,
-				value: f,
-				disabled: r || !t || l.isPending,
-				onChange: (e) => void S(e)
+				tiers: t?.backend === "chatgpt-codex-responses" ? $c(v.model, m) : null,
+				value: g,
+				disabled: f,
+				onChange: (e) => void E(e)
 			})
 		]
 	});
@@ -30342,7 +30375,7 @@ function Mk({ children: e }) {
 	});
 }
 // src/App.tsx
-var Nk = oo(() => import("./chunks/DesktopSessionTargetOwner-Byp3L73E.js").then((e) => ({ default: e.DesktopSessionTargetOwner }))), Pk = oo(() => import("./chunks/DesignPreviewPage-B_Pg6YAg.js").catch(() => ({ default: () => /* @__PURE__ */ Q("p", {
+var Nk = oo(() => import("./chunks/DesktopSessionTargetOwner-Byp3L73E.js").then((e) => ({ default: e.DesktopSessionTargetOwner }))), Pk = oo(() => import("./chunks/DesignPreviewPage-C5t1aMLc.js").catch(() => ({ default: () => /* @__PURE__ */ Q("p", {
 	role: "alert",
 	children: "The design preview could not be loaded. Reload this page to try again."
 }) })));

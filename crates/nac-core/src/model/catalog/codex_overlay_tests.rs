@@ -398,3 +398,69 @@ fn account_discovery_preserves_speed_metadata_and_distinguishes_empty_from_unkno
     assert_eq!(models[2].service_tiers, None);
     assert_eq!(models[3].service_tiers, None);
 }
+
+#[cfg(feature = "codex-e2e-fixture")]
+#[test]
+fn fixture_managed_discovery_is_local_and_expired_auth_fails_before_refresh() {
+    let _lock = crate::TEST_ENV_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let guard = super::super::test_support::EnvGuard::new(
+        "codex-fixture-discovery",
+        &["NAC_HOME", "NAC_CODEX_E2E_FIXTURE_URL"],
+        &[],
+    );
+    unsafe {
+        std::env::set_var(
+            "NAC_CODEX_E2E_FIXTURE_URL",
+            "http://127.0.0.1:1234/responses",
+        )
+    };
+    let auth_path = guard.path().join("auth.json");
+    let auth = |expires_at_ms| {
+        serde_json::json!({
+            "type":"chatgpt-codex", "access":"e2e-only", "refresh":"e2e-only",
+            "expires_at_ms":expires_at_ms, "account_id":"codex-e2e-account"
+        })
+        .to_string()
+    };
+    nac_credential_store::write_auth_string_to_path(&auth_path, &auth(u64::MAX)).unwrap();
+    record_discovery(
+        "codex-e2e-account",
+        r#"{"models":[{"slug":"fixture-model","display_name":"Fixture"}]}"#,
+    );
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let list = || {
+        runtime.block_on(async {
+            tokio::time::timeout(
+                Duration::from_secs(1),
+                crate::model::list_managed_provider_models(
+                    crate::model::ManagedAuthProvider::Codex,
+                ),
+            )
+            .await
+            .expect("fixture discovery must not wait for network")
+        })
+    };
+    let models = list().unwrap();
+    assert_eq!(models.len(), 1);
+    assert_eq!(models[0].id, "fixture-model");
+    let expired = auth(0);
+    nac_credential_store::write_auth_string_to_path(&auth_path, &expired).unwrap();
+    assert!(list()
+        .unwrap_err()
+        .to_string()
+        .contains("must not be expired"));
+    assert_eq!(std::fs::read_to_string(&auth_path).unwrap(), expired);
+    let direct_error = runtime
+        .block_on(crate::model::chatgpt_codex::stored_auth_for_request(
+            &reqwest::Client::new(),
+        ))
+        .unwrap_err();
+    assert!(direct_error
+        .to_string()
+        .contains("cannot be used for public discovery"));
+}

@@ -612,6 +612,20 @@ pub async fn send_responses(
 
 /// A fixture build may address only a synthetic account and an exact loopback
 /// endpoint. Release builds do not compile this override at all.
+/// Return a validated synthetic account without entering OAuth in fixture mode.
+#[cfg(feature = "codex-e2e-fixture")]
+pub(super) fn codex_e2e_discovery_account() -> Result<Option<String>> {
+    if std::env::var_os("NAC_CODEX_E2E_FIXTURE_URL").is_none() {
+        return Ok(None);
+    }
+    let auth = read_auth_file()?;
+    codex_e2e_fixture_url(&auth)?;
+    if near_expiry(&auth) {
+        return Err(anyhow!("Codex fixture credentials must not be expired"));
+    }
+    Ok(Some(account_fingerprint(&auth.account_id)))
+}
+
 #[cfg(feature = "codex-e2e-fixture")]
 fn codex_e2e_fixture_url(auth: &StoredCodexAuth) -> Result<Option<String>> {
     let Some(value) = std::env::var_os("NAC_CODEX_E2E_FIXTURE_URL") else {
@@ -1024,6 +1038,12 @@ async fn fresh_auth(client: &Client) -> Result<StoredCodexAuth> {
 /// Bearer token and account id for a read-only call to the Codex API, renewed
 /// first when the stored one is close to expiring.
 pub(super) async fn stored_auth_for_request(client: &Client) -> Result<(String, String)> {
+    #[cfg(feature = "codex-e2e-fixture")]
+    if std::env::var_os("NAC_CODEX_E2E_FIXTURE_URL").is_some() {
+        return Err(anyhow!(
+            "Codex fixture credentials cannot be used for public discovery"
+        ));
+    }
     let auth = fresh_auth(client).await?;
     Ok((auth.access, auth.account_id))
 }
