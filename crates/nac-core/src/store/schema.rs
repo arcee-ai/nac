@@ -808,7 +808,12 @@ fn open_connection_with_hooks(
         retirement::purge_owned_rows(&transaction, &doomed)?;
     }
     provider_connections::create_provider_connections(&transaction)?;
-    provider_connections::migrate_provider_connections(&transaction)?;
+    // Presets were copied into independent provider connections in v53. Do
+    // not replay that insert when a later migration opens an existing v53
+    // store: those connections may have been edited or deleted since then.
+    if schema_version < 53 {
+        provider_connections::migrate_provider_connections(&transaction)?;
+    }
     transaction.execute_batch(
         "CREATE TRIGGER IF NOT EXISTS session_direct_only_insert BEFORE INSERT ON sessions
          WHEN NEW.behavior <> 'direct' OR NEW.light_model_json IS NOT NULL BEGIN SELECT RAISE(ABORT, 'retired session behavior or light model'); END;
