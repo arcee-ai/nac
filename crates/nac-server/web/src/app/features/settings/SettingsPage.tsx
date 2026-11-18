@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { Icon, IconName } from "@/app/atoms";
-import { ConfigurationsSettings } from "@/app/components/modals/ConfigurationsModal";
 import { McpServersSettings } from "@/app/components/modals/MCPServersModal/McpServersModal";
 import { SshConfigsSettings } from "@/app/components/modals/SshConfigsModal";
 import { ShortcutList } from "@/app/features/command-palette/ShortcutList";
@@ -24,6 +23,7 @@ import { AboutSection } from "./sections/AboutSection";
 import { AccountsSection } from "./sections/AccountsSection";
 import { AppearanceSection } from "./sections/AppearanceSection";
 import { GeneralSection } from "./sections/GeneralSection";
+import { SettingsBackButton } from "./SettingsRows";
 import { useSettingsReturn } from "./settingsReturn";
 import { useSettingsEscape } from "./useSettingsEscape";
 
@@ -36,8 +36,6 @@ function SectionBody({ section }: { section: SettingsSection }) {
       return <AppearanceSection />;
     case "accounts":
       return <AccountsSection />;
-    case "models":
-      return <ConfigurationsSettings />;
     case "mcp":
       return <McpServersSettings />;
     case "capabilities":
@@ -206,19 +204,6 @@ function SectionHeading({ section }: { section: SettingsSection }) {
   );
 }
 
-function BackButton({ onClick, label }: { onClick: () => void; label: string }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="type-label inline-flex h-8 items-center gap-1 rounded-pill pl-1.5 pr-3 text-basic-secondary outline-none transition-colors duration-150 ease-out hover:bg-[var(--f-wash-2)] hover:text-basic-primary focus-visible:bg-[var(--f-wash-2)] max-md:h-11 max-md:min-w-11"
-    >
-      <Icon iconName={IconName.Left} size={16} />
-      {label}
-    </button>
-  );
-}
-
 function useSectionMatches(query: string) {
   const managed = useManagedHost();
   const available = useMemo(
@@ -278,7 +263,7 @@ export function SettingsPage() {
       <aside className="flex w-[264px] shrink-0 flex-col gap-4 overflow-y-auto border-r border-muted bg-elevation-level-0-5 px-3 pb-6 pt-[52px]">
         <div className="flex flex-col gap-3 px-1">
           <div>
-            <BackButton onClick={leave} label="Back" />
+            <SettingsBackButton onClick={leave} label="Back" />
           </div>
           <h1 className="type-heading px-2 text-basic-primary">Settings</h1>
           <SettingsSearch value={query} onChange={setQuery} />
@@ -312,7 +297,7 @@ function MobileBar({
   return (
     <header className="sticky top-0 z-20 grid shrink-0 grid-cols-[1fr_auto_1fr] items-center bg-elevation-ground/90 px-2 pb-1 pt-[max(4px,env(safe-area-inset-top))] backdrop-blur-md md:px-4 md:pt-[52px]">
       <div className="justify-self-start">
-        <BackButton onClick={onBack} label={backLabel} />
+        <SettingsBackButton onClick={onBack} label={backLabel} />
       </div>
       {title ? <h1 className="type-strong truncate text-basic-primary">{title}</h1> : <span />}
       <div />

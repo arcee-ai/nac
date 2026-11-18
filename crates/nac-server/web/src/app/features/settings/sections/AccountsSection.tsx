@@ -1,13 +1,12 @@
 import { useState } from "react";
 
-import { Button, ButtonVariant, IconName, Input } from "@/app/atoms";
+import { Button, ButtonVariant, Input } from "@/app/atoms";
 import { ManagedAuthCallout } from "@/app/features/managed/presentation/ManagedAuthCallout";
-import { routes } from "@/app/lib/routes";
 import { providerLabel } from "@/app/lib/providers";
 import { useModelCatalog } from "@/app/services/queries";
 import type { ModelCatalog } from "@/app/types/api";
 
-import { SettingsGroup, SettingsLinkRow, SettingsRow } from "../SettingsRows";
+import { SettingsGroup, SettingsRow } from "../SettingsRows";
 
 type ProviderListing = ModelCatalog["providers"][number];
 
@@ -78,14 +77,6 @@ export function AccountsSection() {
             <ProviderKeyRow key={provider.envVar ?? provider.label} provider={provider} />
           ))
         )}
-      </SettingsGroup>
-      <SettingsGroup>
-        <SettingsLinkRow
-          label="Models & providers"
-          hint="Saved model setups, custom endpoints and per-setup keys"
-          to={routes.settings("models")}
-          icon={IconName.Ai}
-        />
       </SettingsGroup>
     </div>
   );

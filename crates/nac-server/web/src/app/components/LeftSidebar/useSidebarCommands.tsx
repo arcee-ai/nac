@@ -81,7 +81,7 @@ export function useSidebarCommands() {
     openProjects: () => navigate(routes.list()),
     openMcp: navigation.openMcp,
     openSsh: navigation.openSsh,
-    openConfigurations: navigation.openConfigurations,
+    openSettings: navigation.openSettings,
     inspectProduct: navigation.inspect,
     openManaged: managed.openSettings,
   };

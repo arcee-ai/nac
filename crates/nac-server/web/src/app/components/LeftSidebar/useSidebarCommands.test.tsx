@@ -13,7 +13,7 @@ vi.mock("@/app/features/product-context/context", () => ({
   useProductNavigationOwner: () => ({
     openMcp: vi.fn(),
     openSsh: vi.fn(),
-    openConfigurations: vi.fn(),
+    openSettings: vi.fn(),
     inspect: vi.fn(),
   }),
 }));
@@ -35,9 +35,6 @@ vi.mock("@/app/providers/ProjectActionsProvider", () => ({
 }));
 vi.mock("@/app/features/managed/controller/useManagedHost", () => ({
   useManagedHost: () => ({ isManaged: false }),
-}));
-vi.mock("@/app/components/modals/ConfigurationsModal", () => ({
-  ConfigurationsModal: () => null,
 }));
 vi.mock("@/app/components/modals/MCPServersModal/McpServersModal", () => ({
   McpServersModal: () => null,

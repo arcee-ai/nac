@@ -31,19 +31,19 @@ it("keeps a platform fix as an href without carrying request query credentials",
   expect(handlers.navigate).not.toHaveBeenCalled();
 });
 
-it("preserves login, settings and caller-supplied retry callbacks", () => {
+it("preserves login and caller-supplied retry callbacks", () => {
   const retry = vi.fn();
   const { result } = renderHook(() => useErrorNotice("arcee-auth"));
-  for (const error of [
-    "Arcee auth is not configured",
-    "invalid model configuration: missing key",
-    "HTTP 429: rate limit reached",
-  ]) {
+  for (const error of ["Arcee auth is not configured", "HTTP 429: rate limit reached"]) {
     click(result.current(error, retry).action);
   }
   expect(handlers.start).toHaveBeenCalledExactlyOnceWith("arcee");
-  expect(handlers.navigate).toHaveBeenCalledExactlyOnceWith("/settings/models");
   expect(retry).toHaveBeenCalledOnce();
+});
+
+it("leaves a broken model configuration to its wording", () => {
+  const { result } = renderHook(() => useErrorNotice("arcee-auth"));
+  expect(result.current("invalid model configuration: missing key").action).toBeUndefined();
 });
 
 it("sends a rejected key to the accounts page", () => {

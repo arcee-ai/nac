@@ -4630,7 +4630,7 @@ function cs() {
 // src/app/lib/markdownChunk.ts
 var ls = null, us = !1;
 function ds() {
-	return ls ??= import("./markdown-renderer-ymp_-JZc.js").then((e) => e.t).then((e) => (us = !0, e)), ls;
+	return ls ??= import("./markdown-renderer-P1fsuZ8M.js").then((e) => e.t).then((e) => (us = !0, e)), ls;
 }
 function fs() {
 	return us;

@@ -684,13 +684,7 @@ export function Transcript({
                 goal={goal}
                 backend={backend}
                 onResumeGoal={resumeGoal}
-                onOpenSettings={() =>
-                  navigate(
-                    routes.settings(
-                      durableFailure.kind === "authentication" ? "accounts" : "models",
-                    ),
-                  )
-                }
+                onOpenSettings={() => navigate(routes.settings("accounts"))}
                 onRegenerate={
                   latestUser?.kind === "user" ? () => resend(latestUser.messageIndex) : null
                 }

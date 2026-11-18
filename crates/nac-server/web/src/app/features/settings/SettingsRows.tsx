@@ -144,6 +144,20 @@ export function SettingsLinkRow({
   );
 }
 
+/** Steps back out of a page: settings itself, or a section's detail view. */
+export function SettingsBackButton({ onClick, label }: { onClick: () => void; label: string }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="type-label inline-flex h-8 items-center gap-1 rounded-pill pl-1.5 pr-3 text-basic-secondary outline-none transition-colors duration-150 ease-out hover:bg-[var(--f-wash-2)] hover:text-basic-primary focus-visible:bg-[var(--f-wash-2)] max-md:h-11 max-md:min-w-11"
+    >
+      <Icon iconName={IconName.Left} size={16} />
+      {label}
+    </button>
+  );
+}
+
 /** Lead paragraph under a section's title. */
 export function SectionLead({ children }: { children: ReactNode }) {
   return (

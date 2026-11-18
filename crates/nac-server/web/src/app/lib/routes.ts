@@ -52,7 +52,6 @@ export const SETTINGS_SECTIONS = [
   "general",
   "appearance",
   "accounts",
-  "models",
   "mcp",
   "capabilities",
   "ssh",

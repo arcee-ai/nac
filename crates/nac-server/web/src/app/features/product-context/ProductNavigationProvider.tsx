@@ -40,7 +40,6 @@ export function ProductNavigationProvider({ children }: { children: ReactNode })
   const owner = useMemo<ProductNavigationOwner>(
     () => ({
       openMcp: () => navigate(routes.settings("mcp")),
-      openConfigurations: () => navigate(routes.settings("models")),
       openSsh: () => navigate(routes.settings("ssh")),
       inspect: () => navigate(capabilitiesHref(sessionId)),
       openSettings: (section = "general") => navigate(routes.settings(section)),
@@ -65,7 +64,7 @@ export function ProductNavigationProvider({ children }: { children: ReactNode })
               return true;
             case "configurations":
             case "model-authentication":
-              owner.openConfigurations();
+              owner.openSettings("accounts");
               return true;
             case "ssh-configurations":
               owner.openSsh();

@@ -31,6 +31,11 @@ export declare function SettingsLinkRow({ label, hint, value, to, href, icon, }:
     href?: string;
     icon?: IconName;
 }): import("react").JSX.Element;
+/** Steps back out of a page: settings itself, or a section's detail view. */
+export declare function SettingsBackButton({ onClick, label }: {
+    onClick: () => void;
+    label: string;
+}): import("react").JSX.Element;
 /** Lead paragraph under a section's title. */
 export declare function SectionLead({ children }: {
     children: ReactNode;

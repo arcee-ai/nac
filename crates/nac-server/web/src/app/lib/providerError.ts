@@ -189,7 +189,6 @@ export function humanError(error: RunError, backend?: string | null): HumanError
     return {
       title: "Configuration needs repair",
       description: sentence(invalidConfig[1]),
-      fix: { kind: "settings", label: "Open model settings", section: "models" },
     };
   }
 
@@ -309,7 +308,6 @@ export function humanError(error: RunError, backend?: string | null): HumanError
     return {
       title: "This model is not available",
       description: "The account cannot use the selected model. Pick a different one to continue.",
-      fix: { kind: "settings", label: "Open model settings", section: "models" },
     };
   }
   if (has("provider.unprocessable") || codes.has(422)) {

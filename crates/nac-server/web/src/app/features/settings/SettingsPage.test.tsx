@@ -17,9 +17,6 @@ vi.mock("@/app/features/managed/controller/useManagedHost", () => ({
 vi.mock("@/app/features/managed/queries", () => ({
   useManagedHostStatus: () => ({ isPending: false }),
 }));
-vi.mock("@/app/components/modals/ConfigurationsModal", () => ({
-  ConfigurationsSettings: () => <p>Configurations manager</p>,
-}));
 vi.mock("@/app/components/modals/MCPServersModal/McpServersModal", () => ({
   McpServersSettings: () => <p>MCP manager</p>,
 }));
@@ -87,7 +84,6 @@ it("shows grouped sections beside the open one and switches between them", () =>
     "General",
     "Appearance",
     "Accounts & keys",
-    "Models & providers",
     "MCP servers",
     "Capabilities",
     "SSH hosts",

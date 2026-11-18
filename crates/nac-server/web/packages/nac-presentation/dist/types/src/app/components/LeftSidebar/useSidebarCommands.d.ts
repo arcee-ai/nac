@@ -22,7 +22,7 @@ export declare function useSidebarCommands(): {
     openProjects: () => void | Promise<void>;
     openMcp: () => void;
     openSsh: () => void;
-    openConfigurations: () => void;
+    openSettings: (section?: import("../../lib/routes").SettingsSection) => void;
     inspectProduct: () => void;
     openManaged: () => void;
 };

@@ -1,7 +1,7 @@
 import { n as e, r as t, t as n } from "./rolldown-runtime-QGRDbDUS.js";
 import { A as r, M as i, N as a, n as o } from "./RuntimeContext-Baka66HE.js";
 import { a as s } from "./PresentationBoundary-BAUfAcJZ.js";
-import { fr as c, n as l, o as u, or as d, ot as f, pr as p, r as m, t as h } from "./workspaceLink-CDMQdGI6.js";
+import { lr as c, n as l, o as u, ot as d, r as f, rr as p, t as m, ur as h } from "./workspaceLink-fcWtz4sR.js";
 import { G as g, i as _, r as v } from "./Toast-DLhlVenn.js";
 import { a as y, c as b, l as x, o as S, r as C, s as w, t as T } from "./lib-rX7C_D5H.js";
 import { Suspense as E, createContext as D, isValidElement as O, memo as k, use as ee, useCallback as te, useLayoutEffect as A, useMemo as j, useRef as M, useState as ne } from "react";
@@ -6528,7 +6528,7 @@ function bl(e) {
 	}, [e]), te(async () => {
 		let e = new AbortController();
 		r.current = e;
-		let i = d.sessions(!1), a = n.getQueryState(i)?.dataUpdateCount;
+		let i = p.sessions(!1), a = n.getQueryState(i)?.dataUpdateCount;
 		try {
 			let r = await t.listSessions({}, e.signal);
 			if (e.signal.aborted) throw Error("Session inventory verification cancelled");
@@ -6549,7 +6549,7 @@ function xl(e, t) {
 	return !!e?.some(({ summary: e, lineage: n }) => e.session_id === t && e.behavior === "direct" && n == null);
 }
 function Sl({ id: e, children: t }) {
-	let n = f(0), r = o(), i = se(), a = oe(), s = M(0), l = j(() => ({
+	let n = d(0), r = o(), i = se(), a = oe(), s = M(0), l = j(() => ({
 		runtime: r,
 		path: a.pathname,
 		id: e
@@ -6557,9 +6557,9 @@ function Sl({ id: e, children: t }) {
 		r,
 		a.pathname,
 		e
-	]), u = bl(l), d = M(null), p = M(null), m = M(!1), h = M(!1), g = M(!1), _ = M(!1), v = M(null), y = M(null), b = M(null), [x, S] = ne(null), [C, w] = ne(null);
+	]), u = bl(l), f = M(null), p = M(null), m = M(!1), h = M(!1), g = M(!1), _ = M(!1), v = M(null), y = M(null), b = M(null), [x, S] = ne(null), [C, w] = ne(null);
 	A(() => (s.current += 1, () => {
-		s.current += 1, d.current === l && (d.current = null), p.current === l && (p.current = null), h.current = !1, g.current = !1;
+		s.current += 1, f.current === l && (f.current = null), p.current === l && (p.current = null), h.current = !1, g.current = !1;
 	}), [l]);
 	let T = x === l, E = C?.binding === l && (n.isError || n.dataUpdatedAt <= C.dataUpdatedAt), D = !n.isError && xl(n.data, e) && !E;
 	A(() => {
@@ -6571,8 +6571,8 @@ function Sl({ id: e, children: t }) {
 		D
 	]);
 	let O = (t, r) => {
-		if (d.current === l) return;
-		r && (h.current = !1, g.current = !1, p.current = l, _.current = !1), d.current = l;
+		if (f.current === l) return;
+		r && (h.current = !1, g.current = !1, p.current = l, _.current = !1), f.current = l;
 		let a = s.current;
 		S(l), (async () => {
 			try {
@@ -6593,7 +6593,7 @@ function Sl({ id: e, children: t }) {
 					dataUpdatedAt: n.dataUpdatedAt
 				});
 			} finally {
-				s.current === a && (d.current = null, S(null));
+				s.current === a && (f.current = null, S(null));
 			}
 		})();
 	}, k = T || n.isPending ? "Checking task availability" : D ? "" : "Task unavailable", ee = T || n.isPending ? "Checking whether the task is available." : D ? "The task is available." : "The task is unavailable.";
@@ -6658,7 +6658,7 @@ function Cl(e) {
 var wl = /* @__PURE__ */ e({ default: () => Hl }), Tl = [Xc], El = /* @__PURE__ */ new Map();
 function Dl(e) {
 	let t = El.get(e);
-	return t || (t = import("./markdown-mathjax-Ci3naDhg.js").then(({ createMathjaxPlugin: t, remarkMathPlugin: n }) => ({
+	return t || (t = import("./markdown-mathjax-gl3ZTOou.js").then(({ createMathjaxPlugin: t, remarkMathPlugin: n }) => ({
 		remark: [...Tl, n],
 		rehype: [t(e)]
 	})), El.set(e, t)), t;
@@ -6696,7 +6696,7 @@ function jl(e) {
 }
 var Ml = D(!1);
 function Nl({ href: e, children: t, ...n }) {
-	let r = ee(Ml), { selectRevision: i, selectFileListing: a, selectFile: s, revealSidePanel: l } = o().stores.sessionLayoutStore, { api: f } = o(), m = se(), _ = oe(), v = g(), y = u(), b = re(), x = p(_.pathname), S = x ? b.getQueryData(d.sessionSnapshot(x)) : void 0, C = h(e, [
+	let r = ee(Ml), { selectRevision: i, selectFileListing: a, selectFile: s, revealSidePanel: l } = o().stores.sessionLayoutStore, { api: d } = o(), f = se(), _ = oe(), v = g(), y = u(), b = re(), x = h(_.pathname), S = x ? b.getQueryData(p.sessionSnapshot(x)) : void 0, C = m(e, [
 		S?.workspace?.host_root,
 		S?.metadata.workspace_host_path,
 		S?.metadata.cwd
@@ -6706,13 +6706,13 @@ function Nl({ href: e, children: t, ...n }) {
 		children: t
 	}, w);
 	let T = (e) => {
-		x && (i(null), a("tree"), s(e), l(v), m(c.session(x, "files")));
+		x && (i(null), a("tree"), s(e), l(v), f(c.session(x, "files")));
 	};
 	return C.kind === "workspace" && x ? /* @__PURE__ */ P("a", {
 		...n,
 		href: e,
 		onClick: (e) => {
-			e.preventDefault(), f.openWorkspacePath(x, C.path).catch((e) => {
+			e.preventDefault(), d.openWorkspacePath(x, C.path).catch((e) => {
 				let t = e instanceof Error ? e.message : String(e);
 				/only available for local sessions|lives only inside the sandbox/i.test(t) || y.error(`Could not open file: ${t}`), T(C.path);
 			});
@@ -6839,7 +6839,7 @@ var Hl = k(function({ children: e, streaming: t = !1, taskReferences: n = !1 }) 
 	let o = t || i && !Vl(e);
 	return /* @__PURE__ */ P(Ml, {
 		value: n,
-		children: /* @__PURE__ */ P(m, {
+		children: /* @__PURE__ */ P(f, {
 			id: "markdown",
 			children: o ? sl(e).map((e, t) => /* @__PURE__ */ P(zl, { source: e }, t)) : /* @__PURE__ */ P(Ll, {
 				source: e,
