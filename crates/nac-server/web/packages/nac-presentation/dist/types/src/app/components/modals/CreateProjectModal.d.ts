@@ -1,4 +1,4 @@
-/** Remounted on every open so the form always starts from the configured defaults. */
+/** Remounted on every open so the form always starts empty. */
 export declare function CreateProjectModal({ open, onClose }: {
     open: boolean;
     onClose: () => void;

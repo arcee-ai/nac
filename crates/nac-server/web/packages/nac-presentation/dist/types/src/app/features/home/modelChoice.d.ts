@@ -25,8 +25,16 @@ export declare function useInheritedModel(projectId: string | null): {
     pending: boolean;
     error: Error | null;
 };
-/** A short chip label: "model · effort". */
+/** The model chip's label; reasoning effort has its own chip. */
 export declare function modelChipLabel(override: ModelOverride | null, inherited: InheritedModel | null): string | null;
+/** The backend, model and effort a session will start on, whichever way it was chosen. */
+export declare function sessionRoute(override: ModelOverride | null, inherited: InheritedModel | null): {
+    backend: BackendKind;
+    model: string;
+    effort: string;
+} | null;
+/** `override` (or the inherited model) with a different reasoning effort; "" is the model's default. */
+export declare function withEffort(override: ModelOverride | null, inherited: InheritedModel | null, effort: string): ModelOverride | null;
 /** The resolved tuple a configured session is created with. */
 export interface ResolvedModel {
     backend: BackendKind;

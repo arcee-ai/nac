@@ -12,5 +12,6 @@ export declare function isBackendKind(backend: string): backend is BackendKind;
  * carry a kind this bundle does not know yet; both fall back to the raw value.
  */
 export declare function providerLabel(backend: string | null | undefined): string;
+export declare function providerAccountLabel(backend: string): string;
 /** Providers present in the given sessions, in canonical display order. */
 export declare function providersFromBackends(backends: Iterable<string>): string[];

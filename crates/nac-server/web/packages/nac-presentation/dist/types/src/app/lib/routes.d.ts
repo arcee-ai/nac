@@ -19,7 +19,7 @@ export declare const WIDE_SESSION_PANELS: ("threads" | "sessions" | "worksets" |
 export declare const DEFAULT_SESSION_PANEL: SessionPanel;
 export declare function isSessionPanel(value: string | undefined): value is SessionPanel;
 /** Full-page settings destinations (`/settings/:section`). */
-export declare const SETTINGS_SECTIONS: readonly ["general", "appearance", "models", "mcp", "capabilities", "ssh", "managed", "shortcuts", "about"];
+export declare const SETTINGS_SECTIONS: readonly ["general", "appearance", "accounts", "models", "mcp", "capabilities", "ssh", "managed", "shortcuts", "about"];
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
 export declare function isSettingsSection(value: string | undefined): value is SettingsSection;
 export declare const routes: {
