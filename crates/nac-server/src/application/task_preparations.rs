@@ -53,6 +53,51 @@ impl TaskPreparations {
         // Every accepted future owns a reader through Git cleanup, store ack,
         // service publication and any error receipt. No new reader can start
         // work once stop() has raised the admission fence.
-        let _settled = self.work.write().await;
+        loop {
+            if self.is_stopping() {
+                let _settled = self.work.write().await;
+                return;
+            }
+            // A live drain must not queue a writer ahead of work already
+            // admitted by a reader: that work can transfer its obligation to
+            // a continuation reader before it releases the original guard.
+            // While live this observes eventual quiescence, not a bounded fence.
+            if let Ok(_settled) = self.work.try_write() {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TaskPreparations;
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn live_settlement_allows_an_admitted_effect_to_transfer_ownership() {
+        let preparations = TaskPreparations::default();
+        let original = preparations.admit().await.unwrap();
+        let drain = preparations.settle();
+        tokio::pin!(drain);
+        tokio::select! {
+            biased;
+            _ = &mut drain => panic!("settlement finished while work was admitted"),
+            _ = tokio::task::yield_now() => {}
+        }
+        let continuation = preparations.try_admit().unwrap();
+        drop(original);
+        tokio::select! {
+            biased;
+            _ = &mut drain => panic!("settlement lost the transferred obligation"),
+            _ = tokio::task::yield_now() => {}
+        }
+        drop(continuation);
+        tokio::time::timeout(Duration::from_secs(1), &mut drain)
+            .await
+            .unwrap();
+        preparations.stop();
+        assert!(preparations.try_admit().is_err());
     }
 }
