@@ -37,6 +37,57 @@ impl nac_contracts::CommandEnvironmentProvider for Environment {
     }
 }
 
+struct GitRedirectEnvironment(std::path::PathBuf);
+impl nac_contracts::CommandEnvironmentProvider for GitRedirectEnvironment {
+    fn snapshot(&self) -> nac_contracts::CommandEnvironmentFuture<'_> {
+        Box::pin(async { self.redaction_snapshot() })
+    }
+    fn redaction_snapshot(&self) -> anyhow::Result<nac_contracts::CommandEnvironmentSnapshot> {
+        let values = [
+            (
+                "GIT_DIR".to_string(),
+                self.0.join(".git").display().to_string(),
+            ),
+            ("GIT_WORK_TREE".to_string(), self.0.display().to_string()),
+            (
+                "GIT_INDEX_FILE".to_string(),
+                self.0.join("index-override").display().to_string(),
+            ),
+            ("GIT_CONFIG_COUNT".to_string(), "1".to_string()),
+            ("GIT_CONFIG_KEY_0".to_string(), "core.hooksPath".to_string()),
+            ("GIT_CONFIG_VALUE_0".to_string(), "/dev/null".to_string()),
+            ("NAC_TEST_ENV_MARKER".to_string(), "retained".to_string()),
+        ]
+        .into_iter()
+        .collect();
+        Ok(nac_contracts::CommandEnvironmentSnapshot::from_parts(
+            values,
+            Vec::new(),
+        ))
+    }
+    fn worker_environment(&self) -> nac_contracts::WorkerEnvironment {
+        Default::default()
+    }
+}
+
+struct PathOverride(std::path::PathBuf);
+impl nac_contracts::CommandEnvironmentProvider for PathOverride {
+    fn snapshot(&self) -> nac_contracts::CommandEnvironmentFuture<'_> {
+        Box::pin(async { self.redaction_snapshot() })
+    }
+    fn redaction_snapshot(&self) -> anyhow::Result<nac_contracts::CommandEnvironmentSnapshot> {
+        Ok(nac_contracts::CommandEnvironmentSnapshot::from_parts(
+            [("PATH".to_string(), self.0.display().to_string())]
+                .into_iter()
+                .collect(),
+            Vec::new(),
+        ))
+    }
+    fn worker_environment(&self) -> nac_contracts::WorkerEnvironment {
+        Default::default()
+    }
+}
+
 fn registry() -> kernel::ToolRegistry {
     kernel::ToolRegistry::builder()
         .register(ExecCommandTool)
@@ -286,6 +337,355 @@ async fn conflict_is_rejected_before_marker_spawn() {
     assert!(result.content.contains("conflict"));
     assert!(!root.path().join("must-not-spawn").exists());
     assert!(runtime.terminal_manager.live_terminal_names().is_empty());
+}
+
+#[tokio::test]
+async fn prepared_git_policy_binds_cwd_and_denies_before_execution() {
+    let root = TempRoot::new();
+    let repo = root.path().join("repo");
+    std::fs::create_dir(&repo).unwrap();
+    assert!(std::process::Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(&repo)
+        .status()
+        .unwrap()
+        .success());
+    let mut runtime = crate::tools::test_runtime();
+    runtime.workspace_cwd = root.path().into();
+    runtime.backend = crate::sandbox::execution_backend_from_sandbox(None, root.path());
+    let client = crate::model::ModelClient::new_for_test();
+    let registry = registry();
+    let snapshot = registry.snapshot(["exec_command"]).unwrap();
+    let services = kernel::ToolServices {
+        runtime: &runtime,
+        client: &client,
+    };
+
+    let command = "git -C repo -c core.quotepath=false status --short";
+    let prepared = snapshot
+        .prepare("exec_command", json!({"cmd": command}), services)
+        .unwrap();
+    assert!(prepared
+        .permission_resources()
+        .iter()
+        .any(|r| r.resource == repo.canonicalize().unwrap().display().to_string()));
+    assert!(prepared
+        .permission_resources()
+        .iter()
+        .all(|r| r.hard_denial.is_none()));
+    let result = snapshot
+        .invoke(
+            "exec_command",
+            json!({"cmd":command}),
+            services,
+            &kernel::ToolCallContext::default(),
+        )
+        .await;
+    assert!(!result.is_error, "{}", result.content);
+
+    let denied = snapshot
+        .invoke(
+            "exec_command",
+            json!({"cmd":"git -C repo reset --hard; touch must-not-spawn"}),
+            services,
+            &kernel::ToolCallContext::default(),
+        )
+        .await;
+    assert!(denied.is_error, "{}", denied.content);
+    assert!(denied.content.to_string().contains("destructive Git"));
+    assert!(!root.path().join("must-not-spawn").exists());
+
+    let denied_override = snapshot
+        .invoke(
+            "exec_command",
+            json!({"cmd":"env GIT_DIR=repo/.git git checkout -b forbidden; touch override-must-not-spawn"}),
+            services,
+            &kernel::ToolCallContext::default(),
+        )
+        .await;
+    assert!(denied_override.is_error, "{}", denied_override.content);
+    assert!(!root.path().join("override-must-not-spawn").exists());
+
+    let denied_stateful = snapshot
+        .invoke(
+            "exec_command",
+            json!({"cmd":"cd repo; git checkout -b forbidden; touch compound-must-not-spawn"}),
+            services,
+            &kernel::ToolCallContext::default(),
+        )
+        .await;
+    assert!(denied_stateful.is_error, "{}", denied_stateful.content);
+    assert!(!repo.join("compound-must-not-spawn").exists());
+
+    std::fs::write(
+        root.path().join("settings"),
+        "touch source-must-not-run\nexport GIT_DIR=repo/.git\n",
+    )
+    .unwrap();
+    let denied_source = snapshot
+        .invoke(
+            "exec_command",
+            json!({"cmd":"source settings; git checkout -b forbidden"}),
+            services,
+            &kernel::ToolCallContext::default(),
+        )
+        .await;
+    assert!(denied_source.is_error, "{}", denied_source.content);
+    assert!(!root.path().join("source-must-not-run").exists());
+
+    let store = root.path().join("store.db");
+    crate::store::initialize(&store).unwrap();
+    crate::store::insert_test_session(&store, "session-a");
+    runtime.store_path = store.clone();
+    runtime.session_id = Some("session-a".into());
+    runtime.permission_broker = Some(std::sync::Arc::new(
+        crate::permissions::PermissionBroker::new(
+            store,
+            "session-a".into(),
+            crate::permissions::PermissionBackend::Local,
+            0,
+            [crate::permissions::PermissionRule::new(
+                "execute*",
+                "*",
+                crate::permissions::PermissionEffect::Deny,
+            )],
+        ),
+    ));
+    let denied = snapshot
+        .invoke(
+            "exec_command",
+            json!({"cmd":command}),
+            kernel::ToolServices {
+                runtime: &runtime,
+                client: &client,
+            },
+            &kernel::ToolCallContext::default(),
+        )
+        .await;
+    assert!(
+        denied.is_error,
+        "configured Deny must apply to safe settings"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn prepared_git_creates_branch_and_stages_symlink_entry() {
+    use std::os::unix::fs::symlink;
+
+    let root = TempRoot::new();
+    let repo = root.path().join("repo");
+    std::fs::create_dir(&repo).unwrap();
+    let git = |args: &[&str]| {
+        let output = std::process::Command::new("git")
+            .args(args)
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output.stdout
+    };
+    git(&["init", "-q"]);
+    git(&[
+        "-c",
+        "user.name=Fixture",
+        "-c",
+        "user.email=fixture@example.invalid",
+        "commit",
+        "--allow-empty",
+        "--no-verify",
+        "-q",
+        "-m",
+        "initial",
+    ]);
+    std::fs::write(repo.join("target"), "content").unwrap();
+    symlink("target", repo.join("checkout")).unwrap();
+    std::fs::write(repo.join("--output=checkout"), "literal").unwrap();
+
+    let mut runtime = crate::tools::test_runtime();
+    runtime.workspace_cwd = root.path().into();
+    runtime.backend = crate::sandbox::execution_backend_from_sandbox(None, root.path());
+    let client = crate::model::ModelClient::new_for_test();
+    let registry = registry();
+    let snapshot = registry.snapshot(["exec_command"]).unwrap();
+    let services = kernel::ToolServices {
+        runtime: &runtime,
+        client: &client,
+    };
+    for command in [
+        "git -C repo checkout -b topic",
+        "git -C repo add -f -- checkout",
+        "git -C repo add -- --output=checkout",
+    ] {
+        let prepared = snapshot
+            .prepare("exec_command", json!({"cmd":command}), services)
+            .unwrap();
+        assert!(
+            prepared
+                .permission_resources()
+                .iter()
+                .all(|r| r.hard_denial.is_none()),
+            "{command}"
+        );
+        let output = value(
+            snapshot
+                .invoke(
+                    "exec_command",
+                    json!({"cmd":command}),
+                    services,
+                    &kernel::ToolCallContext::default(),
+                )
+                .await,
+        );
+        assert_eq!(output["exit_code"], 0, "{command}: {output}");
+    }
+    assert_eq!(git(&["branch", "--show-current"]), b"topic\n");
+    let entry = git(&["ls-files", "--stage", "--", "checkout"]);
+    assert!(
+        String::from_utf8_lossy(&entry).starts_with("120000 "),
+        "{}",
+        String::from_utf8_lossy(&entry)
+    );
+    assert_eq!(git(&["show", ":checkout"]), b"target");
+    assert_eq!(git(&["show", ":--output=checkout"]), b"literal");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn prepared_git_checkout_clears_inherited_redirects_and_keeps_other_environment() {
+    let root = TempRoot::new();
+    let repo = root.path().join("repo");
+    let decoy = root.path().join("decoy");
+    for path in [&repo, &decoy] {
+        std::fs::create_dir(path).unwrap();
+        assert!(std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(path)
+            .status()
+            .unwrap()
+            .success());
+        assert!(std::process::Command::new("git")
+            .args([
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "--allow-empty",
+                "--no-verify",
+                "-qm",
+                "initial"
+            ])
+            .current_dir(path)
+            .status()
+            .unwrap()
+            .success());
+    }
+    let hook = repo.join(".git/hooks/post-checkout");
+    std::fs::write(
+        &hook,
+        "#!/bin/sh\n[ -z \"${GIT_CONFIG_KEY_0+x}\" ] && [ -z \"${GIT_CONFIG_VALUE_0+x}\" ] || exit 1\nprintf %s \"$NAC_TEST_ENV_MARKER\" > env-marker\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&hook, std::os::unix::fs::PermissionsExt::from_mode(0o700)).unwrap();
+    let mut runtime = crate::tools::test_runtime();
+    runtime.workspace_cwd = root.path().into();
+    runtime.backend = crate::sandbox::execution_backend_from_sandbox(None, root.path());
+    runtime.command_environment = Some(std::sync::Arc::new(GitRedirectEnvironment(decoy.clone())));
+    let client = crate::model::ModelClient::new_for_test();
+    let registry = registry();
+    let snapshot = registry.snapshot(["exec_command"]).unwrap();
+    let result = snapshot
+        .invoke(
+            "exec_command",
+            json!({"cmd":"env git -C repo checkout -b topic"}),
+            kernel::ToolServices {
+                runtime: &runtime,
+                client: &client,
+            },
+            &kernel::ToolCallContext::default(),
+        )
+        .await;
+    let output = value(result);
+    assert_eq!(output["exit_code"], 0, "{output}");
+    assert_eq!(
+        std::fs::read_to_string(repo.join("env-marker")).unwrap(),
+        "retained"
+    );
+    assert!(repo.join(".git/refs/heads/topic").exists());
+    assert!(!decoy.join(".git/refs/heads/topic").exists());
+    assert!(!decoy.join("index-override").exists());
+    std::fs::write(repo.join("checkout"), "staged").unwrap();
+    for command in [
+        "git -C repo add -- checkout",
+        "git -C repo -c core.quotepath=false status --short",
+    ] {
+        let output = value(
+            snapshot
+                .invoke(
+                    "exec_command",
+                    json!({"cmd":command}),
+                    kernel::ToolServices {
+                        runtime: &runtime,
+                        client: &client,
+                    },
+                    &kernel::ToolCallContext::default(),
+                )
+                .await,
+        );
+        assert_eq!(output["exit_code"], 0, "{command}: {output}");
+    }
+    let staged = std::process::Command::new("git")
+        .args(["show", ":checkout"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    assert!(staged.status.success());
+    assert_eq!(staged.stdout, b"staged");
+    assert!(!decoy.join("index-override").exists());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn prepared_git_rejects_wrapper_lookup_override_before_execution() {
+    let root = TempRoot::new();
+    let executable = root.path().join("git");
+    std::fs::write(
+        &executable,
+        "#!/bin/sh\nprintf marker > lookup-must-not-run\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(
+        &executable,
+        std::os::unix::fs::PermissionsExt::from_mode(0o700),
+    )
+    .unwrap();
+    let mut runtime = crate::tools::test_runtime();
+    runtime.workspace_cwd = root.path().into();
+    runtime.backend = crate::sandbox::execution_backend_from_sandbox(None, root.path());
+    runtime.command_environment = Some(std::sync::Arc::new(PathOverride(root.path().into())));
+    let client = crate::model::ModelClient::new_for_test();
+    let registry = registry();
+    let snapshot = registry.snapshot(["exec_command"]).unwrap();
+    let result = snapshot
+        .invoke(
+            "exec_command",
+            json!({"cmd":"command -p git checkout -b topic"}),
+            kernel::ToolServices {
+                runtime: &runtime,
+                client: &client,
+            },
+            &kernel::ToolCallContext::default(),
+        )
+        .await;
+    assert!(result.is_error, "{}", result.content);
+    assert!(!root.path().join("lookup-must-not-run").exists());
 }
 
 #[tokio::test]
