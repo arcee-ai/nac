@@ -1,10 +1,10 @@
 import type { ManagedSessionSummary, ProjectRecord } from "../../types/api";
 /**
- * Home's hero composer — the app's one new-session flow. Its chips pick the
- * behavior and model; the row under it says where the session works: the
- * project, then its folder or (for a direct agent on a Git source) an isolated
- * checkout and the ref it starts from. Sending creates the session with the
- * prompt as its first message and opens it.
+ * Home's hero composer — the app's one new-session flow. The strip on top says
+ * where the session runs (this computer or the project's SSH host) and picks
+ * the project; its settings button holds the isolated-checkout choice and ref,
+ * out of the way of a plain session. The composer's chips pick the behavior and
+ * model. Sending creates the session with the prompt as its first message.
  */
 export declare function HomeComposer({ projects, sessions, compact, }: {
     projects: readonly ProjectRecord[];

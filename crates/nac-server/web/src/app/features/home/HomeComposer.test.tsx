@@ -267,12 +267,26 @@ describe("Home composer", () => {
     expect(fakes.start).not.toHaveBeenCalled();
   });
 
+  it("shows where the session runs, with checkout choices folded behind settings", () => {
+    mount("/", false);
+    const strip = screen.getByRole("group", { name: "Workspace" });
+    expect(strip.textContent).toContain("This computer");
+    expect(screen.queryByRole("switch", { name: "Isolated checkout" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }));
+    const isolated = screen.getByRole("switch", { name: "Isolated checkout" });
+    expect((isolated as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText("Needs a direct agent in a local Git project.")).toBeTruthy();
+    expect(
+      (screen.getByRole("button", { name: /^Start from/ }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+
   it("routes an isolated-checkout send through the isolated task form", () => {
     fakes.eligible = true;
     mount("/", false);
-    fireEvent.click(screen.getByRole("button", { name: "Workspace: Project folder" }));
-    fireEvent.click(screen.getByRole("menuitemradio", { name: /Isolated checkout/ }));
-    expect(screen.getByRole("button", { name: "Start from main" }).textContent).toBe("from main");
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Isolated checkout" }));
+    expect(screen.getByRole("button", { name: /^Start from/ }).textContent).toContain("main");
     fireEvent.change(prompt(), { target: { value: "Upgrade the toolchain" } });
     fireEvent.click(screen.getByRole("button", { name: "Set up isolated task" }));
     const form = screen.getByRole("dialog", { name: "New isolated task" });
@@ -281,31 +295,24 @@ describe("Home composer", () => {
     expect(fakes.start).not.toHaveBeenCalled();
   });
 
-  it("starts an isolated checkout from a typed ref, kept per project", () => {
+  it("starts an isolated checkout from a typed ref", () => {
     fakes.eligible = true;
     mount("/", false);
-    fireEvent.click(screen.getByRole("button", { name: "Workspace: Project folder" }));
-    fireEvent.click(screen.getByRole("menuitemradio", { name: /Isolated checkout/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Start from main" }));
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Isolated checkout" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Start from/ }));
     const input = screen.getByRole("textbox", { name: "Branch, tag or commit" });
     fireEvent.change(input, { target: { value: " release/2.4 " } });
     fireEvent.keyDown(input, { key: "Enter" });
-    expect(screen.getByRole("button", { name: "Start from release/2.4" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Start from/ }).textContent).toContain(
+      "release/2.4",
+    );
 
     fireEvent.change(prompt(), { target: { value: "Backport the fix" } });
     fireEvent.click(screen.getByRole("button", { name: "Set up isolated task" }));
     expect(screen.getByRole("dialog", { name: "New isolated task" }).getAttribute("data-ref")).toBe(
       "release/2.4",
     );
-  });
-
-  it("keeps the project folder when an isolated checkout is unavailable", () => {
-    mount("/", false);
-    fireEvent.click(screen.getByRole("button", { name: "Workspace: Project folder" }));
-    const isolated = screen.getByRole("menuitemradio", { name: /Isolated checkout/ });
-    expect((isolated as HTMLButtonElement).disabled).toBe(true);
-    expect(isolated.textContent).toContain("Needs a direct agent in a local Git project.");
-    expect(screen.queryByRole("button", { name: /^Start from/ })).toBeNull();
   });
 
   it("adds a repository from the project picker on a managed host", () => {

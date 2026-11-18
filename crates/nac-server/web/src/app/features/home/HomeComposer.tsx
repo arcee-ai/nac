@@ -24,7 +24,8 @@ import type {
 import { defaultBehavior } from "./behaviors";
 import { Chip } from "./Chip";
 import { ModelPicker } from "./ComposerModelPickers";
-import { BehaviorPicker, ProjectPicker, RefPicker, WorkspacePicker } from "./ComposerPickers";
+import { BehaviorPicker, ProjectPicker } from "./ComposerPickers";
+import { WorkspaceSettings } from "./WorkspaceSettings";
 import {
   modelChipLabel,
   sessionRoute,
@@ -61,11 +62,11 @@ function recentProjectId(
 }
 
 /**
- * Home's hero composer — the app's one new-session flow. Its chips pick the
- * behavior and model; the row under it says where the session works: the
- * project, then its folder or (for a direct agent on a Git source) an isolated
- * checkout and the ref it starts from. Sending creates the session with the
- * prompt as its first message and opens it.
+ * Home's hero composer — the app's one new-session flow. The strip on top says
+ * where the session runs (this computer or the project's SSH host) and picks
+ * the project; its settings button holds the isolated-checkout choice and ref,
+ * out of the way of a plain session. The composer's chips pick the behavior and
+ * model. Sending creates the session with the prompt as its first message.
  */
 export function HomeComposer({
   projects,
@@ -212,146 +213,153 @@ export function HomeComposer({
   };
 
   const addProject = managed.isManaged ? managed.addRepository : projectActions.create;
+  const host = project?.ssh_host
+    ? project.ssh_host
+    : managed.isManaged
+      ? "Managed host"
+      : "This computer";
 
   return (
     <div className="flex w-full flex-col gap-2">
-      <div
-        className={cn(
-          "rounded-composer border border-tertiary bg-elevation-level-1",
-          "transition-[border-color,box-shadow] duration-150 ease-out motion-reduce:transition-none",
-          "focus-within:border-secondary focus-within:shadow-sm",
-        )}
-      >
-        <label htmlFor="home-composer" className="sr-only">
-          What should we work on?
-        </label>
-        <textarea
-          id="home-composer"
-          ref={textarea}
-          rows={compact ? 2 : 3}
-          value={prompt}
-          disabled={busy}
-          placeholder={
-            project
-              ? `Describe a task for ${project.name}…`
-              : requestedMissing
-                ? "That project is no longer available. Choose a project."
-                : "Add a project to start a session"
-          }
-          onChange={(event) => {
-            setPrompt(event.target.value);
-            if (starter.error) starter.clearError();
-          }}
-          onKeyDown={(event) => {
-            if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
-            // Touch keyboards keep Enter for new lines; the Send button sends.
-            if (coarse && !(event.metaKey || event.ctrlKey)) return;
-            event.preventDefault();
-            void send();
-          }}
-          className={cn(
-            "block w-full resize-none bg-transparent px-5 pt-4 pb-1 text-basic-primary outline-none",
-            "type-body placeholder:text-basic-muted max-md:text-base",
-            "disabled:opacity-60",
-          )}
-        />
-        <div className="flex items-end gap-2 px-3 pt-1 pb-3">
-          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-0.5 max-md:-ml-1 max-md:flex-nowrap max-md:overflow-x-auto max-md:[&>*]:shrink-0 max-md:[scrollbar-width:none] max-md:[mask-image:linear-gradient(to_right,black_85%,transparent)] max-md:pr-6">
-            {policy.orchestrationEnabled ? (
-              <BehaviorPicker value={behavior} onChange={setBehavior} disabled={busy} />
-            ) : null}
-            {project && needsProvider ? (
-              <Chip
-                icon={IconName.Key}
-                menu={false}
-                disabled={busy}
-                onClick={() => navigate(routes.settings("accounts"))}
-              >
-                Connect a provider
-              </Chip>
-            ) : null}
-          </div>
-          {project && !needsProvider ? (
-            <ModelPicker
-              fallbackLabel={modelChipLabel(chosenModel, model.inherited)}
-              pending={modelPending}
-              value={route}
-              effort={effort}
-              supportedEfforts={supported}
-              inheritedLabel={model.inherited ? modelChipLabel(null, model.inherited) : null}
-              usingInherited={!override && model.inherited != null}
-              disabled={busy}
-              onPick={(pick) => catalog.data && setOverride(catalogOverride(catalog.data, pick))}
-              onEffort={setEffortChoice}
-              onUseInherited={() => setOverride(null)}
-              onAdvanced={policy.orchestrationEnabled ? () => setModelOpen(true) : undefined}
+      <div className="rounded-[calc(var(--radius-composer)+4px)] bg-[var(--f-wash-1)] p-1 pt-0">
+        <div
+          role="group"
+          aria-label="Workspace"
+          className="flex min-w-0 items-center gap-1 py-1 pr-1 pl-2 max-md:pl-1"
+        >
+          <span className="type-label inline-flex shrink-0 items-center gap-1.5 px-1.5 text-basic-secondary max-md:hidden">
+            <Icon
+              iconName={project?.ssh_host ? IconName.Server : IconName.Desktop}
+              size={14}
+              className="text-basic-tertiary"
             />
-          ) : null}
-          <Tooltip title={useIsolation ? "Set up isolated task" : "Start session"} sticky>
-            <button
-              type="button"
-              aria-label={useIsolation ? "Set up isolated task" : "Start session"}
-              disabled={!canSend}
-              onClick={() => void send()}
-              className={cn(
-                "inline-flex size-8 shrink-0 items-center justify-center rounded-pill max-md:size-11",
-                "bg-[var(--f-ink)] text-[var(--f-on-ink)] outline-none",
-                "transition-[opacity,background-color] duration-150 ease-out",
-                "hover:bg-[var(--f-ink-hover)] focus-visible:ring-2 focus-visible:ring-[var(--f-focus)] focus-visible:ring-offset-2",
-                "disabled:cursor-default disabled:bg-[var(--f-ink-disabled)] disabled:opacity-60",
-              )}
-            >
-              {busy ? (
-                <Loader size={LoaderSize.XSmall} />
-              ) : (
-                <Icon iconName={IconName.ArrowTop} size={16} />
-              )}
-            </button>
-          </Tooltip>
-        </div>
-      </div>
-      <div
-        aria-label="Workspace"
-        role="group"
-        className="flex min-w-0 flex-wrap items-center gap-0.5 px-1 max-md:-ml-1"
-      >
-        <ProjectPicker
-          projects={projects}
-          value={project}
-          disabled={busy}
-          addLabel={managed.isManaged ? "Add repository…" : "Add project…"}
-          onAddProject={addProject}
-          onChange={(id) => {
-            setChosen(id);
-            if (prompt) draft.update(prompt, id);
-            if (requested) {
-              const next = new URLSearchParams(params);
-              next.delete("project");
-              setParams(next, { replace: true });
-            }
-          }}
-        />
-        {project ? (
-          <>
-            <span aria-hidden className="type-label px-0.5 text-basic-muted">
-              /
-            </span>
-            <WorkspacePicker
-              isolated={useIsolation}
-              available={isolationAvailable}
-              onChange={setIsolated}
-              disabled={busy}
-            />
-            {useIsolation ? (
-              <RefPicker
-                value={gitRef}
+            {host}
+          </span>
+          <ProjectPicker
+            projects={projects}
+            value={project}
+            disabled={busy}
+            addLabel={managed.isManaged ? "Add repository…" : "Add project…"}
+            onAddProject={addProject}
+            onChange={(id) => {
+              setChosen(id);
+              if (prompt) draft.update(prompt, id);
+              if (requested) {
+                const next = new URLSearchParams(params);
+                next.delete("project");
+                setParams(next, { replace: true });
+              }
+            }}
+          />
+          {project ? (
+            <span className="ml-auto shrink-0">
+              <WorkspaceSettings
+                isolated={useIsolation}
+                available={isolationAvailable}
+                onIsolatedChange={setIsolated}
+                gitRef={gitRef}
                 defaultRef={source.data?.default_ref ?? null}
-                onChange={(ref) => setRefFor({ projectId, ref })}
+                onRefChange={(ref) => setRefFor({ projectId, ref })}
                 disabled={busy}
               />
+            </span>
+          ) : null}
+        </div>
+        <div
+          className={cn(
+            "rounded-composer border border-tertiary bg-elevation-level-1",
+            "transition-[border-color,box-shadow] duration-150 ease-out motion-reduce:transition-none",
+            "focus-within:border-secondary focus-within:shadow-sm",
+          )}
+        >
+          <label htmlFor="home-composer" className="sr-only">
+            What should we work on?
+          </label>
+          <textarea
+            id="home-composer"
+            ref={textarea}
+            rows={compact ? 2 : 3}
+            value={prompt}
+            disabled={busy}
+            placeholder={
+              project
+                ? `Describe a task for ${project.name}…`
+                : requestedMissing
+                  ? "That project is no longer available. Choose a project."
+                  : "Add a project to start a session"
+            }
+            onChange={(event) => {
+              setPrompt(event.target.value);
+              if (starter.error) starter.clearError();
+            }}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+              // Touch keyboards keep Enter for new lines; the Send button sends.
+              if (coarse && !(event.metaKey || event.ctrlKey)) return;
+              event.preventDefault();
+              void send();
+            }}
+            className={cn(
+              "block w-full resize-none bg-transparent px-5 pt-4 pb-1 text-basic-primary outline-none",
+              "type-body placeholder:text-basic-muted max-md:text-base",
+              "disabled:opacity-60",
+            )}
+          />
+          <div className="flex items-end gap-2 px-3 pt-1 pb-3">
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-0.5 max-md:-ml-1 max-md:flex-nowrap max-md:overflow-x-auto max-md:[&>*]:shrink-0 max-md:[scrollbar-width:none] max-md:[mask-image:linear-gradient(to_right,black_85%,transparent)] max-md:pr-6">
+              {policy.orchestrationEnabled ? (
+                <BehaviorPicker value={behavior} onChange={setBehavior} disabled={busy} />
+              ) : null}
+              {project && needsProvider ? (
+                <Chip
+                  icon={IconName.Key}
+                  menu={false}
+                  disabled={busy}
+                  onClick={() => navigate(routes.settings("accounts"))}
+                >
+                  Connect a provider
+                </Chip>
+              ) : null}
+            </div>
+            {project && !needsProvider ? (
+              <ModelPicker
+                fallbackLabel={modelChipLabel(chosenModel, model.inherited)}
+                pending={modelPending}
+                value={route}
+                effort={effort}
+                supportedEfforts={supported}
+                inheritedLabel={model.inherited ? modelChipLabel(null, model.inherited) : null}
+                usingInherited={!override && model.inherited != null}
+                disabled={busy}
+                onPick={(pick) => catalog.data && setOverride(catalogOverride(catalog.data, pick))}
+                onEffort={setEffortChoice}
+                onUseInherited={() => setOverride(null)}
+                onAdvanced={policy.orchestrationEnabled ? () => setModelOpen(true) : undefined}
+              />
             ) : null}
-          </>
-        ) : null}
+            <Tooltip title={useIsolation ? "Set up isolated task" : "Start session"} sticky>
+              <button
+                type="button"
+                aria-label={useIsolation ? "Set up isolated task" : "Start session"}
+                disabled={!canSend}
+                onClick={() => void send()}
+                className={cn(
+                  "inline-flex size-8 shrink-0 items-center justify-center rounded-pill max-md:size-11",
+                  "bg-[var(--f-ink)] text-[var(--f-on-ink)] outline-none",
+                  "transition-[opacity,background-color] duration-150 ease-out",
+                  "hover:bg-[var(--f-ink-hover)] focus-visible:ring-2 focus-visible:ring-[var(--f-focus)] focus-visible:ring-offset-2",
+                  "disabled:cursor-default disabled:bg-[var(--f-ink-disabled)] disabled:opacity-60",
+                )}
+              >
+                {busy ? (
+                  <Loader size={LoaderSize.XSmall} />
+                ) : (
+                  <Icon iconName={IconName.ArrowTop} size={16} />
+                )}
+              </button>
+            </Tooltip>
+          </div>
+        </div>
       </div>
       <div className="px-5 md:min-h-5" aria-live="polite">
         {project && needsProvider ? (
