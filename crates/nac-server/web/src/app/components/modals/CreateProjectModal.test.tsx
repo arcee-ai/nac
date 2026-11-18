@@ -4,10 +4,11 @@ import { UiPolicyContext } from "@/app/features/ui-policy/UiPolicyContext";
 import { ORCHESTRATION_UI_POLICY, DIRECT_UI_POLICY } from "@/app/features/ui-policy/policy";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { CreateProjectModal } from "@/app/components/modals/CreateProjectModal";
+import { routes } from "@/app/lib/routes";
 import { ToastProvider } from "@/app/providers/ToastProvider";
 import { api, ApiError } from "@/app/services/api";
 import { queryKeys } from "@/app/services/queries/keys";
@@ -189,7 +190,11 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function renderModal(orchestration = true) {
+function LocationProbe() {
+  return <output data-testid="location">{useLocation().pathname}</output>;
+}
+
+function renderModal(orchestration = true, onClose = vi.fn()) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(queryKeys.storeInfo, { root_cwd: "/workspace" } as StoreInfo);
   const view = render(
@@ -197,7 +202,8 @@ function renderModal(orchestration = true) {
       <UiPolicyContext.Provider value={orchestration ? ORCHESTRATION_UI_POLICY : DIRECT_UI_POLICY}>
         <ToastProvider>
           <MemoryRouter>
-            <CreateProjectModal open onClose={vi.fn()} />
+            <CreateProjectModal open onClose={onClose} />
+            <LocationProbe />
           </MemoryRouter>
         </ToastProvider>
       </UiPolicyContext.Provider>
@@ -438,6 +444,63 @@ it("reopens and submits the exact selected local folder with trailing whitespace
     expect(vi.mocked(api.createProject).mock.calls[0]?.[0]).toMatchObject({
       cwd: "/workspace/Project 日本語 ",
     });
+  } finally {
+    view.unmount();
+    client.clear();
+  }
+});
+
+it("says the project starts with a session, then opens that first session", async () => {
+  const onClose = vi.fn();
+  const { client, view } = renderModal(false, onClose);
+  try {
+    expect(screen.getByText(/Creating the project also starts its first session/)).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: "Change primary model" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create Project" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("location").textContent).toBe(routes.session("first-session")),
+    );
+    expect(api.createProject).toHaveBeenCalledOnce();
+    expect(api.createSession).toHaveBeenCalledOnce();
+    expect(onClose).toHaveBeenCalled();
+    expect(await screen.findByText("Project created")).toBeTruthy();
+  } finally {
+    view.unmount();
+    client.clear();
+  }
+});
+
+it("keeps the created project and opens it when its first session does not start", async () => {
+  vi.mocked(api.createSession).mockRejectedValueOnce(
+    new ApiError(422, "POST", "/sessions", "model unavailable", "first-session"),
+  );
+  const onClose = vi.fn();
+  const { client, view } = renderModal(false, onClose);
+  try {
+    fireEvent.click(await screen.findByRole("button", { name: "Change primary model" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create Project" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("location").textContent).toBe(routes.project("created-project")),
+    );
+    expect(api.createProject).toHaveBeenCalledOnce();
+    expect(onClose).toHaveBeenCalled();
+    expect(
+      await screen.findByText(/Project created, but its first session did not start/),
+    ).toBeTruthy();
+  } finally {
+    view.unmount();
+    client.clear();
+  }
+});
+
+it("creates nothing when closed without submitting", async () => {
+  const onClose = vi.fn();
+  const { client, view } = renderModal(false, onClose);
+  try {
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(api.createProject).not.toHaveBeenCalled();
+    expect(api.createSession).not.toHaveBeenCalled();
   } finally {
     view.unmount();
     client.clear();

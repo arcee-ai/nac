@@ -18,6 +18,7 @@ import { errorMessage } from "@/app/providers/ToastProvider";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useProjects, useSessions } from "@/app/services/queries";
 
+import { AddProjectAction } from "./AddProjectAction";
 import { HomeComposer } from "./HomeComposer";
 import { NeedsYouLine } from "./NeedsYouLine";
 import { ProjectTiles } from "./ProjectTiles";
@@ -62,6 +63,8 @@ export function HomePage() {
   const loading = projectsQuery.isPending || sessionsQuery.isPending || seedingDefault;
   const error = projectsQuery.error ?? sessionsQuery.error;
   const empty = !loading && !error && items.length === 0;
+  // Without the project list, neither "no projects" nor a project choice is true.
+  const projectsKnown = !loading && !projectsQuery.error;
 
   const retry = () => {
     void projectsQuery.refetch();
@@ -122,9 +125,9 @@ export function HomePage() {
               </h1>
               {loading ? (
                 <LoadingHome />
-              ) : (
+              ) : projectsKnown ? (
                 <HomeComposer projects={projects} sessions={sessions} compact={isMobile} />
-              )}
+              ) : null}
               <NeedsYouLine
                 onShowList={
                   isMobile
@@ -139,7 +142,8 @@ export function HomePage() {
                 className="flex items-center justify-between gap-3 rounded-card border border-[var(--f-red-line)] bg-[var(--f-red-wash)] px-4 py-3"
               >
                 <span className="type-body-chrome text-[var(--f-red-text)]">
-                  Couldn't load your sessions: {errorMessage(error)}
+                  Couldn't load your {projectsQuery.error ? "projects" : "sessions"}:{" "}
+                  {errorMessage(error)}
                 </span>
                 <Button
                   variant={ButtonVariant.Secondary}
@@ -151,13 +155,16 @@ export function HomePage() {
                 </Button>
               </div>
             ) : null}
-            {loading ? null : isMobile ? (
+            {!projectsKnown ? null : isMobile ? (
               // A phone has no sidebar: its list is here, under the same switch.
               <section
                 ref={listRef}
                 aria-label="Sessions and Inbox"
                 className="flex flex-col gap-3"
               >
+                <div className="self-start">
+                  <AddProjectAction touch />
+                </div>
                 <SessionListSwitch touch />
                 <SessionListBody
                   touch
@@ -172,11 +179,11 @@ export function HomePage() {
                 items={items}
                 projects={projects}
                 sessions={sessions}
-                headingTrailing={intervalTasks}
-                addProject={
-                  managed.isManaged
-                    ? { label: "Add repository", onClick: managed.addRepository }
-                    : { label: "New project", onClick: projectActions.create }
+                headingTrailing={
+                  <span className="flex items-center gap-1">
+                    {intervalTasks}
+                    <AddProjectAction />
+                  </span>
                 }
               />
             )}

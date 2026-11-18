@@ -1,7 +1,6 @@
 import { Fragment } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { Icon, IconName } from "@/app/atoms";
 import { ProjectCard, type ProjectReorderStart } from "@/app/components/projects/ProjectCard";
 import { cn } from "@/app/lib/cn";
 import { projectListItemId, type ProjectListItem } from "@/app/lib/projects";
@@ -26,19 +25,6 @@ function TileGrid({ children }: { children: React.ReactNode }) {
     <div className="grid grid-cols-[repeat(auto-fill,minmax(min(220px,100%),1fr))] gap-2">
       {children}
     </div>
-  );
-}
-
-function AddProjectTile({ label, onClick }: { label: string; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="flex min-h-[88px] items-center justify-center gap-2 rounded-card border-2 border-dashed border-[var(--f-line-strong)] type-label text-basic-tertiary hover:bg-[var(--f-wash-1)] hover:text-basic-primary"
-    >
-      <Icon iconName={IconName.Add} size={16} />
-      {label}
-    </button>
   );
 }
 
@@ -121,13 +107,11 @@ export function ProjectTiles({
   projects,
   sessions,
   headingTrailing,
-  addProject,
 }: {
   items: readonly ProjectListItem[];
   projects: readonly ProjectRecord[];
   sessions: readonly ManagedSessionSummary[];
   headingTrailing?: React.ReactNode;
-  addProject?: { label: string; onClick: () => void };
 }) {
   const reorder = useProjectReorder(projects, sessions);
   const { drag, dropTarget, pinZoneActive } = reorder;
@@ -209,12 +193,7 @@ export function ProjectTiles({
             ) : null}
           </TileGrid>
         ) : null}
-        {unpinned.length > 0 || addProject ? (
-          <TileGrid>
-            {unpinned.map(renderTile)}
-            {addProject ? <AddProjectTile {...addProject} /> : null}
-          </TileGrid>
-        ) : null}
+        {unpinned.length > 0 ? <TileGrid>{unpinned.map(renderTile)}</TileGrid> : null}
       </section>
       {orphans.length > 0 ? (
         <section aria-label="Unassigned sessions" className="flex flex-col gap-2">
