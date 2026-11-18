@@ -354,3 +354,32 @@ it("does not reclaim focus from elsewhere when passive inventory restores the ta
   expect(document.activeElement).toBe(elsewhere);
   expect(screen.getByLabelText("route").textContent).toBe("/session/caller/insights");
 });
+
+it.each([true, false])(
+  "handles passive inventory failure with link focus owned: %s",
+  async (keepFocus) => {
+    const list = vi.fn().mockResolvedValueOnce([entry]).mockRejectedValueOnce(new Error("offline"));
+    const cache = client();
+    render(
+      <MemoryRouter initialEntries={["/session/caller/insights"]}>
+        <QueryClientProvider client={cache}>
+          <RuntimeContext value={runtime(list)}>
+            <MarkdownTaskReference id={id}>Open</MarkdownTaskReference>
+            <button>Elsewhere</button>
+            <Location />
+          </RuntimeContext>
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+    const link = await screen.findByRole("link", { name: "Open" });
+    link.focus();
+    const elsewhere = screen.getByRole("button", { name: "Elsewhere" });
+    if (!keepFocus) elsewhere.focus();
+    await act(async () => {
+      await cache.refetchQueries();
+    });
+    const retry = await screen.findByRole("button", { name: "Check again" });
+    expect(document.activeElement).toBe(keepFocus ? retry : elsewhere);
+    expect(screen.getByLabelText("route").textContent).toBe("/session/caller/insights");
+  },
+);

@@ -334,3 +334,19 @@ it("restores retry focus when the recheck resolves immediately", async () => {
   await act(async () => fireEvent.click(retry));
   expect(document.activeElement).toBe(screen.getByRole("link", { name: "Open" }));
 });
+
+it("retains focus when activation fails immediately", async () => {
+  state.entries = [entry];
+  state.refetch = vi.fn().mockRejectedValueOnce(new Error("offline"));
+  render(
+    <MemoryRouter>
+      <MarkdownTaskReference id={id}>Open</MarkdownTaskReference>
+    </MemoryRouter>,
+  );
+  const link = screen.getByRole("link", { name: "Open" });
+  link.focus();
+  await act(async () => {
+    fireEvent.keyDown(link, { key: "Enter" });
+  });
+  expect(document.activeElement).toBe(screen.getByRole("button", { name: "Check again" }));
+});
