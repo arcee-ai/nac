@@ -571,31 +571,6 @@ pub struct SubmitPromptResponse {
     pub display_prompt: String,
 }
 
-#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
-pub struct OrchestratorSteeringRequest {
-    pub instruction: String,
-}
-
-#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
-pub struct OrchestratorSteeringResponse {
-    pub steering_id: i64,
-    pub status: String,
-    pub instruction_preview: String,
-}
-
-#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
-pub struct ThreadSteeringRequest {
-    pub instruction: String,
-}
-
-#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
-pub struct ThreadSteeringResponse {
-    pub steering_id: i64,
-    pub thread_name: String,
-    pub status: String,
-    pub instruction_preview: String,
-}
-
 #[derive(Debug, Clone, Deserialize, utoipa::IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct EventsQuery {

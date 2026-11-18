@@ -102,47 +102,6 @@ async fn retired_steering_routes_are_not_found() {
 }
 
 #[tokio::test]
-async fn active_run_accepts_orchestrator_steering() {
-    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
-    let root = temp_root("orchestrator_steering");
-    let nac_home = root.join("nac-home");
-    let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
-    seed_editable_session(&root, "session");
-    let endpoint = point_session_at_hanging_endpoint(&root, "session").await;
-    let manager = test_manager(&root);
-
-    manager
-        .submit_prompt(
-            "session",
-            SubmitPromptRequest {
-                prompt: "begin the original task".to_string(),
-            },
-            nac_core::store::InputOrigin::Automation,
-        )
-        .await
-        .unwrap();
-    let steering = manager
-        .queue_orchestrator_steering(
-            "session",
-            OrchestratorSteeringRequest {
-                instruction: "change direction".to_string(),
-            },
-            nac_core::store::InputOrigin::Automation,
-        )
-        .await
-        .unwrap();
-    assert_eq!(steering.status, "queued");
-    let records = manager.snapshot("session").await.unwrap().thread_steering;
-    assert_eq!(records.len(), 1);
-    assert_eq!(records[0].thread_name, "__orchestrator__");
-    assert_eq!(records[0].instruction, "change direction");
-
-    manager.cancel_active_run("session").await.unwrap();
-    endpoint.abort();
-    let _ = std::fs::remove_dir_all(root);
-}
-
-#[tokio::test]
 async fn cancel_active_run_route_is_idempotent() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let root = temp_root("cancel_idempotent");

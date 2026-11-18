@@ -38,14 +38,13 @@ pub use delivery::contracts::{
     ApiErrorBody, CancelInboxItemRequest, ClearGoalRequest, CreateGoalRequest,
     CreateInboxItemRequest, CreateSessionRequest, EventsQuery, HeadersRequest, HealthResponse,
     InboxItemResponse, LaggedEvent, ManagedSessionSummary, MessageCycleMetadata,
-    MessagePageMetadata, MessagesPageResponse, MessagesQuery, OrchestratorSteeringRequest,
-    OrchestratorSteeringResponse, PermissionStateResponse, ProviderModelList,
-    ProviderModelsRequest, RecentEventsResponse, ReplayBoundaryEvent, ReplayGapEvent,
-    ReplyPermissionRequest, RequestField, SandboxRequest, SessionLineageKind,
+    MessagePageMetadata, MessagesPageResponse, MessagesQuery, PermissionStateResponse,
+    ProviderModelList, ProviderModelsRequest, RecentEventsResponse, ReplayBoundaryEvent,
+    ReplayGapEvent, ReplyPermissionRequest, RequestField, SandboxRequest, SessionLineageKind,
     SessionLineageSnapshot, SessionSnapshotQuery, SessionSnapshotResponse, SshBrowseRequest,
-    StoreInfo, SubmitPromptRequest, SubmitPromptResponse, ThreadEventsQuery, ThreadSteeringRequest,
-    ThreadSteeringResponse, ToolCallContentResponse, UpdateConfigRequest, UpdateGoalRequest,
-    UpdateInboxItemRequest, UpdatePermissionApprovalModeRequest,
+    StoreInfo, SubmitPromptRequest, SubmitPromptResponse, ThreadEventsQuery,
+    ToolCallContentResponse, UpdateConfigRequest, UpdateGoalRequest, UpdateInboxItemRequest,
+    UpdatePermissionApprovalModeRequest,
 };
 pub use delivery::credentials::{
     GeneratedCredential, StoreCredentialRequest, StoredCredentialList, StoredCredentialSummary,
@@ -1469,42 +1468,6 @@ impl SessionManager {
             run_id: submitted.run_id,
             client_id: submitted.client_id,
             display_prompt: submitted.display_prompt,
-        })
-    }
-
-    pub async fn queue_thread_steering(
-        &self,
-        session_id: &str,
-        thread_name: &str,
-        request: ThreadSteeringRequest,
-        origin: nac_core::store::InputOrigin,
-    ) -> Result<ThreadSteeringResponse> {
-        let steering = self
-            .session_runs()
-            .queue_thread_steering(session_id, thread_name, request.instruction, origin)
-            .await?;
-        Ok(ThreadSteeringResponse {
-            steering_id: steering.steering_id,
-            thread_name: steering.thread_name,
-            status: steering.status,
-            instruction_preview: steering.instruction_preview,
-        })
-    }
-
-    pub async fn queue_orchestrator_steering(
-        &self,
-        session_id: &str,
-        request: OrchestratorSteeringRequest,
-        origin: nac_core::store::InputOrigin,
-    ) -> Result<OrchestratorSteeringResponse> {
-        let steering = self
-            .session_runs()
-            .queue_orchestrator_steering(session_id, request.instruction, origin)
-            .await?;
-        Ok(OrchestratorSteeringResponse {
-            steering_id: steering.steering_id,
-            status: steering.status,
-            instruction_preview: steering.instruction_preview,
         })
     }
 

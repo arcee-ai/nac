@@ -6,7 +6,6 @@ use nac_core::{
     },
     session_service::{SessionCancelError, SessionEventReceiver},
     sessions,
-    store::ManagedOrchestratorExecutionMode,
 };
 
 use crate::{frontend_command_name, SessionManager};
@@ -15,19 +14,6 @@ pub(crate) struct SubmittedRun {
     pub(crate) run_id: String,
     pub(crate) client_id: Option<String>,
     pub(crate) display_prompt: String,
-}
-
-pub(crate) struct OrchestratorSteering {
-    pub(crate) steering_id: i64,
-    pub(crate) status: String,
-    pub(crate) instruction_preview: String,
-}
-
-pub(crate) struct ThreadSteering {
-    pub(crate) steering_id: i64,
-    pub(crate) thread_name: String,
-    pub(crate) status: String,
-    pub(crate) instruction_preview: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -74,7 +60,7 @@ impl<'a> SessionRunApplication<'a> {
         // A person's prompt becomes review intent as typed, before expansion.
         let review_intent =
             (origin == nac_core::store::InputOrigin::Person).then(|| prompt.clone());
-        self.submit_with_admission(session_id, prompt, None, review_intent)
+        self.submit_with_admission(session_id, prompt, review_intent)
             .await
     }
 
@@ -82,7 +68,6 @@ impl<'a> SessionRunApplication<'a> {
         &self,
         session_id: &str,
         prompt: String,
-        managed_mode: Option<ManagedOrchestratorExecutionMode>,
         review_intent: Option<String>,
     ) -> Result<SubmittedRun> {
         let gate = self.manager.lifecycle_gate(session_id);
@@ -91,21 +76,12 @@ impl<'a> SessionRunApplication<'a> {
             &self.manager.inner.store_path,
             session_id,
         )?;
-        if managed_mode.is_some() {
-            self.manager
-                .validate_operation_session(
-                    session_id,
-                    super::persistence::OperationSessionScope::Persisted,
-                )
-                .await?;
-        } else {
-            self.manager
-                .validate_operation_session(
-                    session_id,
-                    super::persistence::OperationSessionScope::Primary,
-                )
-                .await?;
-        }
+        self.manager
+            .validate_operation_session(
+                session_id,
+                super::persistence::OperationSessionScope::Primary,
+            )
+            .await?;
         let service = self
             .manager
             .attach_current_operation_service_locked(session_id, &operation_lease)
@@ -125,20 +101,9 @@ impl<'a> SessionRunApplication<'a> {
         }?;
         let display_prompt = prepared.display_prompt.clone();
         let handle = nac_core::store::spawn_blocking_store_caller(move || {
-            match managed_mode {
-                Some(execution_mode) => client
-                    .try_submit_prepared_managed_orchestrator_prompt_with_lease(
-                        prepared,
-                        operation_lease,
-                        execution_mode,
-                    ),
-                None => client.try_submit_prepared_prompt_with_lease(
-                    prepared,
-                    operation_lease,
-                    review_intent,
-                ),
-            }
-            .map_err(anyhow::Error::new)
+            client
+                .try_submit_prepared_prompt_with_lease(prepared, operation_lease, review_intent)
+                .map_err(anyhow::Error::new)
         })
         .await??;
         Ok(SubmittedRun {
@@ -148,91 +113,6 @@ impl<'a> SessionRunApplication<'a> {
                 .as_ref()
                 .map(std::string::ToString::to_string),
             display_prompt,
-        })
-    }
-
-    pub(crate) async fn queue_thread_steering(
-        &self,
-        session_id: &str,
-        thread_name: &str,
-        instruction: String,
-        origin: nac_core::store::InputOrigin,
-    ) -> Result<ThreadSteering> {
-        self.manager
-            .validate_operation_session(
-                session_id,
-                super::persistence::OperationSessionScope::Primary,
-            )
-            .await?;
-        self.queue_thread_steering_for_run(session_id, thread_name, instruction, None, origin)
-            .await
-    }
-
-    pub(crate) async fn queue_thread_steering_for_run(
-        &self,
-        session_id: &str,
-        thread_name: &str,
-        instruction: String,
-        expected_run_id: Option<&str>,
-        origin: nac_core::store::InputOrigin,
-    ) -> Result<ThreadSteering> {
-        let service = self.manager.attach_session(session_id).await?;
-        let thread_name = thread_name.to_owned();
-        let expected_run_id = expected_run_id.map(str::to_owned);
-        let record = self
-            .manager
-            .inner
-            ._store_ownership
-            .call_legacy(move || {
-                service.queue_thread_steering_for_run(
-                    &thread_name,
-                    &instruction,
-                    expected_run_id.as_deref(),
-                    origin,
-                )
-            })
-            .await??;
-        Ok(ThreadSteering {
-            steering_id: record.id,
-            thread_name: record.thread_name,
-            status: record.status,
-            instruction_preview: record.instruction.chars().take(160).collect(),
-        })
-    }
-
-    pub(crate) async fn queue_orchestrator_steering(
-        &self,
-        session_id: &str,
-        instruction: String,
-        origin: nac_core::store::InputOrigin,
-    ) -> Result<OrchestratorSteering> {
-        self.manager
-            .validate_operation_session(
-                session_id,
-                super::persistence::OperationSessionScope::Primary,
-            )
-            .await?;
-        self.queue_orchestrator_steering_unchecked(session_id, instruction, origin)
-            .await
-    }
-
-    pub(crate) async fn queue_orchestrator_steering_unchecked(
-        &self,
-        session_id: &str,
-        instruction: String,
-        origin: nac_core::store::InputOrigin,
-    ) -> Result<OrchestratorSteering> {
-        let service = self.manager.attach_session(session_id).await?;
-        let record = self
-            .manager
-            .inner
-            ._store_ownership
-            .call_legacy(move || service.queue_orchestrator_steering(&instruction, origin))
-            .await??;
-        Ok(OrchestratorSteering {
-            steering_id: record.id,
-            status: record.status,
-            instruction_preview: record.instruction.chars().take(160).collect(),
         })
     }
 
