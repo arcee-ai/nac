@@ -140,7 +140,7 @@ use nac_core::{
         ToolCallContent,
     },
     sessions,
-    store::{ManagedOrchestratorStatus, SessionGoalRecord, SessionInboxRecord},
+    store::{SessionGoalRecord, SessionInboxRecord},
     view::{self, SessionSummarySnapshot},
     workspace::GitTarget,
 };
@@ -183,9 +183,9 @@ const WORKSPACE_DIFF_MEASURE_BUDGET: Duration = Duration::from_secs(4);
 const GIT_PROBE_CACHE_TTL: Duration = Duration::from_secs(60);
 const COMPLETE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(20);
 
-enum SuppressedCompletion {
-    Traditional { session_id: String, generation: u64 },
-    Managed { session_id: String, generation: u64 },
+struct SuppressedCompletion {
+    session_id: String,
+    generation: u64,
 }
 
 struct CompletionSuppressionRollback {
@@ -229,26 +229,10 @@ impl CompletionSuppressionRollback {
     }
 
     fn suppress_running(&mut self, session_id: &str) -> Result<()> {
-        let managed_already = self.suppressed.iter().any(|entry| {
-            matches!(entry, SuppressedCompletion::Managed { session_id: existing, .. } if existing == session_id)
-        });
-        if !managed_already
-            && nac_core::store::load_managed_orchestrator(&self.store_path, session_id)?
-                .is_some_and(|record| record.status == ManagedOrchestratorStatus::Running)
-        {
-            let record = nac_core::store::suppress_managed_orchestrator_completion(
-                &self.store_path,
-                session_id,
-            )?;
-            self.suppressed.push(SuppressedCompletion::Managed {
-                session_id: session_id.to_string(),
-                generation: record.generation,
-            });
-        }
-
-        let child_already = self.suppressed.iter().any(|entry| {
-            matches!(entry, SuppressedCompletion::Traditional { session_id: existing, .. } if existing == session_id)
-        });
+        let child_already = self
+            .suppressed
+            .iter()
+            .any(|entry| entry.session_id == session_id);
         if !child_already
             && nac_core::store::load_traditional_child(&self.store_path, session_id)?.is_some_and(
                 |record| record.status == nac_core::store::TraditionalChildStatus::Running,
@@ -258,7 +242,7 @@ impl CompletionSuppressionRollback {
                 &self.store_path,
                 session_id,
             )?;
-            self.suppressed.push(SuppressedCompletion::Traditional {
+            self.suppressed.push(SuppressedCompletion {
                 session_id: session_id.to_string(),
                 generation: record.generation,
             });
@@ -277,24 +261,11 @@ impl Drop for CompletionSuppressionRollback {
             return;
         }
         for entry in self.suppressed.drain(..).rev() {
-            let result = match entry {
-                SuppressedCompletion::Traditional {
-                    session_id,
-                    generation,
-                } => nac_core::store::restore_traditional_child_completion(
-                    &self.store_path,
-                    &session_id,
-                    generation,
-                ),
-                SuppressedCompletion::Managed {
-                    session_id,
-                    generation,
-                } => nac_core::store::restore_managed_orchestrator_completion(
-                    &self.store_path,
-                    &session_id,
-                    generation,
-                ),
-            };
+            let result = nac_core::store::restore_traditional_child_completion(
+                &self.store_path,
+                &entry.session_id,
+                entry.generation,
+            );
             if let Err(error) = result {
                 eprintln!("nac: failed to roll back completion suppression: {error:#}");
             }

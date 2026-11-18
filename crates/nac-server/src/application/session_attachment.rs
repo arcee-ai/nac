@@ -258,29 +258,6 @@ impl<'a> SessionAttachmentApplication<'a> {
             }
             drop(lease);
         }
-        for (orchestrator_session_id, generation) in
-            nac_core::store::list_suppressed_managed_orchestrator_generations(
-                store_path,
-                parent_session_id,
-            )?
-        {
-            let lease = match sessions::SessionRelationshipLease::try_acquire(
-                store_path,
-                &orchestrator_session_id,
-            ) {
-                Ok(lease) => lease,
-                Err(sessions::SessionOperationLeaseError::Busy(_)) => continue,
-                Err(sessions::SessionOperationLeaseError::Store(error)) => return Err(error),
-            };
-            if sessions::load_session(store_path, &orchestrator_session_id).is_ok() {
-                nac_core::store::restore_managed_orchestrator_completion(
-                    store_path,
-                    &orchestrator_session_id,
-                    generation,
-                )?;
-            }
-            drop(lease);
-        }
         Ok(())
     }
 
