@@ -5,10 +5,100 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
 import { expect, it, vi } from "vitest";
 
-import { managedQueryKeys, useReadyProviderModels } from "@/app/features/managed/queries";
+import {
+  managedQueryKeys,
+  useManagedProviderModels,
+  useReadyProviderModels,
+} from "@/app/features/managed/queries";
 import { api } from "@/app/services/api";
 import { refreshProviderAuthentication } from "@/app/services/queries/configuration";
+import { queryKeys } from "@/app/services/queries/keys";
 import type { ManagedHostStatus, ModelCatalog } from "@/app/types/api";
+
+it("invalidates cached catalog metadata when Codex discovery completes", async () => {
+  const discovery = vi.spyOn(api, "listProviderModels").mockResolvedValue({
+    base_url: "https://chatgpt.com/backend-api",
+    models: [{ id: "gpt-6.1-sol", display_name: "GPT-6.1-Sol" }],
+  });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client.setQueryData(queryKeys.modelCatalog, { catalog_version: 1, providers: [] });
+  const wrapper = ({ children }: PropsWithChildren) => (
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  );
+  const hook = renderHook(() => useManagedProviderModels("chatgpt-codex-responses", true), {
+    wrapper,
+  });
+  try {
+    await waitFor(() => expect(hook.result.current.isSuccess).toBe(true));
+    expect(client.getQueryState(queryKeys.modelCatalog)?.isInvalidated).toBe(true);
+  } finally {
+    hook.unmount();
+    client.clear();
+    discovery.mockRestore();
+  }
+});
+
+it("does not reuse Codex availability after the catalog version changes", async () => {
+  const catalog: ModelCatalog = {
+    catalog_version: 1,
+    providers: [
+      {
+        id: "chatgpt-codex-responses",
+        auth: "codex_oauth",
+        auth_status: "ready",
+        auth_hint: null,
+        connection: { base_url: "https://chatgpt.com/backend-api", api_key_env: null },
+        default_base_url: null,
+        managed_base_url: "https://chatgpt.com/backend-api",
+        default_limits: { context_window: 128000, max_tokens: 16384, supported_efforts: [] },
+        models: [],
+      },
+    ],
+  };
+  const next = Promise.withResolvers<Awaited<ReturnType<typeof api.listProviderModels>>>();
+  const host = vi.spyOn(api, "getManagedStatus").mockRejectedValue(new Error("not managed"));
+  const discovery = vi
+    .spyOn(api, "listProviderModels")
+    .mockResolvedValueOnce({
+      base_url: "https://chatgpt.com/backend-api",
+      models: [{ id: "old-account", display_name: null }],
+    })
+    .mockReturnValueOnce(next.promise);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const wrapper = ({ children }: PropsWithChildren) => (
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  );
+  const hook = renderHook(
+    ({ current }: { current: ModelCatalog }) => useReadyProviderModels(current),
+    { wrapper, initialProps: { current: catalog } },
+  );
+  try {
+    await waitFor(() =>
+      expect(hook.result.current.get("chatgpt-codex-responses")).toEqual([
+        { id: "old-account", display_name: null },
+      ]),
+    );
+    hook.rerender({ current: { ...catalog, catalog_version: 2 } });
+    await waitFor(() => expect(discovery).toHaveBeenCalledTimes(2));
+    expect(hook.result.current.get("chatgpt-codex-responses")).toBeNull();
+    await act(async () =>
+      next.resolve({
+        base_url: "https://chatgpt.com/backend-api",
+        models: [{ id: "new-account", display_name: null }],
+      }),
+    );
+    await waitFor(() =>
+      expect(hook.result.current.get("chatgpt-codex-responses")).toEqual([
+        { id: "new-account", display_name: null },
+      ]),
+    );
+  } finally {
+    hook.unmount();
+    client.clear();
+    host.mockRestore();
+    discovery.mockRestore();
+  }
+});
 
 it("loads all mounted-key models without sending a browser credential", async () => {
   // The hook reads only the model/auth fields in these response fixtures.

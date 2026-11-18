@@ -5907,6 +5907,7 @@ function kC(e = !0) {
 		queryFn: ({ signal: e }) => t.getModelCatalog(e),
 		enabled: e,
 		staleTime: 6e5,
+		refetchInterval: 6e4,
 		retry: !1
 	});
 }
@@ -7545,44 +7546,62 @@ function zE(e = !0, t = !1) {
 	});
 }
 function BE(e, t, n) {
-	let { api: r } = i();
+	let { api: r } = i(), a = _(), o = kC(e === "chatgpt-codex-responses" && t !== null && n !== null);
 	return g({
 		queryKey: [
 			...jE.providerModels(e ?? ""),
 			"after-refusal",
 			t,
-			n
+			n,
+			...e === "chatgpt-codex-responses" ? [o.data?.catalog_version] : []
 		],
-		queryFn: ({ signal: t }) => r.listProviderModels({ backend: e }, t),
-		enabled: e !== null && t !== null && n !== null,
+		queryFn: async ({ signal: t }) => {
+			let n = await r.listProviderModels({ backend: e }, t);
+			return e === "chatgpt-codex-responses" && await a.invalidateQueries({ queryKey: y.modelCatalog }), n;
+		},
+		enabled: e !== null && t !== null && n !== null && (e !== "chatgpt-codex-responses" || o.data !== void 0),
 		retry: !1,
 		staleTime: Infinity
 	});
 }
 function VE(e, t, n = null) {
-	let { api: r } = i();
+	let { api: r } = i(), a = _(), o = kC(t && e === "chatgpt-codex-responses");
 	return g({
-		queryKey: jE.providerModels(e ?? "", n),
-		queryFn: ({ signal: t }) => r.listProviderModels(n ? {
-			backend: e,
-			base_url: n
-		} : { backend: e }, t),
-		enabled: t && e !== null,
+		queryKey: e === "chatgpt-codex-responses" ? [
+			...jE.providerModels(e, n),
+			"catalog",
+			o.data?.catalog_version
+		] : jE.providerModels(e ?? "", n),
+		queryFn: async ({ signal: t }) => {
+			let i = await r.listProviderModels(n ? {
+				backend: e,
+				base_url: n
+			} : { backend: e }, t);
+			return e === "chatgpt-codex-responses" && await a.invalidateQueries({ queryKey: y.modelCatalog }), i;
+		},
+		enabled: t && e !== null && (e !== "chatgpt-codex-responses" || o.data !== void 0),
 		retry: !1,
 		staleTime: 3e5
 	});
 }
 function HE(e) {
-	let { api: t } = i(), n = ME().data ?? null, r = m(() => eE(e, n), [e, n]), a = ae({ queries: r.map((e) => ({
-		queryKey: jE.providerModels(e.backend, e.base_url),
-		queryFn: ({ signal: n }) => t.listProviderModels(e, n),
+	let { api: t } = i(), n = _(), r = ME().data ?? null, a = m(() => eE(e, r), [e, r]), o = ae({ queries: a.map((r) => ({
+		queryKey: r.backend === "chatgpt-codex-responses" ? [
+			...jE.providerModels(r.backend, r.base_url),
+			"catalog",
+			e?.catalog_version
+		] : jE.providerModels(r.backend, r.base_url),
+		queryFn: async ({ signal: e }) => {
+			let i = await t.listProviderModels(r, e);
+			return r.backend === "chatgpt-codex-responses" && await n.invalidateQueries({ queryKey: y.modelCatalog }), i;
+		},
 		retry: !1,
 		staleTime: 3e5
-	})) }), o = /* @__PURE__ */ new Map();
-	return r.forEach((e, t) => {
-		let n = a[t];
-		n?.isPending ? o.set(e.backend, null) : n?.isSuccess && o.set(e.backend, n.data.models);
-	}), o;
+	})) }), s = /* @__PURE__ */ new Map();
+	return a.forEach((e, t) => {
+		let n = o[t];
+		n?.isPending ? s.set(e.backend, null) : n?.isSuccess && s.set(e.backend, n.data.models);
+	}), s;
 }
 // src/app/providers/ToastProvider.tsx
 var UE = u(null), WE = 150, GE = 3, KE = 0, qE = () => `toast-${Date.now()}-${KE++}`;

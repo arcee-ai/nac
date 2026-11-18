@@ -1740,6 +1740,7 @@ impl SessionManager {
         orchestrator.project_id = parent.project_id;
         orchestrator.light_model = parent.light_model;
         orchestrator.orchestrator_compaction_threshold = parent.orchestrator_compaction_threshold;
+        orchestrator.automatic_compaction = parent.automatic_compaction;
         nac_core::store::create_managed_orchestrator_session(
             &self.inner.store_path,
             &orchestrator,
@@ -1809,6 +1810,7 @@ impl SessionManager {
         child.behavior = sessions::SessionBehavior::Direct;
         child.project_id = parent.project_id;
         child.orchestrator_compaction_threshold = parent.orchestrator_compaction_threshold;
+        child.automatic_compaction = parent.automatic_compaction;
         nac_core::store::create_traditional_child_session(
             &self.inner.store_path,
             &child,

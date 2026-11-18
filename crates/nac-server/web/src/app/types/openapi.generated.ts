@@ -383,6 +383,7 @@ export interface components {
     };
     DefaultLimits: {
       context_window: number;
+      limits?: components["schemas"]["ResolvedLimits"] | null;
       max_tokens: number;
       supported_efforts: components["schemas"]["ReasoningEffort"][];
     };
@@ -823,6 +824,7 @@ export interface components {
       model: string;
       reasoning_effort?: components["schemas"]["ReasoningEffort"] | null;
     };
+    LimitOrigin: "observed" | "profile" | "inherited" | "customized" | "estimated";
     ManagedAcceptedIdentity: {
       host_incarnation_id: string;
       managed_host_id: string;
@@ -1136,6 +1138,7 @@ export interface components {
       cost: components["schemas"]["ModelCostRates"];
       display_name: string | null;
       id: string;
+      limits?: components["schemas"]["ResolvedLimits"] | null;
       max_tokens: number;
       reasoning: boolean;
       source: components["schemas"]["ModelSource"];
@@ -1393,6 +1396,7 @@ export interface components {
     RawSessionConfig: {
       allow_insecure_http: boolean;
       api_key_env: string | null;
+      automatic_compaction?: boolean;
       backend: string | null;
       base_url: string;
       config_version: number;
@@ -1499,6 +1503,17 @@ export interface components {
     };
     RequestField_Vec_Vec_String: null | string[];
     ResizeUserTerminalRequest: { cols: number; protocol_version: number; rows: number };
+    ResolvedLimits: {
+      automatic_compaction_origin?: components["schemas"]["LimitOrigin"] | null;
+      automatic_compaction_threshold?: number | null;
+      context_origin: components["schemas"]["LimitOrigin"];
+      context_window: number;
+      effective_input_tokens: number;
+      input_origin: components["schemas"]["LimitOrigin"];
+      max_input_tokens?: number | null;
+      max_output_tokens: number;
+      output_origin: components["schemas"]["LimitOrigin"];
+    };
     ResolvedModelConfiguration: {
       allow_insecure_http: boolean;
       api_key_env: string | null;

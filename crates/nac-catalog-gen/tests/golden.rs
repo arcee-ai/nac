@@ -41,6 +41,7 @@ fn golden_output_covers_the_models_dev_provider_projections() {
         providers,
         [
             "anthropic-messages",
+            "chatgpt-codex-responses",
             "deepseek-chat",
             "fireworks-chat",
             "openai-chat-completions",
@@ -55,7 +56,7 @@ fn golden_output_covers_the_models_dev_provider_projections() {
         .map(|provider| provider.models.len())
         .sum();
     assert_eq!(
-        total, 108,
+        total, 143,
         "models.dev snapshot agent-compatible model count drifted"
     );
 }
@@ -69,6 +70,21 @@ fn models_dev_input_modalities_drive_image_capability() {
     assert!(
         !generation.catalog.providers["together-chat"].models["MiniMaxAI/MiniMax-M2.7"].image_input
     );
+}
+
+#[test]
+fn newer_codex_projection_keeps_api_limits_separate() {
+    // Recorded models.dev OpenAI records from 2026-11-17; the Codex identity
+    // is also present in the sanitized authenticated index fixture.
+    let generation = gen::generate(FIXTURE, OVERRIDES).expect("fixture generates");
+    let api = &generation.catalog.providers["openai-responses"].models["gpt-6.1-sol"];
+    let codex = &generation.catalog.providers["chatgpt-codex-responses"].models["gpt-6.1-sol"];
+    assert_eq!(api.context_window, 1_050_000);
+    assert_eq!(api.max_input_tokens, Some(922_000));
+    assert!(codex.image_input);
+    assert_eq!(codex.context_window, gen::FALLBACK_CONTEXT_WINDOW);
+    assert_eq!(codex.max_input_tokens, None);
+    assert_eq!(codex.context_origin.as_deref(), Some("estimated"));
 }
 
 #[test]
@@ -119,7 +135,7 @@ fn manifest_hash_matches_the_generated_bytes() {
         manifest.sha256,
         gen::hex_sha256(generation.catalog_json.as_bytes())
     );
-    assert_eq!(manifest.model_counts.len(), 6);
+    assert_eq!(manifest.model_counts.len(), 7);
 }
 
 #[test]

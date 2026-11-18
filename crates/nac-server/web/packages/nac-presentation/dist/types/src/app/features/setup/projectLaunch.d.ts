@@ -21,6 +21,7 @@ export declare function projectChatRequest(values: {
     reasoning: string;
     headers: Record<string, string> | undefined;
     compaction: string;
+    automaticCompaction: boolean;
     presetCompaction: boolean;
     savedLight: LightModelSettings | null | undefined;
     light: LightSelection;

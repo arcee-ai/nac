@@ -434,8 +434,8 @@ export function useStoredKeyProviderModels(
  */
 /**
  * The server's model catalog: context windows, prices and the efforts each
- * model accepts. It only changes when the server reloads it, and a failure is
- * never fatal — every consumer falls back to showing the raw numbers.
+ * model accepts. Poll while mounted so background catalog reloads reach a
+ * long-lived client; a failure is never fatal.
  */
 export function useModelCatalog(enabled = true) {
   const { api } = useNativeRuntime();
@@ -445,6 +445,7 @@ export function useModelCatalog(enabled = true) {
     queryFn: ({ signal }) => api.getModelCatalog(signal),
     enabled,
     staleTime: 10 * 60_000,
+    refetchInterval: 60_000,
     retry: false,
   });
 }

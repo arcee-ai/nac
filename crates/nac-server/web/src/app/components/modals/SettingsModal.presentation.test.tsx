@@ -70,7 +70,9 @@ function renderReadySettings({
   projectId = null,
   diagnostics = [],
   providerBackend = "openai-responses",
+  automaticCompaction = false,
 }: {
+  automaticCompaction?: boolean;
   providerBackend?: BackendKind;
   diagnostics?: string[];
   projectId?: string | null;
@@ -136,6 +138,7 @@ function renderReadySettings({
     extra_headers_json: headersJson,
     light_model: lightModel,
     orchestrator_compaction_threshold: threshold,
+    automatic_compaction: automaticCompaction,
     diagnostics,
   } as RawSessionConfig);
   vi.spyOn(api, "getModelCatalog").mockResolvedValue({
@@ -190,6 +193,36 @@ function renderReadySettings({
   );
   return { client, update, view };
 }
+
+it("saves a manually edited automatic threshold even if restored to its original value", async () => {
+  vi.spyOn(api, "listModelConfigs").mockResolvedValue({ configurations: [] });
+  vi.spyOn(api, "listManagedAuth").mockResolvedValue({ providers: [] });
+  const { client, update, view } = renderReadySettings({
+    automaticCompaction: true,
+    orchestration: false,
+  });
+  try {
+    await waitFor(() =>
+      expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(
+        false,
+      ),
+    );
+    fireEvent.click(screen.getByText("Advanced execution settings"));
+    fireEvent.click(screen.getByRole("button", { name: "Advanced Configurations" }));
+    const limit = screen.getByRole("textbox", { name: "Context limit" }) as HTMLInputElement;
+    const original = limit.value;
+    fireEvent.change(limit, { target: { value: "123" } });
+    fireEvent.change(limit, { target: { value: original } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(update).toHaveBeenCalled());
+    expect(update.mock.calls[0]?.[1]).toMatchObject({
+      orchestrator_compaction_threshold: Number(original),
+    });
+  } finally {
+    view.unmount();
+    client.clear();
+  }
+});
 
 it.each([false, true])(
   "names native headers and retains edits across picker presentations (matching preset: %s)",

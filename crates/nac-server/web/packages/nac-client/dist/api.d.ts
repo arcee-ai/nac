@@ -725,6 +725,7 @@ export declare function createNacApi(nacClient: NacClient, options?: {
     getConfig: (id: string, signal?: AbortSignal) => Promise<{
         allow_insecure_http: boolean;
         api_key_env: string | null;
+        automatic_compaction?: boolean;
         backend: string | null;
         base_url: string;
         config_version: number;

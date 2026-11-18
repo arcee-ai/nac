@@ -163,9 +163,14 @@ async fn prepare_run_config_inner(
         .clone()
         .unwrap_or_else(|| default_config_cwd(&options.workspace_cwd, ssh_host.as_deref()));
     let settings = effective_model_settings(&options.model, config)?;
+    let automatic_compaction = settings.backend == BackendKind::ChatGptCodexResponses
+        && options.orchestrator_compaction_threshold.is_none();
+    let limits = settings.resolved.resolved_limits();
     let orchestrator_compaction_threshold = effective_orchestrator_compaction_threshold(
-        options.orchestrator_compaction_threshold,
-        settings.resolved.context_window,
+        options
+            .orchestrator_compaction_threshold
+            .or(limits.automatic_compaction_threshold),
+        limits.effective_input_tokens,
     )?;
     let client = ModelClient::from_effective_settings(settings.clone())?.with_cache_ttl(Some("1h"));
     let light_model = options.model.light_model.clone();
@@ -239,7 +244,7 @@ async fn prepare_run_config_inner(
         let agents_md_message = mcp
             .as_ref()
             .and_then(|registry| registry.instructions_message());
-        let agent = Agent::with_config(
+        let mut agent = Agent::with_config(
             client.clone(),
             AgentConfig {
                 command_output_limits: worker_command_output_limits(config)?,
@@ -267,6 +272,9 @@ async fn prepare_run_config_inner(
                 permission_rules: config.permissions.rules.clone(),
             },
         )?;
+        if automatic_compaction {
+            agent.enable_automatic_compaction();
+        }
         let mut session_snapshot = sessions::new_snapshot(
             session_id.clone(),
             remote_cwd,
@@ -284,6 +292,7 @@ async fn prepare_run_config_inner(
         session_snapshot.allow_insecure_http = settings.allow_insecure_http;
         session_snapshot.project_id = project_id.clone();
         session_snapshot.orchestrator_compaction_threshold = orchestrator_compaction_threshold;
+        session_snapshot.automatic_compaction = automatic_compaction;
         session_snapshot.light_model = light_model;
         return Ok(PreparedSessionRunConfig::new(
             SessionRunConfig {
@@ -381,7 +390,7 @@ async fn prepare_run_config_inner(
             .map(|registry| registry.model_tool_definitions())
             .unwrap_or_default();
 
-        let agent = Agent::with_config(
+        let mut agent = Agent::with_config(
             client.clone(),
             AgentConfig {
                 command_output_limits: worker_command_output_limits(config)?,
@@ -409,6 +418,9 @@ async fn prepare_run_config_inner(
                 permission_rules: config.permissions.rules.clone(),
             },
         )?;
+        if automatic_compaction {
+            agent.enable_automatic_compaction();
+        }
         let mut session_snapshot = sessions::new_snapshot(
             session_id.clone(),
             workspace_cwd.clone(),
@@ -426,6 +438,7 @@ async fn prepare_run_config_inner(
         session_snapshot.allow_insecure_http = settings.allow_insecure_http;
         session_snapshot.project_id = project_id;
         session_snapshot.orchestrator_compaction_threshold = orchestrator_compaction_threshold;
+        session_snapshot.automatic_compaction = automatic_compaction;
         session_snapshot.light_model = light_model;
         Ok(SessionRunConfig {
             agent,

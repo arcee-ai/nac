@@ -15,6 +15,7 @@ const MODEL_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(20);
 /// Provider error bodies are echoed back to help diagnose a rejected key, but
 /// only far enough to carry the message.
 const MAX_PROVIDER_ERROR_BODY: usize = 400;
+const MAX_PROVIDER_MODEL_LIST_BYTES: usize = 8 * 1024 * 1024;
 
 /// The Codex model index hides every model whose `minimal_client_version` is
 /// above the version the caller reports, so asking without one lists nothing.
@@ -64,7 +65,7 @@ pub struct ProviderModel {
 /// rather than at the OpenAI-shaped path; every other supported provider
 /// speaks the OpenAI shape where the base URL already includes any version
 /// segment.
-fn models_url(backend: BackendKind, base_url: &str) -> Option<String> {
+pub(super) fn models_url(backend: BackendKind, base_url: &str) -> Option<String> {
     let trimmed = base_url.trim_end_matches('/');
     match backend {
         BackendKind::AnthropicMessages => Some(format!("{trimmed}/v1/models")),
@@ -189,7 +190,13 @@ pub async fn list_provider_models_with_http_policy(
         _ => request.bearer_auth(api_key),
     };
 
-    read_model_list(request, &base_url, "the provider rejected this API key").await
+    read_model_list(
+        request,
+        &base_url,
+        "the provider rejected this API key",
+        &[api_key],
+    )
+    .await
 }
 
 /// Ask a provider signed in through the browser which models the login reaches.
@@ -203,27 +210,51 @@ pub async fn list_managed_provider_models(
     let backend = provider.backend();
     let client = client::no_redirect_model_client()?;
 
-    let (base_url, request) = match provider {
+    let (base_url, request, codex_account, token) = match provider {
         ManagedAuthProvider::Arcee => {
             // The login names the endpoint it belongs to, so the token is never
             // offered to an origin other than the one that issued it.
             let base_url = arcee::read_stored_auth()?.base_url;
             let token = arcee::fresh_access_token(&client, &base_url).await?;
             let url = model_index_url(backend, &base_url)?;
-            (base_url, model_index_request(&url)?.bearer_auth(token))
+            (
+                base_url,
+                model_index_request(&url)?.bearer_auth(&token),
+                None,
+                token,
+            )
         }
         ManagedAuthProvider::Codex => {
             let base_url = resolve_model_base_url(backend, None)?;
             let (token, account_id) = chatgpt_codex::stored_auth_for_request(&client).await?;
             let url = model_index_url(backend, &base_url)?;
             let request = model_index_request(&url)?
-                .bearer_auth(token)
-                .header("ChatGPT-Account-Id", account_id);
-            (base_url, request)
+                .bearer_auth(&token)
+                .header("ChatGPT-Account-Id", &account_id);
+            (base_url, request, Some(account_id), token)
         }
     };
 
-    read_model_list(request, &base_url, "the provider rejected this login").await
+    let mut secrets = vec![token.as_str()];
+    if let Some(account) = codex_account.as_deref() {
+        secrets.push(account);
+    }
+    let body = read_model_list_body(
+        request,
+        &base_url,
+        "the provider rejected this login",
+        &secrets,
+        false,
+    )
+    .await?;
+    let models = parse_model_list(&body)?;
+    if models.is_empty() {
+        return Err(anyhow!("the provider returned an empty model list"));
+    }
+    if let Some(account) = codex_account {
+        catalog::record_codex_discovery(&account, &body);
+    }
+    Ok(models)
 }
 
 fn model_index_request(url: &str) -> Result<reqwest::RequestBuilder> {
@@ -240,29 +271,55 @@ async fn read_model_list(
     request: reqwest::RequestBuilder,
     base_url: &str,
     rejected: &str,
+    secrets: &[&str],
 ) -> Result<Vec<ProviderModel>> {
-    let response = request
-        .send()
-        .await
-        .map_err(|error| anyhow!("could not reach the provider at {base_url}: {error}"))?;
-    let status = response.status();
-    let body = response.text().await.unwrap_or_default();
-
-    if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
-        return Err(anyhow!("{rejected} ({status})"));
-    }
-    if !status.is_success() {
-        return Err(anyhow!(
-            "the provider returned {status} for the model list: {}",
-            truncated_body(&body)
-        ));
-    }
-
+    let body = read_model_list_body(request, base_url, rejected, secrets, true).await?;
     let models = parse_model_list(&body)?;
     if models.is_empty() {
         return Err(anyhow!("the provider returned an empty model list"));
     }
     Ok(models)
+}
+
+async fn read_model_list_body(
+    request: reqwest::RequestBuilder,
+    base_url: &str,
+    rejected: &str,
+    secrets: &[&str],
+    include_error_body: bool,
+) -> Result<String> {
+    let mut response = request
+        .send()
+        .await
+        .map_err(|error| anyhow!("could not reach the provider at {base_url}: {error}"))?;
+    let status = response.status();
+    if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+        return Err(anyhow!("{rejected} ({status})"));
+    }
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|_| anyhow!("could not read the provider model list"))?
+    {
+        if bytes.len().saturating_add(chunk.len()) > MAX_PROVIDER_MODEL_LIST_BYTES {
+            return Err(anyhow!("provider model list exceeded the size limit"));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    let body = String::from_utf8_lossy(&bytes).into_owned();
+
+    if !status.is_success() {
+        if !include_error_body {
+            return Err(anyhow!("the provider returned {status} for the model list"));
+        }
+        return Err(anyhow!(
+            "the provider returned {status} for the model list: {}",
+            truncated_body(&redact_credentials(&body, secrets))
+        ));
+    }
+
+    Ok(body)
 }
 
 #[cfg(test)]
@@ -546,6 +603,24 @@ mod tests {
             message.contains("upstream exploded"),
             "unexpected error: {message}"
         );
+    }
+
+    #[tokio::test]
+    async fn discovery_redacts_echoed_credentials_from_provider_errors() {
+        let server = ScriptedServer::start(vec![ScriptedResponse::json(
+            "500 Internal Server Error",
+            "the exact credential secret-value-123 was rejected",
+        )]);
+        let error = list_provider_models(
+            BackendKind::OpenAiResponses,
+            &server.base_url,
+            "secret-value-123",
+        )
+        .await
+        .unwrap_err();
+        server.finish();
+        assert!(!error.to_string().contains("secret-value-123"));
+        assert!(error.to_string().contains("500"));
     }
 
     #[tokio::test]

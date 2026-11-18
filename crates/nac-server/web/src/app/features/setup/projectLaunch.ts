@@ -22,6 +22,7 @@ export function projectChatRequest(values: {
   reasoning: string;
   headers: Record<string, string> | undefined;
   compaction: string;
+  automaticCompaction: boolean;
   presetCompaction: boolean;
   savedLight: LightModelSettings | null | undefined;
   light: LightSelection;
@@ -55,7 +56,10 @@ export function projectChatRequest(values: {
   if (headers !== undefined) body.extra_headers = headers;
   if (values.presetCompaction && selected.orchestrator_compaction_threshold !== undefined)
     body.orchestrator_compaction_threshold = selected.orchestrator_compaction_threshold;
-  else if (nullable(values.compaction) !== null)
+  else if (
+    !(selected.backend === "chatgpt-codex-responses" && values.automaticCompaction) &&
+    nullable(values.compaction) !== null
+  )
     body.orchestrator_compaction_threshold = Number(values.compaction);
   if (values.execution !== "ssh")
     body.sandbox = {

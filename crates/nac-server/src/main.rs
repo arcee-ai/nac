@@ -765,6 +765,7 @@ async fn run_server_inner(
     // Anthropic API and merges effort tiers, context window, max tokens,
     // thinking types and context_management support into the catalog).
     nac_core::model::spawn_anthropic_model_refresh();
+    nac_core::model::spawn_codex_model_refresh();
     #[cfg(unix)]
     if let Some(desktop) = desktop {
         return desktop.serve(bind, manager).await;
@@ -897,6 +898,7 @@ async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
     nac_core::model::spawn_arcee_model_refresh();
     // Fire-and-forget anthropic model refresh; same cadence-gated pattern.
     nac_core::model::spawn_anthropic_model_refresh();
+    nac_core::model::spawn_codex_model_refresh();
     let launch_cwd = std::env::current_dir()?;
     let workspace_cwd = match (&cli.ssh_host, &cli.workspace_cwd) {
         (Some(_), Some(remote_cwd)) => remote_cwd.clone(),

@@ -21,9 +21,11 @@ export interface ResolvedCatalogModel {
     /** The catalog entry, absent when only the provider defaults matched. */
     model: CatalogModel | null;
     contextWindow: number | null;
+    automaticThreshold: number | null;
     supportedEfforts: ReasoningEffort[];
     /** The numbers come from the provider default, not from a real entry. */
     estimated: boolean;
+    inputOrigin: "observed" | "profile" | "inherited" | "customized" | "estimated" | null;
 }
 /**
  * Resolves a (provider, model) pair against the catalog. An unknown model still
