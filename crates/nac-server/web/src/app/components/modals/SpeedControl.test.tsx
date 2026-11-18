@@ -129,7 +129,9 @@ it("marks the selected native Ultrafast menu choice visibly", () => {
       <SpeedControl openAiApi tiers={[priority, ultra]} value="ultrafast" onChange={vi.fn()} />
     </MemoryRouter>,
   );
-  fireEvent.click(screen.getByRole("button", { name: "Speed: Ultrafast" }));
+  const trigger = screen.getByRole("button", { name: "Speed: Ultrafast" });
+  expect(trigger.querySelector("svg")).toBeNull();
+  fireEvent.click(trigger);
   const selected = screen.getByRole("menuitemradio", { name: "Ultrafast" });
   expect(selected.getAttribute("aria-checked")).toBe("true");
   expect(selected.querySelector("svg")).toBeTruthy();

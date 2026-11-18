@@ -2784,6 +2784,8 @@ function al({ tiers: e, value: t, onChange: n, disabled: r, form: i = !1, openAi
 	let h = /* @__PURE__ */ Q(Ss, {
 		"aria-label": `Speed: ${il(t)}`,
 		checkedChoices: !0,
+		size: !i && a ? z.Small : void 0,
+		trailingIcon: !i && a ? null : void 0,
 		triggerClassName: "max-md:min-h-11 max-md:min-w-11",
 		presentation: i ? "form" : void 0,
 		items: m,

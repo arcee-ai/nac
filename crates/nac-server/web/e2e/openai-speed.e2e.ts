@@ -61,6 +61,13 @@ test("native OpenAI speed survives settings, protocol changes and restart", asyn
     /OpenAI Responses/,
   );
   await expect(page.getByRole("heading", { name: "Get started" })).toBeVisible();
+  if (mobile) {
+    const label = page.getByRole("button", { name: "Model", exact: true }).locator("span").first();
+    await expect(label).toHaveText("GPT-6.1 Sol");
+    await expect
+      .poll(async () => label.evaluate((node) => node.scrollWidth <= node.clientWidth))
+      .toBe(true);
+  }
   if (process.env.NAC_VISUAL_DIR) await page.waitForTimeout(1000);
   if (process.env.NAC_VISUAL_DIR && process.env.NAC_VISUAL_LABEL === "before") {
     await page.screenshot({

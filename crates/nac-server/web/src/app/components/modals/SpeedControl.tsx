@@ -130,6 +130,8 @@ export function SpeedControl({
     <SmallSelect
       aria-label={`Speed: ${speedLabel(value)}`}
       checkedChoices
+      size={!form && openAiApi ? ButtonSize.Small : undefined}
+      trailingIcon={!form && openAiApi ? null : undefined}
       triggerClassName="max-md:min-h-11 max-md:min-w-11"
       presentation={form ? "form" : undefined}
       items={items}
