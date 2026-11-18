@@ -2498,385 +2498,6 @@
         }
       }
     },
-    "/model-configs": {
-      "get": {
-        "tags": [
-          "model-configs"
-        ],
-        "operationId": "get_model_configs",
-        "responses": {
-          "200": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ModelConfigurationList"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Request failed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          }
-        }
-      },
-      "post": {
-        "tags": [
-          "model-configs"
-        ],
-        "operationId": "post_model_configs",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateModelConfigurationRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ModelConfigurationRecord"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Request failed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Request failed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Request failed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/model-configs/from-file": {
-      "post": {
-        "tags": [
-          "model-configs"
-        ],
-        "operationId": "post_model_configs_from_file",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ModelConfigFromFileRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ResolvedModelConfiguration"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Request failed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Request failed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Request failed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "502": {
-            "description": "Request failed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/model-configs/{config_id}": {
-      "delete": {
-        "tags": [
-          "model-configs"
-        ],
-        "operationId": "delete_model_configs_config_id",
-        "parameters": [
-          {
-            "name": "config_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Success with no response body"
-          },
-          "400": {
-            "description": "Path extraction failed",
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Request failed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Configuration is a project default",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Request failed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          }
-        }
-      },
-      "patch": {
-        "tags": [
-          "model-configs"
-        ],
-        "operationId": "patch_model_configs_config_id",
-        "parameters": [
-          {
-            "name": "config_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateModelConfigurationRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ModelConfigurationRecord"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Bad request or rejected path/query/body extraction",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Request failed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Request failed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Request failed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/model-configs/{config_id}/models": {
-      "post": {
-        "tags": [
-          "model-configs"
-        ],
-        "operationId": "post_model_configs_config_id_models",
-        "parameters": [
-          {
-            "name": "config_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ResolvedModelConfiguration"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Bad request or rejected path/query/body extraction",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Request failed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Request failed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "502": {
-            "description": "Request failed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/models": {
       "get": {
         "tags": [
@@ -3074,7 +2695,7 @@
             }
           },
           "404": {
-            "description": "Directory or default model configuration was not found",
+            "description": "Directory was not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -3308,7 +2929,7 @@
             }
           },
           "404": {
-            "description": "Project or default model configuration was not found",
+            "description": "Project was not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -3711,6 +3332,56 @@
         }
       }
     },
+    "/provider-connections": {
+      "post": {
+        "tags": [
+          "credentials"
+        ],
+        "operationId": "post_provider_connections",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateProviderConnectionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Provider connection saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderConnectionCreated"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid provider connection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Storage failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/providers/models": {
       "post": {
         "tags": [
@@ -3969,66 +3640,6 @@
             }
           },
           "409": {
-            "description": "Request failed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Request failed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/sessions/launch-defaults": {
-      "post": {
-        "tags": [
-          "sessions"
-        ],
-        "operationId": "post_sessions_launch_defaults",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LaunchModelDefaultsRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LaunchModelDefaults"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Request failed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "404": {
             "description": "Request failed",
             "content": {
               "application/json": {
@@ -6958,273 +6569,6 @@
         }
       }
     },
-    "/sessions/{session_id}/orchestrators": {
-      "get": {
-        "tags": [
-          "conversation"
-        ],
-        "operationId": "get_sessions_session_id_orchestrators",
-        "parameters": [
-          {
-            "name": "session_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Managed orchestrators",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/ManagedOrchestratorRecord"
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Direct-with-orchestrator behavior required",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Session not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Request failed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          }
-        }
-      },
-      "post": {
-        "tags": [
-          "conversation"
-        ],
-        "operationId": "post_sessions_session_id_orchestrators",
-        "parameters": [
-          {
-            "name": "session_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/StartManagedOrchestratorRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "Orchestrator created, continued, or steered",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ManagedOrchestratorRecord"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid orchestrator request",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Session not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Orchestrator concurrency or run conflict",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Request failed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/sessions/{session_id}/orchestrators/{orchestrator_session_id}": {
-      "get": {
-        "tags": [
-          "conversation"
-        ],
-        "operationId": "get_sessions_session_id_orchestrators_orchestrator_session_id",
-        "parameters": [
-          {
-            "name": "session_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "orchestrator_session_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Managed orchestrator status",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ManagedOrchestratorRecord"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Orchestrator not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Request failed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/sessions/{session_id}/orchestrators/{orchestrator_session_id}/cancel": {
-      "post": {
-        "tags": [
-          "conversation"
-        ],
-        "operationId": "post_sessions_session_id_orchestrators_orchestrator_session_id_cancel",
-        "parameters": [
-          {
-            "name": "session_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "orchestrator_session_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Managed orchestrator cancelled",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ManagedOrchestratorRecord"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Orchestrator not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Orchestrator run unavailable",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Request failed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/sessions/{session_id}/permissions": {
       "get": {
         "tags": [
@@ -8454,91 +7798,6 @@
         }
       }
     },
-    "/sessions/{session_id}/steering": {
-      "post": {
-        "tags": [
-          "conversation"
-        ],
-        "operationId": "post_sessions_session_id_steering",
-        "parameters": [
-          {
-            "name": "session_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/OrchestratorSteeringRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "202": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OrchestratorSteeringResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Bad request or rejected path/query/body extraction",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Request failed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Request failed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Request failed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/sessions/{session_id}/task-followup-delegations": {
       "post": {
         "tags": [
@@ -8818,190 +8077,6 @@
           },
           "500": {
             "description": "Terminal cleanup failed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/sessions/{session_id}/threads/{thread_name}/events": {
-      "get": {
-        "tags": [
-          "conversation"
-        ],
-        "operationId": "get_sessions_session_id_threads_thread_name_events",
-        "parameters": [
-          {
-            "name": "before_id",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 0
-            }
-          },
-          {
-            "name": "session_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "thread_name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ThreadEventPage"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Bad request or rejected path/query/body extraction",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Request failed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Request failed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/sessions/{session_id}/threads/{thread_name}/steering": {
-      "post": {
-        "tags": [
-          "conversation"
-        ],
-        "operationId": "post_sessions_session_id_threads_thread_name_steering",
-        "parameters": [
-          {
-            "name": "session_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "thread_name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ThreadSteeringRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "202": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ThreadSteeringResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Bad request or rejected path/query/body extraction",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Request failed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Request failed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Request failed",
             "content": {
               "application/json": {
                 "schema": {
@@ -11500,23 +10575,6 @@
           }
         }
       }
-    },
-    "/ui-config": {
-      "get": {
-        "operationId": "get_ui_configuration",
-        "responses": {
-          "200": {
-            "description": "Runtime browser presentation policy",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UiConfiguration"
-                }
-              }
-            }
-          }
-        }
-      }
     }
   },
   "components": {
@@ -13660,91 +12718,6 @@
           }
         }
       },
-      "CreateModelConfigurationRequest": {
-        "type": "object",
-        "required": [
-          "name",
-          "backend",
-          "model"
-        ],
-        "properties": {
-          "allow_insecure_http": {
-            "type": "boolean",
-            "description": "Explicitly permit sending credentials and model traffic over public plaintext HTTP.",
-            "default": false
-          },
-          "api_key": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "example": "fake-api-key",
-            "writeOnly": true
-          },
-          "backend": {
-            "$ref": "#/components/schemas/BackendKind"
-          },
-          "base_url": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Defaults to the provider's canonical URL."
-          },
-          "extra_headers": {
-            "type": [
-              "object",
-              "null"
-            ],
-            "additionalProperties": {
-              "type": "string"
-            },
-            "propertyNames": {
-              "type": "string"
-            }
-          },
-          "initial_prompt": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "light_model": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/LightModelSettings"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "model": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "orchestrator_compaction_threshold": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64",
-            "minimum": 0
-          },
-          "reasoning_effort": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/ReasoningEffort"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        }
-      },
       "CreateProjectRequest": {
         "type": "object",
         "required": [
@@ -13753,12 +12726,6 @@
         "properties": {
           "cwd": {
             "type": "string"
-          },
-          "default_model_config_id": {
-            "type": [
-              "string",
-              "null"
-            ]
           },
           "description": {
             "type": [
@@ -13794,12 +12761,38 @@
           }
         }
       },
+      "CreateProviderConnectionRequest": {
+        "type": "object",
+        "required": [
+          "backend",
+          "api_key"
+        ],
+        "properties": {
+          "allow_insecure_http": {
+            "type": "boolean"
+          },
+          "api_key": {
+            "type": "string",
+            "example": "fake-api-key",
+            "writeOnly": true
+          },
+          "backend": {
+            "$ref": "#/components/schemas/BackendKind"
+          },
+          "base_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
       "CreateSessionRequest": {
         "type": "object",
         "properties": {
           "allow_insecure_http": {
             "$ref": "#/components/schemas/RequestField_bool_bool",
-            "description": "Explicitly permit public plaintext HTTP for this session's primary and light endpoints."
+            "description": "Explicitly permit public plaintext HTTP for this session's primary endpoint."
           },
           "api_key_env": {
             "$ref": "#/components/schemas/RequestField_String_String"
@@ -13812,7 +12805,7 @@
           },
           "behavior": {
             "$ref": "#/components/schemas/SessionBehavior",
-            "description": "Immutable execution behavior. Omission preserves the established\norchestrator default."
+            "description": "Direct session behavior. Omission selects direct."
           },
           "cwd": {
             "type": [
@@ -13834,7 +12827,7 @@
           },
           "light_model": {
             "$ref": "#/components/schemas/RequestField_LightModelSettings_LightModelSettings",
-            "description": "Optional light model. Omitted inherits project/session defaults, null\nexplicitly selects single-model operation, and a value replaces the\ninherited selection."
+            "description": "Retired selector. Any explicitly supplied value is rejected."
           },
           "model": {
             "$ref": "#/components/schemas/RequestField_String_String"
@@ -14920,6 +13913,16 @@
             "type": [
               "string",
               "null"
+            ]
+          },
+          "model_selection": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TaskModelSelection"
+              },
+              {
+                "type": "null"
+              }
             ]
           },
           "pinned_commit": {
@@ -16506,61 +15509,6 @@
           }
         }
       },
-      "LaunchModelDefaults": {
-        "type": "object",
-        "properties": {
-          "configured_model": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Configured model id; lets the launch dialog render the inherited\n\"from config\" selection resolved against the model catalog (the\nfrontend resolves the provider from the model id, exactly like\nsession creation does)."
-          },
-          "configured_reasoning_effort": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/ReasoningEffort",
-                "description": "Configured reasoning effort, if any."
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        }
-      },
-      "LaunchModelDefaultsRequest": {
-        "type": "object",
-        "properties": {
-          "cwd": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "ssh_host": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "OpenSSH target for remote sessions; remote paths never select local config."
-          },
-          "ssh_identity_file": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "ssh_port": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int32",
-            "minimum": 0
-          }
-        }
-      },
       "LightModelSettings": {
         "type": "object",
         "description": "The optional light model selection stored with a session. Orchestrator\nruntimes use it for weight-classified dispatch, and direct-with-orchestrator\nsessions pass it to the orchestrators they launch. Plain direct sessions\nretain it without a runtime consumer pending ALL-36. The model remains a\ncatalog id; backend and reasoning effort are typed before entering the\ndomain model, and the credential is always a selector name, never a key\nvalue.",
@@ -17043,87 +15991,6 @@
           },
           "id": {
             "type": "string"
-          }
-        }
-      },
-      "ManagedOrchestratorRecord": {
-        "type": "object",
-        "required": [
-          "orchestrator_session_id",
-          "parent_session_id",
-          "root_session_id",
-          "description",
-          "status",
-          "generation",
-          "created_at",
-          "updated_at",
-          "version"
-        ],
-        "properties": {
-          "completion_inbox_id": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64"
-          },
-          "created_at": {
-            "type": "string"
-          },
-          "description": {
-            "type": "string"
-          },
-          "execution_mode": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/TraditionalChildExecutionMode"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "failure": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "generation": {
-            "type": "integer",
-            "format": "int64",
-            "minimum": 0
-          },
-          "orchestrator_session_id": {
-            "type": "string"
-          },
-          "parent_session_id": {
-            "type": "string"
-          },
-          "report": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "root_session_id": {
-            "type": "string"
-          },
-          "run_id": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "status": {
-            "$ref": "#/components/schemas/TraditionalChildStatus"
-          },
-          "updated_at": {
-            "type": "string"
-          },
-          "version": {
-            "type": "integer",
-            "format": "int64"
           }
         }
       },
@@ -18205,120 +17072,6 @@
           }
         }
       },
-      "ModelConfigFromFileRequest": {
-        "type": "object",
-        "required": [
-          "path"
-        ],
-        "properties": {
-          "path": {
-            "type": "string"
-          }
-        }
-      },
-      "ModelConfigurationList": {
-        "type": "object",
-        "required": [
-          "configurations"
-        ],
-        "properties": {
-          "configurations": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ModelConfigurationRecord"
-            }
-          }
-        }
-      },
-      "ModelConfigurationRecord": {
-        "type": "object",
-        "description": "A named, reusable model setup offered by the launch modal.\n\n`api_key_env` names the credential rather than holding it: the value lives\nin the credential store (or the environment), exactly as it does for a\nconfiguration written by hand in `config.toml`.",
-        "required": [
-          "config_id",
-          "name",
-          "backend",
-          "model",
-          "base_url",
-          "allow_insecure_http",
-          "extra_headers",
-          "created_at",
-          "updated_at"
-        ],
-        "properties": {
-          "allow_insecure_http": {
-            "type": "boolean"
-          },
-          "api_key_env": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "backend": {
-            "type": "string"
-          },
-          "base_url": {
-            "type": "string"
-          },
-          "config_id": {
-            "type": "string"
-          },
-          "created_at": {
-            "type": "string"
-          },
-          "extra_headers": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "string"
-            },
-            "propertyNames": {
-              "type": "string"
-            }
-          },
-          "initial_prompt": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Message the launch modal pre-fills when this setup is chosen."
-          },
-          "light_model": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/LightModelSettings",
-                "description": "Light worker model; `None` keeps single-model behavior."
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "model": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "orchestrator_compaction_threshold": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64",
-            "description": "Compaction budget a session started from this setup inherits; `None`\nfalls back to `[compaction].threshold_tokens`.",
-            "minimum": 0
-          },
-          "reasoning_effort": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "updated_at": {
-            "type": "string"
-          }
-        }
-      },
       "ModelCostRates": {
         "type": "object",
         "description": "Cost rates in USD per 1M tokens. All-zero = unknown (pi's zero-cost\nfallback); `calculate_cost` bills unknown pricing as zero. Missing fields\ndeserialize as zero so partial catalog records stay loadable.\n\n`tiers` carries context-dependent pricing (models.dev `cost.tiers`,\npi's `model.cost.tiers`): when a response's prompt size exceeds a tier's\n`input_tokens_above`, that tier's rates replace the base rates for the\nresponse. `None` and `Some([])` both mean flat pricing; the Option keeps\nuser overrides three-state (absent = keep existing tiers, `[]` = clear).",
@@ -18570,37 +17323,6 @@
         "properties": {
           "path": {
             "type": "string"
-          }
-        }
-      },
-      "OrchestratorSteeringRequest": {
-        "type": "object",
-        "required": [
-          "instruction"
-        ],
-        "properties": {
-          "instruction": {
-            "type": "string"
-          }
-        }
-      },
-      "OrchestratorSteeringResponse": {
-        "type": "object",
-        "required": [
-          "steering_id",
-          "status",
-          "instruction_preview"
-        ],
-        "properties": {
-          "instruction_preview": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          },
-          "steering_id": {
-            "type": "integer",
-            "format": "int64"
           }
         }
       },
@@ -19201,12 +17923,6 @@
           "cwd": {
             "type": "string"
           },
-          "default_model_config_id": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "description": {
             "type": [
               "string",
@@ -19269,9 +17985,13 @@
         "description": "The server-owned account a unified picker can use for this provider.\n`api_key_env` is a selector only; the credential value never leaves the\nserver. Managed logins therefore carry no selector.",
         "required": [
           "base_url",
+          "allow_insecure_http",
           "api_key_env"
         ],
         "properties": {
+          "allow_insecure_http": {
+            "type": "boolean"
+          },
           "api_key_env": {
             "type": [
               "string",
@@ -19279,6 +17999,17 @@
             ]
           },
           "base_url": {
+            "type": "string"
+          }
+        }
+      },
+      "ProviderConnectionCreated": {
+        "type": "object",
+        "required": [
+          "connection_id"
+        ],
+        "properties": {
+          "connection_id": {
             "type": "string"
           }
         }
@@ -20078,27 +18809,6 @@
           }
         ]
       },
-      "RequestField_BackendKind_BackendKind": {
-        "oneOf": [
-          {
-            "type": "null"
-          },
-          {
-            "type": "string",
-            "enum": [
-              "deepseek-chat",
-              "fireworks-chat",
-              "together-chat",
-              "openai-responses",
-              "openai-chat-completions",
-              "chatgpt-codex-responses",
-              "anthropic-messages",
-              "arcee-auth",
-              "arcee-api"
-            ]
-          }
-        ]
-      },
       "RequestField_HeadersRequest_HeadersRequest": {
         "oneOf": [
           {
@@ -20199,25 +18909,6 @@
             "enum": [
               "allow",
               "ask"
-            ]
-          }
-        ]
-      },
-      "RequestField_ReasoningEffort_ReasoningEffort": {
-        "oneOf": [
-          {
-            "type": "null"
-          },
-          {
-            "type": "string",
-            "enum": [
-              "none",
-              "minimal",
-              "low",
-              "medium",
-              "high",
-              "xhigh",
-              "max"
             ]
           }
         ]
@@ -20423,64 +19114,6 @@
           },
           "output_origin": {
             "$ref": "#/components/schemas/LimitOrigin"
-          }
-        }
-      },
-      "ResolvedModelConfiguration": {
-        "type": "object",
-        "required": [
-          "backend",
-          "model",
-          "base_url",
-          "allow_insecure_http",
-          "api_key_env",
-          "reasoning_effort",
-          "models",
-          "models_error"
-        ],
-        "properties": {
-          "allow_insecure_http": {
-            "type": "boolean"
-          },
-          "api_key_env": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "backend": {
-            "$ref": "#/components/schemas/BackendKind"
-          },
-          "base_url": {
-            "type": "string"
-          },
-          "model": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "models": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ProviderModel"
-            }
-          },
-          "models_error": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "reasoning_effort": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/ReasoningEffort"
-              },
-              {
-                "type": "null"
-              }
-            ]
           }
         }
       },
@@ -20883,7 +19516,7 @@
       },
       "SessionBehavior": {
         "type": "string",
-        "description": "Immutable execution behavior selected when a top-level session is created.\nStored as text so future behaviors can fail closed instead of being\nmisinterpreted as the orchestrator.",
+        "description": "Immutable stored execution behavior. New sessions select direct; old values\nremain available only while the retirement migration and removal are staged.",
         "enum": [
           "orchestrator",
           "direct",
@@ -22307,30 +20940,6 @@
           }
         }
       },
-      "StartManagedOrchestratorRequest": {
-        "type": "object",
-        "required": [
-          "description",
-          "prompt"
-        ],
-        "properties": {
-          "background": {
-            "type": "boolean"
-          },
-          "description": {
-            "type": "string"
-          },
-          "orchestrator_session_id": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "prompt": {
-            "type": "string"
-          }
-        }
-      },
       "StartTraditionalChildRequest": {
         "type": "object",
         "required": [
@@ -22379,17 +20988,13 @@
         "type": "object",
         "required": [
           "root_cwd",
-          "store_path",
-          "worker_executable"
+          "store_path"
         ],
         "properties": {
           "root_cwd": {
             "type": "string"
           },
           "store_path": {
-            "type": "string"
-          },
-          "worker_executable": {
             "type": "string"
           }
         }
@@ -22685,6 +21290,16 @@
               "null"
             ]
           },
+          "model_selection": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TaskModelSelection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "project_id": {
             "type": "string"
           },
@@ -22764,6 +21379,63 @@
             "type": "boolean"
           }
         }
+      },
+      "TaskModelSelection": {
+        "type": "object",
+        "description": "Model selection is frozen with the task request for retry and recovery.\nCredential values never enter the durable request.",
+        "required": [
+          "backend",
+          "model",
+          "base_url",
+          "allow_insecure_http"
+        ],
+        "properties": {
+          "allow_insecure_http": {
+            "type": "boolean"
+          },
+          "api_key_env": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "backend": {
+            "type": "string"
+          },
+          "base_url": {
+            "type": "string"
+          },
+          "extra_headers": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "model": {
+            "type": "string"
+          },
+          "orchestrator_compaction_threshold": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "reasoning_effort": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
       },
       "TerminalSelectionAttribution": {
         "type": "object",
@@ -23427,67 +22099,6 @@
           }
         }
       },
-      "ThreadEventPage": {
-        "type": "object",
-        "required": [
-          "events",
-          "has_older"
-        ],
-        "properties": {
-          "diagnostics": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ThreadEventDecodeDiagnostic"
-            }
-          },
-          "events": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ThreadEventPageItem"
-            }
-          },
-          "has_older": {
-            "type": "boolean"
-          },
-          "next_before_id": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64"
-          },
-          "thread_event_boundary": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/SessionEventBoundary"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        }
-      },
-      "ThreadEventPageItem": {
-        "type": "object",
-        "required": [
-          "id",
-          "created_at",
-          "event"
-        ],
-        "properties": {
-          "created_at": {
-            "type": "string"
-          },
-          "event": {
-            "$ref": "#/components/schemas/AgentEvent"
-          },
-          "id": {
-            "type": "integer",
-            "format": "int64"
-          }
-        }
-      },
       "ThreadSnapshot": {
         "type": "object",
         "required": [
@@ -23571,41 +22182,6 @@
           },
           "status": {
             "type": "string"
-          },
-          "thread_name": {
-            "type": "string"
-          }
-        }
-      },
-      "ThreadSteeringRequest": {
-        "type": "object",
-        "required": [
-          "instruction"
-        ],
-        "properties": {
-          "instruction": {
-            "type": "string"
-          }
-        }
-      },
-      "ThreadSteeringResponse": {
-        "type": "object",
-        "required": [
-          "steering_id",
-          "thread_name",
-          "status",
-          "instruction_preview"
-        ],
-        "properties": {
-          "instruction_preview": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          },
-          "steering_id": {
-            "type": "integer",
-            "format": "int64"
           },
           "thread_name": {
             "type": "string"
@@ -23973,23 +22549,6 @@
         },
         "additionalProperties": false
       },
-      "UiConfiguration": {
-        "type": "object",
-        "required": [
-          "orchestration_enabled"
-        ],
-        "properties": {
-          "diagnostic": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "orchestration_enabled": {
-            "type": "boolean"
-          }
-        }
-      },
       "UpdateConfigRequest": {
         "type": "object",
         "properties": {
@@ -24012,7 +22571,7 @@
           },
           "light_model": {
             "$ref": "#/components/schemas/RequestField_LightModelSettings_LightModelSettings",
-            "description": "Omitted preserves; null returns the session to single-model mode."
+            "description": "Retired selector. Any explicitly supplied value is rejected."
           },
           "model": {
             "$ref": "#/components/schemas/RequestField_String_String"
@@ -24216,45 +22775,6 @@
           }
         }
       },
-      "UpdateModelConfigurationRequest": {
-        "type": "object",
-        "properties": {
-          "allow_insecure_http": {
-            "$ref": "#/components/schemas/RequestField_bool_bool"
-          },
-          "api_key": {
-            "$ref": "#/components/schemas/RequestField_String_String",
-            "writeOnly": true
-          },
-          "backend": {
-            "$ref": "#/components/schemas/RequestField_BackendKind_BackendKind"
-          },
-          "base_url": {
-            "$ref": "#/components/schemas/RequestField_String_String"
-          },
-          "extra_headers": {
-            "$ref": "#/components/schemas/RequestField_BTreeMap_BTreeMap_String_String"
-          },
-          "initial_prompt": {
-            "$ref": "#/components/schemas/RequestField_String_String"
-          },
-          "light_model": {
-            "$ref": "#/components/schemas/RequestField_LightModelSettings_LightModelSettings"
-          },
-          "model": {
-            "$ref": "#/components/schemas/RequestField_String_String"
-          },
-          "name": {
-            "$ref": "#/components/schemas/RequestField_String_String"
-          },
-          "orchestrator_compaction_threshold": {
-            "$ref": "#/components/schemas/RequestField_u64_u64"
-          },
-          "reasoning_effort": {
-            "$ref": "#/components/schemas/RequestField_ReasoningEffort_ReasoningEffort"
-          }
-        }
-      },
       "UpdatePermissionApprovalModeRequest": {
         "type": "object",
         "required": [
@@ -24269,9 +22789,6 @@
       "UpdateProjectRequest": {
         "type": "object",
         "properties": {
-          "default_model_config_id": {
-            "$ref": "#/components/schemas/RequestField_String_String"
-          },
           "description": {
             "$ref": "#/components/schemas/RequestField_String_String"
           },

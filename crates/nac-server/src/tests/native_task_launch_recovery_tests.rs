@@ -10,6 +10,10 @@ async fn fixture_context(
         .session_creation()
         .create_session(application::session_creation::SessionCreationCommand {
             behavior: sessions::SessionBehavior::Direct,
+            model: application::Field::Set("gpt-5.2".into()),
+            backend: application::Field::Set("openai-responses".into()),
+            base_url: application::Field::Set("http://127.0.0.1:9/v1".into()),
+            api_key_env: application::Field::Set("OPENAI_API_KEY".into()),
             project_id: Some(source.project_id.clone()),
             ..Default::default()
         })

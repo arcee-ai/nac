@@ -1,6 +1,6 @@
 import type { ProductNavigationRequest } from "./types.js";
 import { ApiError, type NacClient } from "./nacClient.js";
-import type { UpdateGitIdentityRequest, AuthenticateMcpOAuthRequest, ConfigureMcpOAuthRequest, AssignSessionRequest, CommitWorkspaceRequest, CreateModelConfigurationRequest, CreateGoalRequest, CreateProjectRequest, CreateSessionRequest, DeleteProjectSessions, LaunchModelDefaultsRequest, InboxDelivery, ManagedAuthProvider, StartManagedCloneRequest, CreateMcpServerRequest, UpdateMcpServerRequest, TestMcpServerRequest, PermissionApprovalMode, PermissionReply, StartTraditionalChildRequest, StartManagedOrchestratorRequest, ProviderModelsRequest, ReorderProjectsRequest, ReorderSessionsRequest, SessionEventBoundary, CreateSshConfigurationRequest, UpdateSshConfigurationRequest, SshTarget, ShellCommandRequest, SwitchBranchRequest, UpdateConfigRequest, UpdateGoalRequest, UpdateModelConfigurationRequest, UpdateProjectRequest, UpdateSessionPresentationRequest, WorkspaceDiffStage } from "./types.js";
+import type { UpdateGitIdentityRequest, AuthenticateMcpOAuthRequest, ConfigureMcpOAuthRequest, AssignSessionRequest, CommitWorkspaceRequest, CreateProviderConnectionRequest, CreateGoalRequest, CreateProjectRequest, CreateSessionRequest, DeleteProjectSessions, InboxDelivery, ManagedAuthProvider, StartManagedCloneRequest, CreateMcpServerRequest, UpdateMcpServerRequest, TestMcpServerRequest, PermissionApprovalMode, PermissionReply, StartTraditionalChildRequest, ProviderModelsRequest, ReorderProjectsRequest, ReorderSessionsRequest, SessionEventBoundary, CreateSshConfigurationRequest, UpdateSshConfigurationRequest, SshTarget, ShellCommandRequest, SwitchBranchRequest, UpdateConfigRequest, UpdateGoalRequest, UpdateProjectRequest, UpdateSessionPresentationRequest, WorkspaceDiffStage } from "./types.js";
 export { ApiError };
 export interface WorkspaceDiffOptions {
     stage?: WorkspaceDiffStage | "all";
@@ -25,11 +25,6 @@ export interface MessagesPageOptions {
     before?: number;
     limit?: number;
     includeSystem?: boolean;
-    signal?: AbortSignal;
-}
-export interface ThreadEventsOptions {
-    beforeId?: number;
-    limit?: number;
     signal?: AbortSignal;
 }
 export declare function createNacApi(nacClient: NacClient, options?: {
@@ -93,7 +88,6 @@ export declare function createNacApi(nacClient: NacClient, options?: {
     getStore: (signal?: AbortSignal) => Promise<{
         root_cwd: string;
         store_path: string;
-        worker_executable: string;
     }>;
     getManagedStatus: (signal?: AbortSignal) => Promise<{
         build_id: string;
@@ -250,6 +244,9 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         phase: string;
         since_epoch_ms: number;
     } | null>;
+    createProviderConnection: (payload: CreateProviderConnectionRequest) => Promise<{
+        connection_id: string;
+    }>;
     listCredentials: (signal?: AbortSignal) => Promise<{
         credentials: import("./openapi.generated.js").components["schemas"]["StoredCredentialSummary"][];
     }>;
@@ -352,42 +349,6 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         description: string;
         name: string;
     }[]>;
-    listModelConfigs: (signal?: AbortSignal) => Promise<{
-        configurations: import("./openapi.generated.js").components["schemas"]["ModelConfigurationRecord"][];
-    }>;
-    createModelConfig: (payload: CreateModelConfigurationRequest) => Promise<{
-        allow_insecure_http: boolean;
-        api_key_env?: string | null;
-        backend: string;
-        base_url: string;
-        config_id: string;
-        created_at: string;
-        extra_headers: Record<string, string>;
-        initial_prompt?: string | null;
-        light_model?: import("./openapi.generated.js").components["schemas"]["LightModelSettings"] | null;
-        model: string;
-        name: string;
-        orchestrator_compaction_threshold?: number | null;
-        reasoning_effort?: string | null;
-        updated_at: string;
-    }>;
-    updateModelConfig: (configId: string, payload: UpdateModelConfigurationRequest) => Promise<{
-        allow_insecure_http: boolean;
-        api_key_env?: string | null;
-        backend: string;
-        base_url: string;
-        config_id: string;
-        created_at: string;
-        extra_headers: Record<string, string>;
-        initial_prompt?: string | null;
-        light_model?: import("./openapi.generated.js").components["schemas"]["LightModelSettings"] | null;
-        model: string;
-        name: string;
-        orchestrator_compaction_threshold?: number | null;
-        reasoning_effort?: string | null;
-        updated_at: string;
-    }>;
-    deleteModelConfig: (configId: string) => Promise<void>;
     listSshConfigs: (signal?: AbortSignal) => Promise<{
         configurations: import("./openapi.generated.js").components["schemas"]["SshConfigurationRecord"][];
     }>;
@@ -542,34 +503,12 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         state: import("./openapi.generated.js").components["schemas"]["McpRuntimeState"];
         tool_count: number;
     }>;
-    /** Resolves a saved configuration's credential and lists its models. */
-    resolveModelConfig: (configId: string, signal?: AbortSignal) => Promise<{
-        allow_insecure_http: boolean;
-        api_key_env: string | null;
-        backend: import("./openapi.generated.js").components["schemas"]["BackendKind"];
-        base_url: string;
-        model: string | null;
-        models: import("./openapi.generated.js").components["schemas"]["ProviderModel"][];
-        models_error: string | null;
-        reasoning_effort: import("./openapi.generated.js").components["schemas"]["ReasoningEffort"] | null;
-    }>;
-    resolveConfigFile: (path: string, signal?: AbortSignal) => Promise<{
-        allow_insecure_http: boolean;
-        api_key_env: string | null;
-        backend: import("./openapi.generated.js").components["schemas"]["BackendKind"];
-        base_url: string;
-        model: string | null;
-        models: import("./openapi.generated.js").components["schemas"]["ProviderModel"][];
-        models_error: string | null;
-        reasoning_effort: import("./openapi.generated.js").components["schemas"]["ReasoningEffort"] | null;
-    }>;
     listProjects: (signal?: AbortSignal) => Promise<{
         projects: import("./openapi.generated.js").components["schemas"]["ProjectRecord"][];
     }>;
     createProject: (payload: CreateProjectRequest) => Promise<{
         created_at: string;
         cwd: string;
-        default_model_config_id?: string | null;
         description?: string | null;
         name: string;
         pinned: boolean;
@@ -584,7 +523,6 @@ export declare function createNacApi(nacClient: NacClient, options?: {
     updateProject: (projectId: string, payload: UpdateProjectRequest) => Promise<{
         created_at: string;
         cwd: string;
-        default_model_config_id?: string | null;
         description?: string | null;
         name: string;
         pinned: boolean;
@@ -604,7 +542,6 @@ export declare function createNacApi(nacClient: NacClient, options?: {
     assignSessionToProject: (projectId: string, payload: AssignSessionRequest) => Promise<{
         created_at: string;
         cwd: string;
-        default_model_config_id?: string | null;
         description?: string | null;
         name: string;
         pinned: boolean;
@@ -691,10 +628,6 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         tool_call_occurrences?: (string | null)[];
     }>;
     deleteSession: (id: string) => Promise<void>;
-    launchDefaults: (payload: LaunchModelDefaultsRequest, signal?: AbortSignal) => Promise<{
-        configured_model?: string | null;
-        configured_reasoning_effort?: import("./openapi.generated.js").components["schemas"]["ReasoningEffort"] | null;
-    }>;
     updatePresentation: (id: string, payload: UpdateSessionPresentationRequest) => Promise<{
         backend: string;
         behavior?: import("./openapi.generated.js").components["schemas"]["SessionBehavior"];
@@ -987,70 +920,6 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         verification_summary: string | null;
         version: number;
     }>;
-    listManagedOrchestrators: (id: string, signal?: AbortSignal) => Promise<{
-        completion_inbox_id?: number | null;
-        created_at: string;
-        description: string;
-        execution_mode?: import("./openapi.generated.js").components["schemas"]["TraditionalChildExecutionMode"] | null;
-        failure?: string | null;
-        generation: number;
-        orchestrator_session_id: string;
-        parent_session_id: string;
-        report?: string | null;
-        root_session_id: string;
-        run_id?: string | null;
-        status: import("./openapi.generated.js").components["schemas"]["TraditionalChildStatus"];
-        updated_at: string;
-        version: number;
-    }[]>;
-    startManagedOrchestrator: (id: string, payload: StartManagedOrchestratorRequest) => Promise<{
-        completion_inbox_id?: number | null;
-        created_at: string;
-        description: string;
-        execution_mode?: import("./openapi.generated.js").components["schemas"]["TraditionalChildExecutionMode"] | null;
-        failure?: string | null;
-        generation: number;
-        orchestrator_session_id: string;
-        parent_session_id: string;
-        report?: string | null;
-        root_session_id: string;
-        run_id?: string | null;
-        status: import("./openapi.generated.js").components["schemas"]["TraditionalChildStatus"];
-        updated_at: string;
-        version: number;
-    }>;
-    getManagedOrchestrator: (id: string, orchestratorId: string, signal?: AbortSignal) => Promise<{
-        completion_inbox_id?: number | null;
-        created_at: string;
-        description: string;
-        execution_mode?: import("./openapi.generated.js").components["schemas"]["TraditionalChildExecutionMode"] | null;
-        failure?: string | null;
-        generation: number;
-        orchestrator_session_id: string;
-        parent_session_id: string;
-        report?: string | null;
-        root_session_id: string;
-        run_id?: string | null;
-        status: import("./openapi.generated.js").components["schemas"]["TraditionalChildStatus"];
-        updated_at: string;
-        version: number;
-    }>;
-    cancelManagedOrchestrator: (id: string, orchestratorId: string) => Promise<{
-        completion_inbox_id?: number | null;
-        created_at: string;
-        description: string;
-        execution_mode?: import("./openapi.generated.js").components["schemas"]["TraditionalChildExecutionMode"] | null;
-        failure?: string | null;
-        generation: number;
-        orchestrator_session_id: string;
-        parent_session_id: string;
-        report?: string | null;
-        root_session_id: string;
-        run_id?: string | null;
-        status: import("./openapi.generated.js").components["schemas"]["TraditionalChildStatus"];
-        updated_at: string;
-        version: number;
-    }>;
     updateConfig: (id: string, payload: UpdateConfigRequest) => Promise<void>;
     getMessages: (id: string, options?: MessagesPageOptions) => Promise<{
         created_at: (string | null)[];
@@ -1058,13 +927,6 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         page: import("./openapi.generated.js").components["schemas"]["MessagePageMetadata"];
         terminal_selection_attributions?: import("./openapi.generated.js").components["schemas"]["TerminalSelectionMessageReference"][];
         tool_call_occurrences?: (string | null)[];
-    }>;
-    getThreadEvents: (id: string, threadName: string, options?: ThreadEventsOptions) => Promise<{
-        diagnostics?: import("./openapi.generated.js").components["schemas"]["ThreadEventDecodeDiagnostic"][];
-        events: import("./openapi.generated.js").components["schemas"]["ThreadEventPageItem"][];
-        has_older: boolean;
-        next_before_id?: number | null;
-        thread_event_boundary?: import("./openapi.generated.js").components["schemas"]["SessionEventBoundary"] | null;
     }>;
     getToolCallContent: (id: string, callId: string, signal?: AbortSignal, occurrence?: string) => Promise<{
         arguments: string;
@@ -1169,17 +1031,6 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         session_id: string;
     }>;
     dismissSessionFork: (id: string, forkId: string) => Promise<void>;
-    steerOrchestrator: (id: string, instruction: string) => Promise<{
-        instruction_preview: string;
-        status: string;
-        steering_id: number;
-    }>;
-    steerThread: (id: string, threadName: string, instruction: string) => Promise<{
-        instruction_preview: string;
-        status: string;
-        steering_id: number;
-        thread_name: string;
-    }>;
     getRecentEvents: (id: string, options?: {
         cursor?: SessionEventBoundary;
         limit?: number;

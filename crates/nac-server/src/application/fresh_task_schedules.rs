@@ -130,6 +130,10 @@ impl<'a> FreshTaskScheduleApplication<'a> {
                 })
                 .context("fresh task destination is required")?;
             ensure!(
+                selected.model_selection.is_some(),
+                "select a model for each scheduled task session"
+            );
+            ensure!(
                 selected.project_id == target,
                 "conflict: schedule destination project changed"
             );

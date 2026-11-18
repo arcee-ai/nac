@@ -133,9 +133,8 @@ fn encode_light_model(
         .transpose()
 }
 
-/// Only `encode_light_model` ever writes the column, so a row that fails to
-/// parse is real corruption; fail the read rather than silently loading the
-/// setup as single-model.
+/// Decode the retained legacy setting so credential ownership is not guessed
+/// when a malformed record is encountered. Updates preserve its stored bytes.
 fn decode_light_model(
     raw: Option<&str>,
     column_index: usize,
@@ -297,6 +296,9 @@ pub fn insert_model_configuration(
     config_id: &str,
     configuration: NewModelConfiguration,
 ) -> ConfigurationResult<ModelConfigurationRecord> {
+    if configuration.light_model.is_some() {
+        return Err(ModelConfigurationStoreError::InvalidInput("light_model is no longer supported".into()));
+    }
     let record = validated_record(config_id, configuration, now_utc())?;
 
     let conn = open_runtime_connection(path)?;
@@ -355,6 +357,9 @@ pub fn update_model_configuration(
     configuration: NewModelConfiguration,
 ) -> ConfigurationResult<ModelConfigurationRecord> {
     let existing = load_model_configuration(path, config_id)?;
+    if configuration.light_model != existing.light_model {
+        return Err(ModelConfigurationStoreError::InvalidInput("light_model is no longer supported".into()));
+    }
     let record = validated_record(config_id, configuration, existing.created_at)?;
 
     let conn = open_runtime_connection(path)?;
@@ -365,7 +370,7 @@ pub fn update_model_configuration(
                  allow_insecure_http = ?6, api_key_env = ?7,
                  reasoning_effort = ?8, extra_headers_json = ?9,
                  orchestrator_compaction_threshold = ?10, initial_prompt = ?11,
-                 updated_at = ?12, light_model_json = ?13
+                 updated_at = ?12
              WHERE config_id = ?1",
             params![
                 record.config_id,
@@ -380,7 +385,6 @@ pub fn update_model_configuration(
                 record.orchestrator_compaction_threshold,
                 record.initial_prompt,
                 record.updated_at,
-                encode_light_model(record.light_model.as_ref())?,
             ],
         )
         .map_err(|error| {

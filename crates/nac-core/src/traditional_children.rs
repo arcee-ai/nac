@@ -281,19 +281,13 @@ mod tests {
         let store = root.join("store.db");
         crate::store::initialize(&store).unwrap();
         let cwd = "/workspace";
-        let direct = crate::agent::render_direct_system_prompt(cwd);
-        let delegating = crate::agent::render_direct_with_orchestrator_system_prompt(cwd);
-        let managed_suffix = delegating.strip_prefix(&direct).unwrap();
         let guidance = "\n\nProject instructions:\n  retain exact whitespace\n\nMCP guidance: α\n";
         let client = crate::model::ModelClient::new_for_test();
         for (index, template) in legacy_direct_prompts::TEMPLATES.iter().enumerate() {
-            for managed in [false, true] {
+            {
                 let base = template.replacen("{working_directory}", cwd, 1);
-                let parent_head = format!(
-                    "{base}{}{guidance}",
-                    if managed { managed_suffix } else { "" }
-                );
-                let id = format!("legacy-{index}-{managed}");
+                let parent_head = format!("{base}{guidance}");
+                let id = format!("legacy-{index}");
                 let mut snapshot = crate::sessions::new_snapshot(
                     id.clone(),
                     PathBuf::from(cwd),
@@ -314,11 +308,7 @@ mod tests {
                     None,
                     std::collections::BTreeMap::new(),
                 );
-                snapshot.behavior = if managed {
-                    crate::sessions::SessionBehavior::DirectWithOrchestrator
-                } else {
-                    crate::sessions::SessionBehavior::Direct
-                };
+                snapshot.behavior = crate::sessions::SessionBehavior::Direct;
                 crate::sessions::create_session(&store, &snapshot).unwrap();
                 let restored = crate::sessions::load_session(&store, &id).unwrap();
                 let Message::System {

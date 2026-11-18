@@ -3,9 +3,8 @@ import { useState } from "react";
 import { IconName, Popover, PopoverPlacement, PopoverSize, SessionAvatar } from "@/app/atoms";
 import { Menu, MenuItem, MenuLabel, MenuSeparator } from "@/app/features/sidebar/MenuItem";
 import { cn } from "@/app/lib/cn";
-import type { ProjectRecord, SessionBehavior } from "@/app/types/api";
+import type { ProjectRecord } from "@/app/types/api";
 
-import { BEHAVIOR_CHOICES, behaviorLabel } from "./behaviors";
 import { Chip } from "./Chip";
 
 const FILTER_FROM = 8;
@@ -98,62 +97,6 @@ export function ProjectPicker({
         onClick={() => setOpen((current) => !current)}
       >
         {value?.name ?? "Choose a project"}
-      </Chip>
-    </Popover>
-  );
-}
-
-/** Agent / Agent + Orchestrator / Orchestrator. Behavior is fixed per session. */
-export function BehaviorPicker({
-  value,
-  onChange,
-  disabled,
-}: {
-  value: SessionBehavior;
-  onChange: (behavior: SessionBehavior) => void;
-  disabled?: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  return (
-    <Popover
-      open={open}
-      onClose={() => setOpen(false)}
-      sticky
-      placement={PopoverPlacement.BottomRight}
-      size={PopoverSize.Large}
-      content={
-        <Menu label="Session behavior">
-          <MenuLabel>Behavior is fixed for the life of the session</MenuLabel>
-          {BEHAVIOR_CHOICES.map((choice) => (
-            <MenuItem
-              key={choice.id}
-              label={choice.label}
-              hint={choice.hint}
-              checked={choice.id === value}
-              onSelect={() => {
-                onChange(choice.id);
-                setOpen(false);
-              }}
-            />
-          ))}
-        </Menu>
-      }
-    >
-      <Chip
-        disabled={disabled}
-        aria-label={`Behavior: ${behaviorLabel(value)}`}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        icon={
-          value === "orchestrator"
-            ? IconName.Orchestrator
-            : value === "direct-with-orchestrator"
-              ? IconName.PlaneAdd
-              : IconName.Plane
-        }
-        onClick={() => setOpen((current) => !current)}
-      >
-        {behaviorLabel(value)}
       </Chip>
     </Popover>
   );

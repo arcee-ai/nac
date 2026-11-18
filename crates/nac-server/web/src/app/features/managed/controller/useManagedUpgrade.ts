@@ -42,11 +42,9 @@ async function settleBlocker(api: NacApi, blocker: ManagedUpgradeBlocker): Promi
       );
       return;
     case "cancel_managed_orchestrator":
-      await api.cancelManagedOrchestrator(
-        required(target.session_id),
-        required(target.orchestrator_session_id),
+      throw new Error(
+        "The retired managed orchestrator must be drained with a compatible earlier version.",
       );
-      return;
     case "terminate_terminal":
       await api.terminateTerminal(required(target.session_id), required(target.terminal_id));
       return;

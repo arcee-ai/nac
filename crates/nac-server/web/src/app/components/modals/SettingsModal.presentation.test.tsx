@@ -1,7 +1,5 @@
 /** @vitest-environment jsdom */
 
-import { UiPolicyContext } from "@/app/features/ui-policy/UiPolicyContext";
-import { ORCHESTRATION_UI_POLICY, DIRECT_UI_POLICY } from "@/app/features/ui-policy/policy";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
@@ -15,27 +13,9 @@ import type {
   ManagedHostStatus,
   ManagedSessionSummary,
   ModelCatalog,
-  ModelConfigurationRecord,
-  ProjectRecord,
   RawSessionConfig,
   SessionSnapshotResponse,
 } from "@/app/types/api";
-
-const openingPreset = {
-  config_id: "matching-preset",
-  name: "Opening preset",
-  backend: "openai-responses" as const,
-  model: "gpt-5.2",
-  base_url: "https://api.openai.com/v1",
-  allow_insecure_http: false,
-  api_key_env: "OPENAI_API_KEY",
-  reasoning_effort: "high" as const,
-  extra_headers: {},
-  orchestrator_compaction_threshold: 111,
-  light_model: null,
-  created_at: "2026-09-30T00:00:00Z",
-  updated_at: "2026-09-30T00:00:00Z",
-} satisfies ModelConfigurationRecord;
 
 const resizeObserved = vi.fn();
 const resizeDisconnected = vi.fn();
@@ -65,7 +45,7 @@ afterEach(() => {
 function renderReadySettings({
   threshold = 111,
   headersJson = "{}",
-  orchestration = true,
+  orchestration: _orchestration = true,
   lightModel = null,
   projectId = null,
   diagnostics = [],
@@ -182,20 +162,19 @@ function renderReadySettings({
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const view = render(
     <QueryClientProvider client={client}>
-      <UiPolicyContext.Provider value={orchestration ? ORCHESTRATION_UI_POLICY : DIRECT_UI_POLICY}>
+      <>
         <ToastProvider>
           <MemoryRouter>
             <SettingsModal open id="settings-session" onClose={vi.fn()} />
           </MemoryRouter>
         </ToastProvider>
-      </UiPolicyContext.Provider>
+      </>
     </QueryClientProvider>,
   );
   return { client, update, view };
 }
 
 it("saves a manually edited automatic threshold even if restored to its original value", async () => {
-  vi.spyOn(api, "listModelConfigs").mockResolvedValue({ configurations: [] });
   vi.spyOn(api, "listManagedAuth").mockResolvedValue({ providers: [] });
   const { client, update, view } = renderReadySettings({
     automaticCompaction: true,
@@ -224,124 +203,76 @@ it("saves a manually edited automatic threshold even if restored to its original
   }
 });
 
-it.each([false, true])(
-  "names native headers and retains edits across picker presentations (matching preset: %s)",
-  async (matchingPreset) => {
-    const record = openingPreset;
-    vi.spyOn(api, "listModelConfigs").mockResolvedValue({
-      configurations: matchingPreset ? [record] : [],
-    });
-    vi.spyOn(api, "resolveModelConfig").mockResolvedValue({
-      ...record,
-      models: [{ id: record.model, display_name: "GPT-5.2" }],
-      models_error: null,
-    });
-    vi.spyOn(api, "listManagedAuth").mockResolvedValue({ providers: [] });
-    const { client, update, view } = renderReadySettings({ orchestration: false });
-    try {
-      await waitFor(() =>
-        expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(
-          false,
-        ),
-      );
-      fireEvent.click(screen.getByText("Advanced execution settings"));
-      fireEvent.click(screen.getByRole("button", { name: "Advanced Configurations" }));
-      const dialog = screen.getByRole("dialog", { name: "Session settings" });
-      const headers = () =>
-        screen.getByRole("textbox", {
-          name: "Extra headers (JSON object)",
-        }) as HTMLTextAreaElement;
-      expect(headers().tagName).toBe("TEXTAREA");
-      expect(headers().closest('[role="dialog"]')).toBe(dialog);
-      expect(screen.getByText(/^Extra headers$/)).toBeTruthy();
-      expect(
-        screen.getByText("Enter a JSON object with string values. Blank sends none.").tagName,
-      ).toBe("P");
-      const body = headers().closest(".paragraph-medium")!;
-      expect(body).not.toBeNull();
-      // matchMedia is desktop: flush cards scroll the outer wrapper, not this inner body.
-      expect(resizeObserved.mock.calls.map(([target]) => target)).toContain(body.parentElement);
-      expect(resizeObserved.mock.calls.map(([target]) => target)).toContain(body);
-      fireEvent.change(headers(), {
-        target: { value: '{"X-Manual":"draft"}' },
-      });
-      fireEvent.change(screen.getByRole("textbox", { name: "Context limit" }), {
-        target: { value: "444" },
-      });
-      fireEvent.click(screen.getByRole("button", { name: "Advanced presets and provider setup" }));
-      await waitFor(() =>
-        expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(
-          false,
-        ),
-      );
-      await waitFor(() => expect(headers().value).toBe('{"X-Manual":"draft"}'));
-      expect(headers().closest('[role="dialog"]')).toBe(dialog);
-      expect(update).not.toHaveBeenCalled();
-      expect(
-        (screen.getByRole("textbox", { name: "Context limit" }) as HTMLInputElement).value,
-      ).toBe("444");
-      fireEvent.click(screen.getByRole("button", { name: "Back to unified models" }));
-      await waitFor(() =>
-        expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(
-          false,
-        ),
-      );
-      expect(
-        (screen.getByRole("textbox", { name: "Context limit" }) as HTMLInputElement).value,
-      ).toBe("444");
-      expect(headers().value).toBe('{"X-Manual":"draft"}');
-      expect(headers().closest('[role="dialog"]')).toBe(dialog);
-      expect(update).not.toHaveBeenCalled();
-      fireEvent.click(screen.getByRole("button", { name: "Save" }));
-      await waitFor(() =>
-        expect(update).toHaveBeenCalledExactlyOnceWith(
-          "settings-session",
-          expect.objectContaining({
-            extra_headers: { "X-Manual": "draft" },
-            orchestrator_compaction_threshold: 444,
-          }),
-        ),
-      );
-    } finally {
-      view.unmount();
-      expect(resizeDisconnected).toHaveBeenCalled();
-      client.clear();
-    }
-  },
-);
-
-it("can explicitly set an automatically matched full preset as the project default", async () => {
-  vi.spyOn(api, "listModelConfigs").mockResolvedValue({ configurations: [openingPreset] });
-  vi.spyOn(api, "resolveModelConfig").mockResolvedValue({
-    ...openingPreset,
-    models: [{ id: openingPreset.model, display_name: "GPT-5.2" }],
-    models_error: null,
-  });
+it("names native headers and retains edits while opening provider connections", async () => {
   vi.spyOn(api, "listManagedAuth").mockResolvedValue({ providers: [] });
-  const updateProject = vi.spyOn(api, "updateProject").mockResolvedValue({
-    project_id: "project-1",
-    default_model_config_id: "matching-preset",
-  } as ProjectRecord);
-  const { client, view } = renderReadySettings({ orchestration: false, projectId: "project-1" });
+  const { client, update, view } = renderReadySettings({ orchestration: false });
   try {
     await waitFor(() =>
       expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(
         false,
       ),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Advanced presets and provider setup" }));
-    await screen.findByText("Opening preset");
-    fireEvent.click(
-      await screen.findByRole("checkbox", { name: /Use selected preset as the project default/ }),
+    fireEvent.click(screen.getByText("Advanced execution settings"));
+    fireEvent.click(screen.getByRole("button", { name: "Advanced Configurations" }));
+    const dialog = screen.getByRole("dialog", { name: "Session settings" });
+    const headers = () =>
+      screen.getByRole("textbox", {
+        name: "Extra headers (JSON object)",
+      }) as HTMLTextAreaElement;
+    expect(headers().tagName).toBe("TEXTAREA");
+    expect(headers().closest('[role="dialog"]')).toBe(dialog);
+    expect(screen.getByText(/^Extra headers$/)).toBeTruthy();
+    expect(
+      screen.getByText("Enter a JSON object with string values. Blank sends none.").tagName,
+    ).toBe("P");
+    const body = headers().closest(".paragraph-medium")!;
+    expect(body).not.toBeNull();
+    // matchMedia is desktop: flush cards scroll the outer wrapper, not this inner body.
+    expect(resizeObserved.mock.calls.map(([target]) => target)).toContain(body.parentElement);
+    expect(resizeObserved.mock.calls.map(([target]) => target)).toContain(body);
+    fireEvent.change(headers(), {
+      target: { value: '{"X-Manual":"draft"}' },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Context limit" }), {
+      target: { value: "444" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Provider connections" }));
+    await waitFor(() =>
+      expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(
+        false,
+      ),
     );
+    await waitFor(() => expect(headers().value).toBe('{"X-Manual":"draft"}'));
+    expect(headers().closest('[role="dialog"]')).toBe(dialog);
+    expect(update).not.toHaveBeenCalled();
+    expect((screen.getByRole("textbox", { name: "Context limit" }) as HTMLInputElement).value).toBe(
+      "444",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Provider connections" }));
+    await waitFor(() =>
+      expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(
+        false,
+      ),
+    );
+    expect((screen.getByRole("textbox", { name: "Context limit" }) as HTMLInputElement).value).toBe(
+      "444",
+    );
+    expect(headers().value).toBe('{"X-Manual":"draft"}');
+    expect(headers().closest('[role="dialog"]')).toBe(dialog);
+    expect(update).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() =>
-      expect(updateProject).toHaveBeenCalledExactlyOnceWith("project-1", {
-        default_model_config_id: "matching-preset",
-      }),
+      expect(update).toHaveBeenCalledExactlyOnceWith(
+        "settings-session",
+        expect.objectContaining({
+          extra_headers: { "X-Manual": "draft" },
+          orchestrator_compaction_threshold: 444,
+        }),
+      ),
     );
   } finally {
     view.unmount();
+    expect(resizeDisconnected).toHaveBeenCalled();
     client.clear();
   }
 });
@@ -349,11 +280,10 @@ it("can explicitly set an automatically matched full preset as the project defau
 it.each([
   { threshold: 111, context: "444", headers: '{"X-Manual":"draft"}', orchestration: false },
   { threshold: null, context: "444", headers: '{"X-Manual":"draft"}', orchestration: false },
-  { threshold: 111, context: "", headers: "", orchestration: true },
+  { threshold: 111, context: "", headers: "", orchestration: false },
 ])(
   "keeps local Advanced edits when changing the primary model (%j)",
   async ({ threshold, context, headers, orchestration }) => {
-    vi.spyOn(api, "listModelConfigs").mockResolvedValue({ configurations: [] });
     vi.spyOn(api, "listManagedAuth").mockResolvedValue({ providers: [] });
     const { client, update, view } = renderReadySettings({
       orchestration,
@@ -403,7 +333,6 @@ it.each([
             model: "gpt-5.3",
             extra_headers: headers ? { "X-Manual": "draft" } : {},
             orchestrator_compaction_threshold: context ? Number(context) : null,
-            ...(orchestration ? { light_model: null } : {}),
           }),
         ),
       );
@@ -417,7 +346,6 @@ it.each([
 it.each(["chatgpt-codex-responses", "arcee-auth"] as const)(
   "saves title and context edits on an existing signed-out %s session",
   async (providerBackend) => {
-    vi.spyOn(api, "listModelConfigs").mockResolvedValue({ configurations: [] });
     vi.spyOn(api, "listManagedAuth").mockResolvedValue({ providers: [] });
     const title = vi
       .spyOn(api, "updatePresentation")

@@ -50,7 +50,7 @@ fn migration_51_classifies_only_pending_completions_with_durable_evidence() {
         ))
         .join("store.db");
     initialize(&path).unwrap();
-    for session in ["parent", "child-a", "child-b", "child-c", "orchestrator"] {
+    for session in ["parent", "child-a", "child-b", "child-c"] {
         insert_test_session(&path, session);
     }
     let connection = open_runtime_connection(&path).unwrap();
@@ -65,14 +65,6 @@ fn migration_51_classifies_only_pending_completions_with_durable_evidence() {
         create_traditional_child_relationship(&path, "parent", child, GENERAL_CHILD_PROFILE, child)
             .unwrap();
     }
-    connection
-        .execute(
-            "UPDATE sessions SET behavior = 'direct-with-orchestrator' WHERE session_id = 'parent'",
-            [],
-        )
-        .unwrap();
-    create_managed_orchestrator_relationship(&path, "parent", "orchestrator", "work").unwrap();
-
     // Current relationship evidence.
     let a = settle_background_child(&path, "child-a", "run-a");
     // Receipt-only evidence: the next generation cleared the relationship's id.
@@ -99,30 +91,9 @@ fn migration_51_classifies_only_pending_completions_with_durable_evidence() {
             params![c.completion_inbox_id.unwrap()],
         )
         .unwrap();
-    begin_managed_orchestrator_run(
-        &path,
-        "orchestrator",
-        "run-o",
-        TraditionalChildExecutionMode::Background,
-    )
-    .unwrap();
-    let orchestrator = settle_managed_orchestrator_run(
-        &path,
-        "orchestrator",
-        "run-o",
-        ManagedOrchestratorTerminal {
-            status: TraditionalChildStatus::Completed,
-            report: Some("orchestrated".to_owned()),
-            failure: None,
-        },
-    )
-    .unwrap()
-    .orchestrator;
-
     let a_id = a.completion_inbox_id.unwrap();
     let b_id = b.completion_inbox_id.unwrap();
     let c_id = c.completion_inbox_id.unwrap();
-    let o_id = orchestrator.completion_inbox_id.unwrap();
     let completion_text = load_session_inbox_item(&path, "parent", a_id)
         .unwrap()
         .content;
@@ -159,8 +130,7 @@ fn migration_51_classifies_only_pending_completions_with_durable_evidence() {
         .unwrap();
     drop(connection);
     let legacy = Connection::open(&path).unwrap();
-    let before =
-        [a_id, b_id, c_id, o_id, mimic.id, person_mimic.id].map(|id| raw_inbox_row(&legacy, id));
+    let before = [a_id, b_id, c_id, mimic.id, person_mimic.id].map(|id| raw_inbox_row(&legacy, id));
     drop(legacy);
 
     // A failed upgrade leaves the dev shape and its rows untouched.
@@ -198,14 +168,6 @@ fn migration_51_classifies_only_pending_completions_with_durable_evidence() {
             generation: 1,
         })
     );
-    assert_eq!(
-        origin(o_id),
-        Some(InternalCompletionOrigin {
-            source: InternalCompletionSource::ManagedOrchestrator,
-            relationship_session_id: "orchestrator".to_owned(),
-            generation: 1,
-        })
-    );
     assert_eq!(origin(c_id), None, "delivered history is not rewritten");
     assert_eq!(origin(mimic.id), None);
     assert_eq!(origin(person_mimic.id), None);
@@ -213,7 +175,7 @@ fn migration_51_classifies_only_pending_completions_with_durable_evidence() {
     // Classification adds provenance only: every committed fact is unchanged.
     let upgraded = open_runtime_connection(&path).unwrap();
     let after =
-        [a_id, b_id, c_id, o_id, mimic.id, person_mimic.id].map(|id| raw_inbox_row(&upgraded, id));
+        [a_id, b_id, c_id, mimic.id, person_mimic.id].map(|id| raw_inbox_row(&upgraded, id));
     assert_eq!(before, after);
     assert!(upgraded
         .execute(
@@ -239,7 +201,7 @@ fn migration_51_classifies_only_pending_completions_with_durable_evidence() {
     )
     .unwrap_err();
     assert!(refused.downcast_ref::<InternalInboxItemError>().is_some());
-    assert!(cancel_pending_session_inbox_item(&path, "parent", o_id, 0)
+    assert!(cancel_pending_session_inbox_item(&path, "parent", b_id, 0)
         .unwrap_err()
         .downcast_ref::<InternalInboxItemError>()
         .is_some());

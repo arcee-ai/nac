@@ -546,23 +546,12 @@ async fn stale_config_missing_owner_backend_and_store_readiness_are_rechecked_be
         .as_text(),
         Some("Error: execution unavailable")
     );
-    conn.execute(
-        "UPDATE sessions SET behavior='orchestrator' WHERE session_id='test-session'",
-        [],
-    )
-    .unwrap();
-    assert_eq!(
-        call(&runtime, "read_command_output", json!({"execution_id":id}))
-            .await
-            .content
-            .as_text(),
-        Some("Error: execution unavailable")
-    );
-    conn.execute(
-        "UPDATE sessions SET behavior='direct' WHERE session_id='test-session'",
-        [],
-    )
-    .unwrap();
+    assert!(conn
+        .execute(
+            "UPDATE sessions SET behavior='orchestrator' WHERE session_id='test-session'",
+            []
+        )
+        .is_err());
     conn.pragma_update(None, "user_version", crate::store::schema_version() + 1)
         .unwrap();
     let unready = call(&runtime, "read_command_output", json!({"execution_id":id})).await;

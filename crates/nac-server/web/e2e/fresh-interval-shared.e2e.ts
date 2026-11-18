@@ -1,3 +1,4 @@
+import { chooseFixtureSessionModel } from "./model-fixture";
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
@@ -100,6 +101,7 @@ test("non-Git interval task shows and retains its exact shared Local directory",
   await form.getByRole("spinbutton", { name: "Interval in minutes" }).fill("10");
   await form.getByRole("spinbutton", { name: "Retained task allowance" }).fill("1");
   await page.screenshot({ path: info.outputPath("fresh-interval-shared-warning.png") });
+  await chooseFixtureSessionModel(page, form);
   await form.getByRole("button", { name: "Create task schedule", exact: true }).click();
   await expect(page.getByRole("button", { name: "Run now", exact: true })).toBeEnabled();
   const schedules: HeartbeatSchedule[] = await (

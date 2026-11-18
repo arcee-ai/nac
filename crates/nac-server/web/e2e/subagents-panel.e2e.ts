@@ -412,7 +412,7 @@ for (const [name, viewport, mobile] of [
     ).toEqual([olderId, olderId]);
 
     // Observe actual durable admission, rather than racing the provider release with HTTP handling.
-    await waitForDelegatedInput(harness, "child", olderId, "E2E_PANEL_STEER check the cache too");
+    await waitForDelegatedInput(harness, olderId, "E2E_PANEL_STEER check the cache too");
     running.release();
     await harness.provider.waitForRequestCount(4);
     expect(harness.provider.requests.map((entry) => entry.matchedStep)).toEqual([

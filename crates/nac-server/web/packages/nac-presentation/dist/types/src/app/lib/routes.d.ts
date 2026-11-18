@@ -1,21 +1,19 @@
-export declare const SESSION_PANELS: readonly ["sessions", "insights", "threads", "delegated", "files", "terminal", "heartbeats", "worksets", "history"];
+export declare const SESSION_PANELS: readonly ["sessions", "insights", "delegated", "files", "terminal", "heartbeats", "history"];
 export type SessionPanel = (typeof SESSION_PANELS)[number];
 export declare const SESSION_PANEL_LABEL: {
     sessions: string;
     insights: string;
-    threads: string;
     delegated: string;
     files: string;
     terminal: string;
     heartbeats: string;
-    worksets: string;
     history: string;
 };
 /**
  * Panels the wide side box tabs between. A wide box carries the revisions in
  * its footer chip, so History is a phone-only panel of the bottom bar.
  */
-export declare const WIDE_SESSION_PANELS: ("threads" | "sessions" | "worksets" | "insights" | "delegated" | "files" | "terminal" | "heartbeats")[];
+export declare const WIDE_SESSION_PANELS: ("sessions" | "insights" | "delegated" | "files" | "terminal" | "heartbeats")[];
 export declare const DEFAULT_SESSION_PANEL: SessionPanel;
 export declare function isSessionPanel(value: string | undefined): value is SessionPanel;
 /** Full-page settings destinations (`/settings/:section`). */

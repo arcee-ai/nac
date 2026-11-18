@@ -99,7 +99,7 @@ const EXPECTED_OPENAPI_OPERATIONS: &[(&str, &str)] = &[
     ("DELETE", "/managed/github/login/{login_id}"),
     ("DELETE", "/managed/secrets/{name}"),
     ("DELETE", "/mcp_library/servers/{server_name}"),
-    ("DELETE", "/model-configs/{config_id}"),
+
     ("DELETE", "/projects/{project_id}"),
     ("DELETE", "/sessions/{session_id}"),
     ("DELETE", "/sessions/{session_id}/goal/{goal_id}"),
@@ -150,7 +150,6 @@ const EXPECTED_OPENAPI_OPERATIONS: &[(&str, &str)] = &[
     ("GET", "/credentials"),
     ("GET", "/fs/browse"),
     ("GET", "/health"),
-    ("GET", "/ui-config"),
     ("GET", "/healthz"),
     ("GET", "/managed/github"),
     ("GET", "/managed/github/clone-operations/{operation_id}"),
@@ -168,7 +167,7 @@ const EXPECTED_OPENAPI_OPERATIONS: &[(&str, &str)] = &[
     ("GET", "/mcp_library/servers/status"),
     ("GET", "/mcp_library/servers/{server_name}/oauth/callback"),
     ("GET", "/mcp_library/servers/{server_name}/oauth/status"),
-    ("GET", "/model-configs"),
+
     ("GET", "/projects"),
     ("GET", "/readyz"),
     ("GET", "/models"),
@@ -186,15 +185,12 @@ const EXPECTED_OPENAPI_OPERATIONS: &[(&str, &str)] = &[
     ("GET", "/sessions/{session_id}/goal"),
     ("GET", "/sessions/{session_id}/inbox"),
     ("GET", "/sessions/{session_id}/messages"),
-    ("GET", "/sessions/{session_id}/orchestrators"),
-    (
-        "GET",
-        "/sessions/{session_id}/orchestrators/{orchestrator_session_id}",
-    ),
+
+
     ("GET", "/sessions/{session_id}/permissions"),
     ("GET", "/sessions/{session_id}/questions"),
     ("GET", "/sessions/{session_id}/questions/{request_id}"),
-    ("GET", "/sessions/{session_id}/threads/{thread_name}/events"),
+
     ("GET", "/sessions/{session_id}/tool-calls/{call_id}"),
     ("GET", "/sessions/{session_id}/workspace/branches"),
     ("GET", "/sessions/{session_id}/workspace/diff"),
@@ -209,7 +205,7 @@ const EXPECTED_OPENAPI_OPERATIONS: &[(&str, &str)] = &[
     ("GET", "/ssh/aliases"),
     ("GET", "/store"),
     ("PATCH", "/mcp_library/servers/{server_name}"),
-    ("PATCH", "/model-configs/{config_id}"),
+
     ("PATCH", "/projects/{project_id}"),
     ("PATCH", "/sessions/{session_id}/config"),
     ("PATCH", "/sessions/{session_id}/goal/{goal_id}"),
@@ -231,14 +227,13 @@ const EXPECTED_OPENAPI_OPERATIONS: &[(&str, &str)] = &[
     ("POST", "/mcp_library/servers/{server_name}/oauth/configure"),
     ("POST", "/mcp_library/servers/{server_name}/oauth/logout"),
     ("POST", "/mcp_library/servers/{server_name}/reload"),
-    ("POST", "/model-configs"),
-    ("POST", "/model-configs/from-file"),
-    ("POST", "/model-configs/{config_id}/models"),
+
+
+
     ("POST", "/projects"),
     ("POST", "/projects/{project_id}/sessions"),
     ("POST", "/providers/models"),
     ("POST", "/sessions"),
-    ("POST", "/sessions/launch-defaults"),
     ("POST", "/sessions/{session_id}/cancel-active-run"),
     ("POST", "/sessions/{session_id}/compact"),
     ("POST", "/sessions/{session_id}/children"),
@@ -248,11 +243,8 @@ const EXPECTED_OPENAPI_OPERATIONS: &[(&str, &str)] = &[
     ),
     ("POST", "/sessions/{session_id}/goal"),
     ("POST", "/sessions/{session_id}/inbox"),
-    ("POST", "/sessions/{session_id}/orchestrators"),
-    (
-        "POST",
-        "/sessions/{session_id}/orchestrators/{orchestrator_session_id}/cancel",
-    ),
+
+
     (
         "POST",
         "/sessions/{session_id}/permissions/reviews/{review_id}/authorize-retry",
@@ -295,11 +287,8 @@ const EXPECTED_OPENAPI_OPERATIONS: &[(&str, &str)] = &[
         "/sessions/{session_id}/executions/{execution_id}/stop",
     ),
     ("POST", "/sessions/{session_id}/runs"),
-    ("POST", "/sessions/{session_id}/steering"),
-    (
-        "POST",
-        "/sessions/{session_id}/threads/{thread_name}/steering",
-    ),
+
+
     ("POST", "/sessions/{session_id}/workspace/branches"),
     ("POST", "/sessions/{session_id}/workspace/commit"),
     ("POST", "/sessions/{session_id}/workspace/open"),
@@ -314,6 +303,7 @@ const EXPECTED_OPENAPI_OPERATIONS: &[(&str, &str)] = &[
     ("PUT", "/projects/order"),
     ("PUT", "/sessions/order"),
     ("PUT", "/sessions/{session_id}/presentation"),
+    ("POST", "/provider-connections"),
 ];
 
 fn concrete_api_path(path: &str) -> String {
@@ -576,11 +566,8 @@ async fn openapi_special_wire_schemas_and_docs_are_live() {
     for schema in [
         "CreateSessionRequest",
         "UpdateConfigRequest",
-        "CreateModelConfigurationRequest",
-        "UpdateModelConfigurationRequest",
+        "CreateProviderConnectionRequest",
         "ProviderModelsRequest",
-        "ModelConfigurationRecord",
-        "ResolvedModelConfiguration",
     ] {
         assert!(
             document["components"]["schemas"][schema]["properties"]
@@ -589,20 +576,15 @@ async fn openapi_special_wire_schemas_and_docs_are_live() {
             "{schema} must expose allow_insecure_http"
         );
     }
-    let model_headers_ref = document["components"]["schemas"]["UpdateModelConfigurationRequest"]
-        ["properties"]["extra_headers"]["$ref"]
-        .as_str()
-        .expect("model header map schema reference");
     let mcp_env_ref = document["components"]["schemas"]["UpdateMcpServerRequest"]["properties"]
         ["env"]["$ref"]
         .as_str()
         .expect("MCP environment map schema reference");
-    assert_ne!(model_headers_ref, mcp_env_ref);
-    let model_headers = document
-        .pointer(model_headers_ref.strip_prefix('#').unwrap())
-        .and_then(|schema| schema["oneOf"].as_array())
-        .and_then(|variants| variants.iter().find(|variant| variant["type"] == "object"))
-        .expect("model header map variant");
+    assert_ne!(headers_ref, mcp_env_ref);
+    let model_headers = headers
+        .iter()
+        .find(|schema| schema["type"] == "object")
+        .unwrap();
     assert_eq!(model_headers["additionalProperties"]["type"], "string");
     let mcp_env = document
         .pointer(mcp_env_ref.strip_prefix('#').unwrap())
@@ -635,7 +617,7 @@ async fn openapi_special_wire_schemas_and_docs_are_live() {
         ),
         ("StoreCredentialRequest", "value", "fake-credential-value"),
         ("ProviderModelsRequest", "api_key", "fake-provider-key"),
-        ("CreateModelConfigurationRequest", "api_key", "fake-api-key"),
+        ("CreateProviderConnectionRequest", "api_key", "fake-api-key"),
     ] {
         let property = &document["components"]["schemas"][schema]["properties"][field];
         assert_eq!(property["writeOnly"], true, "{schema}.{field}");
@@ -659,7 +641,6 @@ async fn openapi_special_wire_schemas_and_docs_are_live() {
         ("get", "/sessions", "400"),
         ("post", "/providers/models", "500"),
         ("post", "/sessions/{session_id}/runs", "501"),
-        ("delete", "/model-configs/{config_id}", "400"),
         ("delete", "/ssh-configs/{config_id}", "400"),
         ("delete", "/credentials/{name}", "400"),
         ("get", "/sessions/{session_id}/workspace/revisions", "400"),
@@ -698,8 +679,6 @@ async fn openapi_special_wire_schemas_and_docs_are_live() {
         );
     }
     for (method, path) in [
-        ("post", "/model-configs"),
-        ("patch", "/model-configs/{config_id}"),
         ("post", "/mcp_library/servers"),
         ("patch", "/mcp_library/servers/{server_name}"),
         ("post", "/mcp_library/servers/test"),

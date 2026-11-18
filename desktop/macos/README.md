@@ -60,7 +60,7 @@ only a dummy model configuration and fixture project through existing HTTP
 routes; session creation and all chat/history behavior use the production UI.
 
 The exact bundled child binds `127.0.0.1:0`, with `--directory`, `--store-path`,
-`--worker-executable` and `--no-open`. A private inherited Unix socketpair reports the actual address only after bind
+`--no-open`. A private inherited Unix socketpair reports the actual address only after bind
 and store readiness. The shell verifies version, launch incarnation, compiled
 product/build/source/track identity, canonical selected store and opened schema
 before seeding or loading the workspace. Stdout/stderr are asynchronously drained

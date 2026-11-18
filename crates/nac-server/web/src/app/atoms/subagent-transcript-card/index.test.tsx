@@ -8,11 +8,8 @@ import SubagentTranscriptCard, { SubagentCardStatus } from "./index";
 afterEach(cleanup);
 
 it.each([
-  ["orchestrator", null, "Orchestrator"],
   ["direct", null, "Agent"],
-  ["direct-with-orchestrator", null, "Agent + Orchestrator"],
-  ["direct-with-orchestrator", "traditional-child", "Subagent"],
-  ["direct", "managed-orchestrator", "Managed orchestrator"],
+  ["direct", "traditional-child", "Subagent"],
 ] as const)("names the displayed %s / %s glyph", (behavior, lineage, label) => {
   render(
     <SubagentTranscriptCard

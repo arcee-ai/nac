@@ -1,6 +1,6 @@
 import { type QueryClient } from "@tanstack/react-query";
 import { type BrowseKind } from "./keys";
-import type { BackendKind, SshTarget, UpdateMcpServerRequest, UpdateModelConfigurationRequest, UpdateSshConfigurationRequest } from "../../types/api";
+import type { BackendKind, SshTarget, UpdateMcpServerRequest, UpdateSshConfigurationRequest } from "../../types/api";
 /** Where a listing comes from: the server's own filesystem or one SSH host. */
 export type BrowseSource = SshTarget | null;
 /**
@@ -235,9 +235,6 @@ export declare function useMcpRuntimeAction(): import("@tanstack/react-query").U
     serverName: string;
     action: "connect" | "disconnect" | "reload";
 }, unknown>;
-export declare function useModelConfigs(enabled?: boolean): import("@tanstack/react-query").UseQueryResult<NoInfer<{
-    configurations: import("../../types/openapi.generated").components["schemas"]["ModelConfigurationRecord"][];
-}>, Error>;
 export declare function useProviderModels(backend: BackendKind, apiKey: string, baseUrl: string | null, enabled: boolean): import("@tanstack/react-query").UseQueryResult<NoInfer<{
     base_url: string;
     models: import("../../types/openapi.generated").components["schemas"]["ProviderModel"][];
@@ -285,65 +282,3 @@ export declare function useSessionSkills(sessionId: string): import("@tanstack/r
     description: string;
     name: string;
 }[]>, Error>;
-/**
- * A saved configuration or a `config.toml`, checked end to end by the server:
- * the credential resolves and the provider answers with its model list.
- */
-export declare function useResolvedModelConfig(configId: string | null, filePath: string): import("@tanstack/react-query").UseQueryResult<NoInfer<{
-    allow_insecure_http: boolean;
-    api_key_env: string | null;
-    backend: import("../../types/openapi.generated").components["schemas"]["BackendKind"];
-    base_url: string;
-    model: string | null;
-    models: import("../../types/openapi.generated").components["schemas"]["ProviderModel"][];
-    models_error: string | null;
-    reasoning_effort: import("../../types/openapi.generated").components["schemas"]["ReasoningEffort"] | null;
-}>, Error>;
-export declare function useCreateModelConfig(): import("@tanstack/react-query").UseMutationResult<{
-    allow_insecure_http: boolean;
-    api_key_env?: string | null;
-    backend: string;
-    base_url: string;
-    config_id: string;
-    created_at: string;
-    extra_headers: Record<string, string>;
-    initial_prompt?: string | null;
-    light_model?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["LightModelSettings"] | null;
-    model: string;
-    name: string;
-    orchestrator_compaction_threshold?: number | null;
-    reasoning_effort?: string | null;
-    updated_at: string;
-}, Error, {
-    allow_insecure_http?: boolean;
-    api_key?: string | null;
-    backend: import("../../types/openapi.generated").components["schemas"]["BackendKind"];
-    base_url?: string | null;
-    extra_headers?: Record<string, string> | null;
-    initial_prompt?: string | null;
-    light_model?: import("../../types/openapi.generated").components["schemas"]["LightModelSettings"] | null;
-    model: string;
-    name: string;
-    orchestrator_compaction_threshold?: number | null;
-    reasoning_effort?: import("../../types/openapi.generated").components["schemas"]["ReasoningEffort"] | null;
-}, unknown>;
-export declare function useUpdateModelConfig(): import("@tanstack/react-query").UseMutationResult<{
-    allow_insecure_http: boolean;
-    api_key_env?: string | null;
-    backend: string;
-    base_url: string;
-    config_id: string;
-    created_at: string;
-    extra_headers: Record<string, string>;
-    initial_prompt?: string | null;
-    light_model?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["LightModelSettings"] | null;
-    model: string;
-    name: string;
-    orchestrator_compaction_threshold?: number | null;
-    reasoning_effort?: string | null;
-    updated_at: string;
-}, Error, {
-    configId: string;
-    payload: UpdateModelConfigurationRequest;
-}, unknown>;
-export declare function useDeleteModelConfig(): import("@tanstack/react-query").UseMutationResult<void, Error, string, unknown>;

@@ -54,7 +54,7 @@ export async function runHelperContract(executable, destination) {
     await provider.start();
     environment.MODELS_DEV_URL = provider.baseUrl + "/models-dev";
     server = spawn(executable, ["--bind", "127.0.0.1:0", "--directory", workspace,
-      "--store-path", store, "--worker-executable", executable, "--no-open"], {
+      "--store-path", store, "--no-open"], {
       cwd: workspace, env: environment, stdio: ["ignore", "pipe", "pipe"],
     });
     exited = once(server, "exit").then((result) => { serverExit = result; return result; });

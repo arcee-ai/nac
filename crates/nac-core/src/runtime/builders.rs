@@ -9,13 +9,7 @@ fn combine_system_guidance(primary: Option<String>, secondary: Option<String>) -
 }
 
 pub async fn build_run_config(options: RunOptions, config: &NacConfig) -> Result<SessionRunConfig> {
-    build_run_config_inner(
-        options,
-        config,
-        None,
-        sessions::SessionBehavior::Orchestrator,
-    )
-    .await
+    build_run_config_inner(options, config, None, sessions::SessionBehavior::Direct).await
 }
 
 pub async fn build_run_config_for_project(
@@ -27,14 +21,13 @@ pub async fn build_run_config_for_project(
         options,
         config,
         project_id,
-        sessions::SessionBehavior::Orchestrator,
+        sessions::SessionBehavior::Direct,
     )
     .await
 }
 
-/// Build a persistent top-level session with an explicitly selected immutable
-/// behavior. Existing callers continue through the orchestrator-only wrappers
-/// above, so omission remains backward compatible.
+/// Build a persistent top-level direct session. Retired behavior selections
+/// are rejected before runtime or workspace preparation.
 pub async fn build_run_config_for_project_with_behavior(
     options: RunOptions,
     config: &NacConfig,
@@ -151,6 +144,14 @@ async fn prepare_run_config_inner(
     behavior: sessions::SessionBehavior,
     retained_session_id: Option<String>,
 ) -> Result<PreparedSessionRunConfig> {
+    anyhow::ensure!(
+        behavior == sessions::SessionBehavior::Direct,
+        "only direct session behavior is supported"
+    );
+    anyhow::ensure!(
+        options.model.light_model.is_none(),
+        "light_model is no longer supported"
+    );
     let agent_mode = match behavior {
         sessions::SessionBehavior::Orchestrator => AgentMode::Orchestrator,
         sessions::SessionBehavior::Direct | sessions::SessionBehavior::DirectWithOrchestrator => {
@@ -476,6 +477,17 @@ async fn prepare_run_config_inner(
 }
 
 pub async fn build_managed_worker_config(
+    _options: ManagedWorkerOptions,
+    _config: &NacConfig,
+) -> Result<ManagedWorkerRunConfig> {
+    anyhow::bail!("retired worker construction is unavailable")
+}
+
+#[expect(
+    dead_code,
+    reason = "retired worker construction is unreachable until ALL-614 removes it"
+)]
+async fn build_retired_managed_worker_config(
     options: ManagedWorkerOptions,
     config: &NacConfig,
 ) -> Result<ManagedWorkerRunConfig> {

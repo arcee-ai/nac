@@ -1,13 +1,11 @@
 import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { useNow } from "@/app/hooks/useNow";
 import { useSessionTitle } from "@/app/hooks/useSessionTitle";
 import { cn } from "@/app/lib/cn";
 import { parseStoreTime } from "@/app/lib/format";
 import { routes } from "@/app/lib/routes";
-import { sessionBehaviorPresentation } from "@/app/lib/sessionBehavior";
 import { needsYou, type SessionStatus } from "@/app/lib/sessionStatus";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
@@ -86,7 +84,6 @@ function RowTree({
 }) {
   const { toggleParentExpanded } = useNativeRuntime().stores.sidebarLayoutStore;
   const sessionTitle = useSessionTitle();
-  const policy = useUiPolicy();
   const sessionActions = useSessionActions();
   const projectActions = useProjectActions();
   const id = entry.summary.session_id;
@@ -95,9 +92,7 @@ function RowTree({
   // A parent of the session on screen starts open; a click flips either default.
   const expanded =
     kids.length > 0 && ctx.expandedToggles.includes(id) !== ctx.index.activeAncestors.has(id);
-  const label = policy.orchestrationEnabled
-    ? `${title}, ${sessionBehaviorPresentation(entry.summary.behavior).navigationLabel}`
-    : title;
+  const label = title;
   return (
     <>
       <SessionRow

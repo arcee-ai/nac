@@ -23,14 +23,11 @@ const LIVE_STEPS: { label: string; leadingIcon?: IconName }[] = [
   { label: "Getting goal…" },
   { label: "Updating goal…" },
   { label: "Spawning agent…" },
-  { label: "Spawning orchestrator…" },
   { label: "Checking session status…" },
   { label: "Steering session…" },
   { label: "Reading session…" },
   { label: "Waiting for session…" },
   { label: "Deleting session…" },
-  { label: "Defining workset…" },
-  { label: "Deleting thread…" },
 ];
 
 const noop = () => {};

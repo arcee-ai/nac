@@ -140,7 +140,6 @@ async fn closed_fixture_allows_session_list_bootstrap_but_refuses_effects_before
     }
     assert_eq!(effects.load(Ordering::SeqCst), 0);
     for (method, path) in [
-        (Method::GET, "/ui-config"),
         (Method::GET, "/app"),
         (Method::GET, "/app?document=fixture"),
         (Method::HEAD, "/app"),

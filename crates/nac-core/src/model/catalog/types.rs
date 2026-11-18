@@ -467,6 +467,7 @@ pub struct ModelEntry {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ProviderConnection {
     pub base_url: String,
+    pub allow_insecure_http: bool,
     #[cfg_attr(feature = "openapi", schema(required))]
     pub api_key_env: Option<String>,
 }

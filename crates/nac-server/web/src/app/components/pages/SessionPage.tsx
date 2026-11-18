@@ -1,13 +1,9 @@
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { InsightsNavigationProvider } from "@/app/features/insights/InsightsNavigationProvider";
-import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
-import { sessionAvailable } from "@/app/features/ui-policy/policy";
-import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
 import { Activity, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useDesktopVisible } from "@/app/features/desktop-commands/visibility";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 
-import { Button } from "@/app/atoms";
 import { ChatInputBox } from "@/app/components/inspector/ChatInputBox";
 import { Transcript } from "@/app/components/inspector/Transcript";
 import { TranscriptModelProvider } from "@/app/components/inspector/transcript/TranscriptModelProvider";
@@ -81,8 +77,6 @@ export default function SessionPage() {
   const desktopVisible = useDesktopVisible();
   const {
     useSidePanelCollapsed,
-    useSelectedThread,
-    selectInsight,
     leaveFocusedSidePanel,
     revealSidePanel,
     activateSessionSelection,
@@ -98,8 +92,6 @@ export default function SessionPage() {
   }>();
   const navigate = useNavigate();
   const id = sessionId ?? null;
-  const policy = useUiPolicy();
-  const projectActions = useProjectActions();
 
   perfRender("SessionPage");
 
@@ -107,42 +99,30 @@ export default function SessionPage() {
   const { data: entry = null } = useSessionSummary(id);
   const toNotice = useErrorNotice(id, entry?.summary.backend);
   const collapsed = useSidePanelCollapsed();
-  const selectedThread = useSelectedThread();
 
-  // An omitted behavior on a loaded session is the legacy orchestrator. An
-  // unloaded session is not that default: painting Insights/Files/Worksets and
-  // then replacing them is a flash.
+  // Wait for the session identity before choosing its available panels.
   const behaviorKnown = entry != null || snapshot != null;
   const behavior: SessionBehavior | null = behaviorKnown
-    ? (entry?.summary.behavior ?? snapshot?.metadata.behavior ?? "orchestrator")
+    ? (entry?.summary.behavior ?? snapshot?.metadata.behavior ?? "direct")
     : null;
-  const available =
-    !behaviorKnown || sessionAvailable(policy, behavior, entry?.lineage ?? snapshot?.lineage);
-  useSessionStream(available ? id : null);
-  useRunStateSync(available ? snapshot?.active_run : null);
-  useAutoSshConnect(available ? id : null, available ? entry?.summary : null);
+  useSessionStream(id);
+  useRunStateSync(snapshot?.active_run);
+  useAutoSshConnect(id, entry?.summary);
   const panelPolicy =
     behavior == null ? null : sessionPanelPolicy(behavior, snapshot?.lineage?.kind);
   const sessionPanels = panelPolicy?.mobilePanels ?? [];
   const requestedPanel = isSessionPanel(panel) ? panel : DEFAULT_SESSION_PANEL;
-  // Insights took over the Threads panel; an old link keeps the selected thread.
-  const routedPanel = requestedPanel === "threads" ? "insights" : requestedPanel;
   const effectivePanel =
     panelPolicy == null
-      ? routedPanel
-      : panelPolicy.mobilePanels.includes(routedPanel)
-        ? routedPanel
+      ? requestedPanel
+      : panelPolicy.mobilePanels.includes(requestedPanel)
+        ? requestedPanel
         : panelPolicy.defaultPanel;
 
   useEffect(() => {
-    if (!id || !isSessionPanel(panel)) return;
-    // Other corrections wait for the snapshot's panels. An old Threads link moves
-    // at once: moving it later would close a dialog opened over the page meanwhile.
-    const target = snapshot ? effectivePanel : panel === "threads" ? routedPanel : panel;
-    if (target === panel) return;
-    if (panel === "threads" && selectedThread) selectInsight({ kind: "thread" });
-    navigate(routes.session(id, target), { replace: true });
-  }, [effectivePanel, id, navigate, panel, routedPanel, selectInsight, selectedThread, snapshot]);
+    if (!id || !snapshot || effectivePanel === panel) return;
+    navigate(routes.session(id, effectivePanel), { replace: true });
+  }, [effectivePanel, id, navigate, panel, snapshot]);
 
   const heartbeatResultsThrough =
     entry?.summary.session_id === id
@@ -184,27 +164,6 @@ export default function SessionPage() {
     return () => observer.disconnect();
   }, [chatColumn, composerLayer]);
 
-  if (behaviorKnown && !available)
-    return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-3 bg-elevation-ground p-8 text-center">
-        <h1 className="type-heading text-basic-primary">
-          This chat is unavailable in direct-only mode
-        </h1>
-        <p className="type-body-chrome max-w-[420px] text-basic-tertiary">
-          Its saved behavior and history are preserved. An operator can enable orchestration to open
-          it.
-        </p>
-        <Button
-          onClick={() => {
-            const projectId = entry?.summary.project_id ?? snapshot?.metadata.project_id;
-            if (projectId) void projectActions.newChat(projectId);
-            else projectActions.create();
-          }}
-        >
-          New direct chat
-        </Button>
-      </div>
-    );
   if (!id) return <Navigate to={routes.list()} replace />;
   if (!isSessionPanel(panel)) {
     return <Navigate to={routes.session(id, DEFAULT_SESSION_PANEL)} replace />;
@@ -223,7 +182,7 @@ export default function SessionPage() {
     navigate(routes.session(id, next));
   };
 
-  const direct = behavior === "direct" || behavior === "direct-with-orchestrator";
+  const direct = behavior === "direct";
   const lineage = entry?.lineage ?? snapshot?.lineage ?? null;
 
   const page = (

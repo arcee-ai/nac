@@ -1,6 +1,6 @@
 import { createSession, expect, startForegroundChild, test } from "./harness";
 
-for (const mode of ["child", "orchestrator"] as const) {
+for (const mode of ["child"] as const) {
   for (const [name, viewport] of [
     ["desktop", { width: 1280, height: 720 }],
     ["phone", { width: 390, height: 844 }],
@@ -12,21 +12,18 @@ for (const mode of ["child", "orchestrator"] as const) {
     }) => {
       const token = `E2E_RECOVERY_${mode}_${name}`;
       harness.provider.enqueue(token, { token }, { kind: "text", text: "initial run completed" });
-      const parentId = await createSession(
+      const parentId = await createSession(request, harness, "direct");
+      const endpoint = `${harness.baseUrl}/sessions/${parentId}/children`;
+      const response = await startForegroundChild(
         request,
         harness,
-        mode === "child" ? "direct" : "direct-with-orchestrator",
+        parentId,
+        "Recovery target",
+        token,
       );
-      const endpoint = `${harness.baseUrl}/sessions/${parentId}/${mode === "child" ? "children" : "orchestrators"}`;
-      const response =
-        mode === "child"
-          ? await startForegroundChild(request, harness, parentId, "Recovery target", token)
-          : await request.post(endpoint, {
-              data: { description: "Recovery target", prompt: token, background: false },
-            });
       expect(response.status()).toBe(201);
       const record = await response.json();
-      const targetId = mode === "child" ? record.child_session_id : record.orchestrator_session_id;
+      const targetId = record.child_session_id;
       let attempts = 0;
       await page.route(endpoint, async (route) => {
         if (route.request().method() !== "POST") return route.fallback();

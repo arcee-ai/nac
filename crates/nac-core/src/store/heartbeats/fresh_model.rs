@@ -13,6 +13,8 @@ pub struct FreshTaskDestination {
     /// Used only to establish an unbound project's saved default branch.
     /// An existing binding cannot be silently replaced by this value.
     pub default_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_selection: Option<crate::store::TaskModelSelection>,
     pub model: Option<String>,
     pub reasoning_effort: Option<String>,
     pub retained_limit: i64,
@@ -20,6 +22,9 @@ pub struct FreshTaskDestination {
 
 impl FreshTaskDestination {
     pub fn validate(&self) -> Result<()> {
+        if let Some(selection) = &self.model_selection {
+            selection.validate()?;
+        }
         ensure!(
             !self.project_id.trim().is_empty() && self.project_id.len() <= 256,
             "fresh tasks require an exact saved project identity"
@@ -112,6 +117,7 @@ mod tests {
     fn destination_retains_explicit_choices_and_rejects_mutable_pins_and_unbounded_resources() {
         let mut destination = FreshTaskDestination {
             project_id: "saved-project".into(),
+            model_selection: None,
             pinned_commit: None,
             default_ref: None,
             model: None,

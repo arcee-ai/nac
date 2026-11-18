@@ -59,7 +59,10 @@ for (const zoomed of [false, true]) {
       });
       await page.goto(harness.baseUrl);
       await page.getByRole("button", { name: "Get Started", exact: true }).click();
-      const project = page.getByRole("dialog", { name: "New Project", exact: true });
+      const project = page.getByRole("dialog", {
+        name: "New Project",
+        exact: true,
+      });
       await expect(
         project.getByRole("button", { name: "Select a model", exact: true }),
       ).toBeVisible();
@@ -67,26 +70,17 @@ for (const zoomed of [false, true]) {
       await project.getByRole("button", { name: "Select a model", exact: true }).click();
       await audit("model-options");
       await page.getByRole("button").filter({ hasText: "GPT-5.6 Sol" }).first().click();
-      await project
-        .getByRole("button", { name: "Advanced presets and provider setup", exact: true })
-        .click();
-      await expect(project.getByText(/This selection keeps the current connection/)).toBeVisible();
-      await audit("retained-connection");
-      await project.getByRole("button", { name: "Create New", exact: true }).click();
-      await audit("source-options");
-      await page.getByRole("button", { name: "Create New", exact: true }).last().click();
-      await audit("replacement-connection");
-      await project
-        .getByRole("group", { name: "Model Provider*", exact: true })
-        .getByRole("button")
-        .click();
-      await page.getByRole("button", { name: "Custom", exact: true }).click();
-      await expect(project.getByRole("textbox", { name: "Base URL", exact: true })).toBeVisible();
-      await audit("custom-provider-and-switch");
+      await audit("selected-model");
       await project.getByRole("button", { name: "Provider connections", exact: true }).click();
-      const accounts = project.getByRole("region", { name: "Provider connections", exact: true });
+      const accounts = project.getByRole("region", {
+        name: "Provider connections",
+        exact: true,
+      });
       await expect(
-        accounts.getByRole("button", { name: "Sign in with ChatGPT", exact: true }),
+        accounts.getByRole("button", {
+          name: "Sign in with ChatGPT",
+          exact: true,
+        }),
       ).toBeVisible();
       expect(loginCalls).toEqual([]);
       await audit("provider-disconnected");
@@ -102,16 +96,6 @@ for (const zoomed of [false, true]) {
         (await (await request.get(`${harness.baseUrl}/projects`)).json()).projects,
       ).toHaveLength(0);
 
-      const saved = await request.post(`${harness.baseUrl}/model-configs`, {
-        data: {
-          name: "Target audit saved preset",
-          backend: "openai-responses",
-          model: "gpt-5.6-sol",
-          base_url: harness.provider.baseUrl,
-          api_key: "nac-e2e-dummy-only",
-        },
-      });
-      expect(saved.ok()).toBe(true);
       const ssh = await request.post(`${harness.baseUrl}/ssh-configs`, {
         data: {
           name: "Target audit SSH",
@@ -122,7 +106,10 @@ for (const zoomed of [false, true]) {
       });
       expect(ssh.ok()).toBe(true);
       // Seed only the disposable server HOME used by this harness, never the user home.
-      await fs.mkdir(path.join(harness.runRoot, "home", ".ssh"), { recursive: true, mode: 0o700 });
+      await fs.mkdir(path.join(harness.runRoot, "home", ".ssh"), {
+        recursive: true,
+        mode: 0o700,
+      });
       const id = await createProject(request, harness);
       await page.goto(`${harness.baseUrl}/#/project/${id}`);
       // Direct API fixture seeding must reach a new browser query cache.
@@ -134,15 +121,21 @@ for (const zoomed of [false, true]) {
         .getByRole("button", { name: /^(?:Model: .+|Choose a model)$/ })
         .first()
         .click();
-      const chat = page.getByRole("dialog", { name: "Model for this session", exact: true });
+      const chat = page.getByRole("dialog", {
+        name: "Model for this session",
+        exact: true,
+      });
       await expect(chat).toBeVisible();
       await audit("new-chat");
       await chat.getByRole("button", { name: "Close", exact: true }).click();
       await expect(chat).toHaveCount(0);
-      // Configurations and SSH configs are Settings sections, reached from the phone menu.
+      // SSH hosts are reached from the phone menu.
       const openSettings = async (section: RegExp) => {
         const home = page.getByRole("button", { name: "Home", exact: true });
-        const menu = page.getByRole("button", { name: "Open the menu", exact: true });
+        const menu = page.getByRole("button", {
+          name: "Open the menu",
+          exact: true,
+        });
         if (!(await menu.isVisible())) await home.click();
         await menu.click();
         await page
@@ -151,28 +144,28 @@ for (const zoomed of [false, true]) {
           .click();
         await page.getByRole("link", { name: section }).click();
       };
-      await openSettings(/^Models & providers/);
-      const configurations = page.getByRole("region", { name: "Configurations", exact: true });
-      await configurations
-        .getByRole("button", { name: "Choose configuration", exact: true })
-        .click();
-      await page.getByRole("button", { name: "Target audit saved preset", exact: true }).click();
+      await openSettings(/^SSH hosts/);
+      const sshDialog = page.getByRole("region", {
+        name: "SSH configs",
+        exact: true,
+      });
       await expect(
-        configurations.getByRole("textbox", { name: "Configuration name", exact: true }),
-      ).toHaveValue("Target audit saved preset");
-      await audit("saved-configuration-three-actions", configurations);
-      await configurations.getByRole("button", { name: "Cancel", exact: true }).click();
-      await page.goBack();
-      await page.getByRole("link", { name: /^SSH hosts/ }).click();
-      const sshDialog = page.getByRole("region", { name: "SSH configs", exact: true });
-      await expect(
-        sshDialog.getByRole("textbox", { name: "SSH config name", exact: true }),
+        sshDialog.getByRole("textbox", {
+          name: "SSH config name",
+          exact: true,
+        }),
       ).toHaveValue("Target audit SSH");
       await audit("saved-ssh-three-actions", sshDialog);
-      const key = sshDialog.getByRole("button", { name: "Private Key: .ssh/config", exact: true });
+      const key = sshDialog.getByRole("button", {
+        name: "Private Key: .ssh/config",
+        exact: true,
+      });
       await expect(key).toHaveCount(1);
       await key.click();
-      const keyDialog = page.getByRole("dialog", { name: "Select Private Key", exact: true });
+      const keyDialog = page.getByRole("dialog", {
+        name: "Select Private Key",
+        exact: true,
+      });
       await expect(keyDialog).toBeVisible();
       await expect(keyDialog.locator("footer").getByRole("button")).toHaveCount(3);
       await expect(keyDialog.getByRole("button", { name: "Select", exact: true })).toBeDisabled();

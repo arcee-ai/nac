@@ -16,7 +16,7 @@ export function NumericInputsSection() {
             onChange={setParallel}
             min={1}
             max={16}
-            aria-label="Parallel threads"
+            aria-label="Parallel tasks"
           />
           <div className="flex items-center gap-4 w-[320px]">
             <RangeInput

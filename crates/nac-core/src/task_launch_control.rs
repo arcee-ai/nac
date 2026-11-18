@@ -50,6 +50,7 @@ impl NativeTaskRequest {
             request_id: self.request_id.clone(),
             project_id: self.project_id.clone().unwrap_or_else(|| "current".into()),
             invoking_session_id: None,
+            model_selection: None,
             git_ref: self.git_ref.clone(),
             default_ref: self.default_ref.clone(),
             title: self.title.clone(),
@@ -93,9 +94,6 @@ pub struct SavedTaskProject {
     pub name: String,
     pub cwd: PathBuf,
     pub ssh_host: Option<String>,
-    pub default_model_config_id: Option<String>,
-    pub default_model: Option<String>,
-    pub default_reasoning_effort: Option<String>,
     pub default_ref: Option<String>,
     pub eligible: bool,
     pub eligibility_detail: String,
@@ -104,6 +102,9 @@ pub struct SavedTaskProject {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct NativeTaskLaunch {
     pub request: NativeTaskRequest,
+    /// The caller's selected session model, captured at reservation.
+    #[serde(default, skip_serializing)]
+    pub model_selection: Option<crate::store::TaskModelSelection>,
     pub caller_session_id: String,
     pub project_id: String,
     pub source_cwd: PathBuf,

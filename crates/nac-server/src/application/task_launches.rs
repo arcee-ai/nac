@@ -53,6 +53,10 @@ impl<'a> TaskLaunchApplication<'a> {
     }
 
     pub(crate) async fn start(&self, request: TaskLaunchRequest) -> Result<TaskLaunchRecord> {
+        anyhow::ensure!(
+            request.model_selection.is_some(),
+            "invalid request: select a model for the task session"
+        );
         let admission = self.manager.inner.task_preparations.admit().await?;
         self.start_admitted(request, admission, None).await
     }

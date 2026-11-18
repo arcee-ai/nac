@@ -24,20 +24,26 @@ vi.mock("@/app/runtime/RuntimeContext", () => ({
     },
   }),
 }));
-vi.mock("@/app/features/ui-policy/UiPolicyContext", () => ({
-  useUiPolicy: () => ({ orchestrationEnabled: false }),
-}));
 vi.mock("@/app/services/queries", () => ({
   useCreateSession: () => ({ mutateAsync: fakes.create }),
-  useCreateModelConfig: () => ({ mutateAsync: vi.fn() }),
   useSubmitRun: () => ({ mutateAsync: fakes.submit, isPending: false }),
   useSessions: () => ({ data: [] }),
 }));
 const request = {
   projectId: "project",
-  behavior: "direct" as const,
   prompt: "one intent",
-  model: null,
+  model: {
+    selection: {
+      kind: "resolved" as const,
+      backend: "openai-responses" as const,
+      model: "gpt-5.3",
+      base_url: "https://api.openai.com/v1",
+      allow_insecure_http: false,
+      api_key_env: "OPENAI_API_KEY",
+      reasoning_effort: null,
+      extra_headers: null,
+    },
+  },
 };
 function mount() {
   const client = new QueryClient();
@@ -55,7 +61,7 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-it("requires review after an uncertain plain creation and never retries its admission", async () => {
+it("requires review after an uncertain session creation and never retries its admission", async () => {
   fakes.create.mockRejectedValue(
     new UncertainCommandAdmissionError("request", new Error("lost reply")),
   );
@@ -97,6 +103,9 @@ it("keeps one creation and stages first delivery for the owning session composer
     expect(await first).toBe(true);
   });
   expect(fakes.create).toHaveBeenCalledOnce();
+  expect(fakes.create).toHaveBeenCalledWith(
+    expect.objectContaining({ model: "gpt-5.3", behavior: "direct" }),
+  );
   expect(fakes.submit).not.toHaveBeenCalled();
   expect(fakes.schedule).toHaveBeenCalledWith("session", { text: "one intent", revision: 1 });
   expect(fakes.update).toHaveBeenCalledWith("session", "one intent");

@@ -275,7 +275,7 @@ def setup_engine(profile, config, log):
     chunks = deque(maxlen=64)
     try:
         process = subprocess.Popen([str(engine), '--bind', '127.0.0.1:0', '--directory', str(profile['home']),
-            '--store-path', str(profile['store']), '--worker-executable', str(engine), '--no-open'],
+            '--store-path', str(profile['store']), '--no-open'],
             cwd=profile['home'], env=profile['environment'], stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True)
         def drain():

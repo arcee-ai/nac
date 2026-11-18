@@ -64,10 +64,10 @@ final class StartupSmoke {
                     evidence["launch_incarnation"] = receipt.incarnation
                     evidence["onboarding"] = true
                     evidence["workspace_activated"] = true
-                    let policy = try await js("return await (await fetch('/ui-config')).json();") as! [String: Any]
-                    evidence["ui_policy"] = policy
-                    guard policy["orchestration_enabled"] as? Bool == (ProcessInfo.processInfo.environment["NAC_ORCHESTRATION"] == "1") else {
-                        throw DesktopStartupError.message("Numeric orchestration policy changed")
+                    let retiredPolicyStatus = try await js("return (await fetch('/ui-config')).status;") as? Int
+                    evidence["retired_ui_policy_status"] = retiredPolicyStatus
+                    guard retiredPolicyStatus == 404 else {
+                        throw DesktopStartupError.message("Retired UI policy endpoint remains available")
                     }
                     if ["startup-missing-ssh", "startup-missing-podman", "startup-missing-mcp", "startup-custom-mcp"].contains(scenario) {
                         try await commandJourney()
@@ -102,9 +102,8 @@ final class StartupSmoke {
         if !vendor {
         let provider = value("--smoke-provider")!
         _ = try await js("""
-        const response = await fetch('/model-configs', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-          name:'Finder configured fixture', backend:'openai-responses', model:'gpt-5.6-sol',
-          base_url:'\(provider)', api_key:'preview-dummy-only', extra_headers:{}, orchestrator_compaction_threshold:0})});
+        const response = await fetch('/provider-connections', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+          backend:'openai-responses', base_url:'\(provider)', api_key:'preview-dummy-only'})});
         if (!response.ok) throw new Error(await response.text());
         return await response.json();
         """)
@@ -129,7 +128,7 @@ final class StartupSmoke {
             throw DesktopStartupError.message("Native folder sheet had no pending request to settle")
         }
         try await waitJS("selected working folder", "return [...document.querySelectorAll('button')].some(b => b.getAttribute('aria-label') === \(json("Choose Working Folder: " + workspace)));")
-        if vendor { try await selectVendorModel() }
+        if vendor { try await selectVendorModel() } else { try await selectFixtureModel() }
         try await waitJS("configured project ready", "return [...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Create Project' && !b.disabled);")
         _ = try await js("[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Create Project' && !b.disabled).click(); return true;")
         try await waitJS("configured local chat", "return location.hash.includes('/session/') && !!document.querySelector('[role=combobox][aria-label=Message]');")
@@ -188,6 +187,16 @@ final class StartupSmoke {
     func didStop() {
         evidence["stopped"] = app.engine.pid == 0 && app.engine.receipt == nil
         write()
+    }
+
+    private func selectFixtureModel() async throws {
+        try await waitJS("session model selector", "return !!document.querySelector('[role=dialog] button[aria-expanded]');")
+        _ = try await js("document.querySelector('[role=dialog] button[aria-expanded]').click(); return true;")
+        try await waitJS("model search", "return !!document.querySelector('input[aria-label=\"Search models\"]');")
+        try await fill("input[aria-label='Search models']", "gpt-5.6-sol")
+        let selected = "[...document.querySelectorAll('[aria-label=\"Model results\"] button[data-row]')].find(b => b.parentElement?.textContent.includes('OpenAI') && b.textContent.toLowerCase().includes('gpt-5.6'))"
+        try await waitJS("fixture OpenAI model", "return !!(\(selected));")
+        _ = try await js("\(selected).click(); return true;")
     }
 
     private func selectVendorModel() async throws {

@@ -239,7 +239,11 @@ export function useReadyProviderModels(catalog: ModelCatalog | undefined) {
               "catalog",
               catalog?.catalog_version,
             ]
-          : managedQueryKeys.providerModels(request.backend, request.base_url),
+          : [
+              ...managedQueryKeys.providerModels(request.backend, request.base_url),
+              request.api_key_env ?? null,
+              request.allow_insecure_http ?? false,
+            ],
       queryFn: async ({ signal }: { signal: AbortSignal }) => {
         const result = await api.listProviderModels(request, signal);
         if (request.backend === "chatgpt-codex-responses")

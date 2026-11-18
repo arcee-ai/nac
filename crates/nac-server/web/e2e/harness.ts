@@ -16,7 +16,7 @@ import {
 import { ExaDouble } from "./exa-double";
 import { ScriptedProvider } from "./scripted-provider";
 
-type SessionBehavior = "orchestrator" | "direct" | "direct-with-orchestrator";
+type SessionBehavior = "direct";
 
 const webRoot = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(webRoot, "../../../..");
@@ -262,20 +262,19 @@ export async function createSession(
   projectId?: string,
 ): Promise<string> {
   const response = await request.post(`${harness.baseUrl}/sessions`, {
-    data:
-      projectId == null
-        ? {
-            behavior,
-            cwd: path.join(harness.runRoot, "workspace"),
-            backend: "openai-responses",
-            model: "gpt-5.6-sol",
-            base_url: harness.provider.baseUrl,
-            reasoning_effort: "high",
-            api_key_env: "NAC_E2E_API_KEY",
-            extra_headers: {},
-            orchestrator_compaction_threshold: 0,
-          }
-        : { behavior, project_id: projectId },
+    data: {
+      behavior,
+      ...(projectId == null
+        ? { cwd: path.join(harness.runRoot, "workspace") }
+        : { project_id: projectId }),
+      backend: "openai-responses",
+      model: "gpt-5.6-sol",
+      base_url: harness.provider.baseUrl,
+      reasoning_effort: "high",
+      api_key_env: "NAC_E2E_API_KEY",
+      extra_headers: {},
+      orchestrator_compaction_threshold: 0,
+    },
   });
   if (!response.ok()) {
     throw new Error(`session creation failed (${response.status()}): ${await response.text()}`);
@@ -294,43 +293,26 @@ export async function createProject(
   options: {
     name?: string;
     cwd?: string;
-    lightModel?: {
-      model: string;
-      backend: "openai-responses";
-      base_url: string;
-      api_key_env: string;
-      reasoning_effort: "low";
-    };
   } = {},
 ): Promise<string> {
   const cwd = options.cwd ?? path.join(harness.runRoot, "workspace");
   await fs.mkdir(cwd, { recursive: true });
-  const configuration = await request.post(`${harness.baseUrl}/model-configs`, {
+  const configuration = await request.post(`${harness.baseUrl}/provider-connections`, {
     data: {
-      name: options.name ? `${options.name} scripted provider` : "E2E scripted provider",
       backend: "openai-responses",
-      model: "gpt-5.6-sol",
       base_url: harness.provider.baseUrl,
       api_key: "nac-e2e-dummy-only",
-      reasoning_effort: "high",
-      extra_headers: {},
-      orchestrator_compaction_threshold: 0,
-      light_model: options.lightModel,
     },
   });
   if (!configuration.ok()) {
     throw new Error(
-      `model configuration creation failed (${configuration.status()}): ${await configuration.text()}`,
+      `provider connection creation failed (${configuration.status()}): ${await configuration.text()}`,
     );
   }
-  const configId = ((await configuration.json()) as { config_id?: string }).config_id;
-  if (!configId) throw new Error("model configuration creation returned no id");
-
   const project = await request.post(`${harness.baseUrl}/projects`, {
     data: {
       name: options.name ?? "Embedded E2E project",
       cwd,
-      default_model_config_id: configId,
     },
   });
   if (!project.ok()) {
@@ -456,8 +438,6 @@ async function startHarness(
       workspace,
       "--store-path",
       path.join(runRoot, "store.db"),
-      "--worker-executable",
-      binaryPath,
       ...(managedConfig == null ? [] : ["--managed-config", managedConfig]),
       "--no-open",
     ],
@@ -473,6 +453,11 @@ async function startHarness(
         TMPDIR: tmp,
         LANG: "C.UTF-8",
         BROWSER: "none",
+        // Fail closed for accidental external requests; all fixtures are loopback.
+        HTTP_PROXY: "http://127.0.0.1:1",
+        HTTPS_PROXY: "http://127.0.0.1:1",
+        ALL_PROXY: "http://127.0.0.1:1",
+        NO_PROXY: "localhost,127.0.0.1,::1",
         RUST_BACKTRACE: "1",
         ...(orchestration === null ? {} : { NAC_ORCHESTRATION: orchestration }),
         NAC_E2E_API_KEY: "nac-e2e-dummy-only",

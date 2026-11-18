@@ -42,6 +42,9 @@ mod lineage_retention_tests;
 mod managed_tables;
 mod migration_status;
 mod model_configurations;
+mod provider_connections;
+mod retirement;
+mod retirement_records;
 mod session_summaries;
 mod transaction_observation;
 use session_summaries::backfill_session_summaries;
@@ -91,6 +94,7 @@ use connection::{connect, connect_existing, connect_probe_read_only, connect_rea
 pub(crate) use connection::{track_connection_opens, tracked_connection_opens};
 use wal_preflight::read_schema_version_header;
 
+// 53 retires legacy ownership trees under exclusive, cleanup-safe authority.
 // 51 records internal completion provenance on parent inbox rows.
 // 50 extends the occurrence source format for calendar cadence.
 // 49 adds the physical completion ledger; runtime production remains separately owned.
@@ -136,7 +140,7 @@ use wal_preflight::read_schema_version_header;
 // early whenever the stored version already equals this one. (12 carries the
 // same schema as 11, which added episodes.status; 10 added the
 // ssh_configurations table; 9 the per-session ssh port and key columns.)
-const STORE_SCHEMA_VERSION: i64 = 52;
+const STORE_SCHEMA_VERSION: i64 = 53;
 const HTTP_OPT_IN_COLUMN: &str = "INTEGER NOT NULL DEFAULT 0 CHECK (allow_insecure_http IN (0, 1))";
 pub const MINIMUM_MIGRATABLE_SCHEMA_VERSION: i64 = 0;
 
@@ -490,6 +494,14 @@ fn open_connection_with_hooks(
     if matches!(schema_version, 50 | 51) {
         heartbeat_calendar::verify_format(&transaction)?;
     }
+    // A genuinely empty database has no prior session or resource authority
+    // to retire. Its creator may already hold host admission while initializing
+    // it; do not require a conflicting maintenance lease in that case.
+    let established_store: bool = transaction.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%')",
+        [],
+        |row| row.get(0),
+    )?;
     let needs_session_summary_backfill = schema_version < SESSION_SUMMARY_BACKFILL_VERSION;
     match schema_version {
         0 | 1 => {
@@ -533,7 +545,7 @@ fn open_connection_with_hooks(
             migrate_thread_events(&transaction)?;
             transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
-        2..=51 => {}
+        2..=52 => {}
         unsupported => {
             if unsupported > STORE_SCHEMA_VERSION {
                 return Err(StoreFutureSchemaError::new(unsupported).into());
@@ -782,6 +794,27 @@ fn open_connection_with_hooks(
         heartbeat_calendar::rebuild_occurrences_for_calendar(&transaction)?;
     }
     heartbeat_calendar::verify_format(&transaction)?;
+    // The process and per-session authorities remain held until after commit.
+    // Compute ownership before any cascading delete can erase relationships.
+    let session_ids = retirement::all_session_ids(&transaction)?;
+    let _retirement_leases = established_store
+        .then(|| retirement::acquire_retirement_leases(path, &session_ids))
+        .transpose()?;
+    let doomed = retirement::doomed_sessions(&transaction)?;
+    if !doomed.is_empty() {
+        retirement_records::ensure_no_creation_records(&std::env::temp_dir(), path, &doomed)
+            .context("cannot verify retired resource cleanup; drain with a compatible prior NAC binary or explicitly reset a disposable store")?;
+        retirement::ensure_resources_drained(&transaction, &doomed)?;
+        retirement::purge_owned_rows(&transaction, &doomed)?;
+    }
+    provider_connections::create_provider_connections(&transaction)?;
+    provider_connections::migrate_provider_connections(&transaction)?;
+    transaction.execute_batch(
+        "CREATE TRIGGER IF NOT EXISTS session_direct_only_insert BEFORE INSERT ON sessions
+         WHEN NEW.behavior <> 'direct' OR NEW.light_model_json IS NOT NULL BEGIN SELECT RAISE(ABORT, 'retired session behavior or light model'); END;
+         CREATE TRIGGER IF NOT EXISTS session_direct_only_update BEFORE UPDATE OF behavior ON sessions
+         WHEN NEW.behavior <> 'direct' BEGIN SELECT RAISE(ABORT, 'retired session behavior'); END;",
+    )?;
     verify_auxiliary_foreign_keys(&transaction)?;
 
     before_commit()?;
@@ -841,7 +874,7 @@ fn create_base_schema(conn: &Connection) -> Result<()> {
          );
          CREATE TABLE IF NOT EXISTS sessions (
              session_id TEXT PRIMARY KEY,
-             behavior TEXT NOT NULL DEFAULT 'orchestrator'
+             behavior TEXT NOT NULL DEFAULT 'direct'
                  CHECK (behavior IN ('orchestrator', 'direct', 'direct-with-orchestrator')),
              permission_approval_mode TEXT NOT NULL DEFAULT 'manual'
                  CHECK (permission_approval_mode IN ('manual', 'auto_approve')),

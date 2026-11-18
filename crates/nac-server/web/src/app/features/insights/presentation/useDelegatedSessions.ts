@@ -7,13 +7,8 @@ import type {
   InsightTurnSection,
 } from "@/app/features/insights/model/types";
 import { InsightsNavigationContext } from "@/app/features/insights/useInsightsNavigation";
-import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
-import { queryKeys, useManagedOrchestrators, useTraditionalChildren } from "@/app/services/queries";
-import type {
-  ManagedOrchestratorRecord,
-  SessionSnapshotResponse,
-  TraditionalChildRecord,
-} from "@/app/types/api";
+import { queryKeys, useTraditionalChildren } from "@/app/services/queries";
+import type { SessionSnapshotResponse, TraditionalChildRecord } from "@/app/types/api";
 
 /** A delegated session this session's own records vouch for. */
 export interface SessionLink {
@@ -23,14 +18,9 @@ export interface SessionLink {
 
 export type SessionResolver = (rowKey: DelegatedRowKey | null) => SessionLink | null;
 
-const TARGET_PREFIX: Partial<Record<string, "child" | "orchestrator">> = {
+const TARGET_PREFIX: Partial<Record<string, "child">> = {
   subagent_status: "child",
   subagent_cancel: "child",
-  orchestrator_status: "orchestrator",
-  orchestrator_steer: "orchestrator",
-  orchestrator_read: "orchestrator",
-  orchestrator_wait: "orchestrator",
-  orchestrator_cancel: "orchestrator",
 };
 
 /** The session a session tool addressed; its preview is the id the model passed. */
@@ -79,20 +69,16 @@ function awaitsRecords(
  */
 export function useDelegatedSessions(
   sessionId: string,
-  snapshot: SessionSnapshotResponse | null,
+  _snapshot: SessionSnapshotResponse | null,
   timeline: readonly InsightTurnSection[],
 ): SessionResolver {
   const { panels } = useContext(InsightsNavigationContext);
-  const policy = useUiPolicy();
   const cache = useQueryClient();
   const named = useMemo(() => namedSessions(timeline), [timeline]);
   const delegating = panels.includes("delegated");
   // The gates read the cache: the hooks only return their records once called.
   const cachedChildren = cache.getQueryData<TraditionalChildRecord[]>(
     queryKeys.traditionalChildren(sessionId),
-  );
-  const cachedOrchestrators = cache.getQueryData<ManagedOrchestratorRecord[]>(
-    queryKeys.managedOrchestrators(sessionId),
   );
   const children = useTraditionalChildren(
     sessionId,
@@ -103,32 +89,15 @@ export function useDelegatedSessions(
         cachedChildren?.map((child) => child.child_session_id),
       ),
   );
-  const orchestrators = useManagedOrchestrators(
-    sessionId,
-    delegating &&
-      snapshot?.metadata.behavior === "direct-with-orchestrator" &&
-      awaitsRecords(
-        named,
-        "orchestrator",
-        cachedOrchestrators?.map((orchestrator) => orchestrator.orchestrator_session_id),
-      ),
-  );
   const childRecords = children.data;
-  const orchestratorRecords = policy.orchestrationEnabled ? orchestrators.data : undefined;
 
   const titles = useMemo(() => {
     const known = new Map<DelegatedRowKey, string>();
     for (const child of childRecords ?? []) {
       known.set(`child:${child.child_session_id}`, child.description.trim());
     }
-    for (const orchestrator of orchestratorRecords ?? []) {
-      known.set(
-        `orchestrator:${orchestrator.orchestrator_session_id}`,
-        orchestrator.description.trim(),
-      );
-    }
     return known;
-  }, [childRecords, orchestratorRecords]);
+  }, [childRecords]);
 
   return useCallback(
     (rowKey) => {

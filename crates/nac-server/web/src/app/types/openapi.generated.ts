@@ -330,27 +330,19 @@ export interface components {
       transport: components["schemas"]["McpTransportSchema"];
       url?: string | null;
     };
-    CreateModelConfigurationRequest: {
-      allow_insecure_http?: boolean;
-      api_key?: string | null;
-      backend: components["schemas"]["BackendKind"];
-      base_url?: string | null;
-      extra_headers?: Record<string, string> | null;
-      initial_prompt?: string | null;
-      light_model?: components["schemas"]["LightModelSettings"] | null;
-      model: string;
-      name: string;
-      orchestrator_compaction_threshold?: number | null;
-      reasoning_effort?: components["schemas"]["ReasoningEffort"] | null;
-    };
     CreateProjectRequest: {
       cwd: string;
-      default_model_config_id?: string | null;
       description?: string | null;
       name?: string | null;
       ssh_host?: string | null;
       ssh_identity_file?: string | null;
       ssh_port?: number | null;
+    };
+    CreateProviderConnectionRequest: {
+      allow_insecure_http?: boolean;
+      api_key: string;
+      backend: components["schemas"]["BackendKind"];
+      base_url?: string | null;
     };
     CreateSessionRequest: {
       allow_insecure_http?: components["schemas"]["RequestField_bool_bool"];
@@ -554,6 +546,7 @@ export interface components {
     FreshTaskDestination: {
       default_ref?: string | null;
       model?: string | null;
+      model_selection?: components["schemas"]["TaskModelSelection"] | null;
       pinned_commit?: string | null;
       project_id: string;
       reasoning_effort?: string | null;
@@ -819,16 +812,6 @@ export interface components {
       outcome: components["schemas"]["InputDeliveryOutcome"];
     };
     LaggedEvent: { missed: number };
-    LaunchModelDefaults: {
-      configured_model?: string | null;
-      configured_reasoning_effort?: components["schemas"]["ReasoningEffort"] | null;
-    };
-    LaunchModelDefaultsRequest: {
-      cwd?: string | null;
-      ssh_host?: string | null;
-      ssh_identity_file?: string | null;
-      ssh_port?: number | null;
-    };
     LightModelSettings: {
       api_key_env?: string | null;
       backend?: components["schemas"]["BackendKind"] | null;
@@ -928,22 +911,6 @@ export interface components {
       display_name: string;
       endpoint: string;
       id: string;
-    };
-    ManagedOrchestratorRecord: {
-      completion_inbox_id?: number | null;
-      created_at: string;
-      description: string;
-      execution_mode?: components["schemas"]["TraditionalChildExecutionMode"] | null;
-      failure?: string | null;
-      generation: number;
-      orchestrator_session_id: string;
-      parent_session_id: string;
-      report?: string | null;
-      root_session_id: string;
-      run_id?: string | null;
-      status: components["schemas"]["TraditionalChildStatus"];
-      updated_at: string;
-      version: number;
     };
     ManagedSecretList: {
       healthy: boolean;
@@ -1121,24 +1088,6 @@ export interface components {
       terminal_selection_attributions?: components["schemas"]["TerminalSelectionMessageReference"][];
       tool_call_occurrences?: (string | null)[];
     };
-    ModelConfigFromFileRequest: { path: string };
-    ModelConfigurationList: { configurations: components["schemas"]["ModelConfigurationRecord"][] };
-    ModelConfigurationRecord: {
-      allow_insecure_http: boolean;
-      api_key_env?: string | null;
-      backend: string;
-      base_url: string;
-      config_id: string;
-      created_at: string;
-      extra_headers: Record<string, string>;
-      initial_prompt?: string | null;
-      light_model?: components["schemas"]["LightModelSettings"] | null;
-      model: string;
-      name: string;
-      orchestrator_compaction_threshold?: number | null;
-      reasoning_effort?: string | null;
-      updated_at: string;
-    };
     ModelCostRates: {
       cache_read: number;
       cache_write: number;
@@ -1188,12 +1137,6 @@ export interface components {
       rows: number;
     };
     OpenWorkspacePathRequest: { path: string };
-    OrchestratorSteeringRequest: { instruction: string };
-    OrchestratorSteeringResponse: {
-      instruction_preview: string;
-      status: string;
-      steering_id: number;
-    };
     PartialModelOutput: { reasoning?: boolean; text?: boolean; tool_call?: boolean };
     PermissionApprovalMode: "manual" | "auto_approve" | "review";
     PermissionGrantRecord: {
@@ -1329,7 +1272,6 @@ export interface components {
     ProjectRecord: {
       created_at: string;
       cwd: string;
-      default_model_config_id?: string | null;
       description?: string | null;
       name: string;
       pinned: boolean;
@@ -1342,7 +1284,12 @@ export interface components {
       updated_at: string;
     };
     ProviderAuth: "api_key_env" | "managed_arcee" | "codex_oauth";
-    ProviderConnection: { api_key_env: string | null; base_url: string };
+    ProviderConnection: {
+      allow_insecure_http: boolean;
+      api_key_env: string | null;
+      base_url: string;
+    };
+    ProviderConnectionCreated: { connection_id: string };
     ProviderListing: {
       auth: components["schemas"]["ProviderAuth"];
       auth_hint: string | null;
@@ -1473,19 +1420,6 @@ export interface components {
     ReplayBoundaryEvent: { epoch_id: string; replay_boundary_sequence_id: number };
     ReplayGapEvent: { replay_gap: components["schemas"]["SessionReplayGap"] };
     ReplyPermissionRequest: { reply: components["schemas"]["PermissionReply"] };
-    RequestField_BackendKind_BackendKind:
-      | null
-      | (
-          | "deepseek-chat"
-          | "fireworks-chat"
-          | "together-chat"
-          | "openai-responses"
-          | "openai-chat-completions"
-          | "chatgpt-codex-responses"
-          | "anthropic-messages"
-          | "arcee-auth"
-          | "arcee-api"
-        );
     RequestField_bool_bool: null | boolean;
     RequestField_BTreeMap_BTreeMap_String_McpToolApproval: null | Record<string, "allow" | "ask">;
     RequestField_BTreeMap_BTreeMap_String_Option_String: null | Record<string, null | string>;
@@ -1500,9 +1434,6 @@ export interface components {
     };
     RequestField_McpProtocolSelection_McpProtocolSelection: null | ("legacy" | "auto" | "current");
     RequestField_McpToolApproval_McpToolApproval: null | ("allow" | "ask");
-    RequestField_ReasoningEffort_ReasoningEffort:
-      | null
-      | ("none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max");
     RequestField_String_String: null | string;
     RequestField_u16_u16: null | number;
     RequestField_u64_u64: null | number;
@@ -1526,16 +1457,6 @@ export interface components {
       max_input_tokens?: number | null;
       max_output_tokens: number;
       output_origin: components["schemas"]["LimitOrigin"];
-    };
-    ResolvedModelConfiguration: {
-      allow_insecure_http: boolean;
-      api_key_env: string | null;
-      backend: components["schemas"]["BackendKind"];
-      base_url: string;
-      model: string | null;
-      models: components["schemas"]["ProviderModel"][];
-      models_error: string | null;
-      reasoning_effort: components["schemas"]["ReasoningEffort"] | null;
     };
     ResponseTimingSnapshot: {
       cumulative_token_usage?: components["schemas"]["TokenUsage"] | null;
@@ -1842,12 +1763,6 @@ export interface components {
       repository: string;
       repository_id: number;
     };
-    StartManagedOrchestratorRequest: {
-      background?: boolean;
-      description: string;
-      orchestrator_session_id?: string | null;
-      prompt: string;
-    };
     StartTraditionalChildRequest: {
       background?: boolean;
       child_session_id?: string | null;
@@ -1858,7 +1773,7 @@ export interface components {
     StoreCredentialRequest: { value: string };
     StoredCredentialList: { credentials: components["schemas"]["StoredCredentialSummary"][] };
     StoredCredentialSummary: { last_four: string; name: string };
-    StoreInfo: { root_cwd: string; store_path: string; worker_executable: string };
+    StoreInfo: { root_cwd: string; store_path: string };
     SubmitPromptRequest: { prompt: string };
     SubmitPromptResponse: { client_id?: string | null; display_prompt: string; run_id: string };
     SubmittedUserMessageSnapshot: {
@@ -1910,6 +1825,7 @@ export interface components {
       default_ref?: string | null;
       git_ref?: string | null;
       invoking_session_id?: string | null;
+      model_selection?: components["schemas"]["TaskModelSelection"] | null;
       project_id: string;
       prompt: string;
       request_id: string;
@@ -1928,6 +1844,16 @@ export interface components {
       subdirectory: string;
     };
     TaskLaunchSourceInfo: { default_ref?: string | null; eligible: boolean };
+    TaskModelSelection: {
+      allow_insecure_http: boolean;
+      api_key_env?: string | null;
+      backend: string;
+      base_url: string;
+      extra_headers?: Record<string, string> | null;
+      model: string;
+      orchestrator_compaction_threshold?: number | null;
+      reasoning_effort?: string | null;
+    };
     TerminalSelectionAttribution: {
       admission_id: string;
       capture_id: string;
@@ -2050,18 +1976,6 @@ export interface components {
       id: number;
       thread_name: string;
     };
-    ThreadEventPage: {
-      diagnostics?: components["schemas"]["ThreadEventDecodeDiagnostic"][];
-      events: components["schemas"]["ThreadEventPageItem"][];
-      has_older: boolean;
-      next_before_id?: number | null;
-      thread_event_boundary?: components["schemas"]["SessionEventBoundary"] | null;
-    };
-    ThreadEventPageItem: {
-      created_at: string;
-      event: components["schemas"]["AgentEvent"];
-      id: number;
-    };
     ThreadSnapshot: {
       created_at: string;
       episode_count: number;
@@ -2080,13 +1994,6 @@ export interface components {
       instruction: string;
       session_id: string;
       status: string;
-      thread_name: string;
-    };
-    ThreadSteeringRequest: { instruction: string };
-    ThreadSteeringResponse: {
-      instruction_preview: string;
-      status: string;
-      steering_id: number;
       thread_name: string;
     };
     TokenCostMicros: {
@@ -2153,7 +2060,6 @@ export interface components {
       expected_revision: string;
       protocol_version: number;
     };
-    UiConfiguration: { diagnostic?: string | null; orchestration_enabled: boolean };
     UpdateConfigRequest: {
       allow_insecure_http?: components["schemas"]["RequestField_bool_bool"];
       api_key_env?: components["schemas"]["RequestField_String_String"];
@@ -2209,22 +2115,8 @@ export interface components {
       transport?: components["schemas"]["RequestField_String_String"];
       url?: components["schemas"]["RequestField_String_String"];
     };
-    UpdateModelConfigurationRequest: {
-      allow_insecure_http?: components["schemas"]["RequestField_bool_bool"];
-      api_key?: components["schemas"]["RequestField_String_String"];
-      backend?: components["schemas"]["RequestField_BackendKind_BackendKind"];
-      base_url?: components["schemas"]["RequestField_String_String"];
-      extra_headers?: components["schemas"]["RequestField_BTreeMap_BTreeMap_String_String"];
-      initial_prompt?: components["schemas"]["RequestField_String_String"];
-      light_model?: components["schemas"]["RequestField_LightModelSettings_LightModelSettings"];
-      model?: components["schemas"]["RequestField_String_String"];
-      name?: components["schemas"]["RequestField_String_String"];
-      orchestrator_compaction_threshold?: components["schemas"]["RequestField_u64_u64"];
-      reasoning_effort?: components["schemas"]["RequestField_ReasoningEffort_ReasoningEffort"];
-    };
     UpdatePermissionApprovalModeRequest: { mode: components["schemas"]["PermissionApprovalMode"] };
     UpdateProjectRequest: {
-      default_model_config_id?: components["schemas"]["RequestField_String_String"];
       description?: components["schemas"]["RequestField_String_String"];
       name?: components["schemas"]["RequestField_String_String"];
       pinned?: components["schemas"]["RequestField_bool_bool"];

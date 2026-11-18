@@ -1,8 +1,6 @@
-import type { LaunchModelSelection } from "@/app/components/modals/ConfigurationsPanel";
-import type { LightSelection } from "@/app/components/modals/LightModelSection";
-import { creationBehavior, type UiPolicy } from "@/app/features/ui-policy/policy";
-import { CLEAR_EFFORT, csv, inheritPrimaryCredential, nullable } from "@/app/lib/modelConfig";
-import type { CreateSessionRequest, LightModelSettings, SessionBehavior } from "@/app/types/api";
+import type { LaunchModelSelection } from "@/app/features/setup/modelSelection";
+import { CLEAR_EFFORT, csv, nullable } from "@/app/lib/modelConfig";
+import type { CreateSessionRequest } from "@/app/types/api";
 
 export interface SandboxOptions {
   noMount: boolean;
@@ -17,25 +15,20 @@ export interface SandboxOptions {
 export function projectChatRequest(values: {
   projectId: string;
   selected: Extract<LaunchModelSelection, { kind: "resolved" }>;
-  policy: UiPolicy;
-  behavior: SessionBehavior;
   reasoning: string;
   headers: Record<string, string> | undefined;
   compaction: string;
   automaticCompaction: boolean;
-  presetCompaction: boolean;
-  savedLight: LightModelSettings | null | undefined;
-  light: LightSelection;
   execution: "local" | "ssh" | "sandbox";
   sandbox: SandboxOptions;
   activityKey: string | null;
 }): CreateSessionRequest {
-  const { selected, policy, light, sandbox } = values;
+  const { selected, sandbox } = values;
   const body: CreateSessionRequest = {
     project_id: values.projectId,
-    behavior: creationBehavior(policy, values.behavior),
+    behavior: "direct",
     first_chat: true,
-    first_chat_same_behavior: !policy.orchestrationEnabled,
+    first_chat_same_behavior: true,
     backend: selected.backend,
     model: selected.model,
     base_url: selected.base_url,
@@ -45,18 +38,10 @@ export function projectChatRequest(values: {
       values.reasoning === CLEAR_EFFORT
         ? null
         : values.reasoning || selected.reasoning_effort || null,
-    // Explicit Single overrides a saved Dual default; direct preserves hidden stored data.
-    light_model: !policy.orchestrationEnabled
-      ? (values.savedLight ?? null)
-      : light.mode === "dual" && light.light
-        ? inheritPrimaryCredential(light.light, selected.backend, selected.api_key_env)
-        : null,
   };
   const headers = values.headers ?? selected.extra_headers ?? undefined;
   if (headers !== undefined) body.extra_headers = headers;
-  if (values.presetCompaction && selected.orchestrator_compaction_threshold !== undefined)
-    body.orchestrator_compaction_threshold = selected.orchestrator_compaction_threshold;
-  else if (
+  if (
     !(selected.backend === "chatgpt-codex-responses" && values.automaticCompaction) &&
     nullable(values.compaction) !== null
   )

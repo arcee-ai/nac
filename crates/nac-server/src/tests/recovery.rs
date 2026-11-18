@@ -1,7 +1,7 @@
 use super::*;
 
 #[tokio::test]
-async fn server_attach_ignores_invalid_ambient_model_but_create_remains_strict() {
+async fn server_ignores_removed_ambient_model_and_requires_session_selection() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let root = temp_root("persisted_attach_invalid_ambient_model");
     let nac_home = root.join("nac-home");
@@ -32,8 +32,7 @@ thread_timeout_secs = 7200
     let resumed = manager.snapshot("persisted").await.unwrap();
     assert_eq!(resumed.metadata.session_id.as_deref(), Some("persisted"));
 
-    // A new session still parses the complete model table before doing any
-    // persistence, so the same obsolete config remains an actionable error.
+    // Removed defaults are ignored; a new session still requires its own model.
     let error = manager
         .create_session(CreateSessionRequest {
             cwd: Some(root.clone()),
@@ -41,13 +40,24 @@ thread_timeout_secs = 7200
         })
         .await
         .unwrap_err();
-    assert!(
-        error.to_string().contains("failed to parse config"),
-        "{error:#}"
-    );
+    assert!(error.to_string().contains("backend"), "{error:#}");
     assert_eq!(
         manager.session_catalog().list(false).await.unwrap().len(),
         1
+    );
+    manager
+        .create_session(CreateSessionRequest {
+            cwd: Some(root.clone()),
+            model: RequestField::Value("gpt-5.2".into()),
+            backend: RequestField::Value("openai-responses".into()),
+            api_key_env: RequestField::Value("OPENAI_API_KEY".into()),
+            ..CreateSessionRequest::default()
+        })
+        .await
+        .expect("an explicitly selected session model must ignore removed defaults");
+    assert_eq!(
+        manager.session_catalog().list(false).await.unwrap().len(),
+        2
     );
 
     let _ = std::fs::remove_dir_all(root);

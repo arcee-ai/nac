@@ -17,7 +17,7 @@ export interface StoredThread {
 /** Session rows and workset-only groups navigate to another panel instead. */
 export declare function opensInPlace(entry: InsightEntry): boolean;
 /** The pick stored in the layout store, while it still names something on the page. */
-export declare function resolveStoredInsight(selection: InsightSelection | null, thread: StoredThread, timeline: readonly InsightTurnSection[], ownsThread: (name: string) => boolean): ShownInsight | null;
+export declare function resolveStoredInsight(selection: InsightSelection | null, _thread: StoredThread, timeline: readonly InsightTurnSection[], _ownsThread: (name: string) => boolean): ShownInsight | null;
 /** The newest entry the filtered list shows that has a detail of its own. */
 export declare function newestShownInsight(sections: readonly InsightTurnSection[], timeline: readonly InsightTurnSection[]): ShownInsight | null;
 export declare function hiddenByFilter(shown: ShownInsight, sections: readonly InsightTurnSection[]): boolean;

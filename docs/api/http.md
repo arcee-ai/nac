@@ -56,8 +56,7 @@ descriptor headroom under the common 256-descriptor process limit.
 Projects are explicit, store-scoped records exposed by `GET /projects`,
 `POST /projects`, `PATCH /projects/{project_id}`, and
 `DELETE /projects/{project_id}`. A project owns one canonical local directory or
-one canonical directory on an SSH connection, plus a name, optional description,
-and optional saved model configuration. Creation canonicalizes local paths and
+one canonical directory on an SSH connection, plus a name and optional description. Creation canonicalizes local paths and
 verifies remote paths with the same SSH directory browse used by session launch.
 Canonical location duplicates return 409. Remote errors retain their existing
 classes: invalid or non-directory paths return 400, unreadable paths 403,
@@ -98,11 +97,16 @@ rewrites one pin group; the request must list every project in that group
 exactly once and carry each current `presentation_version`, otherwise it
 returns 409 rather than reordering a set that has since changed.
 
-The selected project ID appears in session summary and detail metadata.
-Project model defaults are copied into a new session, not read live. Later
-project edits affect only later sessions, and resume uses the session snapshot.
-Deleting a saved model configuration still referenced by a project returns
-409 and retains both the configuration and its credentials.
+The selected project ID appears in session summary and detail metadata. Each new session selects its own model. Provider credentials are managed separately; projects do not supply model defaults.
+
+## Provider connections
+
+`POST /provider-connections` saves an API-key provider's `backend`, optional
+`base_url`, optional `allow_insecure_http` and `api_key`. It returns a connection
+identifier, never the key. `GET /models` exposes the available provider and
+model catalog, including the connection's endpoint and credential selector; a
+session chooses its own model and can use that connection. Existing provider
+credentials are kept when older saved model presets are migrated.
 
 ## Direct goals
 
@@ -112,8 +116,7 @@ Deleting a saved model configuration still referenced by a project returns
 unfinished goal exists. `PATCH /sessions/{session_id}/goal/{goal_id}` uses
 `expected_version` for optimistic concurrency and can edit `objective`, set or
 clear `token_budget`, or set a user/system status. `DELETE` on the same path
-takes `expected_version` and clears the goal. These endpoints reject
-orchestrator sessions and delegated traditional children.
+takes `expected_version` and clears the goal. These endpoints reject delegated child sessions.
 
 Goal responses include the generation ID, six-state status, accumulated
 `tokens_used` and `time_used_ms`, optional budget, current run/continuation
@@ -131,8 +134,7 @@ token baseline.
 In an idle direct-primary chat, `!<command>` runs the exact text after `!` on
 that session's selected backend. `\!` sends a literal leading bang as chat
 text. Commands do not start a model turn; “Ask about this” fills a draft that
-the user submits deliberately. Busy chats, orchestrators, and delegated
-children cannot admit this operation.
+the user submits deliberately. Busy chats and delegated children cannot admit this operation.
 
 `POST /sessions/{session_id}/user-commands` accepts `request_id`, `command`, and
 optional `timeout_ms` (1–3,600,000; default 30,000). It commits intent before
@@ -160,10 +162,9 @@ publish command transitions without manufacturing a model run.
 
 ## Direct sessions and inbox
 
-For a direct session, send `behavior: "direct"` in `POST /sessions`. The
-behavior is persisted and immutable. The current API still defaults an omitted
-behavior to the legacy value; ALL-613 owns changing that default and rejecting
-retired selections. Session detail exposes traditional-child lineage.
+Sessions use direct behavior. `POST /sessions` accepts `behavior: "direct"` and
+defaults to it when omitted. Retired behavior values are rejected. Session detail
+exposes traditional-child lineage.
 
 Direct parents expose their durable input at `GET /sessions/{session_id}/inbox`
 and `POST /sessions/{session_id}/inbox`. A create body contains `delivery`
@@ -171,7 +172,7 @@ and `POST /sessions/{session_id}/inbox`. A create body contains `delivery`
 `PATCH /sessions/{session_id}/inbox/{item_id}` or be cancelled with versioned
 `DELETE` on that path. A steer targets the current non-finishing run when one
 exists; otherwise it participates in the same successor queue as ordinary
-queued input. These routes reject orchestrator and delegated-child ownership.
+queued input. These routes reject delegated-child ownership.
 
 ## Traditional child sessions
 
@@ -188,13 +189,10 @@ include generation, run and execution mode, terminal report or failure,
 workspace change and verification summaries when available, the durable parent
 completion inbox ID, timestamps, and version.
 
-These endpoints reject orchestrator parents, grandchildren, mismatched parent
+These endpoints reject grandchildren, mismatched parent
 ownership, changes to a child's profile or description, sandboxed sessions
 without a host-backed shared workspace, and more than four simultaneously
 running children per root parent.
-
-The legacy managed-orchestrator routes remain present until the ALL-613
-cutover; they are pending removal and are not part of the direct workflow.
 
 ## Remote access
 
@@ -255,12 +253,12 @@ bypass it.
 ## Retained Local task launches
 
 `POST /task-launches` accepts a canonical UUID `request_id`, exact saved
-`project_id`, title and initial prompt, with optional `invoking_session_id`,
-`git_ref` and first-binding `default_ref`. It always selects a new retained
+`project_id`, title, initial prompt and `model_selection`, with optional
+`invoking_session_id`, `git_ref` and first-binding `default_ref`. It always selects a new retained
 Local direct task, never an existing-checkout fallback. The source repository,
 effective subdirectory and destination path are derived and validated by the
-service; clients cannot supply arbitrary paths, a backend or trusted origin.
-The destination project's ordinary model defaults apply.
+service; clients cannot supply arbitrary paths or trusted origin. The selected
+model and credential reference are frozen into the request receipt.
 Saved defaults bind canonical direct branch refs; symbolic/dynamic defaults
 are rejected. `git_ref: "HEAD"` remains valid per-launch intent. Exact retries
 compare their original arguments and return their original receipt.

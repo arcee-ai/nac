@@ -1,5 +1,3 @@
-import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
-import { visibleSessions } from "@/app/features/ui-policy/policy";
 import { useEffect, useMemo, useState } from "react";
 import { Navigate, useParams } from "react-router-dom";
 
@@ -19,7 +17,6 @@ import { useProjects, useSessions } from "@/app/services/queries";
 export default function ProjectRedirectPage() {
   const { projectId = "" } = useParams();
   const actions = useProjectActions();
-  const policy = useUiPolicy();
   const projectsQuery = useProjects();
   const sessionsQuery = useSessions();
   const [confirmedProjectId, setConfirmedProjectId] = useState<string | null>(null);
@@ -45,9 +42,8 @@ export default function ProjectRedirectPage() {
     [projectsQuery.data, projectId],
   );
   const newest = useMemo(
-    () =>
-      newestPrimarySessionForProject(visibleSessions(policy, sessionsQuery.data ?? []), projectId),
-    [sessionsQuery.data, projectId, policy],
+    () => newestPrimarySessionForProject(sessionsQuery.data ?? [], projectId),
+    [sessionsQuery.data, projectId],
   );
 
   const loading = projectsQuery.isLoading || sessionsQuery.isLoading;

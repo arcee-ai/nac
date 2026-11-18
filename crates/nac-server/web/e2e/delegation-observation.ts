@@ -16,7 +16,6 @@ export function isSqliteObservationLock(error: unknown): boolean {
 /** Read the committed receipt before releasing a model barrier; never mutate fixture state. */
 export async function waitForDelegatedInput(
   harness: EmbeddedHarness,
-  topology: "child" | "orchestrator",
   sessionId: string,
   prompt: string,
 ) {
@@ -28,9 +27,7 @@ export async function waitForDelegatedInput(
           readOnly: true,
         });
         const query =
-          topology === "child"
-            ? "SELECT COUNT(*) AS count FROM session_inbox WHERE session_id = ? AND content = ?"
-            : "SELECT COUNT(*) AS count FROM thread_steering WHERE session_id = ? AND instruction = ?";
+          "SELECT COUNT(*) AS count FROM session_inbox WHERE session_id = ? AND content = ?";
         return database.prepare(query).get(sessionId, prompt)?.count;
       } catch (error) {
         // This external observer has no serving-owner connection. A concurrent

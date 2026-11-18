@@ -98,7 +98,7 @@ function mount(
           <SubagentComposer
             parentSessionId="parent"
             permissionSessionId={id}
-            permissionBehavior={mode === "child" ? "direct" : "orchestrator"}
+            permissionBehavior="direct"
             showPermissions={false}
             target={{
               mode,
@@ -123,7 +123,6 @@ function mount(
 function accepted() {
   return Response.json({
     child_session_id: "target",
-    orchestrator_session_id: "target",
     parent_session_id: "parent",
     root_session_id: "parent",
     profile: "general",
@@ -146,24 +145,23 @@ function accepted() {
 
 function expectRequest(
   fetch: ReturnType<typeof vi.fn<typeof globalThis.fetch>>,
-  mode: SubagentTarget["mode"],
+  _mode: SubagentTarget["mode"],
   prompt: string,
   index = 0,
 ) {
   const [url, init] = fetch.mock.calls[index];
-  expect(url).toBe(`/api/sessions/parent/${mode === "child" ? "children" : "orchestrators"}`);
+  expect(url).toBe("/api/sessions/parent/children");
   expect(init?.method).toBe("POST");
   expect(JSON.parse(init?.body as string)).toEqual({
     description: "Review permissions",
     prompt,
     background: false,
-    ...(mode === "child"
-      ? { profile: "general", child_session_id: "target" }
-      : { orchestrator_session_id: "target" }),
+    profile: "general",
+    child_session_id: "target",
   });
 }
 
-it.each(["child", "orchestrator"] as const)(
+it.each(["child"] as const)(
   "R1 exact cold boundary still dispatches one fresh %s request",
   async (mode) => {
     const response = Promise.withResolvers<Response>();
@@ -185,7 +183,7 @@ it.each(["child", "orchestrator"] as const)(
   },
 );
 
-it.each(["child", "orchestrator"] as const)(
+it.each(["child"] as const)(
   "suppresses the same %s revision across repeated events and a view remount",
   async (mode) => {
     const response = Promise.withResolvers<Response>();
@@ -209,7 +207,7 @@ it.each(["child", "orchestrator"] as const)(
   },
 );
 
-it.each(["child", "orchestrator"] as const)(
+it.each(["child"] as const)(
   "permits fresh %s steering before an older foreground request settles",
   async (mode) => {
     const a = Promise.withResolvers<Response>();
@@ -238,7 +236,7 @@ it.each(["child", "orchestrator"] as const)(
   },
 );
 
-it.each(["child", "orchestrator"] as const)(
+it.each(["child"] as const)(
   "preserves a newer identical %s edit on acknowledgement",
   async (mode) => {
     const response = Promise.withResolvers<Response>();
@@ -260,7 +258,7 @@ it.each(["child", "orchestrator"] as const)(
   },
 );
 
-for (const mode of ["child", "orchestrator"] as const) {
+for (const mode of ["child"] as const) {
   it.each(["unchanged", "newer", "http409"] as const)(
     `keeps ${mode} uncertainty visible without replay (%s)`,
     async (edit) => {
@@ -297,7 +295,7 @@ for (const mode of ["child", "orchestrator"] as const) {
   );
 }
 
-it.each(["child", "orchestrator"] as const)(
+it.each(["child"] as const)(
   "keeps one %s start but allows fresh steering after the target becomes running",
   async (mode) => {
     const a = Promise.withResolvers<Response>();
@@ -323,7 +321,7 @@ it.each(["child", "orchestrator"] as const)(
   },
 );
 
-it.each(["child", "orchestrator"] as const)(
+it.each(["child"] as const)(
   "keeps a claimed %s draft while another target is edited",
   async (mode) => {
     const response = Promise.withResolvers<Response>();
@@ -345,7 +343,7 @@ it.each(["child", "orchestrator"] as const)(
   },
 );
 
-it.each(["child", "orchestrator"] as const)(
+it.each(["child"] as const)(
   "distinguishes an in-memory %s recovery from unavailable durable storage",
   async (mode) => {
     const response = Promise.withResolvers<Response>();
@@ -366,7 +364,7 @@ it.each(["child", "orchestrator"] as const)(
   },
 );
 
-for (const mode of ["child", "orchestrator"] as const) {
+for (const mode of ["child"] as const) {
   it.each(["accepted", "lost"] as const)(
     `fences a purged ${mode} request's late %s result`,
     async (outcome) => {
@@ -394,7 +392,7 @@ for (const mode of ["child", "orchestrator"] as const) {
   );
 }
 
-it.each(["child", "orchestrator"] as const)(
+it.each(["child"] as const)(
   "fences closed %s runtime results from a replacement runtime",
   async (mode) => {
     const response = Promise.withResolvers<Response>();

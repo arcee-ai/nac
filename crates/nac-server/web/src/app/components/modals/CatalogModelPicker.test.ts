@@ -9,6 +9,7 @@ const seeded = {
   auth_status: "ready",
   auth_hint: null,
   connection: {
+    allow_insecure_http: false,
     base_url: "https://api.arcee.ai/api/v1",
     api_key_env: "ARCEE_API_KEY",
   },

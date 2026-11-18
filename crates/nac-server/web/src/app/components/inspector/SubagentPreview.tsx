@@ -20,7 +20,6 @@ import {
 import { DelegatedCompletionCard } from "@/app/features/delegation/presentation/DelegatedCompletionCard";
 import { GoalContinuationCard } from "@/app/features/goals/presentation/GoalContinuationCard";
 import { ChildTranscriptScope } from "@/app/features/insights/transcript/ChildTranscriptScope";
-import { useSessionBehaviorIconVisible } from "@/app/features/ui-policy/useSessionBehaviorIconVisible";
 import { useDelegatedPreviewStream } from "@/app/hooks/useDelegatedPreviewStream";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { useStickToBottom } from "@/app/hooks/useStickToBottom";
@@ -56,7 +55,6 @@ export function SubagentPreview({
   title,
   fallbackText,
   relationship,
-  icon,
   header = true,
   phoneHeaderInFlow = false,
   onOpen,
@@ -65,7 +63,6 @@ export function SubagentPreview({
   title: string;
   fallbackText: string | null;
   relationship?: { status: string; generation: number; runId: string | null };
-  icon: IconName;
   /** Below the desktop width the panel's own header names it and carries Open. */
   header?: boolean;
   /** The selected phone detail reserves its header outside this scroll viewport. */
@@ -74,7 +71,6 @@ export function SubagentPreview({
   onOpen: () => void;
 }) {
   const isMobile = useIsMobile();
-  const showBehaviorIcon = useSessionBehaviorIconVisible();
   const live = useDelegatedPreviewStream(sessionId);
   const snapshot = useSessionSnapshot(sessionId, {
     retry: false,
@@ -239,9 +235,6 @@ export function SubagentPreview({
     <div className="flex min-h-0 flex-1 flex-col">
       {header ? (
         <div className="flex h-12 shrink-0 items-center gap-2.5 border-b border-tertiary px-4">
-          {showBehaviorIcon ? (
-            <Icon iconName={icon} size={16} className="shrink-0 text-basic-tertiary" />
-          ) : null}
           <SessionNameDisclosure
             key={sessionId}
             name={title}

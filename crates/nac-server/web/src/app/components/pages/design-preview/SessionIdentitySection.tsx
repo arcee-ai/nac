@@ -8,27 +8,10 @@ import {
   ForkSessionItem,
   ProjectButton,
   ProjectButtonVariant,
-  SessionBehaviorIcon,
-  SessionBehaviorIconSize,
 } from "@/app/atoms";
 import { SAMPLE_IDS } from "@/app/components/pages/design-preview/samples";
 import { ChatSessionActions } from "@/app/components/projects/ChatSessionActions";
 import { cn } from "@/app/lib/cn";
-import { SESSION_BEHAVIORS } from "@/app/lib/sessionBehavior";
-
-const ICON_SIZES = [
-  SessionBehaviorIconSize.Small,
-  SessionBehaviorIconSize.Medium,
-  SessionBehaviorIconSize.Large,
-];
-
-/** Figma's `color` axis: the fill tokens a parent sets as the glyph's color. */
-const ICON_TONES = [
-  { label: "Default", className: "text-fill-btn-secondary" },
-  { label: "Hovered", className: "text-fill-btn-secondary-hovered" },
-  { label: "Pressed", className: "text-fill-btn-secondary-pressed" },
-  { label: "Disabled", className: "text-fill-btn-secondary-disabled" },
-];
 
 type ChatSessionButtonSample = Partial<React.ComponentProps<typeof ChatSessionButton>>;
 
@@ -41,43 +24,12 @@ const BUTTON_COLUMNS: { label: string; sample: ChatSessionButtonSample }[] = [
 
 const BUTTON_ROWS: { label: string; sample: ChatSessionButtonSample }[] = [
   { label: "Direct agent", sample: { behavior: "direct" } },
-  { label: "Direct + NAC", sample: { behavior: "direct-with-orchestrator" } },
-  { label: "Orchestrator", sample: { behavior: "orchestrator" } },
   { label: "Fork", sample: { behavior: "direct", forkedFromTitle: "Chat session 0" } },
   { label: "Unread", sample: { behavior: "direct", unread: true } },
-  { label: "Without NAC", sample: { behavior: "direct", showBehaviorIcon: false } },
   { label: "Disabled", sample: { behavior: "direct", disabled: true } },
 ];
 
 const noop = () => {};
-
-function SessionBehaviorIconGrid() {
-  return (
-    <div className="grid w-fit grid-cols-[200px_repeat(12,32px)] items-center gap-y-3">
-      <span />
-      {ICON_TONES.map((tone) => (
-        <span key={tone.label} className="col-span-3 type-meta-strong text-basic-muted">
-          {tone.label}
-        </span>
-      ))}
-      {SESSION_BEHAVIORS.map((option) => (
-        <Fragment key={option.id}>
-          <span className="type-body-chrome truncate text-basic-secondary">{option.label}</span>
-          {ICON_TONES.flatMap((tone) =>
-            ICON_SIZES.map((size) => (
-              <span
-                key={`${tone.label}-${size}`}
-                className={cn("flex items-center justify-center", tone.className)}
-              >
-                <SessionBehaviorIcon behavior={option.id} size={size} />
-              </span>
-            )),
-          )}
-        </Fragment>
-      ))}
-    </div>
-  );
-}
 
 /** Hover, press and keyboard focus are live: point at or Tab through a row. */
 function ChatSessionButtonMatrix({ isMobile }: { isMobile: boolean }) {
@@ -110,7 +62,6 @@ function ChatSessionButtonMatrix({ isMobile }: { isMobile: boolean }) {
             <ChatSessionButton
               key={column.label}
               title="Chat session 1"
-              showBehaviorIcon
               isMobile={isMobile}
               actions={actions}
               {...row.sample}
@@ -127,16 +78,9 @@ export function SessionIdentitySection() {
   return (
     <BoxSurface title="Project navigation" bodyClassName="overflow-x-auto">
       <div className="p-4 flex flex-col gap-6 overflow-x-auto [&>*]:shrink-0">
-        <SessionBehaviorIconGrid />
         <div className="flex items-start gap-2">
-          <ChatSessionTab title="Fix the parser" behavior="direct" showBehaviorIcon active />
-          <ChatSessionTab
-            title="Rewrite the store layer"
-            behavior="direct-with-orchestrator"
-            showBehaviorIcon
-          />
-          <ChatSessionTab title="Investigating" behavior="orchestrator" showBehaviorIcon running />
-          <ChatSessionTab title="Without NAC" behavior="direct" />
+          <ChatSessionTab title="Fix the parser" behavior="direct" active />
+          <ChatSessionTab title="Investigating" behavior="direct" running />
           <ChatSessionTab title="Fork: Fix the parser" forkedFromTitle="Fix the parser" />
           <ChatSessionTab title="Fork running" forkedFromTitle="Fix the parser" running />
         </div>

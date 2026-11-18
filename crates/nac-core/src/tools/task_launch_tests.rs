@@ -26,9 +26,6 @@ impl Controller {
             name: "Project".into(),
             cwd: self.cwd.clone(),
             ssh_host: None,
-            default_model_config_id: None,
-            default_model: None,
-            default_reasoning_effort: None,
             default_ref: None,
             eligible: true,
             eligibility_detail: "Local".into(),
@@ -93,7 +90,7 @@ fn fixture(rules: Vec<PermissionRule>) -> (super::super::ToolRuntime, Arc<Contro
     crate::store::insert_test_session(&runtime.store_path, "caller");
     let conn = crate::store::open_runtime_connection(&runtime.store_path).unwrap();
     conn.execute(
-        "UPDATE sessions SET behavior='direct',cwd=?1,store_path=?2 WHERE session_id='caller'",
+        "UPDATE sessions SET behavior='direct',backend='openai-responses',cwd=?1,store_path=?2 WHERE session_id='caller'",
         rusqlite::params![
             runtime.workspace_cwd.to_string_lossy(),
             runtime.store_path.to_string_lossy()
@@ -410,6 +407,7 @@ async fn pinned_git_preparation_uses_agent_ask_deny_and_exact_targets() {
                 request_id: id.clone(),
                 project_id: "p".into(),
                 invoking_session_id: runtime.session_id.clone(),
+                model_selection: None,
                 git_ref: None,
                 default_ref: Some("main".into()),
                 title: "Separate task".into(),

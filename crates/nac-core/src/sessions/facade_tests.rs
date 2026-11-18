@@ -6,7 +6,7 @@ use crate::TEST_ENV_LOCK;
 fn point_summary_preserves_catalog_projection_and_isolates_other_rows() {
     let path = temp_store_path("point_summary");
     let mut snapshot = test_snapshot("target", "2026-01-01", "2026-01-02");
-    snapshot.behavior = SessionBehavior::DirectWithOrchestrator;
+    snapshot.behavior = SessionBehavior::Direct;
     snapshot.messages.push(Message::User {
         content: "hello".into(),
     });
@@ -120,7 +120,7 @@ fn create_and_load_session_round_trip() {
     create_session(&store_path, &snapshot).unwrap();
     let loaded = load_session(&store_path, "session-1").unwrap();
     assert_eq!(loaded.session_id, "session-1");
-    assert_eq!(loaded.behavior, SessionBehavior::Orchestrator);
+    assert_eq!(loaded.behavior, SessionBehavior::Direct);
     assert_eq!(loaded.cwd, PathBuf::from("/repo"));
     assert_eq!(loaded.messages.len(), 1);
     assert_eq!(loaded.orchestrator_compaction_threshold, Some(32_768));
@@ -179,49 +179,35 @@ fn behavior_round_trips_lists_and_cannot_change_during_state_save() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     let store_path = temp_store_path("behavior_round_trip");
 
+    let mut direct = test_snapshot("direct", "created", "updated");
+    direct.behavior = SessionBehavior::Direct;
+    create_session(&store_path, &direct).unwrap();
+    assert_eq!(
+        load_session(&store_path, "direct").unwrap().behavior,
+        SessionBehavior::Direct
+    );
+    assert_eq!(
+        load_session_behavior(&store_path, "direct").unwrap(),
+        SessionBehavior::Direct
+    );
     for (session_id, behavior) in [
         ("orchestrator", SessionBehavior::Orchestrator),
-        ("direct", SessionBehavior::Direct),
         (
             "direct-with-orchestrator",
             SessionBehavior::DirectWithOrchestrator,
         ),
     ] {
-        let mut snapshot = test_snapshot(session_id, "created", "updated");
-        snapshot.behavior = behavior;
-        create_session(&store_path, &snapshot).unwrap();
-        assert_eq!(
-            load_session(&store_path, session_id).unwrap().behavior,
-            behavior
-        );
-        assert_eq!(
-            load_session_behavior(&store_path, session_id).unwrap(),
-            behavior
-        );
+        let mut retired = test_snapshot(session_id, "created", "updated");
+        retired.behavior = behavior;
+        assert!(create_session(&store_path, &retired).is_err());
     }
-
     let summaries = list_sessions(&store_path).unwrap();
-    for (session_id, behavior) in [
-        ("orchestrator", SessionBehavior::Orchestrator),
-        ("direct", SessionBehavior::Direct),
-        (
-            "direct-with-orchestrator",
-            SessionBehavior::DirectWithOrchestrator,
-        ),
-    ] {
-        assert_eq!(
-            summaries
-                .iter()
-                .find(|summary| summary.session_id == session_id)
-                .unwrap()
-                .behavior,
-            behavior
-        );
-    }
+    assert_eq!(summaries.len(), 1);
+    assert_eq!(summaries[0].behavior, SessionBehavior::Direct);
 
     let mut stale = load_session(&store_path, "direct").unwrap();
     stale.behavior = SessionBehavior::Orchestrator;
-    save_session(&store_path, &stale).unwrap();
+    assert!(save_session(&store_path, &stale).is_err());
     assert_eq!(
         load_session(&store_path, "direct").unwrap().behavior,
         SessionBehavior::Direct
@@ -248,11 +234,11 @@ fn unknown_stored_behavior_fails_closed_for_load_and_list() {
     create_session(&store_path, &snapshot).unwrap();
 
     let conn = rusqlite::Connection::open(&store_path).unwrap();
-    conn.execute_batch(
-        "PRAGMA ignore_check_constraints = ON;
-         UPDATE sessions SET behavior = 'future-behavior' WHERE session_id = 'session';",
-    )
-    .unwrap();
+    assert!(conn.execute_batch(
+        "PRAGMA ignore_check_constraints = ON; UPDATE sessions SET behavior = 'future-behavior' WHERE session_id = 'session';",
+    ).is_err());
+    // Simulate structural corruption by bypassing the write guard, then prove reads fail closed.
+    conn.execute_batch("DROP TRIGGER session_direct_only_update; UPDATE sessions SET behavior = 'future-behavior' WHERE session_id = 'session';").unwrap();
     drop(conn);
 
     let load_error = load_session(&store_path, "session").unwrap_err();
@@ -342,55 +328,53 @@ fn project_link_is_atomic_authoritative_and_session_owned() {
 }
 
 #[test]
-fn light_model_round_trips_and_malformed_json_is_a_diagnostic() {
+fn direct_sessions_preserve_but_do_not_load_or_rewrite_inert_light_data() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
-    let store_path = temp_store_path("light_model");
-    let mut snapshot = test_snapshot(
+    let store_path = temp_store_path("inert_light_model");
+    let snapshot = test_snapshot(
         "light",
         "2026-01-01 00:00:00.000000000",
         "2026-01-01 00:00:00.000000000",
     );
-    snapshot.light_model = Some(LightModelSettings {
-        model: "gpt-5-mini".to_string(),
-        backend: Some(BackendKind::OpenAiResponses),
+    let mut rejected = snapshot.clone();
+    rejected.session_id = "new-light".into();
+    rejected.light_model = Some(LightModelSettings {
+        model: "test".into(),
+        backend: None,
         base_url: None,
-        api_key_env: Some("OPENAI_API_KEY".to_string()),
-        reasoning_effort: Some(ReasoningEffort::Low),
+        api_key_env: None,
+        reasoning_effort: None,
     });
+    assert!(create_session(&store_path, &rejected).is_err());
+    assert!(!store_path.exists());
     create_session(&store_path, &snapshot).unwrap();
-
-    let loaded = load_session(&store_path, "light").unwrap();
-    assert_eq!(loaded.light_model, snapshot.light_model);
-    let raw = load_session_config(&store_path, "light").unwrap();
-    assert_eq!(raw.light_model, snapshot.light_model);
-    assert!(raw.diagnostics.is_empty());
-
-    // Clearing through a config update returns the row to single-model.
-    let mut cleared = raw.clone();
-    cleared.light_model = None;
-    assert_eq!(update_raw_session_config(&store_path, &cleared).unwrap(), 1);
-    assert_eq!(
-        load_session_config(&store_path, "light")
-            .unwrap()
-            .light_model,
-        None
-    );
-
-    // Malformed stored JSON surfaces as a diagnostic, not a silent clear.
+    let legacy = "{broken";
     let conn = rusqlite::Connection::open(&store_path).unwrap();
     conn.execute(
-        "UPDATE sessions SET light_model_json = '{broken' WHERE session_id = 'light'",
-        [],
+        "UPDATE sessions SET light_model_json=?1 WHERE session_id='light'",
+        [legacy],
     )
     .unwrap();
     drop(conn);
-    let broken = load_session_config(&store_path, "light").unwrap();
-    assert_eq!(broken.light_model, None);
-    assert!(broken
-        .diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.starts_with(MALFORMED_LIGHT_MODEL_DIAGNOSTIC)));
-
+    assert!(load_session(&store_path, "light")
+        .unwrap()
+        .light_model
+        .is_none());
+    let mut config = load_session_config(&store_path, "light").unwrap();
+    assert!(config.light_model.is_none());
+    assert!(config.diagnostics.is_empty());
+    config.model = "replacement-model".into();
+    assert_eq!(update_raw_session_config(&store_path, &config).unwrap(), 1);
+    let conn = rusqlite::Connection::open(&store_path).unwrap();
+    let retained: String = conn
+        .query_row(
+            "SELECT light_model_json FROM sessions WHERE session_id='light'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(retained, legacy);
+    drop(conn);
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
 
@@ -428,7 +412,7 @@ fn session_load_rejects_threshold_above_supported_maximum() {
 }
 
 #[test]
-fn load_session_migrates_legacy_schema_without_duration_history() {
+fn load_retires_pre_behavior_session_without_duration_history() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     let store_path = temp_store_path("legacy_duration_schema");
     std::fs::create_dir_all(store_path.parent().unwrap()).unwrap();
@@ -482,20 +466,8 @@ fn load_session_migrates_legacy_schema_without_duration_history() {
         .unwrap();
     }
 
-    let loaded = load_session(&store_path, "legacy-session").unwrap();
-    assert_eq!(loaded.session_id, "legacy-session");
-    assert_eq!(loaded.last_response_duration_ms, Some(12_345));
-    assert_eq!(loaded.previous_response_duration_ms, Some(6_789));
-    assert_eq!(loaded.response_durations_ms, None);
-    assert!(
-        loaded.token_usages.is_empty(),
-        "legacy rows without token_usages_json column load as empty Vec"
-    );
-    assert_eq!(
-        loaded.ssh, None,
-        "legacy rows without a host_id column load as local sessions"
-    );
-
+    let error = load_session(&store_path, "legacy-session").unwrap_err();
+    assert!(error.to_string().contains("not found"));
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
 
@@ -1140,7 +1112,7 @@ fn concurrent_config_updates_use_revision_cas() {
 }
 
 #[test]
-fn legacy_session_without_api_key_env_loads_with_defaults() {
+fn legacy_session_without_behavior_is_retired_even_without_api_key_column() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     let store_path = temp_store_path("legacy_no_api_key_env");
     std::fs::create_dir_all(store_path.parent().unwrap()).unwrap();
@@ -1194,16 +1166,12 @@ fn legacy_session_without_api_key_env_loads_with_defaults() {
         .unwrap();
     }
 
-    // load_session goes through open_connection which runs migrations
-    let loaded = load_session(&store_path, "legacy-session").unwrap();
-    assert_eq!(
-        loaded.api_key_env, None,
-        "legacy rows without api_key_env column load as None"
-    );
-    assert!(
-        loaded.extra_headers.is_empty(),
-        "legacy rows without extra_headers_json column load as empty map"
-    );
+    // A row predating behavior was an orchestrator and must be retired.
+    assert!(load_session(&store_path, "legacy-session")
+        .unwrap_err()
+        .to_string()
+        .contains("not found"));
+    assert!(list_sessions(&store_path).unwrap().is_empty());
 
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
@@ -1336,7 +1304,7 @@ fn delete_session_uses_cascades_for_owned_auxiliary_rows() {
 }
 
 #[test]
-fn legacy_store_migrates_presentation_table_and_lists_defaults() {
+fn legacy_store_migrates_presentation_table_and_retires_old_session() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     let store_path = temp_store_path("presentation_migration");
     std::fs::create_dir_all(store_path.parent().unwrap()).unwrap();
@@ -1380,11 +1348,7 @@ fn legacy_store_migrates_presentation_table_and_lists_defaults() {
     }
 
     let summaries = list_sessions(&store_path).unwrap();
-    assert_eq!(summaries.len(), 1);
-    assert_eq!(summaries[0].title, None);
-    assert!(!summaries[0].pinned);
-    assert_eq!(summaries[0].sort_order, 0);
-    assert_eq!(summaries[0].presentation_version, 0);
+    assert!(summaries.is_empty());
 
     let conn = crate::store::open_connection(&store_path).unwrap();
     let table_exists: bool = conn

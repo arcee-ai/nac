@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, path::PathBuf};
 use nac_core::{
     events::{SessionEventBoundary, SessionEventEnvelope, SessionReplayGap},
     light_model::LightModelSettings,
-    model::{BackendKind, ProviderModel, ReasoningEffort},
+    model::{BackendKind, ProviderModel},
     permissions::{PermissionApprovalMode, PermissionReply, PermissionRequest},
     session_service::{
         ActiveRunSnapshot, MessagesPageSnapshot, SessionFrontendSnapshot, ToolCallContent,
@@ -33,21 +33,6 @@ pub struct StoreInfo {
     pub root_cwd: PathBuf,
     #[schema(value_type = String)]
     pub store_path: PathBuf,
-    #[schema(value_type = String)]
-    pub worker_executable: PathBuf,
-}
-
-#[derive(Debug, Clone, Default, Deserialize, utoipa::ToSchema)]
-pub struct LaunchModelDefaultsRequest {
-    #[schema(value_type = Option<String>)]
-    pub cwd: Option<PathBuf>,
-    /// OpenSSH target for remote sessions; remote paths never select local config.
-    #[serde(default, alias = "host_id")]
-    pub ssh_host: Option<String>,
-    #[serde(default)]
-    pub ssh_port: Option<u16>,
-    #[serde(default)]
-    pub ssh_identity_file: Option<String>,
 }
 
 /// Where to look on an SSH host, for the remote half of the path picker.
@@ -68,17 +53,6 @@ pub struct SshBrowseRequest {
     /// Dot-prefixed names are hidden unless explicitly requested, as locally.
     #[serde(default)]
     pub hidden: bool,
-}
-
-#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
-pub struct LaunchModelDefaults {
-    /// Configured model id; lets the launch dialog render the inherited
-    /// "from config" selection resolved against the model catalog (the
-    /// frontend resolves the provider from the model id, exactly like
-    /// session creation does).
-    pub configured_model: Option<String>,
-    /// Configured reasoning effort, if any.
-    pub configured_reasoning_effort: Option<ReasoningEffort>,
 }
 
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
@@ -246,8 +220,7 @@ impl utoipa::ToSchema for HeadersRequest {
 
 #[derive(Debug, Clone, Default, Deserialize, utoipa::ToSchema)]
 pub struct CreateSessionRequest {
-    /// Immutable execution behavior. Omission preserves the established
-    /// orchestrator default.
+    /// Direct session behavior. Omission selects direct.
     #[serde(default)]
     pub behavior: sessions::SessionBehavior,
     /// Marks the required first chat for an empty project. The server
@@ -268,7 +241,7 @@ pub struct CreateSessionRequest {
     pub model: RequestField<String>,
     #[serde(default)]
     pub base_url: RequestField<String>,
-    /// Explicitly permit public plaintext HTTP for this session's primary and light endpoints.
+    /// Explicitly permit public plaintext HTTP for this session's primary endpoint.
     #[serde(default)]
     pub allow_insecure_http: RequestField<bool>,
     #[serde(default)]
@@ -283,9 +256,7 @@ pub struct CreateSessionRequest {
     /// Omitted defaults to 70% of the model's context window; null or zero disables.
     #[serde(default)]
     pub orchestrator_compaction_threshold: RequestField<u64>,
-    /// Optional light model. Omitted inherits project/session defaults, null
-    /// explicitly selects single-model operation, and a value replaces the
-    /// inherited selection.
+    /// Retired selector. Any explicitly supplied value is rejected.
     #[serde(default)]
     pub light_model: RequestField<LightModelSettings>,
     /// OpenSSH target for remote sessions; `cwd` is remote and defaults to `~`.
@@ -427,7 +398,7 @@ pub struct UpdateConfigRequest {
     /// Omitted preserves; null or zero disables.
     #[serde(default)]
     pub orchestrator_compaction_threshold: RequestField<u64>,
-    /// Omitted preserves; null returns the session to single-model mode.
+    /// Retired selector. Any explicitly supplied value is rejected.
     #[serde(default)]
     pub light_model: RequestField<LightModelSettings>,
 }
@@ -832,4 +803,22 @@ pub struct ReplayGapEvent {
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct LaggedEvent {
     pub missed: u64,
+}
+
+#[cfg(test)]
+mod direct_creation_tests {
+    use super::*;
+
+    #[test]
+    fn omitted_or_explicit_direct_behavior_defaults_to_direct() {
+        for body in [r"{}", r#"{"behavior":"direct"}"#] {
+            let request: CreateSessionRequest = serde_json::from_str(body).unwrap();
+            assert_eq!(request.behavior, sessions::SessionBehavior::Direct);
+        }
+        assert_eq!(
+            CreateSessionRequest::default().behavior,
+            sessions::SessionBehavior::Direct
+        );
+        assert!(serde_json::from_str::<CreateSessionRequest>(r#"{"behavior":"unknown"}"#).is_err());
+    }
 }

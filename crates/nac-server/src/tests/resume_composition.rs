@@ -146,46 +146,32 @@ async fn completed_direct_reopens_after_owner_restart_without_replay() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn primary_topologies_cold_attach_and_explicit_resume_keep_scoped_context() {
+async fn direct_cold_attach_and_explicit_resume_keep_scoped_context() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let root = temp_root("primary-resume-context");
     let _env = ScopedModelEnv::isolated(&root.join("home"), Some("resume-test-key"));
     seed_direct_session(&root, "direct");
-    seed_editable_session(&root, "orchestrator");
-    seed_direct_with_orchestrator_session_with_base_url(
-        &root,
-        "delegating",
-        "https://api.openai.com/v1".into(),
-    );
     let manager = owned_test_manager(&root).unwrap();
     let app = router(manager.clone());
-    for (id, behavior) in [
-        ("direct", sessions::SessionBehavior::Direct),
-        ("orchestrator", sessions::SessionBehavior::Orchestrator),
-        (
-            "delegating",
-            sessions::SessionBehavior::DirectWithOrchestrator,
-        ),
-    ] {
-        let response = get_response(
-            app.clone(),
-            &format!("/sessions/{id}?include_sessions=false"),
-            None,
-        )
-        .await;
-        assert_eq!(response.status(), StatusCode::OK);
-        manager.inner.active_sessions.write().await.clear();
-        let service = manager.resume_session(id, None).await.unwrap();
-        assert!(!service.has_active_operation());
-        let context = crate::ProductContextApplication::new(manager.clone())
-            .read(Some(id))
-            .await
-            .unwrap();
-        let session = context.session.unwrap();
-        assert_eq!(session.session_id, id);
-        assert_eq!(session.behavior, behavior);
-        drop(service);
-    }
+    let (id, behavior) = ("direct", sessions::SessionBehavior::Direct);
+    let response = get_response(
+        app.clone(),
+        &format!("/sessions/{id}?include_sessions=false"),
+        None,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    manager.inner.active_sessions.write().await.clear();
+    let service = manager.resume_session(id, None).await.unwrap();
+    assert!(!service.has_active_operation());
+    let context = crate::ProductContextApplication::new(manager.clone())
+        .read(Some(id))
+        .await
+        .unwrap();
+    let session = context.session.unwrap();
+    assert_eq!(session.session_id, id);
+    assert_eq!(session.behavior, behavior);
+    drop(service);
     drop(app);
     manager.quiesce_persistence_callers().await;
     manager.drain_persistence().await.unwrap();

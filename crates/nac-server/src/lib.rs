@@ -3,7 +3,7 @@ pub use application::product_context::{
     ProductNavigationResolution,
 };
 #[cfg(test)]
-use nac_core::{store::ManagedOrchestratorRecord, types::Message};
+use nac_core::types::Message;
 mod application;
 mod build_identity;
 mod compaction;
@@ -18,7 +18,6 @@ pub mod desktop_startup;
 mod executable;
 mod filesystem;
 mod fork;
-mod light_model;
 mod managed_auth;
 mod managed_control;
 mod managed_github;
@@ -38,27 +37,23 @@ pub use compaction::{CompactSessionError, CompactSessionResponse};
 pub use delivery::contracts::{
     ApiErrorBody, CancelInboxItemRequest, ClearGoalRequest, CreateGoalRequest,
     CreateInboxItemRequest, CreateSessionRequest, EventsQuery, HeadersRequest, HealthResponse,
-    InboxItemResponse, LaggedEvent, LaunchModelDefaults, LaunchModelDefaultsRequest,
-    ManagedSessionSummary, MessageCycleMetadata, MessagePageMetadata, MessagesPageResponse,
-    MessagesQuery, OrchestratorSteeringRequest, OrchestratorSteeringResponse,
-    PermissionStateResponse, ProviderModelList, ProviderModelsRequest, RecentEventsResponse,
-    ReplayBoundaryEvent, ReplayGapEvent, ReplyPermissionRequest, RequestField, SandboxRequest,
-    SessionLineageKind, SessionLineageSnapshot, SessionSnapshotQuery, SessionSnapshotResponse,
-    SshBrowseRequest, StoreInfo, SubmitPromptRequest, SubmitPromptResponse, ThreadEventsQuery,
-    ThreadSteeringRequest, ThreadSteeringResponse, ToolCallContentResponse, UpdateConfigRequest,
-    UpdateGoalRequest, UpdateInboxItemRequest, UpdatePermissionApprovalModeRequest,
+    InboxItemResponse, LaggedEvent, ManagedSessionSummary, MessageCycleMetadata,
+    MessagePageMetadata, MessagesPageResponse, MessagesQuery, OrchestratorSteeringRequest,
+    OrchestratorSteeringResponse, PermissionStateResponse, ProviderModelList,
+    ProviderModelsRequest, RecentEventsResponse, ReplayBoundaryEvent, ReplayGapEvent,
+    ReplyPermissionRequest, RequestField, SandboxRequest, SessionLineageKind,
+    SessionLineageSnapshot, SessionSnapshotQuery, SessionSnapshotResponse, SshBrowseRequest,
+    StoreInfo, SubmitPromptRequest, SubmitPromptResponse, ThreadEventsQuery, ThreadSteeringRequest,
+    ThreadSteeringResponse, ToolCallContentResponse, UpdateConfigRequest, UpdateGoalRequest,
+    UpdateInboxItemRequest, UpdatePermissionApprovalModeRequest,
 };
 pub use delivery::credentials::{
     GeneratedCredential, StoreCredentialRequest, StoredCredentialList, StoredCredentialSummary,
 };
-pub use delivery::delegation::{StartManagedOrchestratorRequest, StartTraditionalChildRequest};
+pub use delivery::delegation::StartTraditionalChildRequest;
 pub use delivery::error::ApiError;
 pub use delivery::managed_secrets::{
     ManagedSecretList, ManagedSecretSummary, PutManagedSecretRequest,
-};
-pub use delivery::model_configurations::{
-    CreateModelConfigurationRequest, ModelConfigFromFileRequest, ModelConfigurationList,
-    ResolvedModelConfiguration, UpdateModelConfigurationRequest,
 };
 pub use delivery::projects::{
     AssignSessionRequest, CreateProjectRequest, DeleteProjectQuery, DeleteProjectResponse,
@@ -171,14 +166,12 @@ use utoipa_swagger_ui::{Config as SwaggerConfig, SwaggerUi};
 use application::request_validation::{
     create_compaction_threshold_override, model_options, nonblank_request_string,
     parse_prospective_model_config, request_configuration_error, request_configuration_error_from,
-    sandbox_options, sandbox_requested, validate_steering_instruction,
-    validated_compaction_threshold,
+    sandbox_options, sandbox_requested, validated_compaction_threshold,
 };
 
 const DEFAULT_REPLAY_LIMIT: usize = 256;
 const DEFAULT_MESSAGE_PAGE_LIMIT: usize = 24;
 const MAX_MESSAGE_PAGE_LIMIT: usize = 100;
-const DEFAULT_THREAD_EVENT_PAGE_LIMIT: usize = 24;
 const MAX_THREAD_EVENT_PAGE_LIMIT: usize = 100;
 const WORKSPACE_DIFF_CACHE_TTL: Duration = Duration::from_secs(3);
 /// A failed measurement is cached too, and for less time: an unreachable host
@@ -664,7 +657,6 @@ impl SessionManager {
         StoreInfo {
             root_cwd: self.inner.root_cwd.clone(),
             store_path: self.inner.store_path.clone(),
-            worker_executable: self.inner.worker_executable.clone(),
         }
     }
 
@@ -905,12 +897,6 @@ impl SessionManager {
         application::project_folders::ProjectFolderApplication::new(self)
     }
 
-    pub(crate) fn model_configurations(
-        &self,
-    ) -> application::model_configurations::ModelConfigurationApplication<'_> {
-        application::model_configurations::ModelConfigurationApplication::new(self)
-    }
-
     pub(crate) fn model_catalog(&self) -> application::model_catalog::ModelCatalogApplication<'_> {
         application::model_catalog::ModelCatalogApplication::new(self)
     }
@@ -1024,25 +1010,6 @@ impl SessionManager {
                 })
                 .collect(),
             truncated: listing.truncated,
-        })
-    }
-
-    pub fn launch_model_defaults(
-        &self,
-        request: LaunchModelDefaultsRequest,
-    ) -> Result<LaunchModelDefaults> {
-        let location = self.resolve_launch_location(
-            request.cwd,
-            SshRequest {
-                host: request.ssh_host,
-                port: request.ssh_port,
-                identity_file: request.ssh_identity_file,
-            },
-        )?;
-        let config = NacConfig::load_from_cwd(&location.config_cwd)?;
-        Ok(LaunchModelDefaults {
-            configured_model: config.model.model.clone(),
-            configured_reasoning_effort: config.model.reasoning_effort,
         })
     }
 

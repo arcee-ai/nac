@@ -9,8 +9,6 @@ import { SettingsPage } from "@/app/features/settings/SettingsPage";
 import { SettingsReturnProvider } from "@/app/features/settings/SettingsReturnProvider";
 import { Navigate, Route, Routes, useParams } from "react-router-dom";
 
-import { UiPolicyProvider } from "@/app/features/ui-policy/UiPolicyProvider";
-import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { AppShell } from "@/app/components/AppShell";
 import { LeftSidebar } from "@/app/components/LeftSidebar";
 import ProjectRedirectPage from "@/app/components/pages/ProjectRedirectPage";
@@ -31,16 +29,6 @@ const DesktopSessionTargetOwner = lazy(() =>
   })),
 );
 
-// The design showcase is a separate user-selected route. Ordinary workspace
-// startup does not render it; keep its complete page available on demand.
-const DesignPreviewPage = lazy(() =>
-  import("@/app/components/pages/DesignPreviewPage").catch(() => ({
-    default: () => (
-      <p role="alert">The design preview could not be loaded. Reload this page to try again.</p>
-    ),
-  })),
-);
-
 export function KeyedSessionPage() {
   const { sessionId } = useParams<{ sessionId: string }>();
   return (
@@ -55,66 +43,49 @@ export function KeyedSessionPage() {
   );
 }
 
-function DesignRoute() {
-  const policy = useUiPolicy();
-  return policy.orchestrationEnabled ? (
-    <Suspense fallback={<p role="status">Loading design preview…</p>}>
-      <DesignPreviewPage />
-    </Suspense>
-  ) : (
-    <Navigate to={routes.list()} replace />
-  );
-}
-
 export default function App({ desktopCommands }: { desktopCommands?: DesktopCommandPort }) {
   return (
     <DesktopVisibility port={desktopCommands}>
-      <UiPolicyProvider>
-        <ToastProvider>
-          {/* Projects sit outside sessions: deleting a project reaches its chats,
+      <ToastProvider>
+        {/* Projects sit outside sessions: deleting a project reaches its chats,
             never the other way round. */}
-          <SessionActionsProvider>
-            <ProjectActionsProvider>
-              <ManagedHostProvider>
-                <ProductNavigationProvider>
-                  <InboxProvider>
-                    {desktopCommands && <DesktopCommandOwner port={desktopCommands} />}
-                    {desktopCommands?.connectSessionTarget && (
-                      <Suspense fallback={null}>
-                        <DesktopSessionTargetOwner port={desktopCommands} />
-                      </Suspense>
-                    )}
-                    {/* ⌘K palette and ⌘/ sheet: one owner, on every route. */}
-                    <CommandSurfaces />
-                    <SettingsReturnProvider>
-                      <Routes>
-                        <Route element={<AppShell />}>
-                          <Route path="/" element={<ProjectsListPage />} />
-                          <Route path="/project/:projectId" element={<ProjectRedirectPage />} />
-                          <Route
-                            path="/project/:projectId/task-schedules"
-                            element={<ProjectTaskSchedulesPage />}
-                          />
-                          <Route path="/task-schedules" element={<ProjectTaskSchedulesPage />} />
-                          <Route
-                            path="/session/:sessionId/:panel?"
-                            element={<KeyedSessionPage />}
-                          />
-                        </Route>
-                        {/* Settings take over the window: outside the shell and sidebar. */}
-                        <Route path="/settings" element={<SettingsPage />} />
-                        <Route path="/settings/:section" element={<SettingsPage />} />
-                        <Route path="/design" element={<DesignRoute />} />
-                        <Route path="*" element={<Navigate to={routes.list()} replace />} />
-                      </Routes>
-                    </SettingsReturnProvider>
-                  </InboxProvider>
-                </ProductNavigationProvider>
-              </ManagedHostProvider>
-            </ProjectActionsProvider>
-          </SessionActionsProvider>
-        </ToastProvider>
-      </UiPolicyProvider>
+        <SessionActionsProvider>
+          <ProjectActionsProvider>
+            <ManagedHostProvider>
+              <ProductNavigationProvider>
+                <InboxProvider>
+                  {desktopCommands && <DesktopCommandOwner port={desktopCommands} />}
+                  {desktopCommands?.connectSessionTarget && (
+                    <Suspense fallback={null}>
+                      <DesktopSessionTargetOwner port={desktopCommands} />
+                    </Suspense>
+                  )}
+                  {/* ⌘K palette and ⌘/ sheet: one owner, on every route. */}
+                  <CommandSurfaces />
+                  <SettingsReturnProvider>
+                    <Routes>
+                      <Route element={<AppShell />}>
+                        <Route path="/" element={<ProjectsListPage />} />
+                        <Route path="/project/:projectId" element={<ProjectRedirectPage />} />
+                        <Route
+                          path="/project/:projectId/task-schedules"
+                          element={<ProjectTaskSchedulesPage />}
+                        />
+                        <Route path="/task-schedules" element={<ProjectTaskSchedulesPage />} />
+                        <Route path="/session/:sessionId/:panel?" element={<KeyedSessionPage />} />
+                      </Route>
+                      {/* Settings take over the window: outside the shell and sidebar. */}
+                      <Route path="/settings" element={<SettingsPage />} />
+                      <Route path="/settings/:section" element={<SettingsPage />} />
+                      <Route path="*" element={<Navigate to={routes.list()} replace />} />
+                    </Routes>
+                  </SettingsReturnProvider>
+                </InboxProvider>
+              </ProductNavigationProvider>
+            </ManagedHostProvider>
+          </ProjectActionsProvider>
+        </SessionActionsProvider>
+      </ToastProvider>
     </DesktopVisibility>
   );
 }

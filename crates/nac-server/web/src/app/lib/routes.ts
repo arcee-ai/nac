@@ -3,17 +3,14 @@
 
 // The session screen always shows the chat; the URL only selects which panel
 // the side box has open.
-// Order is also the tab order in the side box. `threads` is no longer a tab:
-// it stays only so links to the old Threads panel still resolve to Insights.
+// Order is also the tab order in the side box.
 export const SESSION_PANELS = [
   "sessions",
   "insights",
-  "threads",
   "delegated",
   "files",
   "terminal",
   "heartbeats",
-  "worksets",
   "history",
 ] as const;
 
@@ -24,12 +21,10 @@ export type SessionPanel = (typeof SESSION_PANELS)[number];
 export const SESSION_PANEL_LABEL = {
   sessions: "Sessions",
   insights: "Insights",
-  threads: "Threads",
   delegated: "Subagents",
   files: "Files",
   terminal: "Terminal",
   heartbeats: "Heartbeats",
-  worksets: "Worksets",
   history: "History",
 } satisfies Record<SessionPanel, string>;
 

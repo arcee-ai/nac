@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { Icon, IconName } from "@/app/atoms";
-import { ConfigurationsSettings } from "@/app/components/modals/ConfigurationsModal";
+import { ProviderConnections } from "@/app/features/managed/presentation/ProviderConnections";
 import { McpServersSettings } from "@/app/components/modals/MCPServersModal/McpServersModal";
 import { SshConfigsSettings } from "@/app/components/modals/SshConfigsModal";
 import { ShortcutList } from "@/app/features/command-palette/ShortcutList";
@@ -34,7 +34,7 @@ function SectionBody({ section }: { section: SettingsSection }) {
     case "appearance":
       return <AppearanceSection />;
     case "models":
-      return <ConfigurationsSettings />;
+      return <ProviderConnections />;
     case "mcp":
       return <McpServersSettings />;
     case "capabilities":

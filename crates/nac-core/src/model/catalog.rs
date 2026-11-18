@@ -513,6 +513,7 @@ pub fn api_listing_for_invocation(invocation_name: &str) -> ModelListing {
                     .or_else(|| provider_catalog.default_base_url.clone())
                     .map(|base_url| ProviderConnection {
                         base_url,
+                        allow_insecure_http: false,
                         api_key_env: backend::api_key_backend(*provider)
                             .then(|| provider_catalog.credential_env_var.clone())
                             .flatten(),

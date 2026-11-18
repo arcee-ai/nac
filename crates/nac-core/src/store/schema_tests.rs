@@ -508,14 +508,16 @@ fn assert_current_schema(conn: &Connection) {
 }
 
 #[test]
-fn v16_store_adds_orchestrator_behavior_and_establishes_downgrade_barrier() {
+fn v16_store_purges_pre_behavior_sessions_and_establishes_downgrade_barrier() {
     let path = temp_store_path("v16_behavior");
     initialize(&path).unwrap();
     let legacy = Connection::open(&path).unwrap();
     insert_legacy_session(&legacy, "legacy-session");
     legacy
         .execute_batch(
-            "ALTER TABLE sessions DROP COLUMN behavior;
+            "DROP TRIGGER session_direct_only_insert;
+             DROP TRIGGER session_direct_only_update;
+             ALTER TABLE sessions DROP COLUMN behavior;
              PRAGMA user_version = 16;",
         )
         .unwrap();
@@ -524,19 +526,19 @@ fn v16_store_adds_orchestrator_behavior_and_establishes_downgrade_barrier() {
     initialize(&path).unwrap();
 
     let migrated = Connection::open(&path).unwrap();
-    let behavior: String = migrated
+    let retained: i64 = migrated
         .query_row(
-            "SELECT behavior FROM sessions WHERE session_id = 'legacy-session'",
+            "SELECT count(*) FROM sessions WHERE session_id = 'legacy-session'",
             [],
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(behavior, "orchestrator");
+    assert_eq!(retained, 0);
     let version: i64 = migrated
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
     assert_eq!(version, STORE_SCHEMA_VERSION);
-    assert_eq!(STORE_SCHEMA_VERSION, 52);
+    assert_eq!(STORE_SCHEMA_VERSION, 53);
     drop(migrated);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
@@ -905,7 +907,7 @@ fn v22_store_adds_relationship_completion_obligations() {
 }
 
 #[test]
-fn main_v0_store_migrates_directly_to_v4() {
+fn main_v0_store_retires_pre_behavior_sessions() {
     let path = temp_store_path("main_v0");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     let legacy = Connection::open(&path).unwrap();
@@ -934,10 +936,13 @@ fn main_v0_store_migrates_directly_to_v4() {
         .unwrap();
     assert_eq!(version, STORE_SCHEMA_VERSION);
     assert_current_schema(&migrated);
-    let episode: String = migrated
-        .query_row("SELECT content FROM episodes", [], |row| row.get(0))
+    let remaining: i64 = migrated
+        .query_row("SELECT COUNT(*) FROM episodes", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(episode, "preserved");
+    assert_eq!(
+        remaining, 0,
+        "pre-behavior sessions are retired with their episodes"
+    );
     drop(migrated);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
@@ -979,7 +984,7 @@ fn v14_store_adds_projects_without_classifying_existing_sessions() {
 }
 
 #[test]
-fn partial_v1_tables_at_version_zero_are_rebuilt() {
+fn partial_v1_tables_are_rebuilt_then_retired() {
     let path = temp_store_path("partial_v1_v0");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     let legacy = Connection::open(&path).unwrap();
@@ -1008,18 +1013,16 @@ fn partial_v1_tables_at_version_zero_are_rebuilt() {
 
     let migrated = Connection::open(&path).unwrap();
     assert_current_schema(&migrated);
-    let event: (i64, String) = migrated
-        .query_row("SELECT id, thread_name FROM thread_events", [], |row| {
-            Ok((row.get(0)?, row.get(1)?))
-        })
+    let remaining: i64 = migrated
+        .query_row("SELECT COUNT(*) FROM thread_events", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(event, (8, "pre-episode-worker".to_string()));
+    assert_eq!(remaining, 0);
     drop(migrated);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
 #[test]
-fn v1_to_v4_preserves_owned_rows_drops_orphans_and_sequences() {
+fn v1_to_current_retires_owned_and_orphan_rows_preserving_sequences() {
     let path = temp_store_path("v1");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     let legacy = Connection::open(&path).unwrap();
@@ -1079,105 +1082,38 @@ fn v1_to_v4_preserves_owned_rows_drops_orphans_and_sequences() {
     let migrated = open_runtime_connection(&path).unwrap();
     assert_current_schema(&migrated);
 
-    let steering = migrated
-        .prepare(
-            "SELECT id, dispatch_id, status, claimed_at, delivered_at, expired_at
-             FROM thread_steering ORDER BY id",
-        )
-        .unwrap()
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, i64>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, Option<String>>(3)?,
-                row.get::<_, Option<String>>(4)?,
-                row.get::<_, Option<String>>(5)?,
-            ))
-        })
-        .unwrap()
-        .collect::<rusqlite::Result<Vec<_>>>()
-        .unwrap();
-    assert_eq!(steering.len(), 3);
-    assert_eq!(steering[0].0, 7);
-    assert_eq!(steering[0].1, "legacy-v1:7");
-    assert_eq!(steering[0].2, "expired");
-    assert!(steering[0].3.is_none());
-    assert!(steering[0].4.is_none());
-    assert!(steering[0].5.is_some());
-    assert_eq!(
-        &steering[1],
-        &(
-            9,
-            "legacy-v1:9".to_string(),
-            "delivered".to_string(),
-            Some("delivered-9".to_string()),
-            Some("delivered-9".to_string()),
-            None
-        )
-    );
-    assert_eq!(steering[2].0, 11);
-    assert_eq!(steering[2].2, "expired");
-    assert_eq!(steering[2].5.as_deref(), Some("expired-11"));
-
-    let event: (i64, String, String) = migrated
+    for table in ["sessions", "thread_steering", "thread_events"] {
+        let count: i64 = migrated
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, 0, "retired and orphan rows remain in {table}");
+    }
+    let steering_sequence: i64 = migrated
         .query_row(
-            "SELECT id, thread_name, event_json FROM thread_events",
+            "SELECT seq FROM sqlite_sequence WHERE name='thread_steering'",
             [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(event.0, 20);
-    assert_eq!(event.1, "worker-without-thread-row");
-    assert!(!event.2.contains("CANARY_COMMAND"));
-    let migrated_event: crate::events::AgentEvent = serde_json::from_str(&event.2).unwrap();
-    assert!(matches!(
-        migrated_event,
-        crate::events::AgentEvent::ToolCallStarted {
-            call_id,
-            args_preview,
-            args_detail: None,
-            key_arg_preview,
-            ..
-        } if call_id == "call-20"
-            && args_preview.contains("/safe/work")
-            && args_preview.contains("execute")
-            && key_arg_preview.as_deref() == Some("echo safe_cmd")
-    ));
-    let migrated_event_count: i64 = migrated
-        .query_row("SELECT COUNT(*) FROM thread_events", [], |row| row.get(0))
-        .unwrap();
-    assert_eq!(migrated_event_count, 1);
-
-    migrated
-        .execute(
-            "INSERT INTO thread_steering
-                 (session_id, thread_name, dispatch_id, instruction, status, created_at)
-             VALUES ('owned', 'worker', 'next-dispatch', 'next', 'queued', 'next')",
+    let event_sequence: i64 = migrated
+        .query_row(
+            "SELECT seq FROM sqlite_sequence WHERE name='thread_events'",
             [],
+            |row| row.get(0),
         )
         .unwrap();
-    assert!(migrated.last_insert_rowid() > 13);
-    migrated
-        .execute(
-            "INSERT INTO thread_events
-                 (session_id, thread_name, event_json, created_at)
-             VALUES ('owned', 'worker', '{}', 'next')",
-            [],
-        )
-        .unwrap();
-    assert!(migrated.last_insert_rowid() > 25);
-
+    assert!(steering_sequence >= 13);
+    assert!(event_sequence >= 25);
     drop(migrated);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
 #[test]
-fn transcript_log_rows_survive_thread_events_rebuild_migration() {
-    // Pins the invariant that the thread_events sanitize-drop rebuild (and any
-    // future rebuild-migration) carries transcript log rows through verbatim.
-    // Current v4 DBs never re-run this migration, but the assertion keeps the
-    // pattern honest for future rebuilds.
+fn pre_behavior_transcript_rows_are_retired_after_thread_events_rebuild() {
+    // Pre-behavior identities are retired even when their older event table
+    // first needs rebuilding. Direct transcript preservation has its own fixture.
     let path = temp_store_path("transcript_survival");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     let legacy = Connection::open(&path).unwrap();
@@ -1253,20 +1189,10 @@ fn transcript_log_rows_survive_thread_events_rebuild_migration() {
         .unwrap()
         .collect::<rusqlite::Result<Vec<_>>>()
         .unwrap();
-    // Transcript rows survive byte-identical; the valid AgentEvent row is
-    // sanitized and kept; the malformed row is dropped.
-    assert_eq!(rows.len(), 3);
-    assert_eq!(
-        rows[0],
-        (30, "__orchestrator__".to_string(), transcript_zero)
+    assert!(
+        rows.is_empty(),
+        "pre-behavior transcript belongs to a retired session"
     );
-    assert_eq!(
-        rows[1],
-        (31, "__orchestrator__".to_string(), transcript_one)
-    );
-    assert_eq!(rows[2].0, 32);
-    assert_eq!(rows[2].1, "worker");
-    assert!(serde_json::from_str::<crate::events::AgentEvent>(&rows[2].2).is_ok());
     drop(migrated);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }

@@ -20,7 +20,7 @@ bundle, and builds the `nac-web` binary. Product use cases live in focused
 - `SessionManager` remains composition/lifecycle state, not a destination for
   unrelated use cases. Add a focused facade and preserve shared gates and exact
   transaction ordering.
-- Lifecycle gates nest parent before child or managed orchestrator, as deletion
+- Lifecycle gates nest parent before child, as deletion
   cascades. Never wait for a parent's gate while holding a descendant's: settle
   under the descendant's gate, release it, then wake the parent.
 - Authenticated human-initiated product operations never request agent approval.
@@ -72,9 +72,9 @@ bundle, and builds the `nac-web` binary. Product use cases live in focused
   implementations there.
 - `lib.rs` is the server composition/lifecycle root: supported re-exports,
   `SessionManager` shared gates/caches, service-facade construction, attachment,
-  delegation monitor settlement, and complete shutdown. Product CRUD and HTTP
+  child settlement, and complete shutdown. Product CRUD and HTTP
   handlers already live in focused modules and must not return to this root.
-- `main.rs` owns CLI parsing, auth/upgrade/server/worker action dispatch, and
+- `main.rs` owns CLI parsing, auth/upgrade/server action dispatch, and
   outermost runtime composition. Library use cases and provider algorithms do
   not belong in the binary.
 - `mcp_api.rs` keeps MCP configuration delivery and OAuth callback/task/listener

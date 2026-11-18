@@ -1,7 +1,6 @@
 export declare function useStoreInfo(): import("@tanstack/react-query").UseQueryResult<NoInfer<{
     root_cwd: string;
     store_path: string;
-    worker_executable: string;
 }>, Error>;
 /**
  * Whether this host can run sandboxed sessions. Probing spawns podman

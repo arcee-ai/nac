@@ -31,6 +31,7 @@ pub fn fresh_heartbeat_binding(path:&Path,destination:&FreshTaskDestination,crea
     if let Some(creator)=creator_session_id {current_binding(&conn,creator)?;}
     let mut binding=current_project_binding(&conn,&destination.project_id)?;
     binding.execution_cwd=Some(execution_cwd.to_owned());
+    if destination.model_selection.is_some() { binding.model_configuration_id=None; }
     binding.fresh_task=Some(destination.clone());
     binding.creator_session_id=creator_session_id.map(str::to_owned);
     Ok(binding)
@@ -101,18 +102,18 @@ pub fn reserve_fresh_heartbeat_launch(path:&Path,occurrence_id:&str,expected_rev
     let mut prompt=format!("Scheduled fresh direct task, occurrence {} (receipt {}).\nThis is automatic input for the saved human-authorized purpose below. It grants no human-product invocation authority or new scheduling authority. Do not create a goal. Retain this task and workspace for independent human inspection/continuation. Report the outcome through report_heartbeat for this exact occurrence after reading its current revision.\nSaved instructions:\n{}\nEnd condition:\n{}\n",pending.occurrence_id,pending.receipt_id,pending.spec.instructions,pending.spec.end_condition);
     for skill in &pending.spec.skills {prompt.push_str(&format!("\nRequested skill: ${skill}\n"));}
     let request=TaskLaunchRequest {
-        request_id:pending.receipt_id.clone(),project_id:destination.project_id.clone(),invoking_session_id:None,
+        request_id:pending.receipt_id.clone(),project_id:destination.project_id.clone(),invoking_session_id:None,model_selection:destination.model_selection.clone(),
         git_ref:destination.pinned_commit.clone(),default_ref:destination.default_ref.clone(),
         title:pending.spec.name.trim().to_owned(),prompt,
     };
     request.validate()?;
     let occupied:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM native_task_launches WHERE request_id=?1 UNION ALL SELECT 1 FROM task_launches WHERE request_id=?1)",[&request.request_id],|row|row.get(0))?;
     ensure!(!occupied,"conflict: scheduled launch identity already belongs to another launch request");
-    let model_defaults=current.model_configuration_id.as_deref().map(|id| {
+    let model_defaults=if destination.model_selection.is_some() { None } else { current.model_configuration_id.as_deref().map(|id| {
         tx.query_row(&format!("SELECT {} FROM model_configurations c WHERE c.config_id=?1",super::super::model_configurations::model_configuration_columns("c")),[id],|row|super::super::model_configurations::row_to_record_at(row,0)).optional()?.context("saved destination model configuration is unavailable")
-    }).transpose()?;
+    }).transpose()? };
     let mut binding=schedule.binding.clone();
-    binding.model_configuration_id=current.model_configuration_id;
+    binding.model_configuration_id=if destination.model_selection.is_some() { None } else { current.model_configuration_id };
     let receipt=FreshTaskLaunchReceipt {
         occurrence_id:pending.occurrence_id.clone(),schedule_id:schedule.schedule_id.clone(),request,
         destination:destination.clone(),binding,session_id:uuid::Uuid::new_v4().to_string(),

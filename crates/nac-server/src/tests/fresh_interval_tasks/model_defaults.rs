@@ -102,6 +102,7 @@ async fn reservation(
         .unwrap();
     let destination = FreshTaskDestination {
         project_id: project.clone(),
+        model_selection: None,
         pinned_commit: None,
         default_ref: git_project.then(|| "refs/heads/dev".into()),
         model: explicit.then(|| "gpt-5.1".into()),

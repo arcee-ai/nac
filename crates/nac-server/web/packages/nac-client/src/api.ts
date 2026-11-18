@@ -24,7 +24,8 @@ import type {
   CommitOutcome,
   CommitWorkspaceRequest,
   CompactSessionResponse,
-  CreateModelConfigurationRequest,
+  CreateProviderConnectionRequest,
+  ProviderConnectionCreated,
   CreateGoalRequest,
   CreateProjectRequest,
   CreateSessionRequest,
@@ -32,8 +33,6 @@ import type {
   DeleteProjectSessions,
   DeviceLoginStarted,
   DeviceLoginState,
-  LaunchModelDefaults,
-  LaunchModelDefaultsRequest,
   InboxDelivery,
   InboxItem,
   ManagedAuthList,
@@ -51,7 +50,6 @@ import type {
   StartManagedCloneRequest,
   GeneratedCredential,
   ManagedSessionSummary,
-  ManagedOrchestratorRecord,
   McpLibraryResponse,
   McpServerList,
   McpServerView,
@@ -63,16 +61,12 @@ import type {
   TestMcpServerResponse,
   MessagesPageResponse,
   ModelCatalog,
-  ModelConfigurationList,
-  ModelConfigurationRecord,
-  OrchestratorSteeringResponse,
   PermissionApprovalMode,
   PermissionReply,
   PermissionReview,
   PermissionStateResponse,
   SessionGoalRecord,
   StartTraditionalChildRequest,
-  StartManagedOrchestratorRequest,
   TraditionalChildRecord,
   ProjectList,
   ProjectRecord,
@@ -83,7 +77,6 @@ import type {
   ReorderProjectsResponse,
   ReorderSessionsRequest,
   ReorderSessionsResponse,
-  ResolvedModelConfiguration,
   RevertSessionResponse,
   ForkSessionResponse,
   SessionSnapshotResponse,
@@ -105,12 +98,9 @@ import type {
   SubmitPromptResponse,
   ShellCommandRequest,
   SwitchBranchRequest,
-  ThreadEventPage,
-  ThreadSteeringResponse,
   ToolCallContentResponse,
   UpdateConfigRequest,
   UpdateGoalRequest,
-  UpdateModelConfigurationRequest,
   UpdateProjectRequest,
   UpdateSessionPresentationRequest,
   WorkspaceDiffStage,
@@ -159,12 +149,6 @@ export interface MessagesPageOptions {
   before?: number;
   limit?: number;
   includeSystem?: boolean;
-  signal?: AbortSignal;
-}
-
-export interface ThreadEventsOptions {
-  beforeId?: number;
-  limit?: number;
   signal?: AbortSignal;
 }
 
@@ -302,6 +286,9 @@ export function createNacApi(
 
     // Credentials are write-only: the value is sent to the server and never
     // read back, so the UI only ever learns which names have a key stored.
+    createProviderConnection: (payload: CreateProviderConnectionRequest) =>
+      request<ProviderConnectionCreated>("POST", "/provider-connections", { body: payload }),
+
     listCredentials: (signal?: AbortSignal) =>
       request<StoredCredentialList>("GET", "/credentials", { signal }),
 
@@ -407,20 +394,6 @@ export function createNacApi(
         signal,
       }),
 
-    listModelConfigs: (signal?: AbortSignal) =>
-      request<ModelConfigurationList>("GET", "/model-configs", { signal }),
-
-    createModelConfig: (payload: CreateModelConfigurationRequest) =>
-      request<ModelConfigurationRecord>("POST", "/model-configs", { body: payload }),
-
-    updateModelConfig: (configId: string, payload: UpdateModelConfigurationRequest) =>
-      request<ModelConfigurationRecord>("PATCH", `/model-configs/${encodeURIComponent(configId)}`, {
-        body: payload,
-      }),
-
-    deleteModelConfig: (configId: string) =>
-      request<void>("DELETE", `/model-configs/${encodeURIComponent(configId)}`),
-
     listSshConfigs: (signal?: AbortSignal) =>
       request<SshConfigurationList>("GET", "/ssh-configs", { signal }),
 
@@ -512,20 +485,6 @@ export function createNacApi(
         `/mcp_library/servers/${encodeURIComponent(serverName)}/reload`,
       ),
 
-    /** Resolves a saved configuration's credential and lists its models. */
-    resolveModelConfig: (configId: string, signal?: AbortSignal) =>
-      request<ResolvedModelConfiguration>(
-        "POST",
-        `/model-configs/${encodeURIComponent(configId)}/models`,
-        { signal },
-      ),
-
-    resolveConfigFile: (path: string, signal?: AbortSignal) =>
-      request<ResolvedModelConfiguration>("POST", "/model-configs/from-file", {
-        body: { path },
-        signal,
-      }),
-
     listProjects: (signal?: AbortSignal) => request<ProjectList>("GET", "/projects", { signal }),
 
     createProject: (payload: CreateProjectRequest) =>
@@ -566,12 +525,6 @@ export function createNacApi(
       request<SessionSnapshotResponse>("POST", "/sessions", { body: payload }),
 
     deleteSession: (id: string) => request<void>("DELETE", sessionPath(id)),
-
-    launchDefaults: (payload: LaunchModelDefaultsRequest, signal?: AbortSignal) =>
-      request<LaunchModelDefaults>("POST", "/sessions/launch-defaults", {
-        body: payload,
-        signal,
-      }),
 
     updatePresentation: (id: string, payload: UpdateSessionPresentationRequest) =>
       request<SessionSummarySnapshot>("PUT", `${sessionPath(id)}/presentation`, {
@@ -675,27 +628,6 @@ export function createNacApi(
         `${sessionPath(id)}/children/${encodeURIComponent(childId)}/cancel`,
       ),
 
-    listManagedOrchestrators: (id: string, signal?: AbortSignal) =>
-      request<ManagedOrchestratorRecord[]>("GET", `${sessionPath(id)}/orchestrators`, { signal }),
-
-    startManagedOrchestrator: (id: string, payload: StartManagedOrchestratorRequest) =>
-      request<ManagedOrchestratorRecord>("POST", `${sessionPath(id)}/orchestrators`, {
-        body: payload,
-      }),
-
-    getManagedOrchestrator: (id: string, orchestratorId: string, signal?: AbortSignal) =>
-      request<ManagedOrchestratorRecord>(
-        "GET",
-        `${sessionPath(id)}/orchestrators/${encodeURIComponent(orchestratorId)}`,
-        { signal },
-      ),
-
-    cancelManagedOrchestrator: (id: string, orchestratorId: string) =>
-      request<ManagedOrchestratorRecord>(
-        "POST",
-        `${sessionPath(id)}/orchestrators/${encodeURIComponent(orchestratorId)}/cancel`,
-      ),
-
     updateConfig: (id: string, payload: UpdateConfigRequest) =>
       request<void>("PATCH", `${sessionPath(id)}/config`, { body: payload }),
 
@@ -708,22 +640,6 @@ export function createNacApi(
       return request<MessagesPageResponse>(
         "GET",
         `${sessionPath(id)}/messages${query ? `?${query}` : ""}`,
-        { signal: options.signal },
-      );
-    },
-
-    getThreadEvents: (id: string, threadName: string, options: ThreadEventsOptions = {}) => {
-      const params = new URLSearchParams();
-      if (options.beforeId !== undefined) {
-        params.set("before_id", String(options.beforeId));
-      }
-      if (options.limit !== undefined) params.set("limit", String(options.limit));
-      const query = params.toString();
-      return request<ThreadEventPage>(
-        "GET",
-        `${sessionPath(id)}/threads/${encodeURIComponent(threadName)}/events${
-          query ? `?${query}` : ""
-        }`,
         { signal: options.signal },
       );
     },
@@ -848,18 +764,6 @@ export function createNacApi(
 
     dismissSessionFork: (id: string, forkId: string) =>
       request<void>("DELETE", `${sessionPath(id)}/forks/${encodeURIComponent(forkId)}`),
-
-    steerOrchestrator: (id: string, instruction: string) =>
-      request<OrchestratorSteeringResponse>("POST", `${sessionPath(id)}/steering`, {
-        body: { instruction },
-      }),
-
-    steerThread: (id: string, threadName: string, instruction: string) =>
-      request<ThreadSteeringResponse>(
-        "POST",
-        `${sessionPath(id)}/threads/${encodeURIComponent(threadName)}/steering`,
-        { body: { instruction } },
-      ),
 
     getRecentEvents: (
       id: string,

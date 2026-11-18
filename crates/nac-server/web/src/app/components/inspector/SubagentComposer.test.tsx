@@ -46,7 +46,7 @@ function storage() {
 }
 
 function mount(
-  mode: "child" | "orchestrator",
+  mode: "child",
   fetch: typeof globalThis.fetch,
   draftStorage = storage(),
   binding = scope,
@@ -94,7 +94,7 @@ function mount(
   return { runtime, view, field: screen.getByRole("textbox") as HTMLTextAreaElement };
 }
 
-it.each(["child", "orchestrator"] as const)(
+it.each(["child"] as const)(
   "recovers %s pending text on reload without replay or overwriting the next draft",
   async (mode) => {
     const fetch = vi.fn(() => new Promise<Response>(() => {}));

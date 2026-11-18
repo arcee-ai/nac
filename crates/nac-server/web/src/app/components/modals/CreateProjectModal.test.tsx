@@ -1,7 +1,5 @@
 /** @vitest-environment jsdom */
 
-import { UiPolicyContext } from "@/app/features/ui-policy/UiPolicyContext";
-import { ORCHESTRATION_UI_POLICY, DIRECT_UI_POLICY } from "@/app/features/ui-policy/policy";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
@@ -12,105 +10,54 @@ import { ToastProvider } from "@/app/providers/ToastProvider";
 import { api, ApiError } from "@/app/services/api";
 import { queryKeys } from "@/app/services/queries/keys";
 import type {
-  LightModelSettings,
   ModelCatalog,
   ProjectRecord,
   SessionSnapshotResponse,
   StoreInfo,
 } from "@/app/types/api";
 
-vi.mock("@/app/components/modals/ConfigurationsPanel", () => {
-  const selection = (threshold: number | null, lightModel: LightModelSettings | null) => ({
-    kind: "resolved",
-    backend: "openai-responses",
-    model: "gpt-5.2",
-    base_url: "https://api.openai.com/v1",
-    allow_insecure_http: false,
-    api_key_env: "OPENAI_API_KEY",
-    reasoning_effort: "high",
-    extra_headers: { "X-Preset": "yes" },
-    orchestrator_compaction_threshold: threshold,
-    light_model: lightModel,
-    config_id: "saved-preset",
-  });
-  return {
-    ConfigurationsPanel: ({
-      onChange,
-      children,
-    }: {
-      onChange: (selection: Record<string, unknown>) => void;
-      children?: import("react").ReactNode;
-    }) => (
-      <section>
-        <button
-          type="button"
-          onClick={() =>
-            onChange({
-              kind: "resolved",
-              backend: "chatgpt-codex-responses",
-              model: "gpt-6.1-sol",
-              base_url: "https://chatgpt.com/backend-api",
-              allow_insecure_http: false,
-              api_key_env: null,
-              reasoning_effort: "medium",
-              extra_headers: {},
-            })
-          }
-        >
-          Select Codex model
-        </button>
-        <button type="button" onClick={() => onChange(selection(222, null))}>
-          Select preset threshold 222
-        </button>
-        <button type="button" onClick={() => onChange(selection(null, null))}>
-          Select preset with compaction disabled
-        </button>
-        <button
-          type="button"
-          onClick={() =>
-            onChange(
-              selection(222, {
-                backend: "openai-responses",
-                model: "gpt-5-mini",
-                base_url: "https://api.openai.com/v1",
-                api_key_env: "OPENAI_API_KEY",
-                reasoning_effort: "low",
-              }),
-            )
-          }
-        >
-          Select dual preset
-        </button>
-        {children}
-      </section>
-    ),
-  };
-});
-
 vi.mock("@/app/components/modals/PrimaryModelSection", () => ({
   PrimaryModelSection: ({
     onChange,
   }: {
     onChange: (selection: Record<string, unknown>) => void;
-  }) => (
-    <button
-      type="button"
-      onClick={() =>
-        onChange({
-          kind: "resolved",
-          backend: "openai-responses",
-          model: "gpt-5.3",
-          base_url: "https://api.openai.com/v1",
-          allow_insecure_http: false,
-          api_key_env: "OPENAI_API_KEY",
-          reasoning_effort: "high",
-          extra_headers: {},
-        })
-      }
-    >
-      Change primary model
-    </button>
-  ),
+  }) => {
+    const choose = (backend: string, model: string, base_url: string) =>
+      onChange({
+        kind: "resolved",
+        backend,
+        model,
+        base_url,
+        allow_insecure_http: false,
+        api_key_env: backend === "chatgpt-codex-responses" ? null : "OPENAI_API_KEY",
+        reasoning_effort: "medium",
+        extra_headers: {},
+      });
+    return (
+      <section>
+        <button
+          type="button"
+          onClick={() =>
+            choose("chatgpt-codex-responses", "gpt-6.1-sol", "https://chatgpt.com/backend-api")
+          }
+        >
+          Select Codex model
+        </button>
+        <button
+          type="button"
+          onClick={() => choose("openai-responses", "gpt-5.2", "https://api.openai.com/v1")}
+        >
+          Choose model
+        </button>
+        <button
+          type="button"
+          onClick={() => choose("openai-responses", "gpt-5.3", "https://api.openai.com/v1")}
+        >
+          Change primary model
+        </button>
+      </section>
+    );
+  },
 }));
 
 vi.mock("@/app/components/modals/PathPickerModal", () => ({
@@ -133,28 +80,6 @@ vi.mock("@/app/components/modals/PathPickerModal", () => ({
       </>
     ) : null,
 }));
-
-vi.mock("@/app/components/modals/LightModelSection", async () => {
-  const React = await import("react");
-  return {
-    LightModelSection: ({
-      initial,
-      onChange,
-    }: {
-      initial?: LightModelSettings | null;
-      onChange: (selection: { mode: "single" | "dual"; light: LightModelSettings | null }) => void;
-    }) => {
-      React.useEffect(() => {
-        onChange({ mode: initial ? "dual" : "single", light: initial ?? null });
-      }, [initial, onChange]);
-      return (
-        <button type="button" onClick={() => onChange({ mode: "single", light: null })}>
-          Use one model
-        </button>
-      );
-    },
-  };
-});
 
 beforeEach(() => {
   vi.stubGlobal("matchMedia", () => ({
@@ -189,18 +114,18 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function renderModal(orchestration = true) {
+function renderModal(_orchestration = true) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(queryKeys.storeInfo, { root_cwd: "/workspace" } as StoreInfo);
   const view = render(
     <QueryClientProvider client={client}>
-      <UiPolicyContext.Provider value={orchestration ? ORCHESTRATION_UI_POLICY : DIRECT_UI_POLICY}>
+      <>
         <ToastProvider>
           <MemoryRouter>
             <CreateProjectModal open onClose={vi.fn()} />
           </MemoryRouter>
         </ToastProvider>
-      </UiPolicyContext.Provider>
+      </>
     </QueryClientProvider>,
   );
   return { client, view };
@@ -241,60 +166,20 @@ it("leaves an untouched Codex suggestion automatic when creating the first chat"
   }
 });
 
-it.each([
-  ["numeric", "Select preset threshold 222", 222],
-  ["disabled", "Select preset with compaction disabled", null],
-] as const)(
-  "launches with an explicitly selected preset's %s compaction policy",
-  async (_, label, expected) => {
-    const { client, view } = renderModal();
-    try {
-      fireEvent.click(await screen.findByRole("button", { name: label }));
-      fireEvent.click(screen.getByRole("button", { name: "Create Project" }));
-      await waitFor(() => expect(api.createSession).toHaveBeenCalled());
-      expect(vi.mocked(api.createSession).mock.calls[0]?.[0]).toEqual(
-        expect.objectContaining({
-          orchestrator_compaction_threshold: expected,
-        }),
-      );
-    } finally {
-      view.unmount();
-      client.clear();
-    }
-  },
-);
-
-it("sends explicit null when the first chat changes a saved Dual preset to Single", async () => {
-  const { client, view } = renderModal();
-  try {
-    fireEvent.click(await screen.findByRole("button", { name: "Select dual preset" }));
-    fireEvent.click(screen.getByRole("button", { name: "Use one model" }));
-    fireEvent.click(screen.getByRole("button", { name: "Create Project" }));
-    await waitFor(() => expect(api.createSession).toHaveBeenCalled());
-    expect(vi.mocked(api.createSession).mock.calls[0]?.[0].light_model).toBeNull();
-  } finally {
-    view.unmount();
-    client.clear();
-  }
-});
-
-it("default project creation requests direct without clearing a hidden dual preset", async () => {
+it("project creation uses the selected direct session model", async () => {
   const { client, view } = renderModal(false);
   try {
     expect(screen.queryByRole("radiogroup")).toBeNull();
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Advanced presets and provider setup" }),
-    );
-    fireEvent.click(await screen.findByRole("button", { name: "Select dual preset" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Choose model" }));
     expect(screen.queryByRole("button", { name: "Use one model" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Create Project" }));
     await waitFor(() => expect(api.createSession).toHaveBeenCalled());
+    expect(vi.mocked(api.createSession).mock.calls[0]?.[0]).not.toHaveProperty("light_model");
     expect(vi.mocked(api.createSession).mock.calls[0]?.[0]).toEqual(
       expect.objectContaining({
         behavior: "direct",
         first_chat: true,
         first_chat_same_behavior: true,
-        light_model: expect.objectContaining({ model: "gpt-5-mini" }),
       }),
     );
   } finally {
@@ -309,10 +194,7 @@ it("allows a new folder after a known duplicate-project rejection without replay
   );
   const { client, view } = renderModal(false);
   try {
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Advanced presets and provider setup" }),
-    );
-    fireEvent.click(await screen.findByRole("button", { name: "Select preset threshold 222" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Choose model" }));
     fireEvent.click(screen.getByRole("button", { name: "Create Project" }));
     await screen.findByText(/A project already uses this folder/);
     expect(api.createProject).toHaveBeenCalledTimes(1);
@@ -336,31 +218,25 @@ it("allows a new folder after a known duplicate-project rejection without replay
   }
 });
 
-it.each(["Select preset threshold 222", "Select preset with compaction disabled"])(
-  "preserves an edited context limit through primary changes from %s",
-  async (preset) => {
-    const { client, view } = renderModal();
-    try {
-      fireEvent.click(await screen.findByRole("button", { name: preset }));
-      const limit = document.querySelector<HTMLInputElement>('input[inputmode="numeric"]')!;
-      fireEvent.change(limit, { target: { value: "777" } });
-      fireEvent.click(screen.getByRole("button", { name: "Back to unified models" }));
-      fireEvent.click(screen.getByRole("button", { name: "Change primary model" }));
-      expect(document.querySelector<HTMLInputElement>('input[inputmode="numeric"]')!.value).toBe(
-        "777",
-      );
-      fireEvent.click(screen.getByRole("button", { name: "Create Project" }));
-      await waitFor(() => expect(api.createSession).toHaveBeenCalled());
-      expect(vi.mocked(api.createSession).mock.calls[0]?.[0]).toMatchObject({
-        model: "gpt-5.3",
-        orchestrator_compaction_threshold: 777,
-      });
-    } finally {
-      view.unmount();
-      client.clear();
-    }
-  },
-);
+it("preserves an edited context limit when changing the session model", async () => {
+  const { client, view } = renderModal();
+  try {
+    fireEvent.click(await screen.findByRole("button", { name: "Choose model" }));
+    const limit = document.querySelector<HTMLInputElement>('input[inputmode="numeric"]')!;
+    fireEvent.change(limit, { target: { value: "777" } });
+    fireEvent.click(screen.getByRole("button", { name: "Change primary model" }));
+    expect(limit.value).toBe("777");
+    fireEvent.click(screen.getByRole("button", { name: "Create Project" }));
+    await waitFor(() => expect(api.createSession).toHaveBeenCalled());
+    expect(vi.mocked(api.createSession).mock.calls[0]?.[0]).toMatchObject({
+      model: "gpt-5.3",
+      orchestrator_compaction_threshold: 777,
+    });
+  } finally {
+    view.unmount();
+    client.clear();
+  }
+});
 
 vi.mock("@/app/components/modals/SshConnectionBox", () => ({
   SshConnectionBox: ({
@@ -391,7 +267,7 @@ it("launches once through the connected SSH project without restating location o
     fireEvent.click(screen.getByRole("button", { name: "SSH" }));
     expect(api.createProject).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Connect fixture SSH" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Select preset threshold 222" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Choose model" }));
     const launch = screen.getByRole("button", { name: "Create Project" });
     fireEvent.click(launch);
     fireEvent.click(launch);
@@ -406,9 +282,8 @@ it("launches once through the connected SSH project without restating location o
     const request = vi.mocked(api.createSession).mock.calls[0]?.[0];
     expect(request).toMatchObject({
       project_id: "created-project",
-      behavior: "orchestrator",
+      behavior: "direct",
       model: "gpt-5.2",
-      orchestrator_compaction_threshold: 222,
     });
     expect(request).not.toHaveProperty("sandbox");
     expect(request).not.toHaveProperty("cwd");
@@ -422,10 +297,7 @@ it("launches once through the connected SSH project without restating location o
 it("reopens and submits the exact selected local folder with trailing whitespace", async () => {
   const { client, view } = renderModal(false);
   try {
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Advanced presets and provider setup" }),
-    );
-    fireEvent.click(await screen.findByRole("button", { name: "Select preset threshold 222" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Choose model" }));
     fireEvent.click(screen.getByText("/workspace"));
     fireEvent.click(screen.getByRole("button", { name: "Choose literal folder" }));
     fireEvent.click(screen.getByText("/workspace/Project 日本語", { exact: false }));

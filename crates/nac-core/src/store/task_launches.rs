@@ -3,6 +3,57 @@
 use super::*;
 use serde::{Deserialize, Serialize};
 
+/// Model selection is frozen with the task request for retry and recovery.
+/// Credential values never enter the durable request.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct TaskModelSelection {
+    pub backend: String,
+    pub model: String,
+    pub base_url: String,
+    pub allow_insecure_http: bool,
+    pub api_key_env: Option<String>,
+    pub reasoning_effort: Option<String>,
+    pub extra_headers: Option<std::collections::BTreeMap<String, String>>,
+    pub orchestrator_compaction_threshold: Option<u64>,
+}
+
+impl TaskModelSelection {
+    pub fn validate(&self) -> Result<()> {
+        for value in [&self.backend, &self.model, &self.base_url] {
+            anyhow::ensure!(
+                !value.trim().is_empty() && value.len() <= 4096 && !value.contains('\0'),
+                "invalid request: model selection fields must be nonblank and bounded"
+            );
+        }
+        let backend: crate::model::BackendKind = self
+            .backend
+            .parse()
+            .map_err(|error: String| anyhow!("invalid request: {error}"))?;
+        crate::model::resolve_model_base_url_with_policy(
+            backend,
+            Some(self.base_url.clone()),
+            self.allow_insecure_http,
+        )?;
+        if let Some(selector) = &self.api_key_env {
+            anyhow::ensure!(
+                crate::model::is_valid_env_name(selector),
+                "invalid request: invalid credential selector"
+            );
+        }
+        if let Some(headers) = &self.extra_headers {
+            crate::model::validate_extra_headers(headers)?;
+        }
+        if let Some(effort) = &self.reasoning_effort {
+            let _: crate::model::ReasoningEffort =
+                serde_json::from_value(serde_json::Value::String(effort.clone()))
+                    .map_err(|_| anyhow!("invalid request: unknown reasoning effort"))?;
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -10,6 +61,8 @@ pub struct TaskLaunchRequest {
     pub request_id: String,
     pub project_id: String,
     pub invoking_session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_selection: Option<TaskModelSelection>,
     pub git_ref: Option<String>,
     /// Required when initially binding a project without an invoking task.
     /// The binding persists independently of the ref selected for this launch.
@@ -38,6 +91,9 @@ impl TaskLaunchRequest {
             title.as_deref() == Some(self.title.as_str()),
             "invalid request: task title must be nonblank and trimmed"
         );
+        if let Some(selection) = &self.model_selection {
+            selection.validate()?;
+        }
         for value in [&self.git_ref, &self.default_ref, &self.invoking_session_id]
             .into_iter()
             .flatten()

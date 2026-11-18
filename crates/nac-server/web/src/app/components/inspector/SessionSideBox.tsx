@@ -1,7 +1,6 @@
 import { HeartbeatPanel } from "@/app/features/heartbeats/HeartbeatPanel";
 
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
-import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import {
   Button,
   ButtonContent,
@@ -22,13 +21,12 @@ import { PanelPhoneScreen } from "@/app/components/inspector/PanelPhoneScreen";
 import { panelBadgeCount, PANEL_ICON } from "@/app/components/inspector/sessionPanelIcons";
 import { DelegatedWorkView } from "@/app/components/inspector/DelegatedWorkView";
 import { HistoryView } from "@/app/components/inspector/HistoryView";
-import { WorksetsView } from "@/app/components/inspector/WorksetsView";
 import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
 import { useSessionFetching } from "@/app/hooks/useSessionFetching";
 import { SESSION_PANEL_LABEL, type SessionPanel } from "@/app/lib/routes";
 import { cn } from "@/app/lib/cn";
 import { sessionPanelPolicy } from "@/app/lib/sessionBehavior";
-import { useManagedOrchestrators, useTraditionalChildren } from "@/app/services/queries";
+import { useTraditionalChildren } from "@/app/services/queries";
 
 import type { SessionBehavior, SessionSnapshotResponse } from "@/app/types/api";
 
@@ -37,7 +35,7 @@ interface SessionSideBoxProps {
   snapshot: SessionSnapshotResponse | null;
   /**
    * Null while the session has not loaded. Callers that omit it keep the
-   * snapshot's behavior, and an omitted stored behavior stays orchestrator.
+   * snapshot's behavior, and an omitted behavior is direct.
    */
   behavior?: SessionBehavior | null;
   panel: SessionPanel;
@@ -68,8 +66,7 @@ function SideBoxProgress({ sessionId }: { sessionId: string }) {
 
 /**
  * The panels a session's drawer holds: Insights, Files (Changes), Subagents,
- * Terminal, Schedules, Worksets, History — whichever the session's behavior
- * has. On a wide screen it heads itself with a 52px bar: a quiet segmented
+ * Terminal, Schedules, and History. On a wide screen it heads itself with a 52px bar: a quiet segmented
  * row to move between the panels, then dock, full width and close. On a
  * phone the drawer is a bottom sheet and each screen heads itself with the
  * way out the sheet lends it.
@@ -86,36 +83,26 @@ export function SessionSideBox({
 }: SessionSideBoxProps) {
   const {
     useSidePanelExpanded,
-    useSelectedWorkset,
     useSelectedRevision,
     toggleSidePanelExpanded,
     showSidePanelList,
-    selectWorkset,
     selectRevision,
   } = useNativeRuntime().stores.sessionLayoutStore;
 
   const expanded = useSidePanelExpanded();
   const isMobile = useIsMobile();
   const isTablet = useIsTablet();
-  const selectedWorkset = useSelectedWorkset();
   const selectedRevision = useSelectedRevision();
   const behavior =
-    behaviorProp !== undefined ? behaviorProp : (snapshot?.metadata.behavior ?? "orchestrator");
-  const direct = behavior === "direct" || behavior === "direct-with-orchestrator";
+    behaviorProp !== undefined ? behaviorProp : (snapshot?.metadata.behavior ?? "direct");
+  const direct = behavior === "direct";
   const panelPolicy =
     behavior == null ? null : sessionPanelPolicy(behavior, snapshot?.lineage?.kind);
   const delegatedTranscript = panelPolicy?.readOnly ?? false;
   const widePanels = panelPolicy?.widePanels ?? [];
-  const policy = useUiPolicy();
   const subagents = widePanels.includes("delegated");
   const children = useTraditionalChildren(sessionId, subagents);
-  const orchestrators = useManagedOrchestrators(
-    sessionId,
-    subagents && behavior === "direct-with-orchestrator",
-  );
-  const subagentCount =
-    (children.data?.length ?? 0) +
-    (policy.orchestrationEnabled ? (orchestrators.data?.length ?? 0) : 0);
+  const subagentCount = children.data?.length ?? 0;
 
   // History is a phone panel. On a wide screen the session menu switches
   // revisions, so a link to that panel lands on the default one.
@@ -129,12 +116,7 @@ export function SessionSideBox({
   const body = (
     <>
       {active === "insights" ? (
-        <InsightsView
-          sessionId={sessionId}
-          snapshot={snapshot}
-          topology={direct ? "direct" : "orchestrator"}
-          canSteerWorkers={behavior === "orchestrator" && !delegatedTranscript}
-        />
+        <InsightsView sessionId={sessionId} snapshot={snapshot} topology="direct" />
       ) : null}
       {active === "files" ? (
         <FilesView
@@ -154,9 +136,6 @@ export function SessionSideBox({
         <TerminalWorkspace sessionId={sessionId} />
       ) : null}
       {active === "heartbeats" ? <HeartbeatPanel sessionId={sessionId} /> : null}
-      {active === "worksets" ? (
-        <WorksetsView snapshot={snapshot} selected={selectedWorkset} onSelect={selectWorkset} />
-      ) : null}
       {active === "history" ? (
         <HistoryView sessionId={sessionId} selected={selectedRevision} onSelect={selectRevision} />
       ) : null}
@@ -200,11 +179,7 @@ export function SessionSideBox({
           >
             {widePanels.map((name) => {
               const selected = active === name;
-              const badge = panelBadgeCount(
-                name,
-                subagentCount,
-                snapshot?.worksets?.items.length ?? 0,
-              );
+              const badge = panelBadgeCount(name, subagentCount, 0);
               const open = () => {
                 // A tablet shows one column at a time, and a new panel opens on
                 // its selected row; a desktop split ignores the flag entirely.

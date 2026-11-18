@@ -4,22 +4,16 @@ import { type SelectItem } from "@/app/atoms";
 import { FormSection } from "@/app/components/modals/FormSection";
 import { CatalogModelPicker } from "@/app/components/modals/CatalogModelPicker";
 import {
-  type ConfigurationsPanelInitial,
+  type SessionModelInitial,
   type LaunchModelSelection,
-} from "@/app/components/modals/ConfigurationsPanel";
+} from "@/app/features/setup/modelSelection";
 import { ConfigRow } from "@/app/components/modals/ConfigRow";
 import { EFFORT_LEVEL_OPTIONS, reasoningOptionsFor } from "@/app/components/modals/options";
 import { SmallSelect } from "@/app/components/modals/SmallSelect";
 import { type CatalogPick, defaultCatalogPick, resolveCatalogModel } from "@/app/lib/catalog";
 import { providerLabel, providerUsesApiKey } from "@/app/lib/providers";
 import { useManagedModelProfile } from "@/app/features/managed/controller/useManagedModelProfile";
-import {
-  useModelCatalog,
-  useModelConfigs,
-  useResolvedModelConfig,
-  useReadyProviderModels,
-} from "@/app/services/queries";
-import { savedModelSelection } from "@/app/features/setup/modelSelection";
+import { useModelCatalog, useReadyProviderModels } from "@/app/services/queries";
 import type { ReasoningEffort } from "@/app/types/api";
 
 const PRIMARY_EFFORT_OPTIONS: SelectItem[] = [
@@ -34,17 +28,14 @@ interface PrimaryChoice {
 
 /**
  * The ordinary primary-model control: one catalog spanning every configured
- * provider. Provider connection and advanced presets intentionally live
- * outside this component.
+ * provider. Provider connections live outside this component.
  */
 export function PrimaryModelSection({
   initial: suppliedInitial,
-  inheritSavedDefault = false,
   existingSession = false,
   onChange,
 }: {
-  initial?: ConfigurationsPanelInitial;
-  inheritSavedDefault?: boolean;
+  initial?: SessionModelInitial;
   existingSession?: boolean;
   onChange: (selection: LaunchModelSelection | null) => void;
 }) {
@@ -52,23 +43,7 @@ export function PrimaryModelSection({
   const managedModel = useManagedModelProfile();
   const liveByBackend = useReadyProviderModels(catalog.data);
   const [chosen, setChosen] = useState<PrimaryChoice | null>(null);
-  const saved = useModelConfigs(inheritSavedDefault && !suppliedInitial);
-  const latest =
-    inheritSavedDefault && !suppliedInitial ? saved.data?.configurations.at(-1) : undefined;
-  const initial = useMemo(
-    () =>
-      suppliedInitial ??
-      (latest
-        ? { ...savedModelSelection(latest), extra_headers: latest.extra_headers }
-        : undefined),
-    [suppliedInitial, latest],
-  );
-  const resolved = useResolvedModelConfig(latest && !chosen ? latest.config_id : null, "");
-  const savedPending =
-    inheritSavedDefault &&
-    !suppliedInitial &&
-    !chosen &&
-    (saved.isPending || (latest && !resolved.data));
+  const initial = suppliedInitial;
 
   const initialChoice = useMemo<PrimaryChoice | null>(
     () =>
@@ -124,7 +99,7 @@ export function PrimaryModelSection({
   const effectiveIndex =
     isManagedPick && effective ? liveByBackend.get(effective.pick.backend) : undefined;
   const selection = useMemo<LaunchModelSelection | null>(() => {
-    if (savedPending || !effective || !effective.pick.baseUrl) return null;
+    if (!effective || !effective.pick.baseUrl) return null;
     // An existing exact route stays editable without provider login. Readiness
     // still gates new choices; server validation owns actual model transitions.
     const existingRoute = Boolean(
@@ -152,9 +127,7 @@ export function PrimaryModelSection({
         api_key_env: initial.api_key_env,
         reasoning_effort: effective.effort || null,
         extra_headers: initial.extra_headers,
-        light_model: initial.light_model,
         orchestrator_compaction_threshold: initial.orchestrator_compaction_threshold,
-        config_id: initial.config_id,
       };
     }
     if (!providerReady) return null;
@@ -163,13 +136,15 @@ export function PrimaryModelSection({
       backend: effective.pick.backend,
       model: effective.pick.model,
       base_url: effective.pick.baseUrl,
-      allow_insecure_http: false,
+      allow_insecure_http:
+        provider?.connection?.base_url === effective.pick.baseUrl
+          ? (provider.connection.allow_insecure_http ?? false)
+          : false,
       // Provider accounts and conventional environment credentials are
       // resolved server-side; the browser never receives credential values.
       api_key_env: provider?.connection?.api_key_env ?? null,
       reasoning_effort: effective.effort || null,
       extra_headers: null,
-      light_model: undefined,
     };
   }, [
     effective,
@@ -183,7 +158,6 @@ export function PrimaryModelSection({
     isManagedPick,
     managedPending,
     effectiveIndex,
-    savedPending,
   ]);
 
   useEffect(() => onChange(selection), [onChange, selection]);
@@ -198,7 +172,7 @@ export function PrimaryModelSection({
   return (
     <FormSection
       title="Primary model"
-      description="Choose a model across your providers. Connection status and advanced presets are available below."
+      description="Choose a model for this session from your connected providers."
     >
       <ConfigRow
         presentation="form"
@@ -245,16 +219,10 @@ export function PrimaryModelSection({
           />
         }
       />
-      {latest && resolved.isError ? (
-        <p role="alert" className="text-small !leading-[22px] text-error-primary">
-          The saved project setup could not be resolved. Review it in Advanced or choose another
-          model.
-        </p>
-      ) : null}
       {effective && !preservesInitialRoute && !providerReady ? (
         <p className="text-small !leading-[22px] text-error-primary" role="alert">
-          Connect {providerLabel(effective.pick.backend)} in Provider connections or Advanced before
-          selecting this model.
+          Connect {providerLabel(effective.pick.backend)} in Provider connections before selecting
+          this model.
         </p>
       ) : null}
     </FormSection>

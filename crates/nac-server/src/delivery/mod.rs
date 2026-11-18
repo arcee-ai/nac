@@ -5,9 +5,9 @@ pub(crate) mod error;
 pub(crate) mod fresh_task_schedules;
 pub(crate) mod heartbeats;
 pub(crate) mod managed_secrets;
-pub(crate) mod model_configurations;
 pub(crate) mod project_folders;
 pub(crate) mod projects;
+pub(crate) mod provider_connections;
 pub(crate) mod server;
 pub(crate) mod session_integrations;
 pub(crate) mod session_lifecycle;
@@ -19,7 +19,6 @@ pub(crate) mod shell_commands;
 pub(crate) mod ssh_configurations;
 pub(crate) mod terminal_selection;
 mod terminal_selection_submission;
-pub(crate) mod ui_configuration;
 pub(crate) mod user_terminals;
 pub(crate) mod workspace;
 

@@ -40,9 +40,6 @@ tools::discovery::tests::ssh_and_local_backends_return_identical_discovery_pages
 tools::discovery::tests::tools_work_without_external_search_binaries_on_path
 tools::task_wait::tests::maximum_timeout_measurement
 native_pty::tests::latency::native_admission_latency_and_independent_root_cleanup
-tests::managed_load::managed_load_scenario
-tests::persistence_load::owned_persistence_current_thread_load_scenario
-tests::persistence_load::owned_persistence_load_scenario
 '''.splitlines()
 
 DIRECT_IGNORED = '''\
@@ -181,7 +178,7 @@ class Controls(unittest.TestCase):
         inventory = json.loads(runner.INVENTORY.read_text())
         # Keep the actual historical twenty-name discovery receipt unchanged.
         historical = '\n'.join(name + ': test' for name in RETAINED_IGNORED)
-        self.assertEqual(len(RETAINED_IGNORED), 20)
+        self.assertEqual(len(RETAINED_IGNORED), 17)
         runner.verify_inventory(historical, [c for c in inventory if c['name'] in RETAINED_IGNORED])
         heartbeat = ('application::heartbeat_scheduler::tests::'
                      'heartbeat_scheduler_measure_1_10_100_with_two_owners_and_bounded_chat_contention')
@@ -257,11 +254,9 @@ class Controls(unittest.TestCase):
         self.assertEqual({c['name'] for c in included}, {
             'tools::discovery::tests::ssh_and_local_backends_return_identical_discovery_pages',
             'tools::discovery::tests::tools_work_without_external_search_binaries_on_path',
-            'tests::persistence_load::owned_persistence_load_scenario',
-            'tests::persistence_load::owned_persistence_current_thread_load_scenario',
             *DIRECT_IGNORED,
         })
-        self.assertEqual(len(included), 13)
+        self.assertEqual(len(included), 11)
         self.assertEqual(sum('process-PATH mutation' in c['capabilities'] for c in included), 2)
         self.assertFalse(any('Podman machine' in c['capabilities'] for c in included))
 

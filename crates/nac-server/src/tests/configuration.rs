@@ -1,7 +1,62 @@
 use super::*;
 
 #[tokio::test]
-async fn custom_public_https_endpoints_persist_for_primary_and_light_models() {
+async fn direct_config_patch_preserves_inert_legacy_light_bytes_and_rejects_selector() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("inert_light_preserved");
+    let nac_home = root.join("nac-home");
+    let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+    seed_editable_session(&root, "session");
+    let store = root.join("store.db");
+    let raw = "malformed legacy light bytes";
+    let conn = rusqlite::Connection::open(&store).unwrap();
+    conn.execute(
+        "UPDATE sessions SET light_model_json=?1 WHERE session_id='session'",
+        [raw],
+    )
+    .unwrap();
+    drop(conn);
+    assert!(sessions::load_session(&store, "session")
+        .unwrap()
+        .light_model
+        .is_none());
+    let manager = test_manager(&root);
+    manager
+        .update_session_config(
+            "session",
+            UpdateConfigRequest {
+                model: RequestField::Value("replacement-model".into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let conn = rusqlite::Connection::open(&store).unwrap();
+    let retained: String = conn
+        .query_row(
+            "SELECT light_model_json FROM sessions WHERE session_id='session'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(retained, raw);
+    drop(conn);
+    let error = manager
+        .update_session_config(
+            "session",
+            UpdateConfigRequest {
+                light_model: RequestField::Null,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(ApiError::from(error).status, StatusCode::BAD_REQUEST);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn custom_public_https_endpoint_persists_for_session_model() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let root = temp_root("custom_public_https");
     let nac_home = root.join("nac-home");
@@ -11,20 +66,12 @@ async fn custom_public_https_endpoints_persist_for_primary_and_light_models() {
     let store_path = root.join("store.db");
 
     let primary_url = "https://gateway.noncanonical.example/v1";
-    let light_url = "https://light.noncanonical.example/v1";
     let created = manager
         .create_session(CreateSessionRequest {
             model: RequestField::Value("custom-primary-model".to_string()),
             base_url: RequestField::Value(primary_url.to_string()),
             backend: RequestField::Value("openai-responses".to_string()),
             api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
-            light_model: RequestField::Value(LightModelSettings {
-                model: "custom-light-model".to_string(),
-                backend: Some(BackendKind::OpenAiResponses),
-                base_url: Some(light_url.to_string()),
-                api_key_env: None,
-                reasoning_effort: None,
-            }),
             ..CreateSessionRequest::default()
         })
         .await
@@ -32,13 +79,6 @@ async fn custom_public_https_endpoints_persist_for_primary_and_light_models() {
     let session_id = created.metadata.session_id.unwrap();
     let stored = sessions::load_session(&store_path, &session_id).unwrap();
     assert_eq!(stored.base_url, primary_url);
-    assert_eq!(
-        stored
-            .light_model
-            .as_ref()
-            .and_then(|light| light.base_url.as_deref()),
-        Some(light_url)
-    );
 
     manager
         .inner
@@ -47,19 +87,11 @@ async fn custom_public_https_endpoints_persist_for_primary_and_light_models() {
         .await
         .remove(&session_id);
     let updated_primary = "https://updated.noncanonical.example/v2";
-    let updated_light = "https://updated-light.noncanonical.example/v2";
     manager
         .update_session_config(
             &session_id,
             UpdateConfigRequest {
                 base_url: RequestField::Value(updated_primary.to_string()),
-                light_model: RequestField::Value(LightModelSettings {
-                    model: "custom-light-model-v2".to_string(),
-                    backend: Some(BackendKind::OpenAiResponses),
-                    base_url: Some(updated_light.to_string()),
-                    api_key_env: None,
-                    reasoning_effort: None,
-                }),
                 ..UpdateConfigRequest::default()
             },
         )
@@ -67,13 +99,6 @@ async fn custom_public_https_endpoints_persist_for_primary_and_light_models() {
         .expect("an inactive session must accept a new public HTTPS gateway");
     let stored = sessions::load_session(&store_path, &session_id).unwrap();
     assert_eq!(stored.base_url, updated_primary);
-    assert_eq!(
-        stored
-            .light_model
-            .as_ref()
-            .and_then(|light| light.base_url.as_deref()),
-        Some(updated_light)
-    );
 
     let _ = std::fs::remove_dir_all(root);
 }
@@ -88,20 +113,12 @@ async fn public_http_requires_opt_in_and_survives_update_and_resume() {
     let manager = test_manager(&root);
     let store_path = root.join("store.db");
     let primary_url = "http://gateway.example/v1";
-    let light_url = "http://light.example/v1";
 
     let request = CreateSessionRequest {
         model: RequestField::Value("custom-primary-model".to_string()),
         base_url: RequestField::Value(primary_url.to_string()),
         backend: RequestField::Value("openai-responses".to_string()),
         api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
-        light_model: RequestField::Value(LightModelSettings {
-            model: "custom-light-model".to_string(),
-            backend: Some(BackendKind::OpenAiResponses),
-            base_url: Some(light_url.to_string()),
-            api_key_env: None,
-            reasoning_effort: None,
-        }),
         ..CreateSessionRequest::default()
     };
     let denied = manager.create_session(request.clone()).await.unwrap_err();
@@ -117,18 +134,11 @@ async fn public_http_requires_opt_in_and_survives_update_and_resume() {
             ..request
         })
         .await
-        .expect("the explicit opt-in should admit public HTTP for both models");
+        .expect("the explicit opt-in should admit public HTTP for the session model");
     let session_id = created.metadata.session_id.unwrap();
     let stored = sessions::load_session(&store_path, &session_id).unwrap();
     assert!(stored.allow_insecure_http);
     assert_eq!(stored.base_url, primary_url);
-    assert_eq!(
-        stored
-            .light_model
-            .as_ref()
-            .and_then(|light| light.base_url.as_deref()),
-        Some(light_url)
-    );
 
     manager
         .inner
@@ -139,7 +149,7 @@ async fn public_http_requires_opt_in_and_survives_update_and_resume() {
     manager
         .attach_session(&session_id)
         .await
-        .expect("resume must rebuild both clients with the persisted opt-in");
+        .expect("resume must rebuild the client with the persisted opt-in");
     manager
         .inner
         .active_sessions
@@ -172,13 +182,6 @@ async fn public_http_requires_opt_in_and_survives_update_and_resume() {
             &session_id,
             UpdateConfigRequest {
                 base_url: RequestField::Value("https://gateway.example/v1".to_string()),
-                light_model: RequestField::Value(LightModelSettings {
-                    model: "custom-light-model".to_string(),
-                    backend: Some(BackendKind::OpenAiResponses),
-                    base_url: Some("https://light.example/v1".to_string()),
-                    api_key_env: None,
-                    reasoning_effort: None,
-                }),
                 allow_insecure_http: RequestField::Value(false),
                 ..UpdateConfigRequest::default()
             },
@@ -195,64 +198,7 @@ async fn public_http_requires_opt_in_and_survives_update_and_resume() {
 }
 
 #[tokio::test]
-async fn direct_rejects_disabling_http_opt_in_with_unchanged_public_light_url() {
-    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
-    let root = temp_root("direct_public_light_http_opt_out");
-    let nac_home = root.join("nac-home");
-    std::fs::create_dir_all(&nac_home).unwrap();
-    let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
-    let manager = test_manager(&root);
-    let store_path = root.join("store.db");
-    let public_light_url = "http://light.example/v1";
-
-    let created = manager
-        .create_session(CreateSessionRequest {
-            behavior: sessions::SessionBehavior::Direct,
-            model: RequestField::Value("custom-primary-model".to_string()),
-            base_url: RequestField::Value("https://gateway.example/v1".to_string()),
-            backend: RequestField::Value("openai-responses".to_string()),
-            api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
-            light_model: RequestField::Value(LightModelSettings {
-                model: "custom-light-model".to_string(),
-                backend: Some(BackendKind::OpenAiResponses),
-                base_url: Some(public_light_url.to_string()),
-                api_key_env: None,
-                reasoning_effort: None,
-            }),
-            allow_insecure_http: RequestField::Value(true),
-            ..CreateSessionRequest::default()
-        })
-        .await
-        .expect("the explicit opt-in should admit the unused public light endpoint");
-    let session_id = created.metadata.session_id.unwrap();
-
-    let error = manager
-        .update_session_config(
-            &session_id,
-            UpdateConfigRequest {
-                allow_insecure_http: RequestField::Value(false),
-                ..UpdateConfigRequest::default()
-            },
-        )
-        .await
-        .expect_err("disabling the opt-in must revalidate an unchanged light endpoint");
-    assert!(error.to_string().contains("requires HTTPS"), "{error:#}");
-
-    let stored = sessions::load_session(&store_path, &session_id).unwrap();
-    assert!(stored.allow_insecure_http);
-    assert_eq!(
-        stored
-            .light_model
-            .as_ref()
-            .and_then(|light| light.base_url.as_deref()),
-        Some(public_light_url)
-    );
-
-    let _ = std::fs::remove_dir_all(root);
-}
-
-#[tokio::test]
-async fn create_inherits_overrides_and_null_clears_optional_config() {
+async fn create_requires_session_model_and_null_clears_optional_config() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let root = temp_root("create_tristate");
     let nac_home = root.join("nac-home");
@@ -273,72 +219,26 @@ threshold_tokens = 64000
     let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
     let manager = test_manager(&root);
 
-    let inherited = manager
+    let missing = manager
         .create_session(CreateSessionRequest::default())
         .await
-        .expect("omitted fields should inherit config");
-    assert!(inherited.metadata.extra_headers.is_empty());
-    let inherited_id = inherited.metadata.session_id.unwrap();
-    let stored = sessions::load_session(&root.join("store.db"), &inherited_id).unwrap();
-    assert_eq!(stored.behavior, sessions::SessionBehavior::Orchestrator);
-    assert_eq!(stored.backend, BackendKind::OpenAiResponses);
-    assert_eq!(stored.model, "gpt-5.2");
-    assert_eq!(stored.base_url, "https://api.openai.com/v1");
-    assert_eq!(stored.reasoning_effort, Some(ReasoningEffort::Medium));
-    assert_eq!(stored.api_key_env.as_deref(), Some("OPENAI_API_KEY"));
-    assert_eq!(stored.orchestrator_compaction_threshold, Some(280_000));
-    assert_eq!(
-        stored.extra_headers,
-        BTreeMap::from([("X-Config".to_string(), "yes".to_string())])
-    );
-    let Json(config) = delivery::session_lifecycle::session_config_handler(
-        State(manager.clone()),
-        AxumPath(inherited_id.clone()),
-    )
-    .await
-    .unwrap();
-    assert_eq!(
-        config.extra_headers_json.as_deref(),
-        Some("{\"X-Config\":\"yes\"}")
-    );
-    assert_eq!(config.orchestrator_compaction_threshold, Some(280_000));
-    assert!(manager
-        .snapshot(&inherited_id)
+        .unwrap_err();
+    assert!(missing.to_string().contains("backend"));
+    let direct = manager
+        .create_session(CreateSessionRequest {
+            model: RequestField::Value("gpt-5.2".to_string()),
+            backend: RequestField::Value("openai-responses".to_string()),
+            api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
+            ..CreateSessionRequest::default()
+        })
         .await
-        .unwrap()
-        .metadata
-        .extra_headers
-        .is_empty());
-
-    for behavior in [
-        sessions::SessionBehavior::Direct,
-        sessions::SessionBehavior::DirectWithOrchestrator,
-    ] {
-        let direct = manager
-            .create_session(CreateSessionRequest {
-                behavior,
-                ..CreateSessionRequest::default()
-            })
-            .await
-            .expect("an explicitly selected direct behavior should launch");
-        assert_eq!(direct.metadata.behavior, behavior);
-        let direct_id = direct.metadata.session_id.unwrap();
-        assert_eq!(
-            sessions::load_session(&root.join("store.db"), &direct_id)
-                .unwrap()
-                .behavior,
-            behavior
-        );
-        assert_eq!(
-            manager
-                .attach_session(&direct_id)
-                .await
-                .unwrap()
-                .metadata()
-                .behavior,
-            behavior
-        );
-    }
+        .expect("explicit session model should launch");
+    let direct_id = direct.metadata.session_id.unwrap();
+    let stored = sessions::load_session(&root.join("store.db"), &direct_id).unwrap();
+    assert_eq!(stored.behavior, sessions::SessionBehavior::Direct);
+    assert_eq!(stored.model, "gpt-5.2");
+    assert_eq!(stored.reasoning_effort, None);
+    assert!(stored.extra_headers.is_empty());
 
     let cleared = manager
         .create_session(CreateSessionRequest {
@@ -430,7 +330,7 @@ model = "gpt-5.2"
 }
 
 #[tokio::test]
-async fn inherited_managed_launches_clear_stale_selectors_and_persist_fixed_bases() {
+async fn selected_models_resolve_providers_and_managed_bases() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let root = temp_root("managed_base_materialization");
     let nac_home = root.join("nac-home");
@@ -441,7 +341,7 @@ async fn inherited_managed_launches_clear_stale_selectors_and_persist_fixed_base
     let manager = test_manager(&root);
     let store_path = root.join("store.db");
 
-    // The full auto-resolution chain end-to-end: a bare configured
+    // The full auto-resolution chain end-to-end: a session-selected
     // model resolves its provider through the catalog (gpt-5.2 is
     // unique to openai-responses), the base URL materializes from the
     // catalog endpoint default, and the credential auto-selects the
@@ -454,10 +354,11 @@ async fn inherited_managed_launches_clear_stale_selectors_and_persist_fixed_base
     let created = manager
         .create_session(CreateSessionRequest {
             cwd: Some(root.clone()),
+            model: RequestField::Value("gpt-5.2".into()),
             ..CreateSessionRequest::default()
         })
         .await
-        .expect("a configured catalog-known model auto-resolves the full tuple");
+        .expect("a selected catalog-known model auto-resolves the full tuple");
     assert_eq!(created.metadata.backend, "openai-responses");
     assert_eq!(created.metadata.base_url, "https://api.openai.com/v1");
     assert_eq!(
@@ -564,7 +465,7 @@ async fn inherited_managed_launches_clear_stale_selectors_and_persist_fixed_base
         assert!(error.to_string().contains(expected_error), "{error:#}");
     }
 
-    // An unknown configured model resolves no provider: the guided
+    // An unknown session model resolves no provider: the guided
     // missing-backend error surfaces (the frontend renders the
     // from-config selection as unrecognized).
     std::fs::write(
@@ -575,6 +476,7 @@ async fn inherited_managed_launches_clear_stale_selectors_and_persist_fixed_base
     let error = manager
         .create_session(CreateSessionRequest {
             cwd: Some(root.clone()),
+            model: RequestField::Value("api-model".into()),
             ..CreateSessionRequest::default()
         })
         .await
@@ -669,10 +571,6 @@ async fn api_key_settings_switch_to_arcee_normalizes_omitted_managed_endpoint_an
     let store_path = root.join("store.db");
     let mut api_key_session = sessions::load_session(&store_path, "session").unwrap();
     api_key_session.reasoning_effort = None;
-    let inherited_selector = api_key_session
-        .api_key_env
-        .clone()
-        .expect("seeded API-key session has a selector");
     sessions::update_session_config(&store_path, &api_key_session).unwrap();
     let manager = test_manager(&root);
 
@@ -682,13 +580,6 @@ async fn api_key_settings_switch_to_arcee_normalizes_omitted_managed_endpoint_an
             UpdateConfigRequest {
                 backend: RequestField::Value("arcee-auth".to_string()),
                 model: RequestField::Value("trinity-large-thinking".to_string()),
-                light_model: RequestField::Value(LightModelSettings {
-                    model: "trinity-large-thinking".to_string(),
-                    backend: Some(BackendKind::ArceeAuth),
-                    base_url: None,
-                    api_key_env: Some(inherited_selector),
-                    reasoning_effort: None,
-                }),
                 ..UpdateConfigRequest::default()
             },
         )
@@ -702,13 +593,6 @@ async fn api_key_settings_switch_to_arcee_normalizes_omitted_managed_endpoint_an
         nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL
     );
     assert_eq!(stored.api_key_env, None);
-    assert_eq!(
-        stored
-            .light_model
-            .as_ref()
-            .and_then(|light| light.api_key_env.as_deref()),
-        None
-    );
     let rehydrated = manager.session_config("session").unwrap();
     assert_eq!(rehydrated.backend.as_deref(), Some("arcee-auth"));
     assert_eq!(
@@ -716,235 +600,6 @@ async fn api_key_settings_switch_to_arcee_normalizes_omitted_managed_endpoint_an
         nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL
     );
     assert_eq!(rehydrated.api_key_env, None);
-    assert_eq!(
-        rehydrated
-            .light_model
-            .as_ref()
-            .and_then(|light| light.api_key_env.as_deref()),
-        None
-    );
-
-    let _ = std::fs::remove_dir_all(root);
-}
-
-#[tokio::test]
-async fn create_reports_the_missing_light_model_credential() {
-    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
-    let root = temp_root("create_missing_light_credential");
-    let nac_home = root.join("nac-home");
-    let _env = ScopedModelEnv::isolated(&nac_home, None);
-    write_arcee_auth(&nac_home, "https://api.arcee.ai");
-    let manager = test_manager(&root);
-
-    let error = manager
-        .create_session(CreateSessionRequest {
-            model: RequestField::Value("moonshotai/kimi-k3".to_string()),
-            base_url: RequestField::Value("https://api.arcee.ai/api/v1".to_string()),
-            backend: RequestField::Value("arcee-auth".to_string()),
-            api_key_env: RequestField::Null,
-            light_model: RequestField::Value(LightModelSettings {
-                model: "deepseek/deepseek-v4-flash-latest".to_string(),
-                backend: Some(BackendKind::ArceeApi),
-                base_url: Some("https://api.arcee.ai/api/v1".to_string()),
-                api_key_env: None,
-                reasoning_effort: None,
-            }),
-            ..CreateSessionRequest::default()
-        })
-        .await
-        .expect_err("an API-key light model without a key must fail creation");
-    let response = ApiError::from(error);
-
-    assert_eq!(response.status, StatusCode::BAD_REQUEST);
-    assert!(
-        response.message.contains("invalid light model settings"),
-        "{}",
-        response.message
-    );
-    assert!(
-        response.message.contains("api_key_env"),
-        "{}",
-        response.message
-    );
-    assert!(
-        response.message.contains("ARCEE_API_KEY"),
-        "{}",
-        response.message
-    );
-    assert!(manager
-        .session_catalog()
-        .list(false)
-        .await
-        .unwrap()
-        .is_empty());
-
-    let _ = std::fs::remove_dir_all(root);
-}
-
-#[tokio::test]
-async fn direct_validates_light_url_without_resolving_unused_credentials() {
-    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
-    let root = temp_root("direct_unused_light_credential");
-    let nac_home = root.join("nac-home");
-    let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
-    let manager = test_manager(&root);
-    let store_path = root.join("store.db");
-
-    let unavailable_light = LightModelSettings {
-        model: "claude-sonnet-4-6".to_string(),
-        backend: Some(BackendKind::AnthropicMessages),
-        base_url: Some("https://light.noncanonical.example/v1".to_string()),
-        api_key_env: Some("ANTHROPIC_API_KEY".to_string()),
-        reasoning_effort: None,
-    };
-    let mut unsafe_light = unavailable_light.clone();
-    unsafe_light.base_url = Some("http://light.public.example/v1".to_string());
-    let error = manager
-        .create_session(CreateSessionRequest {
-            behavior: sessions::SessionBehavior::Direct,
-            model: RequestField::Value("gpt-5.2".to_string()),
-            backend: RequestField::Value("openai-responses".to_string()),
-            api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
-            light_model: RequestField::Value(unsafe_light),
-            ..CreateSessionRequest::default()
-        })
-        .await
-        .expect_err("plain direct must reject an unsafe unused light endpoint");
-    let response = ApiError::from(error);
-    assert_eq!(response.status, StatusCode::BAD_REQUEST);
-    assert!(response.message.contains("requires HTTPS"), "{response:?}");
-    assert!(manager
-        .session_catalog()
-        .list(false)
-        .await
-        .unwrap()
-        .is_empty());
-
-    let created = manager
-        .create_session(CreateSessionRequest {
-            behavior: sessions::SessionBehavior::Direct,
-            model: RequestField::Value("gpt-5.2".to_string()),
-            backend: RequestField::Value("openai-responses".to_string()),
-            api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
-            light_model: RequestField::Value(unavailable_light.clone()),
-            ..CreateSessionRequest::default()
-        })
-        .await
-        .expect("plain direct must not resolve its unused light model");
-    let session_id = created.metadata.session_id.unwrap();
-    assert_eq!(
-        sessions::load_session(&store_path, &session_id)
-            .unwrap()
-            .light_model,
-        Some(unavailable_light.clone())
-    );
-
-    let mut unsafe_light = unavailable_light.clone();
-    unsafe_light.base_url = Some("https://user:secret@light.example/v1".to_string());
-    let error = manager
-        .update_session_config(
-            &session_id,
-            UpdateConfigRequest {
-                light_model: RequestField::Value(unsafe_light),
-                ..UpdateConfigRequest::default()
-            },
-        )
-        .await
-        .expect_err("plain direct PATCH must reject userinfo in an unused light endpoint");
-    let response = ApiError::from(error);
-    assert_eq!(response.status, StatusCode::BAD_REQUEST);
-    assert!(
-        response.message.contains("must not embed userinfo"),
-        "{response:?}"
-    );
-    assert_eq!(
-        sessions::load_session(&store_path, &session_id)
-            .unwrap()
-            .light_model,
-        Some(unavailable_light.clone())
-    );
-
-    manager
-        .update_session_config(
-            &session_id,
-            UpdateConfigRequest {
-                reasoning_effort: RequestField::Value("high".to_string()),
-                ..UpdateConfigRequest::default()
-            },
-        )
-        .await
-        .expect("plain direct updates must not resolve the unused light model");
-    let stored = sessions::load_session(&store_path, &session_id).unwrap();
-    assert_eq!(stored.light_model, Some(unavailable_light));
-    assert_eq!(stored.reasoning_effort, Some(ReasoningEffort::High));
-
-    manager
-        .inner
-        .active_sessions
-        .write()
-        .await
-        .remove(&session_id);
-    let resumed = manager
-        .attach_session(&session_id)
-        .await
-        .expect("plain direct resume must not resolve the unused light model");
-    assert_eq!(
-        resumed.metadata().behavior,
-        sessions::SessionBehavior::Direct
-    );
-
-    let _ = std::fs::remove_dir_all(root);
-}
-
-#[tokio::test]
-async fn update_reports_the_missing_light_model_credential() {
-    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
-    let root = temp_root("update_missing_light_credential");
-    let nac_home = root.join("nac-home");
-    write_arcee_auth(&nac_home, "https://api.arcee.ai");
-    let _env = ScopedModelEnv::isolated(&nac_home, None);
-    seed_editable_session(&root, "session");
-    let manager = test_manager(&root);
-
-    let error = manager
-        .update_session_config(
-            "session",
-            UpdateConfigRequest {
-                light_model: RequestField::Value(LightModelSettings {
-                    model: "deepseek/deepseek-v4-flash-latest".to_string(),
-                    backend: Some(BackendKind::ArceeApi),
-                    base_url: Some("https://api.arcee.ai/api/v1".to_string()),
-                    api_key_env: None,
-                    reasoning_effort: None,
-                }),
-                ..UpdateConfigRequest::default()
-            },
-        )
-        .await
-        .expect_err("an API-key light model without a key must fail the update");
-    let response = ApiError::from(error);
-
-    assert_eq!(response.status, StatusCode::BAD_REQUEST);
-    // Assert the rendered boundary output: the resolver keeps the cause
-    // chain intact and the boundary renders it once with `{:#}`, so the
-    // response pairs the context with the actionable cause.
-    assert!(
-        response
-            .message
-            .starts_with("invalid light model settings: "),
-        "{}",
-        response.message
-    );
-    assert!(
-        response.message.contains("api_key_env"),
-        "{}",
-        response.message
-    );
-    assert!(
-        response.message.contains("ARCEE_API_KEY"),
-        "{}",
-        response.message
-    );
 
     let _ = std::fs::remove_dir_all(root);
 }
@@ -1661,12 +1316,12 @@ async fn server_arcee_configuration_status_and_persistence_are_consistent() {
 
     let create_error = manager
         .create_session(CreateSessionRequest {
-            behavior: sessions::SessionBehavior::Orchestrator,
+            behavior: sessions::SessionBehavior::Direct,
             first_chat: false,
             first_chat_same_behavior: false,
             project_id: None,
             cwd: None,
-            model: RequestField::Omitted,
+            model: RequestField::Value("trinity-large-thinking".to_string()),
             base_url: RequestField::Value("http://api.arcee.ai/insecure".to_string()),
             allow_insecure_http: RequestField::Omitted,
             backend: RequestField::Value("arcee-auth".to_string()),
@@ -1791,7 +1446,7 @@ async fn server_arcee_configuration_status_and_persistence_are_consistent() {
 
     let created = manager
         .create_session(CreateSessionRequest {
-            behavior: sessions::SessionBehavior::Orchestrator,
+            behavior: sessions::SessionBehavior::Direct,
             first_chat: false,
             first_chat_same_behavior: false,
             project_id: None,

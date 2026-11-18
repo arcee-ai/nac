@@ -6,9 +6,14 @@ fn load(conn: &Connection, request_id: &str) -> Result<Option<NativeTaskLaunch>>
     conn.query_row("SELECT request_json,caller_session_id,project_id,source_cwd,session_id,retained,phase,CASE WHEN phase='ready' AND EXISTS(SELECT 1 FROM session_inbox i WHERE i.id=native_task_launches.first_input_id AND i.session_id=native_task_launches.session_id AND i.status='delivered') THEN NULL ELSE error END,first_input_id,created_at,updated_at
         FROM native_task_launches WHERE request_id=?1", params![request_id], |row| {
             Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?,row.get::<_,String>(3)?,row.get::<_,String>(4)?,row.get::<_,bool>(5)?,row.get::<_,String>(6)?,row.get::<_,Option<String>>(7)?,row.get::<_,Option<i64>>(8)?,row.get::<_,String>(9)?,row.get::<_,String>(10)?))
-        }).optional()?.map(|(request,caller_session_id,project_id,cwd,session_id,retained,phase,error,first_input_id,created_at,updated_at)| Ok(NativeTaskLaunch {
-            request: serde_json::from_str(&request)?, caller_session_id,project_id,source_cwd:cwd.into(),session_id,retained,phase,error,first_input_id,created_at,updated_at
-        })).transpose()
+        }).optional()?.map(|(request,caller_session_id,project_id,cwd,session_id,retained,phase,error,first_input_id,created_at,updated_at)| {
+            let mut value: serde_json::Value = serde_json::from_str(&request)?;
+            let selection = value.as_object_mut().ok_or_else(|| anyhow!("invalid native launch request"))?
+                .remove("_nac_model_selection").map(serde_json::from_value).transpose()?;
+            Ok(NativeTaskLaunch {
+                request: serde_json::from_value(value)?, model_selection: selection, caller_session_id,project_id,source_cwd:cwd.into(),session_id,retained,phase,error,first_input_id,created_at,updated_at
+            })
+        }).transpose()
 }
 
 pub(crate) fn reserved_identity(
@@ -30,6 +35,7 @@ pub(crate) fn reserved_identity(
             && request.invoking_session_id.as_deref() == Some(record.caller_session_id.as_str())
             && record.request.title == request.title
             && record.request.initial_prompt() == request.prompt
+            && record.model_selection == request.model_selection
             && record.request.git_ref == request.git_ref
             && record.request.default_ref == request.default_ref,
         "conflict: retained request differs from its native intent"
@@ -115,9 +121,23 @@ pub fn reserve_native_task_launch(path: &Path, caller: &str, project_id: &str, s
     } else {
         anyhow::ensure!(request.project_id.as_deref() == Some(project_id), "conflict: explicit destination changed");
     }
+    let (backend, model, base_url, allow_insecure_http, api_key_env, reasoning_effort, headers, threshold):
+        (Option<String>, String, String, bool, Option<String>, Option<String>, Option<String>, Option<u64>) =
+        tx.query_row("SELECT backend,model,base_url,allow_insecure_http,api_key_env,reasoning_effort,extra_headers_json,orchestrator_compaction_threshold FROM sessions WHERE session_id=?1", params![caller], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?,row.get(6)?,row.get(7)?)))?;
+    let backend = backend.ok_or_else(|| anyhow!("stored session has no backend; session settings repair required: select an explicit backend"))?;
+    let selection = TaskModelSelection {
+        backend, model: request.model.clone().unwrap_or(model), base_url, allow_insecure_http,
+        api_key_env, reasoning_effort: request.reasoning_effort.clone().or(reasoning_effort),
+        extra_headers: headers.filter(|json| !json.is_empty()).map(|json| serde_json::from_str(&json)).transpose()?,
+        orchestrator_compaction_threshold: threshold,
+    };
+    selection.validate()?;
+    let mut durable_request = serde_json::to_value(&request)?;
+    durable_request.as_object_mut().ok_or_else(|| anyhow!("invalid native launch request"))?
+        .insert("_nac_model_selection".into(), serde_json::to_value(selection)?);
     let session_id = uuid::Uuid::new_v4().to_string();
     tx.execute("INSERT INTO native_task_launches(request_id,caller_session_id,project_id,request_json,source_cwd,session_id,retained,phase,created_at,updated_at)
-        VALUES (?1,?2,?3,?4,?5,?6,?7,'reserved',?8,?8)", params![request.request_id,caller,project_id,serde_json::to_string(&request)?,source_cwd.to_string_lossy(),session_id,retained,now_utc()])?;
+        VALUES (?1,?2,?3,?4,?5,?6,?7,'reserved',?8,?8)", params![request.request_id,caller,project_id,serde_json::to_string(&durable_request)?,source_cwd.to_string_lossy(),session_id,retained,now_utc()])?;
     let record = load(&tx, &request.request_id)?.ok_or_else(|| anyhow!("native launch insert missing"))?;
     tx.commit()?;
     Ok(record)

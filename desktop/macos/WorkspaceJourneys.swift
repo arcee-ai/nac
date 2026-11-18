@@ -36,9 +36,9 @@ extension WorkspaceSmoke {
     """#
 
     func directJourney() async {
-        await check("orchestration-opt-in") {
-            try await self.require("Direct-only policy or behavior choices changed", "return !(await (await fetch('/ui-config')).json()).orchestration_enabled && !!document.getElementById('home-composer') && !document.querySelector('button[aria-label^=\"Behavior: \"]');")
-            return "NAC_ORCHESTRATION=0, no behavior chip on Home's composer"
+        await check("direct-only") {
+            try await self.require("Retired session controls remain visible", "return (await fetch('/ui-config')).status === 404 && !!document.getElementById('home-composer') && !document.querySelector('button[aria-label^=\"Behavior: \"]');")
+            return "Direct sessions only; no behavior chip or policy endpoint"
         }
         await check("direct") {
             try await self.createChat("direct", prompt: "WK_RICH")
@@ -106,12 +106,13 @@ extension WorkspaceSmoke {
         }
         await check("provider") {
             try await self.settingsSection("Models & providers")
-            try await self.waitJS("saved dummy provider", "return document.querySelector('input[aria-label=\"Configuration name\"]')?.value === 'Mac preview — deterministic local fixture';")
-            try await self.fill("input[aria-label='Configuration name']", "WK local fixture configuration")
-            try await self.button("Save")
-            try await self.waitJS("provider configuration readback", "return (await (await fetch('/model-configs')).json()).configurations.some(c => c.name === 'WK local fixture configuration') && !document.body.innerText.includes('preview-dummy-only');")
+            try await self.waitJS("provider connection form", "return !!document.querySelector('[aria-label=\"Provider connections\"] input[type=password]');")
+            _ = try await self.js("const p=document.querySelector('[aria-label=\"Provider\"]'); Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(p,'anthropic-messages'); p.dispatchEvent(new Event('change',{bubbles:true})); return true;")
+            try await self.fill("[aria-label='Provider connections'] input[type=password]", "preview-dummy-only")
+            try await self.button("Save connection")
+            try await self.waitJS("provider connection saved", "return document.body.innerText.includes('Provider connection saved.') && !document.body.innerText.includes('preview-dummy-only');")
             try await self.leaveSettings()
-            return "Saved dummy local provider renamed through production configuration form; no vendor-auth claim"
+            return "Saved a dummy provider credential through the production connection form; no vendor-auth claim"
         }
         await check("mcp") {
             try await self.settingsSection("MCP servers")

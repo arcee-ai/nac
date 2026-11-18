@@ -14,8 +14,12 @@ async fn current_http_rejects_distinct_unknown_tools_and_keeps_catalog_available
     std::fs::create_dir_all(&root).unwrap();
     let manager = crate::tests::test_manager(&root);
     let service = streamable_http_service(manager.clone());
-    for index in 0..16 {
-        let name = format!("unknown-{index}");
+    let names = (0..16).map(|index| format!("unknown-{index}")).chain(
+        ["get_thread_episodes", "get_thread_events"]
+            .into_iter()
+            .map(str::to_owned),
+    );
+    for (index, name) in names.enumerate() {
         let body = json!({
             "jsonrpc":"2.0", "id":index, "method":"tools/call",
             "params":{"name":name, "arguments":{}, "_meta":{

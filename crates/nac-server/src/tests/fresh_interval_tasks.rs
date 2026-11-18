@@ -201,6 +201,7 @@ async fn fresh_interval_git_preparation_initial_input_and_retained_result_use_ex
         );
         let destination = FreshTaskDestination {
             project_id: launch.project_id.clone(),
+            model_selection: None,
             pinned_commit: None,
             default_ref: Some("refs/heads/dev".into()),
             model: None,

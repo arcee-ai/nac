@@ -1,12 +1,24 @@
-import type { LaunchModelSelection } from "../../components/modals/ConfigurationsPanel";
-import type { ModelConfigurationRecord } from "../../types/api";
-/** A persisted preset carries selectors, never credential values. */
-export declare function savedModelSelection(record: ModelConfigurationRecord): Extract<LaunchModelSelection, {
+import type { BackendKind } from "../../types/api";
+/** The model and route chosen for one session. Credential values stay server-side. */
+export interface LaunchModelSelection {
     kind: "resolved";
-}>;
-/**
- * Compare effective values, never insertion order. Undefined means inheritance.
- * Callers store selection metadata separately; a discovered preset ID must not
- * reseed local edits when the effective tuple is unchanged.
- */
+    backend: BackendKind;
+    model: string;
+    base_url: string;
+    allow_insecure_http: boolean;
+    api_key_env: string | null;
+    reasoning_effort: string | null;
+    extra_headers: Record<string, string> | null;
+    orchestrator_compaction_threshold?: number | null;
+}
+export interface SessionModelInitial {
+    backend: BackendKind;
+    model: string;
+    base_url: string;
+    allow_insecure_http?: boolean;
+    api_key_env: string | null;
+    reasoning_effort: string | null;
+    extra_headers: Record<string, string>;
+    orchestrator_compaction_threshold?: number | null;
+}
 export declare function sameModelSelection(left: LaunchModelSelection | null, right: LaunchModelSelection | null): boolean;

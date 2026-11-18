@@ -12,4 +12,4 @@ export declare function sessionTarget(segment: InsightSegment): DelegatedRowKey 
  * Ids in tool calls are the model's to choose, so a session is only named or
  * linked once the delegation records of this session list it.
  */
-export declare function useDelegatedSessions(sessionId: string, snapshot: SessionSnapshotResponse | null, timeline: readonly InsightTurnSection[]): SessionResolver;
+export declare function useDelegatedSessions(sessionId: string, _snapshot: SessionSnapshotResponse | null, timeline: readonly InsightTurnSection[]): SessionResolver;

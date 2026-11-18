@@ -163,21 +163,19 @@ final class WorkspaceSmoke {
 
     static let homeComposerScript = "const f = document.getElementById('home-composer'); return !!f && !f.disabled && [...f.labels].some(l => l.textContent.trim() === 'What should we work on?');"
 
-    /// Home's composer is the one new-session flow: the behavior chip, then
-    /// the first prompt; Start session creates the session and sends it.
+    /// Choose the session model before starting the first prompt.
     func createChat(_ behavior: String, prompt: String) async throws {
         try await waitJS("Home composer", Self.homeComposerScript)
-        if behavior != "direct" {
-            let text = behavior == "orchestrator" ? "Orchestrator" : "Agent + Orchestrator"
-            let chip = "document.querySelector('button[aria-label^=\"Behavior: \"]')"
-            if (try await js("const c = \(chip); if (!c) throw Error('Missing behavior choice'); return c.getAttribute('aria-label') !== 'Behavior: ' + \(quote(text));")) as? Bool == true {
-                _ = try await js("\(chip).click(); return true;")
-                let item = "[...document.querySelectorAll('[role=menu][aria-label=\"Session behavior\"] [role=menuitemradio]')].find(r => r.querySelector('.type-label')?.textContent.trim() === \(quote(text)))"
-                try await waitJS("behavior choice \(text)", "return !!(\(item));")
-                _ = try await js("\(item).click(); return true;")
-            }
-            try await waitJS("chosen behavior \(text)", "return \(chip)?.getAttribute('aria-label') === 'Behavior: ' + \(quote(text)) && !document.querySelector('[role=menu][aria-label=\"Session behavior\"]');")
-        }
+        guard behavior == "direct" else { throw PreviewError.message("Only direct sessions are supported") }
+        try await button("Choose a model")
+        try await waitJS("model selector", "return !!document.querySelector('[role=dialog] button[aria-expanded]');")
+        _ = try await js("document.querySelector('[role=dialog] button[aria-expanded]').click(); return true;")
+        try await waitJS("model search", "return !!document.querySelector('input[aria-label=\"Search models\"]');")
+        try await fill("input[aria-label='Search models']", "gpt-5.6-sol")
+        try await waitJS("fixture OpenAI model", "return [...document.querySelectorAll('[aria-label=\"Model results\"] button[data-row]')].some(b => b.parentElement?.textContent.includes('OpenAI') && b.textContent.toLowerCase().includes('gpt-5.6')); ")
+        _ = try await js("[...document.querySelectorAll('[aria-label=\"Model results\"] button[data-row]')].find(b => b.parentElement?.textContent.includes('OpenAI') && b.textContent.toLowerCase().includes('gpt-5.6')).click(); return true;")
+        try await waitJS("available session model", "return [...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Use this model' && !b.disabled);")
+        try await button("Use this model")
         try await fill("#home-composer", prompt)
         try await button("Start session")
         try await waitJS("production session", "return location.hash.includes('/session/') && !!document.querySelector('[role=combobox][aria-label=Message]');")

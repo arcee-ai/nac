@@ -61,7 +61,7 @@ async fn cold_attachment_and_resume_do_not_read_unrelated_session_lineage() {
 }
 
 #[tokio::test]
-async fn steering_routes_reject_blank_before_lookup_and_keep_inactive_conflicts() {
+async fn retired_steering_routes_are_not_found() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let root = temp_root("steering_validation");
     let nac_home = root.join("nac-home");
@@ -70,25 +70,21 @@ async fn steering_routes_reject_blank_before_lookup_and_keep_inactive_conflicts(
     let app = router(test_manager(&root));
 
     for (uri, instruction, expected) in [
-        (
-            "/sessions/missing/steering",
-            "  \n ",
-            StatusCode::BAD_REQUEST,
-        ),
+        ("/sessions/missing/steering", "  \n ", StatusCode::NOT_FOUND),
         (
             "/sessions/missing/threads/worker/steering",
             "\t",
-            StatusCode::BAD_REQUEST,
+            StatusCode::NOT_FOUND,
         ),
         (
             "/sessions/session/steering",
             "redirect",
-            StatusCode::CONFLICT,
+            StatusCode::NOT_FOUND,
         ),
         (
             "/sessions/session/threads/worker/steering",
             "redirect",
-            StatusCode::CONFLICT,
+            StatusCode::NOT_FOUND,
         ),
     ] {
         let request = Request::builder()

@@ -8,7 +8,7 @@ use nac_core::{
 };
 
 use crate::{
-    application::Field, config_replacement_conflict, light_model, nonblank_request_string,
+    application::Field, config_replacement_conflict, nonblank_request_string,
     parse_prospective_model_config, request_configuration_error, request_configuration_error_from,
     validated_compaction_threshold, SessionManager,
 };
@@ -59,7 +59,7 @@ impl<'a> SessionConfigurationApplication<'a> {
     pub async fn update_session_config(
         &self,
         session_id: &str,
-        mut request: SessionConfigPatch,
+        request: SessionConfigPatch,
     ) -> Result<()> {
         let request_empty = request.is_empty();
         if request_empty {
@@ -67,6 +67,11 @@ impl<'a> SessionConfigurationApplication<'a> {
             // store-free no-op: no cache-dependent busy result, legacy config
             // repair, revision increment, credential lookup, or ownership read.
             return Ok(());
+        }
+        if !matches!(request.light_model, Field::Unchanged) {
+            return Err(request_configuration_error(
+                "light_model is no longer supported",
+            ));
         }
         self.manager
             .validate_operation_session(
@@ -125,64 +130,15 @@ impl<'a> SessionConfigurationApplication<'a> {
             )
             .await?;
 
-        let behavior = sessions::load_session_behavior(&self.manager.inner.store_path, session_id)?;
         let current = sessions::load_session_config(&self.manager.inner.store_path, session_id)?;
         let mut prospective = current.clone();
-        let light_field = std::mem::take(&mut request.light_model);
         apply_patch(&mut prospective, request)?;
-        if matches!(&light_field, Field::Unchanged)
-            && current.diagnostics.iter().any(|diagnostic| {
-                diagnostic.starts_with(sessions::MALFORMED_LIGHT_MODEL_DIAGNOSTIC)
-            })
-        {
-            return Err(request_configuration_error(
-                "stored light-model settings are malformed; include light_model in the update to repair them, or null to return to single-model mode",
-            ));
-        }
         let (backend, reasoning_effort, extra_headers) = parse_prospective_model_config(
             &mut prospective,
             backend_selected,
             base_url_omitted,
             api_key_env_omitted,
         )?;
-        match light_field {
-            Field::Unchanged => {
-                // Re-normalize the durable light selection under the
-                // prospective transport policy without resolving its
-                // credential. This also moves an inherited selector along to
-                // the normalized primary selector, including a clear when the
-                // primary switches to managed auth.
-                let inherited = light_model::InheritedCredential {
-                    backend,
-                    name: prospective.api_key_env.as_deref(),
-                    previous: current.api_key_env.as_deref(),
-                };
-                if let Some(light) = prospective.light_model.take() {
-                    prospective.light_model = Some(light_model::normalize_with_http_policy(
-                        light,
-                        Some(inherited),
-                        prospective.allow_insecure_http,
-                    )?);
-                }
-            }
-            Field::Clear => prospective.light_model = None,
-            Field::Set(light) => {
-                // A same-backend light model with no explicit selector
-                // inherits the session's primary one, following it when the
-                // primary selector changes.
-                let inherited = Some(light_model::InheritedCredential {
-                    backend,
-                    name: prospective.api_key_env.as_deref(),
-                    previous: current.api_key_env.as_deref(),
-                });
-                prospective.light_model = Some(light_model::normalize_with_http_policy(
-                    light,
-                    inherited,
-                    prospective.allow_insecure_http,
-                )?);
-            }
-        }
-
         let _settings = EffectiveModelSettings::new_with_http_policy(
             backend,
             prospective.model.clone(),
@@ -206,35 +162,6 @@ impl<'a> SessionConfigurationApplication<'a> {
                 prospective.api_key_env.as_deref(),
             )
         });
-        let trusted_light = self
-            .manager
-            .managed_model()
-            .and_then(super::managed::ManagedModelProfile::trusted_light_credential);
-        // Plain direct has no ALL-36 light-model consumer: preserve its
-        // normalized durable selection without reading that unused provider's
-        // credentials. Orchestrator-capable sessions validate the same client
-        // they will launch. A mounted key is eligible only for the exact
-        // operator-bound backend and endpoint.
-        if behavior != sessions::SessionBehavior::Direct {
-            if let Some(light) = prospective.light_model.as_ref() {
-                if let Some(trusted) = trusted_light.as_ref() {
-                    nac_core::light_model::validate_with_trusted_credential_and_http_policy(
-                        light,
-                        &extra_headers,
-                        trusted,
-                        prospective.allow_insecure_http,
-                    )
-                    .map_err(request_configuration_error_from)?;
-                } else {
-                    nac_core::light_model::validate_with_http_policy(
-                        light,
-                        &extra_headers,
-                        prospective.allow_insecure_http,
-                    )
-                    .map_err(request_configuration_error_from)?;
-                }
-            }
-        }
         if let Some(profile) = mounted_override {
             let managed = self.manager.managed_host().ok_or_else(|| {
                 anyhow!("managed model profile is missing its host configuration")

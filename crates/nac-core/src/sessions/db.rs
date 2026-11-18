@@ -53,11 +53,6 @@ fn deserialize_token_accounting(
     }
 }
 
-/// Diagnostic prefix `load_session_config` uses for an unparseable
-/// `light_model_json` column, so callers can require an explicit repair
-/// instead of persisting the loss.
-pub const MALFORMED_LIGHT_MODEL_DIAGNOSTIC: &str = "malformed stored light model";
-
 pub(super) fn serialize_light_model(
     light: Option<&crate::light_model::LightModelSettings>,
 ) -> Result<Option<String>> {
@@ -80,6 +75,7 @@ pub(super) fn deserialize_light_model(
 
 coordinated_command! {
 pub fn create_session(path: &Path, snapshot: &SessionSnapshot) -> Result<()> {
+    validate_new_session(snapshot)?;
     crate::store::retry_busy_correlated(
         crate::telemetry::Correlation::session(Some(&snapshot.session_id)),
         || create_session_once(path, snapshot),
@@ -107,6 +103,7 @@ pub(crate) fn insert_new_session_in_transaction(
     path: &Path,
     snapshot: &SessionSnapshot,
 ) -> Result<()> {
+    validate_new_session(snapshot)?;
     let existing: Option<String> = tx
         .query_row(
             "SELECT session_id FROM sessions WHERE session_id = ?1",
@@ -129,6 +126,18 @@ pub(crate) fn insert_new_session_in_transaction(
             params![snapshot.session_id, project_id],
         )?;
     }
+    Ok(())
+}
+
+fn validate_new_session(snapshot: &SessionSnapshot) -> Result<()> {
+    anyhow::ensure!(
+        snapshot.behavior == SessionBehavior::Direct,
+        "only direct session behavior is supported"
+    );
+    anyhow::ensure!(
+        snapshot.light_model.is_none(),
+        "light_model is no longer supported"
+    );
     Ok(())
 }
 
@@ -433,7 +442,6 @@ pub fn update_raw_session_config(
         SessionConfigUpdateError::Store(anyhow!("session configuration version overflow"))
     })?;
 
-    let light_model_json = serialize_light_model(config.light_model.as_ref())?;
     let mut conn = crate::store::open_connection(path)?;
     let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     let updated = tx.execute(
@@ -445,11 +453,10 @@ pub fn update_raw_session_config(
              reasoning_effort = ?5,
              api_key_env = ?6,
              extra_headers_json = ?7,
-             light_model_json = ?8,
-             orchestrator_compaction_threshold = ?9,
-             config_version = ?10,
-             automatic_compaction = ?13
-         WHERE session_id = ?11 AND config_version = ?12",
+             orchestrator_compaction_threshold = ?8,
+             config_version = ?9,
+             automatic_compaction = ?12
+         WHERE session_id = ?10 AND config_version = ?11",
         params![
             config.model,
             config.base_url,
@@ -458,7 +465,6 @@ pub fn update_raw_session_config(
             config.reasoning_effort,
             config.api_key_env,
             config.extra_headers_json,
-            light_model_json,
             config.orchestrator_compaction_threshold,
             next_version,
             config.session_id,
@@ -611,12 +617,12 @@ pub fn load_session_config(path: &Path, session_id: &str) -> Result<RawSessionCo
     let conn = crate::store::open_connection(path)?;
     let row = conn
         .query_row(
-            "SELECT session_id, model, base_url, allow_insecure_http, backend, reasoning_effort, api_key_env, extra_headers_json, config_version, orchestrator_compaction_threshold, light_model_json, automatic_compaction
+            "SELECT session_id, model, base_url, allow_insecure_http, backend, reasoning_effort, api_key_env, extra_headers_json, config_version, orchestrator_compaction_threshold, automatic_compaction
              FROM sessions
              WHERE session_id = ?1",
             params![session_id],
             |row| {
-                Ok((
+                Ok(
                     RawSessionConfig {
                         session_id: row.get(0)?,
                         model: row.get(1)?,
@@ -629,24 +635,17 @@ pub fn load_session_config(path: &Path, session_id: &str) -> Result<RawSessionCo
                         light_model: None,
                         config_version: row.get(8)?,
                         orchestrator_compaction_threshold: row.get(9)?,
-                        automatic_compaction: row.get(11)?,
+                        automatic_compaction: row.get(10)?,
                         diagnostics: Vec::new(),
-                    },
-                    row.get::<_, Option<String>>(10)?,
-                ))
+                    }
+                )
             },
         )
         .optional()?;
 
-    let Some((mut config, light_model_json)) = row else {
+    let Some(mut config) = row else {
         return Err(anyhow!("session '{session_id}' was not found"));
     };
-    match deserialize_light_model(light_model_json.as_deref()) {
-        Ok(light_model) => config.light_model = light_model,
-        Err(error) => config
-            .diagnostics
-            .push(format!("{MALFORMED_LIGHT_MODEL_DIAGNOSTIC}: {error:#}")),
-    }
     config.orchestrator_compaction_threshold =
         validate_stored_compaction_threshold(config.orchestrator_compaction_threshold)?;
     config.diagnostics.extend(model_config_diagnostics(
@@ -1696,11 +1695,19 @@ impl SessionRow {
         let base_url = self.base_url;
         let backend = parse_backend(self.backend)?;
         let extra_headers = parse_extra_headers(self.extra_headers_json.as_deref())?;
+        let behavior: SessionBehavior = self.behavior.parse()?;
+        // Direct sessions have no consumer for the retired selector. Leave its
+        // stored bytes alone and do not let malformed inert data block resume.
+        let light_model = if behavior == SessionBehavior::Direct {
+            None
+        } else {
+            deserialize_light_model(self.light_model_json.as_deref())?
+        };
         let (token_usages, unattributed_token_usage) =
             deserialize_token_accounting(self.token_usages_json.as_deref())?;
         Ok(SessionSnapshot {
             session_id: self.session_id,
-            behavior: self.behavior.parse()?,
+            behavior,
             project_id: self.project_id,
             cwd: PathBuf::from(self.cwd),
             model: self.model,
@@ -1712,7 +1719,7 @@ impl SessionRow {
             ssh: stored_ssh_connection(self.ssh_host, self.ssh_port, self.ssh_identity_file),
             api_key_env: self.api_key_env,
             extra_headers,
-            light_model: deserialize_light_model(self.light_model_json.as_deref())?,
+            light_model,
             orchestrator_compaction_threshold: validate_stored_compaction_threshold(
                 self.orchestrator_compaction_threshold,
             )?,

@@ -12,15 +12,14 @@ import {
 
 const EXA_CANARY = "production-e2e-exa-canary";
 
-test.describe("managed native Exa delegation", () => {
+test.describe("native Exa retrieval", () => {
   test.use({ exaCredential: EXA_CANARY });
 
-  test("runs real worker search/fetch and retains malformed errors without the credential", async ({
+  test("runs search/fetch and retains malformed errors without the credential", async ({
     harness,
     request,
   }) => {
     const exa = requireExa(harness);
-    enqueueDispatch(harness, "success", "E2E_WORKER_EXA_SUCCESS");
     harness.provider.enqueue(
       "worker-search",
       {
@@ -59,19 +58,13 @@ test.describe("managed native Exa delegation", () => {
       { functionOutputCallId: "exa-search-malformed" },
       { kind: "text", text: "managed Exa worker completed after the malformed response" },
     );
-    harness.provider.enqueue(
-      "orchestrator-finished",
-      { functionOutputCallId: "exa-thread-success" },
-      { kind: "text", text: "managed Exa orchestration completed" },
-    );
-
     const projectId = await createProject(request, harness);
-    const sessionId = await createSession(request, harness, "orchestrator", projectId);
+    const sessionId = await createSession(request, harness, "direct", projectId);
     const submitted = await request.post(`${harness.baseUrl}/sessions/${sessionId}/runs`, {
-      data: { prompt: "E2E_MANAGED_EXA_success" },
+      data: { prompt: "E2E_WORKER_EXA_SUCCESS" },
     });
     expect(submitted.status()).toBe(202);
-    await harness.provider.waitForRequestCount(7);
+    await harness.provider.waitForRequestCount(4);
     await exa.waitForRequestCount(3);
     await waitForRunIdle(request, harness, sessionId);
     harness.provider.assertConsumed();
@@ -84,16 +77,15 @@ test.describe("managed native Exa delegation", () => {
     expect(JSON.stringify(malformedResult?.body)).toContain("invalid bounded JSON response");
     expect(JSON.stringify(malformedResult?.body)).not.toContain(EXA_CANARY);
 
-    await assertCanaryAbsentFromRetainedState(harness, request, sessionId, "exa-worker-success");
+    await assertCanaryAbsentFromRetainedState(harness, request, sessionId);
     await harness.waitForNoWorkerProcesses();
   });
 
-  test("cancels a hanging worker request and reaps its background descendant", async ({
+  test("cancels a hanging request and reaps its background descendant", async ({
     harness,
     request,
   }) => {
     const exa = requireExa(harness);
-    enqueueDispatch(harness, "cancel", "E2E_WORKER_EXA_CANCEL");
     harness.provider.enqueue(
       "worker-background-descendant",
       { token: "E2E_WORKER_EXA_CANCEL", requiredTools: ["exec_command", "web_search"] },
@@ -116,9 +108,9 @@ test.describe("managed native Exa delegation", () => {
     );
 
     const projectId = await createProject(request, harness);
-    const sessionId = await createSession(request, harness, "orchestrator", projectId);
+    const sessionId = await createSession(request, harness, "direct", projectId);
     const submitted = await request.post(`${harness.baseUrl}/sessions/${sessionId}/runs`, {
-      data: { prompt: "E2E_MANAGED_EXA_cancel" },
+      data: { prompt: "E2E_WORKER_EXA_CANCEL" },
     });
     expect(submitted.status()).toBe(202);
     await withTimeout(exa.hangingRequestAccepted, 15_000, "hanging Exa request");
@@ -134,51 +126,9 @@ test.describe("managed native Exa delegation", () => {
     expect(exa.requests).toHaveLength(1);
     expect(exa.requests[0]).toMatchObject({ path: "/search", apiKey: EXA_CANARY });
 
-    await assertCanaryAbsentFromRetainedState(harness, request, sessionId, "exa-worker-cancel");
+    await assertCanaryAbsentFromRetainedState(harness, request, sessionId);
   });
 });
-
-function enqueueDispatch(harness: EmbeddedHarness, suffix: string, workerToken: string): void {
-  harness.provider.enqueue(
-    `orchestrator-workset-${suffix}`,
-    { token: `E2E_MANAGED_EXA_${suffix}`, requiredTools: ["thread", "workset_define"] },
-    {
-      kind: "function_call",
-      name: "workset_define",
-      callId: `exa-workset-${suffix}`,
-      arguments: {
-        id: `managed-exa-${suffix}`,
-        goal: "Exercise managed Exa delegation through a real worker",
-        status: "running",
-        summary: "Managed Exa production-path integration",
-        verification_recipe: "Inspect the retained worker episode and provider requests",
-        workset_items: [
-          {
-            title: "Exercise Exa worker",
-            scope: "native web retrieval",
-            description: "Run the branch-built worker through the local TLS Exa double.",
-            role: "verification",
-            depends_on: [],
-            acceptance: "The worker completes without retaining its delegated credential.",
-          },
-        ],
-      },
-    },
-  );
-  harness.provider.enqueue(
-    `orchestrator-thread-${suffix}`,
-    { functionOutputCallId: `exa-workset-${suffix}` },
-    {
-      kind: "function_call",
-      name: "thread",
-      callId: `exa-thread-${suffix}`,
-      arguments: {
-        name: `exa-worker-${suffix}`,
-        action: `${workerToken} use the native Exa tools exactly as scripted`,
-      },
-    },
-  );
-}
 
 function requireExa(harness: EmbeddedHarness) {
   if (harness.exa == null) throw new Error("managed Exa double was not started");
@@ -189,13 +139,11 @@ async function assertCanaryAbsentFromRetainedState(
   harness: EmbeddedHarness,
   request: Parameters<typeof createProject>[0],
   sessionId: string,
-  threadName: string,
 ): Promise<void> {
   const surfaces = [
     `/sessions/${sessionId}?include_system=true&message_limit=200&thread_event_limit=200`,
     `/sessions/${sessionId}/messages?include_system=true&limit=200`,
     `/sessions/${sessionId}/events?limit=500`,
-    `/sessions/${sessionId}/threads/${encodeURIComponent(threadName)}/events?limit=500`,
   ];
   const responses = await Promise.all(
     surfaces.map(async (surface) => {

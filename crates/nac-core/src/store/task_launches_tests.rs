@@ -23,6 +23,7 @@ pub(crate) fn fixture() -> (PathBuf, TaskLaunchRequest, TaskLaunchSource) {
         request_id: uuid::Uuid::new_v4().to_string(),
         project_id: "project".into(),
         invoking_session_id: None,
+        model_selection: None,
         git_ref: Some("topic".into()),
         default_ref: Some("dev".into()),
         title: "Retained task".into(),
@@ -215,7 +216,7 @@ fn retained_migration_rows(conn: &Connection, table: &str) -> Vec<Vec<rusqlite::
 #[test]
 fn v38_evidence_and_delegated_input_survive_retained_launch_migration() {
     let (path, request, source) = fixture();
-    for session in ["parent", "child", "orchestrator"] {
+    for session in ["parent", "child"] {
         insert_test_session(&path, session);
     }
     let conn = Connection::open(&path).unwrap();
@@ -256,31 +257,6 @@ fn v38_evidence_and_delegated_input_survive_retained_launch_migration() {
         )
         .unwrap();
     }
-    conn.execute(
-        "UPDATE sessions SET behavior = 'direct-with-orchestrator' WHERE session_id = 'parent'",
-        [],
-    )
-    .unwrap();
-    create_managed_orchestrator_relationship(&path, "parent", "orchestrator", "kept managed")
-        .unwrap();
-    begin_managed_orchestrator_run(
-        &path,
-        "orchestrator",
-        "managed-generation",
-        ManagedOrchestratorExecutionMode::Foreground,
-    )
-    .unwrap();
-    settle_managed_orchestrator_run(
-        &path,
-        "orchestrator",
-        "managed-generation",
-        ManagedOrchestratorTerminal {
-            status: ManagedOrchestratorStatus::Cancelled,
-            report: None,
-            failure: Some("kept cancellation".into()),
-        },
-    )
-    .unwrap();
     let waiter = crate::sessions::ChildInputWaitLease::new(&path).unwrap();
     let input = create_traditional_child_inbox_item(
         &path,
@@ -291,8 +267,7 @@ fn v38_evidence_and_delegated_input_survive_retained_launch_migration() {
         Some(waiter.id()),
     )
     .unwrap();
-    // The landed v38 shape contains run/goal evidence, both delegated receipt
-    // topologies and exact queued-input authority, but no retained launch tables.
+    // The landed v38 shape contains run/goal evidence, child receipts and exact queued-input authority, but no retained launch tables.
     conn.execute_batch(
         "INSERT INTO session_run_outcomes
              (id, session_id, run_id, disposition, result_excerpt, result_truncated, finished_at)
@@ -357,5 +332,42 @@ fn v38_evidence_and_delegated_input_survive_retained_launch_migration() {
     );
     drop(conn);
     drop(waiter);
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}
+
+#[test]
+fn task_model_is_frozen_and_rejects_credential_headers_before_reservation() {
+    let (path, mut request, source) = fixture();
+    request.model_selection = Some(TaskModelSelection {
+        backend: "openai-responses".into(),
+        model: "gpt-5.2".into(),
+        base_url: "https://api.openai.com/v1".into(),
+        allow_insecure_http: false,
+        api_key_env: Some("OPENAI_API_KEY".into()),
+        reasoning_effort: None,
+        extra_headers: None,
+        orchestrator_compaction_threshold: None,
+    });
+    let first = reserve_task_launch(&path, request.clone(), source.clone()).unwrap();
+    assert_eq!(first.request.model_selection, request.model_selection);
+    let mut changed = request.clone();
+    changed.model_selection.as_mut().unwrap().model = "gpt-5.3".into();
+    assert!(reserve_task_launch(&path, changed, source.clone()).is_err());
+    let mut secret = request;
+    secret.request_id = uuid::Uuid::new_v4().to_string();
+    secret.model_selection.as_mut().unwrap().extra_headers = Some(
+        [("Authorization".to_string(), "secret-value".to_string())]
+            .into_iter()
+            .collect(),
+    );
+    assert!(reserve_task_launch(&path, secret, source).is_err());
+    let conn = open_runtime_connection(&path).unwrap();
+    let stored: String = conn
+        .query_row("SELECT request_json FROM task_launches", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert!(!stored.contains("secret-value"));
+    drop(conn);
     std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
 }

@@ -4,7 +4,7 @@ use super::*;
 pub struct NacConfig {
     #[serde(default)]
     pub storage: StorageConfig,
-    #[serde(default)]
+    #[serde(skip)]
     pub model: ModelConfig,
     #[serde(default)]
     pub compaction: CompactionConfig,
@@ -29,13 +29,8 @@ pub struct PermissionConfig {
     pub rules: Vec<crate::permissions::PermissionRule>,
 }
 
-/// Model defaults from config.toml's `[model]` section. Slim by design:
-/// the backend is resolved from the configured model id through the
-/// catalog, base URLs materialize from catalog provider endpoint defaults,
-/// and credentials auto-select the provider's conventional env var — so
-/// only the model id, an optional effort, and extra headers remain.
-/// Removed keys (`backend`, `base_url`, `api_key_env`) in an old config
-/// are ignored with a one-time warning at load.
+/// Transitional in-memory shape for older callers. Config files no longer
+/// populate these fields or choose model settings for new sessions.
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 pub struct ModelConfig {
     pub model: Option<String>,
@@ -159,13 +154,16 @@ impl NacConfig {
         toml::from_str(&raw).with_context(|| format!("failed to parse config {}", path.display()))
     }
 
-    /// One-time migration warning for `[model]` keys removed from the
-    /// config schema (`backend`, `base_url`, `api_key_env`): they parse
-    /// tolerantly (serde ignores them) and the catalog-driven resolution
-    /// replaces them. Printed at most once per process even though config
-    /// loads happen per session launch.
+    /// Report older global model defaults, which no longer select a session model.
     fn warn_removed_model_keys(raw: &str) {
-        const REMOVED_KEYS: [&str; 3] = ["backend", "base_url", "api_key_env"];
+        const REMOVED_KEYS: [&str; 6] = [
+            "backend",
+            "base_url",
+            "api_key_env",
+            "model",
+            "reasoning_effort",
+            "extra_headers",
+        ];
         static WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
         if WARNED.load(std::sync::atomic::Ordering::Relaxed) {
             return;
@@ -185,7 +183,7 @@ impl NacConfig {
         }
         WARNED.store(true, std::sync::atomic::Ordering::Relaxed);
         eprintln!(
-            "nac: config: ignoring removed [model] keys ({}) — the backend now resolves from the model id through the catalog, base URLs default from the catalog, and credentials auto-select the provider's conventional environment variable",
+            "nac: config: ignoring removed [model] defaults ({}); select a model and its settings for each new session",
             removed.join(", ")
         );
     }

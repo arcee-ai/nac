@@ -22,6 +22,7 @@ impl Choices {
     fn destination(self, project: String) -> FreshTaskDestination {
         FreshTaskDestination {
             project_id: project,
+            model_selection: None,
             pinned_commit: self.pinned_commit,
             default_ref: self.default_ref,
             model: self.model,
@@ -283,7 +284,7 @@ impl NativeTool for ControlFreshTaskScheduleTool {
                 let binding = if relinquishing {
                     prior.context("standalone schedule was not found")?.binding
                 } else {
-                    let destination = if let Some(choices) = input.destination {
+                    let mut destination = if let Some(choices) = input.destination {
                         choices.destination(project.clone())
                     } else {
                         prior
@@ -291,6 +292,22 @@ impl NativeTool for ControlFreshTaskScheduleTool {
                             .and_then(|prior| prior.binding.fresh_task.clone())
                             .unwrap_or_else(|| Choices::default().destination(project.clone()))
                     };
+                    if destination.model_selection.is_none() {
+                        let session = crate::sessions::load_session(path, &caller)?;
+                        destination.model_selection = Some(crate::store::TaskModelSelection {
+                            backend: session.backend.to_string(),
+                            model: destination.model.take().unwrap_or(session.model),
+                            base_url: session.base_url,
+                            allow_insecure_http: session.allow_insecure_http,
+                            api_key_env: session.api_key_env,
+                            reasoning_effort: destination.reasoning_effort.take().or_else(|| {
+                                session.reasoning_effort.map(|v| v.as_str().to_owned())
+                            }),
+                            extra_headers: Some(session.extra_headers),
+                            orchestrator_compaction_threshold: session
+                                .orchestrator_compaction_threshold,
+                        });
+                    }
                     let target =
                         crate::projects::load_project_launch_context(path, &project)?.project;
                     anyhow::ensure!(

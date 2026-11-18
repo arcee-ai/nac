@@ -10,7 +10,7 @@ const forbidden = ["subagent", "create_goal", "orchestrator_launch"];
 test.describe("inherited native web", () => {
   test.use({ exaCredential: CANARY });
 
-  for (const behavior of ["direct", "direct-with-orchestrator"] as const) {
+  for (const behavior of ["direct"] as const) {
     for (const background of [false, true]) {
       test(`${behavior} traditional child ${background ? "background" : "foreground"} invokes both tools and continues`, async ({
         harness,
@@ -120,7 +120,7 @@ test.describe("inherited native web", () => {
     harness,
     request,
   }) => {
-    const parent = await createSession(request, harness, "direct-with-orchestrator");
+    const parent = await createSession(request, harness, "direct");
     const description = "Steered research";
     const gate = new ScriptGate();
     harness.provider.enqueue(
@@ -262,89 +262,6 @@ test.describe("inherited native web", () => {
     harness.provider.assertConsumed();
     await assertIsolated(harness, request, [parent, child_session_id]);
   });
-
-  for (const managedNativeWeb of [true, false]) {
-    test.describe(`${managedNativeWeb ? "managed" : "ordinary local"} dispatch`, () => {
-      test.use({ managedNativeWeb });
-      test("managed orchestrator inherits both tools and forwards only its admitted snapshot to a worker", async ({
-        harness,
-        request,
-      }) => {
-        const parent = await createSession(request, harness, "direct-with-orchestrator");
-        enqueueResearch(
-          harness,
-          "orchestrator",
-          "INHERITED_ORCHESTRATOR",
-          ["subagent", "create_goal", "orchestrator_launch"],
-          false,
-        );
-        harness.provider.enqueue(
-          "workset",
-          { functionOutputCallId: "orchestrator-fetch" },
-          {
-            kind: "function_call",
-            name: "workset_define",
-            callId: "inherited-workset",
-            arguments: {
-              id: "inherited",
-              goal: "Research with native web",
-              status: "running",
-              summary: "Delegated research",
-              verification_recipe: "Invoke both native web tools",
-              workset_items: [
-                {
-                  title: "Research",
-                  scope: "web",
-                  description: "Run a real inherited worker",
-                  role: "verification",
-                  depends_on: [],
-                  acceptance: "Both web tools succeed",
-                },
-              ],
-            },
-          },
-        );
-        harness.provider.enqueue(
-          "dispatch",
-          { functionOutputCallId: "inherited-workset" },
-          {
-            kind: "function_call",
-            name: "thread",
-            callId: "inherited-thread",
-            arguments: {
-              name: "inherited-worker",
-              action: "INHERITED_WORKER research with both tools",
-            },
-          },
-        );
-        enqueueResearch(harness, "worker", "INHERITED_WORKER", forbidden);
-        harness.provider.enqueue(
-          "orchestrator-done",
-          { functionOutputCallId: "inherited-thread" },
-          { kind: "text", text: "research complete" },
-        );
-        const launched = await request.post(`${harness.baseUrl}/sessions/${parent}/orchestrators`, {
-          data: {
-            description: "Native research",
-            prompt: "INHERITED_ORCHESTRATOR",
-            background: false,
-          },
-          timeout: 30_000,
-        });
-        expect(launched.ok(), await launched.text()).toBe(true);
-        const child = (await launched.json()) as {
-          orchestrator_session_id: string;
-          status: string;
-        };
-        expect(child.status).toBe("completed");
-        await harness.exa!.waitForRequestCount(4);
-        expect(harness.exa!.requests.every((r) => r.apiKey === CANARY)).toBe(true);
-        harness.provider.assertConsumed();
-        await harness.waitForNoWorkerProcesses();
-        await assertIsolated(harness, request, [parent, child.orchestrator_session_id]);
-      });
-    });
-  }
 });
 
 function enqueueResearch(
@@ -358,7 +275,7 @@ function enqueueResearch(
     `${id}-search`,
     {
       token,
-      requiredTools: [id === "orchestrator" ? "thread" : "read", "web_search", "web_fetch"],
+      requiredTools: ["read", "web_search", "web_fetch"],
       forbiddenTools,
     },
     {
@@ -436,24 +353,24 @@ async function assertIsolated(
   await scan(harness.runRoot);
 }
 
-test("missing parent credentials grant neither traditional nor managed subagents native web", async ({
+test("missing parent credentials do not grant child sessions native web", async ({
   harness,
   request,
 }) => {
-  const parent = await createSession(request, harness, "direct-with-orchestrator");
-  for (const kind of ["children", "orchestrators"] as const) {
+  const parent = await createSession(request, harness, "direct");
+  for (const kind of ["children"] as const) {
     harness.provider.enqueue(
       kind,
       {
         token: `NO_INHERITED_WEB_${kind}`,
-        requiredTools: kind === "children" ? ["read"] : ["thread"],
+        requiredTools: ["read"],
         forbiddenTools: ["web_search", "web_fetch"],
       },
       { kind: "text", text: "No inherited native web" },
     );
     const response = await request.post(`${harness.baseUrl}/sessions/${parent}/${kind}`, {
       data: {
-        ...(kind === "children" ? { profile: "general" } : {}),
+        profile: "general",
         description: kind,
         prompt: `NO_INHERITED_WEB_${kind}`,
         background: false,

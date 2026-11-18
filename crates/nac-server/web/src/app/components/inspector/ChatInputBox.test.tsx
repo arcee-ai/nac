@@ -38,7 +38,6 @@ const fakes = {
   submitRun: vi.fn(),
   submitShellCommand: vi.fn(),
   getShellCommand: vi.fn(),
-  steerOrchestrator: vi.fn(),
   compactSession: vi.fn(),
   createInboxItem: vi.fn(),
   updateInboxItem: vi.fn(),
@@ -63,9 +62,6 @@ vi.spyOn(api, "submitShellCommand").mockImplementation((...args) =>
 );
 vi.spyOn(api, "getShellCommand").mockImplementation((...args) => fakes.getShellCommand(...args));
 vi.spyOn(api, "submitRun").mockImplementation((...args) => fakes.submitRun(...args));
-vi.spyOn(api, "steerOrchestrator").mockImplementation((...args) =>
-  fakes.steerOrchestrator(...args),
-);
 vi.spyOn(api, "compactSession").mockImplementation((...args) => fakes.compactSession(...args));
 vi.spyOn(api, "createInboxItem").mockImplementation((...args) => fakes.createInboxItem(...args));
 vi.spyOn(api, "updateInboxItem").mockImplementation((...args) => fakes.updateInboxItem(...args));
@@ -194,7 +190,7 @@ function composer(
     lineage,
     summary: {
       session_id: sessionId,
-      behavior: behavior ?? "orchestrator",
+      behavior: behavior ?? "direct",
       cwd: "/tmp/project",
       model: "gpt-5.6-sol",
       backend: "openai-responses",
@@ -213,7 +209,7 @@ function composer(
     ? ({
         metadata: {
           session_id: sessionId,
-          behavior: behavior ?? "orchestrator",
+          behavior: behavior ?? "direct",
           cwd: "/tmp/project",
           workspace_host_path: "/tmp/project",
           store_path: "/tmp/store.db",
@@ -306,7 +302,6 @@ beforeEach(() => {
       display_prompt: "prompt",
     },
   });
-  fakes.steerOrchestrator.mockReset().mockResolvedValue({ status: "queued" });
   fakes.compactSession.mockReset().mockResolvedValue({
     status: "compacted",
     compaction_id: "compaction",
@@ -787,55 +782,6 @@ describe("direct inbox and goal journeys", () => {
     expect(textarea.value).toBe("");
   });
 
-  it("steers an active classic orchestrator while keeping Stop separate", async () => {
-    syncRunFromSnapshot({
-      run_id: "run-live",
-      prompt_preview: "working",
-      started_at_epoch_ms: Date.now(),
-    });
-    const textarea = composer({ behavior: "orchestrator" });
-    type(textarea, "adjust the orchestration");
-
-    fireEvent.click(screen.getByRole("button", { name: "Steer active run" }));
-
-    await waitFor(() =>
-      expect(fakes.steerOrchestrator).toHaveBeenCalledWith("session", "adjust the orchestration"),
-    );
-    expect(fakes.submitRun).not.toHaveBeenCalled();
-    expect(fakes.createInboxItem).not.toHaveBeenCalled();
-    expect(textarea.value).toBe("");
-    expect(screen.getByRole("button", { name: "Stop run" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Queue Next" })).toBeNull();
-  });
-
-  it("keeps a classic steering draft when the active run finishes before acceptance", async () => {
-    fakes.steerOrchestrator.mockRejectedValueOnce(new Error("the active run already finished"));
-    syncRunFromSnapshot({
-      run_id: "run-live",
-      prompt_preview: "working",
-      started_at_epoch_ms: Date.now(),
-    });
-    const textarea = composer({ behavior: "orchestrator" });
-    type(textarea, "preserve this steer");
-
-    fireEvent.click(screen.getByRole("button", { name: "Steer active run" }));
-
-    expect(await screen.findByText(/Failed to send: The active run already finished/)).toBeTruthy();
-    expect(textarea.value).toBe("preserve this steer");
-  });
-
-  it("keeps idle classic orchestrator submission unchanged", async () => {
-    const textarea = composer({ behavior: "orchestrator" });
-    type(textarea, "start ordinary work");
-
-    fireEvent.click(screen.getByRole("button", { name: "Send" }));
-
-    await waitFor(() =>
-      expect(fakes.submitRun).toHaveBeenCalledWith("session", "start ordinary work"),
-    );
-    expect(fakes.steerOrchestrator).not.toHaveBeenCalled();
-  });
-
   it("offers Queue Next and a separate direct-run stop action", async () => {
     syncRunFromSnapshot({
       run_id: "run-live",
@@ -1259,7 +1205,6 @@ describe("human command composer integration", () => {
     await waitFor(() => expect(textarea.value).toBe(""));
     expect(fakes.submitRun).not.toHaveBeenCalled();
     expect(fakes.createInboxItem).not.toHaveBeenCalled();
-    expect(fakes.steerOrchestrator).not.toHaveBeenCalled();
   });
   it("sends escaped bang as literal prompt rather than a human command", async () => {
     const textarea = composer({ behavior: "direct" });
@@ -1388,7 +1333,7 @@ describe("primary composer draft lifetime", () => {
 
   it("clears a successful originating submission after navigation without touching another draft", async () => {
     const result = Promise.withResolvers<unknown>();
-    fakes.steerOrchestrator.mockReturnValue(result.promise);
+    fakes.createInboxItem.mockReturnValue(result.promise);
     syncRunFromSnapshot({
       run_id: "run",
       prompt_preview: "running",
@@ -1397,7 +1342,7 @@ describe("primary composer draft lifetime", () => {
     const textarea = composer();
     type(textarea, "send me");
     fireEvent.keyDown(textarea, { key: "Enter" });
-    await waitFor(() => expect(fakes.steerOrchestrator).toHaveBeenCalled());
+    await waitFor(() => expect(fakes.createInboxItem).toHaveBeenCalled());
     cleanup();
     resetRuntime("b");
     const other = composer({ sessionId: "b" });
@@ -1412,7 +1357,7 @@ describe("primary composer draft lifetime", () => {
 
   it("retains identical text at a newer revision after a late successful steer", async () => {
     const result = Promise.withResolvers<unknown>();
-    fakes.steerOrchestrator.mockReturnValue(result.promise);
+    fakes.createInboxItem.mockReturnValue(result.promise);
     syncRunFromSnapshot({
       run_id: "run",
       prompt_preview: "running",
@@ -1421,7 +1366,7 @@ describe("primary composer draft lifetime", () => {
     const textarea = composer();
     type(textarea, "same text");
     fireEvent.keyDown(textarea, { key: "Enter" });
-    await waitFor(() => expect(fakes.steerOrchestrator).toHaveBeenCalled());
+    await waitFor(() => expect(fakes.createInboxItem).toHaveBeenCalled());
     type(textarea, "different");
     type(textarea, "same text");
     await act(async () => result.resolve({ status: "queued" }));
@@ -1432,7 +1377,7 @@ describe("primary composer draft lifetime", () => {
 
   it("retains rejected text after leaving the originating view", async () => {
     const result = Promise.withResolvers<unknown>();
-    fakes.steerOrchestrator.mockReturnValue(result.promise);
+    fakes.createInboxItem.mockReturnValue(result.promise);
     syncRunFromSnapshot({
       run_id: "run",
       prompt_preview: "running",
@@ -1441,7 +1386,7 @@ describe("primary composer draft lifetime", () => {
     const textarea = composer();
     type(textarea, "retry later");
     fireEvent.keyDown(textarea, { key: "Enter" });
-    await waitFor(() => expect(fakes.steerOrchestrator).toHaveBeenCalled());
+    await waitFor(() => expect(fakes.createInboxItem).toHaveBeenCalled());
     cleanup();
     resetRuntime(null);
     await act(async () => result.reject(new Error("rejected")));
@@ -1555,7 +1500,7 @@ it.each(["send", "steer", "queue", "compact", "shell"] as const)(
       kind === "send"
         ? fakes.submitRun
         : kind === "steer"
-          ? fakes.steerOrchestrator
+          ? fakes.createInboxItem
           : kind === "queue"
             ? fakes.createInboxItem
             : kind === "compact"
@@ -1564,7 +1509,7 @@ it.each(["send", "steer", "queue", "compact", "shell"] as const)(
     fake.mockReturnValue(result.promise);
     const active = kind === "steer" || kind === "queue";
     const options = {
-      behavior: kind === "steer" ? ("orchestrator" as const) : ("direct" as const),
+      behavior: "direct" as const,
     };
     const running = () => {
       if (active)

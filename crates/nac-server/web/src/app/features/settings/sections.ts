@@ -27,7 +27,7 @@ export const SETTINGS_SECTION_META: readonly SettingsSectionMeta[] = [
     group: "App",
     icon: IconName.Gear,
     description: "An overview of this NAC: what is set up, and where to change it.",
-    rows: ["Overview", "Model setups", "Command palette"],
+    rows: ["Overview", "Provider connections", "Command palette"],
   },
   {
     id: "appearance",
@@ -51,21 +51,8 @@ export const SETTINGS_SECTION_META: readonly SettingsSectionMeta[] = [
     label: "Models & providers",
     group: "Agents",
     icon: IconName.Ai,
-    description:
-      "Reusable provider and model setups. Project and session defaults change only when you choose them.",
-    rows: [
-      "Configurations",
-      "Model provider",
-      "API key",
-      "Base URL",
-      "Default model",
-      "Reasoning effort",
-      "Context limit",
-      "Light model",
-      "Extra headers",
-      "Initial prompt",
-      "Model authentication",
-    ],
+    description: "Connect providers; choose models in each session.",
+    rows: ["Provider", "API key", "Endpoint URL", "Model authentication"],
     wide: true,
   },
   {

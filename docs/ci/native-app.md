@@ -227,9 +227,9 @@ owner; unknown fixtures remain intact. Existing authorization policy is
 observed before build, before testing and afterward without changing grants.
 
 Configured local startup uses the shared scripted provider and ordinary Rust
-model-configuration API with one dummy credential. No project or run is seeded.
+provider-connection API with one dummy credential. No project or run is seeded.
 While the app runs, H reads its owned engine API to verify the selected store,
-local workspace/backend, saved model, completed run and canonical transcript,
+local workspace/backend, session model, completed run and canonical transcript,
 plus the production index and its initial JS/CSS references. After positive
 process settlement, a separately owned server checks persisted state. Q has
 eleven declared operations and twenty-two paired dispatch attachments; it does

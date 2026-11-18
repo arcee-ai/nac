@@ -18,6 +18,33 @@ const BINARY: &str = env!("CARGO_BIN_EXE_nac-web");
 // Serialize every test in this process that copies or launches a binary.
 static BINARY_EXECUTION: Mutex<()> = Mutex::new(());
 
+#[test]
+fn retired_worker_entrypoint_cannot_execute() {
+    let _guard = BINARY_EXECUTION.lock().unwrap();
+    let output = Command::new(BINARY)
+        .args([
+            "__worker",
+            "--session-id",
+            "session",
+            "--thread-name",
+            "thread",
+            "--dispatch-id",
+            "dispatch-123",
+            "--action",
+            "work",
+        ])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("retired worker entrypoint"));
+    let output = Command::new(BINARY)
+        .args(["--worker-executable", BINARY, "--no-open"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("retired --worker-executable"));
+}
+
 struct ChildGuard(Option<Child>);
 
 impl ChildGuard {

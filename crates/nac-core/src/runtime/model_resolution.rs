@@ -1,18 +1,15 @@
 use super::*;
 
-/// Merge explicit new-session model options over `config.toml` settings.
+/// Resolve the model options selected for this session.
 ///
 /// This resolution never consults `OPENAI_MODEL`, `OPENAI_BASE_URL`, or any
 /// ambient backend/model/base selector. Credential values are read only from
 /// the configured `api_key_env` later when constructing the model client.
 pub fn effective_model_settings(
     model: &ModelOptions,
-    config: &NacConfig,
+    _config: &NacConfig,
 ) -> Result<EffectiveModelSettings> {
-    let model_id = model
-        .api_model
-        .clone()
-        .or_else(|| config.model.model.clone());
+    let model_id = model.api_model.clone();
     // The backend is explicit (request/CLI) or resolved from the model id
     // through the catalog (unique exact match; collisions prefer the
     // non-managed provider with a warning; unknown ids stay unresolved and
@@ -39,14 +36,9 @@ pub fn effective_model_settings(
         backend,
         model_id,
         base_url,
-        model
-            .reasoning_effort
-            .resolve(config.model.reasoning_effort),
+        model.reasoning_effort.resolve(None),
         api_key_env,
-        model
-            .extra_headers
-            .clone()
-            .unwrap_or_else(|| config.model.extra_headers.clone()),
+        model.extra_headers.clone().unwrap_or_default(),
         model.allow_insecure_http,
     )?
     .with_trusted_api_key_file(model.trusted_api_key_file.clone())

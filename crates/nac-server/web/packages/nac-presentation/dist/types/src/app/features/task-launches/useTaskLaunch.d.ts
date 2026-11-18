@@ -35,6 +35,7 @@ export declare function useTaskLaunch(projectId: string): {
         default_ref?: string | null;
         git_ref?: string | null;
         invoking_session_id?: string | null;
+        model_selection?: import("../../types/openapi.generated").components["schemas"]["TaskModelSelection"] | null;
         project_id: string;
         prompt: string;
         request_id: string;
@@ -68,6 +69,7 @@ export declare function useTaskLaunch(projectId: string): {
         default_ref?: string | null;
         git_ref?: string | null;
         invoking_session_id?: string | null;
+        model_selection?: import("../../types/openapi.generated").components["schemas"]["TaskModelSelection"] | null;
         project_id: string;
         prompt: string;
         request_id: string;

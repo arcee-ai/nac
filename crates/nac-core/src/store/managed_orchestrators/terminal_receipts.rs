@@ -86,6 +86,3 @@ pub(in crate::store) fn seed_terminal_receipts(connection: &Connection) -> Resul
     }
     Ok(())
 }
-
-#[cfg(test)]
-mod tests;

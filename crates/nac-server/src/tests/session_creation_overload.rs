@@ -245,26 +245,25 @@ async fn successful_creation_snapshot_matches_committed_projection() {
     let root = temp_root("creation_response_compatibility");
     let _env = ScopedModelEnv::isolated(&root.join("nac-home"), Some("test-only-key"));
     let manager = owned_test_manager(&root).unwrap();
-    for behavior in ["orchestrator", "direct", "direct-with-orchestrator"] {
-        let response = post_json(
-            router(manager.clone()),
-            "/sessions",
-            serde_json::json!({
-                "behavior": behavior, "cwd": root, "model": "gpt-5.2",
-                "backend": "openai-responses", "api_key_env": "OPENAI_API_KEY"
-            }),
-        )
-        .await;
-        assert_eq!(response.status(), StatusCode::CREATED);
-        let bytes = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
-        let created: SessionFrontendSnapshot = serde_json::from_slice(&bytes).unwrap();
-        let id = created.metadata.session_id.as_deref().unwrap();
-        let committed = manager.snapshot(id).await.unwrap();
-        assert_eq!(
-            serde_json::to_value(created).unwrap(),
-            serde_json::to_value(committed).unwrap()
-        );
-    }
+    let behavior = "direct";
+    let response = post_json(
+        router(manager.clone()),
+        "/sessions",
+        serde_json::json!({
+            "behavior": behavior, "cwd": root, "model": "gpt-5.2",
+            "backend": "openai-responses", "api_key_env": "OPENAI_API_KEY"
+        }),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let bytes = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
+    let created: SessionFrontendSnapshot = serde_json::from_slice(&bytes).unwrap();
+    let id = created.metadata.session_id.as_deref().unwrap();
+    let committed = manager.snapshot(id).await.unwrap();
+    assert_eq!(
+        serde_json::to_value(created).unwrap(),
+        serde_json::to_value(committed).unwrap()
+    );
     manager.drain_persistence().await.unwrap();
     std::fs::remove_dir_all(root).unwrap();
 }

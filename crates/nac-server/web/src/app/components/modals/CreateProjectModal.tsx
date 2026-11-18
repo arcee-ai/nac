@@ -1,5 +1,3 @@
-import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
-import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
@@ -25,18 +23,15 @@ import {
 import { SmallSelect } from "@/app/components/modals/SmallSelect";
 import { FormSection } from "@/app/components/modals/FormSection";
 import { ConfigRow, FieldLabel } from "@/app/components/modals/ConfigRow";
-import { type LaunchModelSelection } from "@/app/components/modals/ConfigurationsPanel";
-import { LightModelSection, type LightSelection } from "@/app/components/modals/LightModelSection";
+import { type LaunchModelSelection } from "@/app/features/setup/modelSelection";
 import { REASONING_OPTIONS, reasoningOptionsFor } from "@/app/components/modals/options";
 import { PathPickerModal } from "@/app/components/modals/PathPickerModal";
 import { SshConnectionBox } from "@/app/components/modals/SshConnectionBox";
-import { SessionBehaviorPicker } from "@/app/components/modals/SessionBehaviorPicker";
 import { useExitTransition } from "@/app/hooks/useExitTransition";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { resolveCatalogModel } from "@/app/lib/catalog";
 import { cn } from "@/app/lib/cn";
-import {} from "@/app/lib/lastLight";
-import { withoutInheritedCredential, nullable, serializeExtraHeaders } from "@/app/lib/modelConfig";
+import { nullable, serializeExtraHeaders } from "@/app/lib/modelConfig";
 import { toRunError } from "@/app/lib/providerError";
 import { routes } from "@/app/lib/routes";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
@@ -53,7 +48,6 @@ import {
   setupReconciliation,
 } from "@/app/features/setup/browserAdapters";
 import {
-  useCreateModelConfig,
   useCreateProject,
   useCreateSession,
   useModelCatalog,
@@ -61,9 +55,8 @@ import {
   useSandboxAvailability,
   useStoreInfo,
 } from "@/app/services/queries";
-import type { SessionBehavior, SshTarget } from "@/app/types/api";
+import type { SshTarget } from "@/app/types/api";
 
-import { savedModelSelection, sameModelSelection } from "@/app/features/setup/modelSelection";
 import { projectChatRequest, type SandboxOptions } from "@/app/features/setup/projectLaunch";
 
 type Mode = "local" | "ssh" | "sandbox";
@@ -141,21 +134,14 @@ function CreateProjectForm({
   defaultCwd: string;
   onClose: () => void;
 }) {
-  const { loadLastLight, storeLastLight } = useNativeRuntime().stores.lastLight;
-
   const navigate = useNavigate();
   const toast = useToast();
   const action = useSetupAction(open);
   const client = useQueryClient();
   const createProject = useCreateProject();
   const createSession = useCreateSession();
-  const createModelConfig = useCreateModelConfig();
 
   const [mode, setMode] = useState<Mode>("local");
-  const policy = useUiPolicy();
-  const [behavior, setBehavior] = useState<SessionBehavior>(
-    policy.orchestrationEnabled ? "orchestrator" : "direct",
-  );
   const [cwd, setCwd] = useState(defaultCwd);
   const [name, setName] = useState("");
   const [reasoning, setReasoning] = useState("");
@@ -166,23 +152,18 @@ function CreateProjectForm({
   const [sandboxOpen, setSandboxOpen] = useState(false);
   const [picking, setPicking] = useState(false);
   const [selection, setSelection] = useState<LaunchModelSelection | null>(null);
-  const [light, setLight] = useState<LightSelection>({ mode: "single", light: null });
   const [error, setError] = useState<FormError | null>(null);
   const [reviewError, setReviewError] = useState("");
   // The host this form has actually reached. Everything remote — the working
   // directory above all — is meaningless until one connection has answered, so
   // the rest of the form waits for it.
   const [connection, setConnection] = useState<SshTarget | null>(null);
-  const compactionRef = useRef("");
   const compactionAutoRef = useRef(true);
-  // A saved preset owns an explicit numeric or disabled compaction policy;
-  // this also prevents disabled (`null`) from being auto-filled by the model.
-  const compactionPresetRef = useRef(false);
 
   // The override only makes sense for the model the selection settles on, so
   // the catalog narrows it to the efforts that model accepts.
   const catalog = useModelCatalog();
-  const chosen = selection?.kind === "save" ? selection.request : (selection ?? null);
+  const chosen = selection;
   const reasoningItems = reasoningOptionsFor(
     resolveCatalogModel(catalog.data, chosen?.backend, chosen?.model).supportedEfforts,
     reasoning,
@@ -231,56 +212,10 @@ function CreateProjectForm({
     setSandbox((current) => ({ ...current, ...patch }));
   };
 
-  // Stable, so the panel does not re-emit its selection on every render.
-  const projectedSelection = useRef<LaunchModelSelection | null>(null);
-  const onSelection = useCallback(
-    (next: LaunchModelSelection | null, source: "primary" | "preset") => {
-      setSelection(next);
-      if (!next || sameModelSelection(projectedSelection.current, next)) return;
-      const previous = projectedSelection.current;
-      projectedSelection.current = next;
-      // Primary identity changes preserve the context draft; explicit presets
-      // still project their complete numeric or disabled compaction policy.
-      if (source === "primary" && previous?.kind === "resolved") {
-        setError((current) => (current?.field === "config" ? null : current));
-        return;
-      }
-      if (next?.kind === "resolved" && next.orchestrator_compaction_threshold !== undefined) {
-        const threshold = next.orchestrator_compaction_threshold;
-        const value = threshold == null ? "" : String(threshold);
-        compactionPresetRef.current = true;
-        compactionAutoRef.current = false;
-        compactionRef.current = value;
-        setCompaction(value);
-      } else {
-        const leavingPreset = compactionPresetRef.current;
-        compactionPresetRef.current = false;
-        if (leavingPreset) {
-          compactionAutoRef.current = true;
-          compactionRef.current = "";
-          setCompaction("");
-        }
-      }
-      setError((current) => (current?.field === "config" ? null : current));
-    },
-    [],
-  );
-
-  const onLight = useCallback((next: LightSelection) => {
-    setLight(next);
+  const onSelection = useCallback((next: LaunchModelSelection | null) => {
+    setSelection(next);
     setError((current) => (current?.field === "config" ? null : current));
   }, []);
-
-  // A resolved saved setup is authoritative for its light model — including
-  // an explicitly single-model one (`null`). Sources with no opinion (catalog
-  // and file launches, `undefined`) fall back to the last light model a
-  // session launched with. The key remounts the section when the seed changes.
-  const lastLight = useMemo(() => loadLastLight(), [loadLastLight]);
-  const savedLight =
-    selection?.kind === "resolved" && selection.light_model !== undefined
-      ? selection.light_model
-      : lastLight;
-  const savedLightKey = JSON.stringify(savedLight);
 
   // Auto-suggest 70% of the selected model's effective input budget as the compaction
   // threshold. A manually entered value is preserved across model changes —
@@ -292,22 +227,15 @@ function CreateProjectForm({
     return threshold != null ? String(threshold) : "auto";
   }, [catalog.data, chosen?.backend, chosen?.model]);
   useEffect(() => {
-    if (
-      !compactionPresetRef.current &&
-      compactionPlaceholder !== "auto" &&
-      (compactionRef.current === "" || compactionAutoRef.current)
-    ) {
+    if (compactionPlaceholder !== "auto" && compactionAutoRef.current) {
       compactionAutoRef.current = true;
-      compactionRef.current = compactionPlaceholder;
       setCompaction(compactionPlaceholder);
     }
   }, [compactionPlaceholder, selection]);
 
   const onCompactionChange = (value: string) => {
     setError(null);
-    compactionPresetRef.current = false;
     compactionAutoRef.current = false;
-    compactionRef.current = value;
     setCompaction(value);
   };
 
@@ -355,13 +283,6 @@ function CreateProjectForm({
       });
       return;
     }
-    if (policy.orchestrationEnabled && light.mode === "dual" && !light.light) {
-      setError({
-        field: "config",
-        message: "Pick the light model before creating a project.",
-      });
-      return;
-    }
 
     let headers: Record<string, string> | undefined;
     try {
@@ -378,28 +299,15 @@ function CreateProjectForm({
           current: current.current,
           classify: classifySetupFailure,
           reconcile: setupReconciliation(client),
-          persistsModel: selection.kind === "save",
-          model: async () => {
-            if (selection.kind === "save") {
-              const request =
-                light.mode === "dual" && light.light
-                  ? { ...selection.request, light_model: light.light }
-                  : selection.request;
-              const record = await createModelConfig.mutateAsync(request);
-              const selected = savedModelSelection(record);
-              if (current.current()) setSelection(selected);
-              return selected;
-            }
-            return selection;
-          },
-          project: async (selected) => {
+          persistsModel: false,
+          model: async () => selection,
+          project: async () => {
             const project = await createProject.mutateAsync({
               name: nullable(name),
               cwd,
               ssh_host: connected?.ssh_host ?? null,
               ssh_port: connected?.ssh_port ?? null,
               ssh_identity_file: connected?.ssh_identity_file ?? null,
-              default_model_config_id: selected.config_id ?? null,
             });
             createdProjectId = project.project_id;
             return project;
@@ -410,31 +318,21 @@ function CreateProjectForm({
             const body = projectChatRequest({
               selected,
               projectId: project.project_id,
-              policy,
-              behavior,
               reasoning,
               headers,
               compaction,
               automaticCompaction: compactionAutoRef.current,
-              presetCompaction: compactionPresetRef.current,
-              savedLight,
-              light,
               execution: connected ? "ssh" : mode,
               sandbox,
               activityKey,
             });
             const snapshot = await createSession.mutateAsync(body);
-            return {
-              snapshot,
-              launchLight: body.light_model ?? null,
-              apiKeyEnv: selected.api_key_env,
-            };
+            return { snapshot };
           },
         }),
       );
       if (!result) return;
-      const { snapshot, launchLight, apiKeyEnv } = result.chat;
-      storeLastLight(launchLight && withoutInheritedCredential(launchLight, apiKeyEnv));
+      const { snapshot } = result.chat;
       toast.success("Project created");
       navigate(
         snapshot.metadata.session_id
@@ -525,9 +423,6 @@ function CreateProjectForm({
         <p className="text-small !leading-[22px] text-basic-secondary">
           Choose where NAC works and the model for your first chat.
         </p>
-        {policy.orchestrationEnabled ? (
-          <SessionBehaviorPicker value={behavior} onChange={setBehavior} disabled={busy} />
-        ) : null}
 
         <FormSection title="Environment" description="Where NAC runs commands and accesses files.">
           <div className="flex flex-wrap items-start gap-2">
@@ -629,21 +524,11 @@ function CreateProjectForm({
 
         {ready ? (
           <ModelSetupSection
-            simple={!policy.orchestrationEnabled}
-            inheritSavedDefault
             invalid={invalid("config")}
             errorText={reviewError || (invalid("config") ? error?.message : undefined)}
             onChange={onSelection}
           >
             <div className="flex flex-col gap-2">
-              {policy.orchestrationEnabled ? (
-                <LightModelSection
-                  key={savedLightKey}
-                  initial={savedLight}
-                  behavior={behavior}
-                  onChange={onLight}
-                />
-              ) : null}
               <Separator />
               <ConfigRow
                 presentation="form"

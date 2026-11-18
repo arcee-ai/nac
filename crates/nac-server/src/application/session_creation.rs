@@ -1,13 +1,8 @@
-use std::{
-    collections::BTreeMap,
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 
 use anyhow::{anyhow, Context, Result};
 use nac_core::{
     light_model::{LightModelError, LightModelSettings},
-    model::provider_for_model,
     model_configurations::ModelConfigurationRecord,
     projects,
     runtime::{self, NacConfig, OptionalModelOption, RunOptions, StoreOptions},
@@ -16,34 +11,12 @@ use nac_core::{
 };
 
 use crate::{
-    create_compaction_threshold_override, light_model, model_options, nonblank,
+    create_compaction_threshold_override, model_options, nonblank, request_configuration_error,
     request_configuration_error_from, sandbox_options, sandbox_requested, ResolvedLaunchLocation,
     SessionManager, SshRequest,
 };
 
 use super::Field;
-
-fn apply_managed_model_defaults(
-    request: &mut SessionCreationCommand,
-    profile: Option<&super::managed::ManagedModelProfile>,
-) {
-    let Some(profile) = profile else {
-        return;
-    };
-    let identity_omitted = matches!(request.model, Field::Unchanged)
-        && matches!(request.base_url, Field::Unchanged)
-        && matches!(request.backend, Field::Unchanged)
-        && matches!(request.api_key_env, Field::Unchanged);
-    if !identity_omitted {
-        return;
-    }
-    request.model = Field::Set(profile.model_id.clone());
-    request.base_url = Field::Set(profile.endpoint.clone());
-    request.backend = Field::Set(profile.backend.as_str().to_string());
-    // Explicit absence suppresses conventional environment auto-selection;
-    // the trusted mounted file is attached after request parsing.
-    request.api_key_env = Field::Clear;
-}
 
 fn project_location_conflicts(request: &SessionCreationCommand) -> bool {
     request
@@ -53,6 +26,35 @@ fn project_location_conflicts(request: &SessionCreationCommand) -> bool {
         || nonblank(request.ssh_host.clone()).is_some()
         || request.ssh_port.is_some()
         || nonblank(request.ssh_identity_file.clone()).is_some()
+}
+
+fn apply_task_model_selection(
+    request: &mut SessionCreationCommand,
+    selected: &nac_core::store::TaskModelSelection,
+) {
+    request.backend = Field::Set(selected.backend.clone());
+    request.model = Field::Set(selected.model.clone());
+    request.base_url = Field::Set(selected.base_url.clone());
+    request.allow_insecure_http = Field::Set(selected.allow_insecure_http);
+    request.api_key_env = selected
+        .api_key_env
+        .clone()
+        .map(Field::Set)
+        .unwrap_or(Field::Clear);
+    request.reasoning_effort = selected
+        .reasoning_effort
+        .clone()
+        .map(Field::Set)
+        .unwrap_or(Field::Clear);
+    request.extra_headers = selected
+        .extra_headers
+        .clone()
+        .map(Field::Set)
+        .unwrap_or(Field::Clear);
+    request.orchestrator_compaction_threshold = selected
+        .orchestrator_compaction_threshold
+        .map(Field::Set)
+        .unwrap_or(Field::Clear);
 }
 
 fn inherit_project_field<T>(field: &mut Field<T>, inherited: Field<T>) {
@@ -93,82 +95,6 @@ fn apply_project_model_defaults(
             Field::Set(threshold),
         );
     }
-    inherit_project_field(
-        &mut request.light_model,
-        defaults.light_model.map(Field::Set).unwrap_or(Field::Clear),
-    );
-}
-
-/// The chat a project's model settings are read off when the project names no
-/// default configuration of its own.
-///
-/// A project set up from a one-off model pick has no saved configuration to
-/// point at, which used to leave its every later chat unlaunchable: nothing said
-/// what to run it on. Its existing chats do say, so the newest one stands in —
-/// and being the newest, it also tracks the project as its chats are retuned,
-/// rather than pinning it to whatever was chosen the day it was created.
-///
-/// A chat whose own stored configuration no longer parses has nothing to lend,
-/// and is passed over so one broken row cannot make the project unusable.
-fn newest_project_session(
-    store_path: &Path,
-    project_id: &str,
-) -> Option<sessions::SessionSnapshot> {
-    let mut candidates: Vec<_> = sessions::list_sessions(store_path)
-        .ok()?
-        .into_iter()
-        .filter(|summary| summary.project_id.as_deref() == Some(project_id))
-        .collect();
-    candidates.sort_by(|left, right| right.created_at.cmp(&left.created_at));
-    candidates
-        .into_iter()
-        .find_map(|summary| sessions::load_session(store_path, &summary.session_id).ok())
-}
-
-/// Same inheritance as `apply_project_model_defaults`, sourced from a sibling
-/// chat instead of a saved configuration.
-fn apply_sibling_model_defaults(
-    request: &mut SessionCreationCommand,
-    sibling: sessions::SessionSnapshot,
-) {
-    inherit_project_field(&mut request.model, Field::Set(sibling.model));
-    inherit_project_field(&mut request.base_url, Field::Set(sibling.base_url));
-    inherit_project_field(
-        &mut request.allow_insecure_http,
-        Field::Set(sibling.allow_insecure_http),
-    );
-    inherit_project_field(
-        &mut request.backend,
-        Field::Set(sibling.backend.as_str().to_string()),
-    );
-    inherit_project_field(
-        &mut request.reasoning_effort,
-        sibling
-            .reasoning_effort
-            .map(|effort| Field::Set(effort.as_str().to_string()))
-            .unwrap_or(Field::Clear),
-    );
-    inherit_project_field(
-        &mut request.api_key_env,
-        sibling.api_key_env.map(Field::Set).unwrap_or(Field::Clear),
-    );
-    inherit_project_field(
-        &mut request.extra_headers,
-        Field::Set(sibling.extra_headers),
-    );
-    if let Some(threshold) = sibling
-        .orchestrator_compaction_threshold
-        .filter(|_| !sibling.automatic_compaction)
-    {
-        inherit_project_field(
-            &mut request.orchestrator_compaction_threshold,
-            Field::Set(threshold),
-        );
-    }
-    inherit_project_field(
-        &mut request.light_model,
-        sibling.light_model.map(Field::Set).unwrap_or(Field::Clear),
-    );
 }
 
 fn newest_primary_project_session_id(
@@ -235,7 +161,7 @@ pub(crate) struct SessionSandboxCommand {
 
 /// Session creation and first-chat admission.
 ///
-/// Project location/default inheritance, model and credential preflight,
+/// Project location, model and credential preflight,
 /// sandbox/SSH exclusion, runtime construction, resource ownership, and cache
 /// publication stay in one application transaction.
 pub(crate) struct SessionCreationApplication<'a> {
@@ -278,7 +204,13 @@ impl<'a> SessionCreationApplication<'a> {
             ..SessionCreationCommand::default()
         };
         if let Some(native) = &native {
-            apply_native_settings(&mut request, native);
+            apply_native_settings(&mut request, native)?;
+        } else if let Some(selected) = &launch.request.model_selection {
+            apply_task_model_selection(&mut request, selected);
+        } else {
+            return Err(anyhow!(
+                "invalid request: select a model for the task session"
+            ));
         }
         self.create_prepared_session(request, Some(launch), None, None)
             .await
@@ -293,7 +225,7 @@ impl<'a> SessionCreationApplication<'a> {
             project_id: Some(launch.project_id.clone()),
             ..Default::default()
         };
-        apply_native_settings(&mut request, &launch);
+        apply_native_settings(&mut request, &launch)?;
         self.create_prepared_session(request, None, Some(launch), None)
             .await
     }
@@ -323,6 +255,9 @@ impl<'a> SessionCreationApplication<'a> {
                 .unwrap_or(Field::Unchanged),
             ..SessionCreationCommand::default()
         };
+        if let Some(selected) = &destination.model_selection {
+            apply_task_model_selection(&mut request, selected);
+        }
         if let Some(defaults) = scheduled.model_defaults() {
             apply_project_model_defaults(&mut request, defaults.clone());
         }
@@ -337,6 +272,16 @@ impl<'a> SessionCreationApplication<'a> {
         native: Option<nac_core::task_launch_control::NativeTaskLaunch>,
         scheduled: Option<nac_core::store::PreparedFreshTaskLaunch>,
     ) -> Result<SessionFrontendSnapshot> {
+        if request.behavior != SessionBehavior::Direct {
+            return Err(request_configuration_error(
+                "only direct session behavior is supported",
+            ));
+        }
+        if !matches!(request.light_model, Field::Unchanged) {
+            return Err(request_configuration_error(
+                "light_model is no longer supported",
+            ));
+        }
         anyhow::ensure!(
             native.is_none() || (retained.is_none() && scheduled.is_none()),
             "conflict: native and scheduled creation ownership are mutually exclusive"
@@ -374,32 +319,14 @@ impl<'a> SessionCreationApplication<'a> {
         let project_context = request
             .project_id
             .as_deref()
-            .map(|project_id| {
-                projects::load_project_launch_context(&self.manager.inner.store_path, project_id)
-            })
+            .map(|project_id| projects::load_project(&self.manager.inner.store_path, project_id))
             .transpose()?;
-        let (project_id, mut location) = if let Some(context) = project_context {
+        let (project_id, mut location) = if let Some(project) = project_context {
             if project_location_conflicts(&request) {
                 return Err(anyhow!(
                     "invalid request: project_id cannot be combined with cwd or ssh location fields"
                 ));
             }
-            // A reserved occurrence already owns its model snapshot, including
-            // absent optional defaults. Only an unpinned launch inherits here.
-            if !scheduled
-                .as_ref()
-                .is_some_and(|scheduled| scheduled.model_defaults().is_some())
-            {
-                if let Some(defaults) = context.default_model_config {
-                    apply_project_model_defaults(&mut request, defaults);
-                } else if let Some(sibling) = newest_project_session(
-                    &self.manager.inner.store_path,
-                    &context.project.project_id,
-                ) {
-                    apply_sibling_model_defaults(&mut request, sibling);
-                }
-            }
-            let project = context.project;
             let ssh = runtime::SshOptions {
                 host: project.ssh_host,
                 port: project.ssh_port,
@@ -436,7 +363,6 @@ impl<'a> SessionCreationApplication<'a> {
                 "invalid request: ssh_host and sandbox options cannot both be set"
             ));
         }
-        apply_managed_model_defaults(&mut request, self.manager.managed_model());
         if let Some(launch) = &native {
             anyhow::ensure!(
                 location.ssh.host().is_none()
@@ -497,32 +423,7 @@ impl<'a> SessionCreationApplication<'a> {
                 model.trusted_api_key_file = profile.trusted_api_key_file();
             }
         }
-        model.light_model = match request.light_model {
-            Field::Unchanged | Field::Clear => None,
-            Field::Set(light) => {
-                // A same-backend light model with no explicit selector
-                // inherits the session's primary one.
-                let primary_key = match &model.api_key_env {
-                    OptionalModelOption::Value(name) => Some(name.clone()),
-                    OptionalModelOption::Inherit | OptionalModelOption::Clear => None,
-                };
-                let inherited = primary_key.as_deref().and_then(|name| {
-                    let backend = model
-                        .backend
-                        .or_else(|| model.api_model.as_deref().and_then(provider_for_model))?;
-                    Some(light_model::InheritedCredential {
-                        backend,
-                        name: Some(name),
-                        previous: None,
-                    })
-                });
-                Some(light_model::normalize_with_http_policy(
-                    light,
-                    inherited,
-                    model.allow_insecure_http,
-                )?)
-            }
-        };
+        model.light_model = None;
         let options = RunOptions {
             workspace_cwd: location.workspace_cwd,
             config_cwd: Some(location.config_cwd.clone()),
@@ -741,11 +642,16 @@ impl<'a> SessionCreationApplication<'a> {
 fn apply_native_settings(
     request: &mut SessionCreationCommand,
     launch: &nac_core::task_launch_control::NativeTaskLaunch,
-) {
+) -> Result<()> {
+    let selection = launch.model_selection.as_ref().ok_or_else(|| {
+        anyhow!("native task predates per-session model selection; create a new task with a selected model")
+    })?;
+    apply_task_model_selection(request, selection);
     if let Some(model) = &launch.request.model {
         request.model = Field::Set(model.clone());
     }
     if let Some(reasoning) = &launch.request.reasoning_effort {
         request.reasoning_effort = Field::Set(reasoning.clone());
     }
+    Ok(())
 }

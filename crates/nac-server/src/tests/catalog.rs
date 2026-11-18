@@ -91,562 +91,6 @@ async fn provider_models_route_keeps_provider_failures_at_bad_gateway() {
 }
 
 #[tokio::test]
-async fn saved_chat_configuration_survives_unavailable_model_discovery() {
-    use std::io::{Read, Write};
-
-    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
-    let root = temp_root("saved_chat_discovery_optional");
-    let nac_home = root.join("nac-home");
-    std::fs::create_dir_all(&nac_home).unwrap();
-    let _env = ScopedModelEnv::isolated(&nac_home, None);
-    let manager = test_manager(&root);
-
-    let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
-    let base_url = format!("http://{}", listener.local_addr().unwrap());
-    let server = std::thread::spawn(move || {
-        let (mut stream, _) = listener.accept().unwrap();
-        let mut request = [0u8; 2048];
-        let read = stream.read(&mut request).unwrap();
-        assert!(String::from_utf8_lossy(&request[..read]).starts_with("GET /models "));
-        stream
-            .write_all(
-                b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 18\r\nConnection: close\r\n\r\ndiscovery disabled",
-            )
-            .unwrap();
-    });
-
-    let created = manager
-        .model_configurations()
-        .create(
-            application::model_configurations::CreateModelConfiguration {
-                name: "Custom chat gateway".to_string(),
-                backend: BackendKind::OpenAiChatCompletions,
-                model: "vendor/uncatalogued-model".to_string(),
-                base_url: Some(base_url),
-                allow_insecure_http: false,
-                api_key: Some("saved-custom-key".to_string()),
-                reasoning_effort: None,
-                extra_headers: None,
-                orchestrator_compaction_threshold: None,
-                initial_prompt: None,
-                light_model: None,
-            },
-        )
-        .unwrap();
-
-    let resolved = manager
-        .model_configurations()
-        .resolve_saved(&created.config_id)
-        .await
-        .expect("discovery is advisory, not model admission");
-    server.join().unwrap();
-    assert_eq!(resolved.backend, BackendKind::OpenAiChatCompletions);
-    assert_eq!(resolved.model.as_deref(), Some("vendor/uncatalogued-model"));
-    assert!(resolved.models.is_empty());
-    assert!(resolved
-        .models_error
-        .as_deref()
-        .is_some_and(|error| error.contains("503")));
-
-    let _ = std::fs::remove_dir_all(root);
-}
-
-#[tokio::test]
-async fn saved_chat_configuration_survives_discovery_that_omits_its_model() {
-    use std::io::{Read, Write};
-
-    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
-    let root = temp_root("saved_chat_incomplete_discovery");
-    let nac_home = root.join("nac-home");
-    std::fs::create_dir_all(&nac_home).unwrap();
-    let _env = ScopedModelEnv::isolated(&nac_home, None);
-    let manager = test_manager(&root);
-
-    let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
-    let base_url = format!("http://{}", listener.local_addr().unwrap());
-    let server = std::thread::spawn(move || {
-        let (mut stream, _) = listener.accept().unwrap();
-        let mut request = [0u8; 2048];
-        let read = stream.read(&mut request).unwrap();
-        assert!(String::from_utf8_lossy(&request[..read]).starts_with("GET /models "));
-        let body = r#"{"data":[{"id":"vendor/different-model"}]}"#;
-        write!(
-            stream,
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-            body.len()
-        )
-        .unwrap();
-    });
-
-    let created = manager
-        .model_configurations()
-        .create(
-            application::model_configurations::CreateModelConfiguration {
-                name: "Custom chat gateway".to_string(),
-                backend: BackendKind::OpenAiChatCompletions,
-                model: "vendor/manually-selected-model".to_string(),
-                base_url: Some(base_url),
-                allow_insecure_http: false,
-                api_key: Some("saved-custom-key".to_string()),
-                reasoning_effort: None,
-                extra_headers: None,
-                orchestrator_compaction_threshold: None,
-                initial_prompt: None,
-                light_model: None,
-            },
-        )
-        .unwrap();
-
-    let resolved = manager
-        .model_configurations()
-        .resolve_saved(&created.config_id)
-        .await
-        .expect("discovery suggestions must not replace a saved model");
-    server.join().unwrap();
-    assert_eq!(resolved.backend, BackendKind::OpenAiChatCompletions);
-    assert_eq!(
-        resolved.model.as_deref(),
-        Some("vendor/manually-selected-model")
-    );
-    assert_eq!(
-        resolved
-            .models
-            .iter()
-            .map(|model| model.id.as_str())
-            .collect::<Vec<_>>(),
-        vec!["vendor/different-model"]
-    );
-    assert!(resolved.models_error.is_none());
-
-    let _ = std::fs::remove_dir_all(root);
-}
-
-#[tokio::test]
-async fn saved_configurations_accept_public_https_across_create_update_and_resolve() {
-    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
-    let root = temp_root("saved_custom_public_https");
-    let nac_home = root.join("nac-home");
-    std::fs::create_dir_all(&nac_home).unwrap();
-    let _env = ScopedModelEnv::isolated(&nac_home, None);
-    let manager = test_manager(&root);
-
-    let created = manager
-        .model_configurations()
-        .create(
-            application::model_configurations::CreateModelConfiguration {
-                name: "Custom gateway".to_string(),
-                backend: BackendKind::OpenAiResponses,
-                model: "custom-primary-model".to_string(),
-                base_url: Some("https://gateway.noncanonical.example/v1".to_string()),
-                allow_insecure_http: false,
-                api_key: Some("saved-custom-key".to_string()),
-                reasoning_effort: None,
-                extra_headers: None,
-                orchestrator_compaction_threshold: None,
-                initial_prompt: None,
-                light_model: Some(LightModelSettings {
-                    model: "custom-light-model".to_string(),
-                    backend: Some(BackendKind::OpenAiResponses),
-                    base_url: Some("https://light.noncanonical.example/v1".to_string()),
-                    api_key_env: None,
-                    reasoning_effort: None,
-                }),
-            },
-        )
-        .expect("saved custom endpoint should need no config.toml host entry");
-    assert_eq!(created.base_url, "https://gateway.noncanonical.example/v1");
-    assert_eq!(
-        created
-            .light_model
-            .as_ref()
-            .and_then(|light| light.base_url.as_deref()),
-        Some("https://light.noncanonical.example/v1")
-    );
-
-    let updated = manager
-        .model_configurations()
-        .update(
-            &created.config_id,
-            application::model_configurations::UpdateModelConfiguration {
-                name: application::Field::Unchanged,
-                backend: application::Field::Unchanged,
-                model: application::Field::Unchanged,
-                base_url: application::Field::Set(
-                    "https://updated.noncanonical.example/v2".to_string(),
-                ),
-                allow_insecure_http: application::Field::Unchanged,
-                api_key: application::Field::Unchanged,
-                reasoning_effort: application::Field::Unchanged,
-                extra_headers: application::Field::Unchanged,
-                orchestrator_compaction_threshold: application::Field::Unchanged,
-                initial_prompt: application::Field::Unchanged,
-                light_model: application::Field::Set(LightModelSettings {
-                    model: "custom-light-model-v2".to_string(),
-                    backend: Some(BackendKind::OpenAiResponses),
-                    base_url: Some("https://updated-light.noncanonical.example/v2".to_string()),
-                    api_key_env: None,
-                    reasoning_effort: None,
-                }),
-            },
-        )
-        .expect("saved custom endpoint update should need no host entry");
-    assert_eq!(updated.base_url, "https://updated.noncanonical.example/v2");
-
-    let credential = updated.api_key_env.as_deref().unwrap();
-    nac_core::model::remove_api_key(credential).unwrap();
-    let error = match manager
-        .model_configurations()
-        .resolve_saved(&updated.config_id)
-        .await
-    {
-        Ok(_) => panic!("the removed key should fail after the custom URL is accepted"),
-        Err(error) => error,
-    };
-    assert!(error.to_string().contains(credential), "{error}");
-    assert!(!error.to_string().contains("approved host"), "{error}");
-
-    let _ = std::fs::remove_dir_all(root);
-}
-
-#[tokio::test]
-async fn saved_public_http_configuration_requires_and_preserves_opt_in() {
-    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
-    let root = temp_root("saved_public_http_opt_in");
-    let nac_home = root.join("nac-home");
-    std::fs::create_dir_all(&nac_home).unwrap();
-    let _env = ScopedModelEnv::isolated(&nac_home, None);
-    let manager = test_manager(&root);
-
-    let configuration = || application::model_configurations::CreateModelConfiguration {
-        name: "Plaintext gateway".to_string(),
-        backend: BackendKind::OpenAiChatCompletions,
-        model: "vendor/model".to_string(),
-        base_url: Some("http://gateway.example/v1".to_string()),
-        allow_insecure_http: false,
-        api_key: Some("plaintext-secret".to_string()),
-        reasoning_effort: None,
-        extra_headers: None,
-        orchestrator_compaction_threshold: None,
-        initial_prompt: None,
-        light_model: None,
-    };
-    let denied = manager
-        .model_configurations()
-        .create(configuration())
-        .unwrap_err();
-    assert!(denied.to_string().contains("requires HTTPS"), "{denied:#}");
-
-    let missing_key = manager
-        .model_configurations()
-        .create(
-            application::model_configurations::CreateModelConfiguration {
-                allow_insecure_http: true,
-                api_key: None,
-                ..configuration()
-            },
-        )
-        .unwrap_err();
-    assert!(
-        missing_key.to_string().contains("requires an API key"),
-        "{missing_key:#}"
-    );
-
-    let created = manager
-        .model_configurations()
-        .create(
-            application::model_configurations::CreateModelConfiguration {
-                allow_insecure_http: true,
-                ..configuration()
-            },
-        )
-        .expect("saved configurations should accept explicit public HTTP opt-in");
-    assert!(created.allow_insecure_http);
-    let loaded =
-        model_configurations::load_model_configuration(&root.join("store.db"), &created.config_id)
-            .unwrap();
-    assert!(loaded.allow_insecure_http);
-
-    let credential = created.api_key_env.as_deref().unwrap();
-    nac_core::model::remove_api_key(credential).unwrap();
-    let resolve_error = match manager
-        .model_configurations()
-        .resolve_saved(&created.config_id)
-        .await
-    {
-        Ok(_) => panic!("the removed key should fail after HTTP policy validation"),
-        Err(error) => error,
-    };
-    assert!(
-        resolve_error.to_string().contains(credential),
-        "{resolve_error:#}"
-    );
-    assert!(
-        !resolve_error.to_string().contains("requires HTTPS"),
-        "{resolve_error:#}"
-    );
-
-    let update_error = manager
-        .model_configurations()
-        .update(
-            &created.config_id,
-            application::model_configurations::UpdateModelConfiguration {
-                name: application::Field::Unchanged,
-                backend: application::Field::Unchanged,
-                model: application::Field::Unchanged,
-                base_url: application::Field::Unchanged,
-                allow_insecure_http: application::Field::Set(false),
-                api_key: application::Field::Unchanged,
-                reasoning_effort: application::Field::Unchanged,
-                extra_headers: application::Field::Unchanged,
-                orchestrator_compaction_threshold: application::Field::Unchanged,
-                initial_prompt: application::Field::Unchanged,
-                light_model: application::Field::Unchanged,
-            },
-        )
-        .unwrap_err();
-    assert!(update_error.to_string().contains("requires HTTPS"));
-    assert!(
-        model_configurations::load_model_configuration(&root.join("store.db"), &created.config_id,)
-            .unwrap()
-            .allow_insecure_http
-    );
-
-    let _ = std::fs::remove_dir_all(root);
-}
-
-#[tokio::test]
-async fn model_configuration_routes_round_trip_public_http_opt_in() {
-    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
-    let root = temp_root("saved_public_http_route");
-    let nac_home = root.join("nac-home");
-    std::fs::create_dir_all(&nac_home).unwrap();
-    let _env = ScopedModelEnv::isolated(&nac_home, None);
-    let app = router(test_manager(&root));
-    let body = serde_json::json!({
-        "name": "HTTP route",
-        "backend": "openai-chat-completions",
-        "model": "vendor/model",
-        "base_url": "http://gateway.example/v1",
-        "api_key": "route-secret"
-    });
-
-    let denied = post_json(app.clone(), "/model-configs", body.clone()).await;
-    assert_eq!(denied.status(), StatusCode::BAD_REQUEST);
-    assert!(response_json(denied).await["error"]
-        .as_str()
-        .is_some_and(|message| message.contains("requires HTTPS")));
-
-    let mut opted_in = body;
-    opted_in["allow_insecure_http"] = serde_json::Value::Bool(true);
-    let created = post_json(app.clone(), "/model-configs", opted_in).await;
-    assert_eq!(created.status(), StatusCode::CREATED);
-    let created = response_json(created).await;
-    assert_eq!(created["allow_insecure_http"], true);
-    assert!(!created.to_string().contains("route-secret"));
-    let config_id = created["config_id"].as_str().unwrap();
-
-    let listed = response_json(get_response(app.clone(), "/model-configs", None).await).await;
-    assert_eq!(listed["configurations"][0]["allow_insecure_http"], true);
-
-    let disable = app
-        .oneshot(
-            Request::builder()
-                .method("PATCH")
-                .uri(format!("/model-configs/{config_id}"))
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(r#"{"allow_insecure_http":false}"#))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(disable.status(), StatusCode::BAD_REQUEST);
-    assert!(response_json(disable).await["error"]
-        .as_str()
-        .is_some_and(|message| message.contains("requires HTTPS")));
-
-    let _ = std::fs::remove_dir_all(root);
-}
-
-#[test]
-fn launch_defaults_reload_config_after_manager_boot() {
-    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
-    let root = temp_root("launch_defaults_reload");
-    let nac_home = root.join("nac-home");
-    std::fs::create_dir_all(&nac_home).unwrap();
-    let _env = ScopedModelEnv::isolated(&nac_home, None);
-    let manager = test_manager(&root);
-    let request = || LaunchModelDefaultsRequest {
-        cwd: Some(root.clone()),
-        ssh_host: None,
-        ssh_port: None,
-        ssh_identity_file: None,
-    };
-
-    std::fs::write(
-        nac_home.join("config.toml"),
-        "[model]\nmodel = \"trinity-large-thinking\"\n",
-    )
-    .unwrap();
-    let arcee_defaults = manager.launch_model_defaults(request()).unwrap();
-    assert_eq!(
-        arcee_defaults.configured_model.as_deref(),
-        Some("trinity-large-thinking")
-    );
-
-    std::fs::write(
-        nac_home.join("config.toml"),
-        "[model]\nmodel = \"gpt-5.6-sol\"\nreasoning_effort = \"high\"\n",
-    )
-    .unwrap();
-    let defaults = manager.launch_model_defaults(request()).unwrap();
-    assert_eq!(defaults.configured_model.as_deref(), Some("gpt-5.6-sol"));
-    assert_eq!(
-        defaults.configured_reasoning_effort,
-        Some(ReasoningEffort::High)
-    );
-    let serialized_defaults = serde_json::to_value(defaults).unwrap();
-    assert_eq!(serialized_defaults["configured_model"], "gpt-5.6-sol");
-    assert_eq!(serialized_defaults["configured_reasoning_effort"], "high");
-    assert!(
-        serde_json::to_value(manager.store_info())
-            .unwrap()
-            .get("configured_model")
-            .is_none(),
-        "root-only launch metadata must not remain on /store"
-    );
-    let _ = std::fs::remove_dir_all(root);
-}
-
-#[test]
-fn launch_defaults_use_local_cwd_but_server_root_for_ssh_with_relative_config_homes() {
-    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
-
-    for config_home_kind in ["NAC_HOME", "XDG_CONFIG_HOME", "HOME"] {
-        let root = temp_root(&format!("launch_defaults_{config_home_kind}"));
-        let workspace_a = root.join("workspace-a");
-        let workspace_b = root.join("workspace-b");
-        std::fs::create_dir_all(&workspace_a).unwrap();
-        std::fs::create_dir_all(&workspace_b).unwrap();
-        let relative_home = std::path::Path::new("relative-config-home");
-        let _env = match config_home_kind {
-            "NAC_HOME" => ScopedModelEnv::with_config_home(Some(relative_home), None, None, None),
-            "XDG_CONFIG_HOME" => {
-                ScopedModelEnv::with_config_home(None, Some(relative_home), None, None)
-            }
-            "HOME" => ScopedModelEnv::with_config_home(None, None, Some(relative_home), None),
-            _ => unreachable!(),
-        };
-        let config_dir = |cwd: &std::path::Path| match config_home_kind {
-            "NAC_HOME" => cwd.join(relative_home),
-            "XDG_CONFIG_HOME" => cwd.join(relative_home).join("nac"),
-            "HOME" => cwd.join(relative_home).join(".config").join("nac"),
-            _ => unreachable!(),
-        };
-        for (cwd, model) in [
-            (&root, "gpt-5.2"),
-            (&workspace_a, "trinity-large-thinking"),
-            (&workspace_b, "gpt-5.6-sol"),
-        ] {
-            let dir = config_dir(cwd);
-            std::fs::create_dir_all(&dir).unwrap();
-            std::fs::write(
-                dir.join("config.toml"),
-                format!("[model]\nmodel = \"{model}\"\n"),
-            )
-            .unwrap();
-        }
-        let manager = test_manager(&root);
-
-        assert_eq!(
-            manager
-                .launch_model_defaults(LaunchModelDefaultsRequest {
-                    cwd: Some(workspace_a.clone()),
-                    ssh_host: None,
-                    ssh_port: None,
-                    ssh_identity_file: None,
-                })
-                .unwrap()
-                .configured_model
-                .as_deref(),
-            Some("trinity-large-thinking"),
-            "{config_home_kind} local workspace A"
-        );
-        assert_eq!(
-            manager
-                .launch_model_defaults(LaunchModelDefaultsRequest {
-                    cwd: Some(workspace_b.clone()),
-                    ssh_host: None,
-                    ssh_port: None,
-                    ssh_identity_file: None,
-                })
-                .unwrap()
-                .configured_model
-                .as_deref(),
-            Some("gpt-5.6-sol"),
-            "{config_home_kind} local workspace B"
-        );
-        assert_eq!(
-            manager
-                .launch_model_defaults(LaunchModelDefaultsRequest {
-                    cwd: Some(std::path::PathBuf::from("remote/project")),
-                    ssh_host: Some(" build-box ".to_string()),
-                    ssh_port: None,
-                    ssh_identity_file: None,
-                })
-                .unwrap()
-                .configured_model
-                .as_deref(),
-            Some("gpt-5.2"),
-            "{config_home_kind} SSH must use the server root"
-        );
-
-        let _ = std::fs::remove_dir_all(root);
-    }
-}
-
-#[test]
-fn launch_defaults_carry_the_configured_model_and_effort() {
-    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
-    let root = temp_root("launch_defaults_model_effort");
-    let nac_home = root.join("nac-home");
-    std::fs::create_dir_all(&nac_home).unwrap();
-    let _env = ScopedModelEnv::isolated(&nac_home, None);
-    let manager = test_manager(&root);
-    let request = || LaunchModelDefaultsRequest {
-        cwd: Some(root.clone()),
-        ssh_host: None,
-        ssh_port: None,
-        ssh_identity_file: None,
-    };
-
-    std::fs::write(
-        nac_home.join("config.toml"),
-        "[model]\nmodel = \"gpt-5.2\"\nreasoning_effort = \"high\"\n",
-    )
-    .unwrap();
-    let defaults = manager.launch_model_defaults(request()).unwrap();
-    assert_eq!(defaults.configured_model.as_deref(), Some("gpt-5.2"));
-    assert_eq!(
-        defaults.configured_reasoning_effort,
-        Some(ReasoningEffort::High)
-    );
-    let serialized = serde_json::to_value(defaults).unwrap();
-    assert_eq!(serialized["configured_model"], "gpt-5.2");
-    assert_eq!(serialized["configured_reasoning_effort"], "high");
-
-    // Without a configured model/effort the fields serialize as null
-    // (older frontends ignore them either way).
-    std::fs::write(nac_home.join("config.toml"), "[model]\n").unwrap();
-    let defaults = manager.launch_model_defaults(request()).unwrap();
-    assert_eq!(defaults.configured_model, None);
-    assert_eq!(defaults.configured_reasoning_effort, None);
-    let serialized = serde_json::to_value(defaults).unwrap();
-    assert!(serialized["configured_model"].is_null());
-    assert!(serialized["configured_reasoning_effort"].is_null());
-    let _ = std::fs::remove_dir_all(root);
-}
-
-#[tokio::test]
 async fn commands_route_returns_registry() {
     let root = temp_root("commands_endpoint");
     let app = router(test_manager(&root));
@@ -921,27 +365,10 @@ async fn models_endpoint_computes_auth_status_from_the_environment() {
         "nac-web codex-auth login"
     );
 
-    // Advanced setup stores a provider account under a generated selector.
-    // The catalog publishes that non-secret route until its saved setup is
-    // deleted, so unified pickers do not depend on a conventional env var.
-    let saved = manager
-        .model_configurations()
-        .create(
-            application::model_configurations::CreateModelConfiguration {
-                name: "DeepSeek account".to_string(),
-                backend: BackendKind::DeepSeekChat,
-                model: "deepseek-v4-flash".to_string(),
-                base_url: Some("https://api.deepseek.com".to_string()),
-                allow_insecure_http: false,
-                api_key: Some("saved-deepseek-key".to_string()),
-                reasoning_effort: None,
-                extra_headers: None,
-                orchestrator_compaction_threshold: None,
-                initial_prompt: None,
-                light_model: None,
-            },
-        )
-        .unwrap();
+    let saved = post_json(app.clone(), "/provider-connections", serde_json::json!({
+        "backend":"deepseek-chat", "base_url":"https://api.deepseek.com", "api_key":"saved-deepseek-key"
+    })).await;
+    assert_eq!(saved.status(), StatusCode::CREATED);
     let body = response_json(get_response(app.clone(), "/models", None).await).await;
     let deepseek = body["providers"]
         .as_array()
@@ -955,22 +382,8 @@ async fn models_endpoint_computes_auth_status_from_the_environment() {
         "https://api.deepseek.com"
     );
     let selector = deepseek["connection"]["api_key_env"].as_str().unwrap();
-    assert!(selector.starts_with(GENERATED_CREDENTIAL_PREFIX));
+    assert!(selector.starts_with("NAC_PROVIDER_"));
     assert_ne!(selector, "saved-deepseek-key");
-
-    manager
-        .model_configurations()
-        .delete(&saved.config_id)
-        .unwrap();
-    let body = response_json(get_response(app.clone(), "/models", None).await).await;
-    let deepseek = body["providers"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|provider| provider["id"] == "deepseek-chat")
-        .unwrap();
-    assert_eq!(deepseek["auth_status"], "no_credential");
-    assert!(deepseek["connection"].is_null());
 
     // The conventional variable naming a set value reads ready — the
     // same variable session resolution auto-selects. Unrelated
@@ -1031,7 +444,7 @@ fn create_session_request_deserializes_optional_ssh_host() {
         )
         .unwrap();
     assert_eq!(with_host.ssh_host.as_deref(), Some("build-box"));
-    assert_eq!(with_host.behavior, sessions::SessionBehavior::Orchestrator);
+    assert_eq!(with_host.behavior, sessions::SessionBehavior::Direct);
     assert_eq!(
         with_host.backend,
         RequestField::Value("together-chat".to_string())
@@ -1072,7 +485,7 @@ async fn create_session_rejects_ssh_host_combined_with_sandbox() {
     let manager = test_manager(&root);
 
     let request = CreateSessionRequest {
-        behavior: sessions::SessionBehavior::Orchestrator,
+        behavior: sessions::SessionBehavior::Direct,
         first_chat: false,
         first_chat_same_behavior: false,
         project_id: None,
@@ -1113,7 +526,7 @@ async fn server_create_rejects_removed_backend_names_as_bad_requests() {
     for backend in ["arcee", "auto"] {
         let error = manager
             .create_session(CreateSessionRequest {
-                behavior: sessions::SessionBehavior::Orchestrator,
+                behavior: sessions::SessionBehavior::Direct,
                 first_chat: false,
                 first_chat_same_behavior: false,
                 project_id: None,
@@ -1269,4 +682,73 @@ async fn stored_arcee_auth_config_errors_are_400_and_store_failures_are_500() {
         assert_eq!(stored.base_url, "https://api.openai.com/v1");
         let _ = std::fs::remove_dir_all(&root);
     }
+}
+
+#[tokio::test]
+async fn provider_connection_is_model_independent_and_keeps_secret_private() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("provider_connection");
+    let nac_home = root.join("nac-home");
+    std::fs::create_dir_all(&nac_home).unwrap();
+    let _env = ScopedModelEnv::isolated(&nac_home, None);
+    let manager = test_manager(&root);
+    let app = router(manager.clone());
+    let rejected = post_json(
+        app.clone(),
+        "/provider-connections",
+        serde_json::json!({
+            "backend": "openai-responses", "base_url": "http://example.invalid/v1",
+            "api_key": "private-fake-api-key"
+        }),
+    )
+    .await;
+    assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
+    let response = post_json(
+        app.clone(),
+        "/provider-connections",
+        serde_json::json!({
+            "backend": "openai-responses", "base_url": "https://example.invalid/v1",
+            "api_key": "private-fake-api-key"
+        }),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let body = response_json(response).await;
+    assert!(body
+        .get("connection_id")
+        .and_then(serde_json::Value::as_str)
+        .is_some());
+    assert!(!body.to_string().contains("private-fake-api-key"));
+    let conn = rusqlite::Connection::open(root.join("store.db")).unwrap();
+    assert_eq!(
+        conn.query_row::<i64, _, _>("SELECT count(*) FROM model_configurations", [], |row| row
+            .get(0))
+            .unwrap(),
+        0
+    );
+    drop(conn);
+    let listing = nac_core::store::spawn_blocking_store_caller(move || {
+        Ok::<_, anyhow::Error>(manager.model_catalog().listing())
+    })
+    .await
+    .unwrap()
+    .unwrap();
+    let provider = listing
+        .providers
+        .iter()
+        .find(|p| p.id == BackendKind::OpenAiResponses)
+        .unwrap();
+    let connection = provider.connection.as_ref().unwrap();
+    assert_eq!(connection.base_url, "https://example.invalid/v1");
+    assert!(!connection.allow_insecure_http);
+    let selector = connection.api_key_env.as_deref().unwrap();
+    assert_eq!(
+        nac_core::model::resolve_backend_api_key(BackendKind::OpenAiResponses, Some(selector))
+            .unwrap(),
+        "private-fake-api-key"
+    );
+    assert!(!serde_json::to_string(&listing)
+        .unwrap()
+        .contains("private-fake-api-key"));
+    let _ = std::fs::remove_dir_all(root);
 }

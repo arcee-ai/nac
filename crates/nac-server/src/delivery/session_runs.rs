@@ -2,7 +2,7 @@ use std::{collections::VecDeque, convert::Infallible, time::Duration};
 
 use async_stream::stream;
 use axum::{
-    extract::{rejection::JsonRejection, Path as AxumPath, Query, State},
+    extract::{Path as AxumPath, Query, State},
     http::StatusCode,
     response::sse::{Event, KeepAlive, Sse},
     Json,
@@ -18,10 +18,9 @@ use nac_core::{
 use serde::Serialize;
 
 use crate::{
-    validate_steering_instruction, ApiError, ApiErrorBody, EventsQuery, LaggedEvent,
-    OrchestratorSteeringRequest, OrchestratorSteeringResponse, RecentEventsResponse,
-    ReplayBoundaryEvent, ReplayGapEvent, SessionManager, SubmitPromptRequest, SubmitPromptResponse,
-    ThreadSteeringRequest, ThreadSteeringResponse, DEFAULT_REPLAY_LIMIT,
+    ApiError, ApiErrorBody, EventsQuery, LaggedEvent, RecentEventsResponse, ReplayBoundaryEvent,
+    ReplayGapEvent, SessionManager, SubmitPromptRequest, SubmitPromptResponse,
+    DEFAULT_REPLAY_LIMIT,
 };
 
 #[utoipa::path(
@@ -42,50 +41,6 @@ pub(crate) async fn submit_prompt(
         .submit_prompt(&session_id, request, InputOrigin::Person)
         .await?;
     Ok((StatusCode::ACCEPTED, Json(submitted)))
-}
-
-#[utoipa::path(
-    post,
-    path = "/sessions/{session_id}/steering",
-    operation_id = "post_sessions_session_id_steering",
-    tag = "conversation",
-    params(("session_id" = String, Path)),
-    request_body(content = OrchestratorSteeringRequest, content_type = "application/json"),
-    responses((status = 202, description = "Success", body = OrchestratorSteeringResponse, content_type = "application/json"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
-)]
-pub(crate) async fn queue_orchestrator_steering_handler(
-    State(manager): State<SessionManager>,
-    AxumPath(session_id): AxumPath<String>,
-    payload: std::result::Result<Json<OrchestratorSteeringRequest>, JsonRejection>,
-) -> std::result::Result<(StatusCode, Json<OrchestratorSteeringResponse>), ApiError> {
-    let Json(request) = payload.map_err(ApiError::from)?;
-    validate_steering_instruction(&request.instruction)?;
-    let queued = manager
-        .queue_orchestrator_steering(&session_id, request, InputOrigin::Person)
-        .await?;
-    Ok((StatusCode::ACCEPTED, Json(queued)))
-}
-
-#[utoipa::path(
-    post,
-    path = "/sessions/{session_id}/threads/{thread_name}/steering",
-    operation_id = "post_sessions_session_id_threads_thread_name_steering",
-    tag = "conversation",
-    params(("session_id" = String, Path), ("thread_name" = String, Path)),
-    request_body(content = ThreadSteeringRequest, content_type = "application/json"),
-    responses((status = 202, description = "Success", body = ThreadSteeringResponse, content_type = "application/json"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
-)]
-pub(crate) async fn queue_thread_steering_handler(
-    State(manager): State<SessionManager>,
-    AxumPath((session_id, thread_name)): AxumPath<(String, String)>,
-    payload: std::result::Result<Json<ThreadSteeringRequest>, JsonRejection>,
-) -> std::result::Result<(StatusCode, Json<ThreadSteeringResponse>), ApiError> {
-    let Json(request) = payload.map_err(ApiError::from)?;
-    validate_steering_instruction(&request.instruction)?;
-    let queued = manager
-        .queue_thread_steering(&session_id, &thread_name, request, InputOrigin::Person)
-        .await?;
-    Ok((StatusCode::ACCEPTED, Json(queued)))
 }
 
 pub(crate) fn event_cursor(

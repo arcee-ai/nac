@@ -5,8 +5,6 @@ import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { routes, sessionIdFromPath, type SessionPanel } from "@/app/lib/routes";
 import { sessionPanelPolicy } from "@/app/lib/sessionBehavior";
 import { useSessionSnapshot, useSessionSummary } from "@/app/services/queries";
-import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
-import { sessionAvailable } from "@/app/features/ui-policy/policy";
 import {
   capabilitiesHref,
   productSessionFromLocation,
@@ -27,15 +25,10 @@ export function ProductNavigationProvider({ children }: { children: ReactNode })
   const { data: entry } = useSessionSummary(sessionId);
   // Passive cache consumption: context/navigation cannot attach or recover a session.
   const { data: snapshot } = useSessionSnapshot(sessionId, { enabled: false });
-  const uiPolicy = useUiPolicy();
   const mobile = useIsMobile();
   // Bind the adapter to meaningful visibility/panel changes. Passive snapshot
   // refreshes must not replace an otherwise current navigation consumer.
-  const sessionVisible =
-    !!sessionId &&
-    !!snapshot &&
-    !!entry &&
-    sessionAvailable(uiPolicy, entry.summary.behavior, entry.lineage);
+  const sessionVisible = !!sessionId && !!snapshot && !!entry;
   const panelPolicy = sessionPanelPolicy(entry?.summary.behavior, snapshot?.lineage?.kind);
   const owner = useMemo<ProductNavigationOwner>(
     () => ({

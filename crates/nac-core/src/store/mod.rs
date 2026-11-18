@@ -33,6 +33,10 @@ pub(crate) mod orchestrator_compaction;
 pub(crate) mod peer_goals;
 mod permission_grants;
 mod projects;
+mod provider_connections;
+pub use provider_connections::{
+    insert_provider_connection, list_provider_connections, ProviderConnectionRecord,
+};
 mod render;
 mod review_intent;
 mod run_recovery;
@@ -144,7 +148,7 @@ pub use task_followups::{
 pub use task_launches::{
     list_task_launches, load_project_git_source, load_task_launch, reconcile_task_launches,
     reserve_task_launch, update_task_launch, TaskLaunchPhase, TaskLaunchRecord, TaskLaunchRequest,
-    TaskLaunchSource,
+    TaskLaunchSource, TaskModelSelection,
 };
 pub use terminal_cleanups::*;
 pub use terminal_selection::*;

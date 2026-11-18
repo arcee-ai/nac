@@ -22,7 +22,6 @@ mod summary;
 pub(crate) use child_input_wait::ChildInputWaitLease;
 #[doc(hidden)]
 pub use child_input_wait::{ChildInputWaitCancellation, WeakChildInputWaitCancellation};
-pub use db::MALFORMED_LIGHT_MODEL_DIAGNOSTIC;
 pub(crate) use db::{
     compare_and_update_permission_approval_state, insert_new_session_in_transaction,
     list_sessions_with_connection, load_effective_permission_approval_state,
@@ -91,15 +90,14 @@ pub async fn reviewable_intent(path: std::path::PathBuf, session_id: String) -> 
     .unwrap_or(ReviewIntent::Unavailable)
 }
 
-/// Immutable execution behavior selected when a top-level session is created.
-/// Stored as text so future behaviors can fail closed instead of being
-/// misinterpreted as the orchestrator.
+/// Immutable stored execution behavior. New sessions select direct; old values
+/// remain available only while the retirement migration and removal are staged.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "kebab-case")]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum SessionBehavior {
-    #[default]
     Orchestrator,
+    #[default]
     Direct,
     DirectWithOrchestrator,
 }

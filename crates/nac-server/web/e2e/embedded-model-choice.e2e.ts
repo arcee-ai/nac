@@ -2,254 +2,30 @@
 // Home's composer, the per-session model dialog, unified-catalog switching and
 // saved provider accounts. Split from embedded.e2e.ts along that ownership seam.
 import type { Page } from "@playwright/test";
+import { createDirectSession, createProject, expect, test } from "./harness";
+import { homeComposer, startSessionFromHome } from "./focus-embedded-helpers";
 
-import { createDirectSession, createProject, expect, test, waitForRunIdle } from "./harness";
-import {
-  behaviorChoice,
-  chooseBehavior,
-  homeComposer,
-  openSessionDrawer,
-  openSessionPanel,
-  sessionPanelTabs,
-  startSessionFromHome,
-} from "./focus-embedded-helpers";
-import { ScriptGate } from "./scripted-provider";
-
-/** Match the page's browser profile, which can differ from the test host. */
-async function newChatChord(page: Page): Promise<string> {
-  const isMac = await page.evaluate(() => /Mac|iPhone|iPad|iPod/.test(navigator.userAgent));
-  return isMac ? "Meta+Shift+O" : "Control+Shift+O";
-}
-
-test("asks for immutable behavior on every first and new chat", async ({
-  harness,
-  page,
-  request,
-}) => {
-  const projectId = await createProject(request, harness);
-  // Home's send creates the session and delivers its prompt as the first run;
-  // the prompt also names the session.
-  const orchestratorTitle = "Plan the managed deployment rollout";
-  const directTitle = "Implement connection status feedback";
-  const hybridTitle = "Coordinate release readiness review";
-  for (const title of [orchestratorTitle, directTitle, hybridTitle]) {
-    harness.provider.enqueue(
-      `first-run-${title}`,
-      { token: title },
-      { kind: "text", text: `${title} acknowledged`, stream: "request" },
-    );
-  }
-  // An explicit title outlives the auto-title, which follows the latest prompt.
-  const present = async (sessionId: string, title: string) => {
-    const response = await request.put(`${harness.baseUrl}/sessions/${sessionId}/presentation`, {
-      data: { title, pinned: false, expected_version: 0 },
-    });
-    expect(response.ok()).toBe(true);
-  };
-  const onHome = new RegExp(`/#/\\?project=${encodeURIComponent(projectId)}$`);
-  const behaviorChip = page.getByRole("button", { name: /^Behavior: / });
-  const tabs = sessionPanelTabs(page);
-
-  // An empty project offers the one new-session flow: Home's composer, pointed
-  // at it, asking for the behavior with the orchestrator preselected.
-  await page.goto(`${harness.baseUrl}/#/project/${projectId}`);
-  await expect(page).toHaveURL(onHome);
-  await expect(homeComposer(page)).toBeFocused();
-  await expect(behaviorChip).toHaveAccessibleName("Behavior: Orchestrator");
-  await behaviorChip.click();
-  await expect(page.getByRole("menuitemradio")).toHaveCount(3);
-  for (const label of ["Agent", "Agent + Orchestrator", "Orchestrator"] as const) {
-    await expect(behaviorChoice(page, label)).toHaveAttribute(
-      "aria-checked",
-      label === "Orchestrator" ? "true" : "false",
-    );
-  }
-  await page.keyboard.press("Escape");
-  await expect(page.getByRole("menuitemradio")).toHaveCount(0);
-
-  // Re-entering an empty project offers the same first session again; leaving
-  // the first offer must not strand the project route behind a loader.
-  await page.goto(`${harness.baseUrl}/#/`);
-  await page.goto(`${harness.baseUrl}/#/project/${projectId}`);
-  await expect(page).toHaveURL(onHome);
-  await expect(homeComposer(page)).toBeFocused();
-  await expect(behaviorChip).toHaveAccessibleName("Behavior: Orchestrator");
-  const orchestratorSessionId = await startSessionFromHome(page, orchestratorTitle);
-  await waitForRunIdle(request, harness, orchestratorSessionId);
-  await present(orchestratorSessionId, orchestratorTitle);
-  await openSessionDrawer(page);
-  await expect(tabs.getByRole("tab", { name: "Insights" })).toHaveAttribute(
-    "aria-selected",
-    "true",
-  );
-  await expect(tabs.getByRole("tab", { name: "Worksets" })).toBeVisible();
-  await page.reload();
-  await openSessionDrawer(page);
-  await expect(tabs.getByRole("tab", { name: "Insights" })).toBeVisible();
-  await expect(tabs.getByRole("tab", { name: "Worksets" })).toBeVisible();
-  await expect(tabs.getByRole("tab", { name: "Threads" })).toHaveCount(0);
-  await page.keyboard.press("Escape");
-
-  await page.keyboard.press(await newChatChord(page));
-  await expect(page).toHaveURL(onHome);
-  await expect(behaviorChip).toHaveAccessibleName("Behavior: Orchestrator");
-  await chooseBehavior(page, "Agent");
-  const directSessionId = await startSessionFromHome(page, directTitle);
-  expect(directSessionId).not.toBe(orchestratorSessionId);
-  await waitForRunIdle(request, harness, directSessionId);
-  await present(directSessionId, directTitle);
-  await openSessionDrawer(page);
-  await expect(tabs.getByRole("tab", { name: "Subagents" })).toBeVisible();
-  await page.reload();
-  await openSessionDrawer(page);
-  await expect(tabs.getByRole("tab", { name: "Subagents" })).toBeVisible();
-  await expect(tabs.getByRole("tab", { name: "Threads" })).toHaveCount(0);
-  await expect(tabs.getByRole("tab", { name: "Worksets" })).toHaveCount(0);
-  await page.keyboard.press("Escape");
-
-  await page.keyboard.press(await newChatChord(page));
-  await expect(page).toHaveURL(onHome);
-  await expect(behaviorChip).toHaveAccessibleName("Behavior: Orchestrator");
-  await chooseBehavior(page, "Agent + Orchestrator");
-  const hybridSessionId = await startSessionFromHome(page, hybridTitle);
-  expect([orchestratorSessionId, directSessionId]).not.toContain(hybridSessionId);
-  await waitForRunIdle(request, harness, hybridSessionId);
-  await present(hybridSessionId, hybridTitle);
-  await openSessionPanel(page, "Subagents");
-  await expect(page).toHaveURL(new RegExp(`/session/${hybridSessionId}/delegated$`));
-  await expect(page.getByText("No subagents yet")).toBeVisible();
-  await expect(page.getByRole("button", { name: "New Orchestrator" })).toHaveCount(0);
-
-  const runningGate = new ScriptGate();
-  harness.provider.enqueue(
-    "all97-running-session",
-    { token: "ALL97_RUNNING_SESSION" },
-    { kind: "text", text: "release review complete", stream: "request" },
-    runningGate,
-  );
-  const runningRequest = request.post(`${harness.baseUrl}/sessions/${directSessionId}/runs`, {
-    data: { prompt: "ALL97_RUNNING_SESSION" },
-  });
-  await runningGate.accepted;
-
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.reload();
-  await openSessionPanel(page, "Subagents");
-  await expect(page.getByText("No subagents yet")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Spawn" })).toHaveCount(0);
-  await expect(tabs.getByRole("tab", { name: "Sessions" })).toHaveCount(0);
-  await expect(tabs.getByRole("tab", { name: "Subagents" })).toBeVisible();
-  await expect(tabs.getByRole("tab", { name: "Files" })).toBeVisible();
-  await page.keyboard.press("Escape");
-
-  await expect(page.getByText(hybridTitle, { exact: true }).first()).toBeVisible();
-  try {
-    for (const [title, behavior, id, tab] of [
-      [orchestratorTitle, "Orchestrator", orchestratorSessionId, "Worksets"],
-      [directTitle, "Agent", directSessionId, "Subagents"],
-    ] as const) {
-      const row = page
-        .locator('[data-sidebar="true"]')
-        .getByRole("button", { name: `${title}, ${behavior}`, exact: true });
-      await expect(row).toBeVisible();
-      await row.click();
-      await expect(page).toHaveURL(new RegExp(`/session/${id}/insights$`));
-      await openSessionDrawer(page);
-      await expect(tabs.getByRole("tab", { name: "Insights" })).toHaveAttribute(
-        "aria-selected",
-        "true",
-      );
-      await expect(tabs.getByRole("tab", { name: tab })).toBeVisible();
-      await page.keyboard.press("Escape");
-    }
-  } finally {
-    runningGate.release();
-  }
-  expect((await runningRequest).status()).toBe(202);
-  await waitForRunIdle(request, harness, directSessionId);
-  await expect(page.getByText("release review complete", { exact: true }).last()).toBeVisible();
-  harness.provider.assertConsumed();
-});
-
-test("shows and persists the optional light model for every chat behavior", async ({
-  harness,
-  page,
-  request,
-}) => {
-  const lightModel = {
-    model: "gpt-5.6-sol",
-    backend: "openai-responses" as const,
-    base_url: harness.provider.baseUrl,
-    api_key_env: "NAC_E2E_API_KEY",
-    reasoning_effort: "low" as const,
-  };
-  const projectId = await createProject(request, harness, { lightModel });
-  const expectations = [
-    { behavior: "Orchestrator", routingCopy: "Worker models", prompt: "ALL_LIGHT_ORCHESTRATOR" },
-    { behavior: "Agent", routingCopy: "Optional light model", prompt: "ALL_LIGHT_DIRECT" },
-    {
-      behavior: "Agent + Orchestrator",
-      routingCopy: "Orchestrator models",
-      prompt: "ALL_LIGHT_HYBRID",
-    },
-  ] as const;
-  for (const expected of expectations) {
-    harness.provider.enqueue(
-      `first-run-${expected.prompt}`,
-      { token: expected.prompt },
-      { kind: "text", text: `${expected.prompt} acknowledged`, stream: "request" },
-    );
-  }
-  const onHome = new RegExp(`/#/\\?project=${encodeURIComponent(projectId)}$`);
-  await page.goto(`${harness.baseUrl}/#/project/${projectId}`);
-  await expect(page).toHaveURL(onHome);
-
-  for (const [index, expected] of expectations.entries()) {
-    if (expected.behavior === "Orchestrator") {
-      await expect(page.getByRole("button", { name: /^Behavior: / })).toHaveAccessibleName(
-        "Behavior: Orchestrator",
-      );
-    } else {
-      await chooseBehavior(page, expected.behavior);
-    }
-    // The model chip shows what the session inherits, light model included.
-    await page.getByRole("button", { name: /^(Model: |Choose a model$)/ }).click();
-    const dialog = page.getByRole("dialog", { name: "Model for this session", exact: true });
-    await expect(dialog).toContainText("GPT-5.6 Sol");
-    await expect(dialog).toContainText(expected.routingCopy);
-    await expect(dialog.getByRole("button", { name: "Dual" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    await page.keyboard.press("Escape");
-    await expect(dialog).toBeHidden();
-    const sessionId = await startSessionFromHome(page, expected.prompt);
-    const config = await request.get(`${harness.baseUrl}/sessions/${sessionId}/config`);
-    expect(config.ok()).toBe(true);
-    expect((await config.json()) as { light_model?: unknown }).toMatchObject({
-      light_model: lightModel,
-    });
-    await waitForRunIdle(request, harness, sessionId);
-
-    if (index < expectations.length - 1) {
-      await page.keyboard.press(await newChatChord(page));
-      await expect(page).toHaveURL(onHome);
-    }
-  }
-  harness.provider.assertConsumed();
-});
-
-/**
- * Home always delivers the prompt as the new session's first run. A session on
- * a real hosted provider must never reach it from the suite, so the browser
- * holds that one admission back; the create request and stored configuration
- * are what these tests prove.
- */
 async function holdFirstRunAdmission(page: Page) {
   await page.route(
     (url) => /\/sessions\/[^/]+\/runs$/.test(url.pathname),
     (route) => (route.request().method() === "POST" ? route.abort() : route.fallback()),
   );
+}
+
+async function chooseFixtureModel(page: Page) {
+  await page.getByRole("button", { name: "Choose a model" }).click();
+  const dialog = page.getByRole("dialog", { name: "Model for this session" });
+  await dialog.locator("button[aria-expanded]").first().click();
+  await page.getByRole("textbox", { name: "Search models" }).fill("gpt-5.6-sol");
+  await page
+    .locator('[aria-label="Model results"] button[data-row]')
+    .filter({ hasText: /gpt-5\.6/i })
+    .locator("..")
+    .filter({ hasText: "OpenAI" })
+    .locator("button[data-row]")
+    .first()
+    .click();
+  await dialog.getByRole("button", { name: "Use this model" }).click();
 }
 
 test("uses the unified catalog for a cross-provider New Chat override", async ({
@@ -263,10 +39,8 @@ test("uses the unified catalog for a cross-provider New Chat override", async ({
   await page.getByRole("button", { name: /^(Model: |Choose a model$)/ }).click();
   const dialog = page.getByRole("dialog", { name: "Model for this session", exact: true });
   await expect(dialog.getByText("Primary model", { exact: true })).toBeVisible();
-  await expect(
-    dialog.getByRole("button", { name: "Advanced presets and provider setup" }),
-  ).toBeVisible();
-  await dialog.getByRole("button").filter({ hasText: "GPT-5.6 Sol" }).first().click();
+  await expect(dialog.getByRole("button", { name: "Provider connections" })).toBeVisible();
+  await dialog.locator("button[aria-expanded]").first().click();
   await page.getByPlaceholder("Search models…").fill("deepseek-v4-flash");
   await page.getByText("deepseek-v4-flash", { exact: true }).click();
   await dialog.getByRole("button", { name: "Use this model", exact: true }).click();
@@ -329,25 +103,22 @@ test("switches the active chat across configured providers from the unified comp
     .toBe("deepseek-chat/deepseek-v4-flash");
 });
 
-test("uses an Advanced saved provider account from the unified composer without exposing its key", async ({
+test("uses a provider connection from the unified composer without exposing its key", async ({
   harness,
   page,
   request,
 }) => {
   const sessionId = await createDirectSession(request, harness);
   const canary = "advanced-provider-secret-must-stay-server-side";
-  const created = await request.post(`${harness.baseUrl}/model-configs`, {
+  const created = await request.post(`${harness.baseUrl}/provider-connections`, {
     data: {
-      name: "Advanced Fireworks account",
       backend: "fireworks-chat",
-      model: "gpt-5.6-sol",
       base_url: harness.provider.baseUrl,
       api_key: canary,
     },
   });
   expect(created.ok()).toBe(true);
-  const saved = (await created.json()) as { api_key_env?: string };
-  expect(saved.api_key_env).toMatch(/^NAC_CONFIG_/);
+  const saved = await created.json();
   expect(JSON.stringify(saved)).not.toContain(canary);
 
   const catalog = await request.get(`${harness.baseUrl}/models`);
@@ -362,11 +133,10 @@ test("uses an Advanced saved provider account from the unified composer without 
   ).providers.find((entry) => entry.id === "fireworks-chat");
   expect(provider).toMatchObject({
     auth_status: "ready",
-    connection: {
-      base_url: harness.provider.baseUrl,
-      api_key_env: saved.api_key_env,
-    },
+    connection: { base_url: harness.provider.baseUrl },
   });
+  const selector = provider?.connection?.api_key_env;
+  expect(selector).toMatch(/^NAC_PROVIDER_/);
 
   await page.goto(`${harness.baseUrl}/#/session/${sessionId}/delegated`);
   await page.getByRole("button", { name: "Model" }).click();
@@ -384,7 +154,7 @@ test("uses an Advanced saved provider account from the unified composer without 
     backend: "fireworks-chat",
     model: "gpt-5.6-sol",
     base_url: harness.provider.baseUrl,
-    api_key_env: saved.api_key_env,
+    api_key_env: selector,
     extra_headers: null,
   });
   expect(JSON.stringify(body)).not.toContain(canary);
@@ -398,77 +168,7 @@ test("uses an Advanced saved provider account from the unified composer without 
       };
       return `${config.backend}/${config.api_key_env}`;
     })
-    .toBe(`fireworks-chat/${saved.api_key_env}`);
-});
-
-test("uses an Advanced saved provider account for the light model without exposing its key", async ({
-  harness,
-  page,
-  request,
-}) => {
-  const canary = "advanced-light-provider-secret-must-stay-server-side";
-  const created = await request.post(`${harness.baseUrl}/model-configs`, {
-    data: {
-      name: "Advanced Fireworks light account",
-      backend: "fireworks-chat",
-      model: "gpt-5.6-sol",
-      base_url: harness.provider.baseUrl,
-      api_key: canary,
-    },
-  });
-  expect(created.ok()).toBe(true);
-  const saved = (await created.json()) as { api_key_env?: string };
-  expect(saved.api_key_env).toMatch(/^NAC_CONFIG_/);
-  expect(JSON.stringify(saved)).not.toContain(canary);
-
-  const projectId = await createProject(request, harness);
-  harness.provider.enqueue(
-    "advanced-light-first-run",
-    { token: "ALL_ADVANCED_LIGHT_FIRST_RUN" },
-    { kind: "text", text: "advanced light account session started", stream: "request" },
-  );
-  await page.goto(`${harness.baseUrl}/#/project/${projectId}`);
-  await page.getByRole("button", { name: /^(Model: |Choose a model$)/ }).click();
-  const dialog = page.getByRole("dialog", { name: "Model for this session", exact: true });
-  await dialog.getByRole("button", { name: "Dual" }).click();
-  const lightRow = dialog.getByText("Light model*", { exact: true }).locator("..").locator("..");
-  await lightRow.getByRole("button").click();
-  await page.getByPlaceholder("Search models…").fill("fireworks-chat");
-  await page
-    .getByRole("group", { name: "Model results", exact: true })
-    .getByRole("button", { name: /^gpt-5\.6-sol\b/ })
-    .click();
-
-  await dialog.getByRole("button", { name: "Use this model", exact: true }).click();
-  await expect(dialog).toBeHidden();
-
-  const mutation = page.waitForRequest(
-    (candidate) => candidate.method() === "POST" && candidate.url().endsWith("/sessions"),
-  );
-  const sessionId = await startSessionFromHome(page, "ALL_ADVANCED_LIGHT_FIRST_RUN");
-  const body = (await mutation).postDataJSON() as {
-    light_model?: Record<string, unknown> | null;
-  };
-  expect(body.light_model).toMatchObject({
-    backend: "fireworks-chat",
-    model: "gpt-5.6-sol",
-    base_url: harness.provider.baseUrl,
-    api_key_env: saved.api_key_env,
-  });
-  expect(JSON.stringify(body)).not.toContain(canary);
-
-  const config = await request.get(`${harness.baseUrl}/sessions/${sessionId}/config`);
-  expect(config.ok()).toBe(true);
-  expect((await config.json()) as { light_model?: unknown }).toMatchObject({
-    light_model: {
-      backend: "fireworks-chat",
-      model: "gpt-5.6-sol",
-      base_url: harness.provider.baseUrl,
-      api_key_env: saved.api_key_env,
-    },
-  });
-  await waitForRunIdle(request, harness, sessionId);
-  harness.provider.assertConsumed();
+    .toBe(`fireworks-chat/${selector}`);
 });
 
 test("converges concurrent required-first-chat tabs and refreshes deleted ownership", async ({
@@ -499,6 +199,7 @@ test("converges concurrent required-first-chat tabs and refreshes deleted owners
       expect(homeComposer(second)).toBeVisible(),
     ]);
     expect(await sessionsOf()).toHaveLength(0);
+    await Promise.all([chooseFixtureModel(page), chooseFixtureModel(second)]);
 
     // Hold both real creates at the same admission boundary. Each tab still
     // believes this project has no primary session when it sends first_chat.
@@ -534,7 +235,7 @@ test("converges concurrent required-first-chat tabs and refreshes deleted owners
     await expect.poll(() => creates.length).toBe(2);
     releaseCreates();
     for (const body of creates)
-      expect(body).toMatchObject({ first_chat: true, first_chat_same_behavior: false });
+      expect(body).toMatchObject({ first_chat: true, first_chat_same_behavior: true });
     const [firstSessionId, otherSessionId] = await Promise.all(starts);
     expect(otherSessionId).toBe(firstSessionId);
     expect(await sessionsOf()).toHaveLength(1);

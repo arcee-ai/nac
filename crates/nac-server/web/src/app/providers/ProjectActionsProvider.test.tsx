@@ -4,8 +4,6 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { UiPolicyContext } from "@/app/features/ui-policy/UiPolicyContext";
-import { DIRECT_UI_POLICY, ORCHESTRATION_UI_POLICY } from "@/app/features/ui-policy/policy";
 import { MOD } from "@/app/lib/shortcuts";
 import { chatTabsStore, dismissChatTab, setChatTabOrder } from "@/app/store/chatTabsStore";
 import {
@@ -57,14 +55,14 @@ function Harness() {
   );
 }
 
-function tree(orchestration = false, path = "/project/project-1") {
+function tree(_orchestration = false, path = "/project/project-1") {
   return (
     <MemoryRouter initialEntries={[path]}>
-      <UiPolicyContext.Provider value={orchestration ? ORCHESTRATION_UI_POLICY : DIRECT_UI_POLICY}>
+      <>
         <ProjectActionsProvider>
           <Harness />
         </ProjectActionsProvider>
-      </UiPolicyContext.Provider>
+      </>
     </MemoryRouter>
   );
 }

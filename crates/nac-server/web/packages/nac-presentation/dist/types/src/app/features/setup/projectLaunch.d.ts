@@ -1,7 +1,5 @@
-import type { LaunchModelSelection } from "../../components/modals/ConfigurationsPanel";
-import type { LightSelection } from "../../components/modals/LightModelSection";
-import { type UiPolicy } from "../ui-policy/policy";
-import type { CreateSessionRequest, LightModelSettings, SessionBehavior } from "../../types/api";
+import type { LaunchModelSelection } from "./modelSelection";
+import type { CreateSessionRequest } from "../../types/api";
 export interface SandboxOptions {
     noMount: boolean;
     image: string;
@@ -16,15 +14,10 @@ export declare function projectChatRequest(values: {
     selected: Extract<LaunchModelSelection, {
         kind: "resolved";
     }>;
-    policy: UiPolicy;
-    behavior: SessionBehavior;
     reasoning: string;
     headers: Record<string, string> | undefined;
     compaction: string;
     automaticCompaction: boolean;
-    presetCompaction: boolean;
-    savedLight: LightModelSettings | null | undefined;
-    light: LightSelection;
     execution: "local" | "ssh" | "sandbox";
     sandbox: SandboxOptions;
     activityKey: string | null;

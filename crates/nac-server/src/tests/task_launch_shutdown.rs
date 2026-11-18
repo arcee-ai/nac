@@ -520,16 +520,10 @@ async fn active_observer_survives_creator_publication(shutdown: bool) {
     let root = temp_root("retained_active_observer_publication");
     let _env = ScopedModelEnv::isolated(&root.join("nac-home"), Some("fixture-key"));
     let setup = test_manager(&root);
-    let request = fixture(&root, &setup).await;
+    let mut request = fixture(&root, &setup).await;
     let provider = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let connection = rusqlite::Connection::open(&setup.inner.store_path).unwrap();
-    connection
-        .execute(
-            "UPDATE model_configurations SET base_url=?1 WHERE config_id='task-config'",
-            [format!("http://{}/v1", provider.local_addr().unwrap())],
-        )
-        .unwrap();
-    drop(connection);
+    request.model_selection.as_mut().unwrap().base_url =
+        format!("http://{}/v1", provider.local_addr().unwrap());
     let received = Arc::new(tokio::sync::Notify::new());
     let reached = Arc::clone(&received);
     let endpoint = tokio::spawn(async move {

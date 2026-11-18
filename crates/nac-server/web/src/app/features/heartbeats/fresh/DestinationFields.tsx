@@ -1,4 +1,10 @@
+import { useCallback, useState } from "react";
 import { Input } from "@/app/atoms";
+import { ModelSetupSection } from "@/app/features/setup/ModelSetupSection";
+import type {
+  LaunchModelSelection,
+  SessionModelInitial,
+} from "@/app/features/setup/modelSelection";
 import type { FreshTaskDestination } from "@/app/types/api";
 
 export function DestinationFields({
@@ -13,6 +19,37 @@ export function DestinationFields({
   savedDefaultRef: string | null;
 }) {
   const update = (patch: Partial<FreshTaskDestination>) => onChange({ ...value, ...patch });
+  const [initial] = useState<SessionModelInitial | undefined>(() =>
+    value.model_selection
+      ? {
+          ...value.model_selection,
+          backend: value.model_selection.backend as SessionModelInitial["backend"],
+          api_key_env: value.model_selection.api_key_env ?? null,
+          reasoning_effort: value.model_selection.reasoning_effort ?? null,
+          extra_headers: value.model_selection.extra_headers ?? {},
+        }
+      : undefined,
+  );
+  const onModelChange = useCallback(
+    (selection: LaunchModelSelection | null) => {
+      const next = selection
+        ? {
+            backend: selection.backend,
+            model: selection.model,
+            base_url: selection.base_url,
+            allow_insecure_http: selection.allow_insecure_http,
+            api_key_env: selection.api_key_env,
+            reasoning_effort: selection.reasoning_effort,
+            extra_headers: selection.extra_headers,
+            orchestrator_compaction_threshold: selection.orchestrator_compaction_threshold ?? null,
+          }
+        : null;
+      if (JSON.stringify(value.model_selection ?? null) !== JSON.stringify(next)) {
+        onChange({ ...value, model_selection: next, model: null, reasoning_effort: null });
+      }
+    },
+    [value, onChange],
+  );
   return (
     <fieldset className="flex flex-col gap-4" aria-label="Scheduled task destination">
       <p className="type-body-chrome text-basic-secondary">
@@ -45,21 +82,10 @@ export function DestinationFields({
           />
         </>
       )}
-      <Input
-        label="Model override (optional)"
-        aria-label="Scheduled model override"
-        value={value.model ?? ""}
-        maxLength={256}
-        onChange={(event) => update({ model: event.target.value || null })}
-        hintText="Leave empty to use the destination project's model defaults."
-      />
-      <Input
-        label="Reasoning override (optional)"
-        aria-label="Scheduled reasoning override"
-        value={value.reasoning_effort ?? ""}
-        maxLength={64}
-        onChange={(event) => update({ reasoning_effort: event.target.value || null })}
-        hintText="Leave empty to use the destination project's reasoning default."
+      <ModelSetupSection
+        initial={initial}
+        onChange={onModelChange}
+        invalid={!value.model_selection}
       />
       <Input
         label="Retained task allowance"

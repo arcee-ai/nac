@@ -193,6 +193,7 @@ async fn retained_command(label: &str) -> (CreateSessionWithSnapshot, PathBuf, S
         request_id: uuid::Uuid::new_v4().to_string(),
         project_id: "retained-project".into(),
         invoking_session_id: None,
+        model_selection: None,
         git_ref: Some("dev".into()),
         default_ref: Some("dev".into()),
         title: "é".repeat(120),

@@ -37,7 +37,7 @@ pub struct NacMcpService {
     product_context: crate::ProductContextApplication,
 }
 
-const NAC_MCP_INSTRUCTIONS: &str = "nac is an AI coding agent orchestrator. It manages coding sessions where an orchestrator agent receives your prompt, plans the work, and dispatches worker threads to execute tasks autonomously. Each worker operates independently — reading files, writing code, running commands, and calling tools — then reports back with its results. The orchestrator reviews thread output, compacts context when approaching the model's context window limit, and either dispatches more threads or produces a final response. Each worker's final output is retained as an episode you can inspect.\n\nSessions are asynchronous: send_message returns immediately with a run_id and the work continues in the background. Poll get_session_status to check completion, use steer to guide running tasks mid-flight, and inspect results with get_messages, get_thread_episodes, and get_thread_events. Sessions persist across server restarts and you can manage multiple simultaneously.";
+const NAC_MCP_INSTRUCTIONS: &str = "NAC runs persistent direct coding sessions. A session can read and change files, run commands, and use tools within its configured permissions. It can also use traditional child sessions and independent tasks.\n\nSessions run asynchronously: send_message returns a run_id while work continues. Use get_session_status to check progress, steer to submit durable guidance, and get_messages to read the transcript. Sessions persist across server restarts and can be managed independently.";
 
 fn mcp_server_info_for_version(version: &str) -> ServerConfig {
     ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
@@ -51,6 +51,8 @@ fn mcp_server_info_for_version(version: &str) -> ServerConfig {
 
 #[derive(Deserialize, schemars::JsonSchema)]
 struct CreateSessionParams {
+    #[schemars(description = "Optional session behavior; only direct is supported.")]
+    behavior: Option<String>,
     #[schemars(
         description = "Project id. When set, the project supplies the working directory and any default model configuration."
     )]
@@ -91,6 +93,9 @@ struct CreateSessionParams {
         description = "Compaction threshold in tokens (0 disables, blank defaults to 70% of context window)"
     )]
     compaction_threshold: Option<u64>,
+    #[serde(flatten)]
+    #[schemars(skip)]
+    extra: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -119,8 +124,9 @@ struct SteerParams {
     session_id: String,
     #[schemars(description = "Steering instruction")]
     instruction: String,
-    #[schemars(description = "Thread name to steer; omit for orchestrator-level steering")]
-    thread_name: Option<String>,
+    #[serde(flatten)]
+    #[schemars(skip)]
+    extra: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -137,26 +143,6 @@ struct GetMessagesParams {
         description = "Include system messages (default true). transcript_index always identifies the canonical transcript position usable with session_action(revert), regardless of this filter."
     )]
     include_system: Option<bool>,
-}
-
-#[derive(Deserialize, schemars::JsonSchema)]
-struct GetThreadEpisodesParams {
-    #[schemars(description = "Session id")]
-    session_id: String,
-    #[schemars(description = "Thread name; omit for all threads")]
-    thread_name: Option<String>,
-}
-
-#[derive(Deserialize, schemars::JsonSchema)]
-struct GetThreadEventsParams {
-    #[schemars(description = "Session id")]
-    session_id: String,
-    #[schemars(description = "Thread name; omit for all threads from snapshot")]
-    thread_name: Option<String>,
-    #[schemars(description = "Maximum events to return (default 24)")]
-    limit: Option<usize>,
-    #[schemars(description = "Return events before this id (cursor)")]
-    before_id: Option<i64>,
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -187,6 +173,9 @@ struct UpdateSessionParams {
     backend: Option<String>,
     #[schemars(description = "New reasoning effort")]
     reasoning_effort: Option<String>,
+    #[serde(flatten)]
+    #[schemars(skip)]
+    extra: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 // ---------------------------------------------------------------------------
@@ -272,6 +261,20 @@ impl NacMcpService {
         &self,
         Parameters(params): Parameters<CreateSessionParams>,
     ) -> Result<CallToolResult, ErrorData> {
+        if params
+            .behavior
+            .as_deref()
+            .is_some_and(|value| value != "direct")
+        {
+            return Ok(CallToolResult::error(vec![Content::text(
+                "Only direct session behavior is supported",
+            )]));
+        }
+        if params.extra.contains_key("light_model") {
+            return Ok(CallToolResult::error(vec![Content::text(
+                "light_model is no longer supported",
+            )]));
+        }
         let extra_headers = match params.extra_headers {
             None => RequestField::Omitted,
             Some(v) => {
@@ -288,7 +291,7 @@ impl NacMcpService {
             }
         };
         let request = CreateSessionRequest {
-            behavior: nac_core::sessions::SessionBehavior::Orchestrator,
+            behavior: nac_core::sessions::SessionBehavior::Direct,
             first_chat: false,
             first_chat_same_behavior: false,
             project_id: params.project_id,
@@ -375,7 +378,7 @@ impl NacMcpService {
 
     #[tool(
         name = "get_session_status",
-        description = "Get a lightweight status snapshot: active_run, active_threads, and thread summaries. Use this for polling — it does not include messages or episode content. When active_run is null, the run is complete."
+        description = "Get the current direct session's active run. Use get_messages to read its transcript."
     )]
     async fn get_session_status(
         &self,
@@ -390,22 +393,9 @@ impl NacMcpService {
                         "started_at_epoch_ms": r.started_at_epoch_ms,
                     })
                 });
-                let threads: Vec<_> = snapshot
-                    .threads
-                    .iter()
-                    .map(|t| {
-                        json!({
-                            "name": t.name,
-                            "episode_count": t.episode_count,
-                            "latest_action": t.latest_action,
-                        })
-                    })
-                    .collect();
                 let result = json!({
                     "session_id": snapshot.metadata.session_id,
                     "active_run": active_run,
-                    "active_threads": snapshot.active_threads,
-                    "threads": threads,
                 });
                 Ok(CallToolResult::success(vec![Content::text(
                     serde_json::to_string_pretty(&result)
@@ -454,21 +444,21 @@ impl NacMcpService {
 
     #[tool(
         name = "steer",
-        description = "Inject guidance into a running session without stopping it. Target the orchestrator (omit thread_name) or a specific worker thread. The instruction is delivered on the next iteration."
+        description = "Queue durable steering for a direct session. Guidance is delivered to the current run or a successor."
     )]
     async fn steer(
         &self,
         Parameters(params): Parameters<SteerParams>,
     ) -> Result<CallToolResult, ErrorData> {
-        let result = if let Some(thread_name) = params.thread_name {
-            self.operations
-                .steer(&params.session_id, params.instruction, Some(thread_name))
-                .await
-        } else {
-            self.operations
-                .steer(&params.session_id, params.instruction, None)
-                .await
-        };
+        if params.extra.contains_key("thread_name") {
+            return Ok(CallToolResult::error(vec![Content::text(
+                "thread_name is retired and cannot be used for direct steering",
+            )]));
+        }
+        let result = self
+            .operations
+            .steer(&params.session_id, params.instruction)
+            .await;
         match result {
             Ok(value) => Ok(CallToolResult::success(vec![Content::text(
                 serde_json::to_string_pretty(&value)
@@ -510,57 +500,6 @@ impl NacMcpService {
     }
 
     #[tool(
-        name = "get_thread_episodes",
-        description = "Get the retained output from worker threads. Each episode contains the thread's action (its task prompt) and content (its final response). Pass thread_name for one thread, or omit for all threads."
-    )]
-    async fn get_thread_episodes(
-        &self,
-        Parameters(params): Parameters<GetThreadEpisodesParams>,
-    ) -> Result<CallToolResult, ErrorData> {
-        match self
-            .operations
-            .thread_episodes(&params.session_id, params.thread_name)
-            .await
-        {
-            Ok(value) => Ok(CallToolResult::success(vec![Content::text(
-                serde_json::to_string_pretty(&value)
-                    .unwrap_or_else(|e| format!("Error serializing: {e}")),
-            )])),
-            Err(e) => Ok(CallToolResult::error(vec![Content::text(format!(
-                "Error: {e}"
-            ))])),
-        }
-    }
-
-    #[tool(
-        name = "get_thread_events",
-        description = "Get recent activity for worker threads: tool calls, tool results, errors, and completion status. Pass thread_name for one thread, or omit for all threads."
-    )]
-    async fn get_thread_events(
-        &self,
-        Parameters(params): Parameters<GetThreadEventsParams>,
-    ) -> Result<CallToolResult, ErrorData> {
-        let result = self
-            .operations
-            .thread_events(
-                &params.session_id,
-                params.thread_name,
-                params.before_id,
-                params.limit.unwrap_or(24),
-            )
-            .await;
-        match result {
-            Ok(value) => Ok(CallToolResult::success(vec![Content::text(
-                serde_json::to_string_pretty(&value)
-                    .unwrap_or_else(|e| format!("Error serializing: {e}")),
-            )])),
-            Err(e) => Ok(CallToolResult::error(vec![Content::text(format!(
-                "Error: {e}"
-            ))])),
-        }
-    }
-
-    #[tool(
         name = "session_action",
         description = "Perform a lifecycle action: 'compact' (reduce context), 'cancel' (stop active run), 'delete' (remove session), or 'revert' (roll back to a message index, requires message_idx)."
     )]
@@ -591,6 +530,11 @@ impl NacMcpService {
         &self,
         Parameters(params): Parameters<UpdateSessionParams>,
     ) -> Result<CallToolResult, ErrorData> {
+        if params.extra.contains_key("light_model") {
+            return Ok(CallToolResult::error(vec![Content::text(
+                "light_model is no longer supported",
+            )]));
+        }
         let request = UpdateConfigRequest {
             model: field(params.model),
             base_url: field(params.base_url),

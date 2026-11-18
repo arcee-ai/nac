@@ -149,9 +149,20 @@ async fn human_shell_routes_reject_unsupported_and_invalid_requests() {
     let root = temp_root("human_shell_validation");
     let _env = ScopedModelEnv::isolated(&root.join("nac-home"), Some("server-test-key"));
     seed_session(&root, "session", "2026-01-01 00:00:00.000000000");
-    let app = router(test_manager(&root));
-    for payload in [
+    let manager = test_manager(&root);
+    let child = manager
+        .create_traditional_child_session("session", "general", "child shell guard")
+        .await
+        .unwrap();
+    let app = router(manager);
+    let unsupported = post_json(
+        app.clone(),
+        &format!("/sessions/{child}/user-commands"),
         serde_json::json!({"request_id":"unsupported","command":"echo denied"}),
+    )
+    .await;
+    assert_eq!(unsupported.status(), StatusCode::BAD_REQUEST);
+    for payload in [
         serde_json::json!({"request_id":"blank","command":" "}),
         serde_json::json!({"request_id":"timeout","command":"echo denied", "timeout_ms":0}),
     ] {

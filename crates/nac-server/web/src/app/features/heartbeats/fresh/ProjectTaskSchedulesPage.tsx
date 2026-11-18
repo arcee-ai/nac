@@ -46,6 +46,7 @@ function ProjectSchedules({ projectId }: { projectId: string }) {
   const project = projects.data?.projects.find((project) => project.project_id === projectId);
   const [form, setForm] = useState<"create" | "edit" | null>(null);
   const [editingVersion, setEditingVersion] = useState<number | null>(null);
+  const [modelError, setModelError] = useState(false);
   const [destination, setDestination] = useState<FreshTaskDestination>({
     project_id: projectId,
     pinned_commit: null,
@@ -79,7 +80,12 @@ function ProjectSchedules({ projectId }: { projectId: string }) {
         null,
       );
   };
-  const save = (spec: HeartbeatSpec) =>
+  const save = (spec: HeartbeatSpec) => {
+    if (!destination.model_selection) {
+      setModelError(true);
+      return;
+    }
+    setModelError(false);
     schedules.submit(
       form === "edit" && schedule
         ? {
@@ -92,7 +98,9 @@ function ProjectSchedules({ projectId }: { projectId: string }) {
       destination,
       (receipt) => choose(receipt.schedule.schedule_id),
     );
+  };
   const openCreate = () => {
+    setModelError(false);
     setDestination({
       project_id: projectId,
       pinned_commit: null,
@@ -276,6 +284,11 @@ function ProjectSchedules({ projectId }: { projectId: string }) {
                         git={source.data.eligible}
                         savedDefaultRef={source.data.default_ref ?? null}
                       />
+                      {modelError && (
+                        <p role="alert" className="text-error-primary">
+                          Choose a model for the scheduled task.
+                        </p>
+                      )}
                     </HeartbeatForm>
                   )}
                 </div>

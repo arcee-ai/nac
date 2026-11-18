@@ -7,15 +7,12 @@ import type {
   BackendKind,
   BrowseListing,
   CreateMcpServerRequest,
-  CreateModelConfigurationRequest,
   CreateSshConfigurationRequest,
   McpLibraryResponse,
   McpRuntimeStatusList,
   McpServerList,
   ModelCatalog,
-  ModelConfigurationList,
   ProviderModelList,
-  ResolvedModelConfiguration,
   SkillCatalogEntry,
   SlashCommandDefinition,
   SshConfigurationList,
@@ -23,7 +20,6 @@ import type {
   SshTarget,
   TestMcpServerRequest,
   UpdateMcpServerRequest,
-  UpdateModelConfigurationRequest,
   UpdateSshConfigurationRequest,
 } from "@/app/types/api";
 
@@ -348,18 +344,6 @@ export function useMcpRuntimeAction() {
   });
 }
 
-export function useModelConfigs(enabled = true) {
-  const { api } = useNativeRuntime();
-
-  return useQuery<ModelConfigurationList>({
-    queryKey: queryKeys.modelConfigs,
-    enabled,
-    queryFn: ({ signal }) => api.listModelConfigs(signal),
-    staleTime: 30_000,
-    retry: false,
-  });
-}
-
 /**
  * The models an API key can reach, which is also how the key is validated: the
  * provider rejects the very same request when the key is wrong.
@@ -464,8 +448,6 @@ export async function refreshProviderAuthentication(client: QueryClient): Promis
     client.invalidateQueries({ queryKey: queryKeys.managedAuth }),
     client.invalidateQueries({ queryKey: queryKeys.managedHostStatus }),
     refreshUnifiedProviderCatalog(client),
-    client.invalidateQueries({ queryKey: queryKeys.resolvedModelConfigsAll }),
-    client.invalidateQueries({ queryKey: queryKeys.resolvedConfigFilesAll }),
   ]);
 }
 
@@ -490,84 +472,5 @@ export function useSessionSkills(sessionId: string) {
     queryFn: ({ signal }) => api.listSessionSkills(sessionId, signal),
     refetchOnMount: "always",
     retry: false,
-  });
-}
-
-/**
- * A saved configuration or a `config.toml`, checked end to end by the server:
- * the credential resolves and the provider answers with its model list.
- */
-export function useResolvedModelConfig(configId: string | null, filePath: string) {
-  const { api } = useNativeRuntime();
-
-  const path = filePath.trim();
-  return useQuery<ResolvedModelConfiguration>({
-    queryKey: configId
-      ? queryKeys.resolvedModelConfig(configId)
-      : queryKeys.resolvedConfigFile(path),
-    queryFn: ({ signal }) =>
-      configId ? api.resolveModelConfig(configId, signal) : api.resolveConfigFile(path, signal),
-    enabled: Boolean(configId ?? path),
-    retry: false,
-    staleTime: 60_000,
-  });
-}
-
-export function useCreateModelConfig() {
-  const { api } = useNativeRuntime();
-
-  const client = useQueryClient();
-  return useMutation({
-    retry: false,
-    mutationFn: (payload: CreateModelConfigurationRequest) => api.createModelConfig(payload),
-    onSuccess: async () => {
-      // The server files the key under a generated credential name.
-      await Promise.all([
-        client.invalidateQueries({ queryKey: queryKeys.modelConfigs }),
-        client.invalidateQueries({ queryKey: queryKeys.credentials }),
-        refreshUnifiedProviderCatalog(client),
-      ]);
-    },
-  });
-}
-
-export function useUpdateModelConfig() {
-  const { api } = useNativeRuntime();
-
-  const client = useQueryClient();
-  return useMutation({
-    retry: false,
-    mutationFn: ({
-      configId,
-      payload,
-    }: {
-      configId: string;
-      payload: UpdateModelConfigurationRequest;
-    }) => api.updateModelConfig(configId, payload),
-    onSuccess: async () => {
-      // A replaced key is filed under a new generated name and the old one goes.
-      await Promise.all([
-        client.invalidateQueries({ queryKey: queryKeys.modelConfigs }),
-        client.invalidateQueries({ queryKey: queryKeys.credentials }),
-        refreshUnifiedProviderCatalog(client),
-      ]);
-    },
-  });
-}
-
-export function useDeleteModelConfig() {
-  const { api } = useNativeRuntime();
-
-  const client = useQueryClient();
-  return useMutation({
-    retry: false,
-    mutationFn: (configId: string) => api.deleteModelConfig(configId),
-    onSuccess: async () => {
-      await Promise.all([
-        client.invalidateQueries({ queryKey: queryKeys.modelConfigs }),
-        client.invalidateQueries({ queryKey: queryKeys.credentials }),
-        refreshUnifiedProviderCatalog(client),
-      ]);
-    },
   });
 }

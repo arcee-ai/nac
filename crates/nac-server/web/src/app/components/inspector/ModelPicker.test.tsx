@@ -127,6 +127,7 @@ it("switches from an Arcee account to Codex through one catalog mutation", async
         backend: "chatgpt-codex-responses",
         model: "gpt-5.6-sol",
         base_url: "https://chatgpt.com/backend-api",
+        allow_insecure_http: false,
         api_key_env: null,
         reasoning_effort: "high",
         extra_headers: null,

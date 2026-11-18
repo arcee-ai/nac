@@ -9,7 +9,6 @@ export type SessionPanelTarget = SessionPanel | "goal";
 const ORDER: readonly SessionPanelTarget[] = [
   "files",
   "delegated",
-  "worksets",
   "terminal",
   "goal",
   "heartbeats",
@@ -34,7 +33,6 @@ export function sessionPanelEntries(facts: SessionFacts, phone: boolean): Sessio
       case "files":
         return facts.additions > 0 || facts.deletions > 0;
       case "delegated":
-      case "worksets":
         return facts.agents?.panel === target;
       case "heartbeats":
         return facts.schedules > 0;

@@ -1,5 +1,7 @@
-export declare function TaskLaunchModal({ projectId, defaultRef, onClose, onExistingCheckout, initialPrompt, initialTitle, }: {
+import type { LaunchModelSelection } from "../setup/modelSelection";
+export declare function TaskLaunchModal({ projectId, model, defaultRef, onClose, onExistingCheckout, initialPrompt, initialTitle, }: {
     projectId: string;
+    model: LaunchModelSelection;
     defaultRef: string | null;
     onClose: () => void;
     onExistingCheckout: () => void;

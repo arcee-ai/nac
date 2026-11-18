@@ -40,13 +40,12 @@ export declare function createChat<T>(ports: {
     create: () => Promise<T>;
     accept: (created: T) => void;
 }): Effect.Effect<T, CommandFailure>;
-/** Direct input is durable inbox steering/queueing; classic running input remains steering. */
+/** Running input uses the durable inbox for steering and queueing. */
 export declare function deliverPrompt(ports: {
-    mode: "idle" | "direct-running" | "classic-running";
+    mode: "idle" | "direct-running";
     delivery?: "steer" | "queue";
     submit: () => Promise<unknown>;
     inbox: (delivery: "steer" | "queue") => Promise<unknown>;
-    steer: () => Promise<unknown>;
 }): Effect.Effect<"submitted" | "steered" | "queued", CommandFailure>;
 /** Unwrap only expected workflow failures; defects retain Effect's diagnostics. */
 export declare function runCommand<T>(command: Effect.Effect<T, CommandFailure>): Promise<T>;

@@ -167,7 +167,7 @@ struct ServerCli {
     /// Executable to launch for managed worker dispatch.
     ///
     /// Defaults to the running executable.
-    #[arg(long)]
+    #[arg(long, hide = true)]
     worker_executable: Option<PathBuf>,
 
     /// Explicit versioned Managed NAC host configuration document.
@@ -602,7 +602,9 @@ async fn run() -> Result<()> {
             Ok(())
         }
         Some(RootCommand::Guide(guide)) => read_guide(guide),
-        Some(RootCommand::ManagedWorker(worker)) => run_managed_worker(worker).await,
+        Some(RootCommand::ManagedWorker(_)) => {
+            anyhow::bail!("the retired worker entrypoint is unavailable")
+        }
         Some(RootCommand::GitHubCredential(helper)) => run_github_credential(helper).await,
         Some(RootCommand::CodexAuth(auth)) => run_codex_auth_cli(auth, &invocation_name).await,
         Some(RootCommand::ArceeAuth(auth)) => run_arcee_auth_cli(auth, &invocation_name).await,
@@ -698,6 +700,10 @@ async fn run_server_inner(
     invocation_name: &str,
     #[cfg(unix)] desktop: Option<&nac_server::desktop_launch::DesktopLaunch>,
 ) -> Result<()> {
+    anyhow::ensure!(
+        cli.worker_executable.is_none(),
+        "the retired --worker-executable option is unavailable"
+    );
     let bind = cli.bind_addr();
     let bind_policy = cli.bind_policy();
     #[cfg(all(feature = "native-auth-fixture", unix))]
@@ -881,6 +887,10 @@ fn should_open_dashboard(force_open: bool, no_open: bool) -> bool {
     force_open || nac_core::browser::should_open_browser()
 }
 
+#[expect(
+    dead_code,
+    reason = "worker execution is unreachable until ALL-614 removes it"
+)]
 async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
     // On Linux, harden before connecting to the authenticated parent endpoint.
     // Other Unix hosts adopt and mark the inherited endpoint close-on-exec.

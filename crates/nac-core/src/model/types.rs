@@ -286,7 +286,7 @@ impl EffectiveModelSettings {
     ) -> Result<Self> {
         let backend = backend.ok_or_else(|| {
             model_configuration_error(
-                "invalid model configuration: required setting 'backend' is missing; select a backend in the session settings or configure a model id the catalog knows",
+                "invalid model configuration: required setting 'backend' is missing; select a backend or a model id the catalog knows for this session",
             )
         })?;
         let model = required_nonblank_setting(model, "model")?;

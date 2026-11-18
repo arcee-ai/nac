@@ -33,7 +33,6 @@ export declare function useProjectReorder(projects: readonly ProjectRecord[], se
     fullPinned: {
         created_at: string;
         cwd: string;
-        default_model_config_id?: string | null;
         description?: string | null;
         name: string;
         pinned: boolean;
@@ -48,7 +47,6 @@ export declare function useProjectReorder(projects: readonly ProjectRecord[], se
     fullUnpinned: {
         created_at: string;
         cwd: string;
-        default_model_config_id?: string | null;
         description?: string | null;
         name: string;
         pinned: boolean;

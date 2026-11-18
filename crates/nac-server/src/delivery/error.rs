@@ -152,25 +152,6 @@ impl From<ModelConfigurationStoreError> for ApiError {
     }
 }
 
-impl From<application::model_configurations::ModelConfigurationApplicationError> for ApiError {
-    fn from(error: application::model_configurations::ModelConfigurationApplicationError) -> Self {
-        match error {
-            application::model_configurations::ModelConfigurationApplicationError::InvalidInput(
-                message,
-            ) => Self::bad_request(message),
-            application::model_configurations::ModelConfigurationApplicationError::Provider(
-                message,
-            ) => Self::new(StatusCode::BAD_GATEWAY, message),
-            application::model_configurations::ModelConfigurationApplicationError::Store(error) => {
-                error.into()
-            }
-            application::model_configurations::ModelConfigurationApplicationError::Internal(
-                error,
-            ) => error.into(),
-        }
-    }
-}
-
 impl From<ProjectStoreError> for ApiError {
     fn from(error: ProjectStoreError) -> Self {
         let status = match &error {

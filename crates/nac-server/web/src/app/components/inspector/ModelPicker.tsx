@@ -136,6 +136,10 @@ export function ModelPicker({
           backend: pick.backend,
           model: pick.model,
           base_url: pick.baseUrl,
+          allow_insecure_http:
+            provider?.connection?.base_url === pick.baseUrl
+              ? (provider.connection.allow_insecure_http ?? false)
+              : false,
           // Account credentials remain server-owned. A null selector asks the
           // selected backend to resolve its managed login or conventional env.
           api_key_env: provider?.connection?.api_key_env ?? null,

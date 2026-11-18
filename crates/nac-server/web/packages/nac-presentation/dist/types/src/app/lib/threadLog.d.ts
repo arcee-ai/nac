@@ -1,4 +1,4 @@
-import type { AgentEvent, ThreadEventPage } from "../types/api";
+import type { AgentEvent } from "../types/api";
 export interface ThreadLogLine {
     /**
      * Identifies the event behind the line. The live and the persisted copy of
@@ -55,8 +55,6 @@ export declare function persistedThreadLog(events: AgentEvent[] | undefined): Th
  * in flight.
  */
 export declare function mergeThreadLog(persisted: ThreadLogLine[], live: ThreadLogLine[]): ThreadLogLine[];
-/** Chronological, ID-unique event history from newest-first cursor pages. */
-export declare function mergeThreadEventPages(pages: ThreadEventPage[]): AgentEvent[];
 export interface ToolCallEntry {
     kind: "tool_call";
     callId: string;

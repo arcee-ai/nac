@@ -5,13 +5,8 @@ import { afterEach, expect, it, vi } from "vitest";
 import { PrimaryModelSection } from "./PrimaryModelSection";
 import { queryKeys } from "@/app/services/queries/keys";
 import { api } from "@/app/services/api";
-import type { LaunchModelSelection } from "./ConfigurationsPanel";
-import type {
-  ManagedHostStatus,
-  ModelCatalog,
-  ModelConfigurationList,
-  ResolvedModelConfiguration,
-} from "@/app/types/api";
+import type { LaunchModelSelection } from "@/app/features/setup/modelSelection";
+import type { ManagedHostStatus, ModelCatalog } from "@/app/types/api";
 
 const host = {
   model_ready: true,
@@ -30,7 +25,7 @@ const catalog = {
       auth: "api_key_env",
       auth_status: "ready",
       auth_hint: null,
-      connection: { base_url: host.model.endpoint, api_key_env: null },
+      connection: { base_url: host.model.endpoint, allow_insecure_http: false, api_key_env: null },
       default_base_url: host.model.endpoint,
       managed_base_url: null,
       models: [
@@ -51,7 +46,6 @@ const catalog = {
 } as ModelCatalog;
 function mount(
   initial?: Parameters<typeof PrimaryModelSection>[0]["initial"],
-  inheritSavedDefault = false,
   existingSession = false,
 ) {
   vi.stubGlobal("matchMedia", () => ({
@@ -65,7 +59,6 @@ function mount(
     <QueryClientProvider client={client}>
       <PrimaryModelSection
         initial={initial}
-        inheritSavedDefault={inheritSavedDefault}
         existingSession={existingSession}
         onChange={onChange}
       />
@@ -76,65 +69,6 @@ function mount(
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
-});
-
-it("waits for the latest saved default to resolve and reproduces its full tuple", async () => {
-  const saved = Promise.withResolvers<ModelConfigurationList>();
-  const resolved = Promise.withResolvers<ResolvedModelConfiguration>();
-  vi.spyOn(api, "getManagedStatus").mockResolvedValue(host);
-  vi.spyOn(api, "getModelCatalog").mockResolvedValue(catalog);
-  vi.spyOn(api, "listProviderModels").mockResolvedValue({
-    base_url: host.model.endpoint,
-    models: [{ id: "entitled", display_name: "Entitled" }],
-  });
-  vi.spyOn(api, "listModelConfigs").mockReturnValue(saved.promise);
-  vi.spyOn(api, "resolveModelConfig").mockReturnValue(resolved.promise);
-  const { view, client, onChange } = mount(undefined, true);
-  try {
-    await waitFor(() => expect(onChange).toHaveBeenCalledWith(null));
-    const record = {
-      config_id: "exact-preset",
-      name: "Exact preset",
-      backend: "openai-responses" as const,
-      model: "saved-model",
-      base_url: "https://gateway.example/v1",
-      api_key_env: "SECOND_ACCOUNT",
-      allow_insecure_http: false,
-      reasoning_effort: "high" as const,
-      extra_headers: { "X-Account": "second" },
-      orchestrator_compaction_threshold: null,
-      light_model: { model: "hidden-light" },
-      created_at: "2026-09-30",
-      updated_at: "2026-09-30",
-    };
-    await act(async () => {
-      saved.resolve({ configurations: [record] });
-    });
-    expect(onChange.mock.calls.every(([value]) => value === null)).toBe(true);
-    await act(async () => {
-      resolved.resolve({
-        ...record,
-        models: [{ id: "saved-model", display_name: "Saved" }],
-        models_error: null,
-      });
-    });
-    await waitFor(() =>
-      expect(onChange).toHaveBeenLastCalledWith(
-        expect.objectContaining({
-          kind: "resolved",
-          config_id: "exact-preset",
-          api_key_env: "SECOND_ACCOUNT",
-          extra_headers: { "X-Account": "second" },
-          reasoning_effort: "high",
-          orchestrator_compaction_threshold: null,
-          light_model: { model: "hidden-light" },
-        }),
-      ),
-    );
-  } finally {
-    view.unmount();
-    client.clear();
-  }
 });
 
 it("waits for mounted-provider entitlements and treats an empty result as authoritative", async () => {
@@ -151,7 +85,7 @@ it("waits for mounted-provider entitlements and treats an empty result as author
     });
     expect(onChange.mock.calls.every(([value]) => value === null)).toBe(true);
     expect(models).toHaveBeenCalledWith(
-      { backend: "arcee-api", base_url: host.model.endpoint },
+      { backend: "arcee-api", base_url: host.model.endpoint, allow_insecure_http: false },
       expect.any(AbortSignal),
     );
   } finally {
@@ -177,10 +111,9 @@ it.each(["chatgpt-codex-responses", "arcee-auth"] as const)(
       api_key_env: null,
       reasoning_effort: null,
       extra_headers: {},
-      light_model: null,
       orchestrator_compaction_threshold: null,
     };
-    const { view, client, onChange } = mount(initial, false, true);
+    const { view, client, onChange } = mount(initial, true);
     try {
       await waitFor(() =>
         expect(onChange).toHaveBeenLastCalledWith(

@@ -102,30 +102,6 @@ describe("session side box tabs", () => {
     expect(screen.queryByRole("tab", { name: "Sessions" })).toBeNull();
   });
 
-  it("grants worker steering only to a primary classic orchestrator", () => {
-    const classic = {
-      ...snapshot,
-      metadata: { ...snapshot.metadata, behavior: "orchestrator" },
-      lineage: null,
-    } as SessionSnapshotResponse;
-    const managed = {
-      ...classic,
-      lineage: { kind: "managed-orchestrator" },
-    } as unknown as SessionSnapshotResponse;
-    const props = {
-      sessionId: "session-a",
-      panel: "insights" as const,
-      onPanelChange: vi.fn(),
-      sessions: [],
-      projects: [],
-    };
-
-    const { rerender } = render(<SessionSideBox {...props} snapshot={classic} />);
-    expect(screen.getByTestId("insights").getAttribute("data-can-steer")).toBe("true");
-
-    rerender(<SessionSideBox {...props} snapshot={managed} />);
-    expect(screen.getByTestId("insights").getAttribute("data-can-steer")).toBe("false");
-  });
   it("reactivates selected Insights on the tablet list while desktop selection stays stable", () => {
     const props = {
       sessionId: "session-a",

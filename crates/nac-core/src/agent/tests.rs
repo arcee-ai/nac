@@ -238,7 +238,7 @@ fn direct_topologies_expose_exact_capability_boundaries() {
         std::env::temp_dir().join(format!("nac_child_tool_boundary_{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&root).unwrap();
     let store_path = root.join("store.db");
-    for session_id in ["parent", "child", "delegating"] {
+    for session_id in ["parent", "child"] {
         let mut snapshot = crate::sessions::new_snapshot(
             session_id.to_string(),
             root.clone(),
@@ -252,11 +252,7 @@ fn direct_topologies_expose_exact_capability_boundaries() {
             Some("OPENAI_API_KEY".to_string()),
             std::collections::BTreeMap::new(),
         );
-        snapshot.behavior = if session_id == "delegating" {
-            crate::sessions::SessionBehavior::DirectWithOrchestrator
-        } else {
-            crate::sessions::SessionBehavior::Direct
-        };
+        snapshot.behavior = crate::sessions::SessionBehavior::Direct;
         crate::sessions::create_session(&store_path, &snapshot).unwrap();
     }
     crate::store::create_traditional_child_relationship(
@@ -302,7 +298,6 @@ fn direct_topologies_expose_exact_capability_boundaries() {
 
     let mut parent = build("parent", None);
     let mut child = build("child", None);
-    let mut delegating = build("delegating", None);
     let mut remote = build(
         "parent",
         Some(SshConnection {
@@ -349,10 +344,6 @@ fn direct_topologies_expose_exact_capability_boundaries() {
             child_names
         );
     }
-    assert_eq!(
-        names(&delegating),
-        crate::tools::DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES.map(str::to_string)
-    );
     let capability_names = |definitions: Vec<ToolDefinition>| {
         definitions
             .into_iter()
@@ -376,24 +367,12 @@ fn direct_topologies_expose_exact_capability_boundaries() {
     let remote_names = capability_names(remote.model_request_capabilities_for_test(None));
     for name in crate::tools::TASK_FOLLOWUP_TOOL_NAMES {
         assert!(!remote_names.iter().any(|candidate| candidate == name));
-        assert!(!names(&delegating).iter().any(|candidate| candidate == name));
     }
     let child_web =
         capability_names(child.model_request_capabilities_for_test(Some("child-exa-canary")));
     assert_eq!(&child_web[..child_names.len()], child_names);
     assert_eq!(
         &child_web[child_names.len()..],
-        crate::tools::WEB_TOOL_NAMES
-    );
-    let delegating_web = capability_names(
-        delegating.model_request_capabilities_for_test(Some("delegating-exa-canary")),
-    );
-    assert_eq!(
-        &delegating_web[..crate::tools::DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES.len()],
-        crate::tools::DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES
-    );
-    assert_eq!(
-        &delegating_web[crate::tools::DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES.len()..],
         crate::tools::WEB_TOOL_NAMES
     );
     assert!(matches!(
@@ -403,13 +382,6 @@ fn direct_topologies_expose_exact_capability_boundaries() {
                 && content.contains("review the implementation")
                 && !content.contains("NAC product self-help")
     ));
-    assert!(matches!(
-        delegating.messages.first(),
-        Some(Message::System { content })
-            if content.contains("Managed orchestration")
-                && content.contains("separate durable NAC orchestrator sessions")
-    ));
-
     struct ProductPort;
     impl crate::product_context::ProductContextPort for ProductPort {
         fn read(
@@ -438,7 +410,7 @@ fn direct_topologies_expose_exact_capability_boundaries() {
             .iter()
             .any(|name| crate::tools::PRODUCT_CONTEXT_TOOL_NAMES.contains(&name.as_str())));
     }
-    for primary in [&mut parent, &mut delegating] {
+    for primary in [&mut parent] {
         primary.bind_product_context(Arc::new(ProductPort)).unwrap();
         let refreshed = capability_names(primary.model_request_capabilities_for_test(None));
         assert!(crate::tools::PRODUCT_CONTEXT_TOOL_NAMES
@@ -451,7 +423,6 @@ fn direct_topologies_expose_exact_capability_boundaries() {
 
     drop(parent);
     drop(child);
-    drop(delegating);
     drop(remote);
     let _ = std::fs::remove_dir_all(root);
 }

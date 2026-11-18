@@ -185,7 +185,7 @@ async fn validated_subagent_progress_survives_snapshot_projection() {
 }
 
 #[tokio::test]
-async fn frontend_snapshot_uses_three_operation_scoped_connections() {
+async fn frontend_snapshot_uses_four_operation_scoped_connections_for_direct_sessions() {
     let (parts, store_path) =
         test_active_service("snapshot_connection_reuse", "connection-session");
     for index in 0..3 {
@@ -237,9 +237,9 @@ async fn frontend_snapshot_uses_three_operation_scoped_connections() {
     assert_eq!(snapshot.thread_events["worker"].len(), 1);
     assert_eq!(snapshot.thread_steering.len(), 1);
     assert_eq!(snapshot.worksets.items.len(), 3);
-    // One checkout covers the relational dashboard data; the path-backed
-    // transcript writer checks out once for messages and once for row times.
-    assert_eq!(crate::store::tracked_connection_opens(&store_path), 3);
+    // Direct shell commands have one checkout, relational dashboard data one,
+    // and the transcript writer checks out for messages and row times.
+    assert_eq!(crate::store::tracked_connection_opens(&store_path), 4);
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
 

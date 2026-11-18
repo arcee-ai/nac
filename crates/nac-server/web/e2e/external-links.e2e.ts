@@ -217,7 +217,7 @@ for (const viewport of [
     await page.goto(`${harness.baseUrl}/#/session/${id}/insights`);
     const settings = await openSessionSettings(page);
     await settings.getByRole("button", { name: "Provider connections", exact: true }).click();
-    const accounts = settings.getByRole("region", { name: "Provider connections" });
+    const accounts = settings.getByRole("region", { name: "Provider connections" }).last();
     // This is browser fallback, using controlled HTTP UI responses. Native
     // auth-owner and actual system-browser acceptance remain separate lanes.
     const automatic = page.waitForEvent("popup");

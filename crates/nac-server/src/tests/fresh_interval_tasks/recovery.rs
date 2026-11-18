@@ -123,6 +123,7 @@ async fn seed_occurrence(
     std::fs::write(cwd.join("untracked"), "untracked source").unwrap();
     let destination = FreshTaskDestination {
         project_id: request.project_id.clone(),
+        model_selection: None,
         pinned_commit: None,
         default_ref: Some("refs/heads/dev".into()),
         model: None,
@@ -1095,6 +1096,16 @@ async fn fresh_reservation_owner_restart_before_source_resolution_reuses_one_lau
         assert_eq!(record.source.commit, before_source.0);
         let mut conflict = receipt.request.clone();
         conflict.prompt.push_str(" changed");
+        conflict.model_selection = Some(nac_core::store::TaskModelSelection {
+            backend: "openai-responses".into(),
+            model: "gpt-5.2".into(),
+            base_url: "https://api.openai.com/v1".into(),
+            allow_insecure_http: false,
+            api_key_env: None,
+            reasoning_effort: None,
+            extra_headers: None,
+            orchestrator_compaction_threshold: None,
+        });
         assert!(TaskLaunchApplication::new(manager.as_ref().unwrap())
             .start(conflict)
             .await

@@ -17,7 +17,6 @@ import type { SessionDrawerControls } from "@/app/features/session-chrome/useSes
 import type { SessionFacts } from "@/app/features/session-chrome/useSessionFacts";
 import { useUsageReadings } from "@/app/features/session-chrome/useUsageReadings";
 import { SessionIntegrations } from "@/app/features/session-integrations/SessionIntegrations";
-import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
@@ -27,13 +26,6 @@ import { useToast } from "@/app/providers/ToastProvider";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useForkSession } from "@/app/services/queries";
 import type { ManagedSessionSummary, SessionSnapshotResponse } from "@/app/types/api";
-
-/** Display vocabulary for the immutable persisted behaviors. */
-const BEHAVIOR_LABEL: Record<NonNullable<SessionFacts["behavior"]>, string> = {
-  direct: "Agent",
-  "direct-with-orchestrator": "Agent + Orchestrator",
-  orchestrator: "Orchestrator",
-};
 
 /** "+12 −3", each half only when it has something to count. */
 export function ChangeCounts({ additions, deletions }: { additions: number; deletions: number }) {
@@ -63,7 +55,7 @@ function LiveDot({ pulse, className }: { pulse: boolean; className?: string }) {
 function panelDetail(target: SessionPanelTarget, facts: SessionFacts): ReactNode {
   if (target === "files" && (facts.additions || facts.deletions))
     return <ChangeCounts additions={facts.additions} deletions={facts.deletions} />;
-  if ((target === "delegated" || target === "worksets") && facts.agents?.panel === target) {
+  if (target === "delegated" && facts.agents?.panel === target) {
     const { count, running } = facts.agents;
     return (
       <span className="tabular flex items-center gap-1.5">
@@ -176,7 +168,6 @@ function SessionMenuContent({
   const navigate = useNavigate();
   const toast = useToast();
   const summary = entry?.summary ?? null;
-  const uiPolicy = useUiPolicy();
 
   const forkIndex = [...(model?.baseTurns ?? [])]
     .reverse()
@@ -201,14 +192,7 @@ function SessionMenuContent({
 
   const entries = sessionPanelEntries(facts, phone);
 
-  const kind =
-    facts.lineage?.kind === "managed-orchestrator"
-      ? "Managed orchestrator"
-      : facts.lineage
-        ? "Subagent"
-        : facts.behavior && uiPolicy.orchestrationEnabled
-          ? BEHAVIOR_LABEL[facts.behavior]
-          : null;
+  const kind = facts.lineage ? "Subagent" : null;
   const place = [facts.environment, entry?.summary.ssh_host ?? facts.repo]
     .filter(Boolean)
     .join(" · ");

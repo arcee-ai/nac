@@ -1,5 +1,4 @@
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
-import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -20,10 +19,9 @@ import {
   TextAreaSize,
 } from "@/app/atoms";
 import { SshBadge } from "@/app/components/SshBadge";
-import { type LaunchModelSelection } from "@/app/components/modals/ConfigurationsPanel";
+import { type LaunchModelSelection } from "@/app/features/setup/modelSelection";
 import { FormSection } from "@/app/components/modals/FormSection";
 import { ConfigRow, CONTROL_WIDTH } from "@/app/components/modals/ConfigRow";
-import { LightModelSection, type LightSelection } from "@/app/components/modals/LightModelSection";
 import { reasoningOptionsFor } from "@/app/components/modals/options";
 import { SshConnectionBox } from "@/app/components/modals/SshConnectionBox";
 import { SmallSelect } from "@/app/components/modals/SmallSelect";
@@ -32,18 +30,12 @@ import { matchesManagedModelPick } from "@/app/features/managed/model";
 import { useManagedHostStatus } from "@/app/features/managed/queries";
 import { resolveCatalogModel } from "@/app/lib/catalog";
 import { useExitTransition } from "@/app/hooks/useExitTransition";
-import {
-  inheritPrimaryCredential,
-  buildSettingsPatch,
-  managedLaunchBaseUrl,
-  sameLightModel,
-  type SettingsInitialValues,
-} from "@/app/lib/modelConfig";
+import { buildSettingsPatch, type SettingsInitialValues } from "@/app/lib/modelConfig";
 import { useSessionTitle } from "@/app/hooks/useSessionTitle";
 import { useToast } from "@/app/providers/ToastProvider";
 
 import { ModelSetupSection } from "@/app/features/setup/ModelSetupSection";
-import { savedModelSelection, sameModelSelection } from "@/app/features/setup/modelSelection";
+import { sameModelSelection } from "@/app/features/setup/modelSelection";
 import { saveSettings } from "@/app/features/setup/workflow";
 import { useSetupAction } from "@/app/features/setup/useSetupAction";
 import {
@@ -54,18 +46,15 @@ import {
   setupReconciliation,
 } from "@/app/features/setup/browserAdapters";
 import {
-  useCreateModelConfig,
   useModelCatalog,
   useSessionConfig,
   useSessionSummary,
   useUpdateConfig,
   useUpdatePresentation,
-  useUpdateProject,
 } from "@/app/services/queries";
 
 import type {
   BackendKind,
-  LightModelSettings,
   RawSessionConfig,
   SessionSummarySnapshot,
   SshTarget,
@@ -177,9 +166,6 @@ export function SettingsModal({
 
   const initial = config ? initialFromConfig(config) : null;
 
-  // The form seeds its light-model state from `config` once at mount, so it
-  // must not mount before /config settles — a light model arriving later
-  // would leave the form on Single and a save would clear dual mode.
   if (!initial || !entry || isLoading) {
     return (
       <SettingsShell open={open} onClose={onClose}>
@@ -199,7 +185,6 @@ export function SettingsModal({
       open={open}
       id={id}
       initial={initial}
-      initialLight={config?.light_model ?? null}
       summary={entry.summary}
       diagnostics={config?.diagnostics ?? []}
       onClose={onClose}
@@ -212,7 +197,6 @@ function SettingsForm({
   open,
   id,
   initial,
-  initialLight,
   initialVersion,
   summary,
   diagnostics,
@@ -222,8 +206,6 @@ function SettingsForm({
   id: string;
   initial: SettingsInitialValues;
   initialVersion?: number;
-  /** The light model the session currently runs with, if any. */
-  initialLight: LightModelSettings | null;
   /** Carries the presentation version the title save has to match. */
   summary: SessionSummarySnapshot;
   diagnostics: string[];
@@ -248,12 +230,8 @@ function SettingsForm({
   const action = useSetupAction(open);
   const sessionTitle = useSessionTitle();
   const updateConfig = useUpdateConfig();
-  const updateProject = useUpdateProject();
-  const [updateProjectDefault, setUpdateProjectDefault] = useState(false);
   const managedHostQuery = useManagedHostStatus();
   const managedHost = managedHostQuery.data ?? null;
-  const createModelConfig = useCreateModelConfig();
-  const policy = useUiPolicy();
   const [openingSummary] = useState(summary);
   const [openingVersion] = useState(initialVersion);
   const updatePresentation = useUpdatePresentation();
@@ -273,86 +251,29 @@ function SettingsForm({
   // Track whether the compaction value was auto-suggested (vs. user-entered)
   // so model changes don't clobber a manual value. The ref mirrors the state
   // so the auto-suggest effect can read it without depending on the state.
-  const compactionRef = useRef(
-    initial.orchestrator_compaction_threshold != null
-      ? String(initial.orchestrator_compaction_threshold)
-      : "",
-  );
   // A persisted null is disabled, not an invitation to change it on mount.
   const compactionAutoRef = useRef(initial.automatic_compaction ?? false);
-  // An explicitly selected saved preset owns even a disabled (`null`)
-  // compaction policy. Keep an empty explicit value from being replaced by
-  // the catalog's automatic 70% suggestion until the user edits it.
-  const compactionPresetRef = useRef(false);
   const [error, setError] = useState("");
   const [selection, setSelection] = useState<LaunchModelSelection | null>(null);
-  const [light, setLight] = useState<LightSelection>({
-    mode: initialLight ? "dual" : "single",
-    light: initialLight,
-  });
-  const [lightSeed, setLightSeed] = useState(initialLight);
   const [advanced, setAdvanced] = useState(false);
-  const [clearMalformedLight, setClearMalformedLight] = useState(false);
-
-  // A malformed stored light model loads as null with only a diagnostic; the
-  // server then refuses patches that omit light_model, so saving must always
-  // send an explicit repair or clear.
-  const lightNeedsRepair = diagnostics.some((diagnostic) =>
-    diagnostic.startsWith("malformed stored light model"),
-  );
-
   const projectedSelection = useRef<LaunchModelSelection | null>(null);
-  const onConfigurationChange = useCallback(
-    (next: LaunchModelSelection | null, source: "primary" | "preset") => {
-      setSelection(next);
-      if (!next || sameModelSelection(projectedSelection.current, next)) return;
-      const previous = projectedSelection.current;
-      projectedSelection.current = next;
-      const values = next.kind === "resolved" ? next : next.request;
-      setBackend(values.backend);
-      setModel(values.model);
-      setBaseUrl(values.base_url ?? managedLaunchBaseUrl(values.backend) ?? "");
-      if (next.kind === "resolved") {
-        setReasoning(next.reasoning_effort ?? "");
-        const primaryChange = source === "primary" && previous?.kind === "resolved";
-        const sameProviderRoute =
-          primaryChange &&
-          previous.backend === next.backend &&
-          previous.base_url === next.base_url &&
-          previous.api_key_env === next.api_key_env &&
-          previous.allow_insecure_http === next.allow_insecure_http;
-        // Primary identity changes leave execution drafts with their local form
-        // owner. A provider/account transition still clears the prior headers.
-        // Explicit preset selection intentionally projects the complete tuple.
-        if (!sameProviderRoute) setHeaders(headersToText(next.extra_headers ?? {}));
-        if (primaryChange) return;
-        if (next.orchestrator_compaction_threshold !== undefined) {
-          const threshold = next.orchestrator_compaction_threshold;
-          const value = threshold == null ? "" : String(threshold);
-          compactionPresetRef.current = true;
-          compactionAutoRef.current = false;
-          compactionRef.current = value;
-          setCompaction(value);
-        } else {
-          const leavingPreset = compactionPresetRef.current;
-          compactionPresetRef.current = false;
-          if (leavingPreset) {
-            compactionAutoRef.current = true;
-            compactionRef.current = "";
-            setCompaction("");
-          }
-        }
-        if (next.light_model !== undefined) {
-          setLightSeed(next.light_model);
-          setLight({
-            mode: next.light_model ? "dual" : "single",
-            light: next.light_model,
-          });
-        }
-      }
-    },
-    [],
-  );
+  const onConfigurationChange = useCallback((next: LaunchModelSelection | null) => {
+    setSelection(next);
+    if (!next || sameModelSelection(projectedSelection.current, next)) return;
+    const previous = projectedSelection.current;
+    projectedSelection.current = next;
+    setBackend(next.backend);
+    setModel(next.model);
+    setBaseUrl(next.base_url);
+    setReasoning(next.reasoning_effort ?? "");
+    const sameProviderRoute =
+      previous &&
+      previous.backend === next.backend &&
+      previous.base_url === next.base_url &&
+      previous.api_key_env === next.api_key_env &&
+      previous.allow_insecure_http === next.allow_insecure_http;
+    if (!sameProviderRoute) setHeaders(headersToText(next.extra_headers ?? {}));
+  }, []);
 
   // Only the levels this model actually accepts: the backend rejects the rest,
   // so offering them would only produce a save that fails.
@@ -373,13 +294,8 @@ function SettingsForm({
   // the suggestion only fills the field when it is empty or was itself last
   // auto-suggested.
   useEffect(() => {
-    if (
-      !compactionPresetRef.current &&
-      compactionPlaceholder !== "auto" &&
-      compactionAutoRef.current
-    ) {
+    if (compactionPlaceholder !== "auto" && compactionAutoRef.current) {
       compactionAutoRef.current = true;
-      compactionRef.current = compactionPlaceholder;
       setCompaction(compactionPlaceholder);
     }
   }, [compactionPlaceholder, selection]);
@@ -389,8 +305,7 @@ function SettingsForm({
     action.busy ||
     managedHostQuery.isPending ||
     updateConfig.isPending ||
-    updatePresentation.isPending ||
-    createModelConfig.isPending;
+    updatePresentation.isPending;
 
   const seedTarget = sshTargetFromSummary(openingSummary);
   const sshStatus = useSshConnectionStatus(seedTarget);
@@ -456,58 +371,16 @@ function SettingsForm({
         validationError instanceof Error ? validationError.message : String(validationError),
       );
     }
-    if (policy.orchestrationEnabled) {
-      if (light.mode === "dual") {
-        // Guarded before a named configuration can be created above.
-        if (!light.light) throw new SetupValidation("Pick the light model before saving.");
-        const finalLight = inheritPrimaryCredential(
-          light.light,
-          selected.backend,
-          selected.api_key_env,
-          initial.api_key_env,
-        );
-        if (lightNeedsRepair || !sameLightModel(finalLight, initialLight)) {
-          patch.light_model = finalLight;
-        }
-      } else if (initialLight || lightNeedsRepair) {
-        patch.light_model = null;
-      }
-    } else if (clearMalformedLight) {
-      patch.light_model = null;
-    } else if (!sameLightModel(light.light, initialLight)) {
-      // Explicit preset selection still reproduces its complete tuple. Hiding
-      // the control alone leaves the raw existing value untouched.
-      patch.light_model = light.light;
-    }
     return patch;
   };
 
   const submit = async () => {
     if (busy || action.needsReview || !selection) return;
-    if (updateProjectDefault && selection.kind === "resolved" && !selection.config_id) {
-      setError("Choose a saved preset in Advanced before updating the project default.");
-      return;
-    }
-    if (policy.orchestrationEnabled && light.mode === "dual" && !light.light) {
-      setError("Pick the light model before saving.");
-      return;
-    }
 
     let configurationChanged = false;
     try {
-      const values = selection.kind === "save" ? selection.request : selection;
-      const preview = patchFor({
-        ...values,
-        base_url: values.base_url ?? managedLaunchBaseUrl(values.backend) ?? "",
-        allow_insecure_http: values.allow_insecure_http ?? false,
-        api_key_env:
-          selection.kind === "resolved"
-            ? selection.api_key_env
-            : selection.request.api_key
-              ? "PENDING_SAVED_CREDENTIAL"
-              : null,
-      });
-      configurationChanged = selection.kind === "save" || Object.keys(preview).length > 0;
+      const preview = patchFor(selection);
+      configurationChanged = Object.keys(preview).length > 0;
     } catch (validationError) {
       setError(setupFailureMessage(validationError));
       return;
@@ -523,19 +396,8 @@ function SettingsForm({
             if (openingVersion !== undefined && latest.config_version !== openingVersion)
               throw new ConfigurationChanged();
           },
-          persistsModel: selection.kind === "save",
-          model: async () => {
-            if (selection.kind === "save") {
-              const record = await createModelConfig.mutateAsync({
-                ...selection.request,
-                light_model: light.mode === "dual" ? light.light : null,
-              });
-              const selected = savedModelSelection(record);
-              if (current.current()) setSelection(selected);
-              return selected;
-            }
-            return selection;
-          },
+          persistsModel: false,
+          model: async () => selection,
           configurationSaved: configurationChanged,
           configuration: async (selected) => {
             const patch = patchFor(selected);
@@ -543,19 +405,6 @@ function SettingsForm({
             if (Object.keys(patch).length > 0) await updateConfig.mutateAsync({ id, patch });
           },
           title: title.trim() !== initialTitle.trim() ? saveTitle : undefined,
-          projectDefault:
-            updateProjectDefault && openingSummary.project_id
-              ? (selected) => {
-                  if (!selected.config_id)
-                    throw new SetupValidation(
-                      "Choose a saved preset before updating the project default.",
-                    );
-                  return updateProject.mutateAsync({
-                    projectId: openingSummary.project_id!,
-                    payload: { default_model_config_id: selected.config_id },
-                  });
-                }
-              : undefined,
         }),
       );
       if (!result) return;
@@ -632,8 +481,7 @@ function SettingsForm({
     >
       <div ref={contentRef} className="flex min-w-0 flex-col gap-8 [&>*]:shrink-0">
         <p className="text-small !leading-[22px] text-basic-secondary">
-          Changes apply to this inactive primary chat. Project defaults and existing children keep
-          their settings.
+          Changes apply to this inactive primary chat. Existing children keep their settings.
         </p>
         {diagnostics.length > 0 ? (
           <div className="rounded-[4px] border border-error-muted bg-error-tertiary p-4 text-small !leading-[22px] text-error-primary">
@@ -670,7 +518,6 @@ function SettingsForm({
 
         <ModelSetupSection
           existingSession
-          simple={!policy.orchestrationEnabled}
           invalid={Boolean(error)}
           errorText={error || undefined}
           initial={{
@@ -684,35 +531,10 @@ function SettingsForm({
             reasoning_effort: initial.reasoning_effort,
             extra_headers: initial.extra_headers,
             orchestrator_compaction_threshold: initial.orchestrator_compaction_threshold,
-            light_model: initialLight,
           }}
           onChange={onConfigurationChange}
         >
           <div className="flex min-w-0 flex-col gap-4">
-            {policy.orchestrationEnabled ? (
-              <LightModelSection
-                key={JSON.stringify(lightSeed)}
-                initial={light.light}
-                behavior={openingSummary.behavior ?? "orchestrator"}
-                onChange={setLight}
-              />
-            ) : null}
-            {openingSummary.project_id ? (
-              <label className="flex min-h-11 items-start gap-3 text-small !leading-[22px]">
-                <input
-                  type="checkbox"
-                  checked={updateProjectDefault}
-                  onChange={(event) => setUpdateProjectDefault(event.target.checked)}
-                />{" "}
-                <span>
-                  Use selected preset as the project default
-                  <span className="block text-basic-muted">
-                    Future chats inherit that saved preset, including its Advanced values. Existing
-                    chats and children keep their settings.
-                  </span>
-                </span>
-              </label>
-            ) : null}
             <Separator />
             <button
               type="button"
@@ -729,16 +551,6 @@ function SettingsForm({
                 title="Runtime preferences"
                 description="Optional reasoning, context and request headers for this chat."
               >
-                {lightNeedsRepair && !policy.orchestrationEnabled ? (
-                  <label className="text-micro">
-                    <input
-                      type="checkbox"
-                      checked={clearMalformedLight}
-                      onChange={(event) => setClearMalformedLight(event.target.checked)}
-                    />{" "}
-                    Clear malformed legacy light settings
-                  </label>
-                ) : null}
                 <Separator />
                 <ConfigRow
                   presentation="form"
@@ -769,9 +581,7 @@ function SettingsForm({
                         inputMode="numeric"
                         value={compaction}
                         onChange={(event) => {
-                          compactionPresetRef.current = false;
                           compactionAutoRef.current = false;
-                          compactionRef.current = event.target.value;
                           setCompaction(event.target.value);
                         }}
                       />

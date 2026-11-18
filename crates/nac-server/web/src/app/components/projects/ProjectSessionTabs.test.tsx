@@ -1,8 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { UiPolicyContext } from "@/app/features/ui-policy/UiPolicyContext";
-import { ORCHESTRATION_UI_POLICY } from "@/app/features/ui-policy/policy";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -56,33 +54,33 @@ afterEach(cleanup);
 describe("project session tab behavior identity", () => {
   it("sizes tabs to their titles and keeps every behavior identifiable", () => {
     const sessions = [
-      session("orchestrator", "Plan the managed deployment rollout", "orchestrator"),
+      session("orchestrator", "Plan the managed deployment rollout", "direct"),
       session("direct", "Implement connection status feedback", "direct"),
-      session("hybrid", "Coordinate release readiness review", "direct-with-orchestrator"),
+      session("hybrid", "Coordinate release readiness review", "direct"),
     ];
     render(
       <MemoryRouter>
-        <UiPolicyContext.Provider value={ORCHESTRATION_UI_POLICY}>
+        <>
           <ProjectSessionTabs
             projectId="project"
             sessions={sessions}
             activeSessionId="direct"
             summary={sessions[1].summary}
           />
-        </UiPolicyContext.Provider>
+        </>
       </MemoryRouter>,
     );
 
     const expected = [
-      ["Plan the managed deployment rollout", "Orchestrator", "orchestrator"],
+      ["Plan the managed deployment rollout", "Agent", "plane"],
       ["Implement connection status feedback", "Agent", "plane"],
-      ["Coordinate release readiness review", "Agent + Orchestrator", "planeAdd"],
+      ["Coordinate release readiness review", "Agent", "plane"],
     ] as const;
 
-    for (const [title, behavior, icon] of expected) {
-      const tab = screen.getByRole("button", { name: `${title}, ${behavior}` });
+    for (const [title] of expected) {
+      const tab = screen.getByRole("button", { name: title });
       expect(tab.getAttribute("title")).toBeNull();
-      expect(tab.querySelector(`[data-session-behavior-icon="${icon}"]`)).toBeTruthy();
+      expect(tab.querySelector("[data-session-behavior-icon]")).toBeNull();
       expect(tab.querySelector("[data-session-tab-badge]")).toBeNull();
       expect(tab.closest(".chat-session-tab")?.className).toContain("w-full");
       const slot = tab.closest(".chat-session-tab")?.parentElement;
@@ -93,7 +91,7 @@ describe("project session tab behavior identity", () => {
     }
 
     const active = screen.getByRole("button", {
-      name: "Implement connection status feedback, Agent",
+      name: "Implement connection status feedback",
     });
     expect(active.getAttribute("aria-current")).toBe("page");
     expect(active.className).toContain("pl-2");
@@ -109,18 +107,5 @@ describe("project session tab behavior identity", () => {
     expect(screen.queryByText("Orchestrator")).toBeNull();
     expect(screen.queryByText("Direct")).toBeNull();
     expect(screen.queryByText("Agent + Orchestrator")).toBeNull();
-
-    const orchestrator = screen.getByRole("button", {
-      name: "Plan the managed deployment rollout, Orchestrator",
-    });
-    const orchestratorIcon = orchestrator.querySelector(
-      '[data-session-behavior-icon="orchestrator"]',
-    );
-    fireEvent.mouseEnter(orchestratorIcon!);
-    expect(screen.getByRole("tooltip").textContent).toContain("Orchestrator");
-    fireEvent.keyDown(orchestrator, { key: "Escape" });
-
-    act(() => active.focus());
-    expect(screen.getByRole("tooltip").textContent).toContain("Agent");
   });
 });

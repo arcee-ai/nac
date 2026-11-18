@@ -5,7 +5,7 @@ import { openSessionSettings } from "./nav-focus-helpers";
 test.use({ orchestration: "0" });
 
 for (const mobile of [false, true]) {
-  test(`reviews inherited direct setup, session-only settings and failed saves (${mobile ? "mobile" : "desktop"})`, async ({
+  test(`reviews direct session setup, session-only settings and failed saves (${mobile ? "mobile" : "desktop"})`, async ({
     harness,
     page,
     request,
@@ -16,17 +16,26 @@ for (const mobile of [false, true]) {
     // An empty project opens Home's composer; its model chip shows what the
     // session inherits, and Start session creates it and sends the first prompt.
     await expect(page).toHaveURL(new RegExp(`#/\\?project=${projectId}$`));
-    const prompt = page.getByRole("textbox", { name: "What should we work on?", exact: true });
+    const prompt = page.getByRole("textbox", {
+      name: "What should we work on?",
+      exact: true,
+    });
     await expect(prompt).toBeVisible();
-    await page.getByRole("button", { name: /^Model: / }).click();
+    await page.getByRole("button", { name: "Choose a model" }).click();
     const dialog = page.getByRole("dialog", { name: "Model for this session" });
-    await expect(dialog).toContainText("Project default");
-    await expect(dialog).toContainText("reasoning high");
     await expect(dialog.getByText("Primary model", { exact: true })).toBeVisible();
-    await expect(dialog.getByRole("radiogroup")).toHaveCount(0);
     await expect(dialog.getByText("Optional light model", { exact: true })).toHaveCount(0);
-    await page.keyboard.press("Escape");
-    await expect(dialog).toHaveCount(0);
+    await dialog.locator("button[aria-expanded]").first().click();
+    await page.getByRole("textbox", { name: "Search models" }).fill("gpt-5.6-sol");
+    await page
+      .locator('[aria-label="Model results"] button[data-row]')
+      .filter({ hasText: /gpt-5\.6/i })
+      .locator("..")
+      .filter({ hasText: "OpenAI" })
+      .locator("button[data-row]")
+      .first()
+      .click();
+    await dialog.getByRole("button", { name: "Use this model" }).click();
     harness.provider.enqueue(
       "setup-first-run",
       { token: "SETUP_FIRST_RUN" },
@@ -46,30 +55,15 @@ for (const mobile of [false, true]) {
     await waitForRunIdle(request, harness, sessionId);
     const configUrl = `${harness.baseUrl}/sessions/${sessionId}/config`;
     const before = await (await request.get(configUrl)).json();
-    expect(before).toMatchObject({ reasoning_effort: "high" });
-    // Without a model override, Home inherits exactly as any plain project
-    // create does (the server applies the project default).
-    const reference = await createSession(request, harness, "direct", projectId);
-    const inherited = await (
-      await request.get(`${harness.baseUrl}/sessions/${reference}/config`)
-    ).json();
-    for (const field of [
-      "backend",
-      "model",
-      "base_url",
-      "api_key_env",
-      "reasoning_effort",
-      "orchestrator_compaction_threshold",
-      "extra_headers_json",
-    ])
-      expect(before[field]).toEqual(inherited[field]);
+    expect(before).toMatchObject({ model: "gpt-5.6-sol", backend: "openai-responses" });
     const projectBefore = await (await request.get(`${harness.baseUrl}/projects`)).json();
 
     await openSessionSettings(page);
-    const settings = page.getByRole("dialog", { name: "Session settings", exact: true });
-    await expect(settings).toContainText(
-      "Project defaults and existing children keep their settings",
-    );
+    const settings = page.getByRole("dialog", {
+      name: "Session settings",
+      exact: true,
+    });
+    await expect(settings).toContainText("Existing children keep their settings");
     await expect(settings.getByText("Primary model", { exact: true })).toBeVisible();
     await settings
       .getByRole("textbox", { name: "Session title", exact: true })
@@ -163,7 +157,9 @@ for (const mobile of [false, true]) {
     });
     // OAuth itself is an external boundary. The production UI observes these deterministic account outcomes.
     await page.route(`${harness.baseUrl}/auth`, (route) =>
-      route.fulfill({ json: { providers: [auth("arcee", true), auth("codex", codexReady)] } }),
+      route.fulfill({
+        json: { providers: [auth("arcee", true), auth("codex", codexReady)] },
+      }),
     );
     await page.route(`${harness.baseUrl}/auth/arcee`, async (route) => {
       arceeLogouts += 1;
@@ -182,7 +178,9 @@ for (const mobile of [false, true]) {
     );
     await page.route(`${harness.baseUrl}/auth/codex/login/setup-login`, async (route) => {
       codexReady = true;
-      await route.fulfill({ json: { state: "complete", auth: auth("codex", true) } });
+      await route.fulfill({
+        json: { state: "complete", auth: auth("codex", true) },
+      });
     });
     await page.route(`${harness.baseUrl}/auth/codex`, async (route) => {
       codexReady = false;
@@ -215,7 +213,9 @@ for (const mobile of [false, true]) {
     });
     await page.route(`${harness.baseUrl}/providers/models`, async (route) => {
       if (route.request().postDataJSON().backend === "arcee-auth")
-        return route.fulfill({ json: { base_url: "https://api.arcee.ai/api/v1", models: [] } });
+        return route.fulfill({
+          json: { base_url: "https://api.arcee.ai/api/v1", models: [] },
+        });
       if (route.request().postDataJSON().backend !== "chatgpt-codex-responses")
         return route.continue();
       modelsRequests.push(route.request().postDataJSON());
@@ -229,9 +229,14 @@ for (const mobile of [false, true]) {
     });
     await page.goto(`${harness.baseUrl}/#/session/${sessionId}/files`);
     await openSessionSettings(page);
-    const settings = page.getByRole("dialog", { name: "Session settings", exact: true });
+    const settings = page.getByRole("dialog", {
+      name: "Session settings",
+      exact: true,
+    });
     await settings.getByRole("button", { name: "Provider connections", exact: true }).click();
-    const accounts = settings.getByRole("region", { name: "Provider connections" });
+    const accounts = settings.getByRole("region", {
+      name: "Provider connections",
+    });
     await expect(accounts.getByText("Signed in", { exact: true })).toHaveCount(1);
     const popup = page.waitForEvent("popup");
     await accounts.getByRole("button", { name: "Sign in with ChatGPT", exact: true }).click();
@@ -245,7 +250,9 @@ for (const mobile of [false, true]) {
       settings.getByRole("button").filter({ hasText: "Codex setup fixture" }).first(),
     ).toBeVisible();
     await expect(settings.getByRole("button", { name: "Save", exact: true })).toBeEnabled();
-    expect(modelsRequests).toContainEqual({ backend: "chatgpt-codex-responses" });
+    expect(modelsRequests).toContainEqual({
+      backend: "chatgpt-codex-responses",
+    });
     await accounts.getByRole("button", { name: "Sign out", exact: true }).last().click();
     await expect(accounts.getByText("Signed in", { exact: true })).toHaveCount(1);
     await expect(settings.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
@@ -258,9 +265,8 @@ for (const mobile of [false, true]) {
   });
 }
 
-test("explicitly updates a saved project default while existing children keep creation snapshots and future children inherit the accepted parent", async ({
+test("session model changes leave existing children unchanged and future children inherit the parent", async ({
   harness,
-  page,
   request,
 }) => {
   const projectId = await createProject(request, harness);
@@ -272,7 +278,12 @@ test("explicitly updates a saved project default while existing children keep cr
       { kind: "text", text: `${token} complete`, stream: true },
     );
     const response = await request.post(`${harness.baseUrl}/sessions/${parentId}/children`, {
-      data: { profile: "general", description: token, prompt: token, background: false },
+      data: {
+        profile: "general",
+        description: token,
+        prompt: token,
+        background: false,
+      },
     });
     expect(response.ok()).toBe(true);
     const id = (await response.json()).child_session_id;
@@ -283,77 +294,18 @@ test("explicitly updates a saved project default while existing children keep cr
   const existingBefore = await (
     await request.get(`${harness.baseUrl}/sessions/${existingChild}/config`)
   ).json();
-  const presetResponse = await request.post(`${harness.baseUrl}/model-configs`, {
-    data: {
-      name: "Explicit future default",
-      backend: "openai-responses",
-      model: "gpt-5.6-terra",
-      base_url: harness.provider.baseUrl,
-      api_key: "nac-e2e-dummy-only",
-      reasoning_effort: "low",
-      extra_headers: { "X-Setup": "future" },
-      orchestrator_compaction_threshold: 555,
-      light_model: null,
-    },
+  const update = await request.patch(`${harness.baseUrl}/sessions/${parentId}/config`, {
+    data: { model: "gpt-5.6-terra", reasoning_effort: "low" },
   });
-  expect(presetResponse.ok()).toBe(true);
-  const preset = await presetResponse.json();
-  await page.goto(`${harness.baseUrl}/#/session/${parentId}/files`);
-  await openSessionSettings(page);
-  const settings = page.getByRole("dialog", { name: "Session settings", exact: true });
-  await settings
-    .getByRole("button", { name: "Advanced presets and provider setup", exact: true })
-    .click();
-  await settings.getByRole("button", { name: "Create New", exact: true }).click();
-  await page.getByText("Explicit future default", { exact: true }).click();
-  await settings
-    .getByRole("checkbox", { name: /Use selected preset as the project default/ })
-    .check();
-  await settings.getByRole("button", { name: "Save", exact: true }).click();
-  await expect(settings).toHaveCount(0);
+  expect(update.ok()).toBe(true);
   const current = await (
     await request.get(`${harness.baseUrl}/sessions/${parentId}/config`)
   ).json();
-  expect(current).toMatchObject({
-    model: "gpt-5.6-terra",
-    reasoning_effort: "low",
-    orchestrator_compaction_threshold: 555,
-    api_key_env: preset.api_key_env,
-    extra_headers_json: '{"X-Setup":"future"}',
-  });
-  const projects = await (await request.get(`${harness.baseUrl}/projects`)).json();
-  expect(
-    projects.projects.find((project: { project_id: string }) => project.project_id === projectId)
-      .default_model_config_id,
-  ).toBe(preset.config_id);
-  // Opening the exact saved tuple auto-selects its preset. The explicit default
-  // action must retain that identity without requiring a redundant re-selection.
-  await openSessionSettings(page);
-  await settings
-    .getByRole("button", { name: "Advanced presets and provider setup", exact: true })
-    .click();
-  await expect(settings.getByText("Explicit future default", { exact: true })).toBeVisible();
-  await settings
-    .getByRole("checkbox", { name: /Use selected preset as the project default/ })
-    .check();
-  const repeatedDefault = page.waitForResponse(
-    (response) =>
-      response.url() === `${harness.baseUrl}/projects/${projectId}` &&
-      response.request().method() === "PATCH",
-  );
-  await settings.getByRole("button", { name: "Save", exact: true }).click();
-  const defaultResponse = await repeatedDefault;
-  expect(defaultResponse.ok()).toBe(true);
-  expect(defaultResponse.request().postDataJSON()).toMatchObject({
-    default_model_config_id: preset.config_id,
-  });
-  await expect(settings).toHaveCount(0);
-  expect(
-    await (await request.get(`${harness.baseUrl}/sessions/${parentId}/config`)).json(),
-  ).toEqual(current);
+  expect(current).toMatchObject({ model: "gpt-5.6-terra", reasoning_effort: "low" });
   expect(
     await (await request.get(`${harness.baseUrl}/sessions/${existingChild}/config`)).json(),
   ).toEqual(existingBefore);
+
   const futureChild = await child("SETUP_CHILD_AFTER");
   expect(
     await (await request.get(`${harness.baseUrl}/sessions/${futureChild}/config`)).json(),
@@ -362,7 +314,6 @@ test("explicitly updates a saved project default while existing children keep cr
     backend: current.backend,
     reasoning_effort: current.reasoning_effort,
     api_key_env: current.api_key_env,
-    orchestrator_compaction_threshold: 555,
     extra_headers_json: current.extra_headers_json,
   });
   const forbidden = await request.patch(`${harness.baseUrl}/sessions/${existingChild}/config`, {

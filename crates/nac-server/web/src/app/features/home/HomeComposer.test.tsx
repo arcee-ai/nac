@@ -4,8 +4,6 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { UiPolicyContext } from "@/app/features/ui-policy/UiPolicyContext";
-import { DIRECT_UI_POLICY, ORCHESTRATION_UI_POLICY } from "@/app/features/ui-policy/policy";
 import type { ManagedSessionSummary, ProjectRecord } from "@/app/types/api";
 
 import { HomeComposer } from "./HomeComposer";
@@ -27,19 +25,27 @@ vi.mock("./useStartSession", () => ({
     clearError: vi.fn(),
   }),
 }));
-vi.mock("./modelChoice", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./modelChoice")>()),
-  useInheritedModel: () => ({
-    inherited: {
-      initial: { model: "glm-5", reasoning_effort: "high", backend: "arcee-api" },
-      light: null,
-      source: "project-default",
-    },
-    pending: false,
-    error: null,
-  }),
+const chosenModel = {
+  selection: {
+    kind: "resolved",
+    backend: "arcee-api",
+    model: "glm-5",
+    base_url: "https://api.arcee.ai/api/v1",
+    allow_insecure_http: false,
+    api_key_env: null,
+    reasoning_effort: "high",
+    extra_headers: null,
+  },
+} as const;
+vi.mock("./ModelOverrideModal", () => ({
+  ModelOverrideModal: ({
+    open,
+    onApply,
+  }: {
+    open: boolean;
+    onApply: (value: typeof chosenModel) => void;
+  }) => (open ? <button onClick={() => onApply(chosenModel)}>Choose test model</button> : null),
 }));
-vi.mock("./ModelOverrideModal", () => ({ ModelOverrideModal: () => null }));
 vi.mock("@/app/features/task-launches/useTaskLaunch", () => ({
   useTaskLaunchSource: (_id: string | null, enabled: boolean) => ({
     data: enabled ? { eligible: fakes.eligible, default_ref: "main" } : undefined,
@@ -69,12 +75,12 @@ const sessions = [
   { summary: { session_id: "s", project_id: "p2", updated_at: "2026-11-16T10:00:00Z" } },
 ] as ManagedSessionSummary[];
 
-function mount(path = "/", orchestration = true) {
+function mount(path = "/", _orchestration = true) {
   return render(
     <MemoryRouter initialEntries={[path]}>
-      <UiPolicyContext.Provider value={orchestration ? ORCHESTRATION_UI_POLICY : DIRECT_UI_POLICY}>
+      <>
         <HomeComposer projects={projects} sessions={sessions} />
-      </UiPolicyContext.Provider>
+      </>
     </MemoryRouter>,
   );
 }
@@ -106,12 +112,14 @@ describe("Home composer", () => {
     expect(screen.getByRole("button", { name: "Project: Borealis" })).toBeTruthy();
     fireEvent.change(prompt(), { target: { value: "Fix the flaky test" } });
     fireEvent.keyDown(prompt(), { key: "Enter" });
+    expect(fakes.start).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Choose test model" }));
+    fireEvent.keyDown(prompt(), { key: "Enter" });
     await vi.waitFor(() =>
       expect(fakes.start).toHaveBeenCalledWith({
         projectId: "p2",
-        behavior: "orchestrator",
         prompt: "Fix the flaky test",
-        model: null,
+        model: chosenModel,
       }),
     );
     await vi.waitFor(() => expect((prompt() as HTMLTextAreaElement).value).toBe(""));
@@ -126,13 +134,13 @@ describe("Home composer", () => {
     expect(fakes.start).not.toHaveBeenCalled();
   });
 
-  it("shows the inherited model and the behaviors only where orchestration exists", () => {
-    mount("/", false);
-    expect(screen.getByRole("button", { name: "Model: glm-5 · high" })).toBeTruthy();
+  it("requires an explicit model and does not show a behavior picker", () => {
+    mount();
+    expect(screen.getByRole("button", { name: "Choose a model" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /^Behavior:/ })).toBeNull();
-    cleanup();
-    mount("/", true);
-    expect(screen.getByRole("button", { name: "Behavior: Orchestrator" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Choose a model" }));
+    fireEvent.click(screen.getByRole("button", { name: "Choose test model" }));
+    expect(screen.getByRole("button", { name: "Model: glm-5 · high" })).toBeTruthy();
   });
 
   it("keeps an unsent draft across visits and sends nothing without a prompt", () => {
@@ -149,6 +157,8 @@ describe("Home composer", () => {
   it("routes an isolated-checkout send through the isolated task form", () => {
     fakes.eligible = true;
     mount("/", false);
+    fireEvent.click(screen.getByRole("button", { name: "Choose a model" }));
+    fireEvent.click(screen.getByRole("button", { name: "Choose test model" }));
     fireEvent.click(screen.getByRole("button", { name: "Isolated checkout" }));
     fireEvent.change(prompt(), { target: { value: "Upgrade the toolchain" } });
     fireEvent.click(screen.getByRole("button", { name: "Set up isolated task" }));

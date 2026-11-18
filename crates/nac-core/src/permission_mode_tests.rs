@@ -245,31 +245,15 @@ async fn child_created_during_root_enable_observes_the_same_transition() {
 }
 
 #[tokio::test]
-async fn direct_with_orchestrator_root_covers_children_but_not_managed_orchestrators() {
+async fn direct_root_covers_children_and_preserves_hard_denials() {
     let (path, root) = broker_fixture();
-    crate::store::open_runtime_connection(&path)
-        .unwrap()
-        .execute(
-            "UPDATE sessions SET behavior = 'direct-with-orchestrator'
-             WHERE session_id = 'session-a'",
-            [],
-        )
-        .unwrap();
     insert_direct_session(&path, "child", "direct");
-    insert_direct_session(&path, "managed", "orchestrator");
     crate::store::create_traditional_child_relationship(
         &path,
         "session-a",
         "child",
         crate::store::GENERAL_CHILD_PROFILE,
         "traditional child",
-    )
-    .unwrap();
-    crate::store::create_managed_orchestrator_relationship(
-        &path,
-        "session-a",
-        "managed",
-        "managed orchestrator",
     )
     .unwrap();
     root.set_approval_mode(PermissionApprovalMode::AutoApprove)
@@ -319,12 +303,6 @@ async fn direct_with_orchestrator_root_covers_children_but_not_managed_orchestra
     );
     assert!(child.grants().unwrap().is_empty());
 
-    let managed = child_broker(&path, "managed");
-    assert_eq!(
-        managed.approval_mode().await.unwrap(),
-        PermissionApprovalMode::Manual,
-        "managed orchestrators are a separate durable topology"
-    );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 

@@ -2,7 +2,6 @@
 import { useLocation } from "react-router-dom";
 import { ProjectSessionTabs } from "../../src/app/components/projects/ProjectSessionTabs";
 import { SessionCollection } from "../../src/app/components/sessions/SessionCollection";
-import { UiPolicyProvider } from "../../src/app/features/ui-policy/UiPolicyProvider";
 import { ToastProvider } from "../../src/app/providers/ToastProvider";
 import { ProjectActionsProvider } from "../../src/app/providers/ProjectActionsProvider";
 import { SessionActionsProvider } from "../../src/app/providers/SessionActionsProvider";
@@ -40,7 +39,7 @@ function Surfaces() {
 }
 export function SessionNameSurfaces() {
   return (
-    <UiPolicyProvider>
+    <>
       <ToastProvider>
         <SessionActionsProvider>
           <ProjectActionsProvider>
@@ -48,6 +47,6 @@ export function SessionNameSurfaces() {
           </ProjectActionsProvider>
         </SessionActionsProvider>
       </ToastProvider>
-    </UiPolicyProvider>
+    </>
   );
 }

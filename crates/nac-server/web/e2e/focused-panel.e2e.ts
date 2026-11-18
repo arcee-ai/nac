@@ -1,13 +1,6 @@
 import type { Page } from "@playwright/test";
 
-import {
-  createSession,
-  expect,
-  showSidePanel,
-  startForegroundChild,
-  test,
-  waitForRunIdle,
-} from "./harness";
+import { createSession, expect, showSidePanel, startForegroundChild, test } from "./harness";
 
 /** Counts page requests for browser fullscreen; a full-width drawer must never make one. */
 async function countFullscreenRequests(page: Page) {
@@ -27,91 +20,6 @@ async function expectNoFullscreen(page: Page) {
   expect(await page.evaluate("document.fullscreenElement === null")).toBe(true);
 }
 
-test("retains orchestrator Insights selection and drafts through full width and nested Escape", async ({
-  harness,
-  page,
-  request,
-}) => {
-  harness.provider.enqueue(
-    "focus-alpha-dispatch",
-    { token: "E2E_FOCUS_THREADS_TOKEN", requiredTools: ["thread"] },
-    {
-      kind: "function_call",
-      name: "thread",
-      callId: "focus-alpha",
-      arguments: { name: "alpha-thread", action: "E2E_FOCUS_ALPHA_TOKEN inspect the alpha files" },
-    },
-  );
-  harness.provider.enqueue(
-    "focus-alpha-worker",
-    { token: "E2E_FOCUS_ALPHA_TOKEN", requiredTools: ["read"] },
-    { kind: "text", text: "alpha worker completed" },
-  );
-  harness.provider.enqueue(
-    "focus-beta-dispatch",
-    { functionOutputCallId: "focus-alpha" },
-    {
-      kind: "function_call",
-      name: "thread",
-      callId: "focus-beta",
-      arguments: { name: "beta-thread", action: "E2E_FOCUS_BETA_TOKEN inspect the beta files" },
-    },
-  );
-  harness.provider.enqueue(
-    "focus-beta-worker",
-    { token: "E2E_FOCUS_BETA_TOKEN", requiredTools: ["read"] },
-    { kind: "text", text: "beta worker completed" },
-  );
-  harness.provider.enqueue(
-    "focus-orchestrator-completion",
-    { functionOutputCallId: "focus-beta" },
-    { kind: "text", text: "both threads reported" },
-  );
-  const sessionId = await createSession(request, harness, "orchestrator");
-  const run = await request.post(`${harness.baseUrl}/sessions/${sessionId}/runs`, {
-    data: { prompt: "E2E_FOCUS_THREADS_TOKEN" },
-  });
-  expect(run.status()).toBe(202);
-  await waitForRunIdle(request, harness, sessionId);
-  harness.provider.assertConsumed();
-
-  await countFullscreenRequests(page);
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto(`${harness.baseUrl}/#/session/${sessionId}/insights`);
-  const draft = page.getByRole("combobox", { name: "Message", exact: true });
-  await draft.fill("E2E orchestrator draft kept");
-  await showSidePanel(page, { dock: false });
-  const drawer = page.getByRole("dialog", { name: "Insights", exact: true });
-  const alpha = drawer.getByRole("button", { name: "alpha-thread, Thread, 1" });
-  await alpha.click();
-  const overview = drawer
-    .getByRole("group", { name: "Thread detail view" })
-    .getByRole("button", { name: "Overview" });
-  await overview.click();
-  const expand = drawer.getByRole("button", { name: "Full width", exact: true });
-  await expand.click();
-  const exit = drawer.getByRole("button", { name: "Exit full width", exact: true });
-  await expect(exit).toHaveAttribute("aria-pressed", "true");
-  const show = drawer.getByRole("group", { name: "Show:" }).locator("button[aria-expanded]");
-  await show.click();
-  await page.keyboard.press("Escape");
-  await expect(show).toHaveAttribute("aria-expanded", "false");
-  await expect(exit).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(expand).toBeVisible();
-  await expect(overview).toHaveAttribute("aria-pressed", "true");
-  const list = drawer.getByRole("button", { name: "Open list", exact: true });
-  if (!(await alpha.isVisible()) && (await list.isVisible())) await list.click();
-  await expect(alpha).toHaveAttribute("aria-pressed", "true");
-  await page.keyboard.press("Escape");
-  await expect(drawer).toHaveCount(0);
-  await expect(draft).toHaveValue("E2E orchestrator draft kept");
-  await expectNoFullscreen(page);
-});
-
-// Full width widens the one floating drawer over the chat. The drawer and the
-// panel inside it stay mounted, so going back finds the same selection and
-// drafts, and the chat underneath keeps its own.
 for (const [name, viewport] of [
   ["desktop", { width: 1440, height: 900 }],
   ["tablet", { width: 768, height: 1024 }],

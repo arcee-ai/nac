@@ -19,7 +19,7 @@ export interface StoredThread {
 
 /** Session rows and workset-only groups navigate to another panel instead. */
 export function opensInPlace(entry: InsightEntry): boolean {
-  if (entry.kind === "thread") return true;
+  if (entry.kind === "thread") return false;
   if (entry.kind === "session") return false;
   return entry.group.segments.some((segment) => segment.kind !== "workset");
 }
@@ -27,9 +27,9 @@ export function opensInPlace(entry: InsightEntry): boolean {
 /** The pick stored in the layout store, while it still names something on the page. */
 export function resolveStoredInsight(
   selection: InsightSelection | null,
-  thread: StoredThread,
+  _thread: StoredThread,
   timeline: readonly InsightTurnSection[],
-  ownsThread: (name: string) => boolean,
+  _ownsThread: (name: string) => boolean,
 ): ShownInsight | null {
   if (selection?.kind === "group") {
     const entry = findInsightEntry(timeline, selection.groupId);
@@ -40,9 +40,6 @@ export function resolveStoredInsight(
       entry,
       segmentKey: known ? selection.segmentKey : null,
     };
-  }
-  if (selection?.kind === "thread" && thread.name && ownsThread(thread.name)) {
-    return { kind: "thread", name: thread.name, episode: thread.episode };
   }
   return null;
 }

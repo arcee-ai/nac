@@ -3,6 +3,7 @@ import { Link, useLocation } from "react-router-dom";
 import { Button, ButtonVariant, Input, TextArea, Modal, ModalSize } from "@/app/atoms";
 import { routes, sessionIdFromPath } from "@/app/lib/routes";
 import { useTaskLaunch } from "./useTaskLaunch";
+import type { LaunchModelSelection } from "@/app/features/setup/modelSelection";
 
 const phases = {
   pinned: "Commit pinned",
@@ -15,6 +16,7 @@ const phases = {
 
 export function TaskLaunchModal({
   projectId,
+  model,
   defaultRef,
   onClose,
   onExistingCheckout,
@@ -22,6 +24,7 @@ export function TaskLaunchModal({
   initialTitle = "",
 }: {
   projectId: string;
+  model: LaunchModelSelection;
   defaultRef: string | null;
   onClose: () => void;
   onExistingCheckout: () => void;
@@ -40,8 +43,8 @@ export function TaskLaunchModal({
     <Modal open title="New isolated task" size={ModalSize.Wide} onClose={onClose}>
       <div className="flex flex-col gap-3">
         <p className="text-micro text-basic-muted">
-          Start a direct agent in a retained Local Git checkout. Source edits are excluded. Your
-          project model settings apply. Repository setup remains the agent's first work.
+          Start a direct agent in a retained Local Git checkout. Source edits are excluded. Your The
+          selected session model applies. Repository setup remains the agent's first work.
         </p>
         {!launch.receipt && (
           <>
@@ -100,6 +103,17 @@ export function TaskLaunchModal({
               launch.launch({
                 project_id: projectId,
                 invoking_session_id: sessionIdFromPath(location.pathname),
+                model_selection: {
+                  backend: model.backend,
+                  model: model.model,
+                  base_url: model.base_url,
+                  allow_insecure_http: model.allow_insecure_http,
+                  api_key_env: model.api_key_env,
+                  reasoning_effort: model.reasoning_effort,
+                  extra_headers: model.extra_headers,
+                  orchestrator_compaction_threshold:
+                    model.orchestrator_compaction_threshold ?? null,
+                },
                 git_ref: gitRef.trim() || null,
                 default_ref: defaultRef ? null : branch.trim(),
                 title: title.trim(),

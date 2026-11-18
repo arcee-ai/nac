@@ -7,8 +7,6 @@ import { ProjectsEmptyState } from "@/app/components/projects/ProjectsEmptyState
 import { useManagedHost } from "@/app/features/managed/controller/useManagedHost";
 import { SessionListBody, SessionListSwitch } from "@/app/features/inbox/SessionLists";
 import { SidebarToggle } from "@/app/features/sidebar/SidebarToggle";
-import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
-import { visibleSessions } from "@/app/features/ui-policy/policy";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
 import { projectListItems } from "@/app/lib/projects";
@@ -39,15 +37,11 @@ function LoadingHome() {
 export function HomePage() {
   const { trackAttention } = useNativeRuntime().stores.attentionStore;
   const isMobile = useIsMobile();
-  const policy = useUiPolicy();
   const managed = useManagedHost();
   const projectActions = useProjectActions();
   const sessionsQuery = useSessions();
   const projectsQuery = useProjects();
-  const sessions = useMemo(
-    () => visibleSessions(policy, sessionsQuery.data ?? []),
-    [sessionsQuery.data, policy],
-  );
+  const sessions = useMemo(() => sessionsQuery.data ?? [], [sessionsQuery.data]);
   const projects = useMemo(() => projectsQuery.data?.projects ?? [], [projectsQuery.data]);
   const items = useMemo(() => projectListItems(projects, sessions), [projects, sessions]);
   const listRef = useRef<HTMLElement>(null);

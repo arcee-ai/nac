@@ -1,7 +1,5 @@
 /** @vitest-environment jsdom */
 
-import { UiPolicyContext } from "@/app/features/ui-policy/UiPolicyContext";
-import { ORCHESTRATION_UI_POLICY, DIRECT_UI_POLICY } from "@/app/features/ui-policy/policy";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
@@ -13,7 +11,7 @@ import { api } from "@/app/services/api";
 import { purgeAll as purgeDrafts } from "@/app/store/promptDraftStore";
 import { release as releaseLayout, showSidePanelList } from "@/app/store/sessionLayoutStore";
 import { queryKeys } from "@/app/services/queries";
-import type { ManagedOrchestratorRecord, TraditionalChildRecord } from "@/app/types/api";
+import type { TraditionalChildRecord } from "@/app/types/api";
 
 function Location() {
   return <div data-testid="location">{useLocation().pathname}</div>;
@@ -40,32 +38,12 @@ const child: TraditionalChildRecord = {
   version: 3,
 };
 
-const orchestrator: ManagedOrchestratorRecord = {
-  orchestrator_session_id: "orchestrator-1",
-  parent_session_id: "parent",
-  root_session_id: "parent",
-  description: "Run the compatibility audit",
-  status: "completed",
-  generation: 1,
-  run_id: "orchestrator-run",
-  execution_mode: "foreground",
-  report: "done",
-  failure: null,
-  completion_inbox_id: 4,
-  created_at: "2026-08-25T00:00:00Z",
-  updated_at: "2026-08-25T00:00:00Z",
-  version: 2,
-};
-
 const listChildren = vi.spyOn(api, "listTraditionalChildren");
-const listOrchestrators = vi.spyOn(api, "listManagedOrchestrators");
 const startChild = vi.spyOn(api, "startTraditionalChild");
 const cancelChild = vi.spyOn(api, "cancelTraditionalChild");
-const startOrchestrator = vi.spyOn(api, "startManagedOrchestrator");
-const cancelOrchestrator = vi.spyOn(api, "cancelManagedOrchestrator");
 
 function mount(
-  behavior: "direct" | "direct-with-orchestrator",
+  behavior: "direct",
   seed = true,
   orchestrationEnabled = true,
   { tablet = false, mobile = false }: { tablet?: boolean; mobile?: boolean } = {},
@@ -88,11 +66,10 @@ function mount(
   });
   if (seed) {
     client.setQueryData(queryKeys.traditionalChildren("parent"), [child]);
-    client.setQueryData(queryKeys.managedOrchestrators("parent"), [orchestrator]);
   }
-  const tree = (parent: string, enabled: boolean) => (
+  const tree = (parent: string, _enabled: boolean) => (
     <QueryClientProvider client={client}>
-      <UiPolicyContext.Provider value={enabled ? ORCHESTRATION_UI_POLICY : DIRECT_UI_POLICY}>
+      <>
         <MemoryRouter initialEntries={[`/sessions/${parent}`]}>
           <Routes>
             <Route
@@ -106,7 +83,7 @@ function mount(
             />
           </Routes>
         </MemoryRouter>
-      </UiPolicyContext.Provider>
+      </>
     </QueryClientProvider>
   );
   let view = render(tree("parent", orchestrationEnabled));
@@ -142,11 +119,8 @@ beforeEach(() => {
     disconnect() {}
   };
   listChildren.mockReset().mockResolvedValue([child]);
-  listOrchestrators.mockReset().mockResolvedValue([orchestrator]);
   startChild.mockReset().mockResolvedValue(child);
   cancelChild.mockReset().mockResolvedValue({ ...child, status: "cancelled" });
-  startOrchestrator.mockReset().mockResolvedValue(orchestrator);
-  cancelOrchestrator.mockReset().mockResolvedValue({ ...orchestrator, status: "cancelled" });
 });
 afterEach(() => {
   cleanup();
@@ -180,16 +154,8 @@ describe("delegated work", () => {
     expect(screen.getByTestId("location").textContent).toBe("/session/child-1/insights");
   });
 
-  it("keeps coding agents and managed orchestrators visibly distinct", () => {
-    mount("direct-with-orchestrator");
-
-    expect(screen.getByRole("button", { name: "Review permissions" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Run the compatibility audit" })).toBeTruthy();
-    expect(screen.getAllByText("Running in the background").length).toBeGreaterThan(0);
-  });
-
   it("groups this chat's running and settled agents without navigating on selection", async () => {
-    const client = mount("direct-with-orchestrator");
+    const client = mount("direct");
     act(() =>
       client.setQueryData(queryKeys.traditionalChildren("parent"), [
         child,
@@ -205,7 +171,7 @@ describe("delegated work", () => {
     );
     expect(screen.getByText("Agents in this chat")).toBeTruthy();
     expect(screen.getByText("Active (1)")).toBeTruthy();
-    expect(screen.getByText("Finished")).toBeTruthy();
+    expect(await screen.findByText("Finished")).toBeTruthy();
     expect(await screen.findByRole("button", { name: "Idle audit" })).toBeTruthy();
     expect(screen.getAllByText("Idle").length).toBeGreaterThan(0);
     expect(
@@ -242,7 +208,7 @@ describe("delegated work", () => {
   });
 
   it("routes topology-specific steering, continuation, and cancellation to the parent", async () => {
-    mount("direct-with-orchestrator");
+    mount("direct");
 
     fireEvent.change(screen.getByRole("textbox", { name: "Send a message" }), {
       target: { value: "Check the remembered grant." },
@@ -260,21 +226,6 @@ describe("delegated work", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Stop" }));
     await waitFor(() => expect(cancelChild).toHaveBeenCalledWith("parent", "child-1"));
-
-    fireEvent.click(screen.getByRole("button", { name: "Run the compatibility audit" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Send a message" }), {
-      target: { value: "Run the next audit generation." },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Send" }));
-    await waitFor(() =>
-      expect(startOrchestrator).toHaveBeenCalledWith("parent", {
-        orchestrator_session_id: "orchestrator-1",
-        description: "Run the compatibility audit",
-        prompt: "Run the next audit generation.",
-        background: false,
-      }),
-    );
-    expect(cancelOrchestrator).not.toHaveBeenCalled();
   });
 
   it("renders cache-driven polling transitions without a page refresh", async () => {
@@ -298,66 +249,20 @@ describe("delegated work", () => {
   });
 });
 
-it("hides cached managed relationships while retaining children", async () => {
-  mount("direct-with-orchestrator", true, false);
-  expect(screen.queryByRole("button", { name: "Run the compatibility audit" })).toBeNull();
-  expect(screen.getByRole("button", { name: "Review permissions" })).toBeTruthy();
-  await waitFor(() => expect(listOrchestrators).not.toHaveBeenCalled());
-});
-
 it("offers no way to start a subagent when there are none", async () => {
   listChildren.mockResolvedValue([]);
-  listOrchestrators.mockResolvedValue([]);
-  mount("direct-with-orchestrator", false);
+  mount("direct", false);
 
   expect(await screen.findByText("No subagents yet")).toBeTruthy();
   expect(screen.queryByRole("textbox")).toBeNull();
   expect(screen.queryByRole("button", { name: "New Agent" })).toBeNull();
   expect(screen.queryByRole("button", { name: "New Orchestrator" })).toBeNull();
   expect(startChild).not.toHaveBeenCalled();
-  expect(startOrchestrator).not.toHaveBeenCalled();
-});
-
-it("keeps the selected subagent and its draft when another one updates", async () => {
-  const client = mount("direct-with-orchestrator");
-  fireEvent.click(screen.getByRole("button", { name: "Run the compatibility audit" }));
-  fireEvent.change(screen.getByRole("textbox", { name: "Send a message" }), {
-    target: { value: "Half-written follow-up" },
-  });
-
-  act(() => {
-    client.setQueryData(queryKeys.traditionalChildren("parent"), [
-      {
-        ...child,
-        report: "Still going.",
-        updated_at: "2026-08-26T00:00:00Z",
-        version: 4,
-      },
-    ]);
-  });
-
-  await waitFor(() =>
-    expect(
-      (
-        screen.getByRole("textbox", {
-          name: "Send a message",
-        }) as HTMLTextAreaElement
-      ).value,
-    ).toBe("Half-written follow-up"),
-  );
-  fireEvent.click(screen.getByRole("button", { name: "Send" }));
-  await waitFor(() =>
-    expect(startOrchestrator).toHaveBeenCalledWith(
-      "parent",
-      expect.objectContaining({ orchestrator_session_id: "orchestrator-1" }),
-    ),
-  );
-  expect(startChild).not.toHaveBeenCalled();
 });
 
 it("does not claim there are no subagents while the lists are loading", async () => {
   listChildren.mockReturnValue(new Promise(() => {}));
-  mount("direct-with-orchestrator", false);
+  mount("direct", false);
 
   expect(await screen.findByText("Loading subagents…")).toBeTruthy();
   expect(screen.queryByText("No subagents yet")).toBeNull();
@@ -395,18 +300,6 @@ describe("selection and drafts", () => {
         }),
       ),
     );
-  });
-
-  it("brings back a managed orchestrator and its draft after leaving for a transcript", () => {
-    const client = mount("direct-with-orchestrator");
-    fireEvent.click(screen.getByRole("button", { name: "Run the compatibility audit" }));
-    fireEvent.change(draftBox("Send a message"), {
-      target: { value: "Next audit pass" },
-    });
-
-    act(() => client.remount());
-
-    expect(draftBox("Send a message").value).toBe("Next audit pass");
   });
 
   it("keeps the draft when the selected subagent finishes and the composer remounts", async () => {
@@ -534,50 +427,6 @@ describe("selection and drafts", () => {
     expect(startChild).toHaveBeenCalledTimes(2);
   });
 
-  it("lets a pending orchestrator continuation be steered across a round trip, status change and switch", async () => {
-    const reply = deferred<ManagedOrchestratorRecord>();
-    startOrchestrator.mockReturnValueOnce(reply.promise);
-    const client = mount("direct-with-orchestrator");
-    fireEvent.click(screen.getByRole("button", { name: "Run the compatibility audit" }));
-    fireEvent.change(draftBox("Send a message"), {
-      target: { value: "Next audit pass" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Send" }));
-    await waitFor(() => expect(startOrchestrator).toHaveBeenCalledOnce());
-
-    act(() => client.remount());
-
-    expect(draftBox("Send a message").value).toBe("");
-    fireEvent.change(draftBox("Send a message"), {
-      target: { value: "Check the pins" },
-    });
-    expect(screen.getByRole("button", { name: "Send" })).toHaveProperty("disabled", true);
-
-    act(() => {
-      client.setQueryData(queryKeys.managedOrchestrators("parent"), [
-        { ...orchestrator, status: "running", generation: 2, version: 3 },
-      ]);
-    });
-    await screen.findByRole("button", { name: "Stop" });
-    fireEvent.click(screen.getByRole("button", { name: "Review permissions" }));
-    fireEvent.click(screen.getByRole("button", { name: "Run the compatibility audit" }));
-    expect(draftBox("Send a message").value).toBe("Check the pins");
-    expect(draftBox("Send a message").disabled).toBe(false);
-    fireEvent.click(screen.getByRole("button", { name: "Steer" }));
-    await waitFor(() => expect(startOrchestrator).toHaveBeenCalledTimes(2));
-    expect(startOrchestrator.mock.calls.map(([, payload]) => payload.prompt)).toEqual([
-      "Next audit pass",
-      "Check the pins",
-    ]);
-    expect(
-      startOrchestrator.mock.calls.every(([, p]) => p.orchestrator_session_id === "orchestrator-1"),
-    ).toBe(true);
-    expect(startChild).not.toHaveBeenCalled();
-
-    await act(async () => reply.resolve(orchestrator));
-    expect(startOrchestrator).toHaveBeenCalledTimes(2);
-  });
-
   it("lets another subagent send while one request is pending, without replaying it", async () => {
     listChildren.mockResolvedValue([child, second]);
     const reply = deferred<TraditionalChildRecord>();
@@ -661,32 +510,20 @@ describe("selection and drafts", () => {
     expect(startChild).toHaveBeenCalledTimes(2);
   });
 
-  it.each(["child", "orchestrator"] as const)(
+  it.each(["child"] as const)(
     "ignores an older %s foreground response after a newer generation",
-    async (mode) => {
-      const client = mount(mode === "child" ? "direct" : "direct-with-orchestrator");
-      if (mode === "child") {
-        const reply = deferred<TraditionalChildRecord>();
-        startChild.mockReturnValueOnce(reply.promise);
-        fireEvent.change(draftBox("Send a message"), { target: { value: "Steer" } });
-        fireEvent.click(screen.getByRole("button", { name: "Steer" }));
-        await waitFor(() => expect(startChild).toHaveBeenCalledOnce());
-        const newer = { ...child, generation: 3, version: 8 };
-        act(() => client.setQueryData(queryKeys.traditionalChildren("parent"), [newer]));
-        await act(async () => reply.resolve({ ...child, status: "completed", version: 4 }));
-        expect(client.getQueryData(queryKeys.traditionalChildren("parent"))).toEqual([newer]);
-      } else {
-        fireEvent.click(screen.getByRole("button", { name: "Run the compatibility audit" }));
-        const reply = deferred<ManagedOrchestratorRecord>();
-        startOrchestrator.mockReturnValueOnce(reply.promise);
-        fireEvent.change(draftBox("Send a message"), { target: { value: "Continue" } });
-        fireEvent.click(screen.getByRole("button", { name: "Send" }));
-        await waitFor(() => expect(startOrchestrator).toHaveBeenCalledOnce());
-        const newer = { ...orchestrator, status: "running" as const, generation: 3, version: 8 };
-        act(() => client.setQueryData(queryKeys.managedOrchestrators("parent"), [newer]));
-        await act(async () => reply.resolve({ ...orchestrator, generation: 2, version: 4 }));
-        expect(client.getQueryData(queryKeys.managedOrchestrators("parent"))).toEqual([newer]);
-      }
+    async (_mode) => {
+      const client = mount("direct");
+      const reply = deferred<TraditionalChildRecord>();
+      startChild.mockReturnValueOnce(reply.promise);
+      fireEvent.change(draftBox("Send a message"), { target: { value: "Steer" } });
+      fireEvent.click(screen.getByRole("button", { name: "Steer" }));
+      await waitFor(() => expect(startChild).toHaveBeenCalledOnce());
+      const newer = { ...child, generation: 3, version: 8 };
+      act(() => client.setQueryData(queryKeys.traditionalChildren("parent"), [newer]));
+      await act(async () => reply.resolve({ ...child, status: "completed", version: 4 }));
+      expect(client.getQueryData(queryKeys.traditionalChildren("parent"))).toEqual([newer]);
+
       await waitFor(() => {
         expect(screen.getByRole("button", { name: "Stop" })).toBeTruthy();
         expect(screen.queryByText("Sending message…")).toBeNull();
@@ -694,37 +531,22 @@ describe("selection and drafts", () => {
     },
   );
 
-  it.each(["child", "orchestrator"] as const)(
+  it.each(["child"] as const)(
     "does not rewind a %s record when an older poll completes",
-    async (mode) => {
-      const client = mount("direct-with-orchestrator");
-      if (mode === "child") {
-        const poll = deferred<TraditionalChildRecord[]>();
-        listChildren.mockReturnValueOnce(poll.promise);
-        const refresh = client.refetchQueries({
-          queryKey: queryKeys.traditionalChildren("parent"),
-        });
-        const newer = { ...child, generation: 3, version: 8 };
-        act(() => client.setQueryData(queryKeys.traditionalChildren("parent"), [newer]));
-        await act(async () => {
-          poll.resolve([child]);
-          await refresh;
-        });
-        expect(client.getQueryData(queryKeys.traditionalChildren("parent"))).toEqual([newer]);
-      } else {
-        const poll = deferred<ManagedOrchestratorRecord[]>();
-        listOrchestrators.mockReturnValueOnce(poll.promise);
-        const refresh = client.refetchQueries({
-          queryKey: queryKeys.managedOrchestrators("parent"),
-        });
-        const newer = { ...orchestrator, generation: 3, version: 8 };
-        act(() => client.setQueryData(queryKeys.managedOrchestrators("parent"), [newer]));
-        await act(async () => {
-          poll.resolve([orchestrator]);
-          await refresh;
-        });
-        expect(client.getQueryData(queryKeys.managedOrchestrators("parent"))).toEqual([newer]);
-      }
+    async (_mode) => {
+      const client = mount("direct");
+      const poll = deferred<TraditionalChildRecord[]>();
+      listChildren.mockReturnValueOnce(poll.promise);
+      const refresh = client.refetchQueries({
+        queryKey: queryKeys.traditionalChildren("parent"),
+      });
+      const newer = { ...child, generation: 3, version: 8 };
+      act(() => client.setQueryData(queryKeys.traditionalChildren("parent"), [newer]));
+      await act(async () => {
+        poll.resolve([child]);
+        await refresh;
+      });
+      expect(client.getQueryData(queryKeys.traditionalChildren("parent"))).toEqual([newer]);
     },
   );
 
@@ -798,93 +620,6 @@ describe("selection and drafts", () => {
     await waitFor(() => expect(draftBox("Send a message").value).toBe("Only for child two"));
     expect(startChild).toHaveBeenCalledOnce();
   });
-
-  it("never shows or sends a policy-hidden orchestrator's draft as a child's", async () => {
-    const client = mount("direct-with-orchestrator");
-    fireEvent.click(screen.getByRole("button", { name: "Run the compatibility audit" }));
-    fireEvent.change(draftBox("Send a message"), {
-      target: { value: "Orchestrator only" },
-    });
-
-    act(() => client.show("parent", false));
-
-    expect(screen.queryByRole("button", { name: "Run the compatibility audit" })).toBeNull();
-    expect(draftBox("Send a message").value).toBe("");
-    expect(startChild).not.toHaveBeenCalled();
-    expect(startOrchestrator).not.toHaveBeenCalled();
-
-    act(() => client.show("parent", true));
-    expect(draftBox("Send a message").value).toBe("Orchestrator only");
-  });
-
-  it("targets existing ids for orchestrator steering and stopping and child continuation", async () => {
-    const running = { ...orchestrator, status: "running" as const };
-    listChildren.mockResolvedValue([second]);
-    listOrchestrators.mockResolvedValue([running]);
-    startOrchestrator.mockResolvedValue(running);
-    startChild.mockResolvedValue({
-      ...second,
-      status: "running",
-      generation: 3,
-    });
-    const client = mount("direct-with-orchestrator", false);
-    client.setQueryData(queryKeys.traditionalChildren("parent"), [second]);
-    client.setQueryData(queryKeys.managedOrchestrators("parent"), [
-      {
-        ...orchestrator,
-        status: "running",
-        updated_at: "2026-08-26T00:00:00Z",
-      },
-    ]);
-
-    fireEvent.click(
-      await screen.findByRole("button", {
-        name: "Run the compatibility audit",
-      }),
-    );
-    fireEvent.change(draftBox("Send a message"), {
-      target: { value: "Narrow the audit" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Steer" }));
-    await waitFor(() =>
-      expect(startOrchestrator).toHaveBeenCalledWith("parent", {
-        orchestrator_session_id: "orchestrator-1",
-        description: "Run the compatibility audit",
-        prompt: "Narrow the audit",
-        background: false,
-      }),
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
-    await waitFor(() =>
-      expect(cancelOrchestrator).toHaveBeenCalledWith("parent", "orchestrator-1"),
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: "Audit the cache" }));
-    fireEvent.change(draftBox("Send a message"), {
-      target: { value: "Generation two" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Send" }));
-    await waitFor(() =>
-      expect(startChild).toHaveBeenCalledWith("parent", {
-        profile: "general",
-        child_session_id: "child-2",
-        description: "Audit the cache",
-        prompt: "Generation two",
-        background: true,
-      }),
-    );
-    expect(cancelChild).not.toHaveBeenCalled();
-    // The accepted generation is running, so the cleared field may already say Steer.
-    await waitFor(() =>
-      expect(
-        (
-          screen.getByRole("textbox", {
-            name: /^(Send|Steer) a message$/,
-          }) as HTMLTextAreaElement
-        ).value,
-      ).toBe(""),
-    );
-  });
 });
 
 describe("load state in the narrow list", () => {
@@ -907,20 +642,6 @@ describe("load state in the narrow list", () => {
 
     expect(await screen.findByText("Loading subagents…")).toBeTruthy();
     expect(screen.queryByText("No subagents yet")).toBeNull();
-  });
-
-  it("does not claim a total while the managed list is pending or failed", async () => {
-    listOrchestrators.mockReturnValueOnce(new Promise(() => {}));
-    const client = mount("direct-with-orchestrator", false);
-    await screen.findByRole("button", { name: "Review permissions" });
-    expect(screen.getByText("Loading remaining subagents…")).toBeTruthy();
-    expect(screen.queryByText(/Active \(/)).toBeNull();
-    listOrchestrators.mockRejectedValue(new Error("503"));
-    // A second parent gets a failed managed list while retaining its child rows.
-    client.show("other");
-    expect(await screen.findByText(/Some subagents could not be loaded/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Review permissions" })).toBeTruthy();
-    expect(screen.queryByText(/Active \(/)).toBeNull();
   });
 
   it("keeps loaded rows when a later poll fails", async () => {

@@ -738,13 +738,6 @@ async fn semantic_g2_real_http_direct_idle_before_publish_keeps_exact_a_during_b
     interleave("direct").await;
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn semantic_g2_real_http_dwo_idle_unverified_before_publication_attempt_keeps_exact_a_during_b_and_replays(
-) {
-    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
-    interleave("direct-with-orchestrator").await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn semantic_fixture_teardown_waits_for_accepted_read_after_sqlite_returns() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let root = std::env::temp_dir().join(format!("nac-semantic-retirement-{}", Uuid::new_v4()));

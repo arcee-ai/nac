@@ -4,8 +4,8 @@ use nac_core::{events::SessionEvent, session_service::MessagePageRequest, types:
 use nac_core::{
     sessions,
     store::{
-        ManagedOrchestratorExecutionMode, ManagedOrchestratorRecord, ManagedOrchestratorStatus,
-        TraditionalChildExecutionMode, TraditionalChildRecord,
+        ManagedOrchestratorRecord, ManagedOrchestratorStatus, TraditionalChildExecutionMode,
+        TraditionalChildRecord,
     },
 };
 use std::time::Duration;
@@ -19,13 +19,6 @@ pub(crate) struct StartTraditionalChild {
     pub(crate) prompt: String,
     pub(crate) origin: nac_core::store::InputOrigin,
     pub(crate) child_session_id: Option<String>,
-    pub(crate) background: bool,
-}
-
-pub(crate) struct StartManagedOrchestrator {
-    pub(crate) description: String,
-    pub(crate) prompt: String,
-    pub(crate) orchestrator_session_id: Option<String>,
     pub(crate) background: bool,
 }
 
@@ -169,57 +162,6 @@ impl<'a> DelegationApplication<'a> {
             .await
     }
 
-    pub(crate) async fn list_managed_orchestrators(
-        &self,
-        parent_session_id: &str,
-    ) -> Result<Vec<ManagedOrchestratorRecord>> {
-        let service = self.manager.attach_session(parent_session_id).await?;
-        if service.metadata().behavior != sessions::SessionBehavior::DirectWithOrchestrator {
-            return Err(anyhow!(
-                "managed orchestrators require direct-with-orchestrator behavior"
-            ));
-        }
-        nac_core::store::list_managed_orchestrators(
-            &self.manager.inner.store_path,
-            parent_session_id,
-        )
-    }
-
-    pub(crate) async fn start_managed_orchestrator(
-        &self,
-        parent_session_id: &str,
-        command: StartManagedOrchestrator,
-    ) -> Result<ManagedOrchestratorRecord> {
-        self.manager.attach_session(parent_session_id).await?;
-        let controller =
-            nac_core::orchestration_control::controller_for(&self.manager.inner.store_path)?;
-        let orchestrator = controller
-            .start(
-                nac_core::orchestration_control::ManagedOrchestratorStartRequest {
-                    parent_session_id: parent_session_id.to_string(),
-                    orchestrator_session_id: command.orchestrator_session_id,
-                    description: command.description,
-                    prompt: command.prompt,
-                    execution_mode: if command.background {
-                        ManagedOrchestratorExecutionMode::Background
-                    } else {
-                        ManagedOrchestratorExecutionMode::Foreground
-                    },
-                },
-            )
-            .await?;
-        if command.background {
-            Ok(orchestrator)
-        } else {
-            controller
-                .wait(
-                    &orchestrator.orchestrator_session_id,
-                    orchestrator.generation,
-                )
-                .await
-        }
-    }
-
     pub(crate) async fn managed_orchestrator_async(
         &self,
         parent_session_id: &str,
@@ -247,23 +189,6 @@ impl<'a> DelegationApplication<'a> {
             orchestrator_session_id,
         )?
         .ok_or_else(|| anyhow!("managed orchestrator was not found"))
-    }
-
-    pub(crate) async fn cancel_managed_orchestrator(
-        &self,
-        parent_session_id: &str,
-        orchestrator_session_id: &str,
-    ) -> Result<ManagedOrchestratorRecord> {
-        let orchestrator = self
-            .managed_orchestrator_async(parent_session_id, orchestrator_session_id)
-            .await?;
-        nac_core::orchestration_control::controller_for(&self.manager.inner.store_path)?
-            .cancel(
-                parent_session_id,
-                orchestrator_session_id,
-                orchestrator.generation,
-            )
-            .await
     }
 }
 

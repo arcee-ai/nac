@@ -133,6 +133,7 @@ async fn observe_fresh(boundary: Boundary, git: bool) -> Result<()> {
     let pending = store::spawn_blocking_store_caller(move || -> Result<_> {
         let destination = FreshTaskDestination {
             project_id: project.project_id.clone(),
+            model_selection: None,
             pinned_commit: None,
             default_ref: git.then(|| "refs/heads/dev".into()),
             model: None,

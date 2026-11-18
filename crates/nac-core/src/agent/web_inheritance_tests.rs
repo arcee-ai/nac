@@ -32,43 +32,17 @@ impl Fixture {
         snapshot.behavior = behavior;
         sessions::create_session(&self.store, &snapshot).unwrap();
     }
-    fn child(&self, parent: &str, child: &str, managed: bool) -> NativeWebCapabilities {
-        self.session(
-            child,
-            if managed {
-                SessionBehavior::Orchestrator
-            } else {
-                SessionBehavior::Direct
-            },
-        );
-        if managed {
-            crate::store::create_managed_orchestrator_relationship(
-                &self.store,
-                parent,
-                child,
-                "research",
-            )
-            .unwrap();
-        } else {
-            crate::store::create_traditional_child_relationship(
-                &self.store,
-                parent,
-                child,
-                crate::store::GENERAL_CHILD_PROFILE,
-                "research",
-            )
-            .unwrap();
-        }
-        NativeWebCapabilities::new(
-            if managed {
-                AgentMode::Orchestrator
-            } else {
-                AgentMode::Direct
-            },
+    fn child(&self, parent: &str, child: &str) -> NativeWebCapabilities {
+        self.session(child, SessionBehavior::Direct);
+        crate::store::create_traditional_child_relationship(
             &self.store,
-            Some(child),
+            parent,
+            child,
+            crate::store::GENERAL_CHILD_PROFILE,
+            "research",
         )
-        .unwrap()
+        .unwrap();
+        NativeWebCapabilities::new(AgentMode::Direct, &self.store, Some(child)).unwrap()
     }
     fn source(&self, id: &str, value: Arc<Mutex<Option<String>>>) -> Arc<CredentialSource> {
         let source: Arc<CredentialSource> = Arc::new(move || Ok(value.lock().unwrap().clone()));
@@ -91,13 +65,10 @@ impl Drop for Fixture {
 
 #[test]
 fn generations_rebind_rotation_removal_reattachment_and_restart_without_storing_keys() {
-    for behavior in [
-        SessionBehavior::Direct,
-        SessionBehavior::DirectWithOrchestrator,
-    ] {
+    for behavior in [SessionBehavior::Direct] {
         let f = Fixture::new();
         f.session("parent", behavior);
-        let mut child = f.child("parent", "child", false);
+        let mut child = f.child("parent", "child");
         let key = Arc::new(Mutex::new(Some("parent-canary-one".to_string())));
         let source = f.source("parent", key.clone());
         child.admit_generation().unwrap();
@@ -147,18 +118,21 @@ fn generations_rebind_rotation_removal_reattachment_and_restart_without_storing_
             Some("parent-canary-three")
         );
         for entry in std::fs::read_dir(&f.root).unwrap() {
-            let bytes = std::fs::read(entry.unwrap().path()).unwrap();
-            assert!(!String::from_utf8_lossy(&bytes).contains("parent-canary"));
+            let path = entry.unwrap().path();
+            if path.is_file() {
+                let bytes = std::fs::read(path).unwrap();
+                assert!(!String::from_utf8_lossy(&bytes).contains("parent-canary"));
+            }
         }
     }
 }
 
 #[test]
-fn parent_and_store_ownership_bind_traditional_and_managed_generations() {
+fn parent_and_store_ownership_bind_traditional_generations() {
     let f = Fixture::new();
     let other_host = Fixture::new();
     for fixture in [&f, &other_host] {
-        fixture.session("parent-a", SessionBehavior::DirectWithOrchestrator);
+        fixture.session("parent-a", SessionBehavior::Direct);
         fixture.session("parent-b", SessionBehavior::Direct);
     }
     let a = Arc::new(Mutex::new(Some("owner-a-canary".to_string())));
@@ -169,13 +143,11 @@ fn parent_and_store_ownership_bind_traditional_and_managed_generations() {
         "parent-a",
         Arc::new(Mutex::new(Some("other-host-canary".into()))),
     );
-    let mut child_a = f.child("parent-a", "child-a", false);
-    let mut child_b = f.child("parent-b", "child-b", false);
-    let mut orchestrator = f.child("parent-a", "orchestrator", true);
+    let mut child_a = f.child("parent-a", "child-a");
+    let mut child_b = f.child("parent-b", "child-b");
     for (child, expected) in [
         (&mut child_a, "owner-a-canary"),
         (&mut child_b, "owner-b-canary"),
-        (&mut orchestrator, "owner-a-canary"),
     ] {
         child.admit_generation().unwrap();
         assert_eq!(
@@ -183,7 +155,7 @@ fn parent_and_store_ownership_bind_traditional_and_managed_generations() {
             Some(expected)
         );
     }
-    let mut absent = other_host.child("parent-b", "child-b", false);
+    let mut absent = other_host.child("parent-b", "child-b");
     absent.admit_generation().unwrap();
     assert!(absent.resolve_credential().unwrap().is_none());
     let ordinary = NativeWebCapabilities::new(AgentMode::Orchestrator, &f.store, None).unwrap();
@@ -200,7 +172,7 @@ async fn inherited_snapshot_keeps_policy_url_cancellation_backend_and_output_iso
 
     let f = Fixture::new();
     f.session("parent", SessionBehavior::Direct);
-    let child = f.child("parent", "child", false);
+    let child = f.child("parent", "child");
     let _source = f.source(
         "parent",
         Arc::new(Mutex::new(Some("inherited-policy-canary".into()))),
@@ -290,7 +262,7 @@ fn concurrent_parents_never_cross_bind_and_deleted_parents_cannot_regrant() {
     for (parent, child, key) in [("a", "child-a", "canary-a"), ("b", "child-b", "canary-b")] {
         f.session(parent, SessionBehavior::Direct);
         sources.push(f.source(parent, Arc::new(Mutex::new(Some(key.into())))));
-        children.push((f.child(parent, child, false), key));
+        children.push((f.child(parent, child), key));
     }
     std::thread::scope(|scope| {
         for (mut child, expected) in children {
@@ -317,7 +289,7 @@ fn concurrent_parents_never_cross_bind_and_deleted_parents_cannot_regrant() {
 fn blank_unavailable_and_oversized_parent_sources_never_admit_a_credential() {
     let f = Fixture::new();
     f.session("parent", SessionBehavior::Direct);
-    let mut child = f.child("parent", "child", false);
+    let mut child = f.child("parent", "child");
     let value = Arc::new(Mutex::new(Some("  ".into())));
     let _source = f.source("parent", value.clone());
     child.admit_generation().unwrap();

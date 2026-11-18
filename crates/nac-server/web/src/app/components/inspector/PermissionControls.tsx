@@ -425,8 +425,7 @@ export function PermissionControls({
             ))}
             <div className="type-meta text-basic-tertiary">
               The mode governs this session and all existing or future owned child agents, stays
-              saved across restarts and never creates remembered permissions. Separately managed
-              orchestrators are not included.
+              saved across restarts and never creates remembered permissions.
             </div>
           </section>
         ) : null}

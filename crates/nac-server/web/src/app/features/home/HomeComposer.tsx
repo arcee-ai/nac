@@ -5,17 +5,15 @@ import { Icon, IconName, Loader, LoaderSize, Tooltip } from "@/app/atoms";
 import { useManagedHost } from "@/app/features/managed/controller/useManagedHost";
 import { TaskLaunchModal } from "@/app/features/task-launches/TaskLaunchModal";
 import { useTaskLaunchSource } from "@/app/features/task-launches/useTaskLaunch";
-import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { useMediaQuery } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
-import type { ManagedSessionSummary, ProjectRecord, SessionBehavior } from "@/app/types/api";
+import type { ManagedSessionSummary, ProjectRecord } from "@/app/types/api";
 
-import { defaultBehavior } from "./behaviors";
 import { Chip } from "./Chip";
-import { BehaviorPicker, IsolatedToggle, ProjectPicker } from "./ComposerPickers";
-import { modelChipLabel, useInheritedModel, type ModelOverride } from "./modelChoice";
+import { IsolatedToggle, ProjectPicker } from "./ComposerPickers";
+import { modelChipLabel, type ModelOverride } from "./modelChoice";
 import { ModelOverrideModal } from "./ModelOverrideModal";
 import { useStartSession } from "./useStartSession";
 
@@ -44,7 +42,7 @@ function recentProjectId(
 
 /**
  * Home's hero composer — the app's one new-session flow. Chips pick the
- * project, behavior, model and (for a direct agent on a Git source) an
+ * project, model and (on a Git source) an
  * isolated checkout; sending creates the session with the prompt as its
  * first message and opens it.
  */
@@ -58,7 +56,6 @@ export function HomeComposer({
   /** Phones: no hero heading spacing. */
   compact?: boolean;
 }) {
-  const policy = useUiPolicy();
   const managed = useManagedHost();
   const projectActions = useProjectActions();
   const location = useLocation();
@@ -85,7 +82,6 @@ export function HomeComposer({
   const draft = useNativeRuntime().stores.homeDraftStore;
   const prompt = draft.usePrompt();
   const setPrompt = draft.update;
-  const [behavior, setBehavior] = useState<SessionBehavior>(() => defaultBehavior(policy));
   // An override belongs to the project it was chosen for; another project
   // inherits its own model.
   const [overrideFor, setOverrideFor] = useState<{
@@ -98,11 +94,9 @@ export function HomeComposer({
   const [modelOpen, setModelOpen] = useState(false);
   const [isolated, setIsolated] = useState(false);
   const [isolatedTask, setIsolatedTask] = useState<{ prompt: string } | null>(null);
-  const effectiveBehavior = policy.orchestrationEnabled ? behavior : "direct";
 
-  const model = useInheritedModel(projectId);
-  const source = useTaskLaunchSource(projectId, effectiveBehavior === "direct");
-  const isolationAvailable = effectiveBehavior === "direct" && source.data?.eligible === true;
+  const source = useTaskLaunchSource(projectId, true);
+  const isolationAvailable = source.data?.eligible === true;
   const useIsolation = isolated && isolationAvailable;
   const starter = useStartSession();
 
@@ -128,6 +122,10 @@ export function HomeComposer({
 
   const send = async () => {
     if (!canSend || !projectId) return;
+    if (!override) {
+      setModelOpen(true);
+      return;
+    }
     if (useIsolation) {
       setIsolatedTask({ prompt: prompt.trim() });
       return;
@@ -136,7 +134,6 @@ export function HomeComposer({
     const revision = draft.get().revision;
     const started = await starter.start({
       projectId,
-      behavior: effectiveBehavior,
       prompt: text,
       model: override,
     });
@@ -146,7 +143,7 @@ export function HomeComposer({
   };
 
   const addProject = managed.isManaged ? managed.addRepository : projectActions.create;
-  const modelLabel = modelChipLabel(override, model.inherited);
+  const modelLabel = modelChipLabel(override);
 
   return (
     <div className="flex w-full flex-col gap-2">
@@ -203,9 +200,6 @@ export function HomeComposer({
                 }
               }}
             />
-            {policy.orchestrationEnabled ? (
-              <BehaviorPicker value={behavior} onChange={setBehavior} disabled={busy} />
-            ) : null}
             {project ? (
               <Chip
                 icon={IconName.Ai}
@@ -215,7 +209,7 @@ export function HomeComposer({
                 pressed={override != null || undefined}
                 onClick={() => setModelOpen(true)}
               >
-                {model.pending ? "Model…" : (modelLabel ?? "Project default model")}
+                {modelLabel ?? "Choose a model"}
               </Chip>
             ) : null}
             {isolationAvailable ? (
@@ -258,10 +252,6 @@ export function HomeComposer({
 
       <ModelOverrideModal
         open={modelOpen}
-        behavior={effectiveBehavior}
-        inherited={model.inherited}
-        inheritancePending={model.pending}
-        inheritanceError={model.error}
         current={override}
         onApply={(next) => {
           setOverride(next);
@@ -270,9 +260,10 @@ export function HomeComposer({
         onReset={() => setOverride(null)}
         onClose={() => setModelOpen(false)}
       />
-      {isolatedTask && projectId ? (
+      {isolatedTask && projectId && override ? (
         <TaskLaunchModal
           projectId={projectId}
+          model={override.selection}
           defaultRef={source.data?.default_ref ?? null}
           initialPrompt={isolatedTask.prompt}
           initialTitle={titleFrom(isolatedTask.prompt)}
@@ -281,13 +272,11 @@ export function HomeComposer({
             const text = isolatedTask.prompt;
             const revision = draft.get().revision;
             setIsolatedTask(null);
-            void starter
-              .start({ projectId, behavior: "direct", prompt: text, model: override })
-              .then((started) => {
-                if (started) {
-                  draft.acknowledge(revision);
-                }
-              });
+            void starter.start({ projectId, prompt: text, model: override }).then((started) => {
+              if (started) {
+                draft.acknowledge(revision);
+              }
+            });
           }}
         />
       ) : null}

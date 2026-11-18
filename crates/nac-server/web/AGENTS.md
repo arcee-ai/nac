@@ -19,11 +19,10 @@ server remains the source of business truth and wire schemas.
 - `src/app/types/openapi.generated.ts` is generated from Rust/OpenAPI. Import
   stable aliases from `src/app/types/api.ts`; client-only refinements may live
   there, but do not hand-copy wire DTOs.
-- Keep managed-host product state inside `features/managed`. Managed
-  legacy orchestrator session views remain distinct pending retirement.
+- Keep managed-host product state inside `features/managed`. Session creation
+  and navigation support direct sessions and traditional children only.
 - Preserve navigation, abort signals, polling settlement, optimistic state,
-  query invalidation and accessibility labels. Preserve current wire behavior
-  until the direct-only cutover.
+  query invalidation, accessibility labels and the current direct-only wire contract.
 - Human product operations never invoke agent approval. A focused fresh terminal
   keystroke is intentional input on ordinary attach/reconnect; attaching sends
   no bytes. Accepted-but-uncertain delivery freezes input until explicit recovery

@@ -1,6 +1,106 @@
 use super::*;
 
 #[tokio::test]
+async fn retired_creation_selections_are_rejected_with_bad_request() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("retired_creation_selections");
+    let nac_home = root.join("nac-home");
+    std::fs::create_dir_all(&nac_home).unwrap();
+    let _env = ScopedModelEnv::isolated(&nac_home, Some("test-key"));
+    let app = router(test_manager(&root));
+    for body in [
+        serde_json::json!({"behavior": "orchestrator"}),
+        serde_json::json!({"behavior": "direct-with-orchestrator"}),
+        serde_json::json!({"behavior": "unknown"}),
+        serde_json::json!({"behavior": "direct", "light_model": {"model": "test"}}),
+        serde_json::json!({"behavior": "direct", "light_model": null}),
+    ] {
+        let response = post_json(app.clone(), "/sessions", body.clone()).await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{body}");
+    }
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn retired_ui_configuration_endpoint_is_not_found() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("retired_ui_configuration");
+    let nac_home = root.join("nac-home");
+    std::fs::create_dir_all(&nac_home).unwrap();
+    let _env = ScopedModelEnv::isolated(&nac_home, None);
+    let app = router(test_manager(&root));
+    let response = get_response(app, "/ui-config", None).await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn project_model_defaults_are_rejected() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("retired_project_defaults");
+    let nac_home = root.join("nac-home");
+    std::fs::create_dir_all(&nac_home).unwrap();
+    let _env = ScopedModelEnv::isolated(&nac_home, None);
+    let app = router(test_manager(&root));
+    for default in [serde_json::Value::Null, serde_json::json!("legacy")] {
+        let response = post_json(
+            app.clone(),
+            "/projects",
+            serde_json::json!({
+                "cwd": root.to_string_lossy(), "default_model_config_id": default
+            }),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn retired_worker_and_managed_routes_are_not_found() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("retired_worker_routes");
+    let nac_home = root.join("nac-home");
+    std::fs::create_dir_all(&nac_home).unwrap();
+    let _env = ScopedModelEnv::isolated(&nac_home, None);
+    let app = router(test_manager(&root));
+    for path in [
+        "/sessions/session/orchestrators",
+        "/sessions/session/orchestrators/child",
+        "/sessions/session/threads/worker/events",
+    ] {
+        assert_eq!(
+            get_response(app.clone(), path, None).await.status(),
+            StatusCode::NOT_FOUND,
+            "{path}"
+        );
+    }
+    for path in [
+        "/sessions/session/orchestrators",
+        "/sessions/session/orchestrators/child/cancel",
+        "/sessions/session/steering",
+        "/sessions/session/threads/worker/steering",
+    ] {
+        assert_eq!(
+            post_json(app.clone(), path, serde_json::json!({}))
+                .await
+                .status(),
+            StatusCode::NOT_FOUND,
+            "{path}"
+        );
+    }
+    assert!(post_json(
+        app.clone(),
+        "/sessions/launch-defaults",
+        serde_json::json!({})
+    )
+    .await
+    .status()
+    .is_client_error());
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
 async fn route_health_and_readiness_latency_use_bounded_content_free_labels() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let root = temp_root("telemetry_routes");

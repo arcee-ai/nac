@@ -7,7 +7,7 @@ test.use({ orchestration: "0", hasTouch: true });
 test.skip(!!process.env.NAC_E2E_REMOTE, "Requires the isolated local form fixture");
 
 for (const zoomed of [false, true]) {
-  test(`reviewed form text and saved validation at ${zoomed ? "real200percent195CSS" : "390CSS"}`, async ({
+  test(`reviewed session model form text at ${zoomed ? "real200percent195CSS" : "390CSS"}`, async ({
     harness,
     page: defaultPage,
     request,
@@ -78,13 +78,12 @@ for (const zoomed of [false, true]) {
           .filter({ hasText: longModel })
           .click();
         await checkText(primary.getByRole("button"), `${state}-selected-model-provider`);
-        const advanced = dialog.getByRole("button", {
-          name: "Advanced presets and provider setup",
+        const connections = dialog.getByRole("button", {
+          name: "Provider connections",
           exact: true,
         });
-        await advanced.scrollIntoViewIfNeeded();
-        const wrapping = await checkText(advanced, `${state}-advanced-action`);
-        expect(wrapping.whiteSpace).toBe("normal"); // Real CSS cascade, not a class-string assertion.
+        await connections.scrollIntoViewIfNeeded();
+        await checkText(connections, `${state}-provider-connections`);
       };
       await page.getByRole("button", { name: "Get Started", exact: true }).click();
       const project = page.getByRole("dialog", { name: "New Project", exact: true });
@@ -108,80 +107,12 @@ for (const zoomed of [false, true]) {
       await inspectModelSetup(chat, "chat");
       await chat.getByRole("button", { name: "Close", exact: true }).click();
       await expect(chat).toHaveCount(0);
-      // Configurations is Settings › Models & providers, reached from the phone menu.
-      await page.getByRole("button", { name: "Open the menu", exact: true }).click();
-      await page
-        .getByRole("dialog", { name: "Menu", exact: true })
-        .getByRole("button", { name: "Settings", exact: true })
-        .click();
-      await page.getByRole("link", { name: /^Models & providers/ }).click();
-      const configurations = page.getByRole("region", { name: "Configurations", exact: true });
-      await expect(configurations).toBeVisible();
-      const name = configurations.getByRole("textbox", { name: "Configuration name", exact: true });
-      await expect(name).toHaveValue("E2E scripted provider");
-      const changes: unknown[] = [];
-      let reject = true;
-      await page.route(`${harness.baseUrl}/model-configs/*`, async (route) => {
-        if (route.request().method() !== "PATCH") return route.continue();
-        changes.push(route.request().postDataJSON());
-        if (reject)
-          return route.fulfill({
-            status: 422,
-            json: { error: "Controlled configuration save failed." },
-          });
-        return route.continue();
-      });
-      await name.fill("");
-      await configurations.getByRole("button", { name: "Save", exact: true }).click();
-      await expect(name).toBeFocused();
-      await expect(name).toHaveAttribute("aria-invalid", "true");
-      const description = await name.getAttribute("aria-describedby");
-      expect(description).toBeTruthy();
-      const error = configurations.getByRole("alert").filter({ hasText: "A name is required." });
-      await expect(error).toBeVisible();
-      expect(await error.getAttribute("id")).toBe(description);
-      expect(changes).toEqual([]);
-      const fieldGeometry = await name.evaluate((node) => {
-        const owner = node.closest(
-          '[data-slot="dialog-content"], [data-slot="sheet-content"], [data-settings-surface]',
-        )!;
-        const footer = owner.querySelector("footer")!.getBoundingClientRect();
-        const field = node.getBoundingClientRect();
-        const message = node.ownerDocument
-          .getElementById(node.getAttribute("aria-describedby")!)!
-          .getBoundingClientRect();
-        return {
-          field: { top: field.top, bottom: field.bottom },
-          message: { top: message.top, bottom: message.bottom },
-          footerTop: footer.top,
-        };
-      });
-      expect(fieldGeometry.message.top).toBeGreaterThanOrEqual(fieldGeometry.field.bottom);
-      expect(fieldGeometry.message.bottom).toBeLessThanOrEqual(fieldGeometry.footerTop);
-      await name.fill("Reviewed retry draft");
-      await expect(name).not.toHaveAttribute("aria-invalid", "true");
-      await configurations.getByRole("button", { name: "Save", exact: true }).click();
-      const saveError = configurations.getByRole("alert").filter({
-        hasText:
-          "The request was rejected. One or more request parameters are invalid or out of range.",
-      });
-      await expect(saveError).toBeFocused();
-      await expect(saveError).toBeInViewport();
-      await expect(name).toHaveValue("Reviewed retry draft");
-      reject = false;
-      await configurations.getByRole("button", { name: "Save", exact: true }).click();
-      await expect(configurations.getByRole("alert")).toHaveCount(0);
-      expect(changes).toHaveLength(2);
-      expect(changes[0]).toEqual(changes[1]);
-      await configurations.getByRole("button", { name: "Cancel", exact: true }).click();
       const file = info.outputPath("reviewed-form-regressions.json");
       await fs.writeFile(
         file,
         JSON.stringify(
           {
             textMeasurements,
-            fieldGeometry,
-            changes,
             zoom: zoom?.zoom ?? 1,
             physicalDevice: false,
             screenReader: false,

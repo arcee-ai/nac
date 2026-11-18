@@ -1,6 +1,6 @@
-import type { SessionBehavior, SessionLineage, TraditionalChildStatus } from "../../types/api";
+import type { SessionBehavior, TraditionalChildStatus } from "../../types/api";
 export interface SubagentTarget {
-    mode: "child" | "orchestrator";
+    mode: "child";
     id: string;
     description: string;
     status: TraditionalChildStatus;
@@ -21,10 +21,9 @@ export declare function SubagentComposer({ parentSessionId, target, permissionSe
     floating?: boolean;
 }): import("react").JSX.Element;
 /** Composer on a child session page. Steering goes back through the parent. */
-export declare function SubagentSessionComposer({ parentSessionId, sessionId, kind, description, behavior, }: {
+export declare function SubagentSessionComposer({ parentSessionId, sessionId, description, behavior, }: {
     parentSessionId: string;
     sessionId: string;
-    kind: SessionLineage["kind"];
     description: string;
     behavior: SessionBehavior | null;
 }): import("react").JSX.Element;
