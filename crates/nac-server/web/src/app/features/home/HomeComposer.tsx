@@ -96,14 +96,13 @@ export function HomeComposer({
     if (requested) setChosen(null);
   }
   const fallback = useMemo(() => recentProjectId(projects, sessions), [projects, sessions]);
-  const locations = useMemo(() => {
-    const counts = new Map<string | null, number>([[null, 0]]);
-    for (const entry of projects) {
-      const at = entry.ssh_host ?? null;
-      counts.set(at, (counts.get(at) ?? 0) + 1);
-    }
-    return [...counts].map(([at, projectCount]) => ({ host: at, projectCount }));
-  }, [projects]);
+  const locations = useMemo(
+    () =>
+      [...new Set([null, ...projects.map((entry) => entry.ssh_host ?? null)])].map((at) => ({
+        host: at,
+      })),
+    [projects],
+  );
   const candidate = chosen ?? requested ?? fallback;
   // A requested project that no longer exists leaves the choice to the user
   // rather than quietly starting somewhere else.

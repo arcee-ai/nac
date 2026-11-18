@@ -54,7 +54,7 @@ export function WorkspaceSettings({
       sticky
       focusScope="Additional settings"
       placement={PopoverPlacement.TopRight}
-      size={PopoverSize.Large}
+      size={PopoverSize.Medium}
       content={
         view === "main" ? (
           <>

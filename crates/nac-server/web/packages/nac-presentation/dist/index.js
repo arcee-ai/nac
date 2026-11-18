@@ -11782,7 +11782,7 @@ function Fm({ locations: e, value: t, onChange: n, onAddSsh: r, disabled: i }) {
 		onClose: () => o(!1),
 		sticky: !0,
 		placement: Ur.BottomRight,
-		size: hi.Large,
+		size: hi.Small,
 		content: /* @__PURE__ */ $(mp, {
 			label: "Location",
 			autoFocus: !0,
@@ -11790,7 +11790,6 @@ function Fm({ locations: e, value: t, onChange: n, onAddSsh: r, disabled: i }) {
 				/* @__PURE__ */ Q(gp, { children: "Run on" }),
 				e.map((e) => /* @__PURE__ */ Q(dp, {
 					label: e.host ?? "This computer",
-					hint: e.projectCount === 0 ? "No projects yet" : `${e.projectCount} ${e.projectCount === 1 ? "project" : "projects"}`,
 					checked: e.host === t,
 					onSelect: c(() => n(e.host))
 				}, e.host ?? "local")),
@@ -11825,7 +11824,7 @@ function Im({ isolated: e, available: t, onIsolatedChange: n, gitRef: r, default
 		sticky: !0,
 		focusScope: "Additional settings",
 		placement: Ur.TopRight,
-		size: hi.Large,
+		size: hi.Medium,
 		content: l === "main" ? /* @__PURE__ */ $(Z, { children: [
 			/* @__PURE__ */ Q("p", {
 				className: "type-meta px-2.5 pt-1.5 pb-1 text-basic-tertiary",
@@ -12360,17 +12359,7 @@ function rh(e, t) {
 function ih({ projects: e, sessions: t, compact: n = !1 }) {
 	let r = Gt(), i = Po(), a = gc(), o = bo(), s = xo(), [c, l] = Co(), u = pi("(pointer: coarse)"), d = Y(null), f = c.get("project"), [p, m] = X(null), [h, g] = X(f);
 	h !== f && (g(f), f && m(null));
-	let _ = J(() => rh(e, t), [e, t]), v = J(() => {
-		let t = /* @__PURE__ */ new Map([[null, 0]]);
-		for (let n of e) {
-			let e = n.ssh_host ?? null;
-			t.set(e, (t.get(e) ?? 0) + 1);
-		}
-		return [...t].map(([e, t]) => ({
-			host: e,
-			projectCount: t
-		}));
-	}, [e]), y = p ?? f ?? _, b = !p && f != null && !e.some((e) => e.project_id === f), x = b ? null : e.find((e) => e.project_id === y) ?? e.find((e) => e.project_id === _) ?? null, S = x?.project_id ?? null, C = D().stores.homeDraftStore, w = C.usePrompt(), T = C.useProjectId(), E = (e) => C.update(e, S), O = w.trim() && x && T && T !== x.project_id ? e.find((e) => e.project_id === T)?.name ?? null : void 0, [k, A] = X(() => Tm(r)), [j, M] = X(null), N = j?.projectId === S ? j.value : null, P = (e) => M(e ? {
+	let _ = J(() => rh(e, t), [e, t]), v = J(() => [.../* @__PURE__ */ new Set([null, ...e.map((e) => e.ssh_host ?? null)])].map((e) => ({ host: e })), [e]), y = p ?? f ?? _, b = !p && f != null && !e.some((e) => e.project_id === f), x = b ? null : e.find((e) => e.project_id === y) ?? e.find((e) => e.project_id === _) ?? null, S = x?.project_id ?? null, C = D().stores.homeDraftStore, w = C.usePrompt(), T = C.useProjectId(), E = (e) => C.update(e, S), O = w.trim() && x && T && T !== x.project_id ? e.find((e) => e.project_id === T)?.name ?? null : void 0, [k, A] = X(() => Tm(r)), [j, M] = X(null), N = j?.projectId === S ? j.value : null, P = (e) => M(e ? {
 		projectId: S,
 		value: e
 	} : null), [ee, te] = X(!1), [ne, re] = X(!1), [ie, ae] = X(null), [oe, se] = X(null), ce = oe?.projectId === S ? oe.ref : "", le = r.orchestrationEnabled ? k : "direct", ue = Vm(S), de = $m(!!S && !ue.pending && !ue.inherited && !ue.error), fe = N ?? (ue.inherited ? null : de.override), pe = Wm(fe, ue.inherited), me = Sr(!!pe), he = pe ? ql(me.data, pe.backend, pe.model).supportedEfforts : [], [ge, _e] = X(null), ve = pe ? ge !== null && ((e) => he.includes(e))(ge) ? ge : pe.effort || (uu(he) ?? "") : "", ye = pe && ve !== pe.effort ? Km(fe, ue.inherited, ve) : fe, be = ue.pending || de.pending, xe = !N && !ue.inherited && de.noProviders, Se = ym(S, le === "direct"), Ce = le === "direct" && Se.data?.eligible === !0, we = ne && Ce, Te = eh(), Ee = o.state?.focusComposer;

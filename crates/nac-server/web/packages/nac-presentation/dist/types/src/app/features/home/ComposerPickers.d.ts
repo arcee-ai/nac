@@ -17,7 +17,6 @@ export declare function BehaviorPicker({ value, onChange, disabled, }: {
 /** One place sessions can run: this computer, or an SSH host its projects use. */
 export interface ComposerLocation {
     host: string | null;
-    projectCount: number;
 }
 /**
  * Where the new session runs. SSH belongs to a project, so each host here is

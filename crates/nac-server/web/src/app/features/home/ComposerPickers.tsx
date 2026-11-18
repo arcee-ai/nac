@@ -161,7 +161,6 @@ export function BehaviorPicker({
 /** One place sessions can run: this computer, or an SSH host its projects use. */
 export interface ComposerLocation {
   host: string | null;
-  projectCount: number;
 }
 
 /**
@@ -194,7 +193,7 @@ export function LocationPicker({
       onClose={() => setOpen(false)}
       sticky
       placement={PopoverPlacement.BottomRight}
-      size={PopoverSize.Large}
+      size={PopoverSize.Small}
       content={
         <Menu label="Location" autoFocus>
           <MenuLabel>Run on</MenuLabel>
@@ -202,11 +201,6 @@ export function LocationPicker({
             <MenuItem
               key={location.host ?? "local"}
               label={location.host ?? "This computer"}
-              hint={
-                location.projectCount === 0
-                  ? "No projects yet"
-                  : `${location.projectCount} ${location.projectCount === 1 ? "project" : "projects"}`
-              }
               checked={location.host === value}
               onSelect={choose(() => onChange(location.host))}
             />

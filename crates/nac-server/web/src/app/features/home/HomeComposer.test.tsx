@@ -331,7 +331,7 @@ describe("Home composer", () => {
     mount("/", false, withRemote);
     fireEvent.click(screen.getByRole("button", { name: "Location: This computer" }));
     const options = screen.getAllByRole("menuitemradio").map((item) => item.textContent);
-    expect(options).toEqual(["This computer2 projects", "build-box1 project"]);
+    expect(options).toEqual(["This computer", "build-box"]);
 
     fireEvent.click(screen.getByRole("menuitemradio", { name: /build-box/ }));
     expect(screen.getByRole("button", { name: "Location: build-box" })).toBeTruthy();
