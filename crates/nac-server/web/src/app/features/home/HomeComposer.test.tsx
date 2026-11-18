@@ -74,8 +74,14 @@ vi.mock("@/app/features/task-launches/useTaskLaunch", () => ({
   }),
 }));
 vi.mock("@/app/features/task-launches/TaskLaunchModal", () => ({
-  TaskLaunchModal: ({ initialPrompt }: { initialPrompt: string }) => (
-    <div role="dialog" aria-label="New isolated task">
+  TaskLaunchModal: ({
+    initialPrompt,
+    initialGitRef,
+  }: {
+    initialPrompt: string;
+    initialGitRef: string;
+  }) => (
+    <div role="dialog" aria-label="New isolated task" data-ref={initialGitRef}>
       {initialPrompt}
     </div>
   ),
@@ -264,13 +270,42 @@ describe("Home composer", () => {
   it("routes an isolated-checkout send through the isolated task form", () => {
     fakes.eligible = true;
     mount("/", false);
-    fireEvent.click(screen.getByRole("button", { name: "Isolated checkout" }));
+    fireEvent.click(screen.getByRole("button", { name: "Workspace: Project folder" }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /Isolated checkout/ }));
+    expect(screen.getByRole("button", { name: "Start from main" }).textContent).toBe("from main");
     fireEvent.change(prompt(), { target: { value: "Upgrade the toolchain" } });
     fireEvent.click(screen.getByRole("button", { name: "Set up isolated task" }));
-    expect(screen.getByRole("dialog", { name: "New isolated task" }).textContent).toBe(
-      "Upgrade the toolchain",
-    );
+    const form = screen.getByRole("dialog", { name: "New isolated task" });
+    expect(form.textContent).toBe("Upgrade the toolchain");
+    expect(form.getAttribute("data-ref")).toBe("");
     expect(fakes.start).not.toHaveBeenCalled();
+  });
+
+  it("starts an isolated checkout from a typed ref, kept per project", () => {
+    fakes.eligible = true;
+    mount("/", false);
+    fireEvent.click(screen.getByRole("button", { name: "Workspace: Project folder" }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /Isolated checkout/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Start from main" }));
+    const input = screen.getByRole("textbox", { name: "Branch, tag or commit" });
+    fireEvent.change(input, { target: { value: " release/2.4 " } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(screen.getByRole("button", { name: "Start from release/2.4" })).toBeTruthy();
+
+    fireEvent.change(prompt(), { target: { value: "Backport the fix" } });
+    fireEvent.click(screen.getByRole("button", { name: "Set up isolated task" }));
+    expect(screen.getByRole("dialog", { name: "New isolated task" }).getAttribute("data-ref")).toBe(
+      "release/2.4",
+    );
+  });
+
+  it("keeps the project folder when an isolated checkout is unavailable", () => {
+    mount("/", false);
+    fireEvent.click(screen.getByRole("button", { name: "Workspace: Project folder" }));
+    const isolated = screen.getByRole("menuitemradio", { name: /Isolated checkout/ });
+    expect((isolated as HTMLButtonElement).disabled).toBe(true);
+    expect(isolated.textContent).toContain("Needs a direct agent in a local Git project.");
+    expect(screen.queryByRole("button", { name: /^Start from/ })).toBeNull();
   });
 
   it("adds a repository from the project picker on a managed host", () => {

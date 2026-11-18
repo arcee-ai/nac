@@ -24,7 +24,7 @@ import type {
 import { defaultBehavior } from "./behaviors";
 import { Chip } from "./Chip";
 import { ModelPicker } from "./ComposerModelPickers";
-import { BehaviorPicker, IsolatedToggle, ProjectPicker } from "./ComposerPickers";
+import { BehaviorPicker, ProjectPicker, RefPicker, WorkspacePicker } from "./ComposerPickers";
 import {
   modelChipLabel,
   sessionRoute,
@@ -61,10 +61,11 @@ function recentProjectId(
 }
 
 /**
- * Home's hero composer — the app's one new-session flow. Chips pick the
- * project, behavior, model and (for a direct agent on a Git source) an
- * isolated checkout; sending creates the session with the prompt as its
- * first message and opens it.
+ * Home's hero composer — the app's one new-session flow. Its chips pick the
+ * behavior and model; the row under it says where the session works: the
+ * project, then its folder or (for a direct agent on a Git source) an isolated
+ * checkout and the ref it starts from. Sending creates the session with the
+ * prompt as its first message and opens it.
  */
 export function HomeComposer({
   projects,
@@ -128,6 +129,9 @@ export function HomeComposer({
   const [modelOpen, setModelOpen] = useState(false);
   const [isolated, setIsolated] = useState(false);
   const [isolatedTask, setIsolatedTask] = useState<{ prompt: string } | null>(null);
+  // A ref belongs to the project it was typed for.
+  const [refFor, setRefFor] = useState<{ projectId: string | null; ref: string } | null>(null);
+  const gitRef = refFor?.projectId === projectId ? refFor.ref : "";
   const effectiveBehavior = policy.orchestrationEnabled ? behavior : "direct";
 
   const model = useInheritedModel(projectId);
@@ -253,22 +257,6 @@ export function HomeComposer({
         />
         <div className="flex items-end gap-2 px-3 pt-1 pb-3">
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-0.5 max-md:-ml-1 max-md:flex-nowrap max-md:overflow-x-auto max-md:[&>*]:shrink-0 max-md:[scrollbar-width:none] max-md:[mask-image:linear-gradient(to_right,black_85%,transparent)] max-md:pr-6">
-            <ProjectPicker
-              projects={projects}
-              value={project}
-              disabled={busy}
-              addLabel={managed.isManaged ? "Add repository…" : "Add project…"}
-              onAddProject={addProject}
-              onChange={(id) => {
-                setChosen(id);
-                if (prompt) draft.update(prompt, id);
-                if (requested) {
-                  const next = new URLSearchParams(params);
-                  next.delete("project");
-                  setParams(next, { replace: true });
-                }
-              }}
-            />
             {policy.orchestrationEnabled ? (
               <BehaviorPicker value={behavior} onChange={setBehavior} disabled={busy} />
             ) : null}
@@ -281,9 +269,6 @@ export function HomeComposer({
               >
                 Connect a provider
               </Chip>
-            ) : null}
-            {isolationAvailable ? (
-              <IsolatedToggle value={isolated} onChange={setIsolated} disabled={busy} />
             ) : null}
           </div>
           {project && !needsProvider ? (
@@ -324,6 +309,49 @@ export function HomeComposer({
             </button>
           </Tooltip>
         </div>
+      </div>
+      <div
+        aria-label="Workspace"
+        role="group"
+        className="flex min-w-0 flex-wrap items-center gap-0.5 px-1 max-md:-ml-1"
+      >
+        <ProjectPicker
+          projects={projects}
+          value={project}
+          disabled={busy}
+          addLabel={managed.isManaged ? "Add repository…" : "Add project…"}
+          onAddProject={addProject}
+          onChange={(id) => {
+            setChosen(id);
+            if (prompt) draft.update(prompt, id);
+            if (requested) {
+              const next = new URLSearchParams(params);
+              next.delete("project");
+              setParams(next, { replace: true });
+            }
+          }}
+        />
+        {project ? (
+          <>
+            <span aria-hidden className="type-label px-0.5 text-basic-muted">
+              /
+            </span>
+            <WorkspacePicker
+              isolated={useIsolation}
+              available={isolationAvailable}
+              onChange={setIsolated}
+              disabled={busy}
+            />
+            {useIsolation ? (
+              <RefPicker
+                value={gitRef}
+                defaultRef={source.data?.default_ref ?? null}
+                onChange={(ref) => setRefFor({ projectId, ref })}
+                disabled={busy}
+              />
+            ) : null}
+          </>
+        ) : null}
       </div>
       <div className="px-5 md:min-h-5" aria-live="polite">
         {project && needsProvider ? (
@@ -366,6 +394,7 @@ export function HomeComposer({
         <TaskLaunchModal
           projectId={projectId}
           defaultRef={source.data?.default_ref ?? null}
+          initialGitRef={gitRef}
           initialPrompt={isolatedTask.prompt}
           initialTitle={titleFrom(isolatedTask.prompt)}
           onClose={() => setIsolatedTask(null)}

@@ -20,6 +20,7 @@ export function TaskLaunchModal({
   onExistingCheckout,
   initialPrompt = "",
   initialTitle = "",
+  initialGitRef = "",
 }: {
   projectId: string;
   defaultRef: string | null;
@@ -28,11 +29,13 @@ export function TaskLaunchModal({
   /** Home's composer text, carried in as the brief. */
   initialPrompt?: string;
   initialTitle?: string;
+  /** The ref Home's composer chose to start from. */
+  initialGitRef?: string;
 }) {
   const location = useLocation();
   const [title, setTitle] = useState(initialTitle);
   const [prompt, setPrompt] = useState(initialPrompt);
-  const [gitRef, setGitRef] = useState("");
+  const [gitRef, setGitRef] = useState(initialGitRef);
   const [branch, setBranch] = useState(defaultRef ?? "");
   const launch = useTaskLaunch(projectId);
   const frozen = launch.intent !== null;
