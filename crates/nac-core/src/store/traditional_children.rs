@@ -594,6 +594,28 @@ pub fn settle_traditional_child_run(
     run_id: &str,
     terminal: TraditionalChildTerminal,
 ) -> Result<TraditionalChildSettlement> {
+    crate::telemetry::observe_store(
+        crate::telemetry::StoreOperation::TerminalSettlement,
+        crate::telemetry::Correlation::session(Some(child_session_id)).with_run(Some(run_id)),
+        || settle_traditional_child_run_inner(path, child_session_id, run_id, terminal),
+    )
+}
+command SettleTraditionalChildRunCommand {
+    child_session_id: String = child_session_id.to_owned(),
+    run_id: String = run_id.to_owned(),
+    terminal: TraditionalChildTerminal = terminal,
+}
+call |command| (&command.child_session_id, &command.run_id, command.terminal)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.child_session_id)).with_run(Some(&command.run_id));
+port public;
+}
+
+fn settle_traditional_child_run_inner(
+    path: &Path,
+    child_session_id: &str,
+    run_id: &str,
+    terminal: TraditionalChildTerminal,
+) -> Result<TraditionalChildSettlement> {
     let mut terminal = terminal;
 
     if !terminal.status.is_terminal() {
@@ -671,15 +693,6 @@ pub fn settle_traditional_child_run(
         child: settled,
         newly_settled: true,
     })
-}
-command SettleTraditionalChildRunCommand {
-    child_session_id: String = child_session_id.to_owned(),
-    run_id: String = run_id.to_owned(),
-    terminal: TraditionalChildTerminal = terminal,
-}
-call |command| (&command.child_session_id, &command.run_id, command.terminal)
-correlation |command| crate::telemetry::Correlation::session(Some(&command.child_session_id)).with_run(Some(&command.run_id));
-port public;
 }
 
 fn truncate_optional(value: Option<String>) -> Option<String> {

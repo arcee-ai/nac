@@ -900,11 +900,24 @@ jobs:
           python3 -B -m unittest discover -s desktop/macos -p test_startup_custody.py -v
       - name: Test the other four workspace crates
         run: cargo test --locked -p nac-contracts -p nac-credential-store -p nac-managed -p nac-process
+      - name: Clear cached load evidence
+        id: evidence_cleanup
+        run: rm -rf target/managed-load target/direct-load
       - name: Preserve source, size, and lifecycle contracts on every PR
         run: |
           make test-nac-guide
           make test-source-size test-source-workflow test-source-binary
           make test-durability test-managed-load test-managed-image-contract
+      - name: Retain managed and direct load evidence
+        if: always() && steps.evidence_cleanup.outcome == 'success'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: load-evidence-${{ needs.prepare.outputs.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            target/managed-load
+            target/direct-load
+          retention-days: 14
+          if-no-files-found: warn
 
   quality:
     if: ${{ (always() && needs.prepare.outputs.run == 'true') && !(needs.prepare.result == 'success' && needs.prepare.outputs.admission_mode == 'pure') }}

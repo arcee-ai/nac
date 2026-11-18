@@ -778,7 +778,10 @@ impl Agent {
                 crate::telemetry::RuntimeActivity::Worker,
                 correlation,
             )),
-            AgentMode::Direct => None,
+            AgentMode::Direct => Some(crate::telemetry::RuntimeActivityGuard::start(
+                crate::telemetry::RuntimeActivity::Direct,
+                correlation,
+            )),
         };
         self.emit(AgentEvent::RunStarted {
             thread_name: self.thread_name.clone(),

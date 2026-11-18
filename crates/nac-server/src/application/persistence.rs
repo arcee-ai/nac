@@ -119,6 +119,7 @@ impl crate::SessionManager {
         self.inner.attention.stop();
         self.inner.fleet_attention.stop();
         self.inner.task_preparations.stop();
+        self.inner.continuation_owners.stop();
         let services = self
             .inner
             .active_sessions

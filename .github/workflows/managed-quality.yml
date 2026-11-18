@@ -73,7 +73,19 @@ jobs:
         if: steps.quality-mode.outputs.mode == 'full'
         run: make ci
 
+      - name: Clear cached private candidate evidence
+        id: evidence_cleanup
+        if: steps.quality-mode.outputs.mode == 'full' || steps.fault-mode.outputs.mode == 'full'
+        run: rm -f target/direct-load/private-candidate-child-read.json
       - name: Verify the private managed fault fixture
         if: steps.quality-mode.outputs.mode == 'full' || steps.fault-mode.outputs.mode == 'full'
         run: make test-managed-fault-fixture
+      - name: Retain standalone private candidate evidence
+        if: always() && steps.evidence_cleanup.outcome == 'success' && (steps.quality-mode.outputs.mode == 'full' || steps.fault-mode.outputs.mode == 'full')
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: standalone-private-fault-${{ inputs.source_sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: target/direct-load/private-candidate-child-read.json
+          if-no-files-found: warn
+          retention-days: 14
 

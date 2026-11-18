@@ -1,8 +1,22 @@
 use super::*;
+#[path = "managed_load/direct_acceptance.rs"]
+pub(super) mod direct_acceptance;
+#[path = "managed_load/direct_candidate.rs"]
+mod direct_candidate;
+#[cfg(all(unix, feature = "managed-fault-fixture"))]
+#[path = "managed_load/direct_candidate_fault.rs"]
+mod direct_candidate_fault;
+#[path = "managed_load/direct_faults.rs"]
+mod direct_faults;
+#[path = "managed_load/direct_model.rs"]
+mod direct_model;
+#[path = "managed_load/probes.rs"]
+mod probes;
 #[path = "managed_load/telemetry_evidence.rs"]
 mod telemetry_evidence;
 #[path = "managed_load/worker_completion.rs"]
 mod worker_completion;
+use probes::{probe_pair, ProbeSample};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Write};
@@ -77,6 +91,7 @@ struct PhaseGate {
 struct CompletionGate {
     enabled: bool,
     next_ordinal: Mutex<usize>,
+    released: std::sync::atomic::AtomicBool,
     ready: Condvar,
 }
 impl CompletionGate {
@@ -84,6 +99,7 @@ impl CompletionGate {
         Self {
             enabled,
             next_ordinal: Mutex::new(0),
+            released: std::sync::atomic::AtomicBool::new(false),
             ready: Condvar::new(),
         }
     }
@@ -94,7 +110,7 @@ impl CompletionGate {
         }
         let deadline = Instant::now() + PHASE_TIMEOUT;
         let mut next = self.next_ordinal.lock().unwrap();
-        while *next != ordinal {
+        while *next != ordinal && !self.released.load(std::sync::atomic::Ordering::SeqCst) {
             let remaining = deadline
                 .checked_duration_since(Instant::now())
                 .expect("managed completion ordering timed out");
@@ -113,6 +129,16 @@ impl CompletionGate {
         }
         let mut next = self.next_ordinal.lock().unwrap();
         *next += 1;
+        self.ready.notify_all();
+    }
+
+    fn release_all(&self) {
+        let _next = self
+            .next_ordinal
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.released
+            .store(true, std::sync::atomic::Ordering::SeqCst);
         self.ready.notify_all();
     }
 }
@@ -164,7 +190,10 @@ impl PhaseGate {
     }
 
     fn release(&self) {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         state.released = true;
         self.ready.notify_all();
     }
@@ -174,14 +203,6 @@ impl PhaseGate {
 struct ModelRequest {
     phase: &'static str,
     ordinal: Option<usize>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-struct ProbeSample {
-    phase: &'static str,
-    route: &'static str,
-    status: u16,
-    latency_us: u128,
 }
 
 struct DeterministicModel {
@@ -473,6 +494,20 @@ pub(super) trait LoadStoreAdapter {
     }
     fn identity(&self) -> &'static str;
     fn create_manager(&self, root: &Path, worker: &Path) -> SessionManager;
+    fn create_direct_manager_async<'a>(
+        &'a self,
+        root: &'a Path,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = SessionManager> + 'a>> {
+        Box::pin(async move {
+            SessionManager::new_unowned_fixture(ServerOptions {
+                root_cwd: root.to_path_buf(),
+                store_path: Some(root.join("store.db")),
+                worker_executable: None,
+                managed_host: None,
+            })
+            .expect("direct-load session manager")
+        })
+    }
     fn create_manager_async<'a>(
         &'a self,
         root: &'a Path,
@@ -636,6 +671,8 @@ struct TelemetryEvidence {
     max_connection_active: u64,
     max_persistence_queue_active: u64,
     max_orchestrators_active: u64,
+    max_direct_active: u64,
+    max_terminal_settlement_overlap: usize,
     max_child_processes_active: u64,
     child_process_started: BTreeSet<u32>,
     child_process_stopped: BTreeSet<u32>,
@@ -1368,6 +1405,7 @@ pub(super) fn write_secret_safe_artifact(path: &Path, value: &impl Serialize) {
         "all112-monitor-failure-key",
         "all112-worker-interruption-key",
         "all112-restart-recovery-key",
+        "all612-direct-fixture-key",
     ] {
         assert!(
             !bytes
@@ -1879,26 +1917,6 @@ pub(super) async fn run_variant_with_mode(
     };
     let _ = std::fs::remove_dir_all(root);
     evidence
-}
-
-async fn probe_pair(app: &Router, phase: &'static str) -> Vec<ProbeSample> {
-    let mut samples = Vec::new();
-    for route in ["/healthz", "/readyz"] {
-        let started = Instant::now();
-        let response = get_response(app.clone(), route, None).await;
-        assert_eq!(
-            response.status(),
-            StatusCode::OK,
-            "{route} failed at {phase}"
-        );
-        samples.push(ProbeSample {
-            phase,
-            route,
-            status: response.status().as_u16(),
-            latency_us: started.elapsed().as_micros(),
-        });
-    }
-    samples
 }
 
 fn seed_planned_orchestrators(store_path: &Path, plan: &LogicalPlan) {

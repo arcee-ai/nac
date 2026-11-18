@@ -55,6 +55,75 @@ async fn settle(manager: &SessionManager) {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn native_initial_input_continues_after_peer_releases_lease() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    for retained in [false, true] {
+        let root = temp_root("native_initial_peer_release");
+        let _env = ScopedModelEnv::isolated(&root.join("nac-home"), Some("fixture-key"));
+        let manager = test_manager(&root);
+        let (controller, caller, input) = fixture_context(&root, &manager, retained).await;
+        let gate = Arc::new(application::session_creation::CreationProjectionGate::default());
+        if retained {
+            *manager
+                .inner
+                .task_preparations
+                .initial_input_wake
+                .lock()
+                .unwrap() = Some(gate.clone());
+        } else {
+            *manager
+                .inner
+                .session_creation_after_persistence
+                .lock()
+                .unwrap() = Some(gate.clone());
+        }
+        let first = start(
+            &controller,
+            &caller,
+            input.clone(),
+            &manager.inner.store_path,
+        )
+        .await;
+        tokio::time::timeout(Duration::from_secs(10), gate.reached.notified())
+            .await
+            .unwrap();
+        let published = controller.status(&caller, &input.request_id).await.unwrap();
+        let session = &published.launch.session_id;
+        let item = published.launch.first_input_id.unwrap();
+        let peer = sessions::SessionOperationLease::try_acquire(&manager.inner.store_path, session)
+            .unwrap();
+        gate.resume.notify_one();
+        settle(&manager).await;
+        assert_eq!(first.launch.session_id, *session);
+        assert_eq!(
+            nac_core::store::load_session_inbox_item(&manager.inner.store_path, session, item)
+                .unwrap()
+                .status,
+            nac_core::store::InboxStatus::Pending
+        );
+        drop(peer);
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let current = nac_core::store::load_session_inbox_item(
+                    &manager.inner.store_path,
+                    session,
+                    item,
+                )
+                .unwrap();
+                if current.status == nac_core::store::InboxStatus::Delivered {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the retained wake must admit the original input after peer exit");
+        stop(&manager).await;
+        let _ = std::fs::remove_dir_all(root);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn native_retained_retry_cancellation_fences_each_preparation_boundary() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     for boundary in 0..3 {

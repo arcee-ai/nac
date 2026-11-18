@@ -20,6 +20,8 @@ mod store_process_lease;
 mod summary;
 
 pub(crate) use child_input_wait::ChildInputWaitLease;
+#[doc(hidden)]
+pub use child_input_wait::{ChildInputWaitCancellation, WeakChildInputWaitCancellation};
 pub use db::MALFORMED_LIGHT_MODEL_DIAGNOSTIC;
 pub(crate) use db::{
     compare_and_update_permission_approval_state, insert_new_session_in_transaction,

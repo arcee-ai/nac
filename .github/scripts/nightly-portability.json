@@ -235,5 +235,114 @@
       "manual 1/10/100-schedule calendar catch-up timing/RSS/database-size measurement"
     ],
     "reason": "Manual calendar measurement requires the owner's shared exclusive lease. Seven days of backdated due points do not require a seven-day real wait. It asserts eight inclusive catch-up points per schedule, bounded admission and exactly one retained occurrence per schedule at 1/10/100 schedules. The enabled two-schedule calendar correctness test is distinct; this scale measurement is not executed or counted as passing by nightly."
+  },
+  {
+    "package": "nac-server",
+    "name": "tests::managed_load::direct_acceptance::direct_load_replacement_scenario",
+    "disposition": "included",
+    "capabilities": [
+      "scripted provider",
+      "local SQLite",
+      "native process",
+      "single test thread"
+    ],
+    "reason": "Seeded 1/2/4 direct sessions with traditional children and ordered completion."
+  },
+  {
+    "package": "nac-server",
+    "name": "tests::managed_load::direct_acceptance::direct_load_concurrent_probe",
+    "disposition": "included",
+    "capabilities": [
+      "scripted provider",
+      "local SQLite",
+      "native process",
+      "single test thread"
+    ],
+    "reason": "Concurrent direct attachment and child completion with measured overlap."
+  },
+  {
+    "package": "nac-server",
+    "name": "tests::managed_load::direct_faults::direct_native_cancellation_and_reconstruction",
+    "disposition": "included",
+    "capabilities": [
+      "scripted provider",
+      "local SQLite",
+      "native process",
+      "single test thread"
+    ],
+    "reason": "Cancel a live native process tree and reconstruct the manager."
+  },
+  {
+    "package": "nac-server",
+    "name": "tests::managed_load::direct_faults::direct_model_cancellation_and_reconstruction",
+    "disposition": "included",
+    "capabilities": [
+      "scripted provider",
+      "local SQLite",
+      "native process",
+      "single test thread"
+    ],
+    "reason": "Cancel a blocked child model request and reconstruct the manager."
+  },
+  {
+    "package": "nac-server",
+    "name": "tests::persistence_load::owned_direct_persistence_load_scenario",
+    "disposition": "included",
+    "capabilities": [
+      "scripted provider",
+      "local SQLite",
+      "native process",
+      "single test thread"
+    ],
+    "reason": "Seeded direct-child workload through owned multi-thread persistence."
+  },
+  {
+    "package": "nac-server",
+    "name": "tests::persistence_load::owned_direct_persistence_current_thread_load_scenario",
+    "disposition": "included",
+    "capabilities": [
+      "scripted provider",
+      "local SQLite",
+      "native process",
+      "single test thread"
+    ],
+    "reason": "Seeded direct-child workload through owned current-thread persistence."
+  },
+  {
+    "package": "nac-server",
+    "name": "tests::managed_load::direct_acceptance::direct_load_busy_conflict",
+    "disposition": "included",
+    "capabilities": [
+      "scripted provider",
+      "local SQLite",
+      "native process",
+      "single test thread"
+    ],
+    "reason": "Observe SQLite busy contention on a traditional child during a live direct-session workload."
+  },
+  {
+    "package": "nac-server",
+    "name": "tests::managed_load::direct_faults::direct_child_append_failure_and_reconstruction",
+    "disposition": "included",
+    "capabilities": [
+      "scripted provider",
+      "local SQLite",
+      "native process",
+      "single test thread"
+    ],
+    "reason": "Inject a traditional-child transcript append failure and verify durable parent delivery after reconstruction."
+  },
+  {
+    "package": "nac-server",
+    "name": "tests::managed_load::direct_candidate::direct_candidate_load_scenario",
+    "disposition": "included",
+    "capabilities": [
+      "built nac-web candidate",
+      "scripted provider",
+      "local SQLite",
+      "native process",
+      "single test thread"
+    ],
+    "reason": "Drive the exact built server candidate over loopback with direct sessions and traditional children at 1/2/4 concurrency."
   }
 ]

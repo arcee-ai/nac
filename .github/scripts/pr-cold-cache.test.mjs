@@ -1,3 +1,4 @@
+import { reverseDirectEvidence } from "./direct-evidence-wiring.mjs";
 import { reverseAssetTokens } from "./asset-token-wiring.mjs";
 import {reverseNativeApp, reverseNativeQualification} from './native-qualification-wiring.mjs';
 import assert from "node:assert/strict";
@@ -65,6 +66,9 @@ const cacheSteps = values => Object.entries(values).flatMap(([name, value]) => O
 
 function verify(values) {
   const normalized = structuredClone(values);
+  reverseDirectEvidence(normalized["stable-release"], "stable-release");
+  reverseDirectEvidence(normalized["managed-fault"], "managed-fault");
+  reverseDirectEvidence(normalized["managed-quality"], "managed-quality");
   reverseAssetTokens(normalized["stable-release"]);
   reverseAssetTokens(normalized["managed-image-build"]);
   // Undo only exact authenticated relay additions; original four child hashes

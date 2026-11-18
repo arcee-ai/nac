@@ -335,6 +335,7 @@ struct SessionManagerInner {
     attention: application::attention_runtime::AttentionRuntime,
     fleet_attention: application::fleet_attention::FleetAttentionHub,
     task_preparations: application::task_preparations::TaskPreparations,
+    continuation_owners: Arc<application::continuation_owner::ContinuationOwners>,
     lifecycle_gates: StdMutex<HashMap<String, Weak<Mutex<()>>>>,
     workspace_diff_cache: RwLock<HashMap<GitTargetKey, WorkspaceDiffCacheEntry>>,
     git_probe_cache: RwLock<HashMap<GitTargetKey, GitProbeCacheEntry>>,
@@ -596,6 +597,9 @@ impl SessionManager {
                 attention: application::attention_runtime::AttentionRuntime::default(),
                 fleet_attention: application::fleet_attention::FleetAttentionHub::default(),
                 task_preparations: application::task_preparations::TaskPreparations::default(),
+                continuation_owners: Arc::new(
+                    application::continuation_owner::ContinuationOwners::default(),
+                ),
                 terminal_observations:
                     application::terminal_observation::TerminalObservationHub::default(),
 
@@ -1137,10 +1141,14 @@ impl SessionManager {
     /// use.
     async fn sweep_idle_sessions(&self, except: Option<&str>) {
         let mut active = self.inner.active_sessions.write().await;
+        // Hold this lock through removal so a new accepted reservation cannot
+        // race the idle census and lose its canonical service.
+        let reservations = self.inner.continuation_owners.reservations();
         let idle: Vec<String> = active
             .iter()
             .filter(|(session_id, service)| {
                 Some(session_id.as_str()) != except
+                    && !reservations.contains_key(session_id.as_str())
                     && !service.has_active_operation()
                     && Arc::strong_count(service) == 1
                     && !service.has_event_subscribers()
@@ -1770,11 +1778,17 @@ impl SessionManager {
         nac_core::traditional_children::validate_general_profile(profile)?;
         let gate = self.lifecycle_gate(parent_session_id);
         let _lifecycle = gate.lock().await;
-        let _relationship_lease = sessions::SessionRelationshipLease::try_acquire(
-            &self.inner.store_path,
-            parent_session_id,
-        )?;
-        let parent = sessions::load_session(&self.inner.store_path, parent_session_id)?;
+        let path = self.inner.store_path.clone();
+        let parent_id = parent_session_id.to_owned();
+        let (relationship_lease, parent) = self
+            .inner
+            ._store_ownership
+            .call_legacy(move || {
+                let lease = sessions::SessionRelationshipLease::try_acquire(&path, &parent_id)?;
+                let parent = sessions::load_session(&path, &parent_id)?;
+                Ok::<_, anyhow::Error>((lease, parent))
+            })
+            .await??;
         if parent.behavior == sessions::SessionBehavior::Orchestrator {
             return Err(anyhow!(
                 "traditional children are available only to direct parent sessions"
@@ -1788,9 +1802,15 @@ impl SessionManager {
                 ));
             }
         }
-        if nac_core::store::load_traditional_child(&self.inner.store_path, parent_session_id)?
-            .is_some()
-        {
+        let path = self.inner.store_path.clone();
+        let parent_id = parent_session_id.to_owned();
+        let is_child = self
+            .inner
+            ._store_ownership
+            .call_legacy(move || nac_core::store::load_traditional_child(&path, &parent_id))
+            .await??
+            .is_some();
+        if is_child {
             return Err(anyhow!(
                 "traditional child nesting limit reached (1): child sessions cannot launch children"
             ));
@@ -1822,13 +1842,25 @@ impl SessionManager {
         child.project_id = parent.project_id;
         child.orchestrator_compaction_threshold = parent.orchestrator_compaction_threshold;
         child.automatic_compaction = parent.automatic_compaction;
-        nac_core::store::create_traditional_child_session(
-            &self.inner.store_path,
-            &child,
-            parent_session_id,
-            profile,
-            description,
-        )?;
+        let path = self.inner.store_path.clone();
+        let parent_id = parent_session_id.to_owned();
+        let profile = profile.to_owned();
+        let description = description.to_owned();
+        self.inner
+            ._store_ownership
+            .call_legacy(move || {
+                let _relationship_lease = relationship_lease;
+                #[cfg(test)]
+                tests::pause_child_creation_for_test(&path, &parent_id);
+                nac_core::store::create_traditional_child_session(
+                    &path,
+                    &child,
+                    &parent_id,
+                    &profile,
+                    &description,
+                )
+            })
+            .await??;
         Ok(child_session_id)
     }
 }

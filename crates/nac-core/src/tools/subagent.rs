@@ -306,7 +306,7 @@ impl NativeTool for SubagentStatusTool {
                     true,
                 );
             };
-            match owned_child(services.runtime, parent_session_id, &input.child_session_id) {
+            match owned_child(services.runtime, parent_session_id, &input.child_session_id).await {
                 Ok(child) => control_result(child),
                 Err(error) => ToolResult::text(format!("Error: {error:#}"), true),
             }
@@ -384,7 +384,9 @@ impl NativeTool for SubagentCancelTool {
                 services.runtime,
                 &parent_session_id,
                 &input.child_session_id,
-            ) {
+            )
+            .await
+            {
                 Ok(child) => child,
                 Err(error) => return ToolResult::text(format!("Error: {error:#}"), true),
             };
@@ -403,17 +405,19 @@ impl NativeTool for SubagentCancelTool {
     }
 }
 
-fn owned_child(
+async fn owned_child(
     runtime: &super::ToolRuntime,
     parent_session_id: &str,
     child_session_id: &str,
 ) -> anyhow::Result<TraditionalChildRecord> {
-    crate::store::load_traditional_child_for_parent(
-        &runtime.store_path,
-        parent_session_id,
-        child_session_id,
-    )?
-    .ok_or_else(|| anyhow::anyhow!("traditional child was not found"))
+    let path = runtime.store_path.clone();
+    let parent = parent_session_id.to_owned();
+    let child = child_session_id.to_owned();
+    crate::store::call_legacy_store(&runtime.store_path, move || {
+        crate::store::load_traditional_child_for_parent(&path, &parent, &child)?
+            .ok_or_else(|| anyhow::anyhow!("traditional child was not found"))
+    })
+    .await?
 }
 
 /// A successful status or cancel operation reports a child outcome without

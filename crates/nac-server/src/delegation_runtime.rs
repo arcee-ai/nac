@@ -115,12 +115,17 @@ impl nac_core::traditional_children::TraditionalChildController
                         .await?
                 }
             };
-            let relation = nac_core::store::load_traditional_child_for_parent(
-                &manager.inner.store_path,
-                &request.parent_session_id,
-                &child_session_id,
-            )?
-            .ok_or_else(|| anyhow!("traditional child was not found"))?;
+            let path = manager.inner.store_path.clone();
+            let parent = request.parent_session_id.clone();
+            let child = child_session_id.clone();
+            let relation = manager
+                .inner
+                ._store_ownership
+                .call_legacy(move || {
+                    nac_core::store::load_traditional_child_for_parent(&path, &parent, &child)
+                })
+                .await??
+                .ok_or_else(|| anyhow!("traditional child was not found"))?;
             if relation.profile != request.profile {
                 return Err(anyhow!(
                     "traditional child profile is immutable (expected '{}')",
@@ -133,16 +138,19 @@ impl nac_core::traditional_children::TraditionalChildController
                 &relation,
                 request.description.as_deref(),
             )?;
-            let service = manager.attach_session(&child_session_id).await?;
-            // The service reauthorizes each actual mutation. Do not retain a
-            // host admission lease throughout a foreground delivery wait.
-            drop(_host_admission);
-            service
-                .submit_or_steer_traditional_child_with_origin(
-                    &request.parent_session_id,
+            let reservation = manager.reserve_continuation(&child_session_id).await?;
+            // Transfer attachment and its host lease to the owned actor; the
+            // actor drops the host lease before any foreground delivery wait.
+            manager
+                .submit_owned_child_input(
+                    None,
+                    _host_admission,
+                    request.parent_session_id,
+                    child_session_id,
                     request.prompt,
                     request.execution_mode,
                     request.origin,
+                    reservation,
                 )
                 .await
         })
@@ -157,18 +165,27 @@ impl nac_core::traditional_children::TraditionalChildController
         Box::pin(async move {
             let manager = self.manager()?;
             loop {
-                let child = nac_core::store::load_traditional_child(
-                    &manager.inner.store_path,
-                    child_session_id,
-                )?
-                .ok_or_else(|| {
+                let path = manager.inner.store_path.clone();
+                let child_id = child_session_id.to_owned();
+                let (child, terminal) = manager
+                    .inner
+                    ._store_ownership
+                    .call_legacy(move || {
+                        let child = nac_core::store::load_traditional_child(&path, &child_id)?;
+                        let terminal = if child.is_some() {
+                            nac_core::store::load_traditional_child_terminal_receipt(
+                                &path, &child_id, generation,
+                            )?
+                        } else {
+                            None
+                        };
+                        Ok::<_, anyhow::Error>((child, terminal))
+                    })
+                    .await??;
+                let child = child.ok_or_else(|| {
                     anyhow!("traditional child session '{child_session_id}' was not found")
                 })?;
-                if let Some(terminal) = nac_core::store::load_traditional_child_terminal_receipt(
-                    &manager.inner.store_path,
-                    child_session_id,
-                    generation,
-                )? {
+                if let Some(terminal) = terminal {
                     return Ok(terminal);
                 }
                 if child.generation != generation {
@@ -191,13 +208,16 @@ impl nac_core::traditional_children::TraditionalChildController
     {
         Box::pin(async move {
             let manager = self.manager()?;
-            let child = nac_core::store::load_traditional_child(
-                &manager.inner.store_path,
-                child_session_id,
-            )?
-            .ok_or_else(|| {
-                anyhow!("traditional child session '{child_session_id}' was not found")
-            })?;
+            let path = manager.inner.store_path.clone();
+            let child_id = child_session_id.to_owned();
+            let child = manager
+                .inner
+                ._store_ownership
+                .call_legacy(move || nac_core::store::load_traditional_child(&path, &child_id))
+                .await??
+                .ok_or_else(|| {
+                    anyhow!("traditional child session '{child_session_id}' was not found")
+                })?;
             if child.parent_session_id != parent_session_id {
                 return Err(anyhow!(
                     "session '{child_session_id}' is not a child of parent '{parent_session_id}'"
@@ -233,9 +253,29 @@ impl nac_core::traditional_children::TraditionalChildController
                 .request_cancel(&active.run_id)
                 .await
                 .map_err(anyhow::Error::new)?;
-            nac_core::store::load_traditional_child(&manager.inner.store_path, child_session_id)?
+            let path = manager.inner.store_path.clone();
+            let child_id = child_session_id.to_owned();
+            manager
+                .inner
+                ._store_ownership
+                .call_legacy(move || nac_core::store::load_traditional_child(&path, &child_id))
+                .await??
                 .ok_or_else(|| anyhow!("traditional child disappeared after cancellation"))
         })
+    }
+
+    fn retain_wake(&self, session_id: &str) -> Option<anyhow::Result<()>> {
+        Some(
+            self.manager()
+                .and_then(|manager| manager.schedule_continuation(session_id)),
+        )
+    }
+
+    fn retain_recovery(&self, session_id: &str) -> Option<anyhow::Result<()>> {
+        Some(
+            self.manager()
+                .and_then(|manager| manager.schedule_recovery(session_id)),
+        )
     }
 
     fn wake<'a>(

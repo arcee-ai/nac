@@ -326,112 +326,80 @@ impl SessionService {
         report: Option<String>,
         failure: Option<String>,
     ) {
-        if crate::store::coordinator::owner_for(&self.metadata.store_path)
-            .is_ok_and(|owner| owner.is_none())
+        if let Err(error) = self
+            .try_settle_traditional_child_run(run_id, status, report, failure)
+            .await
         {
-            self.settle_traditional_child_run_sync(run_id, status, report, failure);
-            return;
-        }
-        let service = self.clone();
-        let run_id = run_id.clone();
-        if let Err(error) = crate::store::spawn_blocking_store_caller(move || {
-            service.settle_traditional_child_run_sync(&run_id, status, report, failure);
-        })
-        .await
-        {
-            eprintln!("nac: child settlement caller failed: {error:#}");
+            eprintln!("nac: failed to settle traditional child run {run_id}: {error:#}");
+            // The private restart fixture deliberately leaves this exact
+            // generation unreconciled until the candidate is restarted.
+            #[cfg(feature = "managed-fault-fixture")]
+            if error
+                .downcast_ref::<super::child_continuation::InjectedChildReadFailure>()
+                .is_some()
+            {
+                return;
+            }
+            if let (Some(session_id), Ok(controller)) = (
+                self.metadata.session_id.as_deref(),
+                crate::traditional_children::controller_for(&self.metadata.store_path),
+            ) {
+                if let Err(wake_error) =
+                    super::child_continuation::retain_wake(controller, session_id, true)
+                {
+                    eprintln!("nac: failed to retain child recovery wake: {wake_error:#}");
+                }
+            }
         }
     }
 
-    fn settle_traditional_child_run_sync(
+    /// Internal recovery needs the typed failure, including definite queue
+    /// rejection, while ordinary settlement retains its established logging.
+    pub(super) async fn try_settle_traditional_child_run(
         &self,
         run_id: &SessionRunId,
         status: crate::store::TraditionalChildStatus,
         report: Option<String>,
         failure: Option<String>,
-    ) {
-        let Some(session_id) = self.metadata.session_id.as_deref() else {
-            return;
+    ) -> Result<()> {
+        let settled = if crate::store::coordinator::owner_for(&self.metadata.store_path)?.is_none()
+        {
+            super::child_continuation::settle_generation(self, run_id, status, report, failure)?
+        } else {
+            let service = self.clone();
+            let run = run_id.clone();
+            crate::store::spawn_blocking_store_caller(move || {
+                super::child_continuation::settle_generation(
+                    &service, &run, status, report, failure,
+                )
+            })
+            .await??
         };
-        let child =
-            match crate::store::load_traditional_child(&self.metadata.store_path, session_id) {
-                Ok(Some(child)) => child,
-                Ok(None) => return,
-                Err(error) => {
-                    eprintln!("nac: failed to inspect traditional child settlement: {error:#}");
-                    return;
-                }
-            };
-        let revision = crate::store::workspace_revision_for_run(
-            &self.metadata.store_path,
-            session_id,
-            run_id.as_str(),
-        )
-        .unwrap_or_else(|error| {
-            eprintln!("nac: failed to read child workspace revision: {error:#}");
-            None
-        });
-        let change_summary = revision.map(|revision| {
-            format!(
-                "{} files changed, +{} -{}",
-                revision.changed_files, revision.additions, revision.deletions
-            )
-        });
-        let verification_summary = report
-            .as_deref()
-            .and_then(|report| extract_report_section(report, "verification"));
-        match crate::store::settle_traditional_child_run(
-            &self.metadata.store_path,
-            session_id,
-            run_id.as_str(),
-            crate::store::TraditionalChildTerminal {
-                status,
-                report,
-                failure,
-                change_summary,
-                verification_summary,
-            },
-        ) {
-            Ok(settlement)
-                if settlement.newly_settled && settlement.child.completion_inbox_id.is_some() =>
+        let Some(settled) = settled else {
+            return Ok(());
+        };
+        if settled.completion_inbox_id.is_some() {
+            if let Ok(controller) =
+                crate::traditional_children::controller_for(&self.metadata.store_path)
             {
-                if let Ok(controller) =
-                    crate::traditional_children::controller_for(&self.metadata.store_path)
-                {
-                    let parent_session_id = child.parent_session_id;
-                    tokio::spawn(async move {
-                        if let Err(error) = controller.wake(&parent_session_id).await {
-                            eprintln!(
-                                "nac: failed to wake parent after child settlement: {error:#}"
-                            );
-                        }
-                    });
-                }
-                if let Err(error) = crate::store::clear_settled_run_recovery(
-                    &self.metadata.store_path,
-                    session_id,
-                    run_id.as_str(),
-                ) {
-                    eprintln!(
-                        "nac: failed to clear settled child recovery for run {run_id}: {error:#}"
-                    );
-                }
-            }
-            Ok(_) => {
-                if let Err(error) = crate::store::clear_settled_run_recovery(
-                    &self.metadata.store_path,
-                    session_id,
-                    run_id.as_str(),
-                ) {
-                    eprintln!(
-                        "nac: failed to clear settled child recovery for run {run_id}: {error:#}"
-                    );
-                }
-            }
-            Err(error) => {
-                eprintln!("nac: failed to settle traditional child run {run_id}: {error:#}");
+                // The serving implementation only registers owned work here;
+                // it must not acquire a parent lifecycle gate under the child.
+                super::child_continuation::retain_wake(
+                    controller,
+                    &settled.parent_session_id,
+                    false,
+                )?;
             }
         }
+        let Some(session_id) = self.metadata.session_id.clone() else {
+            return Ok(());
+        };
+        let path = self.metadata.store_path.clone();
+        let run = run_id.as_str().to_owned();
+        crate::store::call_legacy_store(&self.metadata.store_path, move || {
+            crate::store::clear_settled_run_recovery(&path, &session_id, &run)
+        })
+        .await?
     }
 
     /// Freeze the checkout as it stands now, so the run can be revisited later.

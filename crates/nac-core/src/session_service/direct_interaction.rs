@@ -653,6 +653,31 @@ impl SessionService {
         Ok(self.select_next_direct_inbox_item().await?.run)
     }
 
+    /// Continue an already-authorized inbox under the composition owner's
+    /// canonical lifecycle gate and exact cross-process operation lease.
+    #[doc(hidden)]
+    pub async fn continue_owned_inbox_with_lease(
+        &self,
+        lease: sessions::SessionOperationLease,
+    ) -> Result<Option<SessionRunHandle>> {
+        self.require_direct_behavior()?;
+        let session_id = self
+            .metadata
+            .session_id
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
+        lease.validate(&self.metadata.store_path, session_id)?;
+        let _wake = self.inbox_wake.lock().await;
+        if self
+            .stopping_admission
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            return Ok(None);
+        }
+        self.start_next_direct_inbox_item_with_lease_async(lease)
+            .await
+    }
+
     pub(super) async fn select_next_direct_inbox_item(
         &self,
     ) -> Result<attention::ContinuationSelection> {
@@ -792,6 +817,10 @@ impl SessionService {
         prompt: &str,
     ) -> std::result::Result<Option<crate::store::AdmittedInboxPrompt>, SessionSubmitError> {
         id.map(|id| {
+            #[cfg(any(test, feature = "test-support"))]
+            if self.take_child_inbox_admission_rejection_for_test() {
+                return Err(crate::store::PersistenceAdmissionError::Overloaded.into());
+            }
             let session = self
                 .metadata
                 .session_id

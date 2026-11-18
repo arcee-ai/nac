@@ -5,6 +5,330 @@ use crate::session_service::tests::test_direct_active_service;
 
 const QUEUED_PROMPT: &str = "foreground input sent before peer exit";
 
+#[tokio::test]
+async fn recovery_settlement_failure_does_not_publish_duplicate_run_failures() {
+    for failed in [false, true] {
+        let (service, path, child) = abandoned_child("recovery_event_retry", Some("recovery-run"));
+        if failed {
+            crate::store::stage_active_run_failure(
+                &path,
+                "child",
+                "recovery-run",
+                &crate::run_failure::RunFailure::unknown("fixture failure"),
+            )
+            .unwrap();
+        }
+        let mut events = service.event_bus.subscribe();
+        let lease = sessions::SessionOperationLease::try_acquire(&path, "child").unwrap();
+        for _ in 0..2 {
+            assert!(service
+                .reconcile_durable_run_recovery(&lease)
+                .await
+                .is_err());
+            assert!(
+                events.try_recv().is_err(),
+                "failed settlement must not publish"
+            );
+            assert!(service.has_unreconciled_durable_run_recovery().unwrap());
+        }
+        let connection = crate::store::open_runtime_connection(&path).unwrap();
+        connection
+            .execute(
+                "UPDATE traditional_children SET run_id = ?1, execution_mode = 'background' WHERE child_session_id = ?2",
+                rusqlite::params!["recovery-run", "child"],
+            )
+            .unwrap();
+        drop(connection);
+        service
+            .reconcile_durable_run_recovery(&lease)
+            .await
+            .unwrap();
+        let event = events.try_recv().expect("settlement publishes one failure");
+        assert!(matches!(event.event, SessionEvent::RunFailed { .. }));
+        assert!(events.try_recv().is_err());
+        let receipt =
+            crate::store::load_traditional_child_terminal_receipt(&path, "child", child.generation)
+                .unwrap()
+                .unwrap();
+        assert_eq!(
+            receipt.status,
+            if failed {
+                crate::store::TraditionalChildStatus::Failed
+            } else {
+                crate::store::TraditionalChildStatus::Interrupted
+            }
+        );
+        assert_eq!(
+            crate::store::list_session_inbox(&path, "parent")
+                .unwrap()
+                .len(),
+            1
+        );
+        service
+            .reconcile_durable_run_recovery(&lease)
+            .await
+            .unwrap();
+        assert!(events.try_recv().is_err(), "replay must not republish");
+        drop(lease);
+        let (rebuilt, _) = crate::session_service::tests::test_direct_active_service_at(
+            "child",
+            ModelClient::new_for_test(),
+            path.clone(),
+        );
+        let mut rebuilt_events = rebuilt.service.event_bus.subscribe();
+        let lease = sessions::SessionOperationLease::try_acquire(&path, "child").unwrap();
+        rebuilt
+            .service
+            .reconcile_durable_run_recovery(&lease)
+            .await
+            .unwrap();
+        assert!(
+            rebuilt_events.try_recv().is_err(),
+            "reattachment must not republish"
+        );
+        drop(lease);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+}
+
+#[tokio::test]
+async fn owned_continuation_rejects_a_lease_for_another_session() {
+    let (service, path, original) =
+        abandoned_child("owned_continuation_wrong_lease", Some("relationship-run"));
+    let lease = sessions::SessionOperationLease::try_acquire(&path, "parent").unwrap();
+    assert!(service
+        .continue_owned_inbox_with_lease(lease)
+        .await
+        .is_err());
+    assert_eq!(
+        crate::store::load_traditional_child(&path, "child").unwrap(),
+        Some(original)
+    );
+    assert!(crate::store::list_session_inbox(&path, "child")
+        .unwrap()
+        .is_empty());
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn owned_foreground_cancellation_releases_waiter_and_preserves_queued_input() {
+    let (service, path, original) =
+        abandoned_child("owned_foreground_cancel", Some("relationship-run"));
+    let owner = crate::store::StoreCoordinator::acquire(&path).unwrap();
+    let peer = sessions::SessionOperationLease::try_acquire(&path, "child").unwrap();
+    let cancellation = sessions::ChildInputWaitCancellation::default();
+    let owned_service = service.clone();
+    let signal = cancellation.clone();
+    let task = tokio::spawn(async move {
+        owned_service
+            .submit_child_input_with_cancellation(
+                "parent",
+                QUEUED_PROMPT.into(),
+                TraditionalChildExecutionMode::Foreground,
+                crate::store::InputOrigin::Automation,
+                signal,
+                Arc::new(|| {}),
+                true,
+                Arc::new(|| {}),
+            )
+            .await
+    });
+    let item = queued_input(&owner).await;
+    let wait_id = item.child_wait_id.as_deref().unwrap();
+    assert!(matches!(
+        sessions::ChildInputWaitLease::try_acquire(&path, wait_id),
+        Err(sessions::SessionOperationLeaseError::Busy(_))
+    ));
+    cancellation.cancel();
+    let error = tokio::time::timeout(Duration::from_secs(5), task)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap_err();
+    assert!(error.to_string().contains("requester was cancelled"));
+    assert!(sessions::ChildInputWaitLease::try_acquire(&path, wait_id).is_ok());
+    assert_eq!(
+        owner.list_session_inbox("child".into()).await.unwrap(),
+        vec![item]
+    );
+    assert_eq!(
+        owner.load_traditional_child("child".into()).await.unwrap(),
+        Some(original)
+    );
+    drop(peer);
+    owner.shutdown().await.unwrap();
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[cfg(feature = "managed-fault-fixture")]
+#[tokio::test]
+async fn private_child_read_fault_retains_generation_for_exactly_once_settlement() {
+    use std::io::Write;
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
+    let _lock = crate::TEST_ENV_LOCK.lock().unwrap();
+    struct Environment(Option<std::ffi::OsString>);
+    impl Drop for Environment {
+        fn drop(&mut self) {
+            match self.0.take() {
+                Some(value) => std::env::set_var("NAC_MANAGED_FAULT_ROOT", value),
+                None => std::env::remove_var("NAC_MANAGED_FAULT_ROOT"),
+            }
+        }
+    }
+    let (parts, path) =
+        test_direct_active_service("private_child_fault", "child", ModelClient::new_for_test());
+    let mut parent = sessions::load_session(&path, "child").unwrap();
+    parent.session_id = "parent".into();
+    sessions::create_session(&path, &parent).unwrap();
+    crate::store::create_traditional_child_relationship(
+        &path,
+        "parent",
+        "child",
+        "general",
+        "fault fixture",
+    )
+    .unwrap();
+    let child = crate::store::begin_traditional_child_run(
+        &path,
+        "child",
+        "all612-private-fixture-run",
+        TraditionalChildExecutionMode::Background,
+    )
+    .unwrap();
+    let start = sessions::load_session(&path, "child")
+        .unwrap()
+        .messages
+        .len() as u64;
+    let writer = crate::store::TranscriptLogWriter::new(&path).unwrap();
+    writer
+        .append_run_prompt(
+            "child",
+            start,
+            &Message::User {
+                content: "durable prompt".into(),
+            },
+            "all612-private-fixture-run",
+        )
+        .unwrap();
+    writer
+        .append(
+            "child",
+            start + 1,
+            &Message::Assistant {
+                content: Some("report".into()),
+                reasoning_text: None,
+                reasoning_details: None,
+                tool_calls: None,
+                duration_ms: None,
+                model_origin: None,
+                reasoning_field: None,
+            },
+        )
+        .unwrap();
+    let mut connection = crate::store::open_runtime_connection(&path).unwrap();
+    let transaction = connection
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .unwrap();
+    crate::store::clear_active_run(
+        &transaction,
+        "child",
+        "all612-private-fixture-run",
+        crate::store::RunTerminalDisposition::Completed,
+        None,
+    )
+    .unwrap();
+    transaction.commit().unwrap();
+    drop(connection);
+    let control_root =
+        std::path::PathBuf::from(format!("/tmp/all117-fault-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir(&control_root).unwrap();
+    std::fs::set_permissions(&control_root, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let _environment = Environment(std::env::var_os("NAC_MANAGED_FAULT_ROOT"));
+    std::env::set_var("NAC_MANAGED_FAULT_ROOT", &control_root);
+    let nonce = uuid::Uuid::new_v4().to_string();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis();
+    let control = serde_json::json!({"nonce": nonce, "boundary": "child-read", "session_id": "child", "run_id": "all612-private-fixture-run", "generation": child.generation, "expires_unix_ms": now + 10_000});
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(control_root.join("child-read.json"))
+        .unwrap();
+    file.write_all(serde_json::to_string(&control).unwrap().as_bytes())
+        .unwrap();
+    drop(file);
+    let run = SessionRunId::from_stored("all612-private-fixture-run".into());
+    parts
+        .service
+        .settle_traditional_child_run(
+            &run,
+            crate::store::TraditionalChildStatus::Completed,
+            Some("report".into()),
+            None,
+        )
+        .await;
+    assert_eq!(
+        crate::store::load_traditional_child(&path, "child")
+            .unwrap()
+            .unwrap()
+            .status,
+        crate::store::TraditionalChildStatus::Running
+    );
+    assert!(crate::store::list_session_inbox(&path, "parent")
+        .unwrap()
+        .is_empty());
+    let reached: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(control_root.join(format!("used-{nonce}.json"))).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(reached["session_id"], "child");
+    assert_eq!(reached["run_id"], "all612-private-fixture-run");
+    assert_eq!(reached["generation"], child.generation);
+    assert_eq!(reached["after_successful_sqlite_commit"], false);
+    drop(parts);
+    let (rebuilt, _) = crate::session_service::tests::test_direct_active_service_at(
+        "child",
+        ModelClient::new_for_test(),
+        path.clone(),
+    );
+    let lease = sessions::SessionOperationLease::try_acquire(&path, "child").unwrap();
+    rebuilt
+        .service
+        .reconcile_durable_run_recovery(&lease)
+        .await
+        .unwrap();
+    rebuilt
+        .service
+        .reconcile_durable_run_recovery(&lease)
+        .await
+        .unwrap();
+    let receipt =
+        crate::store::load_traditional_child_terminal_receipt(&path, "child", child.generation)
+            .unwrap()
+            .unwrap();
+    assert_eq!(
+        receipt.run_id.as_deref(),
+        Some("all612-private-fixture-run")
+    );
+    assert_eq!(
+        receipt.status,
+        crate::store::TraditionalChildStatus::Completed
+    );
+    assert_eq!(receipt.report.as_deref(), Some("report"));
+    assert!(crate::store::load_run_recovery(&path, "child")
+        .unwrap()
+        .is_none());
+    let inbox = crate::store::list_session_inbox(&path, "parent").unwrap();
+    assert_eq!(inbox.len(), 1);
+    assert_eq!(receipt.completion_inbox_id, Some(inbox[0].id));
+    std::fs::remove_dir_all(control_root).unwrap();
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
 fn successor_server() -> ScriptedServer {
     ScriptedServer::start(vec![ScriptedResponse::json(
         "200 OK",
@@ -629,3 +953,66 @@ async fn child_input_recovery_accepts_a_terminal_pre_prompt_projection() {
 
 #[path = "delegated_input_wait_tests.rs"]
 mod waiter_tests;
+
+#[tokio::test]
+async fn saturated_inbox_admission_preserves_public_error_but_erases_overload_type() {
+    struct Noop;
+    impl crate::store::coordinator::PersistenceCommand for Noop {
+        type Output = ();
+        fn correlation(&self) -> crate::telemetry::Correlation {
+            crate::telemetry::Correlation::default()
+        }
+        fn execute(self, _: &std::path::Path) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+
+    let (parts, path) = test_direct_active_service(
+        "child_inbox_overload_source",
+        "child",
+        ModelClient::new_for_test(),
+    );
+    let item = crate::store::create_session_inbox_item(
+        &path,
+        "child",
+        crate::store::InboxDelivery::Queue,
+        "queued input",
+        None,
+        None,
+    )
+    .unwrap();
+    let owner = crate::store::StoreCoordinator::acquire(&path).unwrap();
+    let (gate, release, _) = crate::store::coordinator::block_executor(&owner);
+    let queued = (0..owner.stats().capacity)
+        .map(|_| owner.submit(Noop).unwrap())
+        .collect::<Vec<_>>();
+    let service = parts.service.clone();
+    let error = crate::store::spawn_blocking_store_caller(move || {
+        service.admitted_inbox_prompt(Some(item.id), "queued input")
+    })
+    .await
+    .unwrap()
+    .unwrap_err();
+    match &error {
+        SessionSubmitError::Coordination {
+            message: SessionCoordinationError::Store { detail },
+        } => {
+            assert!(detail.contains("persistence queue is full"));
+        }
+        other => panic!("expected the existing public coordination error, got {other:?}"),
+    }
+    assert_eq!(error.to_string(), "session operation coordination failed");
+    assert!(anyhow::Error::new(error)
+        .downcast_ref::<crate::store::PersistenceAdmissionError>()
+        .is_none());
+    release.send(()).unwrap();
+    gate.acknowledge().await.unwrap();
+    for command in queued {
+        command.acknowledge().await.unwrap();
+    }
+    let inbox = owner.list_session_inbox("child".into()).await.unwrap();
+    assert_eq!(inbox.len(), 1);
+    assert_eq!(inbox[0].status, crate::store::InboxStatus::Pending);
+    owner.shutdown().await.unwrap();
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
