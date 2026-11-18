@@ -11,7 +11,7 @@ import {
   within,
 } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createNacClient } from "../services/nacClient";
 import {
   queryKeys,
@@ -32,7 +32,11 @@ import { createNativeRuntime, type NativeRuntime } from "./nativeRuntime";
 import { NativePresentationRoot } from "./NativePresentationRoot";
 
 const instances: NativeRuntime[] = [];
+// Past first run, so an empty store shows the projects empty state rather than
+// seeding a default project.
+beforeEach(() => localStorage.setItem("nac.default-project-seeded", "1"));
 afterEach(() => {
+  localStorage.removeItem("nac.default-project-seeded");
   cleanup();
   for (const runtime of instances.splice(0)) runtime.close();
   vi.unstubAllGlobals();
@@ -156,7 +160,7 @@ it("mounts the real presentation under caller routing, keeps overlays local and 
       <NativePresentationRoot runtime={original.runtime} router={router} />
     </StrictMode>,
   );
-  await waitFor(() => expect(mounted.getByText("No projects yet")).toBeDefined());
+  await mounted.findByRole("button", { name: /Get Started/i });
   expect(original.runtime.isClosed()).toBe(false);
   const boundary = mounted.container.querySelector("[data-nac-runtime]");
   expect(boundary?.classList.contains("dark")).toBe(true);
@@ -196,12 +200,8 @@ it("keeps concurrent native dialog stacks and keyboard ownership separate", asyn
   const second = render(<NativePresentationRoot runtime={right.runtime} router={router} />);
   const leftView = within(first.container);
   const rightView = within(second.container);
-  await waitFor(() => {
-    expect(leftView.getByText("No projects yet")).toBeDefined();
-    expect(rightView.getByText("No projects yet")).toBeDefined();
-  });
-  fireEvent.click(leftView.getByRole("button", { name: /Get Started/i }));
-  fireEvent.click(rightView.getByRole("button", { name: /Get Started/i }));
+  fireEvent.click(await leftView.findByRole("button", { name: /Get Started/i }));
+  fireEvent.click(await rightView.findByRole("button", { name: /Get Started/i }));
   fireEvent.keyDown(leftView.getByRole("dialog"), { key: "Escape" });
   await waitFor(() => expect(leftView.queryByRole("dialog")).toBeNull());
   expect(rightView.getByRole("dialog")).toBeDefined();
