@@ -68,7 +68,6 @@ export const SETTINGS_SECTION_META: readonly SettingsSectionMeta[] = [
       "API key",
       "Base URL",
       "Default model",
-      "Reasoning effort",
       "Context limit",
       "Light model",
       "Extra headers",

@@ -7,6 +7,7 @@ import { ConfigurationsModal } from "./ConfigurationsModal";
 import { ToastProvider } from "@/app/providers/ToastProvider";
 import { api } from "@/app/services/api";
 import type {
+  ModelCatalog,
   ModelConfigurationRecord,
   ProviderModel,
   ResolvedModelConfiguration,
@@ -136,6 +137,36 @@ it("binds and focuses a missing name, clears it on edit and retries the unchange
   ]);
   expect(vi.mocked(api.updateModelConfig).mock.calls[0]?.[1]).not.toHaveProperty("api_key");
   expect(api.createModelConfig).not.toHaveBeenCalled();
+});
+
+it("leaves effort to the composer, dropping a stored effort the model no longer takes", async () => {
+  vi.mocked(api.getModelCatalog).mockResolvedValue({
+    catalog_version: 1,
+    providers: [
+      {
+        id: "openai-responses",
+        auth: "api_key_env",
+        auth_status: "ready",
+        auth_hint: null,
+        connection: { base_url: saved.base_url, api_key_env: "STORED_KEY" },
+        default_base_url: "https://api.openai.com/v1",
+        managed_base_url: null,
+        default_limits: {
+          context_window: 128000,
+          max_tokens: 4096,
+          supported_efforts: ["low", "medium"],
+        },
+        models: [],
+      },
+    ],
+  } as ModelCatalog);
+  await openForm();
+  expect(screen.queryByText("Reasoning Effort")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(api.updateModelConfig).toHaveBeenCalledTimes(1));
+  expect(vi.mocked(api.updateModelConfig).mock.calls[0]?.[1]).toMatchObject({
+    reasoning_effort: null,
+  });
 });
 
 it("binds an empty native model input to its adjacent error", async () => {

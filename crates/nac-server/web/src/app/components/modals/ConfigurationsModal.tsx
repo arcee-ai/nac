@@ -32,7 +32,6 @@ import { ConfigRow } from "@/app/components/modals/ConfigRow";
 import { KeyStatus } from "@/app/components/modals/KeyStatus";
 import { ManagedAuthCallout } from "@/app/features/managed/presentation/ManagedAuthCallout";
 import { LightModelSection, type LightSelection } from "@/app/components/modals/LightModelSection";
-import { REASONING_OPTIONS, reasoningOptionsFor } from "@/app/components/modals/options";
 import { SmallSelect } from "@/app/components/modals/SmallSelect";
 import { resolveCatalogModel } from "@/app/lib/catalog";
 import { useDebouncedValue } from "@/app/hooks/useDebouncedValue";
@@ -41,7 +40,7 @@ import { useIsMobile, useMediaQuery } from "@/app/hooks/useMediaQuery";
 import { useManagedSignIn } from "@/app/features/managed/controller/useManagedSignIn";
 import { KEY_DEBOUNCE_MS, MASKED_KEY, modelItems, type Validation } from "@/app/lib/apiKey";
 import { cn } from "@/app/lib/cn";
-import { CLEAR_EFFORT, serializeExtraHeaders } from "@/app/lib/modelConfig";
+import { serializeExtraHeaders } from "@/app/lib/modelConfig";
 import { PROVIDER_KINDS, providerLabel, providerUsesApiKey } from "@/app/lib/providers";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
@@ -66,14 +65,6 @@ const PROVIDER_ITEMS: SelectItem[] = PROVIDER_KINDS.map((kind) => ({
   id: kind,
   label: providerLabel(kind),
 }));
-
-/**
- * A stored setup either names an effort or leaves it to the config file, so
- * there is no configured value here for "clear" to act on.
- */
-const REASONING_ITEMS: SelectItem[] = REASONING_OPTIONS.filter(
-  (item) => item.id !== CLEAR_EFFORT,
-).map((item) => (item.id === "" ? { ...item, label: "Not set" } : item));
 
 /** Sentinel for the sidebar entry that builds a setup instead of editing one. */
 const DRAFT = "__new__";
@@ -232,7 +223,6 @@ function ConfigurationForm({
   const [allowInsecureHttp, setAllowInsecureHttp] = useState(record?.allow_insecure_http ?? false);
   const [apiKey, setApiKey] = useState("");
   const [model, setModel] = useState(record?.model ?? "");
-  const [reasoning, setReasoning] = useState(record?.reasoning_effort ?? "");
   const [compaction, setCompaction] = useState(
     record?.orchestrator_compaction_threshold?.toString() ?? "",
   );
@@ -300,14 +290,16 @@ function ConfigurationForm({
 
   const name = nameDraft ?? autoName(backend, takenNames);
   const needsKey = providerUsesApiKey(backend);
-  // The catalog knows which efforts this model takes; the rest would only be
-  // saved for the backend to reject at launch.
   const catalog = useModelCatalog();
-  const reasoningItems = reasoningOptionsFor(
-    resolveCatalogModel(catalog.data, backend, model).supportedEfforts,
-    reasoning,
-    REASONING_ITEMS,
-  );
+  // Effort is chosen in the composer; a stored one is kept only while the
+  // chosen model still takes it, since the backend rejects the rest at launch.
+  const supportedEfforts = resolveCatalogModel(catalog.data, backend, model).supportedEfforts;
+  // SAFETY: the server only stores ReasoningEffort wire values.
+  const storedEffort = (record?.reasoning_effort ?? null) as ReasoningEffort | null;
+  const reasoningEffort =
+    storedEffort && (supportedEfforts.length === 0 || supportedEfforts.includes(storedEffort))
+      ? storedEffort
+      : null;
 
   const compactionPlaceholder = useMemo(() => {
     const resolved = resolveCatalogModel(catalog.data, backend, model);
@@ -399,9 +391,6 @@ function ConfigurationForm({
     }
 
     const threshold = compaction.trim() ? Number(compaction.trim()) : 0;
-    // SAFETY: this value comes exclusively from REASONING_ITEMS, whose ids are
-    // the generated ReasoningEffort values plus the empty "not set" sentinel.
-    const selectedReasoning = reasoning ? (reasoning as ReasoningEffort) : null;
     if (!Number.isSafeInteger(threshold) || threshold < 0) {
       setError({
         field: "compaction",
@@ -423,7 +412,7 @@ function ConfigurationForm({
           backend,
           model: chosenModel.trim(),
           allow_insecure_http: allowInsecureHttp,
-          reasoning_effort: selectedReasoning,
+          reasoning_effort: reasoningEffort,
           extra_headers: extraHeaders,
           orchestrator_compaction_threshold: threshold,
           initial_prompt: prompt.trim() || null,
@@ -447,7 +436,7 @@ function ConfigurationForm({
           base_url: baseUrl.trim() || null,
           allow_insecure_http: allowInsecureHttp,
           api_key: needsKey ? apiKey.trim() : null,
-          reasoning_effort: selectedReasoning,
+          reasoning_effort: null,
           extra_headers: extraHeaders,
           orchestrator_compaction_threshold: threshold,
           initial_prompt: prompt.trim() || null,
@@ -777,20 +766,6 @@ function ConfigurationForm({
                 )}
                 {fieldError("model")}
               </div>
-            }
-          />
-          <Separator />
-          <ConfigRow
-            presentation="form"
-            label="Reasoning Effort"
-            hint="Higher effort for deeper reasoning and lower effort for faster responses."
-            control={
-              <SmallSelect
-                presentation="form"
-                items={reasoningItems}
-                value={reasoning}
-                onValueChange={edit(setReasoning)}
-              />
             }
           />
           <Separator />
