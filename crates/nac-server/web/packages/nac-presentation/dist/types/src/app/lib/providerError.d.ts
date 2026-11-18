@@ -12,12 +12,15 @@
  * An unrecognised failure keeps the provider's message rather than being
  * flattened into a generic apology; only the envelope around it is stripped.
  */
+import type { SettingsSection } from "./routes";
 /** What the surface showing the error can offer to do about it. */
 export interface ErrorFix {
     label: string;
     kind: "login" | "settings" | "retry" | "link";
     /** Set for `link` fixes: a page on the Arcee platform. */
     url?: string;
+    /** Set for `settings` fixes: the settings page that carries the fix. */
+    section?: SettingsSection;
 }
 export interface HumanError {
     title: string;

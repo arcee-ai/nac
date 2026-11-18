@@ -53,8 +53,6 @@ export interface ComposerFooterProps {
     onOpenChange: (open: boolean) => void;
     focusKey: string | null;
   };
-  /** Session settings, until the session header's ⋯ menu carries it. */
-  onSettings: (() => void) | null;
   contextTokens: number | null;
   onCompact: (() => void) | null;
   compacting: boolean;
@@ -76,7 +74,6 @@ export function ComposerFooter({
   modelDisabled,
   ssh,
   permissionSheet,
-  onSettings,
   contextTokens,
   onCompact,
   compacting,
@@ -113,21 +110,6 @@ export function ComposerFooter({
         onSheetOpenChange={permissionSheet.onOpenChange}
         focusRequestKey={permissionSheet.focusKey}
       />
-      {onSettings ? (
-        <Tooltip title="Session settings" position={TooltipPosition.TopCenter}>
-          <Button
-            type="button"
-            size={ButtonSize.Small}
-            variant={ButtonVariant.Ghost}
-            content={ButtonContent.Icon}
-            className={compact ? "!size-11 !min-h-11 !min-w-11" : undefined}
-            aria-label="Session settings"
-            onClick={onSettings}
-          >
-            <Icon iconName={IconName.Gear} size={16} />
-          </Button>
-        </Tooltip>
-      ) : null}
 
       <div className="ml-auto flex min-w-0 items-center gap-1.5">
         {/* The model sits beside Send, as on Home. It shrinks first, so a

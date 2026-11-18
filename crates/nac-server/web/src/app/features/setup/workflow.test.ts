@@ -4,7 +4,6 @@ import {
   createConfiguredChat,
   createProjectChat,
   runSetup,
-  saveSettings,
   SetupFailure,
   requiresSetupReview,
 } from "./workflow";
@@ -65,52 +64,6 @@ it("settles an accepted origin write after detach and starts no following comman
   expect(project).not.toHaveBeenCalled();
 });
 
-it("does not save title or project defaults when session configuration is rejected", async () => {
-  const title = vi.fn(async () => {});
-  const projectDefault = vi.fn(async () => {});
-  await expect(
-    runSetup(
-      saveSettings({
-        ...ports(),
-        check: async () => {},
-        model: async () => "model",
-        configuration: async () => {
-          throw new ApiError(409, "PATCH", "/test", "session is active", "test-request");
-        },
-        title,
-        projectDefault,
-      }),
-    ),
-  ).rejects.toMatchObject({ phase: "configuration", kind: "conflict" });
-  expect(title).not.toHaveBeenCalled();
-  expect(projectDefault).not.toHaveBeenCalled();
-});
-
-it("makes a partial configuration/title save visible and does not update project defaults", async () => {
-  const projectDefault = vi.fn(async () => {});
-  await expect(
-    runSetup(
-      saveSettings({
-        ...ports(),
-        check: async () => {},
-        model: async () => "model",
-        configuration: async () => {},
-        title: async () => {
-          throw new ApiError(
-            409,
-            "PATCH",
-            "/test",
-            "presentation revision changed",
-            "test-request",
-          );
-        },
-        projectDefault,
-      }),
-    ),
-  ).rejects.toMatchObject({ phase: "title", completed: ["preset", "configuration"] });
-  expect(projectDefault).not.toHaveBeenCalled();
-});
-
 it.each([
   new TypeError("connection lost"),
   new ApiError(500, "PATCH", "/test", "save response failed", "test-request"),
@@ -145,26 +98,6 @@ it("keeps expected workflow errors distinct from defects", async () => {
     ),
   ).rejects.toBeInstanceOf(SetupFailure);
   await expect(runSetup(Effect.die(new Error("defect")))).rejects.toThrow("defect");
-});
-
-it("does not report pure model projection or a no-op configuration as durable partial progress", async () => {
-  const origin = ports();
-  await expect(
-    runSetup(
-      saveSettings({
-        ...origin,
-        check: async () => {},
-        persistsModel: false,
-        model: async () => "current",
-        configurationSaved: false,
-        configuration: async () => {},
-        title: async () => {
-          throw new ApiError(409, "PATCH", "/title", "revision changed", "test");
-        },
-      }),
-    ),
-  ).rejects.toMatchObject({ phase: "title", completed: [] });
-  expect(origin.reconcile.mock.calls.map(([phase]) => phase)).toEqual(["title"]);
 });
 
 it.each([false, true])(

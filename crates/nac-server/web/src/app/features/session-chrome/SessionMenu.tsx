@@ -147,8 +147,8 @@ function ActionRow({
  * Everything the session header used to spread across pills and ⋯, in one
  * list: the goal, and on a phone every panel, with their live facts (a row
  * opens the drawer on it), then where it runs, its branch and snapshot,
- * integrations and usage, then settings, fork, rename and delete. The same content is a popover on a
- * wide screen and a bottom sheet on a phone.
+ * integrations and usage, then fork, rename and delete. The same content is a popover on a wide
+ * screen and a bottom sheet on a phone.
  */
 function SessionMenuContent({
   sessionId,
@@ -273,11 +273,6 @@ function SessionMenuContent({
       </Section>
 
       <Section>
-        <ActionRow
-          icon={IconName.Gear}
-          label="Session settings"
-          onClick={run(() => actions.settings(sessionId))}
-        />
         {facts.readOnly ? null : (
           <ActionRow
             icon={IconName.FileCopy}

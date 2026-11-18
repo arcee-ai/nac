@@ -30,7 +30,7 @@ const MENU = [
 ];
 
 const SAMPLE_TOASTS: { variant: ToastVariant; content: string }[] = [
-  { variant: ToastVariant.Success, content: "Session settings saved" },
+  { variant: ToastVariant.Success, content: "Chat renamed" },
   { variant: ToastVariant.Danger, content: "Connection lost. Retrying…" },
   { variant: ToastVariant.Error, content: "Could not update pin" },
 ];

@@ -43,8 +43,6 @@ vi.mock("@/app/services/queries", () => ({
   useUpdatePresentation: () => ({ mutateAsync: fakes.update, isPending: fakes.pending }),
   useDeleteSession: () => ({ mutateAsync: fakes.remove, isPending: fakes.pending }),
 }));
-vi.mock("@/app/components/modals/SettingsModal", () => ({ SettingsModal: () => null }));
-
 const summary = {
   session_id: "chat-1",
   title: "Draft plan",

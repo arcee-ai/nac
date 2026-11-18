@@ -16,7 +16,7 @@ import type { ManagedSessionSummary, SessionGoalRecord } from "@/app/types/api";
 
 const state = vi.hoisted(() => ({
   phone: false,
-  actions: { settings: vi.fn(), rename: vi.fn(), remove: vi.fn() },
+  actions: { rename: vi.fn(), remove: vi.fn() },
 }));
 
 vi.mock("@/app/hooks/useMediaQuery", () => ({
@@ -220,8 +220,9 @@ describe("session menu", () => {
     expect(within(menu).getByText("ux/focus")).toBeTruthy();
     expect(within(menu).getByText("integrations")).toBeTruthy();
     expect(within(menu).getByText("usage readings")).toBeTruthy();
-    for (const action of ["Session settings", "Fork from latest reply", "Rename", "Delete"])
+    for (const action of ["Fork from latest reply", "Rename", "Delete"])
       expect(within(menu).getByRole("button", { name: action })).toBeTruthy();
+    expect(within(menu).queryByRole("button", { name: "Session settings" })).toBeNull();
   });
 
   it("opens the goal drawer and closes itself", () => {
@@ -234,8 +235,8 @@ describe("session menu", () => {
     expect(screen.queryByRole("dialog", { name: "Session" })).toBeNull();
 
     menu = openMenu();
-    fireEvent.click(within(menu).getByRole("button", { name: "Session settings" }));
-    expect(state.actions.settings).toHaveBeenCalledWith("s1");
+    fireEvent.click(within(menu).getByRole("button", { name: "Rename" }));
+    expect(state.actions.rename).toHaveBeenCalledOnce();
   });
 
   it("is the phone header's Open panel sheet, listing every panel", () => {
