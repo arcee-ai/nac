@@ -29,6 +29,7 @@ export function MarkdownTaskReference({ id, children }: { id: string; children: 
   const focusBinding = useRef<object | null>(null);
   const statusHadFocus = useRef(false);
   const retryHadFocus = useRef(false);
+  const linkHadFocus = useRef(false);
   const focusTransferred = useRef(false);
   const statusRef = useRef<HTMLSpanElement>(null);
   const retryRef = useRef<HTMLButtonElement>(null);
@@ -44,6 +45,7 @@ export function MarkdownTaskReference({ id, children }: { id: string; children: 
       if (pending.current === binding) pending.current = null;
       if (focusBinding.current === binding) focusBinding.current = null;
       retryHadFocus.current = false;
+      linkHadFocus.current = false;
     };
   }, [binding]);
   const checking = checkingBinding === binding;
@@ -59,6 +61,9 @@ export function MarkdownTaskReference({ id, children }: { id: string; children: 
     if (known && !checking && retryHadFocus.current) {
       retryHadFocus.current = false;
       linkRef.current?.focus();
+    } else if (!known && !checking && !inventory.isPending && linkHadFocus.current) {
+      linkHadFocus.current = false;
+      retryRef.current?.focus();
     }
     if (focusBinding.current !== binding) return;
     if (checking) {
@@ -81,6 +86,7 @@ export function MarkdownTaskReference({ id, children }: { id: string; children: 
     if (pending.current === binding) return;
     if (focused) {
       retryHadFocus.current = false;
+      linkHadFocus.current = false;
       focusBinding.current = binding;
       focusTransferred.current = false;
     }
@@ -167,6 +173,12 @@ export function MarkdownTaskReference({ id, children }: { id: string; children: 
       ) : (
         <a
           ref={linkRef}
+          onFocus={() => {
+            linkHadFocus.current = true;
+          }}
+          onBlur={() => {
+            linkHadFocus.current = false;
+          }}
           role="link"
           tabIndex={0}
           onClick={(event) => activate(true, document.activeElement === event.currentTarget)}
