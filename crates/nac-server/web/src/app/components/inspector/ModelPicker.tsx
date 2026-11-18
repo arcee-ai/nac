@@ -9,9 +9,7 @@ import {
 } from "@/app/components/modals/options";
 import { SmallSelect } from "@/app/components/modals/SmallSelect";
 import { useManagedModelProfile } from "@/app/features/managed/controller/useManagedModelProfile";
-import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { resolveCatalogModel, type CatalogPick } from "@/app/lib/catalog";
-import { cn } from "@/app/lib/cn";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { useToast } from "@/app/providers/ToastProvider";
 import { useModelCatalog, useReadyProviderModels, useUpdateConfig } from "@/app/services/queries";
@@ -35,7 +33,6 @@ export function ModelPicker({
   /** A run is in flight, and the server refuses a config change until it ends. */
   disabled: boolean;
 }) {
-  const isMobile = useIsMobile();
   const toast = useToast();
   const catalog = useModelCatalog();
   const managedModel = useManagedModelProfile();
@@ -142,7 +139,7 @@ export function ModelPicker({
   };
 
   return (
-    <div className={cn("flex min-w-0 items-center", isMobile ? "gap-1" : "gap-2")}>
+    <div className="flex min-w-0 items-center">
       <CatalogModelPicker
         catalog={catalog.data}
         loading={catalog.isLoading}
@@ -167,6 +164,7 @@ export function ModelPicker({
           disabled={disabled || !metadata || updateConfig.isPending}
           size={ButtonSize.Small}
           trailingIcon={null}
+          triggerClassName="!pl-1 [--color-text-btn-secondary:var(--color-text-basic-tertiary)]"
           placement={PopoverPlacement.TopCenter}
           onOpenChange={setEffortOpen}
           onValueChange={(effort) => void chooseEffort(effort)}

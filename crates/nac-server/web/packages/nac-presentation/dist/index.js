@@ -15863,38 +15863,38 @@ function i_({ compact: e, className: t, ...n }) {
 }
 // src/app/components/inspector/ModelPicker.tsx
 function a_({ sessionId: e, metadata: t, label: n, disabled: r }) {
-	let i = Qr(), a = rr(), o = tn(), s = Jc(), c = en(o.data), l = $n(), u = t?.model ?? n, d = t?.reasoning_effort ?? "", f = t ? {
+	let i = rr(), a = tn(), o = Jc(), s = en(a.data), c = $n(), l = t?.model ?? n, u = t?.reasoning_effort ?? "", d = t ? {
 		backend: t.backend,
 		model: t.model,
 		baseUrl: t.base_url ?? ""
-	} : null, p = Is(o.data, t?.backend, u), m = wc(p.supportedEfforts), h = d || m, g = J(() => Ec(p.supportedEfforts, h, Sc), [p.supportedEfforts, h]), _ = g.find((e) => e.id === h)?.label, v = typeof _ == "string" ? _ : "not set", [y, b] = X(!1), { mutate: x, isPending: S } = l, C = Y(null);
+	} : null, f = Is(a.data, t?.backend, l), p = wc(f.supportedEfforts), m = u || p, h = J(() => Ec(f.supportedEfforts, m, Sc), [f.supportedEfforts, m]), g = h.find((e) => e.id === m)?.label, _ = typeof g == "string" ? g : "not set", [v, y] = X(!1), { mutate: b, isPending: x } = c, S = Y(null);
 	q(() => {
-		!t || !o.data || d || r || S || C.current !== e && (C.current = e, x({
+		!t || !a.data || u || r || x || S.current !== e && (S.current = e, b({
 			id: e,
-			patch: { reasoning_effort: m }
+			patch: { reasoning_effort: p }
 		}));
 	}, [
 		t,
-		o.data,
-		d,
-		m,
+		a.data,
+		u,
+		p,
 		r,
-		S,
+		x,
 		e,
-		x
+		b
 	]);
-	let w = async (n) => {
+	let C = async (n) => {
 		if (!t || n.backend === t.backend && n.model === t.model) return;
-		let r = o.data?.providers.find((e) => e.id === n.backend), i = n.backend === t.backend, c = !!(r?.auth_status === "ready" || s.matches(n) && s.credentialReady);
-		if (!i && !c) {
-			a.error(`Connect ${n.backend} in session settings before switching to this model.`);
+		let r = a.data?.providers.find((e) => e.id === n.backend), s = n.backend === t.backend, l = !!(r?.auth_status === "ready" || o.matches(n) && o.credentialReady);
+		if (!s && !l) {
+			i.error(`Connect ${n.backend} in session settings before switching to this model.`);
 			return;
 		}
-		if (!i && !n.baseUrl) {
-			a.error(`Configure an endpoint for ${n.backend} in session settings first.`);
+		if (!s && !n.baseUrl) {
+			i.error(`Configure an endpoint for ${n.backend} in session settings first.`);
 			return;
 		}
-		let u = Is(o.data, n.backend, n.model).supportedEfforts, f = d && (!u.length || u.includes(d)) ? d : wc(u), p = i ? {
+		let d = Is(a.data, n.backend, n.model).supportedEfforts, f = u && (!d.length || d.includes(u)) ? u : wc(d), p = s ? {
 			model: n.model,
 			reasoning_effort: f
 		} : {
@@ -15906,50 +15906,51 @@ function a_({ sessionId: e, metadata: t, label: n, disabled: r }) {
 			extra_headers: null
 		};
 		try {
-			await l.mutateAsync({
+			await c.mutateAsync({
 				id: e,
 				patch: p
-			}), a.success(`Model switched to ${n.model}`);
+			}), i.success(`Model switched to ${n.model}`);
 		} catch (e) {
-			a.error(`The model was not switched: ${vs(as(e), n.backend)}`);
+			i.error(`The model was not switched: ${vs(as(e), n.backend)}`);
 		}
-	}, T = async (n) => {
-		if (t && n !== d) try {
-			await l.mutateAsync({
+	}, w = async (n) => {
+		if (t && n !== u) try {
+			await c.mutateAsync({
 				id: e,
 				patch: { reasoning_effort: n }
-			}), a.success(`Reasoning set to ${n}`);
+			}), i.success(`Reasoning set to ${n}`);
 		} catch (e) {
-			a.error(`Reasoning was not changed: ${vs(as(e), t.backend)}`);
+			i.error(`Reasoning was not changed: ${vs(as(e), t.backend)}`);
 		}
 	};
 	return /* @__PURE__ */ $("div", {
-		className: U("flex min-w-0 items-center", i ? "gap-1" : "gap-2"),
+		className: "flex min-w-0 items-center",
 		children: [/* @__PURE__ */ Q(Js, {
-			catalog: o.data,
-			loading: o.isLoading,
-			failed: o.isError,
+			catalog: a.data,
+			loading: a.isLoading,
+			failed: a.isError,
 			compact: !0,
-			disabled: r || !t || l.isPending,
-			liveByBackend: c,
-			value: f,
-			onSelect: (e) => void w(e)
+			disabled: r || !t || c.isPending,
+			liveByBackend: s,
+			value: d,
+			onSelect: (e) => void C(e)
 		}), /* @__PURE__ */ Q(wi, {
-			title: `Effort: ${v}`,
+			title: `Effort: ${_}`,
 			description: "How much the model reasons before it answers.",
 			position: ci.TopCenter,
 			sticky: !0,
-			disabled: y,
+			disabled: v,
 			children: /* @__PURE__ */ Q(Cs, {
-				items: g,
-				value: h,
+				items: h,
+				value: m,
 				placeholder: "Effort",
-				disabled: r || !t || l.isPending,
+				disabled: r || !t || c.isPending,
 				size: B.Small,
 				trailingIcon: null,
+				triggerClassName: "!pl-1 [--color-text-btn-secondary:var(--color-text-basic-tertiary)]",
 				placement: ci.TopCenter,
-				onOpenChange: b,
-				onValueChange: (e) => void T(e)
+				onOpenChange: y,
+				onValueChange: (e) => void w(e)
 			})
 		})]
 	});
