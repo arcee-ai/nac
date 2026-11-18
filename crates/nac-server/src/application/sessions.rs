@@ -335,16 +335,6 @@ impl<'a> SessionStateApplication<'a> {
                 description: child.description,
             }));
         }
-        if let Some(orchestrator) =
-            nac_core::store::load_managed_orchestrator(&self.manager.inner.store_path, session_id)?
-        {
-            return Ok(Some(SessionLineageSnapshot {
-                kind: SessionLineageKind::ManagedOrchestrator,
-                parent_session_id: orchestrator.parent_session_id,
-                root_session_id: orchestrator.root_session_id,
-                description: orchestrator.description,
-            }));
-        }
         Ok(None)
     }
 
