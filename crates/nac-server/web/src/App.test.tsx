@@ -66,7 +66,6 @@ describe("session routing", () => {
   });
 });
 
-
 it("keeps the design preview reachable without an orchestration policy", async () => {
   render(
     <MemoryRouter initialEntries={["/design"]}>
