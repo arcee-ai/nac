@@ -34,7 +34,11 @@ test("keeps the parent conversation while selecting siblings, closing and focusi
     ["E2E_PANEL_FIRST", "First child conversation"],
     ["E2E_PANEL_SECOND", "Second child conversation"],
   ] as const) {
-    harness.provider.enqueue(token, { token }, { kind: "text", text });
+    harness.provider.enqueue(
+      token,
+      { token },
+      { kind: "text", text, reasoning: `${text} reasoning` },
+    );
   }
   const parentId = await createSession(request, harness, "direct");
   const run = await request.post(`${harness.baseUrl}/sessions/${parentId}/runs`, {
@@ -73,7 +77,18 @@ test("keeps the parent conversation while selecting siblings, closing and focusi
     await expect(parent).toBeVisible();
     await expect(parentDraft).toHaveValue("Parent draft stays here");
     await expect(page).toHaveURL(new RegExp(`/session/${parentId}/delegated$`));
+    const fold = panel.locator("[data-work-fold]").first().getByRole("button").first();
+    await expect(fold).toHaveAttribute("aria-expanded", "false");
+    if (title === "First child") await fold.click();
   }
+  await panel.getByRole("button", { name: "First child", exact: true }).click();
+  const firstFold = panel.locator("[data-work-fold]").first();
+  await expect(firstFold.getByRole("button").first()).toHaveAttribute("aria-expanded", "true");
+  await firstFold.getByRole("list", { name: "Steps" }).getByRole("button").first().click();
+  await expect(
+    panel.getByText("First child conversation reasoning", { exact: true }),
+  ).toBeVisible();
+  await panel.getByRole("button", { name: "Second child", exact: true }).click();
   await testInfo.attach("parent-and-selected-sibling", {
     body: await page.screenshot({ animations: "disabled" }),
     contentType: "image/png",
@@ -92,6 +107,107 @@ test("keeps the parent conversation while selecting siblings, closing and focusi
   await expect(parent).toBeVisible();
   await expect(parentDraft).toHaveValue("Parent draft stays here");
   await expect(page).toHaveURL(new RegExp(`/session/${parentId}/delegated$`));
+
+  // Detailed opens activity by default, but each child's explicit choice still wins.
+  await page.evaluate(() => localStorage.setItem("nac.transcriptDensity", "detailed"));
+  await page.reload();
+  await showSubagents(page, false);
+  await panel.getByRole("button", { name: "First child", exact: true }).click();
+  const detailedFirst = panel.locator("[data-work-fold]").first().getByRole("button").first();
+  await expect(detailedFirst).toHaveAttribute("aria-expanded", "true");
+  await detailedFirst.click();
+  await panel.getByRole("button", { name: "Second child", exact: true }).click();
+  await expect(
+    panel.locator("[data-work-fold]").first().getByRole("button").first(),
+  ).toHaveAttribute("aria-expanded", "true");
+  await panel.getByRole("button", { name: "First child", exact: true }).click();
+  await expect(detailedFirst).toHaveAttribute("aria-expanded", "false");
+});
+
+test("keeps a child activity choice through streaming, sibling switches and settlement", async ({
+  harness,
+  page,
+  request,
+}) => {
+  harness.provider.enqueue(
+    "sibling",
+    { token: "E2E_ACTIVITY_SIBLING" },
+    {
+      kind: "text",
+      text: "Sibling completed",
+      reasoning: "Sibling reasoning",
+    },
+  );
+  const gate = new ScriptGate();
+  harness.provider.enqueue(
+    "initial-child",
+    { token: "E2E_ACTIVITY_INITIAL" },
+    { kind: "text", text: "Initial child answer" },
+  );
+  harness.provider.enqueue(
+    "stream-child",
+    { token: "E2E_ACTIVITY_STREAM" },
+    {
+      kind: "text",
+      text: "Child answer",
+      reasoning: "Child streaming reasoning",
+      stream: true,
+    },
+    gate,
+  );
+  const parentId = await createSession(request, harness, "direct");
+  expect(
+    (
+      await startForegroundChild(request, harness, parentId, "Sibling", "E2E_ACTIVITY_SIBLING")
+    ).ok(),
+  ).toBe(true);
+  const started = await startForegroundChild(
+    request,
+    harness,
+    parentId,
+    "Streaming child",
+    "E2E_ACTIVITY_INITIAL",
+  );
+  expect(started.ok()).toBe(true);
+  const childId = ((await started.json()) as { child_session_id: string }).child_session_id;
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(`${harness.baseUrl}/#/session/${parentId}/delegated`);
+  await showSubagents(page, false);
+  const panel = page
+    .getByRole("complementary")
+    .filter({ has: page.getByRole("tablist", { name: "Session panels" }) });
+  await panel.getByRole("button", { name: "Streaming child", exact: true }).click();
+  await expect(panel.getByText("Initial child answer", { exact: true })).toBeVisible();
+  const running = request.post(`${harness.baseUrl}/sessions/${parentId}/children`, {
+    data: {
+      child_session_id: childId,
+      profile: "general",
+      prompt: "E2E_ACTIVITY_STREAM",
+      background: false,
+    },
+  });
+  try {
+    await gate.accepted;
+    const fold = panel.locator("[data-work-fold]").last();
+    const toggle = fold.getByRole("button").first();
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await toggle.click();
+    await fold.getByRole("list", { name: "Steps" }).getByRole("button").first().click();
+    await expect(panel.getByText("Child streaming reasoning", { exact: true })).toBeVisible();
+    await panel.getByRole("button", { name: "Sibling", exact: true }).click();
+    await expect(
+      panel.locator("[data-work-fold]").first().getByRole("button").first(),
+    ).toHaveAttribute("aria-expanded", "false");
+    await panel.getByRole("button", { name: "Streaming child", exact: true }).click();
+    gate.release();
+    expect((await running).ok()).toBe(true);
+    await expect(panel.getByText("Child answer", { exact: true })).toBeVisible();
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await expect(panel.getByText("Child streaming reasoning", { exact: true })).toBeVisible();
+  } finally {
+    gate.release();
+    await running.catch(() => undefined);
+  }
 });
 
 for (const [name, viewport, mobile] of [

@@ -106,7 +106,25 @@ describe("work fold layout", () => {
     expect(layout[2]).toEqual(c);
   });
 
-  it("folds groups and the prose between them, keeping the answer and sessions in the open", () => {
+  it("keeps the fold key when an Insights group receives its canonical prompt anchor", () => {
+    const group = (id: string): ModelTurnItem => ({
+      kind: "group",
+      id,
+      group: {
+        id,
+        segments: [read("read-0", "a.ts")],
+        status: "ready",
+        durationMs: null,
+      },
+    });
+    const live = layoutModelTurn([group("insights-leading:read-0")])[0];
+    const settled = layoutModelTurn([group("user-2:read-0")])[0];
+    expect(live.kind).toBe("fold");
+    expect(settled.kind).toBe("fold");
+    if (live.kind === "fold" && settled.kind === "fold") expect(live.key).toBe(settled.key);
+  });
+
+  it("keeps prose in place between activity folds", () => {
     const group = (id: string, segment: InsightSegment): ModelTurnItem => ({
       kind: "group",
       id,
@@ -122,11 +140,11 @@ describe("work fold layout", () => {
       group("g2", run("b", "npm test")),
       text("t2", "All green."),
     ]);
-    expect(layout.map((entry) => entry.kind)).toEqual(["fold", "block"]);
+    expect(layout.map((entry) => entry.kind)).toEqual(["fold", "block", "fold", "block"]);
     const fold = layout[0];
     if (fold.kind !== "fold") throw new Error("expected a fold first");
-    expect(fold.groupIds).toEqual(["g1", "g2"]);
-    expect(fold.steps.map((step) => step.kind)).toEqual(["segment", "note", "segment"]);
+    expect(fold.groupIds).toEqual(["g1"]);
+    expect(fold.steps.map((step) => step.kind)).toEqual(["segment"]);
   });
 
   it("leaves a turn without work untouched", () => {
@@ -134,8 +152,47 @@ describe("work fold layout", () => {
       { kind: "block", block: { kind: "text", key: "t", text: "Hello" } },
     ]);
     expect(layout).toEqual([
-      { kind: "block", key: "t", block: { kind: "text", key: "t", text: "Hello" } },
+      {
+        kind: "block",
+        key: "t",
+        block: { kind: "text", key: "t", text: "Hello" },
+      },
     ]);
+  });
+
+  it("keeps activity after a thread wave after that wave", () => {
+    const group = (id: string, segment: InsightSegment): ModelTurnItem => ({
+      kind: "group",
+      id,
+      group: { id, segments: [segment], status: "ready", durationMs: null },
+    });
+    const layout = layoutModelTurn([
+      group("first", read("a", "a.ts")),
+      { kind: "block", block: { kind: "wave", key: "wave", rows: [] } },
+      group("second", run("b", "npm test")),
+    ]);
+    expect(layout.map((entry) => entry.kind)).toEqual(["fold", "block", "fold"]);
+  });
+
+  it("does not label prose before a wave as thought because work follows the wave", () => {
+    const layout = layoutModelTurn([
+      {
+        kind: "block",
+        block: { kind: "text", key: "note", text: "Starting a thread." },
+      },
+      { kind: "block", block: { kind: "wave", key: "wave", rows: [] } },
+      {
+        kind: "group",
+        id: "later",
+        group: {
+          id: "later",
+          segments: [read("read", "a.ts")],
+          status: "ready",
+          durationMs: null,
+        },
+      },
+    ]);
+    expect(layout.map((entry) => entry.kind)).toEqual(["block", "block", "fold"]);
   });
 });
 
