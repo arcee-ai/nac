@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createProject, expect, test, waitForRunIdle } from "./harness";
 import { leaveSettings, openCommandPalette, openSettingsSection } from "./settings-focus";
+import { chooseFixtureSessionModel } from "./model-fixture";
 
 test.use({ orchestration: "0" });
 
@@ -54,6 +55,10 @@ test("native auth setup settles session navigation and refreshes the real MCP ca
   const composer = page.getByRole("textbox", { name: "What should we work on?", exact: true });
   await expect(composer).toBeVisible();
   await expect.poll(() => serverReads).toBeGreaterThan(0);
+  await page.getByRole("button", { name: "Choose a model" }).click();
+  const model = page.getByRole("dialog", { name: "Model for this session" });
+  await chooseFixtureSessionModel(page, model);
+  await model.getByRole("button", { name: "Use this model" }).click();
   const prompt = "NATIVE_AUTH_SETUP first message";
   harness.provider.enqueue(
     "first-message",

@@ -3,6 +3,7 @@ import path from "node:path";
 import { createProject, expect, test, waitForRunIdle } from "./harness";
 import { homeComposer } from "./focus-embedded-helpers";
 import { ScriptGate } from "./scripted-provider";
+import { chooseFixtureSessionModel } from "./model-fixture";
 
 test.use({ orchestration: "0" });
 
@@ -52,6 +53,10 @@ test("Home waits for the owning interactive stream before its first permission r
       runs.push(outgoing.postDataJSON().prompt);
   });
   await page.goto(`${harness.baseUrl}/#/project/${project}`);
+  await page.getByRole("button", { name: "Choose a model" }).click();
+  const model = page.getByRole("dialog", { name: "Model for this session" });
+  await chooseFixtureSessionModel(page, model);
+  await model.getByRole("button", { name: "Use this model" }).click();
   await homeComposer(page).fill("HOME_FIRST_ASK");
   await page.getByRole("button", { name: "Start session", exact: true }).click();
   await expect.poll(() => streamRequested).toBe(true);

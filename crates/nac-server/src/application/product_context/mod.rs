@@ -253,9 +253,9 @@ fn destination(
     let steps = match target {
         ProductDestination::Projects => "Open All projects in the sidebar or phone menu.",
         ProductDestination::McpSettings => "Open MCP in the sidebar or phone menu.",
-        ProductDestination::Configurations => "Open Configurations in the sidebar or phone menu.",
+        ProductDestination::Configurations => "Open Models & providers in Settings.",
         ProductDestination::ModelAuthentication => {
-            "Open Configurations, choose a provider, then use its authentication controls."
+            "Open Models & providers in Settings, then use its authentication controls."
         }
         ProductDestination::SshConfigurations => "Open SSH in the sidebar or phone menu.",
         ProductDestination::SessionSubagents => "Open Subagents in the current chat.",

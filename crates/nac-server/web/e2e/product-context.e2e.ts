@@ -86,7 +86,7 @@ for (const mobile of [false, true]) {
     await expect(page).toHaveURL(original);
     await expect(page.getByRole("combobox", { name: "Message" })).toBeVisible();
     for (const [label, title] of [
-      ["Configurations", "Models & providers"],
+      ["Models & providers", "Models & providers"],
       ["Model authentication", "Models & providers"],
       ["SSH configurations", "SSH hosts"],
     ]) {
