@@ -14,7 +14,7 @@ export declare function ModelPicker({ fallbackLabel, pending, value, effort, sup
         backend: BackendKind;
         model: string;
     } | null;
-    /** "" is the model's own default. */
+    /** A reasoning level; "" only while there is no model. */
     effort: string;
     supportedEfforts: readonly ReasoningEffort[];
     /** The project's own model, offered as a way back after picking another. */

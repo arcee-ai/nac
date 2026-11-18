@@ -146,12 +146,16 @@ export function HomeComposer({
   const supported = known.length ? known : COMMON_EFFORTS;
   // A level picked for one model carries over to the next one that accepts it.
   const [effortChoice, setEffortChoice] = useState<string | null>(null);
-  const effortAllowed = (effort: string) =>
-    effort === "" || supported.includes(effort as ReasoningEffort);
-  const effort =
-    route && effortChoice !== null && effortAllowed(effortChoice)
+  const effortAllowed = (effort: string) => supported.includes(effort as ReasoningEffort);
+  // Always a real level: the configured one, else Medium or the middle level the model has.
+  const standardEffort = supported.includes("medium")
+    ? "medium"
+    : (supported[Math.floor((supported.length - 1) / 2)] ?? "medium");
+  const effort = !route
+    ? ""
+    : effortChoice !== null && effortAllowed(effortChoice)
       ? effortChoice
-      : (route?.effort ?? "");
+      : route.effort || standardEffort;
   const sessionModel =
     route && effort !== route.effort
       ? withEffort(chosenModel, model.inherited, effort)

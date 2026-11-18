@@ -16,8 +16,6 @@ import { Chip } from "./Chip";
 import type { ModelOverride } from "./modelChoice";
 import { catalogOverride } from "./suggestedModel";
 
-const MODEL_DEFAULT = { id: "", label: "Default" };
-
 type View = "overview" | "effort" | "model";
 
 /** "DeepSeek: DeepSeek V4.1 Flash" reads "DeepSeek V4.1 Flash"; the group already names the vendor. */
@@ -91,7 +89,7 @@ export function ModelPicker({
   fallbackLabel: string | null;
   pending: boolean;
   value: { backend: BackendKind; model: string } | null;
-  /** "" is the model's own default. */
+  /** A reasoning level; "" only while there is no model. */
   effort: string;
   supportedEfforts: readonly ReasoningEffort[];
   /** The project's own model, offered as a way back after picking another. */
@@ -142,10 +140,7 @@ export function ModelPicker({
         ?.models.find((model) => model.id === value.model)
     : undefined;
   const name = current ? modelName(current) : fallbackLabel;
-  const efforts = reasoningOptionsFor(supportedEfforts, effort, [
-    MODEL_DEFAULT,
-    ...EFFORT_LEVEL_OPTIONS,
-  ]);
+  const efforts = reasoningOptionsFor(supportedEfforts, effort, EFFORT_LEVEL_OPTIONS);
   const effortLabel = effort
     ? String(efforts.find((option) => option.id === effort)?.label ?? effort)
     : null;
@@ -173,11 +168,7 @@ export function ModelPicker({
   const overview = (
     <Menu label="Model settings" autoFocus>
       {value ? (
-        <SettingRow
-          label="Effort"
-          value={effortLabel ?? "Default"}
-          onOpen={() => setView("effort")}
-        />
+        <SettingRow label="Effort" value={effortLabel} onOpen={() => setView("effort")} />
       ) : null}
       {value ? <MenuSeparator /> : null}
       <SettingRow label="Model" value={name ?? "Choose"} onOpen={() => setView("model")} />

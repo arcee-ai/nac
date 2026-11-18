@@ -17,6 +17,7 @@ const fakes = vi.hoisted(() => ({
   addRepository: vi.fn(),
   managed: false,
   eligible: false,
+  inheritedEffort: "high" as string | null,
 }));
 
 vi.mock("./useStartSession", () => ({
@@ -32,7 +33,7 @@ vi.mock("./modelChoice", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./modelChoice")>()),
   useInheritedModel: () => ({
     inherited: {
-      initial: { model: "glm-5", reasoning_effort: "high", backend: "arcee-api" },
+      initial: { model: "glm-5", reasoning_effort: fakes.inheritedEffort, backend: "arcee-api" },
       light: null,
       source: "project-default",
     },
@@ -112,6 +113,7 @@ beforeEach(() => {
   fakes.addRepository.mockReset();
   fakes.managed = false;
   fakes.eligible = false;
+  fakes.inheritedEffort = "high";
   standaloneHomeDraftStore.update("", null);
 });
 afterEach(() => {
@@ -163,7 +165,6 @@ describe("Home composer", () => {
     fireEvent.click(screen.getByRole("button", { name: "Model: glm-5, High reasoning" }));
     fireEvent.click(screen.getByRole("menuitem", { name: /^Effort/ }));
     expect(screen.getAllByRole("menuitemradio").map((item) => item.textContent)).toEqual([
-      "Default",
       "Low",
       "Medium",
       "High",
@@ -177,6 +178,23 @@ describe("Home composer", () => {
         expect.objectContaining({
           model: expect.objectContaining({
             selection: expect.objectContaining({ model: "glm-5", reasoning_effort: "low" }),
+          }),
+        }),
+      ),
+    );
+  });
+
+  it("starts at Medium when nothing sets an effort, and sends it", async () => {
+    fakes.inheritedEffort = null;
+    mount("/", false);
+    expect(screen.getByRole("button", { name: "Model: glm-5, Medium reasoning" })).toBeTruthy();
+    fireEvent.change(prompt(), { target: { value: "Go" } });
+    fireEvent.keyDown(prompt(), { key: "Enter" });
+    await vi.waitFor(() =>
+      expect(fakes.start).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: expect.objectContaining({
+            selection: expect.objectContaining({ reasoning_effort: "medium" }),
           }),
         }),
       ),
