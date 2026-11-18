@@ -327,21 +327,23 @@ test("groups adjacent continuations for one child in both transcript densities",
     // second result control, and the density-controlled activity all fit.
     await results.nth(1).click();
     const prompt = page.getByText("E2E_GROUP_PARENT", { exact: true }).last();
-    await prompt.evaluate((element) => {
-      element.scrollIntoView({ block: "start" });
-      for (
-        let node: typeof element | null = element.parentElement;
-        node;
-        node = node.parentElement
-      ) {
-        if (node.scrollHeight > node.clientHeight && node.scrollTop > 0) {
-          node.scrollTop = Math.max(0, node.scrollTop - 80);
-          break;
+    await expect(async () => {
+      await prompt.evaluate((element) => {
+        element.scrollIntoView({ block: "start" });
+        for (
+          let node: typeof element | null = element.parentElement;
+          node;
+          node = node.parentElement
+        ) {
+          if (node.scrollHeight > node.clientHeight && node.scrollTop > 0) {
+            node.scrollTop = Math.max(0, node.scrollTop - 80);
+            break;
+          }
         }
-      }
-    });
-    await expect(prompt).toBeInViewport();
-    await expect(target).toBeInViewport();
+      });
+      await expect(prompt).toBeInViewport({ timeout: 1000 });
+      await expect(target).toBeInViewport({ timeout: 1000 });
+    }).toPass({ timeout: 10000 });
     await page.screenshot({ path: testInfo.outputPath(`group-${density}.png`) });
     await target.focus();
     await page.keyboard.press("Enter");

@@ -6401,13 +6401,21 @@ function Pw(e, t) {
 		}
 	};
 	let i = t.page.start - n.start;
-	return i > e.messages.length ? { kind: "snapshot-required" } : {
+	if (i > e.messages.length) return { kind: "snapshot-required" };
+	let a = Tw(e.tool_call_occurrences, e.messages.length).slice(0, i);
+	if (t.messages[0]?.role === "tool" && t.page.end > n.end) {
+		let r = e.messages.slice(0, i), o = r.length - 1;
+		for (; o >= 0 && r[o].role !== "assistant" && r[o].role !== "user";) --o;
+		let s = t.messages.findIndex((e) => e.role === "assistant" || e.role === "user"), c = s < 0 ? t.page.end : t.page.start + s;
+		o >= 0 && r[o].role === "assistant" && e.tool_call_occurrences?.[o] != null && n.end < c && (a[o] = null);
+	}
+	return {
 		kind: "accepted",
 		snapshot: {
 			...e,
 			messages: [...e.messages.slice(0, i), ...t.messages],
 			message_created_at: [...r.slice(0, i), ...t.created_at],
-			tool_call_occurrences: [...Tw(e.tool_call_occurrences, e.messages.length).slice(0, i), ...Tw(t.tool_call_occurrences, t.messages.length)],
+			tool_call_occurrences: [...a, ...Tw(t.tool_call_occurrences, t.messages.length)],
 			terminal_selection_attributions: [...kw(e.terminal_selection_attributions, n.start, t.page.start), ...t.terminal_selection_attributions ?? []],
 			message_page: {
 				...t.page,

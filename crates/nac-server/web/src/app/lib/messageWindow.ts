@@ -182,6 +182,34 @@ export function mergeMessageTail(
     return { kind: "snapshot-required" };
   }
 
+  const prefixOccurrences = occurrences(
+    current.tool_call_occurrences,
+    current.messages.length,
+  ).slice(0, prefixLength);
+  // A growing batch can cross the page boundary while its assistant remains
+  // in the retained prefix. Its old token is no longer valid and the incoming
+  // page cannot supply a new one. Keep the loaded history but fail closed
+  // until a page including that assistant provides a fresh token.
+  if (incoming.messages[0]?.role === "tool" && incoming.page.end > currentPage.end) {
+    const prefix = current.messages.slice(0, prefixLength);
+    let owner = prefix.length - 1;
+    while (owner >= 0 && prefix[owner].role !== "assistant" && prefix[owner].role !== "user") {
+      owner -= 1;
+    }
+    const firstBoundary = incoming.messages.findIndex(
+      (message) => message.role === "assistant" || message.role === "user",
+    );
+    const batchEnd = firstBoundary < 0 ? incoming.page.end : incoming.page.start + firstBoundary;
+    if (
+      owner >= 0 &&
+      prefix[owner].role === "assistant" &&
+      current.tool_call_occurrences?.[owner] != null &&
+      currentPage.end < batchEnd
+    ) {
+      prefixOccurrences[owner] = null;
+    }
+  }
+
   return {
     kind: "accepted",
     snapshot: {
@@ -189,10 +217,7 @@ export function mergeMessageTail(
       messages: [...current.messages.slice(0, prefixLength), ...incoming.messages],
       message_created_at: [...currentCreatedAt.slice(0, prefixLength), ...incoming.created_at],
       tool_call_occurrences: [
-        ...occurrences(current.tool_call_occurrences, current.messages.length).slice(
-          0,
-          prefixLength,
-        ),
+        ...prefixOccurrences,
         ...occurrences(incoming.tool_call_occurrences, incoming.messages.length),
       ],
       terminal_selection_attributions: [
