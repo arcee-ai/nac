@@ -20,11 +20,6 @@ import { useModelCatalog, useReadyProviderModels, useUpdateConfig } from "@/app/
 import type { BackendKind, ReasoningEffort, SessionMetadata } from "@/app/types/api";
 
 const EFFORT_ROW_HINTS: Record<string, { title: string; description: string }> = {
-  "": {
-    title: "Default effort",
-    description:
-      "NAC does not send an effort. The model answers the way it does when the level is left unset.",
-  },
   none: {
     title: "None",
     description:
@@ -60,13 +55,10 @@ const EFFORT_ROW_HINTS: Record<string, { title: string; description: string }> =
   },
 };
 
-const COMPOSER_EFFORT_OPTIONS: SelectItem[] = [
-  { id: "", label: "Default", hoverHint: { ...EFFORT_ROW_HINTS[""], muted: true } },
-  ...EFFORT_LEVEL_OPTIONS.map((item) => ({
-    ...item,
-    hoverHint: { ...EFFORT_ROW_HINTS[item.id], muted: true },
-  })),
-];
+const COMPOSER_EFFORT_OPTIONS: SelectItem[] = EFFORT_LEVEL_OPTIONS.map((item) => ({
+  ...item,
+  hoverHint: { ...EFFORT_ROW_HINTS[item.id], muted: true },
+}));
 
 /**
  * The session's current model and reasoning, directly switchable beside the
@@ -107,7 +99,7 @@ export function ModelPicker({
     [resolved.supportedEfforts, currentEffort],
   );
   const selectedEffort = effortItems.find((item) => item.id === currentEffort)?.label;
-  const effortLabel = typeof selectedEffort === "string" ? selectedEffort : "Default";
+  const effortLabel = typeof selectedEffort === "string" ? selectedEffort : "not set";
   const [effortOpen, setEffortOpen] = useState(false);
 
   const chooseModel = async (pick: CatalogPick) => {
@@ -156,9 +148,9 @@ export function ModelPicker({
     try {
       await updateConfig.mutateAsync({
         id: sessionId,
-        patch: { reasoning_effort: effort || null },
+        patch: { reasoning_effort: effort },
       });
-      toast.success(`Reasoning set to ${effort || "the model default"}`);
+      toast.success(`Reasoning set to ${effort}`);
     } catch (error) {
       toast.error(
         `Reasoning was not changed: ${humanErrorText(toRunError(error), metadata.backend)}`,
@@ -188,7 +180,7 @@ export function ModelPicker({
         <SmallSelect
           items={effortItems}
           value={currentEffort}
-          placeholder="Default"
+          placeholder="Effort"
           disabled={disabled || !metadata || updateConfig.isPending}
           size={ButtonSize.Small}
           trailingIcon={null}

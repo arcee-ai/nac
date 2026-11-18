@@ -200,3 +200,29 @@ it("keeps managed mounted credentials server-side while selecting another entitl
     client.clear();
   }
 });
+
+it("offers only real effort levels and prompts for one when none is set", async () => {
+  const update = vi.spyOn(api, "updateConfig").mockResolvedValue(undefined);
+  const { client, view } = renderPicker({
+    backend: "arcee-auth",
+    model: "trinity-large-thinking",
+    base_url: "https://api.arcee.ai/api/v1",
+    api_key_env: null,
+    reasoning_effort: null,
+  } as SessionMetadata);
+  try {
+    const trigger = await screen.findByRole("button", { name: /^Effort/ });
+    await waitFor(() => expect((trigger as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(trigger);
+    expect(await screen.findByRole("button", { name: "High" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Low" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Default" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "High" }));
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledExactlyOnceWith("session", { reasoning_effort: "high" }),
+    );
+  } finally {
+    view.unmount();
+    client.clear();
+  }
+});

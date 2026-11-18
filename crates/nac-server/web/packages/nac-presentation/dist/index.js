@@ -15859,10 +15859,6 @@ function r_({ compact: e, className: t, ...n }) {
 }
 // src/app/components/inspector/ModelPicker.tsx
 var i_ = {
-	"": {
-		title: "Default effort",
-		description: "NAC does not send an effort. The model answers the way it does when the level is left unset."
-	},
 	none: {
 		title: "None",
 		description: "The model answers without a reasoning pass. This is the fastest and cheapest option."
@@ -15891,26 +15887,19 @@ var i_ = {
 		title: "Max",
 		description: "The deepest reasoning this model offers. Slowest and most expensive, for the hardest tasks."
 	}
-}, a_ = [{
-	id: "",
-	label: "Default",
-	hoverHint: {
-		...i_[""],
-		muted: !0
-	}
-}, ...Sc.map((e) => ({
+}, a_ = Sc.map((e) => ({
 	...e,
 	hoverHint: {
 		...i_[e.id],
 		muted: !0
 	}
-}))];
+}));
 function o_({ sessionId: e, metadata: t, label: n, disabled: r }) {
 	let i = Qr(), a = rr(), o = tn(), s = qc(), c = en(o.data), l = $n(), u = t?.model ?? n, d = t?.reasoning_effort ?? "", f = t ? {
 		backend: t.backend,
 		model: t.model,
 		baseUrl: t.base_url ?? ""
-	} : null, p = Is(o.data, t?.backend, u), m = J(() => Tc(p.supportedEfforts, d, a_), [p.supportedEfforts, d]), h = m.find((e) => e.id === d)?.label, g = typeof h == "string" ? h : "Default", [_, v] = X(!1), y = async (n) => {
+	} : null, p = Is(o.data, t?.backend, u), m = J(() => Tc(p.supportedEfforts, d, a_), [p.supportedEfforts, d]), h = m.find((e) => e.id === d)?.label, g = typeof h == "string" ? h : "not set", [_, v] = X(!1), y = async (n) => {
 		if (!t || n.backend === t.backend && n.model === t.model) return;
 		let r = o.data?.providers.find((e) => e.id === n.backend), i = n.backend === t.backend, c = !!(r?.auth_status === "ready" || s.matches(n) && s.credentialReady);
 		if (!i && !c) {
@@ -15944,8 +15933,8 @@ function o_({ sessionId: e, metadata: t, label: n, disabled: r }) {
 		if (t && n !== d) try {
 			await l.mutateAsync({
 				id: e,
-				patch: { reasoning_effort: n || null }
-			}), a.success(`Reasoning set to ${n || "the model default"}`);
+				patch: { reasoning_effort: n }
+			}), a.success(`Reasoning set to ${n}`);
 		} catch (e) {
 			a.error(`Reasoning was not changed: ${vs(as(e), t.backend)}`);
 		}
@@ -15970,7 +15959,7 @@ function o_({ sessionId: e, metadata: t, label: n, disabled: r }) {
 			children: /* @__PURE__ */ Q(Cs, {
 				items: m,
 				value: d,
-				placeholder: "Default",
+				placeholder: "Effort",
 				disabled: r || !t || l.isPending,
 				size: B.Small,
 				trailingIcon: null,
