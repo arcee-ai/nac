@@ -2367,14 +2367,6 @@
     cursor: default;
   }
 
-[data-nac-runtime]:is(.cursor-grab), [data-nac-runtime] .cursor-grab {
-    cursor: grab;
-  }
-
-[data-nac-runtime]:is(.cursor-grabbing), [data-nac-runtime] .cursor-grabbing {
-    cursor: grabbing;
-  }
-
 [data-nac-runtime]:is(.cursor-help), [data-nac-runtime] .cursor-help {
     cursor: help;
   }
@@ -2533,10 +2525,6 @@
 
 [data-nac-runtime]:is(.grid-cols-\[repeat\(auto-fill\,minmax\(104px\,1fr\)\)\]),[data-nac-runtime] .grid-cols-\[repeat\(auto-fill\,minmax\(104px\,1fr\)\)\] {
     grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
-  }
-
-[data-nac-runtime]:is(.grid-cols-\[repeat\(auto-fill\,minmax\(min\(220px\,100\%\)\,1fr\)\)\]),[data-nac-runtime] .grid-cols-\[repeat\(auto-fill\,minmax\(min\(220px\,100\%\)\,1fr\)\)\] {
-    grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr));
   }
 
 [data-nac-runtime]:is(.grid-cols-\[repeat\(auto-fill\,minmax\(min\(300px\,100\%\)\,1fr\)\)\]),[data-nac-runtime] .grid-cols-\[repeat\(auto-fill\,minmax\(min\(300px\,100\%\)\,1fr\)\)\] {
@@ -3050,10 +3038,6 @@
     border-color: var(--f-line-ink);
   }
 
-[data-nac-runtime]:is(.border-\[var\(--f-line-strong\)\]), [data-nac-runtime] .border-\[var\(--f-line-strong\)\] {
-    border-color: var(--f-line-strong);
-  }
-
 [data-nac-runtime]:is(.border-\[var\(--f-red-line\)\]), [data-nac-runtime] .border-\[var\(--f-red-line\)\] {
     border-color: var(--f-red-line);
   }
@@ -3120,10 +3104,6 @@
 
 [data-nac-runtime]:is(.border-b-tertiary), [data-nac-runtime] .border-b-tertiary {
     border-bottom-color: var(--color-border-tertiary);
-  }
-
-[data-nac-runtime]:is(.\!bg-\[var\(--f-green\)\]), [data-nac-runtime] .\!bg-\[var\(--f-green\)\] {
-    background-color: var(--f-green) !important;
   }
 
 [data-nac-runtime]:is(.bg-\[var\(--color-code-bg\)\]), [data-nac-runtime] .bg-\[var\(--color-code-bg\)\] {
@@ -4721,7 +4701,7 @@
     rotate: 90deg;
   }
 
-[data-nac-runtime]:is(.group-focus-within\/group\:opacity-100:is(:where(.group\/group):focus-within *)), [data-nac-runtime] .group-focus-within\/group\:opacity-100:is(:where(.group\/group):focus-within *), [data-nac-runtime]:is(.group-focus-within\/tile\:opacity-100:is(:where(.group\/tile):focus-within *)), [data-nac-runtime] .group-focus-within\/tile\:opacity-100:is(:where(.group\/tile):focus-within *) {
+[data-nac-runtime]:is(.group-focus-within\/group\:opacity-100:is(:where(.group\/group):focus-within *)), [data-nac-runtime] .group-focus-within\/group\:opacity-100:is(:where(.group\/group):focus-within *) {
     opacity: 1;
   }
 
@@ -4825,7 +4805,7 @@
       color: var(--color-text-basic-primary);
     }
 
-    [data-nac-runtime]:is(.group-hover\/subagent-row\:opacity-100:is(:where(.group\/subagent-row):hover *)), [data-nac-runtime] .group-hover\/subagent-row\:opacity-100:is(:where(.group\/subagent-row):hover *), [data-nac-runtime]:is(.group-hover\/terminal-tab-button\:opacity-100:is(:where(.group\/terminal-tab-button):hover *)), [data-nac-runtime] .group-hover\/terminal-tab-button\:opacity-100:is(:where(.group\/terminal-tab-button):hover *), [data-nac-runtime]:is(.group-hover\/thread\:opacity-100:is(:where(.group\/thread):hover *)), [data-nac-runtime] .group-hover\/thread\:opacity-100:is(:where(.group\/thread):hover *), [data-nac-runtime]:is(.group-hover\/tile\:opacity-100:is(:where(.group\/tile):hover *)), [data-nac-runtime] .group-hover\/tile\:opacity-100:is(:where(.group\/tile):hover *), [data-nac-runtime]:is(.group-hover\/turn\:opacity-100:is(:where(.group\/turn):hover *)), [data-nac-runtime] .group-hover\/turn\:opacity-100:is(:where(.group\/turn):hover *) {
+    [data-nac-runtime]:is(.group-hover\/subagent-row\:opacity-100:is(:where(.group\/subagent-row):hover *)), [data-nac-runtime] .group-hover\/subagent-row\:opacity-100:is(:where(.group\/subagent-row):hover *), [data-nac-runtime]:is(.group-hover\/terminal-tab-button\:opacity-100:is(:where(.group\/terminal-tab-button):hover *)), [data-nac-runtime] .group-hover\/terminal-tab-button\:opacity-100:is(:where(.group\/terminal-tab-button):hover *), [data-nac-runtime]:is(.group-hover\/thread\:opacity-100:is(:where(.group\/thread):hover *)), [data-nac-runtime] .group-hover\/thread\:opacity-100:is(:where(.group\/thread):hover *), [data-nac-runtime]:is(.group-hover\/turn\:opacity-100:is(:where(.group\/turn):hover *)), [data-nac-runtime] .group-hover\/turn\:opacity-100:is(:where(.group\/turn):hover *) {
       opacity: 1;
     }
   }
@@ -5314,10 +5294,6 @@
 [data-nac-runtime]:is(.focus-visible\:after\:ring-inset:focus-visible:after), [data-nac-runtime] .focus-visible\:after\:ring-inset:focus-visible:after {
     content: var(--nac-presentation-tw-content);
     --nac-presentation-tw-ring-inset: inset;
-  }
-
-[data-nac-runtime]:is(.active\:cursor-grabbing:active), [data-nac-runtime] .active\:cursor-grabbing:active {
-    cursor: grabbing;
   }
 
 [data-nac-runtime]:is(.active\:bg-\[var\(--f-red-wash-2\)\]:active), [data-nac-runtime] .active\:bg-\[var\(--f-red-wash-2\)\]:active {

@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef } from "react";
-import { Link } from "react-router-dom";
 
-import { Button, ButtonContent, ButtonSize, ButtonVariant, Icon, IconName } from "@/app/atoms";
+import { Button, ButtonContent, ButtonSize, ButtonVariant } from "@/app/atoms";
 import { LeftSidebar } from "@/app/components/LeftSidebar";
 import { ProjectsEmptyState } from "@/app/components/projects/ProjectsEmptyState";
 import { useManagedHost } from "@/app/features/managed/controller/useManagedHost";
@@ -12,7 +11,6 @@ import { visibleSessions } from "@/app/features/ui-policy/policy";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
 import { projectListItems } from "@/app/lib/projects";
-import { routes } from "@/app/lib/routes";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
 import { errorMessage } from "@/app/providers/ToastProvider";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
@@ -21,7 +19,6 @@ import { useProjects, useSessions } from "@/app/services/queries";
 import { AddProjectAction } from "./AddProjectAction";
 import { HomeComposer } from "./HomeComposer";
 import { NeedsYouLine } from "./NeedsYouLine";
-import { ProjectTiles } from "./ProjectTiles";
 import { useDefaultProject } from "./useDefaultProject";
 
 function LoadingHome() {
@@ -34,9 +31,9 @@ function LoadingHome() {
 }
 
 /**
- * Home (`/`): the hero composer — the one new-session flow — then what needs
- * the user, what is running, recent sessions and the project tiles. Phones get
- * the same page under the minimal app header; it is the session list there.
+ * Home (`/`): the hero composer — the one new-session flow — and what needs the
+ * user. Projects and sessions live in the sidebar. Phones get the same page
+ * under the minimal app header, with the session list below it.
  */
 export function HomePage() {
   const { trackAttention } = useNativeRuntime().stores.attentionStore;
@@ -70,16 +67,6 @@ export function HomePage() {
     void projectsQuery.refetch();
     void sessionsQuery.refetch();
   };
-
-  const intervalTasks = managed.isManaged ? null : (
-    <Link
-      to={routes.taskSchedules()}
-      className="type-label inline-flex min-h-8 items-center gap-1.5 rounded-pill px-2.5 text-basic-tertiary hover:bg-[var(--f-wash-1)] hover:text-basic-primary max-md:min-h-11"
-    >
-      <Icon iconName={IconName.Clock} size={14} />
-      Interval tasks
-    </Link>
-  );
 
   return (
     <div className="flex h-full min-h-0 bg-elevation-ground">
@@ -155,7 +142,7 @@ export function HomePage() {
                 </Button>
               </div>
             ) : null}
-            {!projectsKnown ? null : isMobile ? (
+            {projectsKnown && isMobile ? (
               // A phone has no sidebar: its list is here, under the same switch.
               <section
                 ref={listRef}
@@ -172,21 +159,8 @@ export function HomePage() {
                   sessions={sessions}
                   activeSessionId={null}
                 />
-                {intervalTasks ? <div className="self-start">{intervalTasks}</div> : null}
               </section>
-            ) : (
-              <ProjectTiles
-                items={items}
-                projects={projects}
-                sessions={sessions}
-                headingTrailing={
-                  <span className="flex items-center gap-1">
-                    {intervalTasks}
-                    <AddProjectAction />
-                  </span>
-                }
-              />
-            )}
+            ) : null}
           </main>
         )}
       </div>

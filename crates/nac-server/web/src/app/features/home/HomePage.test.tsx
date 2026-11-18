@@ -1,7 +1,6 @@
 /** @vitest-environment jsdom */
 
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import type { ReactNode } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -43,14 +42,6 @@ vi.mock("@/app/providers/ProjectActionsProvider", () => ({
 vi.mock("./useDefaultProject", () => ({ useDefaultProject: () => false }));
 vi.mock("./HomeComposer", () => ({ HomeComposer: () => <div data-testid="composer" /> }));
 vi.mock("./NeedsYouLine", () => ({ NeedsYouLine: () => null }));
-vi.mock("./ProjectTiles", () => ({
-  ProjectTiles: ({ headingTrailing }: { headingTrailing?: ReactNode }) => (
-    <section aria-label="Projects">
-      <h2>Projects</h2>
-      {headingTrailing}
-    </section>
-  ),
-}));
 vi.mock("@/app/components/LeftSidebar", () => ({ LeftSidebar: () => null }));
 vi.mock("@/app/features/sidebar/SidebarToggle", () => ({ SidebarToggle: () => null }));
 vi.mock("@/app/features/inbox/SessionLists", () => ({
@@ -93,21 +84,21 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("Add project from Home", () => {
-  it("sits beside the Projects heading on desktop and opens project creation", () => {
+describe("Home below the composer", () => {
+  it("leaves project details off desktop Home, below the composer", () => {
     mount();
-    const heading = screen.getByRole("region", { name: "Projects" });
-    fireEvent.click(within(heading).getByRole("button", { name: "Add project" }));
-    expect(fakes.create).toHaveBeenCalledOnce();
-    expect(within(heading).getByRole("link", { name: "Interval tasks" })).toBeTruthy();
+    expect(screen.getByTestId("composer")).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Projects" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Interval tasks" })).toBeNull();
+    expect(addProject()).toBeNull();
   });
 
   it("offers both managed choices with accurate labels", () => {
     fakes.managed = true;
+    fakes.mobile = true;
     mount();
-    const trigger = within(screen.getByRole("region", { name: "Projects" })).getByRole("button", {
-      name: "Add project",
-    });
+    const list = screen.getByRole("region", { name: "Sessions and Inbox" });
+    const trigger = within(list).getByRole("button", { name: "Add project" });
     expect(trigger.getAttribute("aria-haspopup")).toBe("menu");
     fireEvent.click(trigger);
     fireEvent.click(screen.getByRole("menuitem", { name: /Add repository/ }));
@@ -126,6 +117,7 @@ describe("Add project from Home", () => {
   });
 
   it("is offered when only unassigned sessions exist", () => {
+    fakes.mobile = true;
     fakes.projects = { data: { projects: [] }, isPending: false, error: null };
     fakes.sessions = { data: [orphan], isPending: false, error: null };
     mount();

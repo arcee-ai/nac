@@ -29,6 +29,7 @@ import {
   openInsightsPanel,
   openSessionSettings,
   primaryModelTrigger,
+  revealDesktopSidebar,
   type ComposedFixture,
   type Journey,
 } from "./presentation-composed-fixture";
@@ -434,19 +435,17 @@ async function managedComposed(j: Journey) {
     if (await sheet.isVisible())
       await activate(j, sheet.getByRole("button", { name: "Close", exact: true }));
   }
-  // Phones have no project tiles: Home is the session list, so open the
-  // project's session row there.
+  // Home has no project tiles: open the project's session row in the session
+  // list, which is Home's own on a phone and the sidebar elsewhere.
+  if (j.width >= 768) await revealDesktopSidebar(j.root);
   await activate(
     j,
-    j.width < 768
-      ? j.root
-          .getByRole("region", { name: "Sessions and Inbox", exact: true })
-          .getByRole("region", { name: /Composed qualification project/ })
-          .getByRole("button", { name: "Composed settings saved", exact: true })
+    (j.width < 768
+      ? j.root.getByRole("region", { name: "Sessions and Inbox", exact: true })
       : j.root
-          .getByRole("region", { name: "Projects", exact: true })
-          .getByRole("button", { name: /Composed qualification project/ })
-          .first(),
+    )
+      .getByRole("region", { name: /Composed qualification project/ })
+      .getByRole("button", { name: "Composed settings saved", exact: true }),
   );
 }
 
