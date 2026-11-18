@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, mpsc::UnboundedSender};
 use uuid::Uuid;
 
-use crate::agent::key_arg_preview;
+use crate::agent::{key_arg_preview, preview::preview_tool_result_with_completion};
 use crate::model::redact_credentials;
 
 mod attention;
@@ -157,6 +157,29 @@ pub enum ToolCompletionStatus {
     Cancelled,
 }
 
+/// Validated traditional-child invocation shape after authorization.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub enum DelegationIntent {
+    BackgroundLaunch,
+    BackgroundContinuation,
+    Foreground,
+}
+
+/// Facts emitted only by the native traditional-child execution owner.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub enum DelegationOutcome {
+    BackgroundStarted,
+    BackgroundContinued,
+    Completed,
+    Failed,
+    Cancelled,
+    Interrupted,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -194,6 +217,10 @@ pub enum AgentEvent {
         key_arg_preview: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         args_detail: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        delegation_intent: Option<DelegationIntent>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        delegation_summary_verified: bool,
     },
     ToolCallFinished {
         thread_name: Option<String>,
@@ -207,6 +234,10 @@ pub enum AgentEvent {
         exit_code: Option<i32>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         completion_status: Option<ToolCompletionStatus>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        delegation_outcome: Option<DelegationOutcome>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        delegation_summary: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         effective_timeout_ms: Option<u64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -417,11 +448,13 @@ impl AgentEvent {
             thread_name,
             call_id,
             name: name.clone(),
-            content_preview: crate::agent::preview::preview_tool_result(&name, result),
+            content_preview: preview_tool_result_with_completion(&name, result, completion_status),
             is_error: result.is_error,
             command_status,
             exit_code,
             completion_status,
+            delegation_outcome: result.delegation_outcome,
+            delegation_summary: result.delegation_summary.clone(),
             effective_timeout_ms: metric("timeout_ms"),
             execution_duration_ms: if result.execution_duration_excludes_authorization {
                 result.execution_duration_ms
@@ -1217,6 +1250,8 @@ pub(crate) fn sanitize_external_agent_event(event: AgentEvent) -> Option<AgentEv
             args_preview,
             key_arg_preview: existing_key,
             args_detail,
+            delegation_intent,
+            delegation_summary_verified,
         } => {
             // Preserve an existing key_arg_preview from a prior sanitization
             // pass so the human-readable cmd snippet survives double
@@ -1234,6 +1269,8 @@ pub(crate) fn sanitize_external_agent_event(event: AgentEvent) -> Option<AgentEv
                 args_preview: safe_args,
                 key_arg_preview: Some(key),
                 args_detail: None,
+                delegation_intent,
+                delegation_summary_verified,
                 name: safe_tool_name(&name),
             }
         }
@@ -1246,6 +1283,8 @@ pub(crate) fn sanitize_external_agent_event(event: AgentEvent) -> Option<AgentEv
             command_status,
             exit_code,
             completion_status,
+            delegation_outcome,
+            delegation_summary,
             effective_timeout_ms,
             execution_duration_ms,
             cleanup_duration_ms,
@@ -1259,6 +1298,9 @@ pub(crate) fn sanitize_external_agent_event(event: AgentEvent) -> Option<AgentEv
             command_status,
             exit_code,
             completion_status,
+            delegation_outcome,
+            delegation_summary: delegation_summary
+                .map(|value| bounded_tool_preview(&redact_credentials(&value, &[]))),
             effective_timeout_ms,
             execution_duration_ms,
             cleanup_duration_ms,

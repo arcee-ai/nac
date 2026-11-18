@@ -590,6 +590,10 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
   function applyAgent(seq: number, event: AgentEvent): RefreshKind {
     switch (event.type) {
       case "tool_call_started":
+        if (event.delegation_intent || event.delegation_summary_verified) {
+          if (!event.thread_name) pushPrimaryToolEvent(event);
+          return "none";
+        }
         setState({ activity: `Tool: ${event.name}` });
         // A thread's own calls also feed its card in the chat and its tail in the
         // side panel, which is why they are kept per thread as well as below.

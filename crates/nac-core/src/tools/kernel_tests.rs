@@ -82,6 +82,47 @@ impl NativeTool for PublishedDuringCancellationTool {
     }
 }
 
+struct SettledErrorWithSummary;
+impl NativeTool for SettledErrorWithSummary {
+    type Input = CountInput;
+    fn definition(&self) -> ToolDefinition {
+        PublishedDuringCancellationTool.definition()
+    }
+    fn admission(&self) -> ToolAdmission {
+        ToolAdmission::Exclusive
+    }
+    fn timeout(
+        &self,
+        input: &mut Value,
+        requested: Option<std::time::Duration>,
+    ) -> Result<ToolTimeout, ToolResult> {
+        PublishedDuringCancellationTool.timeout(input, requested)
+    }
+    fn decode(&self, input: Value) -> Result<Self::Input, ToolResult> {
+        PublishedDuringCancellationTool.decode(input)
+    }
+    fn permission_resources(
+        &self,
+        input: &Self::Input,
+        services: ToolServices<'_>,
+    ) -> Result<Vec<PermissionResource>, ToolResult> {
+        PublishedDuringCancellationTool.permission_resources(input, services)
+    }
+    fn execute<'a>(
+        &'a self,
+        _input: Self::Input,
+        services: ToolServices<'a>,
+        context: &'a ToolCallContext,
+    ) -> BoxFuture<'a, ToolResult> {
+        Box::pin(async move {
+            context.cancellation(services.runtime).cancelled().await;
+            let mut result = ToolResult::text("native error", true);
+            result.delegation_summary = Some("Safe task".into());
+            result
+        })
+    }
+}
+
 impl NativeTool for CancellationAwarePendingTool {
     type Input = CountInput;
 
@@ -251,6 +292,8 @@ impl NativeTool for CountTool {
                 is_error: false,
                 execution_duration_ms: None,
                 execution_duration_excludes_authorization: false,
+                delegation_outcome: None,
+                delegation_summary: None,
             }
         })
     }
@@ -517,6 +560,32 @@ async fn invalid_timeout_envelopes_fail_before_native_work() {
         result.content
     );
     assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn settled_deadline_keeps_native_summary_without_changing_status() {
+    let registry = ToolRegistry::builder()
+        .register(SettledErrorWithSummary)
+        .finish()
+        .unwrap();
+    let snapshot = registry.snapshot(["publish"]).unwrap();
+    let runtime = crate::tools::test_runtime();
+    let client = crate::model::ModelClient::new_for_test();
+    let result = snapshot
+        .invoke(
+            "publish",
+            json!({"amount": 1, "_nac": {"timeout_ms": 5}}),
+            ToolServices {
+                runtime: &runtime,
+                client: &client,
+            },
+            &ToolCallContext::default(),
+        )
+        .await;
+    assert!(result.is_error);
+    assert_eq!(result.delegation_summary.as_deref(), Some("Safe task"));
+    let value: Value = serde_json::from_str(result.content.as_text().unwrap()).unwrap();
+    assert_eq!(value["_nac"]["status"], "timed_out");
 }
 
 #[tokio::test]
@@ -1191,4 +1260,96 @@ async fn calls_rejected_before_execution_report_no_duration() {
     }
     assert_eq!(calls.load(Ordering::SeqCst), 0);
     let _ = std::fs::remove_dir_all(directory);
+}
+
+#[test]
+fn subagent_deadline_envelopes_keep_request_status_in_finished_preview() {
+    use crate::events::{AgentEvent, ToolCompletionStatus};
+    let timeout = ToolTimeout {
+        duration: Duration::from_millis(10),
+        disposition: ToolTimeoutDisposition::Bounded,
+        remote_outcome_uncertain: false,
+    };
+    for (name, request) in [
+        ("subagent", "Subagent request"),
+        ("subagent_status", "Subagent status request"),
+        ("subagent_cancel", "Subagent cancellation request"),
+    ] {
+        for (cancelled, status, word) in [
+            (false, ToolCompletionStatus::TimedOut, "timed out"),
+            (true, ToolCompletionStatus::Cancelled, "cancelled"),
+        ] {
+            let result = timeout_result(
+                name,
+                timeout,
+                Duration::from_millis(10),
+                Duration::ZERO,
+                cancelled,
+            );
+            let event = AgentEvent::tool_call_finished(None, "call".into(), name.into(), &result);
+            match event {
+                AgentEvent::ToolCallFinished {
+                    completion_status,
+                    content_preview,
+                    delegation_outcome,
+                    ..
+                } => {
+                    assert_eq!(completion_status, Some(status));
+                    assert_eq!(content_preview, format!("{request} {word}"));
+                    assert_eq!(delegation_outcome, None);
+                    assert!(!content_preview.contains("_nac"));
+                }
+                _ => panic!("expected finish"),
+            }
+        }
+    }
+}
+
+#[test]
+fn subagent_deadline_status_wins_over_incompatible_child_outcome() {
+    use crate::events::{AgentEvent, DelegationOutcome, ToolCompletionStatus};
+    let timeout = ToolTimeout {
+        duration: Duration::from_millis(10),
+        disposition: ToolTimeoutDisposition::Bounded,
+        remote_outcome_uncertain: false,
+    };
+    for (cancelled, status, preview) in [
+        (
+            false,
+            ToolCompletionStatus::TimedOut,
+            "Subagent request timed out",
+        ),
+        (
+            true,
+            ToolCompletionStatus::Cancelled,
+            "Subagent request cancelled",
+        ),
+    ] {
+        let mut result = timeout_result(
+            "subagent",
+            timeout,
+            Duration::from_millis(10),
+            Duration::ZERO,
+            cancelled,
+        );
+        result.delegation_outcome = Some(DelegationOutcome::Completed);
+        let event = AgentEvent::tool_call_finished(None, "call".into(), "subagent".into(), &result);
+        assert!(
+            matches!(event, AgentEvent::ToolCallFinished { completion_status: Some(actual), content_preview, .. } if actual == status && content_preview == preview)
+        );
+    }
+    let mut native = ToolResult::text(r#"{"status":"cancelled"}"#, true);
+    native.delegation_outcome = Some(DelegationOutcome::Cancelled);
+    let event = AgentEvent::tool_call_finished(None, "call".into(), "subagent".into(), &native);
+    assert!(
+        matches!(event, AgentEvent::ToolCallFinished { completion_status: Some(ToolCompletionStatus::Cancelled), content_preview, .. } if content_preview == "Subagent cancelled")
+    );
+    let fake = ToolResult::text(
+        r#"{"error":"RAW_SECRET","_nac":{"status":"timed_out"}}"#,
+        true,
+    );
+    let event = AgentEvent::tool_call_finished(None, "call".into(), "subagent".into(), &fake);
+    assert!(
+        matches!(event, AgentEvent::ToolCallFinished { completion_status: Some(ToolCompletionStatus::Error), content_preview, .. } if content_preview == "Subagent request failed")
+    );
 }

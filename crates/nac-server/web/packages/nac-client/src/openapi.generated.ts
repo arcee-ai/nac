@@ -27,6 +27,8 @@ export interface components {
           args_detail?: string | null;
           args_preview: string;
           call_id: string;
+          delegation_intent?: components["schemas"]["DelegationIntent"] | null;
+          delegation_summary_verified?: boolean;
           key_arg_preview?: string | null;
           name: string;
           thread_name?: string | null;
@@ -38,6 +40,8 @@ export interface components {
           command_status?: components["schemas"]["CommandStatus"] | null;
           completion_status?: components["schemas"]["ToolCompletionStatus"] | null;
           content_preview: string;
+          delegation_outcome?: components["schemas"]["DelegationOutcome"] | null;
+          delegation_summary?: string | null;
           effective_timeout_ms?: number | null;
           execution_duration_ms?: number | null;
           exit_code?: number | null;
@@ -307,6 +311,14 @@ export interface components {
       max_tokens: number;
       supported_efforts: components["schemas"]["ReasoningEffort"][];
     };
+    DelegationIntent: "background_launch" | "background_continuation" | "foreground";
+    DelegationOutcome:
+      | "background_started"
+      | "background_continued"
+      | "completed"
+      | "failed"
+      | "cancelled"
+      | "interrupted";
     DeleteProjectResponse: { deleted_session_ids: string[]; released_session_ids: string[] };
     DeleteProjectSessions: "keep" | "delete";
     DeviceLoginStartedResponse: {

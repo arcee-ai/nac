@@ -106,6 +106,8 @@ type Phrase =
   | "edit"
   | "command"
   | "spawn"
+  | "delegate"
+  | "orchestrator"
   | "thread"
   | "check"
   | "workset"
@@ -123,7 +125,7 @@ const PHRASE_OF: Partial<Record<ActionKind, Phrase>> = {
   "run-command": "command",
   "write-command": "command",
   "spawn-agent": "spawn",
-  "spawn-orchestrator": "spawn",
+  "spawn-orchestrator": "orchestrator",
   thread: "thread",
   "session-status": "check",
   "session-read": "check",
@@ -146,6 +148,8 @@ const ORDER: readonly Phrase[] = [
   "edit",
   "command",
   "spawn",
+  "delegate",
+  "orchestrator",
   "thread",
   "check",
   "workset",
@@ -169,6 +173,8 @@ const PHRASES: Record<Phrase, (count: number) => string> = {
   edit: (n) => `edited ${plural(n, "file")}`,
   command: (n) => `ran ${plural(n, "command")}`,
   spawn: (n) => `started ${plural(n, "subagent")}`,
+  delegate: (n) => `made ${plural(n, "subagent request")}`,
+  orchestrator: (n) => `requested ${plural(n, "orchestrator")}`,
   thread: (n) => `ran ${plural(n, "thread")}`,
   check: (n) => `checked on subagents${times(n)}`,
   workset: (n) => `defined ${plural(n, "workset")}`,
@@ -192,7 +198,14 @@ export function workSentence(segments: readonly InsightSegment[]): string {
   const seen = new Map<Phrase, Set<string>>();
   for (const segment of segments) {
     if (segment.kind === "reasoning") continue;
-    const phrase = PHRASE_OF[segmentAction(segment)] ?? "tool";
+    const action = segmentAction(segment);
+    const phrase =
+      action === "spawn-agent" &&
+      (segment.kind !== "tool" ||
+        segment.presentation?.delegationOutcome !== "background_started" ||
+        segment.presentation.status !== "success")
+        ? "delegate"
+        : (PHRASE_OF[action] ?? "tool");
     const keys = seen.get(phrase) ?? new Set<string>();
     keys.add(countKey(segment, phrase));
     seen.set(phrase, keys);

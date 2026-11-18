@@ -20,6 +20,8 @@ async fn frontend_snapshot_projects_sanitized_primary_tool_events_separately() {
                 })
                 .to_string(),
             ),
+            delegation_intent: None,
+            delegation_summary_verified: false,
         });
     parts
         .service
@@ -33,6 +35,8 @@ async fn frontend_snapshot_projects_sanitized_primary_tool_events_separately() {
             command_status: Some(crate::terminal::CommandStatus::Completed),
             exit_code: Some(0),
             completion_status: Some(crate::events::ToolCompletionStatus::Success),
+            delegation_outcome: None,
+            delegation_summary: None,
             effective_timeout_ms: None,
             execution_duration_ms: None,
             cleanup_duration_ms: None,
@@ -62,6 +66,121 @@ async fn frontend_snapshot_projects_sanitized_primary_tool_events_separately() {
     assert!(serialized.contains("primary result"));
     assert!(!serialized.contains("RAW_ARGUMENTS_MUST_NOT_SURVIVE"));
     assert!(!serialized.contains("SECRET_MUST_NOT_SURVIVE"));
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn validated_subagent_progress_survives_snapshot_projection() {
+    let (parts, store_path) = test_active_service("subagent_progress", "primary-session");
+    parts
+        .service
+        .event_bus
+        .emit_agent(AgentEvent::ToolCallStarted {
+            thread_name: None,
+            call_id: "child-call".into(),
+            name: "subagent".into(),
+            args_preview: String::new(),
+            key_arg_preview: Some("Review store".into()),
+            args_detail: None,
+            delegation_intent: None,
+            delegation_summary_verified: false,
+        });
+    parts
+        .service
+        .event_bus
+        .emit_agent(AgentEvent::ToolCallStarted {
+            thread_name: None,
+            call_id: "child-call".into(),
+            name: "subagent".into(),
+            args_preview: String::new(),
+            key_arg_preview: Some("Review store".into()),
+            args_detail: None,
+            delegation_intent: None,
+            delegation_summary_verified: true,
+        });
+    let before_approval = parts
+        .service
+        .frontend_snapshot_with_thread_event_limit(1)
+        .await
+        .unwrap();
+    assert!(
+        matches!(before_approval.primary_tool_events.as_slice(), [AgentEvent::ToolCallStarted {
+        delegation_summary_verified: true, delegation_intent: None, key_arg_preview: Some(summary), ..
+    }] if summary == "Review store")
+    );
+    parts
+        .service
+        .event_bus
+        .emit_agent(AgentEvent::ToolCallStarted {
+            thread_name: None,
+            call_id: "child-call".into(),
+            name: "subagent".into(),
+            args_preview: String::new(),
+            key_arg_preview: Some("Review store".into()),
+            args_detail: None,
+            delegation_intent: Some(crate::events::DelegationIntent::BackgroundLaunch),
+            delegation_summary_verified: true,
+        });
+    let snapshot = parts
+        .service
+        .frontend_snapshot_with_thread_event_limit(1)
+        .await
+        .unwrap();
+    assert!(
+        matches!(snapshot.primary_tool_events.as_slice(), [AgentEvent::ToolCallStarted {
+        call_id, key_arg_preview: Some(summary), delegation_intent: Some(crate::events::DelegationIntent::BackgroundLaunch), ..
+    }] if call_id == "child-call" && summary == "Review store")
+    );
+    parts
+        .service
+        .event_bus
+        .emit_agent(AgentEvent::ToolCallFinished {
+            thread_name: None,
+            call_id: "child-call".into(),
+            name: "subagent".into(),
+            content_preview: "Subagent completed".into(),
+            is_error: false,
+            command_status: None,
+            exit_code: None,
+            completion_status: Some(crate::events::ToolCompletionStatus::Success),
+            delegation_outcome: Some(crate::events::DelegationOutcome::Completed),
+            delegation_summary: Some("Review store".into()),
+            effective_timeout_ms: None,
+            execution_duration_ms: Some(42),
+            cleanup_duration_ms: None,
+            remote_outcome_uncertain: false,
+        });
+    let snapshot = parts
+        .service
+        .frontend_snapshot_with_thread_event_limit(1)
+        .await
+        .unwrap();
+    assert!(
+        matches!(snapshot.primary_tool_events.as_slice(), [AgentEvent::ToolCallFinished {
+        call_id, delegation_summary: Some(summary), ..
+    }] if call_id == "child-call" && summary == "Review store")
+    );
+    let mut denied = crate::tools::ToolResult::text("Permission denied", true);
+    denied.delegation_summary = Some("Review store".into());
+    parts
+        .service
+        .event_bus
+        .emit_agent(AgentEvent::tool_call_finished(
+            None,
+            "denied-call".into(),
+            "subagent".into(),
+            &denied,
+        ));
+    let snapshot = parts
+        .service
+        .frontend_snapshot_with_thread_event_limit(1)
+        .await
+        .unwrap();
+    assert!(
+        matches!(snapshot.primary_tool_events.as_slice(), [AgentEvent::ToolCallFinished {
+        call_id, is_error: true, delegation_summary: Some(summary), delegation_outcome: None, ..
+    }] if call_id == "denied-call" && summary == "Review store")
+    );
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
 
@@ -818,6 +937,8 @@ async fn frontend_snapshot_restores_persisted_thread_activity() {
             args_preview: r#"{"path":"index.html"}"#.to_string(),
             key_arg_preview: None,
             args_detail: None,
+            delegation_intent: None,
+            delegation_summary_verified: false,
         });
     parts
         .service
@@ -831,6 +952,8 @@ async fn frontend_snapshot_restores_persisted_thread_activity() {
             command_status: None,
             exit_code: None,
             completion_status: Some(crate::events::ToolCompletionStatus::Success),
+            delegation_outcome: None,
+            delegation_summary: None,
             effective_timeout_ms: None,
             execution_duration_ms: None,
             cleanup_duration_ms: None,

@@ -1,8 +1,9 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { memo } from "react";
+import { memo, useState } from "react";
 import { useHref, useLinkClickHandler } from "react-router-dom";
 
 import { SubagentCardStatus, SubagentTranscriptCard } from "@/app/atoms";
+import { ToolCallDetail } from "@/app/components/inspector/ToolCallDetail";
 import { cardStatus, type CardStatus } from "@/app/features/delegation/presentation/cardStatus";
 import type { InsightSessionEntry } from "@/app/features/insights/model/types";
 import { useTranscriptSessionId } from "@/app/features/insights/transcript/transcriptTurns";
@@ -70,8 +71,20 @@ interface CardState extends CardStatus {
 
 /** A call that waits for approval or did not go through, as Insights shows it. */
 function callStatus(entry: InsightSessionEntry): CardStatus | null {
-  const label = entry.presentation.statusLabel;
-  if (entry.status === "pending") return { status: SubagentCardStatus.Running, label };
+  const label =
+    entry.action === "spawn-agent" ? entry.presentation.label : entry.presentation.statusLabel;
+  if (
+    entry.action === "spawn-agent" &&
+    entry.presentation.status === "running" &&
+    !entry.presentation.delegationIntent
+  )
+    return { status: SubagentCardStatus.Pending, label };
+  if (entry.presentation.status === "pending" || entry.status === "pending")
+    return {
+      status:
+        entry.action === "spawn-agent" ? SubagentCardStatus.Pending : SubagentCardStatus.Running,
+      label,
+    };
   if (entry.status === "failed") return { status: SubagentCardStatus.Failed, label };
   return null;
 }
@@ -95,14 +108,16 @@ function cardState(
   if (record) {
     return {
       ...(own ?? cardStatus(record.status)),
-      title: record.description.trim() || entry.title,
+      // Inventory proves ownership, but its raw description is not a sanitized preview.
+      title:
+        entry.action === "spawn-agent" ? entry.title : record.description.trim() || entry.title,
       sessionId: recordId(record),
     };
   }
   const { title } = entry;
+  if (own) return { ...own, title, sessionId: null };
   if (entry.status === "running")
     return { status: SubagentCardStatus.Running, title, sessionId: null };
-  if (own) return { ...own, title, sessionId: null };
   if (records === undefined || failed) {
     return { status: SubagentCardStatus.Ready, title, sessionId: null };
   }
@@ -120,9 +135,11 @@ export const TranscriptSessionCard = memo(function TranscriptSessionCard({
   entry: InsightSessionEntry;
   interactive: boolean;
 }) {
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const parentId = useTranscriptSessionId();
   const { records, failed } = useLaunchedRecords(entry, parentId);
   const state = cardState(entry, records, failed);
+  const requestStatus = callStatus(entry);
   const showBehaviorIcon = useSessionBehaviorIconVisible();
   const { openSubagent } = useInsightsNavigation();
   const sessionRoute = routes.session(state.sessionId ?? "");
@@ -131,16 +148,45 @@ export const TranscriptSessionCard = memo(function TranscriptSessionCard({
   // The row key is built from the report, which resolved to this very session.
   const rowKey = interactive && state.sessionId !== null ? entry.rowKey : null;
   return (
-    <SubagentTranscriptCard
-      title={state.title}
-      status={state.status}
-      statusLabel={state.label}
-      error={entry.status === "failed" ? entry.presentation.resultPreview : null}
-      lineage={LINEAGE[entry.action]}
-      showBehaviorIcon={showBehaviorIcon}
-      onOpen={rowKey ? () => openSubagent(rowKey) : undefined}
-      sessionHref={rowKey ? sessionHref : null}
-      onSessionLinkClick={followSessionLink}
-    />
+    <div className="w-[440px] max-w-full min-w-0">
+      <SubagentTranscriptCard
+        title={state.title}
+        status={state.status}
+        statusLabel={state.label}
+        invocationLabel={
+          entry.action === "spawn-agent" && requestStatus === null
+            ? entry.presentation.label
+            : undefined
+        }
+        currentSessionStatus={state.sessionId !== null && requestStatus === null}
+        error={
+          entry.status === "failed" &&
+          (entry.action !== "spawn-agent" ||
+            entry.presentation.resultPreview !== entry.presentation.label)
+            ? entry.presentation.resultPreview
+            : null
+        }
+        lineage={LINEAGE[entry.action]}
+        showBehaviorIcon={showBehaviorIcon}
+        onOpen={rowKey ? () => openSubagent(rowKey) : undefined}
+        sessionHref={rowKey ? sessionHref : null}
+        onSessionLinkClick={followSessionLink}
+      />
+      {entry.action === "spawn-agent" ? (
+        <details className="mt-1 pl-3.5 text-basic-tertiary">
+          <summary
+            className="cursor-pointer type-meta"
+            onClick={() => setDetailsOpen((open) => !open)}
+          >
+            Invocation details
+          </summary>
+          {detailsOpen ? (
+            <div className="pt-2">
+              <ToolCallDetail tool={entry.presentation} />
+            </div>
+          ) : null}
+        </details>
+      ) : null}
+    </div>
   );
 });

@@ -90,7 +90,12 @@ export function stepLabel(segment: InsightSegment): StepLabel {
   const argument = argumentOf(segment, action);
   const full = segment.kind === "tool" ? (segment.presentation?.summary?.trim() ?? null) : argument;
   return {
-    verb: status === "running" ? `${verbs.live}…` : verbs.done,
+    verb:
+      segment.kind === "tool" && segment.name === "subagent" && segment.presentation
+        ? segment.presentation.label
+        : status === "running"
+          ? `${verbs.live}…`
+          : verbs.done,
     argument,
     title: full && full !== argument ? full : null,
     duration: rowDuration(segmentDurationMs(segment)),
@@ -108,9 +113,9 @@ export function liveTurnLabel(items: readonly ModelTurnItem[]): string {
   if (!last) return "Thinking…";
   if (last.kind === "group") return liveStepLabel(last.group.segments.at(-1));
   if (last.kind === "session") {
-    return last.status === "running" || last.status === "pending"
-      ? `${VERBS[last.action].live}…`
-      : "Thinking…";
+    if (last.status === "pending") return "Waiting for approval…";
+    if (last.status !== "running") return "Thinking…";
+    return last.action === "spawn-agent" ? last.presentation.label : `${VERBS[last.action].live}…`;
   }
   if ("block" in last && last.block.kind === "wave") return "Running threads…";
   return "Writing…";

@@ -574,6 +574,8 @@ pub(crate) async fn execute_remote_cancellable(
                                 is_error: false,
                                 execution_duration_ms: None,
                                 execution_duration_excludes_authorization: false,
+                                delegation_outcome: None,
+                                delegation_summary: None,
                             };
                         }
                     }
@@ -583,6 +585,8 @@ pub(crate) async fn execute_remote_cancellable(
                     is_error: !output.status.success(),
                     execution_duration_ms: None,
                     execution_duration_excludes_authorization: false,
+                    delegation_outcome: None,
+                    delegation_summary: None,
                 };
             }
             Err(error) => {

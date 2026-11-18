@@ -24,6 +24,9 @@ export interface ToolPresentation {
   resultPreview: string | null;
   status: ToolPresentationStatus;
   statusLabel: string;
+  /** Native-owned historical invocation outcome, absent for legacy events. */
+  delegationOutcome?: NonNullable<ToolFinished["delegation_outcome"]>;
+  delegationIntent?: NonNullable<ToolStarted["delegation_intent"]>;
   /**
    * Execution time from the call's finish event. Absent when the call never
    * ran, or when no finish event reports one.
@@ -113,12 +116,12 @@ const TOOL_LABELS: Record<string, string> = {
   update_goal: "Update goal",
   find_tasks: "Find tasks",
   read_task: "Read task",
-  subagent: "Start coding agent",
+  subagent: "Subagent",
   list_projects: "Find saved projects",
   launch_task: "Start separate task",
   task_launch_status: "Read task preparation",
-  subagent_status: "Check coding agent",
-  subagent_cancel: "Cancel coding agent",
+  subagent_status: "Check subagent",
+  subagent_cancel: "Cancel subagent",
   orchestrator_launch: "Start NAC orchestrator",
   orchestrator_status: "Check NAC orchestrator",
   orchestrator_steer: "Steer NAC orchestrator",
@@ -235,7 +238,19 @@ function launchedTask(name: string, text: string | null): ToolPresentation["laun
   };
 }
 
+// Earlier native control results marked a confirmed cancelled child as a
+// cancelled request. Only native typed outcome establishes this legacy case.
+function isLegacyConfirmedCancellation(event: ToolFinished): boolean {
+  return (
+    event.name === "subagent_cancel" &&
+    event.is_error &&
+    event.completion_status === "cancelled" &&
+    event.delegation_outcome === "cancelled"
+  );
+}
+
 function statusFromFinished(event: ToolFinished): ToolPresentationStatus {
+  if (isLegacyConfirmedCancellation(event)) return "success";
   if (event.completion_status === "timed_out") return "timed-out";
   if (event.completion_status === "cancelled") return "cancelled";
   if (event.completion_status === "error") return "error";
@@ -263,6 +278,32 @@ export function indexToolEvents(events: AgentEvent[]): Map<string, ToolEventPair
     byCall.set(event.call_id, pair);
   }
   return byCall;
+}
+
+function subagentLabel(
+  status: ToolPresentationStatus,
+  outcome: ToolFinished["delegation_outcome"],
+  intent: ToolStarted["delegation_intent"],
+): string {
+  if (status === "pending") return "Subagent pending";
+  if (status === "awaiting-approval") return "Subagent awaiting approval";
+  if (status === "running") {
+    if (intent === "background_launch") return "Starting subagent…";
+    if (intent) return "Working with subagent…";
+    return "Subagent request in progress";
+  }
+  if (status === "timed-out") return "Subagent request timed out";
+  if (status === "cancelled" && outcome !== "cancelled") return "Subagent request cancelled";
+  if (outcome === "failed") return "Subagent failed";
+  if (outcome === "cancelled") return "Subagent cancelled";
+  if (outcome === "interrupted") return "Subagent interrupted";
+  if (status === "cancelled") return "Subagent request cancelled";
+  if (status === "interrupted") return "Subagent request interrupted";
+  if (status === "error") return "Subagent request failed";
+  if (outcome === "background_started") return "Subagent started";
+  if (outcome === "background_continued") return "Instructions sent to subagent";
+  if (outcome === "completed") return "Subagent completed";
+  return "Subagent request finished";
 }
 
 export function presentToolCall({
@@ -300,24 +341,95 @@ export function presentToolCall({
   else status = "interrupted";
 
   let resultPreview = bounded(events?.finished?.content_preview, PREVIEW_LIMIT) || null;
+  // Older traditional-child events have no exact-value redaction provenance.
+  // Native outcome/summary facts are stripped at untrusted worker ingress.
+  if (
+    ["subagent", "subagent_status", "subagent_cancel"].includes(name) &&
+    !events?.finished?.delegation_outcome &&
+    !events?.finished?.delegation_summary
+  ) {
+    resultPreview = null;
+  }
+  // Durable legacy previews may predate typed request timeout/cancel wording.
+  // Reconstruct only fixed text from the authoritative status; never raw output.
+  if (events?.finished) {
+    const request =
+      name === "subagent"
+        ? "Subagent request"
+        : name === "subagent_status"
+          ? "Subagent status request"
+          : name === "subagent_cancel"
+            ? "Subagent cancellation request"
+            : null;
+    if (isLegacyConfirmedCancellation(events.finished))
+      resultPreview = "Subagent cancellation request finished";
+    if (request && events.finished.completion_status === "timed_out")
+      resultPreview = `${request} timed out`;
+    if (
+      request &&
+      events.finished.completion_status === "cancelled" &&
+      !(name === "subagent" && events.finished.delegation_outcome === "cancelled") &&
+      !isLegacyConfirmedCancellation(events.finished)
+    )
+      resultPreview = `${request} cancelled`;
+  }
   if (!resultPreview && resultHasImage) resultPreview = "Image result";
   if (!resultPreview && status === "cancelled") resultPreview = "No result was retained.";
   if (!resultPreview && status === "interrupted") resultPreview = "No result was recorded.";
 
+  const spawnedSessionId = spawnedSession(name, call, resultText);
+  const summary =
+    bounded(
+      name === "subagent"
+        ? (events?.started?.delegation_summary_verified || events?.started?.delegation_intent
+            ? events.started.key_arg_preview
+            : null) || events?.finished?.delegation_summary
+        : events?.started?.key_arg_preview,
+      PREVIEW_LIMIT,
+    ) || null;
+  // Prior candidate events could certify a continuation's ID as its summary.
+  // Suppress canonical IDs even when only a finish event remains in the window.
+  const provenBackgroundLaunch =
+    events?.started?.delegation_intent === "background_launch" ||
+    events?.finished?.delegation_outcome === "background_started";
+  const idOnlySummary =
+    name === "subagent" &&
+    summary &&
+    (summary === spawnedSessionId ||
+      (!provenBackgroundLaunch &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(summary)));
+
   const presentation: ToolPresentation = {
     callId: call.id,
     name,
-    label: toolLabel(name),
-    summary: bounded(events?.started?.key_arg_preview, PREVIEW_LIMIT) || null,
+    label:
+      name === "subagent"
+        ? subagentLabel(
+            status,
+            events?.finished?.delegation_outcome,
+            events?.started?.delegation_intent,
+          )
+        : toolLabel(name),
+    summary: idOnlySummary ? null : summary,
     resultPreview,
     status,
-    statusLabel: STATUS_LABELS[status],
+    statusLabel:
+      name === "subagent" &&
+      events?.finished?.delegation_outcome === "background_started" &&
+      status === "success"
+        ? "Running in background"
+        : STATUS_LABELS[status],
   };
+  if (name === "subagent" && events?.started?.delegation_intent) {
+    presentation.delegationIntent = events.started.delegation_intent;
+  }
+  if (name === "subagent" && events?.finished?.delegation_outcome) {
+    presentation.delegationOutcome = events.finished.delegation_outcome;
+  }
   const durationMs = events?.finished?.execution_duration_ms;
   if (durationMs != null && Number.isFinite(durationMs) && durationMs >= 0) {
     presentation.durationMs = durationMs;
   }
-  const spawnedSessionId = spawnedSession(name, call, resultText);
   if (spawnedSessionId) presentation.spawnedSessionId = spawnedSessionId;
   const task = launchedTask(name, resultText);
   if (task) presentation.launchedTask = task;

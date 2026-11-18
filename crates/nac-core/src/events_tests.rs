@@ -1003,6 +1003,8 @@ fn external_tool_telemetry_is_fail_closed_before_channel_and_database() {
             })
             .to_string(),
         ),
+        delegation_intent: None,
+        delegation_summary_verified: false,
     };
     channel_sink.emit(started.clone());
     channel_sink.emit(AgentEvent::ToolCallStarted {
@@ -1018,6 +1020,8 @@ fn external_tool_telemetry_is_fail_closed_before_channel_and_database() {
             })
             .to_string(),
         ),
+        delegation_intent: None,
+        delegation_summary_verified: false,
     });
     bus_sink.emit(started);
     bus_sink.emit(AgentEvent::ToolCallFinished {
@@ -1029,6 +1033,8 @@ fn external_tool_telemetry_is_fail_closed_before_channel_and_database() {
         command_status: Some(crate::terminal::CommandStatus::Completed),
         exit_code: Some(7),
         completion_status: Some(ToolCompletionStatus::Error),
+        delegation_outcome: None,
+        delegation_summary: None,
         effective_timeout_ms: None,
         execution_duration_ms: None,
         cleanup_duration_ms: None,
@@ -1332,6 +1338,8 @@ fn primary_tool_event_sanitization_keeps_only_bounded_safe_presentation_fields()
         args_detail: Some(
             r#"{"cmd":"printf safe","authorization":"Bearer sk-tool-canary","env":{"TOKEN":"sk-tool-canary"}}"#.to_string(),
         ),
+        delegation_intent: None,
+        delegation_summary_verified: false,
     };
     let sanitized = sanitize_external_agent_event(started).unwrap();
     let AgentEvent::ToolCallStarted {
@@ -1365,6 +1373,8 @@ fn primary_tool_event_sanitization_keeps_only_bounded_safe_presentation_fields()
         command_status: Some(CommandStatus::Completed),
         exit_code: Some(0),
         completion_status: Some(ToolCompletionStatus::Success),
+        delegation_outcome: None,
+        delegation_summary: None,
         effective_timeout_ms: None,
         execution_duration_ms: None,
         cleanup_duration_ms: None,
@@ -1381,6 +1391,20 @@ fn primary_tool_event_sanitization_keeps_only_bounded_safe_presentation_fields()
         panic!("expected ToolCallFinished");
     };
     assert!(content_preview.chars().count() <= 180);
+}
+
+#[test]
+fn subagent_finished_summary_is_bounded_and_sanitized() {
+    let mut result = crate::tools::ToolResult::text("raw body not for display", false);
+    result.delegation_summary = Some(format!("Bearer sk-tool-canary {}", "x".repeat(400)));
+    let event = AgentEvent::tool_call_finished(None, "call".into(), "subagent".into(), &result);
+    let sanitized = sanitize_external_agent_event(event).unwrap();
+    let encoded = serde_json::to_string(&sanitized).unwrap();
+    assert!(!encoded.contains("sk-tool-canary"));
+    assert!(!encoded.contains("raw body not for display"));
+    assert!(
+        matches!(sanitized, AgentEvent::ToolCallFinished { delegation_summary: Some(summary), .. } if summary.chars().count() <= 180)
+    );
 }
 
 const MODEL_ERROR_CANARY: &str = "sk-canary-sink-12345";

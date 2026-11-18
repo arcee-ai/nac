@@ -2,6 +2,7 @@ import type React from "react";
 import type { SessionBehavior, SessionLineage } from "../../types/api";
 export declare enum SubagentCardStatus {
     Ready = "ready",
+    Pending = "pending",
     Running = "running",
     /** Ready's layout with an error mark; `statusLabel` names the outcome. */
     Failed = "failed",
@@ -16,6 +17,9 @@ interface SubagentTranscriptCardProps {
      * failed card's name ends with it, lowercased.
      */
     statusLabel?: string;
+    /** Historical invocation wording, separate from the current child state. */
+    invocationLabel?: string;
+    currentSessionStatus?: boolean;
     /** Why a failed card's call did not go through, under the title. */
     error?: string | null;
     /** Session type, drawn in the header while the child is ready. */
