@@ -209,11 +209,6 @@ impl SessionService {
                 if parent_snapshot.behavior == sessions::SessionBehavior::Orchestrator
                     || crate::store::load_traditional_child(&service.metadata.store_path, &parent)?
                         .is_some()
-                    || crate::store::load_managed_orchestrator(
-                        &service.metadata.store_path,
-                        &parent,
-                    )?
-                    .is_some()
                 {
                     return Err(anyhow::anyhow!("retry requires a primary direct parent"));
                 }

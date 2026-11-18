@@ -147,9 +147,6 @@ impl SessionService {
         if crate::store::load_traditional_child(&self.metadata.store_path, session_id)
             .map_err(store_error)?
             .is_some()
-            || crate::store::load_managed_orchestrator(&self.metadata.store_path, session_id)
-                .map_err(store_error)?
-                .is_some()
         {
             return Err(ShellCommandError::Unsupported);
         }

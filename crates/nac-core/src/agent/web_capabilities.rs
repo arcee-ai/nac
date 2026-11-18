@@ -88,11 +88,7 @@ impl NativeWebCapabilities {
             }
             let eligible =
                 crate::sessions::load_session_summary(store, parent)?.is_some_and(|summary| {
-                    matches!(
-                        summary.behavior,
-                        crate::sessions::SessionBehavior::Direct
-                            | crate::sessions::SessionBehavior::DirectWithOrchestrator
-                    )
+                    summary.behavior == crate::sessions::SessionBehavior::Direct
                 });
             if !eligible {
                 PARENT_SOURCES
@@ -136,13 +132,7 @@ impl NativeWebCapabilities {
 }
 
 fn parent_for(store: &Path, session: &str) -> Result<Option<String>> {
-    let parent = if let Some(child) = crate::store::load_traditional_child(store, session)? {
-        Some(child.parent_session_id)
-    } else {
-        crate::store::load_managed_orchestrator(store, session)?
-            .map(|child| child.parent_session_id)
-    };
-    Ok(parent)
+    Ok(crate::store::load_traditional_child(store, session)?.map(|child| child.parent_session_id))
 }
 
 fn resolve_direct_credential() -> Result<Option<String>> {
