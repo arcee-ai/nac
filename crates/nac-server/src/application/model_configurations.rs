@@ -7,7 +7,7 @@ use nac_core::{
         list_managed_provider_models, list_provider_models_with_http_policy,
         provider_default_base_url, provider_for_model, provider_uses_api_key, remove_api_key,
         resolve_backend_api_key, resolve_model_base_url_with_policy, store_api_key, BackendKind,
-        ManagedAuthProvider, ProviderModel, ReasoningEffort,
+        EffectiveModelSettings, ManagedAuthProvider, ProviderModel, ReasoningEffort, ServiceTier,
     },
     model_configurations::{
         self, ModelConfigurationRecord, ModelConfigurationStoreError, NewModelConfiguration,
@@ -26,6 +26,7 @@ pub(crate) struct CreateModelConfiguration {
     pub(crate) allow_insecure_http: bool,
     pub(crate) api_key: Option<String>,
     pub(crate) reasoning_effort: Option<ReasoningEffort>,
+    pub(crate) service_tier: Option<ServiceTier>,
     pub(crate) extra_headers: Option<BTreeMap<String, String>>,
     pub(crate) orchestrator_compaction_threshold: Option<u64>,
     pub(crate) initial_prompt: Option<String>,
@@ -40,6 +41,7 @@ pub(crate) struct UpdateModelConfiguration {
     pub(crate) allow_insecure_http: Field<bool>,
     pub(crate) api_key: Field<String>,
     pub(crate) reasoning_effort: Field<ReasoningEffort>,
+    pub(crate) service_tier: Field<ServiceTier>,
     pub(crate) extra_headers: Field<BTreeMap<String, String>>,
     pub(crate) orchestrator_compaction_threshold: Field<u64>,
     pub(crate) initial_prompt: Field<String>,
@@ -53,6 +55,7 @@ pub(crate) struct ResolvedModelConfiguration {
     pub(crate) allow_insecure_http: bool,
     pub(crate) api_key_env: Option<String>,
     pub(crate) reasoning_effort: Option<ReasoningEffort>,
+    pub(crate) service_tier: Option<ServiceTier>,
     pub(crate) models: Vec<ProviderModel>,
     pub(crate) models_error: Option<String>,
 }
@@ -165,11 +168,13 @@ impl<'a> ModelConfigurationApplication<'a> {
             reasoning_effort: command
                 .reasoning_effort
                 .map(|effort| effort.as_str().to_string()),
+            service_tier: command.service_tier.map(|tier| tier.as_str().to_owned()),
             extra_headers: command.extra_headers.unwrap_or_default(),
             orchestrator_compaction_threshold: command.orchestrator_compaction_threshold,
             initial_prompt: command.initial_prompt,
             light_model,
         };
+        validate_tier(&configuration)?;
 
         if let Some(name) = credential_name.as_deref() {
             store_api_key(name, api_key).map_err(ModelConfigurationApplicationError::Internal)?;
@@ -263,7 +268,8 @@ impl<'a> ModelConfigurationApplication<'a> {
             name: api_key_env.as_deref(),
             previous: existing.api_key_env.as_deref(),
         };
-        let configuration = NewModelConfiguration {
+        let tier_unchanged = matches!(&command.service_tier, Field::Unchanged);
+        let mut configuration = NewModelConfiguration {
             name: required_text(command.name, &existing.name),
             backend: backend.to_string(),
             model: required_text(command.model, &existing.model),
@@ -274,6 +280,11 @@ impl<'a> ModelConfigurationApplication<'a> {
                 Field::Set(effort) => Some(effort.as_str().to_string()),
                 Field::Clear => None,
                 Field::Unchanged => existing.reasoning_effort.clone(),
+            },
+            service_tier: match command.service_tier {
+                Field::Set(tier) => Some(tier.as_str().to_owned()),
+                Field::Clear => None,
+                Field::Unchanged => existing.service_tier.clone(),
             },
             extra_headers: match command.extra_headers {
                 Field::Set(headers) => headers,
@@ -302,6 +313,23 @@ impl<'a> ModelConfigurationApplication<'a> {
                 }),
             },
         };
+
+        let route_changed = existing.backend != configuration.backend
+            || existing.model != configuration.model
+            || existing.base_url != configuration.base_url;
+        if route_changed || !tier_unchanged {
+            if let Err(error) = validate_tier(&configuration) {
+                if route_changed
+                    && tier_unchanged
+                    && configuration.service_tier.is_some()
+                    && backend == BackendKind::ChatGptCodexResponses
+                {
+                    configuration.service_tier = Some(ServiceTier::Standard.as_str().to_owned());
+                } else {
+                    return Err(error);
+                }
+            }
+        }
 
         if let Some((name, key)) = replacement_credential.as_ref() {
             store_api_key(name, key).map_err(ModelConfigurationApplicationError::Internal)?;
@@ -383,6 +411,7 @@ impl<'a> ModelConfigurationApplication<'a> {
             identity.base_url,
             identity.api_key_env,
             config.model.reasoning_effort,
+            config.model.service_tier,
             false,
         )
         .await
@@ -402,12 +431,22 @@ impl<'a> ModelConfigurationApplication<'a> {
             .as_deref()
             .map(parse_reasoning_effort)
             .transpose()?;
+        let service_tier = record
+            .service_tier
+            .as_deref()
+            .map(|value| {
+                value
+                    .parse()
+                    .map_err(|error| invalid(format!("invalid service_tier: {error}")))
+            })
+            .transpose()?;
         self.resolve(
             backend,
             Some(record.model),
             Some(record.base_url),
             record.api_key_env,
             reasoning_effort,
+            service_tier,
             record.allow_insecure_http,
         )
         .await
@@ -420,6 +459,7 @@ impl<'a> ModelConfigurationApplication<'a> {
         base_url: Option<String>,
         api_key_env: Option<String>,
         reasoning_effort: Option<ReasoningEffort>,
+        service_tier: Option<ServiceTier>,
         allow_insecure_http: bool,
     ) -> Result<ResolvedModelConfiguration, ModelConfigurationApplicationError> {
         let base_url = self.settle_base_url(backend, base_url.as_deref(), allow_insecure_http)?;
@@ -467,6 +507,7 @@ impl<'a> ModelConfigurationApplication<'a> {
             allow_insecure_http,
             api_key_env,
             reasoning_effort,
+            service_tier,
             models,
             models_error,
         })
@@ -546,4 +587,34 @@ fn parse_reasoning_effort(
             "invalid model configuration: invalid 'reasoning_effort' value '{value}': {error}"
         ))
     })
+}
+
+fn validate_tier(
+    configuration: &NewModelConfiguration,
+) -> Result<(), ModelConfigurationApplicationError> {
+    let Some(tier) = configuration.service_tier.as_deref() else {
+        return Ok(());
+    };
+    let tier: ServiceTier = tier.parse().map_err(|error: String| invalid(error))?;
+    let backend: BackendKind = configuration
+        .backend
+        .parse()
+        .map_err(|error: String| invalid(error))?;
+    let reasoning = configuration
+        .reasoning_effort
+        .as_deref()
+        .map(parse_reasoning_effort)
+        .transpose()?;
+    EffectiveModelSettings::new_with_http_policy(
+        backend,
+        configuration.model.clone(),
+        configuration.base_url.clone(),
+        reasoning,
+        configuration.api_key_env.clone(),
+        configuration.extra_headers.clone(),
+        configuration.allow_insecure_http,
+    )
+    .and_then(|settings| settings.with_service_tier(Some(tier)))
+    .map(|_| ())
+    .map_err(|error| invalid(format!("{error:#}")))
 }

@@ -6,6 +6,7 @@ use nac_core::store::PreparedFreshTaskLaunch;
 
 fn model_configuration(next: bool) -> model_configurations::NewModelConfiguration {
     model_configurations::NewModelConfiguration {
+        service_tier: None,
         name: if next { "Next" } else { "Original" }.into(),
         backend: "openai-responses".into(),
         model: "gpt-5.2".into(),
@@ -106,6 +107,7 @@ async fn reservation(
         default_ref: git_project.then(|| "refs/heads/dev".into()),
         model: explicit.then(|| "gpt-5.1".into()),
         reasoning_effort: explicit.then(|| "low".into()),
+        service_tier: None,
         retained_limit: 2,
     };
     let binding = store::fresh_heartbeat_binding(

@@ -24,6 +24,7 @@ fn image_history() -> (Vec<Message>, String) {
             content: "read an image".into(),
         },
         Message::Assistant {
+            service_tier_receipt: None,
             content: None,
             reasoning_text: None,
             reasoning_details: None,
@@ -52,6 +53,7 @@ fn image_history() -> (Vec<Message>, String) {
             content: format!("follow-up {number}: {}", "x".repeat(500)),
         });
         messages.push(Message::Assistant {
+            service_tier_receipt: None,
             content: Some(format!("answer {number}")),
             reasoning_text: None,
             reasoning_details: None,

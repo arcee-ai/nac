@@ -26,6 +26,8 @@ import { ConfigRow, CONTROL_WIDTH } from "@/app/components/modals/ConfigRow";
 import { LightModelSection, type LightSelection } from "@/app/components/modals/LightModelSection";
 import { reasoningOptionsFor } from "@/app/components/modals/options";
 import { SshConnectionBox } from "@/app/components/modals/SshConnectionBox";
+import { SpeedControl } from "@/app/components/modals/SpeedControl";
+import { discoveredSpeed, type ServiceTier } from "@/app/lib/serviceTier";
 import { SmallSelect } from "@/app/components/modals/SmallSelect";
 import { observeSettingsFieldVisibility } from "@/app/components/modals/settingsFieldVisibility";
 import { matchesManagedModelPick } from "@/app/features/managed/model";
@@ -106,6 +108,7 @@ function initialFromConfig(config: RawSessionConfig): SettingsInitialValues {
     base_url: config.base_url,
     allow_insecure_http: config.allow_insecure_http ?? false,
     reasoning_effort: config.reasoning_effort || null,
+    service_tier: (config.service_tier ?? null) as ServiceTier | null,
     api_key_env: config.api_key_env || null,
     extra_headers: headers.headers,
     extra_headers_invalid: headers.invalid,
@@ -263,6 +266,7 @@ function SettingsForm({
   const [model, setModel] = useState(initial.model);
   const [backend, setBackend] = useState(initial.backend);
   const [reasoning, setReasoning] = useState(initial.reasoning_effort ?? "");
+  const [speed, setSpeed] = useState<ServiceTier | null>(initial.service_tier ?? null);
   const [, setBaseUrl] = useState(initial.base_url);
   const [headers, setHeaders] = useState(headersToText(initial.extra_headers));
   const [compaction, setCompaction] = useState(
@@ -312,6 +316,7 @@ function SettingsForm({
       setBackend(values.backend);
       setModel(values.model);
       setBaseUrl(values.base_url ?? managedLaunchBaseUrl(values.backend) ?? "");
+      setSpeed(values.service_tier ?? null);
       if (next.kind === "resolved") {
         setReasoning(next.reasoning_effort ?? "");
         const primaryChange = source === "primary" && previous?.kind === "resolved";
@@ -444,6 +449,7 @@ function SettingsForm({
         initial,
         allowsCredentiallessSelection,
       );
+      if (speed !== (initial.service_tier ?? null)) patch.service_tier = speed;
       if (initial.automatic_compaction && compactionAutoRef.current) {
         delete patch.orchestrator_compaction_threshold;
       } else if (initial.automatic_compaction) {
@@ -559,7 +565,22 @@ function SettingsForm({
         }),
       );
       if (!result) return;
-      toast.success("Session settings saved");
+      let speedReset = false;
+      if (
+        speed &&
+        speed === (initial.service_tier ?? null) &&
+        (model !== initial.model || backend !== initial.backend)
+      ) {
+        try {
+          const refreshed = await api.getConfig(id);
+          speedReset = refreshed.service_tier === "standard" && speed !== "standard";
+        } catch {
+          // The save already succeeded; a failed follow-up read must not report it as failed.
+        }
+      }
+      toast.success(
+        speedReset ? "Session settings saved; speed reset to Standard" : "Session settings saved",
+      );
       onClose();
     } catch (saveError) {
       setError(setupFailureMessage(saveError));
@@ -682,6 +703,7 @@ function SettingsForm({
             allow_insecure_http: initial.allow_insecure_http,
             api_key_env: initial.api_key_env,
             reasoning_effort: initial.reasoning_effort,
+            service_tier: initial.service_tier ?? null,
             extra_headers: initial.extra_headers,
             orchestrator_compaction_threshold: initial.orchestrator_compaction_threshold,
             light_model: initialLight,
@@ -753,6 +775,29 @@ function SettingsForm({
                     />
                   }
                 />
+                <Separator />
+                {backend === "chatgpt-codex-responses" || speed ? (
+                  <ConfigRow
+                    presentation="form"
+                    label="Speed"
+                    hint="Use provider default to clear the speed override."
+                    control={
+                      <SpeedControl
+                        form
+                        tiers={
+                          backend === "chatgpt-codex-responses"
+                            ? discoveredSpeed(
+                                resolveCatalogModel(catalog.data, backend, model).model,
+                                model,
+                              )
+                            : null
+                        }
+                        value={speed}
+                        onChange={setSpeed}
+                      />
+                    }
+                  />
+                ) : null}
                 <Separator />
                 <ConfigRow
                   presentation="form"

@@ -241,6 +241,9 @@ fn append_worker_model_arguments(command: &mut Command, client: &ModelClient) {
     if let Some(reasoning_effort) = client.reasoning_effort() {
         command.arg("--effort").arg(reasoning_effort.as_str());
     }
+    if let Some(tier) = client.service_tier() {
+        command.arg("--service-tier").arg(tier.as_str());
+    }
     if let Some(api_key_env) = client.api_key_env() {
         command.arg("--api-key-env").arg(api_key_env);
     }

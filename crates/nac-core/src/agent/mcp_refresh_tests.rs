@@ -613,6 +613,7 @@ async fn mcp_mount_refresh_during_compaction_applies_before_the_following_model_
             content: "older request".to_string(),
         },
         Message::Assistant {
+            service_tier_receipt: None,
             content: Some("older answer".to_string()),
             reasoning_text: None,
             reasoning_details: None,
@@ -828,6 +829,7 @@ async fn mcp_mount_refresh_manual_compaction_does_not_inherit_a_cancelled_run() 
             content: "older request".to_string(),
         },
         Message::Assistant {
+            service_tier_receipt: None,
             content: Some("older answer".to_string()),
             reasoning_text: None,
             reasoning_details: None,

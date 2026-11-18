@@ -20,6 +20,8 @@ pub struct ModelConfigurationRecord {
     pub allow_insecure_http: bool,
     pub api_key_env: Option<String>,
     pub reasoning_effort: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service_tier: Option<String>,
     pub extra_headers: BTreeMap<String, String>,
     /// Compaction budget a session started from this setup inherits; `None`
     /// falls back to `[compaction].threshold_tokens`.
@@ -42,6 +44,7 @@ pub struct NewModelConfiguration {
     pub allow_insecure_http: bool,
     pub api_key_env: Option<String>,
     pub reasoning_effort: Option<String>,
+    pub service_tier: Option<String>,
     pub extra_headers: BTreeMap<String, String>,
     pub orchestrator_compaction_threshold: Option<u64>,
     pub initial_prompt: Option<String>,
@@ -173,6 +176,7 @@ pub(crate) fn row_to_record_at(
         allow_insecure_http: row.get(offset + 5)?,
         api_key_env: row.get(offset + 6)?,
         reasoning_effort: row.get(offset + 7)?,
+        service_tier: row.get(offset + 14)?,
         extra_headers: decode_headers(&extra_headers),
         orchestrator_compaction_threshold: row.get(offset + 9)?,
         initial_prompt: row.get(offset + 10)?,
@@ -192,7 +196,7 @@ fn row_to_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<ModelConfiguration
 const SELECT_COLUMNS: &str =
     "config_id, name, backend, model, base_url, allow_insecure_http, api_key_env,
      reasoning_effort, extra_headers_json, orchestrator_compaction_threshold,
-     initial_prompt, created_at, updated_at, light_model_json";
+     initial_prompt, created_at, updated_at, light_model_json, service_tier";
 
 pub(crate) fn model_configuration_columns(alias: &str) -> String {
     SELECT_COLUMNS
@@ -264,6 +268,7 @@ fn validated_record(
         allow_insecure_http: configuration.allow_insecure_http,
         api_key_env: configuration.api_key_env,
         reasoning_effort: configuration.reasoning_effort,
+        service_tier: configuration.service_tier,
         extra_headers: configuration.extra_headers,
         orchestrator_compaction_threshold: validate_threshold(
             configuration.orchestrator_compaction_threshold,
@@ -304,8 +309,8 @@ pub fn insert_model_configuration(
         "INSERT INTO model_configurations
          (config_id, name, backend, model, base_url, allow_insecure_http, api_key_env,
           reasoning_effort, extra_headers_json, orchestrator_compaction_threshold,
-          initial_prompt, created_at, updated_at, light_model_json)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+          initial_prompt, created_at, updated_at, light_model_json, service_tier)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
         params![
             record.config_id,
             record.name,
@@ -321,6 +326,7 @@ pub fn insert_model_configuration(
             record.created_at,
             record.updated_at,
             encode_light_model(record.light_model.as_ref())?,
+            record.service_tier,
         ],
     )
     .map_err(|error| {
@@ -365,7 +371,7 @@ pub fn update_model_configuration(
                  allow_insecure_http = ?6, api_key_env = ?7,
                  reasoning_effort = ?8, extra_headers_json = ?9,
                  orchestrator_compaction_threshold = ?10, initial_prompt = ?11,
-                 updated_at = ?12, light_model_json = ?13
+                 updated_at = ?12, light_model_json = ?13, service_tier = ?14
              WHERE config_id = ?1",
             params![
                 record.config_id,
@@ -381,6 +387,7 @@ pub fn update_model_configuration(
                 record.initial_prompt,
                 record.updated_at,
                 encode_light_model(record.light_model.as_ref())?,
+                record.service_tier,
             ],
         )
         .map_err(|error| {
@@ -473,6 +480,7 @@ mod tests {
             allow_insecure_http: false,
             api_key_env: Some("NAC_GENERATED_KEY".to_string()),
             reasoning_effort: Some("high".to_string()),
+            service_tier: None,
             extra_headers: BTreeMap::from([("X-Trace".to_string(), "on".to_string())]),
             orchestrator_compaction_threshold: Some(64_000),
             initial_prompt: Some("Review the diff".to_string()),

@@ -37,6 +37,7 @@ pub(super) async fn fixture(root: &std::path::Path, manager: &SessionManager) ->
         &manager.inner.store_path,
         "task-config",
         model_configurations::NewModelConfiguration {
+            service_tier: None,
             name: "Task fixture".into(),
             backend: "openai-responses".into(),
             model: "gpt-5.2".into(),

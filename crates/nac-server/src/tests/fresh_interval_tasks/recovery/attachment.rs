@@ -235,6 +235,7 @@ async fn attachment_recovery_child() {
                 &write_path,
                 "task-config",
                 model_configurations::NewModelConfiguration {
+                    service_tier: None,
                     name: defaults.name,
                     backend: defaults.backend,
                     model: defaults.model,

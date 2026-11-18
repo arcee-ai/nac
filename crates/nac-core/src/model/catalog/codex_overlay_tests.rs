@@ -376,3 +376,25 @@ fn explicit_modalities_override_lower_layers_but_missing_fields_do_not() {
             .image_input
     );
 }
+
+#[test]
+fn account_discovery_preserves_speed_metadata_and_distinguishes_empty_from_unknown() {
+    let models = parse_index(r#"{"models":[
+        {"slug":"new-model","service_tiers":[{"id":"priority","name":"Fast","description":"Priority processing"},{"id":"ultrafast","name":"Ultrafast","description":"Fastest"}],"default_service_tier":"priority"},
+        {"slug":"revoked","service_tiers":[],"default_service_tier":null},
+        {"slug":"unknown"},
+        {"slug":"malformed","service_tiers":[{"id":"priority","name":42}]}
+    ]}"#).unwrap();
+    let tiers = models[0].service_tiers.as_ref().unwrap();
+    assert_eq!(tiers.len(), 2);
+    assert_eq!(tiers[0].id, "priority");
+    assert_eq!(tiers[0].name, "Fast");
+    assert_eq!(tiers[0].description, "Priority processing");
+    assert_eq!(models[0].default_service_tier.as_deref(), Some("priority"));
+    assert_eq!(models[1].service_tiers, Some(vec![]));
+    assert!(models[1].default_service_tier_known);
+    assert_eq!(models[1].default_service_tier, None);
+    assert!(!models[2].default_service_tier_known);
+    assert_eq!(models[2].service_tiers, None);
+    assert_eq!(models[3].service_tiers, None);
+}

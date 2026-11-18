@@ -401,6 +401,7 @@ pub fn update_session_config(
             reasoning_effort: snapshot
                 .reasoning_effort
                 .map(|effort| effort.as_str().to_string()),
+            service_tier: snapshot.service_tier.map(|tier| tier.as_str().to_string()),
             api_key_env: snapshot.api_key_env.clone(),
             extra_headers_json,
             light_model: snapshot.light_model.clone(),
@@ -448,7 +449,7 @@ pub fn update_raw_session_config(
              light_model_json = ?8,
              orchestrator_compaction_threshold = ?9,
              config_version = ?10,
-             automatic_compaction = ?13
+             automatic_compaction = ?13, service_tier = ?14
          WHERE session_id = ?11 AND config_version = ?12",
         params![
             config.model,
@@ -464,6 +465,7 @@ pub fn update_raw_session_config(
             config.session_id,
             expected_version,
             config.automatic_compaction,
+            config.service_tier,
         ],
     )?;
     if updated == 0 {
@@ -530,7 +532,7 @@ pub fn load_session(path: &Path, session_id: &str) -> Result<SessionSnapshot> {
                     s.created_at, s.updated_at, s.host_id, s.api_key_env,
                     s.extra_headers_json, s.token_usages_json, s.config_version,
                     s.orchestrator_compaction_threshold, s.ssh_port,
-                    s.ssh_identity_file, s.light_model_json, sp.project_id, s.behavior, s.automatic_compaction
+                    s.ssh_identity_file, s.light_model_json, sp.project_id, s.behavior, s.automatic_compaction, s.service_tier
              FROM sessions s
              LEFT JOIN session_projects sp ON sp.session_id = s.session_id
              WHERE s.session_id = ?1",
@@ -611,7 +613,7 @@ pub fn load_session_config(path: &Path, session_id: &str) -> Result<RawSessionCo
     let conn = crate::store::open_connection(path)?;
     let row = conn
         .query_row(
-            "SELECT session_id, model, base_url, allow_insecure_http, backend, reasoning_effort, api_key_env, extra_headers_json, config_version, orchestrator_compaction_threshold, light_model_json, automatic_compaction
+            "SELECT session_id, model, base_url, allow_insecure_http, backend, reasoning_effort, api_key_env, extra_headers_json, config_version, orchestrator_compaction_threshold, light_model_json, automatic_compaction, service_tier
              FROM sessions
              WHERE session_id = ?1",
             params![session_id],
@@ -630,6 +632,7 @@ pub fn load_session_config(path: &Path, session_id: &str) -> Result<RawSessionCo
                         config_version: row.get(8)?,
                         orchestrator_compaction_threshold: row.get(9)?,
                         automatic_compaction: row.get(11)?,
+                        service_tier: row.get(12)?,
                         diagnostics: Vec::new(),
                     },
                     row.get::<_, Option<String>>(10)?,
@@ -986,7 +989,7 @@ pub fn load_last_session(path: &Path) -> Result<SessionSnapshot> {
                     s.created_at, s.updated_at, s.host_id, s.api_key_env,
                     s.extra_headers_json, s.token_usages_json, s.config_version,
                     s.orchestrator_compaction_threshold, s.ssh_port,
-                    s.ssh_identity_file, s.light_model_json, sp.project_id, s.behavior, s.automatic_compaction
+                    s.ssh_identity_file, s.light_model_json, sp.project_id, s.behavior, s.automatic_compaction, s.service_tier
              FROM sessions s
              LEFT JOIN session_projects sp ON sp.session_id = s.session_id
              ORDER BY s.updated_at DESC, s.created_at DESC
@@ -1074,6 +1077,7 @@ fn map_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow> {
         project_id: row.get(23)?,
         behavior: row.get(24)?,
         automatic_compaction: row.get(25)?,
+        service_tier: row.get(26)?,
     })
 }
 
@@ -1502,7 +1506,8 @@ impl SessionSummaryRow {
         // a truncation rebuilds them, and the migration backfills blob ++ log.
         let visible_message_count = usize::try_from(self.visible_message_count)
             .context("session visible message count overflowed")?;
-        let (response_usages, _) = deserialize_token_accounting(self.token_usages_json.as_deref())?;
+        let (response_usages, unattributed_usage) =
+            deserialize_token_accounting(self.token_usages_json.as_deref())?;
         let aggregated = crate::model::TokenUsage::aggregate(&response_usages);
         let total_tokens = aggregated
             .as_ref()
@@ -1529,6 +1534,12 @@ impl SessionSummaryRow {
             updated_at: self.updated_at,
             total_tokens,
             total_cost_micros,
+            speed_tier_charges_excluded: aggregated
+                .as_ref()
+                .is_some_and(|usage| usage.speed_tier_charges_excluded)
+                || unattributed_usage
+                    .as_ref()
+                    .is_some_and(|usage| usage.speed_tier_charges_excluded),
             run_count: self.run_count.max(0) as u64,
             forked_from: crate::store::fork_origin_from_parts(
                 self.fork_source_session_id,
@@ -1597,10 +1608,10 @@ pub(crate) fn insert_or_replace_session(
              response_durations_ms_json, created_at, updated_at, host_id, api_key_env,
              extra_headers_json, token_usages_json, config_version,
              orchestrator_compaction_threshold, ssh_port, ssh_identity_file,
-             light_model_json, behavior, automatic_compaction
+             light_model_json, behavior, automatic_compaction, service_tier
          ) VALUES (
              ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
-             ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28
+             ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29
          )
          ON CONFLICT(session_id) DO UPDATE SET
              cwd = excluded.cwd,
@@ -1648,6 +1659,7 @@ pub(crate) fn insert_or_replace_session(
             light_model_json,
             snapshot.behavior.as_str(),
             snapshot.automatic_compaction,
+            snapshot.service_tier.map(|tier| tier.as_str().to_string()),
         ],
     )?;
     Ok(())
@@ -1680,6 +1692,7 @@ struct SessionRow {
     light_model_json: Option<String>,
     behavior: String,
     automatic_compaction: bool,
+    service_tier: Option<String>,
 }
 
 impl SessionRow {
@@ -1708,6 +1721,11 @@ impl SessionRow {
             allow_insecure_http: self.allow_insecure_http,
             backend,
             reasoning_effort: parse_reasoning_effort(self.reasoning_effort)?,
+            service_tier: self
+                .service_tier
+                .map(|value| value.parse())
+                .transpose()
+                .map_err(|error: String| anyhow!("invalid stored speed: {error}"))?,
             sandbox_spec: deserialize_sandbox(self.sandbox_json)?,
             ssh: stored_ssh_connection(self.ssh_host, self.ssh_port, self.ssh_identity_file),
             api_key_env: self.api_key_env,

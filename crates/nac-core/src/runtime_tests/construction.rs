@@ -306,6 +306,7 @@ fn explicit_model_settings_beat_config_and_config_supplies_omissions() {
     let headers = BTreeMap::from([("X-Explicit".to_string(), "explicit".to_string())]);
     let explicit = effective_model_settings(
         &ModelOptions {
+            service_tier: OptionalModelOption::Inherit,
             backend: Some(BackendKind::TogetherChat),
             reasoning_effort: OptionalModelOption::Value(ReasoningEffort::Low),
             api_base_url: Some(" https://explicit.example/v1 ".to_string()),
@@ -1786,6 +1787,7 @@ async fn persisted_settings_are_identical_across_create_snapshot_resume_and_work
                 store_path: Some(store_path.clone()),
             },
             model: ModelOptions {
+                service_tier: OptionalModelOption::Inherit,
                 backend: Some(BackendKind::OpenAiResponses),
                 reasoning_effort: OptionalModelOption::Value(ReasoningEffort::Xhigh),
                 api_base_url: Some("https://snapshot.example/v1".to_string()),

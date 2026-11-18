@@ -169,6 +169,7 @@ async fn fresh_interval_git_preparation_initial_input_and_retained_result_use_ex
             &manager.inner.store_path,
             "task-config",
             model_configurations::NewModelConfiguration {
+                service_tier: None,
                 name: defaults.name,
                 backend: defaults.backend,
                 model: defaults.model,
@@ -205,6 +206,7 @@ async fn fresh_interval_git_preparation_initial_input_and_retained_result_use_ex
             default_ref: Some("refs/heads/dev".into()),
             model: None,
             reasoning_effort: None,
+            service_tier: None,
             retained_limit: 10,
         };
         let binding = store::fresh_heartbeat_binding(

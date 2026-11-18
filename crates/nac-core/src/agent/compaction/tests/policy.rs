@@ -312,6 +312,8 @@ fn summary_acceptance_requires_nonblank_text_without_tools_or_length_finish() {
     let response =
         |content: Option<&str>, tool_calls: Option<Vec<ToolCall>>, finish: Option<&str>| {
             crate::model::ModelTurnResponse {
+                effective_service_tier: None,
+                served_service_tier: None,
                 assistant: crate::model::AssistantTurn {
                     content: content.map(str::to_string),
                     reasoning_text: None,

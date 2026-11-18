@@ -1021,6 +1021,12 @@ impl Agent {
                     duration_ms: Some(duration_millis(call_started.elapsed())),
                     model_origin: Some(self.client.model_origin()),
                     reasoning_field: response.assistant.reasoning_field.clone(),
+                    service_tier_receipt: (self.client.service_tier().is_some()
+                        || response.served_service_tier.is_some())
+                    .then(|| crate::types::ServiceTierReceipt {
+                        requested: self.client.service_tier(),
+                        served: response.served_service_tier.clone(),
+                    }),
                 })
                 .await
             {
@@ -1783,6 +1789,7 @@ impl Agent {
             duration_ms: None,
             model_origin: Some(self.client.model_origin()),
             reasoning_field: None,
+            service_tier_receipt: None,
         }])
         .await
     }

@@ -1043,6 +1043,7 @@ impl SessionManager {
         Ok(LaunchModelDefaults {
             configured_model: config.model.model.clone(),
             configured_reasoning_effort: config.model.reasoning_effort,
+            configured_service_tier: config.model.service_tier,
         })
     }
 
@@ -1755,6 +1756,7 @@ impl SessionManager {
             parent.api_key_env,
             parent.extra_headers,
         );
+        orchestrator.service_tier = parent.service_tier;
         orchestrator.behavior = sessions::SessionBehavior::Orchestrator;
         orchestrator.project_id = parent.project_id;
         orchestrator.light_model = parent.light_model;
@@ -1838,6 +1840,7 @@ impl SessionManager {
             parent.api_key_env,
             parent.extra_headers,
         );
+        child.service_tier = parent.service_tier;
         child.behavior = sessions::SessionBehavior::Direct;
         child.project_id = parent.project_id;
         child.orchestrator_compaction_threshold = parent.orchestrator_compaction_threshold;

@@ -179,6 +179,7 @@ async fn goal_backed_current_receipt_is_idempotent_and_stale_terminal_receipts_a
             .unwrap();
         agent
             .push_and_log_for_test(Message::Assistant {
+                service_tier_receipt: None,
                 content: Some("A completed".into()),
                 reasoning_text: None,
                 reasoning_details: None,

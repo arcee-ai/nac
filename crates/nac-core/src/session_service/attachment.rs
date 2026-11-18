@@ -70,6 +70,10 @@ impl SessionService {
                 .client
                 .reasoning_effort()
                 .map(|effort| effort.as_str().to_string()),
+            service_tier: run_config
+                .client
+                .service_tier()
+                .map(|tier| tier.as_str().to_string()),
             api_key_env: run_config.client.api_key_env().map(str::to_string),
             extra_headers: run_config.client.extra_headers().clone(),
         };

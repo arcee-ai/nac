@@ -224,6 +224,7 @@ pub struct ModelClient {
     pub model: String,
     backend: BackendKind,
     reasoning_effort: Option<ReasoningEffort>,
+    service_tier: Option<crate::model::ServiceTier>,
     api_key_env: Option<String>,
     trusted_api_key_file: Option<std::path::PathBuf>,
     extra_headers: std::collections::BTreeMap<String, String>,
@@ -298,6 +299,7 @@ impl ModelClient {
             model: settings.model,
             backend,
             reasoning_effort: settings.reasoning_effort,
+            service_tier: settings.service_tier,
             api_key_env: settings.api_key_env,
             trusted_api_key_file: settings.trusted_api_key_file,
             extra_headers: settings.extra_headers,
@@ -344,6 +346,13 @@ impl ModelClient {
         // inherits it; operates on the send-time copy, never the transcript.
         let messages = normalize_history(messages, &self.model_origin());
         self.validate_image_history(&messages)?;
+        if self.backend != BackendKind::ChatGptCodexResponses && self.service_tier.is_some() {
+            super::service_tier::validate_service_tier(
+                self.backend,
+                &self.resolved_model,
+                self.service_tier,
+            )?;
+        }
         // S6: dispatch on the resolved catalog api (the wire protocol), not
         // the provider id. BackendKind remains the auth/base-url/catalog axis
         // (approved decision #1); within the completions adapter it still
@@ -362,11 +371,13 @@ impl ModelClient {
             catalog::ApiKind::ChatGptCodexResponses => {
                 #[cfg(test)]
                 if let Some(url) = self.base_url.strip_prefix("test-codex:") {
-                    let response = chatgpt_codex::send_test_responses(
+                    let tier = self.codex_wire_tier();
+                    let mut response = chatgpt_codex::send_test_responses(
                         &self.client,
                         url,
                         &self.model,
                         self.reasoning_effort,
+                        tier,
                         messages,
                         tools,
                         &self.resolved_model.thinking_level_map,
@@ -374,13 +385,24 @@ impl ModelClient {
                         on_delta,
                     )
                     .await?;
+                    response.effective_service_tier = tier.map(str::to_owned);
                     return Ok(self.with_usage_cost(response));
                 }
-                let response = chatgpt_codex::send_responses(
+                // Refreshes and account changes must not silently keep a revoked
+                // preference active on an already attached session.
+                let current = catalog::resolve(self.backend, &self.model);
+                super::service_tier::validate_service_tier(
+                    self.backend,
+                    &current,
+                    self.service_tier,
+                )?;
+                let tier = self.codex_wire_tier();
+                let mut response = chatgpt_codex::send_responses(
                     &self.client,
                     &self.base_url,
                     &self.model,
                     self.reasoning_effort,
+                    tier,
                     messages,
                     tools,
                     &self.resolved_model.thinking_level_map,
@@ -389,9 +411,19 @@ impl ModelClient {
                     on_delta,
                 )
                 .await?;
+                response.effective_service_tier = tier.map(str::to_owned);
                 Ok(self.with_usage_cost(response))
             }
         }
+    }
+
+    pub fn service_tier(&self) -> Option<crate::model::ServiceTier> {
+        self.service_tier
+    }
+
+    fn codex_wire_tier(&self) -> Option<&'static str> {
+        self.service_tier
+            .and_then(|tier| tier.codex_request_value())
     }
 
     /// The origin stamp for assistant messages this client produces (S5):
@@ -490,6 +522,14 @@ impl ModelClient {
                 && self.resolved_model.api == catalog::ApiKind::AnthropicMessages)
                 .then(|| self.resolved_model.cache_write_1h_rate());
             usage.cost = calculate_cost(&self.resolved_model.cost, cache_write_1h_rate, usage);
+            if self.backend == BackendKind::ChatGptCodexResponses {
+                usage.speed_tier_charges_excluded = response.effective_service_tier.is_some()
+                    || response
+                        .served_service_tier
+                        .as_deref()
+                        .is_some_and(|tier| tier != "default")
+                    || self.service_tier.is_none();
+            }
         }
         response
     }
@@ -1178,6 +1218,7 @@ impl ModelClient {
             model: "gpt-5.5".to_string(),
             backend: BackendKind::OpenAiResponses,
             reasoning_effort: Some(ReasoningEffort::Xhigh),
+            service_tier: None,
             api_key_env: None,
             trusted_api_key_file: None,
             extra_headers: std::collections::BTreeMap::new(),

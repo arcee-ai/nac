@@ -82,6 +82,7 @@ fn user(content: &str) -> Message {
 
 fn assistant(content: &str) -> Message {
     Message::Assistant {
+        service_tier_receipt: None,
         content: Some(content.into()),
         reasoning_text: None,
         reasoning_details: None,

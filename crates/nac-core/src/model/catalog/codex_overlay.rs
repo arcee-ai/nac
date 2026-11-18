@@ -45,6 +45,12 @@ pub(super) struct CodexCapabilities {
     pub max_context_window: Option<u64>,
     pub auto_compact_token_limit: Option<u64>,
     pub image_input: Option<bool>,
+    #[serde(default)]
+    pub service_tiers: Option<Vec<super::ModelServiceTier>>,
+    #[serde(default)]
+    pub default_service_tier: Option<String>,
+    #[serde(default)]
+    pub default_service_tier_known: bool,
 }
 
 /// A cache is tied to the account that supplied its capabilities. Do not
@@ -198,6 +204,14 @@ fn store_observation(home: &Path, fingerprint: &str, body: &str) -> Result<(), S
                         .auto_compact_token_limit
                         .or(old.auto_compact_token_limit);
                     model.image_input = model.image_input.or(old.image_input);
+                    model.service_tiers = model
+                        .service_tiers
+                        .take()
+                        .or_else(|| old.service_tiers.clone());
+                    if !model.default_service_tier_known {
+                        model.default_service_tier = old.default_service_tier.clone();
+                        model.default_service_tier_known = old.default_service_tier_known;
+                    }
                 }
                 if model
                     .context_window
@@ -434,6 +448,48 @@ pub(super) fn parse_index(body: &str) -> Result<Vec<CodexCapabilities>, &'static
                 .and_then(Value::as_u64)
                 .filter(|value| *value > 0 && *value <= crate::MAX_SUPPORTED_TOKEN_COUNT),
             image_input,
+            service_tiers: model
+                .get("service_tiers")
+                .and_then(Value::as_array)
+                .and_then(|items| {
+                    items
+                        .iter()
+                        .map(|item| {
+                            let field = |key: &str| {
+                                item.get(key)
+                                    .and_then(Value::as_str)
+                                    .filter(|value| {
+                                        !value.trim().is_empty()
+                                            && value.len() <= 512
+                                            && !value.chars().any(char::is_control)
+                                    })
+                                    .map(str::to_owned)
+                            };
+                            Some(super::ModelServiceTier {
+                                id: field("id")?,
+                                name: field("name")?,
+                                description: field("description")?,
+                            })
+                        })
+                        .collect()
+                }),
+            default_service_tier_known: model.get("default_service_tier").is_some_and(|value| {
+                value.is_null()
+                    || value.as_str().is_some_and(|text| {
+                        !text.trim().is_empty()
+                            && text.len() <= 512
+                            && !text.chars().any(char::is_control)
+                    })
+            }),
+            default_service_tier: model
+                .get("default_service_tier")
+                .and_then(Value::as_str)
+                .filter(|value| {
+                    !value.trim().is_empty()
+                        && value.len() <= 512
+                        && !value.chars().any(char::is_control)
+                })
+                .map(str::to_owned),
         });
     }
     if result.is_empty() {
@@ -483,6 +539,12 @@ pub(super) fn merge_entries(catalog: &mut ModelCatalog, entries: &[CodexCapabili
                     metadata.output_origin = super::LimitOrigin::Estimated;
                 }
             }
+        }
+        if let Some(tiers) = &observed.service_tiers {
+            metadata.service_tiers = Some(tiers.clone());
+        }
+        if observed.default_service_tier_known {
+            metadata.default_service_tier = observed.default_service_tier.clone();
         }
         if let Some(image_input) = observed.image_input {
             metadata.image_input = image_input;

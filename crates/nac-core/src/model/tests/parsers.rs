@@ -451,3 +451,37 @@ fn parses_together_chat_response_nested_usage() {
     assert_eq!(usage.reasoning_tokens, 71);
     assert_eq!(usage.orchestrator_context_tokens, 2692);
 }
+
+#[test]
+fn responses_preserve_reported_tier_without_inventing_one() {
+    for (field, expected) in [
+        (json!("priority"), Some("priority")),
+        (json!("future-tier"), Some("future-tier")),
+        (Value::Null, None),
+    ] {
+        let response = parse_openai_responses_response(
+            &json!({"status": "completed", "output": [], "service_tier": field}),
+            "fixture",
+        )
+        .unwrap();
+        assert_eq!(response.served_service_tier.as_deref(), expected);
+    }
+}
+
+#[test]
+fn speed_estimate_scope_is_sticky_and_old_usage_decodes() {
+    let old: TokenUsage = serde_json::from_value(json!({
+        "input_tokens": 1, "output_tokens": 2, "cache_read_tokens": 0,
+        "cache_write_tokens": 0, "total_tokens": 3
+    }))
+    .unwrap();
+    assert!(!old.speed_tier_charges_excluded);
+    let accelerated = TokenUsage {
+        speed_tier_charges_excluded: true,
+        ..old.clone()
+    };
+    let aggregate = TokenUsage::aggregate(&[Some(accelerated), Some(old)]).unwrap();
+    let round_trip: TokenUsage =
+        serde_json::from_str(&serde_json::to_string(&aggregate).unwrap()).unwrap();
+    assert!(round_trip.speed_tier_charges_excluded);
+}

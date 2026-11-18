@@ -67,6 +67,11 @@ struct CreateSessionParams {
         description = "Reasoning effort level. Valid values: none, minimal, low, medium, high, xhigh, max. Not all models support all levels — check list_models output."
     )]
     reasoning_effort: Option<String>,
+    #[serde(default, deserialize_with = "present_nullable")]
+    #[schemars(
+        description = "Speed preference: standard, fast, or ultrafast; null clears the override"
+    )]
+    service_tier: Option<Option<String>>,
     #[schemars(description = "Base URL for the model API endpoint")]
     base_url: Option<String>,
     #[schemars(
@@ -187,6 +192,27 @@ struct UpdateSessionParams {
     backend: Option<String>,
     #[schemars(description = "New reasoning effort")]
     reasoning_effort: Option<String>,
+    #[serde(default, deserialize_with = "present_nullable")]
+    #[schemars(
+        description = "Speed preference: standard, fast, or ultrafast; null clears the override"
+    )]
+    service_tier: Option<Option<String>>,
+}
+
+fn present_nullable<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
+}
+
+fn nullable_field<T>(value: Option<Option<T>>) -> RequestField<T> {
+    match value {
+        None => RequestField::Omitted,
+        Some(None) => RequestField::Null,
+        Some(Some(value)) => RequestField::Value(value),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -301,6 +327,7 @@ impl NacMcpService {
                 .unwrap_or(RequestField::Omitted),
             backend: field(params.backend),
             reasoning_effort: field(params.reasoning_effort),
+            service_tier: nullable_field(params.service_tier),
             api_key_env: field(params.api_key_env),
             extra_headers,
             orchestrator_compaction_threshold: params
@@ -600,6 +627,7 @@ impl NacMcpService {
                 .unwrap_or(RequestField::Omitted),
             backend: field(params.backend),
             reasoning_effort: field(params.reasoning_effort),
+            service_tier: nullable_field(params.service_tier),
             api_key_env: RequestField::Omitted,
             extra_headers: RequestField::Omitted,
             orchestrator_compaction_threshold: RequestField::Omitted,

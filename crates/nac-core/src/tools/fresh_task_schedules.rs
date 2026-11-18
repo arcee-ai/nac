@@ -16,6 +16,7 @@ struct Choices {
     default_ref: Option<String>,
     model: Option<String>,
     reasoning_effort: Option<String>,
+    service_tier: Option<String>,
     retained_limit: Option<i64>,
 }
 impl Choices {
@@ -26,6 +27,7 @@ impl Choices {
             default_ref: self.default_ref,
             model: self.model,
             reasoning_effort: self.reasoning_effort,
+            service_tier: self.service_tier,
             retained_limit: self.retained_limit.unwrap_or(10),
         }
     }
@@ -141,7 +143,7 @@ impl NativeTool for ControlFreshTaskScheduleTool {
             "destination":{"type":["object","null"],"additionalProperties":false,"properties":{
                 "pinned_commit":{"type":["string","null"],"description":"Complete immutable commit ID; absent selects the saved destination branch."},
                 "default_ref":{"type":["string","null"],"description":"Only to establish an unbound Git project's saved default branch."},
-                "model":{"type":["string","null"]},"reasoning_effort":{"type":["string","null"]},"retained_limit":{"type":["integer","null"],"minimum":1,"maximum":1000,"default":10}
+                "model":{"type":["string","null"]},"reasoning_effort":{"type":["string","null"]},"service_tier":{"type":["string","null"],"enum":["standard","fast","ultrafast",null]},"retained_limit":{"type":["integer","null"],"minimum":1,"maximum":1000,"default":10}
             }}
         }}))
     }

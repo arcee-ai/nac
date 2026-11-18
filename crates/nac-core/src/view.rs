@@ -76,6 +76,8 @@ pub struct SessionSummarySnapshot {
     /// zero means the catalog had no rates for the model.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub total_cost_micros: Option<u64>,
+    #[serde(default)]
+    pub speed_tier_charges_excluded: bool,
     /// Runs ever started in this session. Older stored snapshots default to 0.
     #[serde(default)]
     pub run_count: u64,
@@ -252,6 +254,7 @@ impl From<sessions::SessionSummary> for SessionSummarySnapshot {
             updated_at: summary.updated_at,
             total_tokens: summary.total_tokens,
             total_cost_micros: summary.total_cost_micros,
+            speed_tier_charges_excluded: summary.speed_tier_charges_excluded,
             run_count: summary.run_count,
             forked_from: summary.forked_from,
         }

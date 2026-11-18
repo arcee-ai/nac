@@ -401,6 +401,11 @@ async function startHarness(
           max_context_window: 872_000,
           auto_compact_token_limit: null,
           image_input: true,
+          service_tiers: [
+            { id: "priority", name: "Fast", description: "Priority processing" },
+            { id: "ultrafast", name: "Ultrafast", description: "Ultrafast processing" },
+          ],
+          default_service_tier: null,
         },
       ],
     };

@@ -33,6 +33,8 @@ interface TileFacts {
   pinned: boolean;
   running: number;
   costMicros: number;
+  speedTierChargesExcluded: boolean;
+  subscriptionEstimate: boolean;
   sessionCount: number | null;
   updatedAt: string;
   representative: SessionSummarySnapshot | null;
@@ -53,6 +55,10 @@ function factsFor(
       pinned: project.pinned,
       running,
       costMicros: totalCostMicros,
+      speedTierChargesExcluded: sessions.some((entry) => entry.summary.speed_tier_charges_excluded),
+      subscriptionEstimate: sessions.some(
+        (entry) => entry.summary.backend === "chatgpt-codex-responses",
+      ),
       sessionCount: sessions.length,
       updatedAt,
       representative: live?.summary ?? sessions[0]?.summary ?? null,
@@ -67,6 +73,8 @@ function factsFor(
     pinned: false,
     running: isActiveRun(active_run) ? 1 : 0,
     costMicros: summary.total_cost_micros ?? 0,
+    speedTierChargesExcluded: Boolean(summary.speed_tier_charges_excluded),
+    subscriptionEstimate: summary.backend === "chatgpt-codex-responses",
     sessionCount: null,
     updatedAt: summary.updated_at,
     representative: summary,
@@ -418,6 +426,16 @@ export function ProjectCard({
           </Popover>
         </div>
       </div>
+      {facts.speedTierChargesExcluded ? (
+        <p className="type-meta text-basic-muted">
+          Base-rate estimate; speed-tier charges excluded.
+        </p>
+      ) : null}
+      {facts.subscriptionEstimate ? (
+        <p className="type-meta text-basic-muted">
+          API-equivalent estimate, not subscription allowance or credits.
+        </p>
+      ) : null}
       {orphan ? disclosure.overlay : null}
     </div>
   );

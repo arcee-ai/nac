@@ -9,6 +9,13 @@ import {
 } from "@/app/atoms";
 import { CatalogModelPicker } from "@/app/components/modals/CatalogModelPicker";
 import { EFFORT_LEVEL_OPTIONS, reasoningOptionsFor } from "@/app/components/modals/options";
+import { SpeedControl } from "@/app/components/modals/SpeedControl";
+import {
+  discoveredSpeed,
+  speedLabel,
+  supportsSpeed,
+  type ServiceTier,
+} from "@/app/lib/serviceTier";
 import { SmallSelect } from "@/app/components/modals/SmallSelect";
 import { useManagedModelProfile } from "@/app/features/managed/controller/useManagedModelProfile";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
@@ -94,6 +101,7 @@ export function ModelPicker({
   const updateConfig = useUpdateConfig();
   const currentModel = metadata?.model ?? label;
   const currentEffort = metadata?.reasoning_effort ?? "";
+  const currentSpeed = (metadata?.service_tier ?? null) as ServiceTier | null;
   const currentPick: CatalogPick | null = metadata
     ? {
         backend: metadata.backend as BackendKind,
@@ -130,8 +138,31 @@ export function ModelPicker({
     const supported = resolveCatalogModel(catalog.data, pick.backend, pick.model).supportedEfforts;
     const compatibleEffort =
       currentEffort && supported.includes(currentEffort as ReasoningEffort) ? currentEffort : null;
+    const targetSpeed = discoveredSpeed(
+      resolveCatalogModel(catalog.data, pick.backend, pick.model).model,
+      pick.model,
+    );
+    let speed = currentSpeed;
+    if (
+      speed &&
+      (pick.backend !== "chatgpt-codex-responses" || (speed !== "standard" && !targetSpeed))
+    ) {
+      toast.error("Choose a compatible speed before switching to this model.");
+      return;
+    }
+    if (speed && !supportsSpeed(targetSpeed, speed)) {
+      if (pick.backend !== "chatgpt-codex-responses") {
+        toast.error("Choose a compatible speed before switching to this provider.");
+        return;
+      }
+      speed = "standard";
+    }
     const patch = preservesRoute
-      ? { model: pick.model, reasoning_effort: compatibleEffort }
+      ? {
+          model: pick.model,
+          reasoning_effort: compatibleEffort,
+          ...(speed !== currentSpeed ? { service_tier: speed } : {}),
+        }
       : {
           backend: pick.backend,
           model: pick.model,
@@ -140,12 +171,15 @@ export function ModelPicker({
           // selected backend to resolve its managed login or conventional env.
           api_key_env: provider?.connection?.api_key_env ?? null,
           reasoning_effort: compatibleEffort,
+          ...(speed !== currentSpeed ? { service_tier: speed } : {}),
           // Provider-specific headers must never leak into another backend.
           extra_headers: null,
         };
     try {
       await updateConfig.mutateAsync({ id: sessionId, patch });
-      toast.success(`Model switched to ${pick.model}`);
+      toast.success(
+        `Model switched to ${pick.model}${speed !== currentSpeed ? "; speed reset to Standard" : ""}`,
+      );
     } catch (error) {
       toast.error(`The model was not switched: ${humanErrorText(toRunError(error), pick.backend)}`);
     }
@@ -163,6 +197,16 @@ export function ModelPicker({
       toast.error(
         `Reasoning was not changed: ${humanErrorText(toRunError(error), metadata.backend)}`,
       );
+    }
+  };
+
+  const chooseSpeed = async (speed: ServiceTier | null) => {
+    if (!metadata || speed === currentSpeed) return;
+    try {
+      await updateConfig.mutateAsync({ id: sessionId, patch: { service_tier: speed } });
+      toast.success(`Speed set to ${speedLabel(speed)}`);
+    } catch (error) {
+      toast.error(`Speed was not changed: ${humanErrorText(toRunError(error), metadata.backend)}`);
     }
   };
 
@@ -197,6 +241,16 @@ export function ModelPicker({
           onValueChange={(effort) => void chooseEffort(effort)}
         />
       </Tooltip>
+      <SpeedControl
+        tiers={
+          metadata?.backend === "chatgpt-codex-responses"
+            ? discoveredSpeed(resolved.model, currentModel)
+            : null
+        }
+        value={currentSpeed}
+        disabled={disabled || !metadata || updateConfig.isPending}
+        onChange={(speed) => void chooseSpeed(speed)}
+      />
     </div>
   );
 }

@@ -395,10 +395,13 @@ pub(super) fn parse_anthropic_messages_response(
                 .saturating_add(cache_read)
                 .saturating_add(cache_write),
             cost: TokenCostMicros::default(),
+            speed_tier_charges_excluded: false,
         }
     });
 
     Ok(ModelTurnResponse {
+        effective_service_tier: None,
+        served_service_tier: None,
         assistant: AssistantTurn {
             content,
             reasoning_text: None,

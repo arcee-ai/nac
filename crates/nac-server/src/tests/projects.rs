@@ -119,6 +119,7 @@ async fn literal_local_path_project_and_first_chat_keep_the_selected_inode() {
         &store_path,
         "literal-path-default",
         model_configurations::NewModelConfiguration {
+            service_tier: None,
             name: "Literal path default".into(),
             backend: "openai-responses".into(),
             model: "gpt-5.2".into(),
@@ -312,6 +313,7 @@ async fn project_session_materializes_defaults_and_filters_membership() {
         &store_path,
         "project-default",
         model_configurations::NewModelConfiguration {
+            service_tier: None,
             name: "Project default".to_string(),
             backend: "openai-responses".to_string(),
             model: "gpt-5.2".to_string(),

@@ -1,3 +1,4 @@
+import type { ServiceTier } from "@/app/lib/serviceTier";
 import type { LaunchModelSelection } from "@/app/components/modals/ConfigurationsPanel";
 import { sameLightModel } from "@/app/lib/modelConfig";
 import type { BackendKind, ModelConfigurationRecord } from "@/app/types/api";
@@ -14,6 +15,7 @@ export function savedModelSelection(
     allow_insecure_http: record.allow_insecure_http ?? false,
     api_key_env: record.api_key_env ?? null,
     reasoning_effort: record.reasoning_effort ?? null,
+    service_tier: (record.service_tier ?? null) as ServiceTier | null,
     extra_headers: record.extra_headers,
     orchestrator_compaction_threshold: record.orchestrator_compaction_threshold,
     light_model: record.light_model ?? null,
@@ -61,6 +63,7 @@ export function sameModelSelection(
       left.allow_insecure_http === right.allow_insecure_http &&
       left.api_key_env === right.api_key_env &&
       left.reasoning_effort === right.reasoning_effort &&
+      (left.service_tier ?? null) === (right.service_tier ?? null) &&
       sameHeaders(left.extra_headers, right.extra_headers) &&
       left.orchestrator_compaction_threshold === right.orchestrator_compaction_threshold &&
       sameOptionalLight(left.light_model, right.light_model)
@@ -77,6 +80,7 @@ export function sameModelSelection(
     a.allow_insecure_http === b.allow_insecure_http &&
     a.api_key === b.api_key &&
     a.reasoning_effort === b.reasoning_effort &&
+    (a.service_tier ?? null) === (b.service_tier ?? null) &&
     a.initial_prompt === b.initial_prompt &&
     sameHeaders(a.extra_headers, b.extra_headers) &&
     a.orchestrator_compaction_threshold === b.orchestrator_compaction_threshold &&

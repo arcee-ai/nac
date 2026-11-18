@@ -131,6 +131,7 @@ fn user_message(content: &str) -> Message {
 
 fn plain_assistant(content: &str) -> Message {
     Message::Assistant {
+        service_tier_receipt: None,
         content: Some(content.to_string()),
         reasoning_text: None,
         reasoning_details: None,
@@ -143,6 +144,7 @@ fn plain_assistant(content: &str) -> Message {
 
 fn tool_call_assistant(call_ids: &[&str]) -> Message {
     Message::Assistant {
+        service_tier_receipt: None,
         content: None,
         reasoning_text: None,
         reasoning_details: None,
@@ -886,6 +888,7 @@ async fn direct_failure_replays_unacknowledged_assistant_without_duplicate_parti
         .writer
         .lose_next_append_ack_for_test();
     let assistant = Message::Assistant {
+        service_tier_receipt: None,
         content: Some("complete streamed answer".to_string()),
         reasoning_text: None,
         reasoning_details: None,

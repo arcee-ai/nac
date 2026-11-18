@@ -1527,3 +1527,20 @@ fn codex_peer_goal_wire_schema_preserves_null_unused_arguments_and_no_implicit_b
         json!(["read", "start", "pause", "resume"])
     );
 }
+
+#[test]
+fn codex_speed_is_independent_of_reasoning_and_omitted_for_standard() {
+    let levels = ThinkingLevelMap(std::collections::BTreeMap::from([(
+        ReasoningEffort::High,
+        Some("high".to_string()),
+    )]));
+    for effort in [None, Some(ReasoningEffort::High)] {
+        for tier in [None, Some("priority"), Some("ultrafast")] {
+            let mut request = codex_responses_request("model", effort, &[], &[], &levels, None);
+            let original_reasoning = request["reasoning"].clone();
+            apply_service_tier(&mut request, tier);
+            assert_eq!(request["reasoning"], original_reasoning);
+            assert_eq!(request.get("service_tier").and_then(Value::as_str), tier);
+        }
+    }
+}

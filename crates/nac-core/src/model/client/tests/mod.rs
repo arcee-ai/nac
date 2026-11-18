@@ -21,6 +21,7 @@ fn test_model_client(
         model: "test-model".to_string(),
         backend,
         reasoning_effort: None,
+        service_tier: None,
         api_key_env: None,
         trusted_api_key_file: None,
         extra_headers,
@@ -99,6 +100,7 @@ fn s5_history(
             content: "first".to_string(),
         },
         Message::Assistant {
+            service_tier_receipt: None,
             content: Some("prior answer".to_string()),
             reasoning_text: reasoning_text.map(str::to_string),
             reasoning_details,
@@ -221,4 +223,20 @@ fn image_tool_results_require_both_model_and_adapter_support() {
 
     responses.resolved_model.image_input = false;
     assert!(!responses.supports_image_tool_results());
+}
+
+#[test]
+fn codex_unset_and_standard_omit_wire_tier_even_with_fast_catalog_default() {
+    let mut client = ModelClient::new_for_codex_test_server("unused".into(), "fixture");
+    client.resolved_model.default_service_tier = Some("priority".into());
+    client.resolved_model.service_tiers = Some(vec![catalog::ModelServiceTier {
+        id: "priority".into(),
+        name: "Fast".into(),
+        description: "Priority processing".into(),
+    }]);
+    assert_eq!(client.codex_wire_tier(), None);
+    client.service_tier = Some(crate::model::ServiceTier::Standard);
+    assert_eq!(client.codex_wire_tier(), None);
+    client.service_tier = Some(crate::model::ServiceTier::Fast);
+    assert_eq!(client.codex_wire_tier(), Some("priority"));
 }

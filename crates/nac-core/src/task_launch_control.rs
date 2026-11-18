@@ -34,6 +34,8 @@ pub struct NativeTaskRequest {
     pub skill: Option<String>,
     pub model: Option<String>,
     pub reasoning_effort: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service_tier: Option<String>,
     #[serde(default)]
     pub workspace: TaskWorkspace,
     pub git_ref: Option<String>,
@@ -56,9 +58,14 @@ impl NativeTaskRequest {
             prompt: self.initial_prompt(),
         }
         .validate()?;
-        for value in [&self.skill, &self.model, &self.reasoning_effort]
-            .into_iter()
-            .flatten()
+        for value in [
+            &self.skill,
+            &self.model,
+            &self.reasoning_effort,
+            &self.service_tier,
+        ]
+        .into_iter()
+        .flatten()
         {
             anyhow::ensure!(
                 !value.trim().is_empty()
@@ -66,6 +73,10 @@ impl NativeTaskRequest {
                     && !value.chars().any(char::is_control),
                 "invalid request: skill/model/reasoning must be nonblank and bounded"
             );
+        }
+        if let Some(tier) = &self.service_tier {
+            tier.parse::<crate::model::ServiceTier>()
+                .map_err(|error| anyhow!(error))?;
         }
         anyhow::ensure!(
             self.workspace != TaskWorkspace::ExistingCheckout
@@ -96,6 +107,7 @@ pub struct SavedTaskProject {
     pub default_model_config_id: Option<String>,
     pub default_model: Option<String>,
     pub default_reasoning_effort: Option<String>,
+    pub default_service_tier: Option<String>,
     pub default_ref: Option<String>,
     pub eligible: bool,
     pub eligibility_detail: String,
@@ -275,4 +287,25 @@ pub(crate) fn controller_for(path: &Path) -> Result<Arc<dyn TaskLaunchController
         .get(path)
         .cloned()
         .ok_or_else(|| anyhow!("independent task launch is unavailable on this host"))
+}
+
+#[cfg(test)]
+mod compatibility_tests {
+    use super::*;
+
+    #[test]
+    fn old_native_task_request_retains_retry_identity() {
+        let old = serde_json::json!({
+            "request_id": "00000000-0000-4000-8000-000000000001",
+            "project_id": null, "title": "Task", "prompt": "Facts",
+            "skill": null, "model": null, "reasoning_effort": null,
+            "workspace": "auto", "git_ref": null, "default_ref": null
+        });
+        let decoded: NativeTaskRequest = serde_json::from_value(old.clone()).unwrap();
+        assert_eq!(decoded.service_tier, None);
+        assert_eq!(serde_json::to_value(&decoded).unwrap(), old);
+        let mut explicit = decoded.clone();
+        explicit.service_tier = Some("fast".into());
+        assert_ne!(explicit, decoded);
+    }
 }

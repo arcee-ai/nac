@@ -7,6 +7,8 @@ interface UsageReadingsProps {
     /** Cache reads, listed only when the provider reported any. */
     cacheRead?: string | null;
     cost: string;
+    speedTierChargesExcluded?: boolean;
+    subscriptionEstimate?: boolean;
     running: boolean;
     startedAt: number | null;
     /** The last finished response, shown while nothing runs. */

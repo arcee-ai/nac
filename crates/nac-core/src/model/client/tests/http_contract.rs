@@ -156,6 +156,7 @@ async fn arcee_inference_sends_expected_contract_and_parses_chat_response() {
         model: "arcee-test-model".to_string(),
         backend: BackendKind::ArceeApi,
         reasoning_effort: None,
+        service_tier: None,
         api_key_env: None,
         trusted_api_key_file: None,
         extra_headers: std::collections::BTreeMap::from([(
@@ -666,6 +667,7 @@ async fn custom_arcee_routes_are_exact_on_wire() {
             model: "arcee-test-model".to_string(),
             backend: BackendKind::ArceeApi,
             reasoning_effort: None,
+            service_tier: None,
             api_key_env: None,
             trusted_api_key_file: None,
             extra_headers: std::collections::BTreeMap::new(),
@@ -711,6 +713,7 @@ async fn arcee_cross_origin_redirects_do_not_replay_prompt_credentials_or_header
             model: "arcee-test-model".to_string(),
             backend: BackendKind::ArceeApi,
             reasoning_effort: None,
+            service_tier: None,
             api_key_env: None,
             trusted_api_key_file: None,
             extra_headers: std::collections::BTreeMap::from([(
@@ -978,6 +981,7 @@ async fn arcee_multibyte_error_body_does_not_panic() {
         model: "test-model".to_string(),
         backend: BackendKind::ArceeApi,
         reasoning_effort: None,
+        service_tier: None,
         api_key_env: None,
         trusted_api_key_file: None,
         extra_headers: std::collections::BTreeMap::new(),

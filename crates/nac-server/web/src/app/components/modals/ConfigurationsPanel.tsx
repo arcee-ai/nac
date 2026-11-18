@@ -1,3 +1,4 @@
+import type { ServiceTier } from "@/app/lib/serviceTier";
 import { useEffect, useMemo, useState } from "react";
 
 import {
@@ -62,6 +63,7 @@ export type LaunchModelSelection =
       allow_insecure_http: boolean;
       api_key_env: string | null;
       reasoning_effort: string | null;
+      service_tier?: ServiceTier | null;
       extra_headers: Record<string, string> | null;
       /**
        * An explicitly selected saved preset owns its compaction policy. An
@@ -91,6 +93,7 @@ export interface ConfigurationsPanelInitial {
   allow_insecure_http?: boolean;
   api_key_env: string | null;
   reasoning_effort: string | null;
+  service_tier?: ServiceTier | null;
   extra_headers: Record<string, string>;
   orchestrator_compaction_threshold?: number | null;
   light_model?: LightModelSettings | null;
@@ -228,6 +231,7 @@ export function ConfigurationsPanel({
           entry.allow_insecure_http === (initial.allow_insecure_http ?? false) &&
           entry.api_key_env === initial.api_key_env &&
           (entry.reasoning_effort ?? null) === initial.reasoning_effort &&
+          (entry.service_tier ?? null) === (initial.service_tier ?? null) &&
           stringMapsEqual(entry.extra_headers, initial.extra_headers),
       )
     : null;
@@ -417,6 +421,7 @@ export function ConfigurationsPanel({
         allow_insecure_http: initial.allow_insecure_http ?? false,
         api_key_env: initial.api_key_env,
         reasoning_effort: initial.reasoning_effort,
+        ...(initial.service_tier != null ? { service_tier: initial.service_tier } : {}),
         extra_headers: initial.extra_headers,
         orchestrator_compaction_threshold: initial.orchestrator_compaction_threshold,
         light_model: initial.light_model,
@@ -517,6 +522,7 @@ export function ConfigurationsPanel({
       allow_insecure_http: resolved.allow_insecure_http,
       api_key_env: resolved.api_key_env,
       reasoning_effort: resolved.reasoning_effort,
+      ...(resolved.service_tier != null ? { service_tier: resolved.service_tier } : {}),
       extra_headers: savedRecord?.extra_headers ?? null,
       orchestrator_compaction_threshold:
         initial && picked === null

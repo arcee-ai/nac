@@ -1,6 +1,77 @@
 use super::*;
 
 #[tokio::test]
+async fn unrelated_update_preserves_unavailable_speed_until_explicit_repair() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("unavailable_speed_update");
+    let nac_home = root.join("nac-home");
+    std::fs::create_dir_all(&nac_home).unwrap();
+    let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
+    let manager = test_manager(&root);
+    let store_path = root.join("store.db");
+    let created = manager
+        .create_session(CreateSessionRequest {
+            model: RequestField::Value("custom-primary-model".into()),
+            base_url: RequestField::Value("https://gateway.example/v1".into()),
+            backend: RequestField::Value("openai-responses".into()),
+            api_key_env: RequestField::Value("OPENAI_API_KEY".into()),
+            ..CreateSessionRequest::default()
+        })
+        .await
+        .unwrap();
+    let id = created.metadata.session_id.unwrap();
+    manager.inner.active_sessions.write().await.remove(&id);
+    let mut stored = sessions::load_session_config(&store_path, &id).unwrap();
+    stored.service_tier = Some("fast".into());
+    sessions::update_raw_session_config(&store_path, &stored).unwrap();
+
+    manager
+        .update_session_config(
+            &id,
+            UpdateConfigRequest {
+                orchestrator_compaction_threshold: RequestField::Value(1234),
+                ..UpdateConfigRequest::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        sessions::load_session_config(&store_path, &id)
+            .unwrap()
+            .service_tier
+            .as_deref(),
+        Some("fast")
+    );
+    assert!(manager
+        .update_session_config(
+            &id,
+            UpdateConfigRequest {
+                service_tier: RequestField::Value("fast".into()),
+                ..UpdateConfigRequest::default()
+            }
+        )
+        .await
+        .is_err());
+    manager
+        .update_session_config(
+            &id,
+            UpdateConfigRequest {
+                service_tier: RequestField::Null,
+                ..UpdateConfigRequest::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        sessions::load_session_config(&store_path, &id)
+            .unwrap()
+            .service_tier,
+        None
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
 async fn custom_public_https_endpoints_persist_for_primary_and_light_models() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let root = temp_root("custom_public_https");
@@ -1330,6 +1401,7 @@ async fn patch_round_trips_every_state_and_rebuilds_from_persisted_settings() {
         .update_session_config(
             "session",
             UpdateConfigRequest {
+                service_tier: RequestField::Omitted,
                 model: RequestField::Value(" replacement-model ".to_string()),
                 base_url: RequestField::Value(" https://api.openai.com/v1 ".to_string()),
                 allow_insecure_http: RequestField::Omitted,
@@ -1619,6 +1691,7 @@ async fn removed_backend_updates_are_bad_requests_and_are_not_persisted() {
             .update_session_config(
                 "session",
                 UpdateConfigRequest {
+                    service_tier: RequestField::Omitted,
                     model: RequestField::Omitted,
                     base_url: RequestField::Value("https://api.arcee.ai".to_string()),
                     allow_insecure_http: RequestField::Omitted,
@@ -1661,6 +1734,7 @@ async fn server_arcee_configuration_status_and_persistence_are_consistent() {
 
     let create_error = manager
         .create_session(CreateSessionRequest {
+            service_tier: RequestField::Omitted,
             behavior: sessions::SessionBehavior::Orchestrator,
             first_chat: false,
             first_chat_same_behavior: false,
@@ -1720,6 +1794,7 @@ async fn server_arcee_configuration_status_and_persistence_are_consistent() {
             .update_session_config(
                 "update",
                 UpdateConfigRequest {
+                    service_tier: RequestField::Omitted,
                     model: RequestField::Omitted,
                     base_url: RequestField::Value(invalid_base_url.to_string()),
                     allow_insecure_http: RequestField::Omitted,
@@ -1750,6 +1825,7 @@ async fn server_arcee_configuration_status_and_persistence_are_consistent() {
         .update_session_config(
             "update",
             UpdateConfigRequest {
+                service_tier: RequestField::Omitted,
                 model: RequestField::Value("trinity-large-thinking".to_string()),
                 base_url: RequestField::Value("https://tenant.arcee.ai/api/v1".to_string()),
                 allow_insecure_http: RequestField::Omitted,
@@ -1772,6 +1848,7 @@ async fn server_arcee_configuration_status_and_persistence_are_consistent() {
         .update_session_config(
             "update",
             UpdateConfigRequest {
+                service_tier: RequestField::Omitted,
                 model: RequestField::Value("trinity-large-thinking".to_string()),
                 base_url: RequestField::Value("https://api.arcee.ai/api".to_string()),
                 allow_insecure_http: RequestField::Omitted,
@@ -1791,6 +1868,7 @@ async fn server_arcee_configuration_status_and_persistence_are_consistent() {
 
     let created = manager
         .create_session(CreateSessionRequest {
+            service_tier: RequestField::Omitted,
             behavior: sessions::SessionBehavior::Orchestrator,
             first_chat: false,
             first_chat_same_behavior: false,
@@ -1844,6 +1922,7 @@ async fn null_update_clears_legacy_arcee_api_key_env() {
         .update_session_config(
             "legacy-arcee",
             UpdateConfigRequest {
+                service_tier: RequestField::Omitted,
                 model: RequestField::Value("trinity-large-thinking".to_string()),
                 base_url: RequestField::Omitted,
                 allow_insecure_http: RequestField::Omitted,

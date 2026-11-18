@@ -501,6 +501,7 @@ async fn terminal_selection_canonical_history_fork_keeps_source_without_copying_
         .is_none());
     let writer = nac_core::store::TranscriptLogWriter::new(&manager.inner.store_path).unwrap();
     let assistant = || nac_core::types::Message::Assistant {
+        service_tier_receipt: None,
         content: Some("observed evidence".into()),
         reasoning_text: None,
         reasoning_details: None,
@@ -957,6 +958,7 @@ async fn terminal_selection_evidence_uses_canonical_indices_with_filtered_system
         content: admitted.record.content.clone(),
     };
     let assistant = Message::Assistant {
+        service_tier_receipt: None,
         content: Some("selection observed".into()),
         reasoning_text: None,
         reasoning_details: None,

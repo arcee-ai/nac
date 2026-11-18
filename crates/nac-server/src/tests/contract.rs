@@ -187,6 +187,40 @@ fn create_resolution_inherits_overrides_and_explicitly_clears_optional_config() 
 }
 
 #[test]
+fn speed_request_omission_null_and_value_are_distinct() {
+    for (json, expected) in [
+        (serde_json::json!({}), RequestField::Omitted),
+        (
+            serde_json::json!({"service_tier": null}),
+            RequestField::Null,
+        ),
+        (
+            serde_json::json!({"service_tier": "standard"}),
+            RequestField::Value("standard".to_owned()),
+        ),
+    ] {
+        let create: CreateSessionRequest = serde_json::from_value(json.clone()).unwrap();
+        let update: UpdateConfigRequest = serde_json::from_value(json).unwrap();
+        assert_eq!(create.service_tier, expected);
+        assert_eq!(update.service_tier, expected);
+    }
+    use crate::application::request_validation::service_tier_option;
+    assert_eq!(
+        service_tier_option(Field::Unchanged).unwrap(),
+        OptionalModelOption::Inherit
+    );
+    assert_eq!(
+        service_tier_option(Field::Clear).unwrap(),
+        OptionalModelOption::Clear
+    );
+    assert_eq!(
+        service_tier_option(Field::Set("standard".into())).unwrap(),
+        OptionalModelOption::Value(nac_core::model::ServiceTier::Standard)
+    );
+    assert!(service_tier_option(Field::Set("priority".into())).is_err());
+}
+
+#[test]
 fn null_required_and_blank_concrete_create_fields_are_bad_requests() {
     for field in ["model", "base_url", "backend"] {
         let json = format!(r#"{{"{field}":null}}"#);

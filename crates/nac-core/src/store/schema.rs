@@ -136,7 +136,7 @@ use wal_preflight::read_schema_version_header;
 // early whenever the stored version already equals this one. (12 carries the
 // same schema as 11, which added episodes.status; 10 added the
 // ssh_configurations table; 9 the per-session ssh port and key columns.)
-const STORE_SCHEMA_VERSION: i64 = 52;
+const STORE_SCHEMA_VERSION: i64 = 53;
 const HTTP_OPT_IN_COLUMN: &str = "INTEGER NOT NULL DEFAULT 0 CHECK (allow_insecure_http IN (0, 1))";
 pub const MINIMUM_MIGRATABLE_SCHEMA_VERSION: i64 = 0;
 
@@ -487,7 +487,7 @@ fn open_connection_with_hooks(
         return Ok(conn);
     }
     // Preserve the calendar format fence before upgrading established stores.
-    if matches!(schema_version, 50 | 51) {
+    if matches!(schema_version, 50..=52) {
         heartbeat_calendar::verify_format(&transaction)?;
     }
     let needs_session_summary_backfill = schema_version < SESSION_SUMMARY_BACKFILL_VERSION;
@@ -533,7 +533,7 @@ fn open_connection_with_hooks(
             migrate_thread_events(&transaction)?;
             transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
-        2..=51 => {}
+        2..=52 => {}
         unsupported => {
             if unsupported > STORE_SCHEMA_VERSION {
                 return Err(StoreFutureSchemaError::new(unsupported).into());
@@ -784,6 +784,8 @@ fn open_connection_with_hooks(
     heartbeat_calendar::verify_format(&transaction)?;
     verify_auxiliary_foreign_keys(&transaction)?;
 
+    ensure_column(&transaction, "sessions", "service_tier", "TEXT")?;
+    ensure_column(&transaction, "model_configurations", "service_tier", "TEXT")?;
     before_commit()?;
     transaction.pragma_update(None, "user_version", STORE_SCHEMA_VERSION)?;
     transaction.commit()?;

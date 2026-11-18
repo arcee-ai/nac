@@ -27,6 +27,8 @@ import { FormSection } from "@/app/components/modals/FormSection";
 import { ConfigRow, FieldLabel } from "@/app/components/modals/ConfigRow";
 import { type LaunchModelSelection } from "@/app/components/modals/ConfigurationsPanel";
 import { LightModelSection, type LightSelection } from "@/app/components/modals/LightModelSection";
+import { SpeedControl } from "@/app/components/modals/SpeedControl";
+import { discoveredSpeed, type ServiceTier } from "@/app/lib/serviceTier";
 import { REASONING_OPTIONS, reasoningOptionsFor } from "@/app/components/modals/options";
 import { PathPickerModal } from "@/app/components/modals/PathPickerModal";
 import { SshConnectionBox } from "@/app/components/modals/SshConnectionBox";
@@ -159,6 +161,7 @@ function CreateProjectForm({
   const [cwd, setCwd] = useState(defaultCwd);
   const [name, setName] = useState("");
   const [reasoning, setReasoning] = useState("");
+  const [speed, setSpeed] = useState<ServiceTier | null>(null);
   const [compaction, setCompaction] = useState("");
   const [extraHeaders, setExtraHeaders] = useState("");
   const [sandbox, setSandbox] = useState<SandboxOptions>(EMPTY_SANDBOX);
@@ -239,6 +242,7 @@ function CreateProjectForm({
       if (!next || sameModelSelection(projectedSelection.current, next)) return;
       const previous = projectedSelection.current;
       projectedSelection.current = next;
+      setSpeed((next.kind === "resolved" ? next.service_tier : next.request.service_tier) ?? null);
       // Primary identity changes preserve the context draft; explicit presets
       // still project their complete numeric or disabled compaction policy.
       if (source === "primary" && previous?.kind === "resolved") {
@@ -383,8 +387,8 @@ function CreateProjectForm({
             if (selection.kind === "save") {
               const request =
                 light.mode === "dual" && light.light
-                  ? { ...selection.request, light_model: light.light }
-                  : selection.request;
+                  ? { ...selection.request, service_tier: speed, light_model: light.light }
+                  : { ...selection.request, service_tier: speed };
               const record = await createModelConfig.mutateAsync(request);
               const selected = savedModelSelection(record);
               if (current.current()) setSelection(selected);
@@ -408,7 +412,7 @@ function CreateProjectForm({
             const activityKey = mode === "sandbox" ? crypto.randomUUID() : null;
             if (current.current()) setLaunchKey(activityKey);
             const body = projectChatRequest({
-              selected,
+              selected: { ...selected, service_tier: speed },
               projectId: project.project_id,
               policy,
               behavior,
@@ -651,6 +655,29 @@ function CreateProjectForm({
                 hint="Higher effort for deeper reasoning and lower effort for faster responses."
                 control={smallSelect(reasoningItems, reasoning, edit(setReasoning))}
               />
+              <Separator />
+              {chosen?.backend === "chatgpt-codex-responses" || speed ? (
+                <ConfigRow
+                  presentation="form"
+                  label="Speed"
+                  hint="Use provider default to clear the speed override."
+                  control={
+                    <SpeedControl
+                      form
+                      tiers={
+                        chosen?.backend === "chatgpt-codex-responses"
+                          ? discoveredSpeed(
+                              resolveCatalogModel(catalog.data, chosen.backend, chosen.model).model,
+                              chosen.model,
+                            )
+                          : null
+                      }
+                      value={speed}
+                      onChange={edit(setSpeed)}
+                    />
+                  }
+                />
+              ) : null}
               <Separator />
               <ConfigRow
                 presentation="form"

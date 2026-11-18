@@ -1,3 +1,4 @@
+import type { ServiceTier } from "../../lib/serviceTier";
 import type { BackendKind, CreateModelConfigurationRequest, LightModelSettings } from "../../types/api";
 /** What the panel hands the launch form once a provider setup is complete. */
 export type LaunchModelSelection = {
@@ -11,6 +12,7 @@ export type LaunchModelSelection = {
     allow_insecure_http: boolean;
     api_key_env: string | null;
     reasoning_effort: string | null;
+    service_tier?: ServiceTier | null;
     extra_headers: Record<string, string> | null;
     /**
      * An explicitly selected saved preset owns its compaction policy. An
@@ -39,6 +41,7 @@ export interface ConfigurationsPanelInitial {
     allow_insecure_http?: boolean;
     api_key_env: string | null;
     reasoning_effort: string | null;
+    service_tier?: ServiceTier | null;
     extra_headers: Record<string, string>;
     orchestrator_compaction_threshold?: number | null;
     light_model?: LightModelSettings | null;

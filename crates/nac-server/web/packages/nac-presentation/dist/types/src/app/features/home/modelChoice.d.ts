@@ -1,3 +1,4 @@
+import type { ServiceTier } from "../../lib/serviceTier";
 import type { ConfigurationsPanelInitial, LaunchModelSelection } from "../../components/modals/ConfigurationsPanel";
 import type { LightSelection } from "../../components/modals/LightModelSection";
 import type { UiPolicy } from "../ui-policy/policy";
@@ -35,6 +36,7 @@ export interface ResolvedModel {
     allow_insecure_http: boolean;
     api_key_env: string | null;
     reasoning_effort: string | null;
+    service_tier?: ServiceTier | null;
     extra_headers: Record<string, string> | null;
     orchestrator_compaction_threshold?: number | null;
 }

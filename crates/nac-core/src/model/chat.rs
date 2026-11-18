@@ -88,6 +88,7 @@ pub(super) fn parse_completions_response(
                 .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0),
             cost: TokenCostMicros::default(),
+            speed_tier_charges_excluded: false,
         }
     });
 
@@ -96,6 +97,8 @@ pub(super) fn parse_completions_response(
         .and_then(Value::as_str)
         .map(ToString::to_string);
     Ok(ModelTurnResponse {
+        effective_service_tier: None,
+        served_service_tier: None,
         assistant: AssistantTurn {
             content: message
                 .get("content")

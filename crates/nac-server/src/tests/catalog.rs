@@ -119,6 +119,7 @@ async fn saved_chat_configuration_survives_unavailable_model_discovery() {
         .model_configurations()
         .create(
             application::model_configurations::CreateModelConfiguration {
+                service_tier: None,
                 name: "Custom chat gateway".to_string(),
                 backend: BackendKind::OpenAiChatCompletions,
                 model: "vendor/uncatalogued-model".to_string(),
@@ -182,6 +183,7 @@ async fn saved_chat_configuration_survives_discovery_that_omits_its_model() {
         .model_configurations()
         .create(
             application::model_configurations::CreateModelConfiguration {
+                service_tier: None,
                 name: "Custom chat gateway".to_string(),
                 backend: BackendKind::OpenAiChatCompletions,
                 model: "vendor/manually-selected-model".to_string(),
@@ -234,6 +236,7 @@ async fn saved_configurations_accept_public_https_across_create_update_and_resol
         .model_configurations()
         .create(
             application::model_configurations::CreateModelConfiguration {
+                service_tier: None,
                 name: "Custom gateway".to_string(),
                 backend: BackendKind::OpenAiResponses,
                 model: "custom-primary-model".to_string(),
@@ -268,6 +271,7 @@ async fn saved_configurations_accept_public_https_across_create_update_and_resol
         .update(
             &created.config_id,
             application::model_configurations::UpdateModelConfiguration {
+                service_tier: application::Field::Unchanged,
                 name: application::Field::Unchanged,
                 backend: application::Field::Unchanged,
                 model: application::Field::Unchanged,
@@ -318,6 +322,7 @@ async fn saved_public_http_configuration_requires_and_preserves_opt_in() {
     let manager = test_manager(&root);
 
     let configuration = || application::model_configurations::CreateModelConfiguration {
+        service_tier: None,
         name: "Plaintext gateway".to_string(),
         backend: BackendKind::OpenAiChatCompletions,
         model: "vendor/model".to_string(),
@@ -390,6 +395,7 @@ async fn saved_public_http_configuration_requires_and_preserves_opt_in() {
         .update(
             &created.config_id,
             application::model_configurations::UpdateModelConfiguration {
+                service_tier: application::Field::Unchanged,
                 name: application::Field::Unchanged,
                 backend: application::Field::Unchanged,
                 model: application::Field::Unchanged,
@@ -928,6 +934,7 @@ async fn models_endpoint_computes_auth_status_from_the_environment() {
         .model_configurations()
         .create(
             application::model_configurations::CreateModelConfiguration {
+                service_tier: None,
                 name: "DeepSeek account".to_string(),
                 backend: BackendKind::DeepSeekChat,
                 model: "deepseek-v4-flash".to_string(),
@@ -1072,6 +1079,7 @@ async fn create_session_rejects_ssh_host_combined_with_sandbox() {
     let manager = test_manager(&root);
 
     let request = CreateSessionRequest {
+        service_tier: RequestField::Omitted,
         behavior: sessions::SessionBehavior::Orchestrator,
         first_chat: false,
         first_chat_same_behavior: false,
@@ -1113,6 +1121,7 @@ async fn server_create_rejects_removed_backend_names_as_bad_requests() {
     for backend in ["arcee", "auto"] {
         let error = manager
             .create_session(CreateSessionRequest {
+                service_tier: RequestField::Omitted,
                 behavior: sessions::SessionBehavior::Orchestrator,
                 first_chat: false,
                 first_chat_same_behavior: false,
@@ -1165,6 +1174,7 @@ async fn stored_arcee_auth_config_errors_are_400_and_store_failures_are_500() {
             .update_session_config(
                 "session",
                 UpdateConfigRequest {
+                    service_tier: RequestField::Omitted,
                     model: RequestField::Value("trinity-large-thinking".to_string()),
                     base_url: RequestField::Value("https://api.arcee.ai".to_string()),
                     allow_insecure_http: RequestField::Omitted,
@@ -1209,6 +1219,7 @@ async fn stored_arcee_auth_config_errors_are_400_and_store_failures_are_500() {
             .update_session_config(
                 "session",
                 UpdateConfigRequest {
+                    service_tier: RequestField::Omitted,
                     model: RequestField::Value("trinity-large-thinking".to_string()),
                     base_url: RequestField::Value("https://api.arcee.ai".to_string()),
                     allow_insecure_http: RequestField::Omitted,
@@ -1246,6 +1257,7 @@ async fn stored_arcee_auth_config_errors_are_400_and_store_failures_are_500() {
             .update_session_config(
                 "session",
                 UpdateConfigRequest {
+                    service_tier: RequestField::Omitted,
                     model: RequestField::Value("trinity-large-thinking".to_string()),
                     base_url: RequestField::Value("https://api.arcee.ai".to_string()),
                     allow_insecure_http: RequestField::Omitted,

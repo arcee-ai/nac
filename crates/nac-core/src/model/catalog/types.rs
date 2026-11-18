@@ -234,6 +234,15 @@ pub struct ResolvedLimits {
     pub output_origin: LimitOrigin,
 }
 
+/// An account-discovered Codex service tier, preserving upstream metadata.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ModelServiceTier {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+}
+
 /// Central model metadata record resolved from the catalog.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModelMetadata {
@@ -247,6 +256,8 @@ pub struct ModelMetadata {
     pub max_tokens: u64,
     pub max_input_tokens: Option<u64>,
     pub auto_compact_token_limit: Option<u64>,
+    pub service_tiers: Option<Vec<ModelServiceTier>>,
+    pub default_service_tier: Option<String>,
     pub context_origin: LimitOrigin,
     pub input_origin: LimitOrigin,
     pub output_origin: LimitOrigin,
@@ -379,6 +390,8 @@ impl ModelMetadata {
             max_tokens: FALLBACK_MAX_TOKENS,
             max_input_tokens: None,
             auto_compact_token_limit: None,
+            service_tiers: None,
+            default_service_tier: None,
             context_origin: LimitOrigin::Estimated,
             input_origin: LimitOrigin::Estimated,
             output_origin: LimitOrigin::Estimated,
@@ -450,6 +463,10 @@ pub struct ModelEntry {
     pub id: String,
     #[cfg_attr(feature = "openapi", schema(required))]
     pub display_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service_tiers: Option<Vec<ModelServiceTier>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_service_tier: Option<String>,
     pub context_window: u64,
     pub max_tokens: u64,
     pub cost: ModelCostRates,

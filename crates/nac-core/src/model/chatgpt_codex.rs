@@ -529,6 +529,7 @@ pub async fn send_responses(
     base_url: &str,
     model: &str,
     reasoning_effort: Option<ReasoningEffort>,
+    service_tier: Option<&str>,
     messages: Vec<Message>,
     tools: Vec<ToolDefinition>,
     thinking_levels: &ThinkingLevelMap,
@@ -537,7 +538,7 @@ pub async fn send_responses(
     on_delta: DeltaSink<'_>,
 ) -> Result<ModelTurnResponse> {
     let url = codex_responses_url(base_url)?;
-    let request = codex_responses_request(
+    let mut request = codex_responses_request(
         model,
         reasoning_effort,
         &messages,
@@ -545,6 +546,7 @@ pub async fn send_responses(
         thinking_levels,
         prompt_cache_key,
     );
+    apply_service_tier(&mut request, service_tier);
     let auth = fresh_auth(client)
         .await
         .map_err(|error| anyhow::Error::new(codex_auth_run_failure(error)))?;
@@ -587,13 +589,14 @@ pub(super) async fn send_test_responses(
     url: &str,
     model: &str,
     reasoning_effort: Option<ReasoningEffort>,
+    service_tier: Option<&str>,
     messages: Vec<Message>,
     tools: Vec<ToolDefinition>,
     thinking_levels: &ThinkingLevelMap,
     prompt_cache_key: Option<&str>,
     on_delta: DeltaSink<'_>,
 ) -> Result<ModelTurnResponse> {
-    let request = codex_responses_request(
+    let mut request = codex_responses_request(
         model,
         reasoning_effort,
         &messages,
@@ -601,6 +604,7 @@ pub(super) async fn send_test_responses(
         thinking_levels,
         prompt_cache_key,
     );
+    apply_service_tier(&mut request, service_tier);
     let auth = StoredCodexAuth {
         auth_type: "chatgpt-codex".into(),
         access: "test-access".into(),
@@ -1003,6 +1007,12 @@ fn auth_from_token_response(
         expires_at_ms: now_ms().saturating_add(expires_in.saturating_mul(1000)),
         account_id,
     })
+}
+
+fn apply_service_tier(request: &mut Value, tier: Option<&str>) {
+    if let Some(tier) = tier {
+        request["service_tier"] = json!(tier);
+    }
 }
 
 fn codex_responses_request(

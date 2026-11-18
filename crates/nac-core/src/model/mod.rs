@@ -59,6 +59,7 @@ mod responses_stream;
 #[cfg(feature = "review-fixture")]
 mod review_fixture;
 mod reviewer_policy;
+mod service_tier;
 mod sse;
 mod stream;
 #[cfg(test)]
@@ -181,6 +182,7 @@ pub fn resolve_named_api_key(name: &str) -> Result<Option<String>> {
 use chatgpt_codex::{codex_auth_login, codex_auth_logout, codex_auth_status};
 pub use client::validate_model_configuration;
 pub(crate) use client::ModelClient;
+pub use service_tier::ServiceTier;
 pub(crate) use stream::{CoalescedDeltas, DeltaSink, ModelStreamDelta};
 pub(crate) use types::{
     calculate_cost, AssistantTurn, ModelTurnResponse, TokenCostMicros, TokenUsage,

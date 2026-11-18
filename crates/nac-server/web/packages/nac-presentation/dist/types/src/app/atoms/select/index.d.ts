@@ -11,8 +11,9 @@ export interface SelectItem {
     /** Info glyph on the row. Its hover text explains that choice. */
     hoverHint?: HoverHintConfig;
 }
-interface SelectProps extends Pick<React.AriaAttributes, "aria-invalid" | "aria-describedby"> {
+interface SelectProps extends Pick<React.AriaAttributes, "aria-invalid" | "aria-describedby" | "aria-label"> {
     items?: SelectItem[];
+    checkedChoices?: boolean;
     value?: string;
     onValueChange?: (id: string) => void;
     size?: ButtonSize;

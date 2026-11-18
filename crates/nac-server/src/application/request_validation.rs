@@ -123,6 +123,7 @@ pub(crate) fn model_options(
     Ok(ModelOptions {
         backend,
         reasoning_effort,
+        service_tier: OptionalModelOption::Inherit,
         api_base_url: required_create_string(base_url, "base_url")?,
         allow_insecure_http,
         api_model: required_create_string(model, "model")?,
@@ -132,6 +133,22 @@ pub(crate) fn model_options(
         extra_headers,
         light_model: None,
     })
+}
+
+pub(crate) fn service_tier_option(
+    field: Field<String>,
+) -> Result<OptionalModelOption<nac_core::model::ServiceTier>> {
+    match field {
+        Field::Unchanged => Ok(OptionalModelOption::Inherit),
+        Field::Clear => Ok(OptionalModelOption::Clear),
+        Field::Set(value) => {
+            let value = nonblank_request_string(value, "service_tier")?;
+            Ok(OptionalModelOption::Value(parse_request_enum(
+                &value,
+                "service_tier",
+            )?))
+        }
+    }
 }
 
 pub(crate) fn parse_prospective_model_config(

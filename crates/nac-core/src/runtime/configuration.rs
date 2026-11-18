@@ -40,6 +40,7 @@ pub struct PermissionConfig {
 pub struct ModelConfig {
     pub model: Option<String>,
     pub reasoning_effort: Option<ReasoningEffort>,
+    pub service_tier: Option<crate::model::ServiceTier>,
     #[serde(default)]
     pub extra_headers: BTreeMap<String, String>,
 }

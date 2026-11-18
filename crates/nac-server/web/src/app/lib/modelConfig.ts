@@ -206,6 +206,7 @@ export interface ModelFormValues {
 }
 
 export interface SettingsInitialValues {
+  service_tier?: import("@/app/lib/serviceTier").ServiceTier | null;
   model: string;
   base_url: string;
   allow_insecure_http: boolean;

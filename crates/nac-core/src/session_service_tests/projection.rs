@@ -536,6 +536,7 @@ async fn store_backed_pages_are_live_mid_run_while_the_agent_is_busy() {
                 content: "mid-run prompt".to_string(),
             },
             Message::Assistant {
+                service_tier_receipt: None,
                 content: Some("mid-run answer".to_string()),
                 reasoning_text: None,
                 reasoning_details: None,
@@ -552,6 +553,7 @@ async fn store_backed_pages_are_live_mid_run_while_the_agent_is_busy() {
         content: "mid-run prompt".to_string(),
     });
     expected_live.push(Message::Assistant {
+        service_tier_receipt: None,
         content: Some("mid-run answer".to_string()),
         reasoning_text: None,
         reasoning_details: None,
