@@ -11777,13 +11777,13 @@ function Fm({ isolated: e, available: t, onIsolatedChange: n, gitRef: r, default
 		open: s,
 		onClose: m,
 		sticky: !0,
-		focusScope: "Workspace settings",
-		placement: Ur.TopLeft,
+		focusScope: "Additional settings",
+		placement: Ur.TopRight,
 		size: hi.Large,
 		content: l === "main" ? /* @__PURE__ */ $(Z, { children: [
 			/* @__PURE__ */ Q("p", {
 				className: "type-meta px-2.5 pt-1.5 pb-1 text-basic-tertiary",
-				children: "Configure workspace"
+				children: "Additional settings"
 			}),
 			/* @__PURE__ */ Q(Im, {
 				icon: I.FolderCopy,
@@ -11880,11 +11880,11 @@ function Fm({ isolated: e, available: t, onIsolatedChange: n, gitRef: r, default
 			})
 		] }),
 		children: /* @__PURE__ */ Q(gi, {
-			title: e ? `Isolated checkout from ${p ?? "…"}` : "Workspace settings",
+			title: e ? `Isolated checkout from ${p ?? "…"}` : "Additional settings",
 			disabled: s,
 			children: /* @__PURE__ */ $("button", {
 				type: "button",
-				"aria-label": "Workspace settings",
+				"aria-label": "Additional settings",
 				"aria-haspopup": "dialog",
 				"aria-expanded": s,
 				disabled: o,
@@ -11901,7 +11901,7 @@ function Fm({ isolated: e, available: t, onIsolatedChange: n, gitRef: r, default
 						children: p ?? "Isolated"
 					})]
 				}) : null, /* @__PURE__ */ Q(R, {
-					iconName: I.Gear,
+					iconName: I.MenuHorizontal,
 					size: 16,
 					className: "shrink-0"
 				})]
@@ -12371,7 +12371,7 @@ function rh({ projects: e, sessions: t, compact: n = !1 }) {
 							}
 						}),
 						b ? /* @__PURE__ */ Q("span", {
-							className: "ml-auto shrink-0",
+							className: "shrink-0",
 							children: /* @__PURE__ */ Q(Fm, {
 								isolated: Ce,
 								available: Se,

@@ -267,12 +267,12 @@ describe("Home composer", () => {
     expect(fakes.start).not.toHaveBeenCalled();
   });
 
-  it("shows where the session runs, with checkout choices folded behind settings", () => {
+  it("shows where the session runs, with checkout choices folded behind ⋯", () => {
     mount("/", false);
     const strip = screen.getByRole("group", { name: "Workspace" });
     expect(strip.textContent).toContain("This computer");
     expect(screen.queryByRole("switch", { name: "Isolated checkout" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Additional settings" }));
     const isolated = screen.getByRole("switch", { name: "Isolated checkout" });
     expect((isolated as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText("Needs a direct agent in a local Git project.")).toBeTruthy();
@@ -284,7 +284,7 @@ describe("Home composer", () => {
   it("routes an isolated-checkout send through the isolated task form", () => {
     fakes.eligible = true;
     mount("/", false);
-    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Additional settings" }));
     fireEvent.click(screen.getByRole("switch", { name: "Isolated checkout" }));
     expect(screen.getByRole("button", { name: /^Start from/ }).textContent).toContain("main");
     fireEvent.change(prompt(), { target: { value: "Upgrade the toolchain" } });
@@ -298,7 +298,7 @@ describe("Home composer", () => {
   it("starts an isolated checkout from a typed ref", () => {
     fakes.eligible = true;
     mount("/", false);
-    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Additional settings" }));
     fireEvent.click(screen.getByRole("switch", { name: "Isolated checkout" }));
     fireEvent.click(screen.getByRole("button", { name: /^Start from/ }));
     const input = screen.getByRole("textbox", { name: "Branch, tag or commit" });

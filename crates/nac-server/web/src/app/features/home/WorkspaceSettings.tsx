@@ -12,7 +12,7 @@ import {
 import { cn } from "@/app/lib/cn";
 
 /**
- * The composer strip's settings button: whether the session gets an isolated
+ * The composer strip's "⋯" button: whether the session gets an isolated
  * checkout, and the ref it starts from. Folded away so a plain session never
  * meets checkout choices. The checkout needs a direct agent on a Local Git
  * project, so the switch is live only when `available`.
@@ -52,13 +52,13 @@ export function WorkspaceSettings({
       open={open}
       onClose={close}
       sticky
-      focusScope="Workspace settings"
-      placement={PopoverPlacement.TopLeft}
+      focusScope="Additional settings"
+      placement={PopoverPlacement.TopRight}
       size={PopoverSize.Large}
       content={
         view === "main" ? (
           <>
-            <p className="type-meta px-2.5 pt-1.5 pb-1 text-basic-tertiary">Configure workspace</p>
+            <p className="type-meta px-2.5 pt-1.5 pb-1 text-basic-tertiary">Additional settings</p>
             <SettingRow icon={IconName.FolderCopy} label="Isolated checkout">
               <Switch
                 aria-label="Isolated checkout"
@@ -141,12 +141,12 @@ export function WorkspaceSettings({
       }
     >
       <Tooltip
-        title={isolated ? `Isolated checkout from ${startRef ?? "…"}` : "Workspace settings"}
+        title={isolated ? `Isolated checkout from ${startRef ?? "…"}` : "Additional settings"}
         disabled={open}
       >
         <button
           type="button"
-          aria-label="Workspace settings"
+          aria-label="Additional settings"
           aria-haspopup="dialog"
           aria-expanded={open}
           disabled={disabled}
@@ -163,7 +163,7 @@ export function WorkspaceSettings({
               <span className="max-w-40 truncate">{startRef ?? "Isolated"}</span>
             </span>
           ) : null}
-          <Icon iconName={IconName.Gear} size={16} className="shrink-0" />
+          <Icon iconName={IconName.MenuHorizontal} size={16} className="shrink-0" />
         </button>
       </Tooltip>
     </Popover>

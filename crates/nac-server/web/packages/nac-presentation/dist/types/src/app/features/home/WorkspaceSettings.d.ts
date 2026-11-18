@@ -1,5 +1,5 @@
 /**
- * The composer strip's settings button: whether the session gets an isolated
+ * The composer strip's "⋯" button: whether the session gets an isolated
  * checkout, and the ref it starts from. Folded away so a plain session never
  * meets checkout choices. The checkout needs a direct agent on a Local Git
  * project, so the switch is live only when `available`.
