@@ -269,10 +269,8 @@ describe("Home composer", () => {
     expect(fakes.start).not.toHaveBeenCalled();
   });
 
-  it("shows where the session runs, with checkout choices folded behind ⋯", () => {
+  it("folds checkout choices behind ⋯", () => {
     mount("/", false);
-    const strip = screen.getByRole("group", { name: "Workspace" });
-    expect(strip.textContent).toContain("This computer");
     expect(screen.queryByRole("switch", { name: "Isolated checkout" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Additional settings" }));
     const isolated = screen.getByRole("switch", { name: "Isolated checkout" });
@@ -317,7 +315,7 @@ describe("Home composer", () => {
     );
   });
 
-  it("picks where the session runs, then that location's projects", () => {
+  it("groups projects under where they run, naming an SSH host on the chip", () => {
     const withRemote = [
       ...projects,
       {
@@ -329,26 +327,26 @@ describe("Home composer", () => {
       },
     ] as ProjectRecord[];
     mount("/", false, withRemote);
-    fireEvent.click(screen.getByRole("button", { name: "Location: This computer" }));
-    const options = screen.getAllByRole("menuitemradio").map((item) => item.textContent);
-    expect(options).toEqual(["This computer", "build-box"]);
+    expect(screen.queryByRole("button", { name: /^Location:/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Project: Borealis" }));
+    const local = screen.getByRole("group", { name: "This computer" });
+    const remote = screen.getByRole("group", { name: "build-box" });
+    expect(local.compareDocumentPosition(remote) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(
+      Array.from(local.querySelectorAll('[role="menuitemradio"]'), (item) => item.textContent),
+    ).toEqual(["Atlas/atlas", "Borealis/borealis"]);
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /Render farm/ }));
+    expect(screen.getByRole("button", { name: "Project: Render farm" }).textContent).toBe(
+      "build-box / Render farm",
+    );
+  });
 
-    fireEvent.click(screen.getByRole("menuitemradio", { name: /build-box/ }));
-    expect(screen.getByRole("button", { name: "Location: build-box" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Project: Render farm" }));
-    expect(screen.getAllByRole("menuitemradio").map((item) => item.textContent)).toEqual([
-      expect.stringContaining("Render farm"),
-    ]);
+  it("adds an SSH project from the project menu", () => {
+    mount();
+    fireEvent.click(screen.getByRole("button", { name: "Project: Borealis" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Add SSH project…" }));
     expect(fakes.createSsh).toHaveBeenCalledOnce();
     expect(fakes.create).not.toHaveBeenCalled();
-  });
-
-  it("adds an SSH project from the location menu", () => {
-    mount();
-    fireEvent.click(screen.getByRole("button", { name: "Location: This computer" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Add SSH project…" }));
-    expect(fakes.createSsh).toHaveBeenCalledOnce();
   });
 
   it("adds a repository from the project picker on a managed host", () => {

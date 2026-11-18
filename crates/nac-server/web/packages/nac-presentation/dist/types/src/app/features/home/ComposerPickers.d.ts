@@ -1,32 +1,22 @@
 import type { ProjectRecord, SessionBehavior } from "../../types/api";
-/** Which project the new session runs in, plus "Add project…". */
-export declare function ProjectPicker({ projects, value, onChange, onAddProject, addLabel, disabled, }: {
+/**
+ * Which project the new session runs in. A project's host is part of it, so
+ * the menu groups projects under where they run rather than offering the host
+ * as a separate choice; SSH projects name their host on the chip.
+ */
+export declare function ProjectPicker({ projects, value, onChange, onAddProject, addLabel, onAddSsh, disabled, }: {
     projects: readonly ProjectRecord[];
     value: ProjectRecord | null;
     onChange: (projectId: string) => void;
     onAddProject: () => void;
     addLabel: string;
+    /** Absent where projects cannot live on SSH hosts (a managed host). */
+    onAddSsh?: () => void;
     disabled?: boolean;
 }): import("react").JSX.Element;
 /** Agent / Agent + Orchestrator / Orchestrator. Behavior is fixed per session. */
 export declare function BehaviorPicker({ value, onChange, disabled, }: {
     value: SessionBehavior;
     onChange: (behavior: SessionBehavior) => void;
-    disabled?: boolean;
-}): import("react").JSX.Element;
-/** One place sessions can run: this computer, or an SSH host its projects use. */
-export interface ComposerLocation {
-    host: string | null;
-}
-/**
- * Where the new session runs. SSH belongs to a project, so each host here is
- * one the user's projects already use; picking a location moves the composer
- * to that location's most recent project.
- */
-export declare function LocationPicker({ locations, value, onChange, onAddSsh, disabled, }: {
-    locations: readonly ComposerLocation[];
-    value: string | null;
-    onChange: (host: string | null) => void;
-    onAddSsh: () => void;
     disabled?: boolean;
 }): import("react").JSX.Element;

@@ -5523,10 +5523,6 @@
       overflow: hidden;
     }
 
-    [data-nac-runtime]:is(.max-md\:hidden), [data-nac-runtime] .max-md\:hidden {
-      display: none;
-    }
-
     [data-nac-runtime]:is(.max-md\:\!size-11), [data-nac-runtime] .max-md\:\!size-11 {
       width: calc(var(--spacing) * 11) !important;
       height: calc(var(--spacing) * 11) !important;

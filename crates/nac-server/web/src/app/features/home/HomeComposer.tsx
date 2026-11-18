@@ -24,7 +24,7 @@ import type {
 import { defaultBehavior } from "./behaviors";
 import { Chip } from "./Chip";
 import { ModelPicker } from "./ComposerModelPickers";
-import { BehaviorPicker, LocationPicker, ProjectPicker } from "./ComposerPickers";
+import { BehaviorPicker, ProjectPicker } from "./ComposerPickers";
 import { WorkspaceSettings } from "./WorkspaceSettings";
 import {
   modelChipLabel,
@@ -63,8 +63,7 @@ function recentProjectId(
 
 /**
  * Home's hero composer — the app's one new-session flow. The strip on top picks
- * where the session runs (this computer or an SSH host the projects use) and
- * the project there; its "⋯" button holds the isolated-checkout choice and ref,
+ * the project, grouped by where it runs (this computer or an SSH host); its "⋯" button holds the isolated-checkout choice and ref,
  * out of the way of a plain session. The composer's chips pick the behavior and
  * model. Sending creates the session with the prompt as its first message.
  */
@@ -96,13 +95,7 @@ export function HomeComposer({
     if (requested) setChosen(null);
   }
   const fallback = useMemo(() => recentProjectId(projects, sessions), [projects, sessions]);
-  const locations = useMemo(
-    () =>
-      [...new Set([null, ...projects.map((entry) => entry.ssh_host ?? null)])].map((at) => ({
-        host: at,
-      })),
-    [projects],
-  );
+
   const candidate = chosen ?? requested ?? fallback;
   // A requested project that no longer exists leaves the choice to the user
   // rather than quietly starting somewhere else.
@@ -219,13 +212,7 @@ export function HomeComposer({
     }
   };
 
-  const host = project?.ssh_host ?? null;
-  const hereProjects = projects.filter((entry) => (entry.ssh_host ?? null) === host);
-  const addProject = managed.isManaged
-    ? managed.addRepository
-    : host
-      ? projectActions.createSsh
-      : projectActions.create;
+  const addProject = managed.isManaged ? managed.addRepository : projectActions.create;
   const chooseProject = (id: string) => {
     setChosen(id);
     if (prompt) draft.update(prompt, id);
@@ -234,13 +221,6 @@ export function HomeComposer({
       next.delete("project");
       setParams(next, { replace: true });
     }
-  };
-  const chooseLocation = (next: string | null) => {
-    const there = projects.filter((entry) => (entry.ssh_host ?? null) === next);
-    const id = recentProjectId(there, sessions);
-    if (id) chooseProject(id);
-    else if (next) projectActions.createSsh();
-    else projectActions.create();
   };
 
   return (
@@ -251,28 +231,13 @@ export function HomeComposer({
           aria-label="Workspace"
           className="flex min-w-0 items-center gap-1 py-1 pr-1 pl-2 max-md:pl-1"
         >
-          {managed.isManaged ? (
-            <span className="type-label inline-flex shrink-0 items-center gap-1.5 px-1.5 text-basic-secondary max-md:hidden">
-              <Icon iconName={IconName.Desktop} size={14} className="text-basic-tertiary" />
-              Managed host
-            </span>
-          ) : (
-            <LocationPicker
-              locations={locations}
-              value={host}
-              disabled={busy}
-              onChange={chooseLocation}
-              onAddSsh={projectActions.createSsh}
-            />
-          )}
           <ProjectPicker
-            projects={hereProjects}
+            projects={projects}
             value={project}
             disabled={busy}
-            addLabel={
-              managed.isManaged ? "Add repository…" : host ? "Add SSH project…" : "Add project…"
-            }
+            addLabel={managed.isManaged ? "Add repository…" : "Add project…"}
             onAddProject={addProject}
+            onAddSsh={managed.isManaged ? undefined : projectActions.createSsh}
             onChange={chooseProject}
           />
           {project ? (
