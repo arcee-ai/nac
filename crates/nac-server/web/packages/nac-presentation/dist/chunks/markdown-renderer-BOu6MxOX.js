@@ -6557,54 +6557,54 @@ function Sl({ id: e, children: t }) {
 		r,
 		a.pathname,
 		e
-	]), u = bl(c), d = M(null), f = M(null), p = M(!1), m = M(!1), g = M(!1), _ = M(null), v = M(null), y = M(null), [b, x] = ne(null), [S, C] = ne(null);
+	]), u = bl(c), d = M(null), f = M(null), p = M(!1), m = M(!1), g = M(!1), _ = M(!1), v = M(null), y = M(null), b = M(null), [x, S] = ne(null), [C, w] = ne(null);
 	A(() => (s.current += 1, () => {
-		s.current += 1, d.current === c && (d.current = null), f.current === c && (f.current = null), m.current = !1;
+		s.current += 1, d.current === c && (d.current = null), f.current === c && (f.current = null), m.current = !1, g.current = !1;
 	}), [c]);
-	let w = b === c, T = S?.binding === c && (n.isError || n.dataUpdatedAt <= S.dataUpdatedAt), E = !n.isError && xl(n.data, e) && !T;
+	let T = x === c, E = C?.binding === c && (n.isError || n.dataUpdatedAt <= C.dataUpdatedAt), D = !n.isError && xl(n.data, e) && !E;
 	A(() => {
-		E && !w && m.current && (m.current = !1, y.current?.focus()), f.current === c && (w ? g.current || (g.current = !0, _.current?.focus()) : n.isPending || (p.current && (E ? y.current?.focus() : v.current?.focus()), p.current = !1, f.current = null));
+		D && !T && m.current ? (m.current = !1, b.current?.focus()) : !D && !T && !n.isPending && g.current && (g.current = !1, y.current?.focus()), f.current === c && (T ? _.current || (_.current = !0, v.current?.focus()) : n.isPending || (p.current && (D ? b.current?.focus() : y.current?.focus()), p.current = !1, f.current = null));
 	}, [
 		c,
-		w,
+		T,
 		n.isPending,
-		E
+		D
 	]);
-	let D = (t, r) => {
+	let O = (t, r) => {
 		if (d.current === c) return;
-		r && (m.current = !1, f.current = c, g.current = !1), d.current = c;
+		r && (m.current = !1, g.current = !1, f.current = c, _.current = !1), d.current = c;
 		let a = s.current;
-		x(c), (async () => {
+		S(c), (async () => {
 			try {
 				let n = await u();
 				if (s.current !== a) return;
 				if (!xl(n, e)) {
-					C({
+					w({
 						binding: c,
 						dataUpdatedAt: Date.now()
 					});
 					return;
 				}
-				C(null), t && i(h.session(e));
+				w(null), t && i(h.session(e));
 			} catch {
 				if (s.current !== a) return;
-				C({
+				w({
 					binding: c,
 					dataUpdatedAt: n.dataUpdatedAt
 				});
 			} finally {
-				s.current === a && (d.current = null, x(null));
+				s.current === a && (d.current = null, S(null));
 			}
 		})();
-	}, O = w || n.isPending ? "Checking task availability" : E ? "" : "Task unavailable", k = w || n.isPending ? "Checking whether the task is available." : E ? "The task is available." : "The task is unavailable.";
+	}, k = T || n.isPending ? "Checking task availability" : D ? "" : "Task unavailable", ee = T || n.isPending ? "Checking whether the task is available." : D ? "The task is available." : "The task is unavailable.";
 	return /* @__PURE__ */ ae("span", { children: [/* @__PURE__ */ P("span", {
 		role: "status",
 		"aria-live": "polite",
 		"aria-atomic": "true",
 		className: "sr-only",
-		children: k
-	}), !E || w ? /* @__PURE__ */ ae(ie, { children: [/* @__PURE__ */ ae("span", {
-		ref: _,
+		children: ee
+	}), !D || T ? /* @__PURE__ */ ae(ie, { children: [/* @__PURE__ */ ae("span", {
+		ref: v,
 		onFocus: () => {
 			p.current = !0;
 		},
@@ -6613,16 +6613,16 @@ function Sl({ id: e, children: t }) {
 		},
 		tabIndex: -1,
 		"aria-disabled": "true",
-		title: O,
+		title: k,
 		className: "rounded-sm focus:outline-2 focus:outline-[var(--color-border-focus-outline)]",
 		children: [
 			t,
 			" (",
-			O,
+			k,
 			")"
 		]
-	}), !w && !n.isPending ? /* @__PURE__ */ ae(ie, { children: [" ", /* @__PURE__ */ P("button", {
-		ref: v,
+	}), !T && !n.isPending ? /* @__PURE__ */ ae(ie, { children: [" ", /* @__PURE__ */ P("button", {
+		ref: y,
 		onFocus: () => {
 			m.current = !0;
 		},
@@ -6631,15 +6631,21 @@ function Sl({ id: e, children: t }) {
 		},
 		type: "button",
 		className: "inline-flex min-h-7 items-center rounded-sm px-1 text-accent-primary underline focus-visible:outline-2 focus-visible:outline-[var(--color-border-focus-outline)] max-md:min-h-11",
-		onClick: (e) => D(!1, document.activeElement === e.currentTarget),
+		onClick: (e) => O(!1, document.activeElement === e.currentTarget),
 		children: "Check again"
 	})] }) : null] }) : /* @__PURE__ */ P("a", {
-		ref: y,
+		ref: b,
+		onFocus: () => {
+			g.current = !0;
+		},
+		onBlur: () => {
+			g.current = !1;
+		},
 		role: "link",
 		tabIndex: 0,
-		onClick: (e) => D(!0, document.activeElement === e.currentTarget),
+		onClick: (e) => O(!0, document.activeElement === e.currentTarget),
 		onKeyDown: (e) => {
-			e.key === "Enter" && (e.preventDefault(), D(!0, document.activeElement === e.currentTarget));
+			e.key === "Enter" && (e.preventDefault(), O(!0, document.activeElement === e.currentTarget));
 		},
 		children: t
 	})] });
@@ -6652,7 +6658,7 @@ function Cl(e) {
 var wl = /* @__PURE__ */ e({ default: () => Hl }), Tl = [Xc], El = /* @__PURE__ */ new Map();
 function Dl(e) {
 	let t = El.get(e);
-	return t || (t = import("./markdown-mathjax-CmsVB2tZ.js").then(({ createMathjaxPlugin: t, remarkMathPlugin: n }) => ({
+	return t || (t = import("./markdown-mathjax-DyFYlKD0.js").then(({ createMathjaxPlugin: t, remarkMathPlugin: n }) => ({
 		remark: [...Tl, n],
 		rehype: [t(e)]
 	})), El.set(e, t)), t;

@@ -215,6 +215,21 @@ for (const packed of [false, true]) {
       await expect(link).toBeVisible({ timeout: 15_000 });
       await expect(composer).toBeFocused();
       await expectCaller();
+      // A passive failure can also replace a focused link without an activation.
+      await link.focus();
+      failInventory = true;
+      await expect(retry).toBeFocused({ timeout: 15_000 });
+      await expectCaller();
+      failInventory = false;
+      await expect(link).toBeFocused({ timeout: 15_000 });
+      await composer.focus();
+      failInventory = true;
+      await expect(retry).toBeVisible({ timeout: 15_000 });
+      await expect(composer).toBeFocused();
+      failInventory = false;
+      await expect(link).toBeVisible({ timeout: 15_000 });
+      await expect(composer).toBeFocused();
+      await expectCaller();
     } finally {
       await fixture?.stop();
     }
