@@ -80,7 +80,6 @@ fn fixture_with_policy(
         AgentConfig {
             command_output_limits: crate::terminal::CommandOutputLimits::default(),
             mode: AgentMode::Direct,
-            session_behavior: None,
             store_path: store_path.clone(),
             session_id: Some("direct-terminal".into()),
             orchestrator_compaction_threshold: None,

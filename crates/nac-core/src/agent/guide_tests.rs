@@ -1,10 +1,6 @@
 use super::*;
 
-fn agent(
-    mode: AgentMode,
-    behavior: Option<crate::sessions::SessionBehavior>,
-    preload: bool,
-) -> Agent {
+fn agent(mode: AgentMode, preload: bool) -> Agent {
     let root = std::env::temp_dir();
     let registry = Arc::new(crate::skills::SkillRegistry::bundled_for_test());
     let initial_messages = if preload {
@@ -18,7 +14,6 @@ fn agent(
         AgentConfig {
             command_output_limits: crate::terminal::CommandOutputLimits::default(),
             mode,
-            session_behavior: behavior,
             store_path: root.join("unused-guide-test.db"),
             session_id: None,
             orchestrator_compaction_threshold: None,
@@ -50,8 +45,8 @@ fn agent(
 
 #[test]
 fn direct_guide_routing_is_bounded() {
-    for (mode, behavior) in [(AgentMode::Direct, crate::sessions::SessionBehavior::Direct)] {
-        let mut agent = agent(mode, Some(behavior), false);
+    {
+        let mut agent = agent(AgentMode::Direct, false);
         let Message::System { content } = &agent.messages[0] else {
             panic!("missing system prompt")
         };
@@ -79,11 +74,11 @@ fn direct_guide_routing_is_bounded() {
 
 #[test]
 fn guide_worker_retrieval_requires_the_selected_preload_and_survives_refresh() {
-    let mut unselected = agent(AgentMode::Worker, None, false);
+    let mut unselected = agent(AgentMode::Worker, false);
     let defs = unselected.refresh_model_request_capabilities().unwrap();
     assert!(!defs.iter().any(|tool| tool.function.name == "nac_guide"));
     assert!(!unselected.messages.iter().any(|message| matches!(message, Message::System { content } if content.contains("NAC product self-help"))));
-    let mut selected = agent(AgentMode::Worker, None, true);
+    let mut selected = agent(AgentMode::Worker, true);
     for _ in 0..2 {
         let defs = selected.refresh_model_request_capabilities().unwrap();
         assert!(defs.iter().any(|tool| tool.function.name == "nac_guide"));

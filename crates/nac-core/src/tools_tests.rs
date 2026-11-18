@@ -170,65 +170,27 @@ fn direct_registries_preserve_exact_topology_capabilities() {
         .into_iter()
         .map(|definition| definition.function.name)
         .collect::<Vec<_>>();
-    let delegating = super::direct_with_orchestrator_tool_definitions(false)
-        .into_iter()
-        .map(|definition| definition.function.name)
-        .collect::<Vec<_>>();
     let direct_web = super::direct_tool_definitions_with_web(false, true)
-        .into_iter()
-        .map(|definition| definition.function.name)
-        .collect::<Vec<_>>();
-    let delegating_web = super::direct_with_orchestrator_tool_definitions_with_web(false, true)
         .into_iter()
         .map(|definition| definition.function.name)
         .collect::<Vec<_>>();
     for name in ["request_question", "read_question", "answer_question"] {
         assert!(direct.iter().any(|n| n == name));
-        assert!(
-            !delegating.iter().any(|n| n == name),
-            "question delivery starts in plain direct mode only"
-        );
         assert!(!worker.iter().any(|n| n == name));
     }
     assert_eq!(worker, super::CODING_TOOL_NAMES);
     assert_eq!(direct, super::DIRECT_TOOL_NAMES);
-    assert_eq!(delegating, super::DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES);
-    let shared = direct
-        .iter()
-        .filter(|name| {
-            !super::TASK_FOLLOWUP_TOOL_NAMES.contains(&name.as_str())
-                && !["request_question", "read_question", "answer_question"]
-                    .contains(&name.as_str())
-        })
-        .cloned()
-        .collect::<Vec<_>>();
-    assert_eq!(&delegating[..shared.len()], &shared);
-    assert_eq!(
-        &delegating[delegating.len() - super::ORCHESTRATOR_CONTROL_TOOL_NAMES.len()..],
-        super::ORCHESTRATOR_CONTROL_TOOL_NAMES
-    );
     assert_eq!(&direct_web[..super::DIRECT_TOOL_NAMES.len()], &direct);
     assert_eq!(
         &direct_web[super::DIRECT_TOOL_NAMES.len()..],
-        super::WEB_TOOL_NAMES
-    );
-    assert_eq!(
-        &delegating_web[..super::DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES.len()],
-        &delegating
-    );
-    assert_eq!(
-        &delegating_web[super::DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES.len()..],
         super::WEB_TOOL_NAMES
     );
 }
 
 #[test]
 fn launch_tools_use_strict_compatible_nullable_new_session_ids() {
-    let definitions = super::direct_with_orchestrator_tool_definitions(false);
-    for (tool_name, session_id) in [
-        ("subagent", "child_session_id"),
-        ("orchestrator_launch", "orchestrator_session_id"),
-    ] {
+    let definitions = super::direct_tool_definitions(false);
+    for (tool_name, session_id) in [("subagent", "child_session_id")] {
         let parameters = &definitions
             .iter()
             .find(|definition| definition.function.name == tool_name)

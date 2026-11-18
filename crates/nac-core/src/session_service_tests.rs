@@ -265,7 +265,6 @@ fn build_test_agent(
         AgentConfig {
             command_output_limits: crate::terminal::CommandOutputLimits::default(),
             mode,
-            session_behavior: None,
             store_path,
             session_id,
             orchestrator_compaction_threshold,
@@ -429,7 +428,6 @@ fn has_sandbox_reflects_the_agent_execution_backend() {
         AgentConfig {
             command_output_limits: crate::terminal::CommandOutputLimits::default(),
             mode: AgentMode::Orchestrator,
-            session_behavior: None,
             store_path: store_path.clone(),
             session_id: Some("has-sandbox-sandboxed".to_string()),
             orchestrator_compaction_threshold: None,
@@ -586,7 +584,6 @@ async fn sandbox_container_destruction_preserves_worktree_until_durable_delete()
         AgentConfig {
             command_output_limits: crate::terminal::CommandOutputLimits::default(),
             mode: AgentMode::Orchestrator,
-            session_behavior: None,
             store_path: store_path.clone(),
             session_id: Some("destroy-preserves-worktree".to_string()),
             orchestrator_compaction_threshold: None,

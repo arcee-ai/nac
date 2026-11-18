@@ -234,7 +234,6 @@ mod tests {
             AgentConfig {
                 command_output_limits: crate::terminal::CommandOutputLimits::default(),
                 mode: AgentMode::Worker,
-                session_behavior: None,
                 store_path,
                 session_id: Some("session".to_string()),
                 orchestrator_compaction_threshold: None,
@@ -455,7 +454,6 @@ mod tests {
             AgentConfig {
                 command_output_limits: crate::terminal::CommandOutputLimits::default(),
                 mode: AgentMode::Worker,
-                session_behavior: None,
                 store_path: store::default_store_path(),
                 session_id: None,
                 orchestrator_compaction_threshold: None,

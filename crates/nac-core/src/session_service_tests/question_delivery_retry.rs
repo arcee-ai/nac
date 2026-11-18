@@ -294,7 +294,6 @@ async fn heartbeat_question_delivery_typed_answer_failure_uses_real_goal_retry_t
         AgentConfig {
             command_output_limits: crate::terminal::CommandOutputLimits::default(),
             mode: AgentMode::Direct,
-            session_behavior: Some(sessions::SessionBehavior::Direct),
             store_path: path.clone(),
             session_id: Some(id.into()),
             orchestrator_compaction_threshold: None,

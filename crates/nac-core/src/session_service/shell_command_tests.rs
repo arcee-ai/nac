@@ -52,7 +52,6 @@ fn test_direct_active_service_at(
         AgentConfig {
             command_output_limits: crate::terminal::CommandOutputLimits::default(),
             mode: AgentMode::Direct,
-            session_behavior: Some(sessions::SessionBehavior::Direct),
             store_path: path.clone(),
             session_id: Some(session_id.into()),
             orchestrator_compaction_threshold: None,

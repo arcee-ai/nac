@@ -250,7 +250,6 @@ async fn prepare_run_config_inner(
             AgentConfig {
                 command_output_limits: worker_command_output_limits(config)?,
                 mode: agent_mode,
-                session_behavior: Some(behavior),
                 store_path: store_path.clone(),
                 session_id: Some(session_id.clone()),
                 orchestrator_compaction_threshold,
@@ -396,7 +395,6 @@ async fn prepare_run_config_inner(
             AgentConfig {
                 command_output_limits: worker_command_output_limits(config)?,
                 mode: agent_mode,
-                session_behavior: Some(behavior),
                 store_path: store_path.clone(),
                 session_id: Some(session_id.clone()),
                 orchestrator_compaction_threshold,
@@ -587,7 +585,6 @@ async fn build_retired_managed_worker_config(
         AgentConfig {
             command_output_limits: worker_command_output_limits(config)?,
             mode: AgentMode::Worker,
-            session_behavior: None,
             store_path: store_path.clone(),
             session_id: Some(options.dispatch.session_id.clone()),
             orchestrator_compaction_threshold: None,

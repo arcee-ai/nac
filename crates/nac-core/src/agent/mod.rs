@@ -61,8 +61,7 @@ use prompt_rendering::{
     light_model_prompt_guidance, render_orchestrator_system_prompt, render_worker_system_prompt,
 };
 pub(crate) use prompt_rendering::{
-    render_direct_system_prompt, render_direct_with_orchestrator_system_prompt,
-    render_general_child_system_prompt,
+    render_direct_system_prompt, render_general_child_system_prompt,
 };
 use tool_exec::{execute_tools_parallel, finalize_tool_results};
 pub(crate) use transcript_messages::TranscriptMessages;
@@ -122,7 +121,6 @@ pub struct AgentConfig {
     /// Authoritative immutable behavior for a persistent top-level session.
     /// Fresh sessions are constructed before their row exists, so callers
     /// must not rely on a store reread to distinguish the two direct modes.
-    pub session_behavior: Option<crate::sessions::SessionBehavior>,
     pub store_path: PathBuf,
     pub session_id: Option<String>,
     pub orchestrator_compaction_threshold: Option<u64>,
@@ -247,20 +245,6 @@ impl Agent {
         } else {
             None
         };
-        let direct_behavior = if mode == AgentMode::Direct && traditional_child.is_none() {
-            config
-                .session_behavior
-                .or_else(|| {
-                    config.session_id.as_deref().and_then(|session_id| {
-                        crate::sessions::load_session(&config.store_path, session_id)
-                            .ok()
-                            .map(|snapshot| snapshot.behavior)
-                    })
-                })
-                .unwrap_or(crate::sessions::SessionBehavior::Direct)
-        } else {
-            crate::sessions::SessionBehavior::Direct
-        };
         let compaction = if matches!(mode, AgentMode::Orchestrator | AgentMode::Direct) {
             config.session_id.clone().map(|session_id| {
                 CompactionState::new(
@@ -313,18 +297,8 @@ impl Agent {
                     tools::coding_tool_definitions(client.supports_image_tool_results()),
                 ),
                 None => (
-                    if direct_behavior == crate::sessions::SessionBehavior::DirectWithOrchestrator {
-                        render_direct_with_orchestrator_system_prompt(&cwd)
-                    } else {
-                        render_direct_system_prompt(&cwd)
-                    },
-                    if direct_behavior == crate::sessions::SessionBehavior::DirectWithOrchestrator {
-                        tools::direct_with_orchestrator_tool_definitions(
-                            client.supports_image_tool_results(),
-                        )
-                    } else {
-                        tools::direct_tool_definitions(client.supports_image_tool_results())
-                    },
+                    render_direct_system_prompt(&cwd),
+                    tools::direct_tool_definitions(client.supports_image_tool_results()),
                 ),
             },
         };
@@ -639,7 +613,6 @@ impl Agent {
             AgentConfig {
                 command_output_limits: crate::terminal::CommandOutputLimits::default(),
                 mode: AgentMode::Worker,
-                session_behavior: None,
                 store_path: crate::store::default_store_path(),
                 session_id: None,
                 orchestrator_compaction_threshold: None,

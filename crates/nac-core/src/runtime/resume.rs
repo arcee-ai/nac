@@ -502,7 +502,6 @@ pub(super) async fn build_resume_config_from_snapshot(
     let agent_config = AgentConfig {
         command_output_limits: worker_command_output_limits(config)?,
         mode: agent_mode,
-        session_behavior: Some(snapshot.behavior),
         store_path: store_path.clone(),
         session_id: Some(snapshot.session_id.clone()),
         orchestrator_compaction_threshold: snapshot.orchestrator_compaction_threshold,

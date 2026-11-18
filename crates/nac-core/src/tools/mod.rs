@@ -30,7 +30,6 @@ pub(crate) mod guide;
 pub mod kernel;
 mod mcp_adapter;
 pub(crate) mod mutation;
-pub(crate) mod orchestrator;
 mod peer_goals;
 pub(crate) mod product_context;
 pub mod read;
@@ -197,6 +196,7 @@ pub(crate) fn product_context_tool_definitions() -> Vec<ToolDefinition> {
 }
 
 pub(crate) const GOAL_TOOL_NAMES: [&str; 3] = ["create_goal", "get_goal", "update_goal"];
+pub(crate) const WEB_TOOL_NAMES: [&str; 2] = ["web_search", "web_fetch"];
 mod fresh_task_schedules;
 pub(crate) mod heartbeat;
 pub(crate) const DIRECT_TOOL_NAMES: [&str; 35] = [
@@ -236,54 +236,6 @@ pub(crate) const DIRECT_TOOL_NAMES: [&str; 35] = [
     "fresh_task_schedule_control",
     "fresh_task_schedule_read",
 ];
-pub(crate) const ORCHESTRATOR_CONTROL_TOOL_NAMES: [&str; 6] = [
-    "orchestrator_launch",
-    "orchestrator_status",
-    "orchestrator_steer",
-    "orchestrator_read",
-    "orchestrator_wait",
-    "orchestrator_cancel",
-];
-pub(crate) const WEB_TOOL_NAMES: [&str; 2] = ["web_search", "web_fetch"];
-pub(crate) const DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES: [&str; 36] = [
-    "nac_guide",
-    "read",
-    "write",
-    "edit",
-    "glob",
-    "grep",
-    "exec_command",
-    "write_stdin",
-    "read_command_output",
-    "list_executions",
-    "list_projects",
-    "launch_task",
-    "task_launch_status",
-    "find_tasks",
-    "read_task",
-    "wait_tasks",
-    "task_goal",
-    "create_goal",
-    "get_goal",
-    "update_goal",
-    "subagent",
-    "subagent_status",
-    "subagent_cancel",
-    "heartbeat_control",
-    "list_heartbeats",
-    "read_heartbeat",
-    "preview_heartbeat",
-    "report_heartbeat",
-    "fresh_task_schedule_control",
-    "fresh_task_schedule_read",
-    "orchestrator_launch",
-    "orchestrator_status",
-    "orchestrator_steer",
-    "orchestrator_read",
-    "orchestrator_wait",
-    "orchestrator_cancel",
-];
-
 fn native_tool_registry(
     image_read: bool,
 ) -> Result<kernel::ToolRegistry, kernel::ToolRegistryError> {
@@ -325,12 +277,6 @@ fn native_tool_registry(
         .register(subagent::SubagentTool)
         .register(subagent::SubagentStatusTool)
         .register(subagent::SubagentCancelTool)
-        .register(orchestrator::LaunchTool)
-        .register(orchestrator::StatusTool)
-        .register(orchestrator::SteerTool)
-        .register(orchestrator::ReadTool)
-        .register(orchestrator::WaitTool)
-        .register(orchestrator::CancelTool)
         .register(web::WebSearchTool)
         .register(web::WebFetchTool)
         .finish()?;
@@ -378,39 +324,8 @@ pub(crate) fn direct_tool_definitions_with_web(
     definitions
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "the static direct-with-orchestrator capability list is covered by registry tests"
-)]
-pub fn direct_with_orchestrator_tool_definitions(image_read: bool) -> Vec<ToolDefinition> {
-    let snapshot = native_tool_registry(image_read)
-        .expect("built-in direct tool registration must be collision-free")
-        .snapshot(DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES)
-        .expect("direct-with-orchestrator capability selection must be complete");
-    debug_assert!(
-        ORCHESTRATOR_CONTROL_TOOL_NAMES
-            .iter()
-            .all(|name| snapshot.contains(name)),
-        "orchestrator runtime must expose every orchestrator control capability"
-    );
-    snapshot.definitions()
-}
-
-#[cfg(test)]
-pub(crate) fn direct_with_orchestrator_tool_definitions_with_web(
-    image_read: bool,
-    web_enabled: bool,
-) -> Vec<ToolDefinition> {
-    let mut definitions = direct_with_orchestrator_tool_definitions(image_read);
-    if web_enabled {
-        definitions.extend(web::definitions());
-    }
-    definitions
-}
-
 fn is_complete_direct_capability(name: &str) -> bool {
     DIRECT_TOOL_NAMES.contains(&name)
-        || DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES.contains(&name)
         || WEB_TOOL_NAMES.contains(&name)
         || PRODUCT_CONTEXT_TOOL_NAMES.contains(&name)
 }
