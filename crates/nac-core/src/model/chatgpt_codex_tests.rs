@@ -1544,3 +1544,40 @@ fn codex_speed_is_independent_of_reasoning_and_omitted_for_standard() {
         }
     }
 }
+
+#[cfg(feature = "codex-e2e-fixture")]
+#[test]
+fn codex_fixture_accepts_only_loopback_and_synthetic_credentials() {
+    let mut auth = StoredCodexAuth {
+        auth_type: AUTH_TYPE.into(),
+        access: "e2e-only".into(),
+        refresh: "e2e-only".into(),
+        expires_at_ms: u64::MAX,
+        account_id: "codex-e2e-account".into(),
+    };
+    assert_eq!(
+        validate_codex_e2e_fixture("http://127.0.0.1:1234/responses", &auth).unwrap(),
+        "http://127.0.0.1:1234/responses"
+    );
+    for url in [
+        "https://127.0.0.1:1234/responses",
+        "http://localhost:1234/responses",
+        "http://127.0.0.2:1234/responses",
+        "http://example.com:1234/responses",
+        "http://127.0.0.1/responses",
+        "http://127.0.0.1:1234/other",
+        "http://user@127.0.0.1:1234/responses",
+        "http://127.0.0.1:1234/responses?x=1",
+        "http://127.0.0.1:1234/responses#fragment",
+    ] {
+        assert!(validate_codex_e2e_fixture(url, &auth).is_err(), "{url}");
+    }
+    auth.access = "real-or-other-access".into();
+    assert!(validate_codex_e2e_fixture("http://127.0.0.1:1234/responses", &auth).is_err());
+    auth.access = "e2e-only".into();
+    auth.refresh = "real-or-other-refresh".into();
+    assert!(validate_codex_e2e_fixture("http://127.0.0.1:1234/responses", &auth).is_err());
+    auth.refresh = "e2e-only".into();
+    auth.account_id = "another-account".into();
+    assert!(validate_codex_e2e_fixture("http://127.0.0.1:1234/responses", &auth).is_err());
+}

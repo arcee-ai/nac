@@ -423,7 +423,7 @@ impl ModelClient {
 
     fn codex_wire_tier(&self) -> Option<&'static str> {
         self.service_tier
-            .and_then(|tier| tier.codex_request_value())
+            .and_then(crate::model::ServiceTier::codex_request_value)
     }
 
     /// The origin stamp for assistant messages this client produces (S5):

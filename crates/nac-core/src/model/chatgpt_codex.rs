@@ -547,10 +547,43 @@ pub async fn send_responses(
         prompt_cache_key,
     );
     apply_service_tier(&mut request, service_tier);
+    #[cfg(feature = "codex-e2e-fixture")]
+    let auth = if std::env::var_os("NAC_CODEX_E2E_FIXTURE_URL").is_some() {
+        // Fixture mode must never send even expired synthetic credentials to
+        // the real OAuth endpoint. Reuse the hardened stored-auth reader.
+        let auth =
+            read_auth_file().map_err(|error| anyhow::Error::new(codex_auth_run_failure(error)))?;
+        if near_expiry(&auth) {
+            return Err(anyhow!("Codex fixture credentials must not be expired"));
+        }
+        auth
+    } else {
+        fresh_auth(client)
+            .await
+            .map_err(|error| anyhow::Error::new(codex_auth_run_failure(error)))?
+    };
+    #[cfg(not(feature = "codex-e2e-fixture"))]
     let auth = fresh_auth(client)
         .await
         .map_err(|error| anyhow::Error::new(codex_auth_run_failure(error)))?;
     ensure_account_binding(account_binding, &auth.account_id)?;
+
+    #[cfg(feature = "codex-e2e-fixture")]
+    if let Some(fixture_url) = codex_e2e_fixture_url(&auth)? {
+        // The synthetic fixture never enters the real OAuth refresh path, even
+        // if it intentionally responds with an authentication failure.
+        let value = post_codex_json_with_retry(
+            client,
+            &fixture_url,
+            &request,
+            &auth,
+            prompt_cache_key,
+            on_delta,
+        )
+        .await
+        .map_err(|error| anyhow::Error::new(error.into_run_failure()))?;
+        return parse_openai_responses_response(&value, &fixture_url);
+    }
 
     match post_codex_json_with_retry(client, &url, &request, &auth, prompt_cache_key, on_delta)
         .await
@@ -575,6 +608,45 @@ pub async fn send_responses(
         }
         Err(error) => Err(anyhow::Error::new(error.into_run_failure())),
     }
+}
+
+/// A fixture build may address only a synthetic account and an exact loopback
+/// endpoint. Release builds do not compile this override at all.
+#[cfg(feature = "codex-e2e-fixture")]
+fn codex_e2e_fixture_url(auth: &StoredCodexAuth) -> Result<Option<String>> {
+    let Some(value) = std::env::var_os("NAC_CODEX_E2E_FIXTURE_URL") else {
+        return Ok(None);
+    };
+    let value = value
+        .into_string()
+        .map_err(|_| anyhow!("invalid Codex fixture URL"))?;
+    validate_codex_e2e_fixture(&value, auth).map(Some)
+}
+
+#[cfg(feature = "codex-e2e-fixture")]
+fn validate_codex_e2e_fixture(value: &str, auth: &StoredCodexAuth) -> Result<String> {
+    if auth.auth_type != AUTH_TYPE
+        || auth.account_id != "codex-e2e-account"
+        || auth.access != "e2e-only"
+        || auth.refresh != "e2e-only"
+    {
+        return Err(anyhow!("Codex fixture requires synthetic credentials"));
+    }
+    let url = Url::parse(value).map_err(|_| anyhow!("invalid Codex fixture URL"))?;
+    if url.scheme() != "http"
+        || url.host_str() != Some("127.0.0.1")
+        || url.port().is_none()
+        || url.path() != "/responses"
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return Err(anyhow!(
+            "Codex fixture requires an exact loopback HTTP responses endpoint"
+        ));
+    }
+    Ok(url.to_string())
 }
 
 /// Exercise the production Codex request mapper and HTTP writer against a

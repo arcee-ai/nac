@@ -452,6 +452,10 @@ impl<'a> ModelConfigurationApplication<'a> {
         .await
     }
 
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the complete prospective model tuple is resolved together"
+    )]
     async fn resolve(
         &self,
         backend: BackendKind,

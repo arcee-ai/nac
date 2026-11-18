@@ -157,6 +157,9 @@ async fn codex_wire_captures_speed_independent_of_reasoning_and_served_receipt()
             .with_header("Content-Type", "text/event-stream")]);
             let mut client =
                 ModelClient::new_for_codex_test_server(server.base_url.clone(), "gpt-5.5");
+            // Neither an inherited selection nor explicit Standard may inject
+            // an account catalog default into the outgoing legacy request.
+            client.resolved_model.default_service_tier = Some("priority".into());
             client.service_tier = preference;
             client.reasoning_effort = effort;
             let response = client.send_turn(vec![], vec![]).await.unwrap();

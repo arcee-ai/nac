@@ -104,6 +104,12 @@ fn cache_path(home: &Path, fingerprint: &str) -> std::path::PathBuf {
 }
 
 async fn refresh_once(force: bool) -> Result<(), String> {
+    // Fixture credentials and discovery metadata are strictly local. Never
+    // send them to the public model index in a fixture-enabled browser run.
+    #[cfg(feature = "codex-e2e-fixture")]
+    if std::env::var_os("NAC_CODEX_E2E_FIXTURE_URL").is_some() {
+        return Ok(());
+    }
     let Some(home) = crate::paths::nac_home_dir() else {
         return Ok(());
     };
