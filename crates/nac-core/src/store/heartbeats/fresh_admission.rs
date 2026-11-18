@@ -30,7 +30,6 @@ pub fn fresh_heartbeat_binding(path:&Path,destination:&FreshTaskDestination,crea
     if let Some(creator)=creator_session_id {current_binding(&conn,creator)?;}
     let mut binding=current_project_binding(&conn,&destination.project_id)?;
     binding.execution_cwd=Some(execution_cwd.to_owned());
-    if destination.model_selection.is_some() { binding.model_configuration_id=None; }
     binding.fresh_task=Some(destination.clone());
     binding.creator_session_id=creator_session_id.map(str::to_owned);
     Ok(binding)
@@ -104,8 +103,7 @@ pub fn reserve_fresh_heartbeat_launch(path:&Path,occurrence_id:&str,expected_rev
     request.validate()?;
     let occupied:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM native_task_launches WHERE request_id=?1 UNION ALL SELECT 1 FROM task_launches WHERE request_id=?1)",[&request.request_id],|row|row.get(0))?;
     ensure!(!occupied,"conflict: scheduled launch identity already belongs to another launch request");
-    let mut binding=schedule.binding.clone();
-    binding.model_configuration_id=None;
+    let binding=schedule.binding.clone();
     let receipt=FreshTaskLaunchReceipt {
         occurrence_id:pending.occurrence_id.clone(),schedule_id:schedule.schedule_id.clone(),request,
         destination:destination.clone(),binding,session_id:uuid::Uuid::new_v4().to_string(),

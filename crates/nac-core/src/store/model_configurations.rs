@@ -193,14 +193,6 @@ const SELECT_COLUMNS: &str =
      reasoning_effort, extra_headers_json, orchestrator_compaction_threshold,
      initial_prompt, created_at, updated_at, light_model_json";
 
-pub(crate) fn model_configuration_columns(alias: &str) -> String {
-    SELECT_COLUMNS
-        .split(',')
-        .map(|column| format!("{alias}.{}", column.trim()))
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
 coordinated_command! {
 pub fn list_model_configurations(
     path: &Path,

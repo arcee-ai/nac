@@ -100,8 +100,6 @@ pub struct HeartbeatBinding {
     pub fresh_task: Option<super::FreshTaskDestination>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub creator_session_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model_configuration_id: Option<String>,
 }
 
 impl HeartbeatBinding {
@@ -110,11 +108,9 @@ impl HeartbeatBinding {
             && self.cwd == other.cwd
             && self.project_id == other.project_id
             && self.backend == other.backend
-            && self.model_configuration_id == other.model_configuration_id
     }
 
-    /// A fresh task inherits model defaults per occurrence. Changing those
-    /// defaults does not change its saved Local project execution target.
+    /// A fresh task binds its saved Local project execution target.
     pub(super) fn same_fresh_project_target(&self, other: &Self) -> bool {
         self.backend == "local"
             && self.project_id.is_some()

@@ -326,12 +326,13 @@ fn changed_prepared_configuration_or_input_still_blocks_initial_admission() {
 }
 
 #[test]
-fn fresh_comparison_keeps_target_guards_and_does_not_relax_classic_comparison() {
+fn fresh_comparison_keeps_target_guards_without_retired_model_presets() {
     let f = configured();
     let binding = f.binding.clone();
-    let mut defaults = binding.clone();
-    defaults.model_configuration_id = Some("model-b".into());
-    assert!(!binding.same_target(&defaults));
+    let mut legacy = serde_json::to_value(&binding).unwrap();
+    legacy["model_configuration_id"] = serde_json::json!("retired-preset");
+    let defaults: HeartbeatBinding = serde_json::from_value(legacy).unwrap();
+    assert!(binding.same_target(&defaults));
     assert!(binding.same_fresh_project_target(&defaults));
     for field in ["configuration", "cwd", "project", "backend"] {
         let mut changed = defaults.clone();

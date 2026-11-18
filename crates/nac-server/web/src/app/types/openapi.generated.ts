@@ -664,7 +664,6 @@ export interface components {
       cwd: string;
       execution_cwd?: string | null;
       fresh_task?: components["schemas"]["FreshTaskDestination"] | null;
-      model_configuration_id?: string | null;
       project_id?: string | null;
       scheduling_request?: string | null;
       seen_through_sequence?: number;

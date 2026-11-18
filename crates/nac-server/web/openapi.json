@@ -14674,12 +14674,6 @@
               }
             ]
           },
-          "model_configuration_id": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "project_id": {
             "type": [
               "string",
