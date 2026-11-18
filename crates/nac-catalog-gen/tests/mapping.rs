@@ -582,3 +582,77 @@ fn invalid_default_base_urls_fail_loudly() {
         "{error}"
     );
 }
+
+#[test]
+fn speed_profiles_are_exact_protocol_specific_and_validated() {
+    let input = api_json("", "");
+    let overrides = r#"
+[service_tiers."openai-responses"]
+"gpt-example" = { tiers = ["standard", "fast", "ultrafast"], fast_input_tokens_below = 272000 }
+[service_tiers."openai-chat-completions"]
+"gpt-example" = { tiers = ["standard", "fast"] }
+"#;
+    let generated = generate(&input, overrides);
+    let responses = &generated.catalog.providers["openai-responses"].service_tiers;
+    assert_eq!(
+        responses["gpt-example"].tiers,
+        ["standard", "fast", "ultrafast"]
+    );
+    assert!(!responses.contains_key("gpt-example-20261118"));
+    assert_eq!(
+        generated.catalog.providers["openai-chat-completions"].service_tiers["gpt-example"].tiers,
+        ["standard", "fast"]
+    );
+    assert!(generated.catalog.providers["chatgpt-codex-responses"]
+        .service_tiers
+        .is_empty());
+    for bad in [
+        "[service_tiers.\"openai-chat-completions\"]\nx = { tiers = [\"standard\", \"ultrafast\"] }",
+        "[service_tiers.\"arcee-chat\"]\nx = { tiers = [\"standard\", \"fast\"] }",
+        "[service_tiers.\"openai-responses\"]\nx = { tiers = [\"standard\", \"fast\", \"fast\"] }",
+        "[service_tiers.\"openai-responses\"]\nx = { tiers = [\"fast\"] }",
+    ] {
+        assert!(gen::generate(&input, bad).is_err(), "accepted {bad}");
+    }
+}
+
+#[test]
+fn reviewed_openai_profiles_match_recorded_sources() {
+    let source: serde_json::Value =
+        serde_json::from_str(include_str!("../fixtures/openai-speed-2026-11-18.json")).unwrap();
+    let generation = generate(&api_json("", ""), include_str!("../overrides.toml"));
+    let fast = source["fast"]["flagship_pricing_model_ids"]
+        .as_array()
+        .unwrap();
+    let ultra = source["ultrafast"]["guide_model_ids"].as_array().unwrap();
+    for (protocol, supports_ultra) in [
+        ("openai-responses", true),
+        ("openai-chat-completions", false),
+    ] {
+        let profile = &generation.catalog.providers[protocol].service_tiers;
+        assert_eq!(profile.len(), fast.len() + usize::from(supports_ultra));
+        if supports_ultra {
+            assert_eq!(profile["gpt-5.3-codex"].tiers, ["standard", "fast"]);
+        } else {
+            assert!(!profile.contains_key("gpt-5.3-codex"));
+        }
+        for id in fast {
+            let id = id.as_str().unwrap();
+            let tiers = &profile[id].tiers;
+            assert_eq!(
+                profile[id].fast_input_tokens_below,
+                if id == "gpt-5.5" || id == "gpt-5.4" {
+                    Some(272_000)
+                } else {
+                    None
+                }
+            );
+            assert!(tiers.contains(&"fast".to_string()), "{protocol}/{id}");
+            assert_eq!(
+                tiers.contains(&"ultrafast".to_string()),
+                supports_ultra && ultra.iter().any(|value| value == id),
+                "{protocol}/{id}"
+            );
+        }
+    }
+}

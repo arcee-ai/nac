@@ -216,3 +216,49 @@ async fn codex_permanent_tier_denial_does_not_retry_or_fall_back() {
     let body: Value = serde_json::from_slice(&requests[0].body).unwrap();
     assert_eq!(body["service_tier"], "priority");
 }
+
+#[test]
+fn native_cost_scope_uses_served_tier_and_retains_aggregate_limitations() {
+    let mut client = test_model_client(
+        BackendKind::OpenAiChatCompletions,
+        "test-openai:http://127.0.0.1:1/v1".into(),
+        Default::default(),
+    );
+    client.model = "gpt-5.4".into();
+    client.resolved_model = catalog::resolve(BackendKind::OpenAiChatCompletions, "gpt-5.4");
+    client.service_tier = Some(crate::model::ServiceTier::Fast);
+    let mut combined = None;
+    for (tier, excluded) in [
+        (Some("default"), false),
+        (Some("priority"), true),
+        (Some("fast"), true),
+        (Some("ultrafast"), true),
+        (None, true),
+        (Some("unrecognized"), true),
+    ] {
+        let mut value = json!({"choices":[{"finish_reason":"stop","message":{"content":"ok"}}],"usage":{"prompt_tokens":100,"completion_tokens":10,"total_tokens":110}});
+        if let Some(tier) = tier {
+            value["service_tier"] = json!(tier);
+        }
+        let response = client.with_usage_cost(
+            crate::model::chat::parse_completions_response(&value, "test", "reasoning_content")
+                .unwrap(),
+        );
+        let usage = response.usage.unwrap();
+        assert_eq!(usage.speed_tier_charges_excluded, excluded, "{tier:?}");
+        if tier == Some("priority") {
+            combined = Some(usage);
+        }
+    }
+    let mut aggregate = combined.unwrap();
+    let value = json!({"choices":[{"finish_reason":"stop","message":{"content":"ok"}}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2},"service_tier":"default"});
+    let standard = client
+        .with_usage_cost(
+            crate::model::chat::parse_completions_response(&value, "test", "reasoning_content")
+                .unwrap(),
+        )
+        .usage
+        .unwrap();
+    aggregate.add_cost_saturating(&standard);
+    assert!(aggregate.speed_tier_charges_excluded);
+}

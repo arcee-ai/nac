@@ -350,6 +350,7 @@ impl ModelClient {
             super::service_tier::validate_service_tier(
                 self.backend,
                 &self.resolved_model,
+                self.native_validation_url(),
                 self.service_tier,
             )?;
         }
@@ -394,6 +395,7 @@ impl ModelClient {
                 super::service_tier::validate_service_tier(
                     self.backend,
                     &current,
+                    &self.base_url,
                     self.service_tier,
                 )?;
                 let tier = self.codex_wire_tier();
@@ -419,6 +421,38 @@ impl ModelClient {
 
     pub fn service_tier(&self) -> Option<crate::model::ServiceTier> {
         self.service_tier
+    }
+
+    // This test-only transport prefix lets wire tests send to a loopback
+    // server while exercising admission against the official native endpoint.
+    // Production never recognizes the prefix.
+    fn native_validation_url(&self) -> &str {
+        #[cfg(test)]
+        if self.base_url.starts_with("test-openai:") {
+            return "https://api.openai.com/v1";
+        }
+        &self.base_url
+    }
+
+    fn transport_base_url(&self) -> &str {
+        #[cfg(test)]
+        if let Some(url) = self.base_url.strip_prefix("test-openai:") {
+            return url;
+        }
+        &self.base_url
+    }
+
+    fn add_native_service_tier(&self, request: &mut Value) {
+        if let Some(tier) = self.service_tier {
+            if super::service_tier::native_openai_supported(
+                self.backend,
+                &self.resolved_model,
+                self.native_validation_url(),
+                tier,
+            ) {
+                request["service_tier"] = json!(super::service_tier::native_request_value(tier));
+            }
+        }
     }
 
     fn codex_wire_tier(&self) -> Option<&'static str> {
@@ -517,12 +551,25 @@ impl ModelClient {
     /// value; everything else bills at the standard rates. Unknown pricing
     /// (all-zero rates) yields zero cost, never an error.
     fn with_usage_cost(&self, mut response: ModelTurnResponse) -> ModelTurnResponse {
+        let native = super::service_tier::native_openai_supported(
+            self.backend,
+            &self.resolved_model,
+            self.native_validation_url(),
+            super::ServiceTier::Standard,
+        );
+        if !native && self.backend != BackendKind::ChatGptCodexResponses {
+            response.served_service_tier = None;
+        }
         if let Some(usage) = response.usage.as_mut() {
             let cache_write_1h_rate = (self.cache_ttl == Some("1h")
                 && self.resolved_model.api == catalog::ApiKind::AnthropicMessages)
                 .then(|| self.resolved_model.cache_write_1h_rate());
             usage.cost = calculate_cost(&self.resolved_model.cost, cache_write_1h_rate, usage);
-            if self.backend == BackendKind::ChatGptCodexResponses {
+            if native {
+                // Only an observed default tier proves the base catalog rate applies.
+                usage.speed_tier_charges_excluded =
+                    response.served_service_tier.as_deref() != Some("default");
+            } else if self.backend == BackendKind::ChatGptCodexResponses {
                 usage.speed_tier_charges_excluded = response.effective_service_tier.is_some()
                     || response.served_service_tier.as_deref() != Some("default");
             }
@@ -573,6 +620,7 @@ impl ModelClient {
                 CompletionsMessageShape::Standard
             },
         );
+        self.add_native_service_tier(&mut request);
         // Clamp output only when the catalog carries a real limit for this
         // model. A synthetic provider-default value (the 16k fallback) would
         // silently truncate models whose true limit the provider knows
@@ -602,7 +650,10 @@ impl ModelClient {
                     .map_err(classify_model_configuration_error)?
                     .to_string()
             }
-            _ => format!("{}/chat/completions", self.base_url.trim_end_matches('/')),
+            _ => format!(
+                "{}/chat/completions",
+                self.transport_base_url().trim_end_matches('/')
+            ),
         };
         let reasoning_field = compat
             .completions_reasoning_field
@@ -717,7 +768,10 @@ impl ModelClient {
         tools: Vec<ToolDefinition>,
         on_delta: DeltaSink<'_>,
     ) -> Result<ModelTurnResponse> {
-        let url = format!("{}/responses", self.base_url);
+        let url = format!(
+            "{}/responses",
+            self.transport_base_url().trim_end_matches('/')
+        );
         let mut request = openai_responses_request(
             &self.model,
             self.reasoning_effort,
@@ -726,6 +780,8 @@ impl ModelClient {
             &self.resolved_model.thinking_level_map,
             self.prompt_cache_key.as_deref(),
         );
+
+        self.add_native_service_tier(&mut request);
 
         let value = match on_delta {
             Some(_) => {
@@ -1036,16 +1092,37 @@ impl ModelClient {
                 });
             }
 
+            let tier_rejected = status == reqwest::StatusCode::BAD_REQUEST
+                && super::service_tier::native_openai_supported(
+                    self.backend,
+                    &self.resolved_model,
+                    self.native_validation_url(),
+                    crate::model::ServiceTier::Standard,
+                )
+                && serde_json::from_str::<Value>(&body)
+                    .ok()
+                    .is_some_and(|value| {
+                        value.pointer("/error/type").and_then(Value::as_str)
+                            == Some("invalid_request_error")
+                            && value.pointer("/error/param").and_then(Value::as_str)
+                                == Some("service_tier")
+                    });
+            let advice = if tier_rejected {
+                " Choose Standard in settings or check your OpenAI project's service-tier access, then retry."
+            } else {
+                ""
+            };
             let error = ModelHttpError {
                 status: Some(status.as_u16()),
                 message: format!(
-                    "HTTP {} from {}: {}",
+                    "HTTP {} from {}: {}{}",
                     status.as_u16(),
                     safe_url,
                     truncate_utf8(
                         &redact_json_body_with_extra_headers(&body, secrets, &self.extra_headers,),
                         500,
-                    )
+                    ),
+                    advice,
                 ),
             };
 

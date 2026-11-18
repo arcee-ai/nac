@@ -15,6 +15,45 @@ afterEach(() => {
 });
 
 describe("transcript topology badge navigation", () => {
+  it("shows requested and reported speeds without inferring missing tiers", () => {
+    const turn: ModelTurn = {
+      kind: "model",
+      key: "receipts",
+      durationMs: null,
+      messageIndex: 1,
+      blocks: [],
+      serviceTierReceipts: [
+        { requested: "fast", served: "priority" },
+        { requested: "ultrafast", served: "default" },
+        { requested: null, served: "fast" },
+        { requested: "standard", served: null },
+        { requested: "fast", served: "future-tier" },
+        { requested: "ultrafast", served: "ultrafast" },
+      ],
+    };
+    render(
+      <ModelMessage
+        turn={turn}
+        model="model"
+        active={false}
+        selectedThreadEpisode={null}
+        onSelectThread={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Requested speed: Fast; served tier: Fast")).toBeTruthy();
+    expect(
+      screen.getByText("Requested speed: Ultrafast; served tier: Standard (provider downgrade)"),
+    ).toBeTruthy();
+    expect(screen.getByText("Requested speed: Provider default; served tier: Fast")).toBeTruthy();
+    expect(screen.getByText("Requested speed: Standard; served tier: Unknown")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Requested speed: Fast; served tier: Unknown (provider reported: future-tier)",
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText("Requested speed: Ultrafast; served tier: Ultrafast")).toBeTruthy();
+  });
+
   it("shows the total turn duration once when prose separates activity folds", () => {
     const turn: ModelTurn = {
       kind: "model",

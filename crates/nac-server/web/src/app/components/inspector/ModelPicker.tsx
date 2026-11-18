@@ -17,7 +17,8 @@ import { CatalogModelPicker } from "@/app/components/modals/CatalogModelPicker";
 import { EFFORT_LEVEL_OPTIONS, reasoningOptionsFor } from "@/app/components/modals/options";
 import { SpeedControl } from "@/app/components/modals/SpeedControl";
 import {
-  discoveredSpeed,
+  providerSpeedProfiles,
+  speedForRoute,
   speedLabel,
   supportsSpeed,
   type ServiceTier,
@@ -80,7 +81,11 @@ const EFFORT_ROW_HINTS: Record<string, { title: string; description: string }> =
 };
 
 const COMPOSER_EFFORT_OPTIONS: SelectItem[] = [
-  { id: "", label: "Default", hoverHint: { ...EFFORT_ROW_HINTS[""], muted: true } },
+  {
+    id: "",
+    label: "Default",
+    hoverHint: { ...EFFORT_ROW_HINTS[""], muted: true },
+  },
   ...EFFORT_LEVEL_OPTIONS.map((item) => ({
     ...item,
     hoverHint: { ...EFFORT_ROW_HINTS[item.id], muted: true },
@@ -136,6 +141,13 @@ export function ModelPicker({
       }
     : null;
   const resolved = resolveCatalogModel(catalog.data, metadata?.backend, currentModel);
+  const speedCapability = speedForRoute(
+    resolved.model,
+    currentModel,
+    metadata?.backend,
+    metadata?.base_url,
+    providerSpeedProfiles(catalog.data?.providers.find((entry) => entry.id === metadata?.backend)),
+  );
   const effortItems = useMemo(
     () => reasoningOptionsFor(resolved.supportedEfforts, currentEffort, COMPOSER_EFFORT_OPTIONS),
     [resolved.supportedEfforts, currentEffort],
@@ -164,12 +176,16 @@ export function ModelPicker({
     const supported = resolveCatalogModel(catalog.data, pick.backend, pick.model).supportedEfforts;
     const compatibleEffort =
       currentEffort && supported.includes(currentEffort as ReasoningEffort) ? currentEffort : null;
-    const targetSpeed = discoveredSpeed(
+    const target = speedForRoute(
       resolveCatalogModel(catalog.data, pick.backend, pick.model).model,
       pick.model,
+      pick.backend,
+      preservesRoute ? metadata.base_url : pick.baseUrl,
+      providerSpeedProfiles(provider),
     );
+    const targetSpeed = target.tiers;
     let speed = currentSpeed;
-    if (speed && pick.backend !== "chatgpt-codex-responses") {
+    if (speed && pick.backend !== "chatgpt-codex-responses" && !target.openAiApi) {
       toast.error("Choose a compatible speed before switching to this model.");
       return;
     }
@@ -280,11 +296,9 @@ export function ModelPicker({
       ) : null}
       {!(snapshot.isError && isMobile) ? (
         <SpeedControl
-          tiers={
-            metadata?.backend === "chatgpt-codex-responses"
-              ? discoveredSpeed(resolved.model, currentModel)
-              : null
-          }
+          tiers={speedCapability.tiers}
+          openAiApi={speedCapability.openAiApi}
+          fastContextLimit={speedCapability.fastContextLimit}
           value={currentSpeed}
           disabled={controlsDisabled}
           onChange={(speed) => void chooseSpeed(speed)}

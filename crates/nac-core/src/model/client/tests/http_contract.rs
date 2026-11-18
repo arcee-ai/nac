@@ -1193,3 +1193,160 @@ async fn anthropic_root_shaped_base_url_appends_v1_messages_exactly_once() {
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].path, "/v1/messages");
 }
+
+fn native_speed_client(
+    backend: BackendKind,
+    url: &str,
+    tier: Option<crate::model::ServiceTier>,
+) -> ModelClient {
+    let mut client = test_model_client(backend, format!("test-openai:{url}"), Default::default());
+    client.model = "gpt-6.1-sol".into();
+    client.resolved_model = catalog::resolve(backend, &client.model);
+    client.reasoning_effort = Some(ReasoningEffort::High);
+    client.service_tier = tier;
+    client
+}
+
+#[tokio::test]
+async fn native_speed_requests_preserve_reasoning_and_omit_only_unset() {
+    use crate::model::ServiceTier;
+    for backend in [
+        BackendKind::OpenAiResponses,
+        BackendKind::OpenAiChatCompletions,
+    ] {
+        let mut baseline_reasoning = None;
+        for (tier, expected) in [
+            (None, None),
+            (Some(ServiceTier::Standard), Some("default")),
+            (Some(ServiceTier::Fast), Some("priority")),
+            (Some(ServiceTier::Ultrafast), Some("ultrafast")),
+        ] {
+            if backend == BackendKind::OpenAiChatCompletions && tier == Some(ServiceTier::Ultrafast)
+            {
+                continue;
+            }
+            let response = if backend == BackendKind::OpenAiResponses {
+                s5_openai_response()
+            } else {
+                s5_completions_response()
+            };
+            let server = ScriptedServer::start(vec![response]);
+            let client = native_speed_client(backend, &server.base_url, tier);
+            client
+                .send_turn(
+                    vec![Message::User {
+                        content: "hello".into(),
+                    }],
+                    vec![],
+                )
+                .await
+                .unwrap();
+            let requests = server.finish();
+            let body: Value = serde_json::from_slice(&requests[0].body).unwrap();
+            assert_eq!(
+                body.get("service_tier").and_then(Value::as_str),
+                expected,
+                "{backend}"
+            );
+            let reasoning = if backend == BackendKind::OpenAiResponses {
+                body.get("reasoning")
+            } else {
+                body.get("reasoning_effort")
+            };
+            assert!(reasoning.is_some(), "missing reasoning for {backend}");
+            if let Some(ref previous) = baseline_reasoning {
+                assert_eq!(reasoning, Some(previous));
+            } else {
+                baseline_reasoning = reasoning.cloned();
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn native_chat_ultrafast_is_rejected_before_http() {
+    let server = ScriptedServer::start(vec![]);
+    let client = native_speed_client(
+        BackendKind::OpenAiChatCompletions,
+        &server.base_url,
+        Some(crate::model::ServiceTier::Ultrafast),
+    );
+    let error = client
+        .send_turn(vec![], vec![])
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("unavailable"), "{error}");
+    assert!(server.finish().is_empty());
+}
+
+#[tokio::test]
+async fn native_service_tier_policy_error_is_actionable_and_scoped() {
+    for (backend, status, body, actionable) in [
+        (
+            BackendKind::OpenAiResponses,
+            "400 Bad Request",
+            json!({"error":{"type":"invalid_request_error","param":"service_tier","message":"selected-provider-credential"}}),
+            true,
+        ),
+        (
+            BackendKind::OpenAiResponses,
+            "400 Bad Request",
+            json!({"error":{"type":"invalid_request_error","param":"model"}}),
+            false,
+        ),
+        (
+            BackendKind::AnthropicMessages,
+            "400 Bad Request",
+            json!({"error":{"type":"invalid_request_error","param":"service_tier"}}),
+            false,
+        ),
+    ] {
+        let server = ScriptedServer::start(vec![ScriptedResponse::json(status, body.to_string())]);
+        let mut client = native_speed_client(backend, &server.base_url, None);
+        if backend == BackendKind::AnthropicMessages {
+            client.base_url = server.base_url.clone();
+        }
+        let result = client
+            .post_json_with_retry(&format!("{}/test", server.base_url), &json!({}))
+            .await
+            .unwrap_err()
+            .to_string();
+        assert_eq!(result.contains("Choose Standard"), actionable, "{result}");
+        assert!(!result.contains("selected-provider-credential"));
+        assert_eq!(server.finish().len(), 1);
+    }
+}
+
+#[tokio::test]
+async fn native_transient_rate_limit_retries_without_changing_requested_tier() {
+    let server = ScriptedServer::start(vec![
+        ScriptedResponse::json(
+            "429 Too Many Requests",
+            json!({"error": {"type": "rate_limit_error", "param": "service_tier"}}).to_string(),
+        )
+        .with_header("Retry-After", "0"),
+        s5_openai_response(),
+    ]);
+    let client = native_speed_client(
+        BackendKind::OpenAiResponses,
+        &server.base_url,
+        Some(crate::model::ServiceTier::Fast),
+    );
+    client
+        .send_turn(
+            vec![Message::User {
+                content: "hello".into(),
+            }],
+            vec![],
+        )
+        .await
+        .unwrap();
+    assert_eq!(client.service_tier(), Some(crate::model::ServiceTier::Fast));
+    let requests = server.finish();
+    assert_eq!(requests.len(), 2);
+    for request in requests {
+        let body: Value = serde_json::from_slice(&request.body).unwrap();
+        assert_eq!(body["service_tier"], "priority");
+    }
+}

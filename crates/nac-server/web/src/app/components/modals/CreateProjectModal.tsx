@@ -28,7 +28,7 @@ import { ConfigRow, FieldLabel } from "@/app/components/modals/ConfigRow";
 import { type LaunchModelSelection } from "@/app/components/modals/ConfigurationsPanel";
 import { LightModelSection, type LightSelection } from "@/app/components/modals/LightModelSection";
 import { SpeedControl } from "@/app/components/modals/SpeedControl";
-import { discoveredSpeed, type ServiceTier } from "@/app/lib/serviceTier";
+import { providerSpeedProfiles, speedForRoute, type ServiceTier } from "@/app/lib/serviceTier";
 import { REASONING_OPTIONS, reasoningOptionsFor } from "@/app/components/modals/options";
 import { PathPickerModal } from "@/app/components/modals/PathPickerModal";
 import { SshConnectionBox } from "@/app/components/modals/SshConnectionBox";
@@ -169,7 +169,10 @@ function CreateProjectForm({
   const [sandboxOpen, setSandboxOpen] = useState(false);
   const [picking, setPicking] = useState(false);
   const [selection, setSelection] = useState<LaunchModelSelection | null>(null);
-  const [light, setLight] = useState<LightSelection>({ mode: "single", light: null });
+  const [light, setLight] = useState<LightSelection>({
+    mode: "single",
+    light: null,
+  });
   const [error, setError] = useState<FormError | null>(null);
   const [reviewError, setReviewError] = useState("");
   // The host this form has actually reached. Everything remote — the working
@@ -186,6 +189,13 @@ function CreateProjectForm({
   // the catalog narrows it to the efforts that model accepts.
   const catalog = useModelCatalog();
   const chosen = selection?.kind === "save" ? selection.request : (selection ?? null);
+  const speedCapability = speedForRoute(
+    resolveCatalogModel(catalog.data, chosen?.backend, chosen?.model).model,
+    chosen?.model ?? "",
+    chosen?.backend,
+    chosen?.base_url,
+    providerSpeedProfiles(catalog.data?.providers.find((entry) => entry.id === chosen?.backend)),
+  );
   const reasoningItems = reasoningOptionsFor(
     resolveCatalogModel(catalog.data, chosen?.backend, chosen?.model).supportedEfforts,
     reasoning,
@@ -371,7 +381,10 @@ function CreateProjectForm({
     try {
       headers = serializeExtraHeaders(extraHeaders, undefined);
     } catch (validationError) {
-      setError({ field: "config", message: errorMessage(toRunError(validationError)) });
+      setError({
+        field: "config",
+        message: errorMessage(toRunError(validationError)),
+      });
       return;
     }
 
@@ -387,7 +400,11 @@ function CreateProjectForm({
             if (selection.kind === "save") {
               const request =
                 light.mode === "dual" && light.light
-                  ? { ...selection.request, service_tier: speed, light_model: light.light }
+                  ? {
+                      ...selection.request,
+                      service_tier: speed,
+                      light_model: light.light,
+                    }
                   : { ...selection.request, service_tier: speed };
               const record = await createModelConfig.mutateAsync(request);
               const selected = savedModelSelection(record);
@@ -656,7 +673,9 @@ function CreateProjectForm({
                 control={smallSelect(reasoningItems, reasoning, edit(setReasoning))}
               />
               <Separator />
-              {chosen?.backend === "chatgpt-codex-responses" || speed ? (
+              {chosen?.backend === "chatgpt-codex-responses" ||
+              speedCapability.openAiApi ||
+              speed ? (
                 <ConfigRow
                   presentation="form"
                   label="Speed"
@@ -664,14 +683,9 @@ function CreateProjectForm({
                   control={
                     <SpeedControl
                       form
-                      tiers={
-                        chosen?.backend === "chatgpt-codex-responses"
-                          ? discoveredSpeed(
-                              resolveCatalogModel(catalog.data, chosen.backend, chosen.model).model,
-                              chosen.model,
-                            )
-                          : null
-                      }
+                      tiers={speedCapability.tiers}
+                      openAiApi={speedCapability.openAiApi}
+                      fastContextLimit={speedCapability.fastContextLimit}
                       value={speed ?? null}
                       onChange={edit(setSpeed)}
                     />
