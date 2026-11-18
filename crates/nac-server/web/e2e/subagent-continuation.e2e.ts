@@ -1,6 +1,7 @@
 import type { APIRequestContext } from "@playwright/test";
 
 import { createDirectSession, expect, type EmbeddedHarness, test, waitForRunIdle } from "./harness";
+import { ScriptGate } from "./scripted-provider";
 
 const label = "Audit the store";
 
@@ -222,6 +223,8 @@ test("groups adjacent continuations for one child in both transcript densities",
   const parentId = await createDirectSession(request, harness);
   await parentTurn(request, harness, parentId, "E2E_GROUP_SEED", "group-seed-answer");
   const [child] = await children(request, harness, parentId);
+  const secondGate = new ScriptGate();
+  const answerGate = new ScriptGate();
   harness.provider.enqueue(
     "group-first",
     { token: "E2E_GROUP_PARENT" },
@@ -258,6 +261,7 @@ test("groups adjacent continuations for one child in both transcript densities",
       },
       stream: "request",
     },
+    secondGate,
   );
   harness.provider.enqueue(
     "group-second-child",
@@ -273,10 +277,32 @@ test("groups adjacent continuations for one child in both transcript densities",
       reasoning: "Compared the two child reports before answering.",
       stream: "request",
     },
+    answerGate,
   );
-  await parentTurn(request, harness, parentId, "E2E_GROUP_PARENT", "group-answer");
-
   await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto(`${harness.baseUrl}/#/session/${parentId}/insights`);
+  const run = await request.post(`${harness.baseUrl}/sessions/${parentId}/runs`, {
+    data: { prompt: "E2E_GROUP_PARENT" },
+  });
+  expect(run.status()).toBe(202);
+  try {
+    await secondGate.accepted;
+    const liveTurn = page.locator("[data-turn]").last();
+    const control = liveTurn.getByRole("button", { name: `Open ${label} in Subagents` });
+    await expect(control).toBeVisible();
+    await control.focus();
+    secondGate.release();
+    await answerGate.accepted;
+    await expect(liveTurn.getByText("Invocation result", { exact: true })).toHaveCount(2);
+    await expect(control).toBeFocused();
+    answerGate.release();
+    await waitForRunIdle(request, harness, parentId);
+    harness.provider.assertConsumed();
+  } finally {
+    secondGate.release();
+    answerGate.release();
+  }
+
   await page.goto(`${harness.baseUrl}/#/session/${parentId}/insights`);
   for (const density of ["compact", "detailed"] as const) {
     await page.goto(`${harness.baseUrl}/#/session/${parentId}/insights`);

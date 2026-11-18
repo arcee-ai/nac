@@ -26,10 +26,7 @@ import {
 import type { ModelTurnItem } from "@/app/features/insights/model/types";
 import { partitionModelTurn } from "@/app/features/insights/model/segments";
 import { formatMessageDate } from "@/app/features/insights/transcript/messageDate";
-import {
-  TranscriptSessionCard,
-  TranscriptSessionGroup,
-} from "@/app/features/insights/transcript/TranscriptSessionCard";
+import { TranscriptSessionGroup } from "@/app/features/insights/transcript/TranscriptSessionCard";
 import {
   usePreviousTurn,
   usePromptCreatedAt,
@@ -200,13 +197,11 @@ const ModelMessageBody = memo(function ModelMessageBody({
             />
           );
         }
-        if (entry.kind === "session") {
-          return <TranscriptSessionCard key={entry.id} entry={entry} interactive={interactive} />;
-        }
-        if (entry.kind === "session-group") {
+        if (entry.kind === "session" || entry.kind === "session-group") {
+          const entries = entry.kind === "session" ? [entry] : entry.entries;
           return (
-            <div key={entry.key} className="min-w-0 max-w-full">
-              <TranscriptSessionGroup entries={entry.entries} interactive={interactive} />
+            <div key={entries[0].id} className="min-w-0 max-w-full">
+              <TranscriptSessionGroup entries={entries} interactive={interactive} />
             </div>
           );
         }

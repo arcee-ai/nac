@@ -20383,17 +20383,16 @@ var nS = so(function({ turn: e, previous: t, date: n, active: r, activity: i, ru
 					selectedGroupId: l,
 					interactive: C
 				}, t.key);
-				if (t.kind === "session") return /* @__PURE__ */ Q(Zx, {
-					entry: t,
-					interactive: C
-				}, t.id);
-				if (t.kind === "session-group") return /* @__PURE__ */ Q("div", {
-					className: "min-w-0 max-w-full",
-					children: /* @__PURE__ */ Q(Jx, {
-						entries: t.entries,
-						interactive: C
-					})
-				}, t.key);
+				if (t.kind === "session" || t.kind === "session-group") {
+					let e = t.kind === "session" ? [t] : t.entries;
+					return /* @__PURE__ */ Q("div", {
+						className: "min-w-0 max-w-full",
+						children: /* @__PURE__ */ Q(Jx, {
+							entries: e,
+							interactive: C
+						})
+					}, e[0].id);
+				}
 				let { block: n } = t;
 				return n.kind === "wave" ? /* @__PURE__ */ Q(Bv, {
 					rows: n.rows,
