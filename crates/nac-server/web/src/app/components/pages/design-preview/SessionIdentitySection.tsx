@@ -79,7 +79,7 @@ export function SessionIdentitySection() {
     <BoxSurface title="Project navigation" bodyClassName="overflow-x-auto">
       <div className="p-4 flex flex-col gap-6 overflow-x-auto [&>*]:shrink-0">
         <div className="flex items-start gap-2">
-          <ChatSessionTab title="Fix the parser" behavior="direct" active />
+          <ChatSessionTab title="Rewrite the store layer" behavior="direct" active />
           <ChatSessionTab title="Investigating" behavior="direct" running />
           <ChatSessionTab title="Fork: Fix the parser" forkedFromTitle="Fix the parser" />
           <ChatSessionTab title="Fork running" forkedFromTitle="Fix the parser" running />

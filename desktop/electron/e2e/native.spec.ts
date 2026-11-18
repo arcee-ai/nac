@@ -155,7 +155,7 @@ test('actual preload admits trusted external anchors while rejecting wrong frame
   expect(await c.app.evaluate(() => (globalThis as any).__nativeProbe.opened)).toEqual([href]);
 });
 
-test('shared provider device sign-in requires a deliberate native browser handoff and retains the configuration draft', async ({ candidate: c }) => {
+test('shared provider device sign-in requires a deliberate native browser handoff', async ({ candidate: c }) => {
   const verificationUri = 'https://example.test/device?state=fake%2Bvalue%3D';
   const auth = await ProviderDeviceAuthDouble.install(c.page, c.endpoint, verificationUri);
   // Observe the real main/preload boundary and double only the OS opener.
@@ -170,15 +170,9 @@ test('shared provider device sign-in requires a deliberate native browser handof
   await expect(c.page.getByText('No projects yet', { exact: true })).toBeVisible();
   await focusWorkspace(c);
   await menu(c, 'Settings…');
-  // Settings › Models & providers holds the saved-configuration manager.
-  const dialog = c.page.getByRole('main', { name: 'Models & providers', exact: true })
-    .getByRole('region', { name: 'Configurations', exact: true });
-  await expect(dialog).toBeVisible();
-  const draft = dialog.getByRole('textbox', { name: 'Configuration name', exact: true });
-  await draft.fill('Electron draft survives sign-in');
-  await dialog.getByRole('button', { name: 'OpenAI Responses', exact: true }).click();
-  await c.page.getByRole('button', { name: 'ChatGPT Codex Responses', exact: true }).click();
-  const account = dialog.getByRole('region', { name: 'Provider account', exact: true });
+  const account = c.page.getByRole('main', { name: 'Models & providers', exact: true })
+    .getByRole('region', { name: 'Provider connections', exact: true });
+  await expect(account).toBeVisible();
   await account.getByRole('button', { name: 'Sign in with ChatGPT', exact: true }).click();
   await expect(account.getByTestId('provider-device-code')).toHaveText(FAKE_DEVICE_CODE);
   const handoff = account.getByRole('link', { name: 'Open ChatGPT', exact: true });
@@ -196,8 +190,6 @@ test('shared provider device sign-in requires a deliberate native browser handof
   auth.approve();
   await expect(account.getByText('Signed in', { exact: true })).toBeVisible({ timeout: 15000 });
   await expect(account.getByTestId('provider-device-code')).toHaveCount(0);
-  await expect(draft).toHaveValue('Electron draft survives sign-in');
-  await expect(dialog.getByRole('button', { name: 'ChatGPT Codex Responses', exact: true })).toBeVisible();
   expect(await c.app.evaluate(() => (globalThis as any).__providerAuthActor))
     .toEqual({ opened: [verificationUri], createdWindows: 0 });
   expect(c.app.windows()).toHaveLength(1);

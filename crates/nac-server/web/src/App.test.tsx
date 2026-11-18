@@ -26,7 +26,9 @@ vi.mock("@/app/features/managed/controller/ManagedHostProvider", () => ({
 vi.mock("@/app/providers/ToastProvider", () => ({
   ToastProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
-vi.mock("@/app/components/pages/DesignPreviewPage", () => ({ default: () => null }));
+vi.mock("@/app/components/pages/DesignPreviewPage", () => ({
+  default: () => <main>Design preview</main>,
+}));
 vi.mock("@/app/components/pages/ProjectRedirectPage", () => ({ default: () => null }));
 vi.mock("@/app/components/pages/ProjectsListPage", () => ({ default: () => null }));
 vi.mock("@/app/components/LeftSidebar", () => ({ LeftSidebar: () => null }));
@@ -62,4 +64,14 @@ describe("session routing", () => {
     expect(screen.getByTestId("session-id").textContent).toBe("session-b");
     expect((screen.getByRole("textbox", { name: "Draft" }) as HTMLInputElement).value).toBe("");
   });
+});
+
+
+it("keeps the design preview reachable without an orchestration policy", async () => {
+  render(
+    <MemoryRouter initialEntries={["/design"]}>
+      <App />
+    </MemoryRouter>,
+  );
+  expect((await screen.findByRole("main")).textContent).toBe("Design preview");
 });

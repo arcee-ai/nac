@@ -77,6 +77,21 @@ final class ExternalAuthSmoke {
         try await wait("loaded production Home composer") {
             try await self.js(Self.homeComposerScript, arguments: ["prompt": NSNull()]) as? Bool == true
         }
+        try await wait("model selection control") {
+            try await self.js("const b=[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Choose a model'); if(!b)return false;b.click();return true") as? Bool == true
+        }
+        try await wait("model selector") {
+            try await self.js("const b=document.querySelector('[role=dialog] button[aria-expanded]');if(!b)return false;b.click();return true") as? Bool == true
+        }
+        try await wait("model search") {
+            try await self.js("const f=document.querySelector('input[aria-label=\"Search models\"]');if(!f)return false;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(f,'gpt-5.6-sol');f.dispatchEvent(new Event('input',{bubbles:true}));return true") as? Bool == true
+        }
+        try await wait("fixture OpenAI model") {
+            try await self.js("const b=[...document.querySelectorAll('[aria-label=\"Model results\"] button[data-row]')].find(b=>b.parentElement?.textContent.includes('OpenAI')&&b.textContent.toLowerCase().includes('gpt-5.6'));if(!b)return false;b.click();return true") as? Bool == true
+        }
+        try await wait("available session model") {
+            try await self.js("const b=[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Use this model'&&!b.disabled);if(!b)return false;b.click();return true") as? Bool == true
+        }
         guard try await js(Self.homeComposerScript, arguments: ["prompt": "External auth fixture session"]) as? Bool == true else {
             throw PreviewError.message("Home composer did not take the first prompt")
         }

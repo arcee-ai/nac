@@ -63,8 +63,6 @@ export const test = base.extend<{ candidate: Candidate; developmentPathOverrides
       XDG_CONFIG_HOME: path.join(directory, "xdg"),
       TMPDIR: path.join(directory, "tmp"),
       NAC_E2E_API_KEY: "nac-e2e-dummy-only",
-      // This cohort deliberately covers direct and orchestrator sessions.
-      NAC_ORCHESTRATION: "1",
       MODELS_DEV_URL: `${provider.baseUrl}/models-dev`,
       BROWSER: "none",
       NAC_ELECTRON_ENGINE: path.join(root, "target/release/nac-web"),
@@ -178,41 +176,30 @@ export const test = base.extend<{ candidate: Candidate; developmentPathOverrides
         api,
         ownedPids,
         project: async () => {
-          const model = await api("/model-configs", {
-            name: "Electron scripted provider",
+          await api("/provider-connections", {
             backend: "openai-responses",
-            model: "gpt-5.6-sol",
             base_url: provider.baseUrl,
             api_key: "nac-e2e-dummy-only",
-            reasoning_effort: "high",
-            extra_headers: {},
-            orchestrator_compaction_threshold: 0,
           });
           return (
-            await api("/projects", {
-              name: "Electron fixture project",
-              cwd: workspace,
-              default_model_config_id: model.config_id,
-            })
+            await api("/projects", { name: "Electron fixture project", cwd: workspace })
           ).project_id;
         },
         session: async (behavior = "direct", project?: string) =>
           (
             await api(
               "/sessions",
-              project
-                ? { behavior, project_id: project }
-                : {
-                    behavior,
-                    cwd: workspace,
-                    backend: "openai-responses",
-                    model: "gpt-5.6-sol",
-                    base_url: provider.baseUrl,
-                    api_key_env: "NAC_E2E_API_KEY",
-                    reasoning_effort: "high",
-                    extra_headers: {},
-                    orchestrator_compaction_threshold: 0,
-                  },
+              {
+                behavior,
+                ...(project ? { project_id: project } : { cwd: workspace }),
+                backend: "openai-responses",
+                model: "gpt-5.6-sol",
+                base_url: provider.baseUrl,
+                api_key_env: "NAC_E2E_API_KEY",
+                reasoning_effort: "high",
+                extra_headers: {},
+                orchestrator_compaction_threshold: 0,
+              },
             )
           ).metadata.session_id,
       };

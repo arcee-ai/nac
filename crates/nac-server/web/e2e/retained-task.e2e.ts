@@ -6,6 +6,7 @@ import type { APIRequestContext, Page, TestInfo } from "@playwright/test";
 import type { EmbeddedHarness } from "./harness";
 import type { TaskLaunchRecord } from "../src/app/types/api";
 import { createProject, createSession, expect, test, waitForRunIdle } from "./harness";
+import { chooseFixtureSessionModel } from "./model-fixture";
 
 const execute = promisify(execFile);
 test.use({ managedNativeWeb: false });
@@ -113,6 +114,10 @@ async function retainedJourney(
   await fs.rename(metadata, path.join(repo, ".git"));
   await page.reload();
   await chooseAgent();
+  await page.getByRole("button", { name: "Choose a model" }).click();
+  const model = page.getByRole("dialog", { name: "Model for this session" });
+  await chooseFixtureSessionModel(page, model);
+  await model.getByRole("button", { name: "Use this model" }).click();
   // An eligible source offers the opt-in isolated checkout.
   await isolated.click();
   await expect(isolated).toHaveAttribute("aria-pressed", "true");

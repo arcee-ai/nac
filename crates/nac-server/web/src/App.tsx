@@ -29,6 +29,15 @@ const DesktopSessionTargetOwner = lazy(() =>
   })),
 );
 
+// The design showcase remains available independently of session behavior.
+const DesignPreviewPage = lazy(() =>
+  import("@/app/components/pages/DesignPreviewPage").catch(() => ({
+    default: () => (
+      <p role="alert">The design preview could not be loaded. Reload this page to try again.</p>
+    ),
+  })),
+);
+
 export function KeyedSessionPage() {
   const { sessionId } = useParams<{ sessionId: string }>();
   return (
@@ -77,6 +86,14 @@ export default function App({ desktopCommands }: { desktopCommands?: DesktopComm
                       {/* Settings take over the window: outside the shell and sidebar. */}
                       <Route path="/settings" element={<SettingsPage />} />
                       <Route path="/settings/:section" element={<SettingsPage />} />
+                      <Route
+                        path="/design"
+                        element={
+                          <Suspense fallback={<p role="status">Loading design preview…</p>}>
+                            <DesignPreviewPage />
+                          </Suspense>
+                        }
+                      />
                       <Route path="*" element={<Navigate to={routes.list()} replace />} />
                     </Routes>
                   </SettingsReturnProvider>
