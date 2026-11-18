@@ -4,8 +4,6 @@ use std::collections::{BTreeMap, HashSet};
 
 pub use nac_contracts::{NewProject, ProjectRecord};
 
-use crate::store::model_configurations::{model_configuration_columns, row_to_record_at};
-
 const MAX_NAME_LEN: usize = 120;
 const MAX_DESCRIPTION_LEN: usize = 2_000;
 
@@ -20,7 +18,6 @@ pub struct ProjectPatch {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectLaunchContext {
     pub project: ProjectRecord,
-    pub default_model_config: Option<ModelConfigurationRecord>,
 }
 
 #[derive(Debug)]
@@ -654,34 +651,9 @@ pub fn load_project_launch_context(
     project_id: &str,
 ) -> ProjectResult<ProjectLaunchContext> {
     let conn = open_runtime_connection(path)?;
-    let model_columns = model_configuration_columns("mc");
-    conn.query_row(
-        &format!(
-            "SELECT p.project_id, p.name, p.description, p.cwd, p.ssh_host, p.ssh_port,
-                    p.ssh_identity_file, p.default_model_config_id, p.created_at, p.updated_at,
-                    p.pinned, p.sort_order, p.presentation_version,
-                    {model_columns}
-             FROM projects p
-             LEFT JOIN model_configurations mc
-               ON mc.config_id = p.default_model_config_id
-             WHERE p.project_id = ?1"
-        ),
-        params![project_id],
-        |row| {
-            let project = row_to_project_at(row, 0)?;
-            let default_model_config = if row.get::<_, Option<String>>(13)?.is_some() {
-                Some(row_to_record_at(row, 13)?)
-            } else {
-                None
-            };
-            Ok(ProjectLaunchContext {
-                project,
-                default_model_config,
-            })
-        },
-    )
-    .optional()?
-    .ok_or_else(|| ProjectStoreError::NotFound(project_id.to_string()))
+    Ok(ProjectLaunchContext {
+        project: load_project_with_connection(&conn, project_id)?,
+    })
 }
 command LoadProjectLaunchContextCommand {
     project_id: String = project_id.to_owned(),
@@ -768,7 +740,7 @@ mod tests {
     }
 
     #[test]
-    fn project_default_load_is_joined_and_restricts_configuration_delete() {
+    fn project_launch_context_does_not_load_a_saved_model_configuration() {
         let path = temp_store_path("default");
         initialize(&path).unwrap();
         insert_model_configuration(&path, "config-a", model_configuration("Project default"))
@@ -777,14 +749,11 @@ mod tests {
         project.default_model_config_id = Some("config-a".to_string());
         insert_project(&path, project).unwrap();
 
+        let conn = open_runtime_connection(&path).unwrap();
+        conn.execute("UPDATE model_configurations SET extra_headers_json='not-json' WHERE config_id='config-a'", []).unwrap();
+        drop(conn);
         let context = load_project_launch_context(&path, "project-a").unwrap();
-        assert_eq!(
-            context
-                .default_model_config
-                .as_ref()
-                .map(|config| config.config_id.as_str()),
-            Some("config-a")
-        );
+        assert_eq!(context.project.project_id, "project-a");
         let deletion = delete_model_configuration(&path, "config-a");
         assert!(
             matches!(
@@ -793,7 +762,13 @@ mod tests {
             ),
             "unexpected deletion result: {deletion:?}"
         );
-        assert!(load_model_configuration(&path, "config-a").is_ok());
+        assert_eq!(
+            load_project_launch_context(&path, "project-a")
+                .unwrap()
+                .project
+                .project_id,
+            "project-a"
+        );
 
         update_project(
             &path,
@@ -805,10 +780,13 @@ mod tests {
         )
         .unwrap();
         assert!(delete_model_configuration(&path, "config-a").unwrap());
-        assert!(load_project_launch_context(&path, "project-a")
-            .unwrap()
-            .default_model_config
-            .is_none());
+        assert_eq!(
+            load_project_launch_context(&path, "project-a")
+                .unwrap()
+                .project
+                .project_id,
+            "project-a"
+        );
 
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }

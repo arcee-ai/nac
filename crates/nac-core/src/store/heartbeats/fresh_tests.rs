@@ -156,16 +156,23 @@ fn legacy_receipt_defaults_remain_in_storage_but_never_replace_the_selection() {
     let f = Fixture::new();
     f.create();
     let pending = f.pending();
-    let original = reserve_fresh_heartbeat_launch(&f.path, &pending.occurrence_id, pending.revision, 61_000)
-        .unwrap().unwrap();
+    let original =
+        reserve_fresh_heartbeat_launch(&f.path, &pending.occurrence_id, pending.revision, 61_000)
+            .unwrap()
+            .unwrap();
     let conn = open_runtime_connection(&f.path).unwrap();
     conn.execute(
         "UPDATE heartbeat_task_launches SET launch_json=json_set(launch_json,'$.model_defaults',json('{\"model\":\"retired-preset\"}')) WHERE occurrence_id=?1",
         [&pending.occurrence_id],
     ).unwrap();
     drop(conn);
-    let replay = read_fresh_heartbeat_launch(&f.path, &pending.occurrence_id).unwrap().unwrap();
-    assert_eq!(replay.receipt().request.model_selection, original.receipt().request.model_selection);
+    let replay = read_fresh_heartbeat_launch(&f.path, &pending.occurrence_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        replay.receipt().request.model_selection,
+        original.receipt().request.model_selection
+    );
     let conn = open_runtime_connection(&f.path).unwrap();
     let retained: String = conn.query_row(
         "SELECT json_extract(launch_json,'$.model_defaults.model') FROM heartbeat_task_launches WHERE occurrence_id=?1",
