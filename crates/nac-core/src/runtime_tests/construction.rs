@@ -604,64 +604,6 @@ fn no_reasoning_effort_is_injected() {
     assert_eq!(settings.reasoning_effort, None);
 }
 
-#[test]
-fn managed_worker_settings_are_snapshot_authoritative() {
-    let settings = managed_worker_effective_model_settings(&ModelOptions {
-        backend: Some(BackendKind::TogetherChat),
-        api_base_url: Some("https://worker.example/v1".to_string()),
-        api_model: Some("worker-model".to_string()),
-        api_key_env: OptionalModelOption::Value("SESSION_API_KEY".to_string()),
-        extra_headers: Some(BTreeMap::new()),
-        ..ModelOptions::default()
-    })
-    .unwrap();
-    assert_eq!(settings.reasoning_effort, None);
-    assert_eq!(settings.api_key_env.as_deref(), Some("SESSION_API_KEY"));
-    assert!(settings.extra_headers.is_empty());
-
-    for (backend, expected) in [
-        (
-            BackendKind::ChatGptCodexResponses,
-            crate::model::CHATGPT_CODEX_CANONICAL_BASE_URL,
-        ),
-        (
-            BackendKind::ArceeAuth,
-            crate::model::ARCEE_AUTH_CANONICAL_BASE_URL,
-        ),
-    ] {
-        let managed = managed_worker_effective_model_settings(&ModelOptions {
-            backend: Some(backend),
-            api_model: Some("managed-worker-model".to_string()),
-            extra_headers: Some(BTreeMap::new()),
-            ..ModelOptions::default()
-        })
-        .expect("managed worker resolver should use the same fixed URL invariant");
-        assert_eq!(managed.base_url, expected);
-    }
-
-    let raw_selector = " WORKER_KEY ";
-    let invalid = managed_worker_effective_model_settings(&ModelOptions {
-        backend: Some(BackendKind::TogetherChat),
-        api_base_url: Some("https://worker.example/v1".to_string()),
-        api_model: Some("worker-model".to_string()),
-        api_key_env: OptionalModelOption::Value(raw_selector.to_string()),
-        extra_headers: Some(BTreeMap::new()),
-        ..ModelOptions::default()
-    })
-    .unwrap();
-    assert_eq!(invalid.api_key_env.as_deref(), Some(raw_selector));
-    let error = ModelClient::from_effective_settings(invalid)
-        .expect_err("worker selector must be validated without normalization");
-    assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
-
-    let error = managed_worker_effective_model_settings(&ModelOptions {
-        backend: Some(BackendKind::TogetherChat),
-        ..ModelOptions::default()
-    })
-    .unwrap_err();
-    assert!(error.to_string().contains("model"));
-}
-
 #[tokio::test]
 async fn resume_picker_defers_snapshot_and_credential_validation_until_selection() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();

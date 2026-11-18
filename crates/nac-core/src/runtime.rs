@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::agent::{Agent, AgentConfig, AgentMode};
 use crate::agents_md::AgentsMdBundle;
-use crate::events::{AgentEvent, EventSink};
+use crate::events::EventSink;
 use crate::light_model::{
     resolve_light_client_with_http_policy, LightModelError, LightModelSettings,
     TrustedLightCredential,
@@ -38,7 +38,6 @@ pub use crate::sandbox::{
 use crate::sessions::{self, SessionSnapshot};
 use crate::skills::{self, SkillPathVisibility, SkillRegistry};
 use crate::store;
-use crate::worker::{build_preloaded_skill_messages, build_worker_context_messages};
 pub use crate::worker::{run_managed_worker, ManagedWorkerRunConfig};
 pub use crate::worker_credentials::ManagedWorkerCredentialReceiver;
 use crate::workspace::GitTarget;
@@ -71,8 +70,7 @@ pub use contracts::{
     SessionRunConfig, SshOptions, StoreOptions, WorkerDispatchOptions,
 };
 use model_resolution::{
-    default_config_cwd, managed_worker_effective_model_settings, worker_command_output_limits,
-    worker_thread_timeout_secs,
+    default_config_cwd, worker_command_output_limits, worker_thread_timeout_secs,
 };
 pub use model_resolution::{
     effective_model_settings, effective_orchestrator_compaction_threshold,
