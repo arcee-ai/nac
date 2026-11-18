@@ -1,9 +1,9 @@
-import { A as e, B as t, C as n, D as r, E as i, F as a, I as o, L as s, M as c, N as l, P as u, R as d, S as f, T as p, _ as m, a as h, b as g, c as _, d as v, f as y, g as b, h as x, i as S, j as C, k as w, l as T, m as E, n as D, o as O, p as k, r as A, s as ee, t as j, u as M, v as N, w as te, x as ne, y as re, z as P } from "./chunks/RuntimeContext-CnwcNcBD.js";
+import { A as e, B as t, C as n, D as r, E as i, F as a, I as o, L as s, M as c, N as l, P as u, R as d, S as f, T as p, _ as m, a as h, b as g, c as _, d as v, f as y, g as b, h as x, i as S, j as C, k as w, l as T, m as E, n as D, o as O, p as k, r as A, s as ee, t as j, u as M, v as N, w as te, x as ne, y as re, z as P } from "./chunks/RuntimeContext-Baka66HE.js";
 import { C as ie, D as ae, E as oe, O as se, S as ce, b as le, d as ue, f as de, g as fe, h as pe, i as me, l as he, m as ge, n as _e, p as ve, r as ye, t as be, u as xe, v as Se, w as Ce, x as we, y as Te } from "./chunks/PresentationBoundary-BAUfAcJZ.js";
 import { n as Ee, t as De } from "./chunks/visibility-Cy5NeKga.js";
-import { $ as Oe, $n as ke, $t as Ae, A as je, An as Me, At as Ne, B as Pe, Bn as Fe, Bt as Ie, C as Le, Cn as Re, Ct as ze, D as Be, Dn as Ve, Dt as He, E as Ue, En as We, Et as Ge, F as Ke, Fn as qe, Ft as Je, G as Ye, Gn as Xe, Gt as Ze, H as Qe, Hn as $e, Ht as et, I as tt, In as nt, It as rt, J as it, Jn as at, Jt as ot, K as st, Kn as ct, Kt as lt, L as ut, Ln as dt, Lt as ft, M as pt, Mn as mt, Mt as ht, N as gt, Nn as _t, Nt as vt, O as yt, On as bt, Ot as xt, P as St, Pn as Ct, Pt as wt, Q as Tt, Qn as Et, Qt as Dt, R as Ot, Rn as kt, Rt as At, S as jt, Sn as Mt, St as Nt, T as Pt, Tn as Ft, Tt as It, U as Lt, Un as Rt, Ut as zt, V as Bt, Vn as Vt, Vt as Ht, W as Ut, Wn as Wt, Wt as Gt, X as Kt, Xn as qt, Xt as Jt, Y as Yt, Yn as Xt, Yt as Zt, Z as Qt, Zn as $t, Zt as en, _ as tn, _n as nn, _t as rn, a as an, an as on, ar as sn, at as cn, b as ln, bn as un, bt as dn, c as fn, cn as pn, cr as mn, ct as hn, d as gn, dn as _n, dr as vn, dt as yn, en as bn, er as xn, et as Sn, f as Cn, fn as wn, fr as F, ft as Tn, g as En, gn as Dn, gt as On, h as kn, hn as An, ht as jn, i as Mn, in as Nn, ir as Pn, it as Fn, j as In, jn as Ln, jt as Rn, k as zn, kn as Bn, kt as Vn, l as Hn, ln as Un, lr as Wn, lt as Gn, m as Kn, mn as qn, mt as Jn, nn as Yn, nr as Xn, nt as Zn, o as Qn, on as $n, or as er, ot as tr, p as nr, pn as rr, pr as ir, pt as ar, q as or, qn as sr, qt as cr, r as lr, rn as ur, rr as dr, rt as fr, s as pr, sn as mr, sr as hr, st as gr, t as _r, tn as vr, tr as yr, tt as br, u as xr, un as Sr, ur as Cr, ut as wr, v as Tr, vn as Er, vt as Dr, w as Or, wn as kr, wt as Ar, x as jr, xn as Mr, xt as Nr, y as Pr, yn as Fr, yt as Ir, z as Lr, zn as Rr, zt as zr } from "./chunks/workspaceLink-BtXcbrfO.js";
+import { $ as Oe, $n as ke, $t as Ae, A as je, An as Me, At as Ne, B as Pe, Bn as Fe, Bt as Ie, C as Le, Cn as Re, Ct as ze, D as Be, Dn as Ve, Dt as He, E as Ue, En as We, Et as Ge, F as Ke, Fn as qe, Ft as Je, G as Ye, Gn as Xe, Gt as Ze, H as Qe, Hn as $e, Ht as et, I as tt, In as nt, It as rt, J as it, Jn as at, Jt as ot, K as st, Kn as ct, Kt as lt, L as ut, Ln as dt, Lt as ft, M as pt, Mn as mt, Mt as ht, N as gt, Nn as _t, Nt as vt, O as yt, On as bt, Ot as xt, P as St, Pn as Ct, Pt as wt, Q as Tt, Qn as Et, Qt as Dt, R as Ot, Rn as kt, Rt as At, S as jt, Sn as Mt, St as Nt, T as Pt, Tn as Ft, Tt as It, U as Lt, Un as Rt, Ut as zt, V as Bt, Vn as Vt, Vt as Ht, W as Ut, Wn as Wt, Wt as Gt, X as Kt, Xn as qt, Xt as Jt, Y as Yt, Yn as Xt, Yt as Zt, Z as Qt, Zn as $t, Zt as en, _ as tn, _n as nn, _t as rn, a as an, an as on, ar as sn, at as cn, b as ln, bn as un, bt as dn, c as fn, cn as pn, cr as mn, ct as hn, d as gn, dn as _n, dr as vn, dt as yn, en as bn, er as xn, et as Sn, f as Cn, fn as wn, fr as F, ft as Tn, g as En, gn as Dn, gt as On, h as kn, hn as An, ht as jn, i as Mn, in as Nn, ir as Pn, it as Fn, j as In, jn as Ln, jt as Rn, k as zn, kn as Bn, kt as Vn, l as Hn, ln as Un, lr as Wn, lt as Gn, m as Kn, mn as qn, mt as Jn, nn as Yn, nr as Xn, nt as Zn, o as Qn, on as $n, or as er, ot as tr, p as nr, pn as rr, pr as ir, pt as ar, q as or, qn as sr, qt as cr, r as lr, rn as ur, rr as dr, rt as fr, s as pr, sn as mr, sr as hr, st as gr, t as _r, tn as vr, tr as yr, tt as br, u as xr, un as Sr, ur as Cr, ut as wr, v as Tr, vn as Er, vt as Dr, w as Or, wn as kr, wt as Ar, x as jr, xn as Mr, xt as Nr, y as Pr, yn as Fr, yt as Ir, z as Lr, zn as Rr, zt as zr } from "./chunks/workspaceLink-CDMQdGI6.js";
 import { $ as I, A as Br, F as Vr, G as L, I as Hr, J as Ur, K as Wr, L as Gr, M as Kr, N as qr, O as Jr, P as Yr, Q as R, R as Xr, S as Zr, W as Qr, X as $r, Y as ei, Z as ti, _ as z, a as ni, b as ri, c as ii, d as ai, et as oi, f as si, g as B, h as V, j as ci, k as li, l as ui, m as H, o as di, p as fi, q as pi, tt as U, u as mi, x as hi, y as gi, z as _i } from "./chunks/Toast-DLhlVenn.js";
-import { A as vi, At as yi, B as bi, Bt as xi, Ct as Si, D as Ci, Dt as wi, E as Ti, Et as Ei, F as Di, Ft as Oi, G as ki, H as Ai, Ht as ji, I as Mi, J as Ni, K as Pi, Kt as Fi, L as Ii, Mt as Li, N as Ri, Ot as zi, P as Bi, Pt as Vi, Q as Hi, S as Ui, St as Wi, T as Gi, U as Ki, V as qi, Vt as Ji, W as Yi, X as Xi, Xt as Zi, Y as W, Z as Qi, Zt as $i, _ as ea, _t as ta, a as na, an as ra, at as ia, b as aa, bt as oa, c as sa, d as ca, dt as la, en as ua, et as da, f as fa, ft as pa, h as ma, i as ha, in as ga, it as _a, kt as va, l as ya, m as ba, mt as xa, n as Sa, nn as Ca, nt as wa, o as Ta, on as Ea, p as Da, pt as Oa, q as G, qt as ka, r as Aa, rn as ja, rt as Ma, s as Na, sn as Pa, st as Fa, t as Ia, tn as La, tt as Ra, u as za, ut as Ba, v as Va, vt as Ha, w as Ua, x as Wa, xt as Ga, z as Ka } from "./chunks/ChatSessionActions-BkIt4jFc.js";
+import { A as vi, At as yi, B as bi, Bt as xi, Ct as Si, D as Ci, Dt as wi, E as Ti, Et as Ei, F as Di, Ft as Oi, G as ki, H as Ai, Ht as ji, I as Mi, J as Ni, K as Pi, Kt as Fi, L as Ii, Mt as Li, N as Ri, Ot as zi, P as Bi, Pt as Vi, Q as Hi, S as Ui, St as Wi, T as Gi, U as Ki, V as qi, Vt as Ji, W as Yi, X as Xi, Xt as Zi, Y as W, Z as Qi, Zt as $i, _ as ea, _t as ta, a as na, an as ra, at as ia, b as aa, bt as oa, c as sa, d as ca, dt as la, en as ua, et as da, f as fa, ft as pa, h as ma, i as ha, in as ga, it as _a, kt as va, l as ya, m as ba, mt as xa, n as Sa, nn as Ca, nt as wa, o as Ta, on as Ea, p as Da, pt as Oa, q as G, qt as ka, r as Aa, rn as ja, rt as Ma, s as Na, sn as Pa, st as Fa, t as Ia, tn as La, tt as Ra, u as za, ut as Ba, v as Va, vt as Ha, w as Ua, x as Wa, xt as Ga, z as Ka } from "./chunks/ChatSessionActions-B_WYZuPW.js";
 import { Activity as qa, Fragment as Ja, Suspense as Ya, createContext as Xa, forwardRef as Za, lazy as Qa, memo as $a, use as eo, useCallback as K, useContext as to, useEffect as q, useEffectEvent as no, useId as ro, useLayoutEffect as io, useMemo as J, useRef as Y, useState as X, useSyncExternalStore as ao } from "react";
 import { QueryClientProvider as oo, QueryObserver as so, replaceEqualDeep as co, useIsFetching as lo, useMutation as uo, useQueries as fo, useQuery as po, useQueryClient as mo } from "@tanstack/react-query";
 import { Fragment as Z, jsx as Q, jsxs as $ } from "react/jsx-runtime";
@@ -28994,8 +28994,8 @@ function Sk({ sessionId: e, enabled: t }) {
 	});
 }
 // src/app/features/session-chrome/SessionDrawer.tsx
-var Ck = "(min-width: 1280px)", wk = 200;
-function Tk(e) {
+var Ck = 200;
+function wk(e) {
 	let [t, n] = X(e), [r, i] = X(!1), [a, o] = X(e);
 	return a !== e && (o(e), e ? n(!0) : i(!1)), q(() => {
 		if (!e || !t) return;
@@ -29003,14 +29003,14 @@ function Tk(e) {
 		return () => cancelAnimationFrame(n);
 	}, [e, t]), q(() => {
 		if (e || !t) return;
-		let r = setTimeout(() => n(!1), wk);
+		let r = setTimeout(() => n(!1), Ck);
 		return () => clearTimeout(r);
 	}, [e, t]), {
 		mounted: t,
 		shown: r
 	};
 }
-function Ek({ onClose: e }) {
+function Tk({ onClose: e }) {
 	return /* @__PURE__ */ $("header", {
 		className: "flex h-[52px] shrink-0 items-center gap-1 border-b border-muted pr-2 pl-5",
 		children: [/* @__PURE__ */ Q("h2", {
@@ -29026,38 +29026,38 @@ function Ek({ onClose: e }) {
 		})]
 	});
 }
-function Dk({ sessionId: e, snapshot: t, behavior: n, panel: r, goalEnabled: i }) {
-	let a = AC(e, r), o = L(), s = pi(Ck) && !o, { useDockWidth: c, setDockWidth: l } = D().stores.dockWidth, u = c(), d = Y(null), f = Y(null), [p, m] = X(940), [h, g] = X(!1);
-	q(() => () => f.current?.(), []), io(() => {
-		let e = d.current?.parentElement;
+function Ek({ sessionId: e, snapshot: t, behavior: n, panel: r, goalEnabled: i }) {
+	let a = AC(e, r), o = L(), { useDockWidth: s, setDockWidth: c } = D().stores.dockWidth, l = s(), u = Y(null), d = Y(null), [f, p] = X(760), [m, h] = X(!1);
+	q(() => () => d.current?.(), []), io(() => {
+		let e = u.current?.parentElement;
 		if (!e || typeof ResizeObserver > "u") return;
-		let t = () => m(e.clientWidth);
+		let t = () => p(e.clientWidth);
 		t();
 		let n = new ResizeObserver(t);
 		return n.observe(e), () => n.disconnect();
 	}, []);
-	let _ = typeof ResizeObserver < "u" && s && p >= 940, v = a.open && _, y = Tk(v), b = Math.max(480, p - 460), x = Math.min(u, b), S = a.expanded && p ? p : x, C = (e) => l(Math.min(b, Math.max(480, e))), w = (e) => {
+	let g = typeof ResizeObserver < "u" && !o && f >= 760, _ = a.open && g, v = wk(_), y = Math.max(360, f - 400), b = Math.min(l, y), x = a.expanded && f ? f : b, S = (e) => c(Math.min(y, Math.max(360, e))), C = (e) => {
 		if (e.button !== 0) return;
-		e.preventDefault(), f.current?.();
-		let t = e.clientX, n = x, r = e.pointerId, i = e.currentTarget;
-		i.setPointerCapture(r), g(!0);
+		e.preventDefault(), d.current?.();
+		let t = e.clientX, n = b, r = e.pointerId, i = e.currentTarget;
+		i.setPointerCapture(r), h(!0);
 		let a = (e) => {
-			e.pointerId === r && C(n + t - e.clientX);
+			e.pointerId === r && S(n + t - e.clientX);
 		}, o = (e) => {
 			if (!(e && e.pointerId !== r)) {
 				window.removeEventListener("pointermove", a), window.removeEventListener("pointerup", o), window.removeEventListener("pointercancel", o);
 				try {
 					i.releasePointerCapture(r);
 				} catch {}
-				f.current = null, g(!1);
+				d.current = null, h(!1);
 			}
 		};
-		f.current = () => o(), window.addEventListener("pointermove", a), window.addEventListener("pointerup", o), window.addEventListener("pointercancel", o);
-	}, T = a.content === "goal" && i, { setDrawerDockable: E } = D().stores.sessionLayoutStore;
-	q(() => E(_), [_, E]);
-	let O = () => T ? /* @__PURE__ */ $("div", {
+		d.current = () => o(), window.addEventListener("pointermove", a), window.addEventListener("pointerup", o), window.addEventListener("pointercancel", o);
+	}, w = a.content === "goal" && i, { setDrawerDockable: T } = D().stores.sessionLayoutStore;
+	q(() => T(g), [g, T]);
+	let E = () => w ? /* @__PURE__ */ $("div", {
 		className: "flex min-h-0 flex-1 flex-col",
-		children: [o ? null : /* @__PURE__ */ Q(Ek, { onClose: a.close }), /* @__PURE__ */ Q("div", {
+		children: [o ? null : /* @__PURE__ */ Q(Tk, { onClose: a.close }), /* @__PURE__ */ Q("div", {
 			className: "min-h-0 flex-1 overflow-y-auto",
 			children: /* @__PURE__ */ Q(Sk, {
 				sessionId: e,
@@ -29071,43 +29071,43 @@ function Dk({ sessionId: e, snapshot: t, behavior: n, panel: r, goalEnabled: i }
 		panel: r,
 		onPanelChange: a.openPanel,
 		onClose: a.close
-	}), k = T ? "Goal" : mn[r];
+	}), O = w ? "Goal" : mn[r];
 	return /* @__PURE__ */ $(Z, { children: [
 		/* @__PURE__ */ Q("span", {
-			ref: d,
+			ref: u,
 			"aria-hidden": "true",
 			className: "absolute hidden"
 		}),
-		y.mounted ? /* @__PURE__ */ $("aside", {
-			"aria-label": k,
-			"aria-hidden": !v || void 0,
-			inert: !v,
-			className: U("relative h-full shrink-0 overflow-hidden border-l border-tertiary bg-elevation-ground", !h && "transition-[width] duration-200 ease-[var(--ease-drawer)] motion-reduce:transition-none"),
-			style: { width: y.shown ? S : 0 },
+		v.mounted ? /* @__PURE__ */ $("aside", {
+			"aria-label": O,
+			"aria-hidden": !_ || void 0,
+			inert: !_,
+			className: U("relative h-full shrink-0 overflow-hidden border-l border-tertiary bg-elevation-ground", !m && "transition-[width] duration-200 ease-[var(--ease-drawer)] motion-reduce:transition-none"),
+			style: { width: v.shown ? x : 0 },
 			onKeyDown: (e) => {
 				e.key !== "Escape" || e.defaultPrevented || e.nativeEvent.isComposing || e.target instanceof Element && e.target.closest(".xterm") || (e.preventDefault(), a.expanded ? a.toggleExpanded() : a.close());
 			},
 			children: [/* @__PURE__ */ Q("div", {
 				className: "absolute inset-y-0 left-0 flex flex-col",
-				style: { width: S || 560 },
-				children: O()
-			}), !a.expanded && v ? /* @__PURE__ */ Q("div", {
+				style: { width: x || 560 },
+				children: E()
+			}), !a.expanded && _ ? /* @__PURE__ */ Q("div", {
 				role: "separator",
 				"aria-label": "Resize session panel",
 				"aria-orientation": "vertical",
-				"aria-valuemin": 480,
-				"aria-valuemax": b,
-				"aria-valuenow": x,
+				"aria-valuemin": 360,
+				"aria-valuemax": y,
+				"aria-valuenow": b,
 				tabIndex: 0,
 				title: "Resize session panel",
 				className: "absolute inset-y-0 left-0 z-10 w-3 cursor-col-resize touch-none hover:bg-basic-primary/10 focus-visible:bg-basic-primary/10 focus-visible:outline focus-visible:outline-2",
-				onPointerDown: w,
+				onPointerDown: C,
 				onKeyDown: (e) => {
 					let t = e.shiftKey ? 50 : 10;
-					if (e.key === "ArrowLeft") C(x + t);
-					else if (e.key === "ArrowRight") C(x - t);
-					else if (e.key === "Home") C(480);
-					else if (e.key === "End") C(b);
+					if (e.key === "ArrowLeft") S(b + t);
+					else if (e.key === "ArrowRight") S(b - t);
+					else if (e.key === "Home") S(360);
+					else if (e.key === "End") S(y);
 					else return;
 					e.preventDefault();
 				},
@@ -29118,12 +29118,12 @@ function Dk({ sessionId: e, snapshot: t, behavior: n, panel: r, goalEnabled: i }
 			}) : null]
 		}) : null,
 		/* @__PURE__ */ Q(Si, {
-			open: a.open && !v,
+			open: a.open && !_,
 			onClose: a.close,
 			onEscape: (e) => {
 				e.target instanceof Element && e.target.closest(".xterm") || (!o && a.expanded ? a.toggleExpanded() : a.close());
 			},
-			title: k,
+			title: O,
 			bare: !0,
 			expanded: a.expanded,
 			className: o ? "h-[92dvh] bg-elevation-ground" : void 0,
@@ -29133,7 +29133,7 @@ function Dk({ sessionId: e, snapshot: t, behavior: n, panel: r, goalEnabled: i }
 					close: a.close,
 					bar: null
 				},
-				children: T ? /* @__PURE__ */ $("div", {
+				children: w ? /* @__PURE__ */ $("div", {
 					className: "flex min-h-0 flex-1 flex-col",
 					children: [/* @__PURE__ */ $("div", {
 						className: "flex h-12 shrink-0 items-center justify-between pr-1 pl-5",
@@ -29155,13 +29155,13 @@ function Dk({ sessionId: e, snapshot: t, behavior: n, panel: r, goalEnabled: i }
 							enabled: i
 						})
 					})]
-				}) : O()
-			}) : O()
+				}) : E()
+			}) : E()
 		})
 	] });
 }
 // src/app/components/pages/SessionPage.tsx
-function Ok(e, t) {
+function Dk(e, t) {
 	let { useSshConnectionStatus: n, sshTargetKey: r, sshTargetFromSummary: i, markSshDisconnected: a, markSshConnected: o } = D().stores.sshConnectionStore, s = J(() => i(t), [i, t]), c = n(s), l = un(), u = Y(null);
 	q(() => {
 		u.current = null;
@@ -29178,11 +29178,11 @@ function Ok(e, t) {
 		a
 	]);
 }
-function kk() {
+function Ok() {
 	let t = Ee(), { useSidePanelCollapsed: n, useSelectedThread: r, selectInsight: i, leaveFocusedSidePanel: a, revealSidePanel: o, activateSessionSelection: s, unbindSidePanelProject: c, bindSidePanelProject: l } = D().stores.sessionLayoutStore, { clearAttention: u } = D().stores.attentionStore, { sessionId: d, panel: f } = So(), p = xo(), m = d ?? null, h = Gt(), g = gc();
 	e("SessionPage");
 	let { data: _ = null, error: v, refetch: y } = Fn(m), { data: b = null } = cn(m), x = bS(m, b?.summary.backend), S = n(), C = r(), w = b != null || _ != null, T = w ? b?.summary.behavior ?? _?.metadata.behavior ?? "orchestrator" : null, E = !w || cr(h, T, b?.lineage ?? _?.lineage);
-	Rg(E ? m : null), Bg(E ? _?.active_run : null), Ok(E ? m : null, E ? b?.summary : null);
+	Rg(E ? m : null), Bg(E ? _?.active_run : null), Dk(E ? m : null, E ? b?.summary : null);
 	let O = T == null ? null : ji(T, _?.lineage?.kind), k = O?.mobilePanels ?? [], A = Wn(f) ? f : hr, ee = A === "threads" ? "insights" : A, j = O == null || O.mobilePanels.includes(ee) ? ee : O.defaultPanel;
 	q(() => {
 		if (!m || !Wn(f)) return;
@@ -29295,7 +29295,7 @@ function kk() {
 								})
 							]
 						}),
-						/* @__PURE__ */ Q(Dk, {
+						/* @__PURE__ */ Q(Ek, {
 							sessionId: m,
 							snapshot: _,
 							behavior: T,
@@ -29310,12 +29310,12 @@ function kk() {
 	});
 }
 // src/app/features/managed/presentation/ManagedBranchPicker.tsx
-function Ak(e, t) {
+function kk(e, t) {
 	return e.toLowerCase().localeCompare(t.toLowerCase()) || e.localeCompare(t);
 }
-function jk({ branches: e, value: t, onValueChange: n, isLoading: r, error: i }) {
+function Ak({ branches: e, value: t, onValueChange: n, isLoading: r, error: i }) {
 	let [a, o] = X(!1), [s, c] = X(""), [l, u] = X(null), d = Y(null), f = Y(null), p = ro(), m = L(), h = J(() => {
-		let t = s.trim().toLowerCase(), n = [...e].sort(Ak);
+		let t = s.trim().toLowerCase(), n = [...e].sort(kk);
 		return t ? n.filter((e) => e.toLowerCase().includes(t)) : n;
 	}, [e, s]), g = l === null ? -1 : h.indexOf(l), _ = (e = !0) => {
 		o(!1), c(""), u(null), e && d.current?.focus();
@@ -29324,7 +29324,7 @@ function jk({ branches: e, value: t, onValueChange: n, isLoading: r, error: i })
 			_();
 			return;
 		}
-		let n = [...e].sort(Ak);
+		let n = [...e].sort(kk);
 		u(t || n[0] || null), o(!0);
 	};
 	q(() => {
@@ -29418,7 +29418,7 @@ function jk({ branches: e, value: t, onValueChange: n, isLoading: r, error: i })
 					"aria-activedescendant": g >= 0 ? `${p}-option-${g}` : void 0,
 					value: s,
 					onChange: (t) => {
-						let n = t.target.value, r = n.trim().toLowerCase(), i = [...e].sort(Ak).filter((e) => !r || e.toLowerCase().includes(r));
+						let n = t.target.value, r = n.trim().toLowerCase(), i = [...e].sort(kk).filter((e) => !r || e.toLowerCase().includes(r));
 						c(n), u(i[0] ?? null);
 					},
 					onKeyDown: x
@@ -29479,7 +29479,7 @@ function jk({ branches: e, value: t, onValueChange: n, isLoading: r, error: i })
 	});
 }
 // src/app/features/managed/presentation/ManagedRepositoryModal.tsx
-function Mk({ open: e, onClose: t, onConnect: n }) {
+function jk({ open: e, onClose: t, onConnect: n }) {
 	let { api: r } = D(), i = xo(), a = Qn(), o = mo(), s = gn(), c = xr(e), [l, u] = X(""), [d, f] = X(null), [p, m] = X(""), [h, g] = X(""), [_, v] = X(""), [y, b] = X(null), [x, S] = X(""), [C, w] = X(!1), [T, E] = X(null), [O, k] = X(e), A = Y(0), ee = po({
 		queryKey: ["managed-github-repositories"],
 		queryFn: ({ signal: e }) => r.listManagedGitHubRepositories(e),
@@ -29710,7 +29710,7 @@ function Mk({ open: e, onClose: t, onConnect: n }) {
 					children: /* @__PURE__ */ $("div", {
 						className: "grid grid-cols-1 gap-4 sm:grid-cols-2",
 						children: [
-							/* @__PURE__ */ Q(jk, {
+							/* @__PURE__ */ Q(Ak, {
 								branches: M.data?.branches ?? [],
 								value: p,
 								onValueChange: m,
@@ -29775,7 +29775,7 @@ function Mk({ open: e, onClose: t, onConnect: n }) {
 	});
 }
 // src/app/features/managed/controller/ManagedHostProvider.tsx
-function Nk({ children: e }) {
+function Mk({ children: e }) {
 	let t = gn(), n = xo(), [r, i] = X("status"), [a, o] = X(!1), [s, c] = X(!1), l = t.data ?? null, u = K(() => {
 		c(!1), i("status"), n(F.settings("managed"));
 	}, [n]), d = K(() => {
@@ -29808,7 +29808,7 @@ function Nk({ children: e }) {
 		value: h,
 		children: /* @__PURE__ */ $(wd.Provider, {
 			value: g,
-			children: [e, a ? /* @__PURE__ */ Q(Mk, {
+			children: [e, a ? /* @__PURE__ */ Q(jk, {
 				open: !0,
 				onClose: () => o(!1),
 				onConnect: d
@@ -29817,40 +29817,40 @@ function Nk({ children: e }) {
 	});
 }
 // src/App.tsx
-var Pk = Qa(() => import("./chunks/DesktopSessionTargetOwner-CRyWE0x-.js").then((e) => ({ default: e.DesktopSessionTargetOwner }))), Fk = Qa(() => import("./chunks/DesignPreviewPage-BJSz95sq.js").catch(() => ({ default: () => /* @__PURE__ */ Q("p", {
+var Nk = Qa(() => import("./chunks/DesktopSessionTargetOwner-eq5-KsEm.js").then((e) => ({ default: e.DesktopSessionTargetOwner }))), Pk = Qa(() => import("./chunks/DesignPreviewPage-DA8V6mdM.js").catch(() => ({ default: () => /* @__PURE__ */ Q("p", {
 	role: "alert",
 	children: "The design preview could not be loaded. Reload this page to try again."
 }) })));
-function Ik() {
+function Fk() {
 	let { sessionId: e } = So();
 	return /* @__PURE__ */ $("section", {
 		className: "relative flex h-full min-h-0 overflow-hidden bg-elevation-ground",
-		children: [/* @__PURE__ */ Q(pm, {}), /* @__PURE__ */ Q(kk, {}, e)]
+		children: [/* @__PURE__ */ Q(pm, {}), /* @__PURE__ */ Q(Ok, {}, e)]
 	});
 }
-function Lk() {
+function Ik() {
 	return Gt().orchestrationEnabled ? /* @__PURE__ */ Q(Ya, {
 		fallback: /* @__PURE__ */ Q("p", {
 			role: "status",
 			children: "Loading design preview…"
 		}),
-		children: /* @__PURE__ */ Q(Fk, {})
+		children: /* @__PURE__ */ Q(Pk, {})
 	}) : /* @__PURE__ */ Q(go, {
 		to: F.list(),
 		replace: !0
 	});
 }
-function Rk({ desktopCommands: e }) {
+function Lk({ desktopCommands: e }) {
 	return /* @__PURE__ */ Q(Ao, {
 		port: e,
 		children: /* @__PURE__ */ Q(xc.Provider, {
 			value: e != null,
-			children: /* @__PURE__ */ Q(yf, { children: /* @__PURE__ */ Q(Mn, { children: /* @__PURE__ */ Q(lp, { children: /* @__PURE__ */ Q(hc, { children: /* @__PURE__ */ Q(Nk, { children: /* @__PURE__ */ Q(Mc, { children: /* @__PURE__ */ $(Cl, { children: [
+			children: /* @__PURE__ */ Q(yf, { children: /* @__PURE__ */ Q(Mn, { children: /* @__PURE__ */ Q(lp, { children: /* @__PURE__ */ Q(hc, { children: /* @__PURE__ */ Q(Mk, { children: /* @__PURE__ */ Q(Mc, { children: /* @__PURE__ */ $(Cl, { children: [
 				e && /* @__PURE__ */ Q(bc, { port: e }),
 				/* @__PURE__ */ Q(Dc, {}),
 				e?.connectSessionTarget && /* @__PURE__ */ Q(Ya, {
 					fallback: null,
-					children: /* @__PURE__ */ Q(Pk, { port: e })
+					children: /* @__PURE__ */ Q(Nk, { port: e })
 				}),
 				/* @__PURE__ */ Q(ml, {}),
 				/* @__PURE__ */ Q(hf, { children: /* @__PURE__ */ $(yo, { children: [
@@ -29875,7 +29875,7 @@ function Rk({ desktopCommands: e }) {
 							}),
 							/* @__PURE__ */ Q(vo, {
 								path: "/session/:sessionId/:panel?",
-								element: /* @__PURE__ */ Q(Ik, {})
+								element: /* @__PURE__ */ Q(Fk, {})
 							})
 						]
 					}),
@@ -29889,7 +29889,7 @@ function Rk({ desktopCommands: e }) {
 					}),
 					/* @__PURE__ */ Q(vo, {
 						path: "/design",
-						element: /* @__PURE__ */ Q(Lk, {})
+						element: /* @__PURE__ */ Q(Ik, {})
 					}),
 					/* @__PURE__ */ Q(vo, {
 						path: "*",
@@ -29904,19 +29904,19 @@ function Rk({ desktopCommands: e }) {
 	});
 }
 // src/app/runtime/NativePresentationRoot.tsx
-function zk(e) {
-	return /* @__PURE__ */ Q(Bk, { ...e }, e.runtime.id);
+function Rk(e) {
+	return /* @__PURE__ */ Q(zk, { ...e }, e.runtime.id);
 }
-function Bk({ runtime: e, router: t, theme: n, className: r, styles: i, globalKeyboard: a, desktopCommands: o }) {
+function zk({ runtime: e, router: t, theme: n, className: r, styles: i, globalKeyboard: a, desktopCommands: o }) {
 	if (q(() => e.retain(), [e]), ao(e.subscribe, e.isClosed, e.isClosed)) return null;
-	let s = /* @__PURE__ */ Q(Vk, {
+	let s = /* @__PURE__ */ Q(Bk, {
 		runtime: e,
 		className: r,
 		styles: i,
 		globalKeyboard: a,
 		children: t(/* @__PURE__ */ Q(Oo, {
 			value: o ? "native-visible-anchor" : "browser",
-			children: /* @__PURE__ */ Q(Rk, { desktopCommands: o })
+			children: /* @__PURE__ */ Q(Lk, { desktopCommands: o })
 		}))
 	});
 	return /* @__PURE__ */ Q(j.Provider, {
@@ -29930,7 +29930,7 @@ function Bk({ runtime: e, router: t, theme: n, className: r, styles: i, globalKe
 		})
 	});
 }
-function Vk({ runtime: e, className: t, styles: n, globalKeyboard: r, children: i }) {
+function Bk({ runtime: e, className: t, styles: n, globalKeyboard: r, children: i }) {
 	let { resolved: a } = ma();
 	return /* @__PURE__ */ $("div", {
 		className: `${t ?? "nac-presentation h-full min-h-0"} ${a}`,
@@ -29943,4 +29943,4 @@ function Vk({ runtime: e, className: t, styles: n, globalKeyboard: r, children: 
 		})]
 	});
 }
-export { zk as NativePresentationRoot, A as NativeRuntime, j as RuntimeContext, S as createNativeRuntime, D as useNativeRuntime };
+export { Rk as NativePresentationRoot, A as NativeRuntime, j as RuntimeContext, S as createNativeRuntime, D as useNativeRuntime };

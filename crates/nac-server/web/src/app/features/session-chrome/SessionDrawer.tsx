@@ -21,14 +21,11 @@ import { GoalPanel } from "@/app/features/session-chrome/GoalPanel";
 import { useSessionDrawer } from "@/app/features/session-chrome/useSessionDrawer";
 import { CHAT_MIN_WIDTH, DOCK_DEFAULT_WIDTH, DOCK_MIN_WIDTH } from "@/app/hooks/useDockWidth";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
-import { useIsMobile, useMediaQuery } from "@/app/hooks/useMediaQuery";
+import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
 import { SESSION_PANEL_LABEL, type SessionPanel } from "@/app/lib/routes";
 import { PanelPhoneChromeProvider } from "@/app/providers/PanelPhoneChrome";
 import type { SessionBehavior, SessionSnapshotResponse } from "@/app/types/api";
-
-/** Docking needs room for a readable chat (≥460px) beside the 560px column and sidebar. */
-const DOCK_QUERY = "(min-width: 1280px)";
 
 /** Kept in step with the width transition below. */
 const DOCK_MS = 200;
@@ -99,7 +96,6 @@ export function SessionDrawer({
 }) {
   const drawer = useSessionDrawer(sessionId, panel);
   const isMobile = useIsMobile();
-  const wideViewport = useMediaQuery(DOCK_QUERY) && !isMobile;
   const { useDockWidth, setDockWidth } = useNativeRuntime().stores.dockWidth;
   const preferredWidth = useDockWidth();
   const measureRef = useRef<HTMLSpanElement>(null);
@@ -117,11 +113,12 @@ export function SessionDrawer({
     observer.observe(parent);
     return () => observer.disconnect();
   }, []);
-  // Without container observation, a host can shrink without a window resize.
-  // Keep the floating fallback rather than risk an unusable split.
+  // Off phones the panel docks whenever the session area fits both minimums.
+  // Without container observation, a host can shrink without a window resize,
+  // so keep the floating fallback rather than risk an unusable split.
   const canDock =
     typeof ResizeObserver !== "undefined" &&
-    wideViewport &&
+    !isMobile &&
     availableWidth >= DOCK_MIN_WIDTH + CHAT_MIN_WIDTH;
   const docked = drawer.open && canDock;
   const presence = useDockPresence(docked);

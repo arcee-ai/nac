@@ -2,9 +2,9 @@ import { useSyncExternalStore } from "react";
 import { standalonePreferenceStorage } from "@/app/lib/store";
 
 const KEY = "nac-session-dock-width";
-export const DOCK_MIN_WIDTH = 480;
+export const DOCK_MIN_WIDTH = 360;
 export const DOCK_DEFAULT_WIDTH = 560;
-export const CHAT_MIN_WIDTH = 460;
+export const CHAT_MIN_WIDTH = 400;
 
 export function createDockWidth(storage?: Pick<Storage, "getItem" | "setItem">) {
   let width = DOCK_DEFAULT_WIDTH;

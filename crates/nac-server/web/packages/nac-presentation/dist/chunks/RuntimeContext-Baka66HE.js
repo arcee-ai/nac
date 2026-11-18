@@ -1076,9 +1076,9 @@ var q = {
 	getItem: (e) => globalThis.localStorage.getItem(e),
 	setItem: (e, t) => globalThis.localStorage.setItem(e, t)
 }, De = /* @__PURE__ */ e({
-	CHAT_MIN_WIDTH: () => 460,
+	CHAT_MIN_WIDTH: () => 400,
 	DOCK_DEFAULT_WIDTH: () => 560,
-	DOCK_MIN_WIDTH: () => 480,
+	DOCK_MIN_WIDTH: () => 360,
 	createDockWidth: () => ke,
 	release: () => Me,
 	setDockWidth: () => je,
@@ -1088,7 +1088,7 @@ function ke(e) {
 	let t = 560;
 	try {
 		let n = e?.getItem(Oe);
-		n != null && Number.isFinite(Number(n)) && (t = Math.max(480, Math.round(Number(n))));
+		n != null && Number.isFinite(Number(n)) && (t = Math.max(360, Math.round(Number(n))));
 	} catch {}
 	let n = /* @__PURE__ */ new Set(), r = (e) => (n.add(e), () => {
 		n.delete(e);
@@ -1097,7 +1097,7 @@ function ke(e) {
 		useDockWidth: () => m(r, () => t, () => 560),
 		setDockWidth: (r) => {
 			if (Number.isFinite(r)) {
-				t = Math.max(480, Math.round(r));
+				t = Math.max(360, Math.round(r));
 				try {
 					e?.setItem(Oe, String(t));
 				} catch {}
