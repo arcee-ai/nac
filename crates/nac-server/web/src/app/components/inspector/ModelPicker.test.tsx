@@ -88,21 +88,22 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function renderPicker(metadata: SessionMetadata) {
+function renderPicker(metadata: SessionMetadata, disabled = false) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const view = render(
+  const tree = (busy: boolean) => (
     <QueryClientProvider client={client}>
       <ToastProvider>
         <ModelPicker
           sessionId="session"
           metadata={metadata}
           label={metadata.model}
-          disabled={false}
+          disabled={busy}
         />
       </ToastProvider>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
-  return { client, view };
+  const view = render(tree(disabled));
+  return { client, view, setBusy: (busy: boolean) => view.rerender(tree(busy)) };
 }
 
 it("switches from an Arcee account to Codex through one catalog mutation", async () => {
@@ -173,7 +174,7 @@ it("keeps managed mounted credentials server-side while selecting another entitl
     model: "trinity-large-thinking",
     base_url: "https://api.arcee.ai/api/v1",
     api_key_env: null,
-    reasoning_effort: null,
+    reasoning_effort: "high",
   } as SessionMetadata);
   try {
     const modelButton = await screen.findByRole("button", { name: "Model" });
@@ -183,7 +184,7 @@ it("keeps managed mounted credentials server-side while selecting another entitl
     await waitFor(() =>
       expect(update).toHaveBeenCalledExactlyOnceWith("session", {
         model: "moonshotai/kimi-k3",
-        reasoning_effort: null,
+        reasoning_effort: "high",
       }),
     );
     expect(discovery).toHaveBeenCalledWith(
@@ -201,7 +202,7 @@ it("keeps managed mounted credentials server-side while selecting another entitl
   }
 });
 
-it("offers only real effort levels and prompts for one when none is set", async () => {
+it("gives a session without a level its standard one and offers only real levels", async () => {
   const update = vi.spyOn(api, "updateConfig").mockResolvedValue(undefined);
   const { client, view } = renderPicker({
     backend: "arcee-auth",
@@ -211,15 +212,43 @@ it("offers only real effort levels and prompts for one when none is set", async 
     reasoning_effort: null,
   } as SessionMetadata);
   try {
-    const trigger = await screen.findByRole("button", { name: /^Effort/ });
+    // The fixture model has Low and High, so its standard level is Low.
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledExactlyOnceWith("session", { reasoning_effort: "low" }),
+    );
+    const trigger = await screen.findByRole("button", { name: "Low" });
     await waitFor(() => expect((trigger as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(trigger);
     expect(await screen.findByRole("button", { name: "High" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Low" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Default" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "High" }));
     await waitFor(() =>
-      expect(update).toHaveBeenCalledExactlyOnceWith("session", { reasoning_effort: "high" }),
+      expect(update).toHaveBeenLastCalledWith("session", { reasoning_effort: "high" }),
+    );
+  } finally {
+    view.unmount();
+    client.clear();
+  }
+});
+
+it("waits for the run to end before giving a session its standard level", async () => {
+  const update = vi.spyOn(api, "updateConfig").mockResolvedValue(undefined);
+  const { client, view, setBusy } = renderPicker(
+    {
+      backend: "arcee-auth",
+      model: "trinity-large-thinking",
+      base_url: "https://api.arcee.ai/api/v1",
+      api_key_env: null,
+      reasoning_effort: null,
+    } as SessionMetadata,
+    true,
+  );
+  try {
+    await screen.findByRole("button", { name: "Low" });
+    expect(update).not.toHaveBeenCalled();
+    setBusy(false);
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledExactlyOnceWith("session", { reasoning_effort: "low" }),
     );
   } finally {
     view.unmount();

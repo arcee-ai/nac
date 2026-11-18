@@ -1,14 +1,12 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-import {
-  ButtonSize,
-  PopoverPlacement,
-  Tooltip,
-  TooltipPosition,
-  type SelectItem,
-} from "@/app/atoms";
+import { ButtonSize, PopoverPlacement, Tooltip, TooltipPosition } from "@/app/atoms";
 import { CatalogModelPicker } from "@/app/components/modals/CatalogModelPicker";
-import { EFFORT_LEVEL_OPTIONS, reasoningOptionsFor } from "@/app/components/modals/options";
+import {
+  EFFORT_LEVEL_OPTIONS,
+  reasoningOptionsFor,
+  standardEffort,
+} from "@/app/components/modals/options";
 import { SmallSelect } from "@/app/components/modals/SmallSelect";
 import { useManagedModelProfile } from "@/app/features/managed/controller/useManagedModelProfile";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
@@ -18,47 +16,6 @@ import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { useToast } from "@/app/providers/ToastProvider";
 import { useModelCatalog, useReadyProviderModels, useUpdateConfig } from "@/app/services/queries";
 import type { BackendKind, ReasoningEffort, SessionMetadata } from "@/app/types/api";
-
-const EFFORT_ROW_HINTS: Record<string, { title: string; description: string }> = {
-  none: {
-    title: "None",
-    description:
-      "The model answers without a reasoning pass. This is the fastest and cheapest option.",
-  },
-  minimal: {
-    title: "Minimal",
-    description:
-      "A very short reasoning pass before the answer. Slightly more careful than none, still built for speed.",
-  },
-  low: {
-    title: "Low",
-    description:
-      "A light reasoning pass. Enough for small decisions, without a long investigation.",
-  },
-  medium: {
-    title: "Medium",
-    description: "A balanced reasoning pass. The model thinks the task through, then answers.",
-  },
-  high: {
-    title: "High",
-    description:
-      "A deep reasoning pass. The model spends more time checking its work, so replies are slower and cost more.",
-  },
-  xhigh: {
-    title: "X-High",
-    description: "Extra-deep reasoning for hard problems. Longer and more expensive than high.",
-  },
-  max: {
-    title: "Max",
-    description:
-      "The deepest reasoning this model offers. Slowest and most expensive, for the hardest tasks.",
-  },
-};
-
-const COMPOSER_EFFORT_OPTIONS: SelectItem[] = EFFORT_LEVEL_OPTIONS.map((item) => ({
-  ...item,
-  hoverHint: { ...EFFORT_ROW_HINTS[item.id], muted: true },
-}));
 
 /**
  * The session's current model and reasoning, directly switchable beside the
@@ -94,13 +51,37 @@ export function ModelPicker({
       }
     : null;
   const resolved = resolveCatalogModel(catalog.data, metadata?.backend, currentModel);
+  const defaultEffort = standardEffort(resolved.supportedEfforts);
+  // Shown while a session without a level is being given its standard one.
+  const shownEffort = currentEffort || defaultEffort;
   const effortItems = useMemo(
-    () => reasoningOptionsFor(resolved.supportedEfforts, currentEffort, COMPOSER_EFFORT_OPTIONS),
-    [resolved.supportedEfforts, currentEffort],
+    () => reasoningOptionsFor(resolved.supportedEfforts, shownEffort, EFFORT_LEVEL_OPTIONS),
+    [resolved.supportedEfforts, shownEffort],
   );
-  const selectedEffort = effortItems.find((item) => item.id === currentEffort)?.label;
+  const selectedEffort = effortItems.find((item) => item.id === shownEffort)?.label;
   const effortLabel = typeof selectedEffort === "string" ? selectedEffort : "not set";
   const [effortOpen, setEffortOpen] = useState(false);
+
+  // A session with no level runs at the standard one. Applied once per
+  // session, and only while it is idle.
+  // TODO(backend): the server should store this level when the session is created.
+  const { mutate: applyConfig, isPending: configPending } = updateConfig;
+  const defaulted = useRef<string | null>(null);
+  useEffect(() => {
+    if (!metadata || !catalog.data || currentEffort || disabled || configPending) return;
+    if (defaulted.current === sessionId) return;
+    defaulted.current = sessionId;
+    applyConfig({ id: sessionId, patch: { reasoning_effort: defaultEffort } });
+  }, [
+    metadata,
+    catalog.data,
+    currentEffort,
+    defaultEffort,
+    disabled,
+    configPending,
+    sessionId,
+    applyConfig,
+  ]);
 
   const chooseModel = async (pick: CatalogPick) => {
     if (!metadata || (pick.backend === metadata.backend && pick.model === metadata.model)) return;
@@ -121,7 +102,9 @@ export function ModelPicker({
 
     const supported = resolveCatalogModel(catalog.data, pick.backend, pick.model).supportedEfforts;
     const compatibleEffort =
-      currentEffort && supported.includes(currentEffort as ReasoningEffort) ? currentEffort : null;
+      currentEffort && (!supported.length || supported.includes(currentEffort as ReasoningEffort))
+        ? currentEffort
+        : standardEffort(supported);
     const patch = preservesRoute
       ? { model: pick.model, reasoning_effort: compatibleEffort }
       : {
@@ -179,7 +162,7 @@ export function ModelPicker({
       >
         <SmallSelect
           items={effortItems}
-          value={currentEffort}
+          value={shownEffort}
           placeholder="Effort"
           disabled={disabled || !metadata || updateConfig.isPending}
           size={ButtonSize.Small}

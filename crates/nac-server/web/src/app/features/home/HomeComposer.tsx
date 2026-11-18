@@ -11,6 +11,7 @@ import { cn } from "@/app/lib/cn";
 import { routes } from "@/app/lib/routes";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
 import { resolveCatalogModel } from "@/app/lib/catalog";
+import { standardEffort } from "@/app/components/modals/options";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useModelCatalog } from "@/app/services/queries";
 import type {
@@ -147,15 +148,11 @@ export function HomeComposer({
   // A level picked for one model carries over to the next one that accepts it.
   const [effortChoice, setEffortChoice] = useState<string | null>(null);
   const effortAllowed = (effort: string) => supported.includes(effort as ReasoningEffort);
-  // Always a real level: the configured one, else Medium or the middle level the model has.
-  const standardEffort = supported.includes("medium")
-    ? "medium"
-    : (supported[Math.floor((supported.length - 1) / 2)] ?? "medium");
   const effort = !route
     ? ""
     : effortChoice !== null && effortAllowed(effortChoice)
       ? effortChoice
-      : route.effort || standardEffort;
+      : route.effort || standardEffort(supported);
   const sessionModel =
     route && effort !== route.effort
       ? withEffort(chosenModel, model.inherited, effort)
