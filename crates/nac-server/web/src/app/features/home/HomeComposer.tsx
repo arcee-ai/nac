@@ -39,8 +39,6 @@ import { useStartSession } from "./useStartSession";
 const MAX_TITLE = 120;
 
 /** Offered when the catalog says nothing about a model's reasoning levels. */
-const COMMON_EFFORTS: readonly ReasoningEffort[] = ["low", "medium", "high"];
-
 /** A task title from the prompt's first line, for the isolated-task form. */
 function titleFrom(prompt: string): string {
   const line = prompt.trim().split("\n")[0]?.trim() ?? "";
@@ -141,10 +139,9 @@ export function HomeComposer({
   const chosenModel = override ?? (model.inherited ? null : suggestion.override);
   const route = sessionRoute(chosenModel, model.inherited);
   const catalog = useModelCatalog(Boolean(route));
-  const known = route
+  const supported = route
     ? resolveCatalogModel(catalog.data, route.backend, route.model).supportedEfforts
     : [];
-  const supported = known.length ? known : COMMON_EFFORTS;
   // A level picked for one model carries over to the next one that accepts it.
   const [effortChoice, setEffortChoice] = useState<string | null>(null);
   const effortAllowed = (effort: string) => supported.includes(effort as ReasoningEffort);
@@ -152,7 +149,7 @@ export function HomeComposer({
     ? ""
     : effortChoice !== null && effortAllowed(effortChoice)
       ? effortChoice
-      : route.effort || standardEffort(supported);
+      : route.effort || (standardEffort(supported) ?? "");
   const sessionModel =
     route && effort !== route.effort
       ? withEffort(chosenModel, model.inherited, effort)

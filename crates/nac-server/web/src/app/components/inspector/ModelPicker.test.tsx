@@ -36,6 +36,16 @@ const catalog = {
           supported_efforts: ["low", "high"],
           source: "baseline",
         },
+        {
+          id: "deepseek-flash",
+          display_name: "DeepSeek Flash",
+          context_window: 128000,
+          max_tokens: 4096,
+          cost,
+          reasoning: true,
+          supported_efforts: [],
+          source: "baseline",
+        },
       ],
     },
     {
@@ -253,5 +263,49 @@ it("waits for the run to end before giving a session its standard level", async 
   } finally {
     view.unmount();
     client.clear();
+  }
+});
+
+it("offers and sends no level for a model that accepts none", async () => {
+  const update = vi.spyOn(api, "updateConfig").mockResolvedValue(undefined);
+  const { client, view } = renderPicker({
+    backend: "arcee-auth",
+    model: "trinity-large-thinking",
+    base_url: "https://api.arcee.ai/api/v1",
+    api_key_env: null,
+    reasoning_effort: "high",
+  } as SessionMetadata);
+  try {
+    const modelButton = await screen.findByRole("button", { name: "Model" });
+    await waitFor(() => expect((modelButton as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(modelButton);
+    fireEvent.click(await screen.findByText("DeepSeek Flash"));
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledExactlyOnceWith("session", {
+        model: "deepseek-flash",
+        reasoning_effort: null,
+      }),
+    );
+  } finally {
+    view.unmount();
+    client.clear();
+  }
+
+  update.mockClear();
+  const second = renderPicker({
+    backend: "arcee-auth",
+    model: "deepseek-flash",
+    base_url: "https://api.arcee.ai/api/v1",
+    api_key_env: null,
+    reasoning_effort: null,
+  } as SessionMetadata);
+  try {
+    const modelButton = await screen.findByRole("button", { name: "Model" });
+    await waitFor(() => expect((modelButton as HTMLButtonElement).disabled).toBe(false));
+    expect(screen.queryByRole("button", { name: /^(Effort|Low|Medium|High)$/ })).toBeNull();
+    expect(update).not.toHaveBeenCalled();
+  } finally {
+    second.view.unmount();
+    second.client.clear();
   }
 });

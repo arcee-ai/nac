@@ -8,9 +8,9 @@ export declare const EFFORT_LEVEL_OPTIONS: SelectItem[];
 export declare const REASONING_OPTIONS: SelectItem[];
 /**
  * The level a session runs at when nothing chose one: Medium, or the middle
- * level the model accepts. Null when the catalog lists no levels for it.
+ * level the model accepts. Null when the model accepts no explicit level.
  */
-export declare function standardEffort(supported: readonly ReasoningEffort[]): ReasoningEffort;
+export declare function standardEffort(supported: readonly ReasoningEffort[]): ReasoningEffort | null;
 /**
  * Narrows the effort list to the levels the catalog says a model accepts. An
  * empty list means the catalog has nothing to say — an unknown model, or a

@@ -167,10 +167,12 @@ export function ModelPicker({
 
   const overview = (
     <Menu label="Model settings" autoFocus>
-      {value ? (
-        <SettingRow label="Effort" value={effortLabel} onOpen={() => setView("effort")} />
+      {value && supportedEfforts.length ? (
+        <>
+          <SettingRow label="Effort" value={effortLabel} onOpen={() => setView("effort")} />
+          <MenuSeparator />
+        </>
       ) : null}
-      {value ? <MenuSeparator /> : null}
       <SettingRow label="Model" value={name ?? "Choose"} onOpen={() => setView("model")} />
     </Menu>
   );

@@ -18,6 +18,7 @@ const fakes = vi.hoisted(() => ({
   managed: false,
   eligible: false,
   inheritedEffort: "high" as string | null,
+  inheritedModel: "glm-5",
 }));
 
 vi.mock("./useStartSession", () => ({
@@ -33,7 +34,11 @@ vi.mock("./modelChoice", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./modelChoice")>()),
   useInheritedModel: () => ({
     inherited: {
-      initial: { model: "glm-5", reasoning_effort: fakes.inheritedEffort, backend: "arcee-api" },
+      initial: {
+        model: fakes.inheritedModel,
+        reasoning_effort: fakes.inheritedEffort,
+        backend: "arcee-api",
+      },
       light: null,
       source: "project-default",
     },
@@ -114,6 +119,7 @@ beforeEach(() => {
   fakes.managed = false;
   fakes.eligible = false;
   fakes.inheritedEffort = "high";
+  fakes.inheritedModel = "glm-5";
   standaloneHomeDraftStore.update("", null);
 });
 afterEach(() => {
@@ -199,6 +205,21 @@ describe("Home composer", () => {
         }),
       ),
     );
+  });
+
+  it("offers and sends no effort for a model that accepts none", async () => {
+    fakes.inheritedEffort = null;
+    fakes.inheritedModel = "no-levels";
+    mount("/", false);
+    const chip = screen.getByRole("button", { name: /^Model: / });
+    expect(chip.getAttribute("aria-label")).not.toContain("reasoning");
+    fireEvent.click(chip);
+    expect(screen.queryByRole("menuitem", { name: /^Effort/ })).toBeNull();
+    fireEvent.change(prompt(), { target: { value: "Go" } });
+    fireEvent.keyDown(prompt(), { key: "Enter" });
+    await vi.waitFor(() => expect(fakes.start).toHaveBeenCalled());
+    const model = fakes.start.mock.calls[0]?.[0]?.model;
+    expect(model?.selection?.reasoning_effort ?? null).toBeNull();
   });
 
   it("keeps an unsent draft across visits and sends nothing without a prompt", () => {

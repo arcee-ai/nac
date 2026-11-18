@@ -50,7 +50,7 @@ export function ModelPicker({
   const resolved = resolveCatalogModel(catalog.data, metadata?.backend, currentModel);
   const defaultEffort = standardEffort(resolved.supportedEfforts);
   // Shown while a session without a level is being given its standard one.
-  const shownEffort = currentEffort || defaultEffort;
+  const shownEffort = currentEffort || defaultEffort || "";
   const effortItems = useMemo(
     () => reasoningOptionsFor(resolved.supportedEfforts, shownEffort, EFFORT_LEVEL_OPTIONS),
     [resolved.supportedEfforts, shownEffort],
@@ -59,13 +59,14 @@ export function ModelPicker({
   const effortLabel = typeof selectedEffort === "string" ? selectedEffort : "not set";
   const [effortOpen, setEffortOpen] = useState(false);
 
-  // A session with no level runs at the standard one. Applied once per
-  // session, and only while it is idle.
+  // A session with no level, on a model that accepts levels, runs at the
+  // standard one. Applied once per session, and only while it is idle.
   // TODO(backend): the server should store this level when the session is created.
   const { mutate: applyConfig, isPending: configPending } = updateConfig;
   const defaulted = useRef<string | null>(null);
   useEffect(() => {
-    if (!metadata || !catalog.data || currentEffort || disabled || configPending) return;
+    if (!metadata || !catalog.data || currentEffort || !defaultEffort) return;
+    if (disabled || configPending) return;
     if (defaulted.current === sessionId) return;
     defaulted.current = sessionId;
     applyConfig({ id: sessionId, patch: { reasoning_effort: defaultEffort } });
@@ -99,7 +100,7 @@ export function ModelPicker({
 
     const supported = resolveCatalogModel(catalog.data, pick.backend, pick.model).supportedEfforts;
     const compatibleEffort =
-      currentEffort && (!supported.length || supported.includes(currentEffort as ReasoningEffort))
+      currentEffort && supported.includes(currentEffort as ReasoningEffort)
         ? currentEffort
         : standardEffort(supported);
     const patch = preservesRoute
@@ -150,26 +151,28 @@ export function ModelPicker({
         value={currentPick}
         onSelect={(pick) => void chooseModel(pick)}
       />
-      <Tooltip
-        title={`Effort: ${effortLabel}`}
-        description="How much the model reasons before it answers."
-        position={TooltipPosition.TopCenter}
-        sticky
-        disabled={effortOpen}
-      >
-        <SmallSelect
-          items={effortItems}
-          value={shownEffort}
-          placeholder="Effort"
-          disabled={disabled || !metadata || updateConfig.isPending}
-          size={ButtonSize.Small}
-          trailingIcon={null}
-          triggerClassName="!pl-1 [--color-text-btn-secondary:var(--color-text-basic-tertiary)]"
-          placement={PopoverPlacement.TopCenter}
-          onOpenChange={setEffortOpen}
-          onValueChange={(effort) => void chooseEffort(effort)}
-        />
-      </Tooltip>
+      {resolved.supportedEfforts.length ? (
+        <Tooltip
+          title={`Effort: ${effortLabel}`}
+          description="How much the model reasons before it answers."
+          position={TooltipPosition.TopCenter}
+          sticky
+          disabled={effortOpen}
+        >
+          <SmallSelect
+            items={effortItems}
+            value={shownEffort}
+            placeholder="Effort"
+            disabled={disabled || !metadata || updateConfig.isPending}
+            size={ButtonSize.Small}
+            trailingIcon={null}
+            triggerClassName="!pl-1 [--color-text-btn-secondary:var(--color-text-basic-tertiary)]"
+            placement={PopoverPlacement.TopCenter}
+            onOpenChange={setEffortOpen}
+            onValueChange={(effort) => void chooseEffort(effort)}
+          />
+        </Tooltip>
+      ) : null}
     </div>
   );
 }
