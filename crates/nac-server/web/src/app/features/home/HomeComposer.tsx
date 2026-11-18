@@ -237,7 +237,6 @@ export function HomeComposer({
             disabled={busy}
             addLabel={managed.isManaged ? "Add repository…" : "Add project…"}
             onAddProject={addProject}
-            onAddSsh={managed.isManaged ? undefined : projectActions.createSsh}
             onChange={chooseProject}
           />
           {project ? (

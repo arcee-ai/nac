@@ -1523,65 +1523,64 @@ var oc = [{
 	label: "SSH",
 	description: "A folder on a connected remote machine. Your files stay on that host."
 }], sc = { paddingInline: "8px" };
-function cc({ open: e, onClose: t, initialMode: n = "local" }) {
-	let { data: r } = Jt();
+function cc({ open: e, onClose: t }) {
+	let { data: n } = Jt();
 	return ys(e) ? /* @__PURE__ */ Q(lc, {
 		open: e,
-		defaultCwd: r?.root_cwd ?? "",
-		initialMode: n,
+		defaultCwd: n?.root_cwd ?? "",
 		onClose: t
 	}, e ? "open" : "closing") : null;
 }
-function lc({ open: e, defaultCwd: t, initialMode: n, onClose: r }) {
-	let i = xo(), a = Qn(), o = Ke(), s = L(), [c, l] = X(n), [u, d] = X(n === "ssh" ? "" : t), [f, p] = X(""), [m, h] = X(!1), [g, _] = X(null), [v, y] = X(null), b = c === "ssh", x = b ? v : null, S = !b || x !== null, C = o.isPending, w = Y(!1), T = (e) => {
-		e !== c && (_(null), l(e), h(!1), y(null), d(e === "ssh" ? "" : t));
-	}, E = (e, t) => {
-		_(null), y(e), d(e ? t ?? "" : "");
-	}, D = async () => {
-		if (!w.current && S) {
-			if (!$s(u)) _("A working folder is required.");
+function lc({ open: e, defaultCwd: t, onClose: n }) {
+	let r = xo(), i = Qn(), a = Ke(), o = L(), [s, c] = X("local"), [l, u] = X(t), [d, f] = X(""), [p, m] = X(!1), [h, g] = X(null), [_, v] = X(null), y = s === "ssh", b = y ? _ : null, x = !y || b !== null, S = a.isPending, C = Y(!1), w = (e) => {
+		e !== s && (g(null), c(e), m(!1), v(null), u(e === "ssh" ? "" : t));
+	}, T = (e, t) => {
+		g(null), v(e), u(e ? t ?? "" : "");
+	}, E = async () => {
+		if (!C.current && x) {
+			if (!$s(l)) g("A working folder is required.");
 			else {
-				w.current = !0;
+				C.current = !0;
 				try {
-					let e = await o.mutateAsync({
-						name: $s(f),
-						cwd: u,
-						ssh_host: x?.ssh_host ?? null,
-						ssh_port: x?.ssh_port ?? null,
-						ssh_identity_file: x?.ssh_identity_file ?? null
+					let e = await a.mutateAsync({
+						name: $s(d),
+						cwd: l,
+						ssh_host: b?.ssh_host ?? null,
+						ssh_port: b?.ssh_port ?? null,
+						ssh_identity_file: b?.ssh_identity_file ?? null
 					});
-					a.success("Project created"), i(F.newSession(e.project_id)), r();
+					i.success("Project created"), r(F.newSession(e.project_id)), n();
 				} catch (e) {
-					_(an(Xo(e)));
+					g(an(Xo(e)));
 				} finally {
-					w.current = !1;
+					C.current = !1;
 				}
 			}
 		}
-	}, O = C || !!g || !S;
+	}, D = S || !!h || !x;
 	return /* @__PURE__ */ $(ii, {
 		open: e,
-		onClose: r,
+		onClose: n,
 		title: "New Project",
 		size: mi.Medium,
 		flush: !0,
 		className: "max-md:[&>header_.btn-sticky]:min-h-11 max-md:[&>header_.btn-sticky]:min-w-11 max-md:[&>header_div:has(>.btn-sticky)]:min-h-11",
-		footer: s ? /* @__PURE__ */ Q(ai, {
+		footer: o ? /* @__PURE__ */ Q(ai, {
 			buttonClassName: "min-h-11 min-w-11 max-w-full",
 			className: "min-h-11 max-w-full",
 			variant: z.Primary,
 			content: V.Text,
-			onClick: D,
-			loading: C,
-			disabled: O,
+			onClick: E,
+			loading: S,
+			disabled: D,
 			children: "Create Project"
 		}) : /* @__PURE__ */ Q(H, {
 			variant: z.Primary,
 			size: B.Large,
 			content: V.Text,
-			onClick: D,
-			loading: C,
-			disabled: O,
+			onClick: E,
+			loading: S,
+			disabled: D,
 			children: "Create Project"
 		}),
 		children: [/* @__PURE__ */ $("div", {
@@ -1593,25 +1592,25 @@ function lc({ open: e, defaultCwd: t, initialMode: n, onClose: r }) {
 					children: [/* @__PURE__ */ Q("div", {
 						className: "flex flex-wrap items-start gap-2",
 						children: oc.map((e) => /* @__PURE__ */ Q(H, {
-							variant: c === e.id ? z.SecondaryHighlighted : z.Secondary,
-							size: s ? B.Large : B.Medium,
+							variant: s === e.id ? z.SecondaryHighlighted : z.Secondary,
+							size: o ? B.Large : B.Medium,
 							content: V.Text,
-							onClick: () => T(e.id),
-							"aria-pressed": c === e.id,
+							onClick: () => w(e.id),
+							"aria-pressed": s === e.id,
 							className: "flex-1 md:flex-none",
 							children: e.label
 						}, e.id))
 					}), /* @__PURE__ */ Q("p", {
 						className: "text-small !leading-[22px] text-basic-secondary",
-						children: oc.find((e) => e.id === c)?.description
+						children: oc.find((e) => e.id === s)?.description
 					})]
 				}),
-				b ? /* @__PURE__ */ Q(Ks, {
+				y ? /* @__PURE__ */ Q(Ks, {
 					mode: "launch",
-					connection: v,
-					onConnectionChange: E
+					connection: _,
+					onConnectionChange: T
 				}) : null,
-				S ? /* @__PURE__ */ $("div", {
+				x ? /* @__PURE__ */ $("div", {
 					className: "flex flex-col md:flex-row items-start gap-4",
 					children: [/* @__PURE__ */ $("div", {
 						className: "flex flex-col gap-1 flex-1 min-w-0 w-full",
@@ -1619,28 +1618,28 @@ function lc({ open: e, defaultCwd: t, initialMode: n, onClose: r }) {
 							/* @__PURE__ */ Q(gs, {
 								label: "Working Folder",
 								required: !0,
-								invalid: !!g
+								invalid: !!h
 							}),
 							/* @__PURE__ */ $(H, {
 								variant: z.Secondary,
-								size: s ? B.Large : B.Medium,
+								size: o ? B.Large : B.Medium,
 								content: V.IconRight,
-								"aria-label": u ? `Choose Working Folder: ${u}` : "Choose Working Folder",
-								className: U("w-full", g && "input-validation"),
+								"aria-label": l ? `Choose Working Folder: ${l}` : "Choose Working Folder",
+								className: U("w-full", h && "input-validation"),
 								style: sc,
-								onClick: () => h(!0),
+								onClick: () => m(!0),
 								children: [/* @__PURE__ */ Q("span", {
-									className: U("flex-1 min-w-0 truncate text-left font-normal", u ? "text-basic-primary" : "text-basic-muted"),
-									children: u || "/path/to/project"
+									className: U("flex-1 min-w-0 truncate text-left font-normal", l ? "text-basic-primary" : "text-basic-muted"),
+									children: l || "/path/to/project"
 								}), /* @__PURE__ */ Q(R, {
 									iconName: I.Folder,
 									className: "shrink-0"
 								})]
 							}),
-							g ? /* @__PURE__ */ Q("p", {
+							h ? /* @__PURE__ */ Q("p", {
 								role: "alert",
 								className: "pt-1 text-error-primary text-small !leading-[22px]",
-								children: g
+								children: h
 							}) : null
 						]
 					}), /* @__PURE__ */ Q("div", {
@@ -1650,26 +1649,26 @@ function lc({ open: e, defaultCwd: t, initialMode: n, onClose: r }) {
 								className: "label-small",
 								children: "Project name"
 							}),
-							inputSize: s ? W.Large : W.Medium,
+							inputSize: o ? W.Large : W.Medium,
 							placeholder: "Taken from the git remote",
-							value: f,
+							value: d,
 							onChange: (e) => {
-								_(null), p(e.target.value);
+								g(null), f(e.target.value);
 							},
-							className: s ? "w-full" : ""
+							className: o ? "w-full" : ""
 						})
 					})]
 				}) : null
 			]
 		}), /* @__PURE__ */ Q(Ms, {
-			open: m,
+			open: p,
 			kind: "directory",
-			nativeLocalDirectory: c === "local",
-			initialPath: u,
-			ssh: x,
-			onClose: () => h(!1),
+			nativeLocalDirectory: s === "local",
+			initialPath: l,
+			ssh: b,
+			onClose: () => m(!1),
 			onSelect: (e) => {
-				_(null), d(e), h(!1);
+				g(null), u(e), m(!1);
 			}
 		})]
 	});
@@ -1809,50 +1808,45 @@ function pc({ open: e, project: t, onClose: n }) {
 // src/app/providers/ProjectActionsProvider.tsx
 var mc = Xa(null);
 function hc({ children: e }) {
-	let { pruneSessionNavigation: t } = D().stores.sessionNavigationStore, { pruneChatTabs: n } = D().stores.chatTabsStore, r = Qn(), i = xo(), a = tr(), o = a.isSuccess, { data: s } = ut(), c = Ot(), l = St(), [u, d] = X(null), [f, p] = X("local"), [m, h] = X(null), [g, _] = X(null), v = c.toggle, y = l.mutateAsync, b = K(async (e, t) => {
+	let { pruneSessionNavigation: t } = D().stores.sessionNavigationStore, { pruneChatTabs: n } = D().stores.chatTabsStore, r = Qn(), i = xo(), a = tr(), o = a.isSuccess, { data: s } = ut(), c = Ot(), l = St(), [u, d] = X(null), [f, p] = X(null), [m, h] = X(null), g = c.toggle, _ = l.mutateAsync, v = K(async (e, t) => {
 		try {
-			await y({
+			await _({
 				projectId: e.project_id,
 				sessionId: t.session_id
 			}), r.success(`Assigned to ${e.name}`);
 		} catch (e) {
 			r.error(`Failed to assign the chat: ${ls(Xo(e))}`);
 		}
-	}, [y, r]), x = K(async (e, t = !1) => {
+	}, [_, r]), y = K(async (e, t = !1) => {
 		i(F.newSession(e), {
 			replace: t,
 			state: { focusComposer: Date.now() }
 		});
-	}, [i]), S = J(() => ({
-		create: () => {
-			p("local"), d("create");
-		},
-		createSsh: () => {
-			p("ssh"), d("create");
-		},
+	}, [i]), b = J(() => ({
+		create: () => d("create"),
 		assign: (e) => {
 			let t = Jo(s?.projects ?? [], e);
-			t ? b(t, e) : (_(e), d("assign"));
+			t ? v(t, e) : (h(e), d("assign"));
 		},
 		rename: (e) => {
-			h(e), d("rename");
+			p(e), d("rename");
 		},
 		remove: (e) => {
-			h(e), d("delete");
+			p(e), d("delete");
 		},
 		togglePin: async (e) => {
 			try {
-				await v(e);
+				await g(e);
 			} catch (e) {
 				r.error(`Failed to update pin: ${an(Xo(e))}`);
 			}
 		},
-		newChat: x
+		newChat: y
 	}), [
-		v,
-		x,
+		g,
+		y,
 		r,
-		b,
+		v,
 		s
 	]);
 	q(() => {
@@ -1865,30 +1859,29 @@ function hc({ children: e }) {
 		n,
 		t
 	]);
-	let C = () => d(null);
+	let x = () => d(null);
 	return /* @__PURE__ */ $(mc.Provider, {
-		value: S,
+		value: b,
 		children: [
 			e,
 			/* @__PURE__ */ Q(cc, {
 				open: u === "create",
-				onClose: C,
-				initialMode: f
+				onClose: x
 			}),
 			/* @__PURE__ */ Q(ps, {
 				open: u === "assign",
-				onClose: C,
-				summary: g
+				onClose: x,
+				summary: m
 			}),
 			/* @__PURE__ */ Q(fc, {
 				open: u === "rename",
-				onClose: C,
-				project: m
+				onClose: x,
+				project: f
 			}),
 			/* @__PURE__ */ Q(dc, {
 				open: u === "delete",
-				onClose: C,
-				project: m
+				onClose: x,
+				project: f
 			})
 		]
 	});
@@ -11692,13 +11685,13 @@ function Nm(e) {
 	}
 	return [...t].filter(([, e]) => e.length > 0);
 }
-function Pm({ projects: e, value: t, onChange: n, onAddProject: r, addLabel: i, onAddSsh: a, disabled: o }) {
-	let [s, c] = X(!1), [l, u] = X(""), d = l.trim().toLowerCase(), f = d ? e.filter((e) => e.name.toLowerCase().includes(d) || e.cwd.toLowerCase().includes(d)) : e, p = () => {
-		c(!1), u("");
+function Pm({ projects: e, value: t, onChange: n, onAddProject: r, addLabel: i, disabled: a }) {
+	let [o, s] = X(!1), [c, l] = X(""), u = c.trim().toLowerCase(), d = u ? e.filter((e) => e.name.toLowerCase().includes(u) || e.cwd.toLowerCase().includes(u)) : e, f = () => {
+		s(!1), l("");
 	};
 	return /* @__PURE__ */ Q(ri, {
-		open: s,
-		onClose: p,
+		open: o,
+		onClose: f,
 		sticky: !0,
 		placement: Ur.BottomRight,
 		size: hi.Medium,
@@ -11710,11 +11703,11 @@ function Pm({ projects: e, value: t, onChange: n, onAddProject: r, addLabel: i, 
 					autoFocus: !0,
 					"aria-label": "Filter projects",
 					placeholder: "Filter projects",
-					value: l,
-					onChange: (e) => u(e.target.value),
+					value: c,
+					onChange: (e) => l(e.target.value),
 					className: "type-body-chrome mb-1 h-8 w-full rounded-lg border border-tertiary bg-elevation-level-1 px-2.5 text-basic-primary outline-none placeholder:text-basic-muted focus:border-secondary max-md:h-11 max-md:text-base"
 				}) : null,
-				Nm(f).map(([e, r]) => /* @__PURE__ */ $("div", {
+				Nm(d).map(([e, r]) => /* @__PURE__ */ $("div", {
 					role: "group",
 					"aria-label": e ?? "This computer",
 					children: [/* @__PURE__ */ $("p", {
@@ -11728,11 +11721,11 @@ function Pm({ projects: e, value: t, onChange: n, onAddProject: r, addLabel: i, 
 						hint: e.cwd,
 						checked: e.project_id === t?.project_id,
 						onSelect: () => {
-							n(e.project_id), p();
+							n(e.project_id), f();
 						}
 					}, e.project_id))]
 				}, e ?? "local")),
-				f.length === 0 ? /* @__PURE__ */ Q("p", {
+				d.length === 0 ? /* @__PURE__ */ Q("p", {
 					className: "type-meta px-2.5 py-2 text-basic-muted",
 					children: "No matching projects"
 				}) : null,
@@ -11741,29 +11734,22 @@ function Pm({ projects: e, value: t, onChange: n, onAddProject: r, addLabel: i, 
 					icon: I.Add,
 					label: i,
 					onSelect: () => {
-						p(), r();
+						f(), r();
 					}
-				}),
-				a ? /* @__PURE__ */ Q(dp, {
-					icon: I.Server,
-					label: "Add SSH project…",
-					onSelect: () => {
-						p(), a();
-					}
-				}) : null
+				})
 			]
 		}),
 		children: /* @__PURE__ */ Q(Em, {
-			disabled: o,
+			disabled: a,
 			"aria-label": t ? `Project: ${t.name}` : "Choose a project",
 			"aria-haspopup": "menu",
-			"aria-expanded": s,
+			"aria-expanded": o,
 			leading: t ? /* @__PURE__ */ Q(vi, {
 				id: t.project_id,
 				size: 16
 			}) : void 0,
 			icon: t ? void 0 : I.Folder,
-			onClick: () => c((e) => !e),
+			onClick: () => s((e) => !e),
 			children: t?.ssh_host ? /* @__PURE__ */ $(Z, { children: [/* @__PURE__ */ $("span", {
 				className: "text-basic-tertiary",
 				children: [t.ssh_host, " / "]
@@ -12389,7 +12375,6 @@ function ih({ projects: e, sessions: t, compact: n = !1 }) {
 						disabled: Ee,
 						addLabel: i.isManaged ? "Add repository…" : "Add project…",
 						onAddProject: ke,
-						onAddSsh: i.isManaged ? void 0 : a.createSsh,
 						onChange: (e) => {
 							if (m(e), C && S.update(C, e), f) {
 								let e = new URLSearchParams(c);

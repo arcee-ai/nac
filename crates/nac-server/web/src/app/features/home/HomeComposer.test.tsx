@@ -14,7 +14,6 @@ import { standaloneHomeDraftStore } from "./homeDraftStore";
 const fakes = vi.hoisted(() => ({
   start: vi.fn(),
   create: vi.fn(),
-  createSsh: vi.fn(),
   addRepository: vi.fn(),
   managed: false,
   eligible: false,
@@ -91,7 +90,7 @@ vi.mock("@/app/features/managed/controller/useManagedHost", () => ({
   useManagedHost: () => ({ isManaged: fakes.managed, addRepository: fakes.addRepository }),
 }));
 vi.mock("@/app/providers/ProjectActionsProvider", () => ({
-  useProjectActions: () => ({ create: fakes.create, createSsh: fakes.createSsh }),
+  useProjectActions: () => ({ create: fakes.create }),
 }));
 
 const projects = [
@@ -122,7 +121,6 @@ beforeEach(() => {
   }));
   fakes.start.mockReset().mockResolvedValue(true);
   fakes.create.mockReset();
-  fakes.createSsh.mockReset();
   fakes.addRepository.mockReset();
   fakes.managed = false;
   fakes.eligible = false;
@@ -339,14 +337,6 @@ describe("Home composer", () => {
     expect(screen.getByRole("button", { name: "Project: Render farm" }).textContent).toBe(
       "build-box / Render farm",
     );
-  });
-
-  it("adds an SSH project from the project menu", () => {
-    mount();
-    fireEvent.click(screen.getByRole("button", { name: "Project: Borealis" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Add SSH project…" }));
-    expect(fakes.createSsh).toHaveBeenCalledOnce();
-    expect(fakes.create).not.toHaveBeenCalled();
   });
 
   it("adds a repository from the project picker on a managed host", () => {

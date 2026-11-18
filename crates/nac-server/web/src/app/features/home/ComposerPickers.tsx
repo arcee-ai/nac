@@ -30,7 +30,6 @@ export function ProjectPicker({
   onChange,
   onAddProject,
   addLabel,
-  onAddSsh,
   disabled,
 }: {
   projects: readonly ProjectRecord[];
@@ -38,8 +37,6 @@ export function ProjectPicker({
   onChange: (projectId: string) => void;
   onAddProject: () => void;
   addLabel: string;
-  /** Absent where projects cannot live on SSH hosts (a managed host). */
-  onAddSsh?: () => void;
   disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -107,16 +104,6 @@ export function ProjectPicker({
               onAddProject();
             }}
           />
-          {onAddSsh ? (
-            <MenuItem
-              icon={IconName.Server}
-              label="Add SSH project…"
-              onSelect={() => {
-                close();
-                onAddSsh();
-              }}
-            />
-          ) : null}
         </Menu>
       }
     >

@@ -4,14 +4,12 @@ import type { ProjectRecord, SessionBehavior } from "../../types/api";
  * the menu groups projects under where they run rather than offering the host
  * as a separate choice; SSH projects name their host on the chip.
  */
-export declare function ProjectPicker({ projects, value, onChange, onAddProject, addLabel, onAddSsh, disabled, }: {
+export declare function ProjectPicker({ projects, value, onChange, onAddProject, addLabel, disabled, }: {
     projects: readonly ProjectRecord[];
     value: ProjectRecord | null;
     onChange: (projectId: string) => void;
     onAddProject: () => void;
     addLabel: string;
-    /** Absent where projects cannot live on SSH hosts (a managed host). */
-    onAddSsh?: () => void;
     disabled?: boolean;
 }): import("react").JSX.Element;
 /** Agent / Agent + Orchestrator / Orchestrator. Behavior is fixed per session. */

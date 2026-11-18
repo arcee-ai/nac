@@ -21,8 +21,6 @@ import type { ProjectRecord, SessionSummarySnapshot } from "@/app/types/api";
 
 interface ProjectActions {
   create: () => void;
-  /** Opens New project on its SSH location. */
-  createSsh: () => void;
   /**
    * Files a session that belongs to no project. Asks nothing when a project
    * already covers the session's location — there is only ever the one it can
@@ -62,7 +60,6 @@ export function ProjectActionsProvider({ children }: { children: React.ReactNode
   const pin = useToggleProjectPin();
   const assignSession = useAssignSessionToProject();
   const [modal, setModal] = useState<ModalKind | null>(null);
-  const [createMode, setCreateMode] = useState<"local" | "ssh">("local");
   const [project, setProject] = useState<ProjectRecord | null>(null);
   const [session, setSession] = useState<SessionSummarySnapshot | null>(null);
 
@@ -96,14 +93,7 @@ export function ProjectActionsProvider({ children }: { children: React.ReactNode
 
   const value = useMemo<ProjectActions>(
     () => ({
-      create: () => {
-        setCreateMode("local");
-        setModal("create");
-      },
-      createSsh: () => {
-        setCreateMode("ssh");
-        setModal("create");
-      },
+      create: () => setModal("create"),
       assign: (summary) => {
         // A session keeps its own working directory and the backend refuses to
         // file it anywhere else, so a project covering that location is not a
@@ -157,7 +147,7 @@ export function ProjectActionsProvider({ children }: { children: React.ReactNode
   return (
     <ProjectActionsContext.Provider value={value}>
       {children}
-      <CreateProjectModal open={modal === "create"} onClose={close} initialMode={createMode} />
+      <CreateProjectModal open={modal === "create"} onClose={close} />
       <AssignToProjectModal open={modal === "assign"} onClose={close} summary={session} />
       <RenameProjectModal open={modal === "rename"} onClose={close} project={project} />
       <DeleteProjectModal open={modal === "delete"} onClose={close} project={project} />
