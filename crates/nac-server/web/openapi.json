@@ -11677,6 +11677,19 @@
               "call_id": {
                 "type": "string"
               },
+              "delegation_intent": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/DelegationIntent"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "delegation_summary_verified": {
+                "type": "boolean"
+              },
               "key_arg_preview": {
                 "type": [
                   "string",
@@ -11743,6 +11756,22 @@
               },
               "content_preview": {
                 "type": "string"
+              },
+              "delegation_outcome": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/DelegationOutcome"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "delegation_summary": {
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "effective_timeout_ms": {
                 "type": [
@@ -13955,6 +13984,27 @@
             }
           }
         }
+      },
+      "DelegationIntent": {
+        "type": "string",
+        "description": "Validated traditional-child invocation shape after authorization.",
+        "enum": [
+          "background_launch",
+          "background_continuation",
+          "foreground"
+        ]
+      },
+      "DelegationOutcome": {
+        "type": "string",
+        "description": "Facts emitted only by the native traditional-child execution owner.",
+        "enum": [
+          "background_started",
+          "background_continued",
+          "completed",
+          "failed",
+          "cancelled",
+          "interrupted"
+        ]
       },
       "DeleteProjectResponse": {
         "type": "object",

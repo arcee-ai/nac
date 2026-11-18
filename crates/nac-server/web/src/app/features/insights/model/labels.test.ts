@@ -69,7 +69,7 @@ describe("insight labels", () => {
     ["create-goal", "Create goal", "Creating goal…", "Create"],
     ["get-goal", "Get goal", "Get goal…", "Read"],
     ["update-goal", "Update goal", "Updating goal…", "Edit"],
-    ["spawn-agent", "Spawn Agent", "Spawn Agent…", "Spawn"],
+    ["spawn-agent", "Subagent", "Subagent request in progress…", "Spawn"],
     ["spawn-orchestrator", "Spawn Orchestrator", "Spawn Orchestrator…", "Spawn"],
     ["session-status", "Check session status", "Checking session status…", "Check"],
     ["session-steer", "Steer session", "Steer session…", "Steer"],
@@ -145,7 +145,7 @@ describe("insight labels", () => {
     expect(inProgressLabel(tool("web_search", { summary: "vitest" }))).toBe("Searching the web…");
     expect(
       inProgressLabel(group([compactTool("subagent-1-0", "subagent", true)]).segments[0]),
-    ).toBe("Starting agent…");
+    ).toBe("Subagent request in progress…");
     expect(inProgressLabel(tool("mcp__linear__read", { label: "MCP · Read" }))).toBe(
       "Running MCP · Read…",
     );

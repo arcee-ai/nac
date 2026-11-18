@@ -46,6 +46,23 @@ describe("primary transcript tool detail", () => {
     expect(screen.getByLabelText(`Run command status: ${statusLabel}`)).toBeTruthy();
   });
 
+  it("describes a background acknowledgement without implying completion", () => {
+    render(
+      <ToolCallDetail
+        tool={tool({
+          name: "subagent",
+          label: "Subagent started",
+          summary: "Review store",
+          resultPreview: "Subagent started in background",
+          statusLabel: "Running in background",
+        })}
+      />,
+    );
+    expect(screen.getByText("Review store")).toBeTruthy();
+    expect(screen.getByLabelText("Subagent started status: Running in background")).toBeTruthy();
+    expect(screen.queryByText("Subagent completed")).toBeNull();
+  });
+
   it("wraps bounded long content without exposing hidden payloads", () => {
     const { container } = render(
       <ToolCallDetail

@@ -12,6 +12,9 @@ export interface ToolPresentation {
     resultPreview: string | null;
     status: ToolPresentationStatus;
     statusLabel: string;
+    /** Native-owned historical invocation outcome, absent for legacy events. */
+    delegationOutcome?: NonNullable<ToolFinished["delegation_outcome"]>;
+    delegationIntent?: NonNullable<ToolStarted["delegation_intent"]>;
     /**
      * Execution time from the call's finish event. Absent when the call never
      * ran, or when no finish event reports one.

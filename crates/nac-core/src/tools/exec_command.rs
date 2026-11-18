@@ -94,12 +94,16 @@ pub(crate) async fn execute_exec_command_with_cancellation(
             is_error,
             execution_duration_ms: None,
             execution_duration_excludes_authorization: false,
+            delegation_outcome: None,
+            delegation_summary: None,
         },
         Err(error) => ToolResult {
             content: (format!("Error: {error:#}")).into(),
             is_error: true,
             execution_duration_ms: None,
             execution_duration_excludes_authorization: false,
+            delegation_outcome: None,
+            delegation_summary: None,
         },
     }
 }
@@ -244,12 +248,16 @@ pub(crate) async fn execute_write_stdin_with_cancellation(
             is_error: false,
             execution_duration_ms: None,
             execution_duration_excludes_authorization: false,
+            delegation_outcome: None,
+            delegation_summary: None,
         },
         Err(error) => ToolResult {
             content: (format!("Error: {error:#}")).into(),
             is_error: true,
             execution_duration_ms: None,
             execution_duration_excludes_authorization: false,
+            delegation_outcome: None,
+            delegation_summary: None,
         },
     }
 }
@@ -279,12 +287,16 @@ pub fn execute_read_command_output(args: &Value, runtime: &ToolRuntime) -> ToolR
             is_error: false,
             execution_duration_ms: None,
             execution_duration_excludes_authorization: false,
+            delegation_outcome: None,
+            delegation_summary: None,
         },
         Err(error) => ToolResult {
             content: (format!("Error: {error:#}")).into(),
             is_error: true,
             execution_duration_ms: None,
             execution_duration_excludes_authorization: false,
+            delegation_outcome: None,
+            delegation_summary: None,
         },
     }
 }

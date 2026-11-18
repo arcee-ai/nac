@@ -301,6 +301,75 @@ for (const behavior of ["direct", "direct-with-orchestrator"] as const) {
   });
 }
 
+for (const behavior of ["direct", "direct-with-orchestrator"] as const) {
+  test(`retains a background subagent acknowledgement in ${behavior} after reload`, async ({
+    harness,
+    page,
+    request,
+  }, testInfo) => {
+    const childGate = new ScriptGate();
+    const callId = `all337-${behavior}`;
+    harness.provider.enqueue(
+      "all337-parent-call",
+      { token: `ALL337_${behavior}`, requiredTools: ["subagent"] },
+      {
+        kind: "function_call",
+        name: "subagent",
+        callId,
+        arguments: {
+          profile: "general",
+          description: "Review store",
+          prompt: "ALL337_CHILD",
+          child_session_id: null,
+          background: true,
+        },
+        stream: true,
+      },
+    );
+    harness.provider.enqueue(
+      "all337-child",
+      { token: "ALL337_CHILD", forbiddenTools: ["subagent"] },
+      { kind: "text", text: "Child finished", stream: "request" },
+      childGate,
+    );
+    harness.provider.enqueue(
+      "all337-parent-finished",
+      { functionOutputCallId: callId },
+      { kind: "text", text: "Delegation accepted", stream: true },
+    );
+    const sessionId = await createSession(request, harness, behavior);
+    await page.goto(`${harness.baseUrl}/#/session/${sessionId}/insights`);
+    const composer = page.getByRole("combobox", { name: "Message" });
+    await composer.fill(`ALL337_${behavior}`);
+    await page.getByRole("button", { name: "Send" }).click();
+    await expect(page.getByText("Delegation accepted")).toBeVisible();
+    await waitForRunIdle(request, harness, sessionId);
+    const assertReceipt = async () => {
+      await expect(page.getByText("Subagent started · Current:")).toBeVisible();
+      await expect(page.getByRole("link", { name: "Go to session Review store" })).toBeVisible();
+      await page.getByText("Invocation details").click();
+      await expect(page.getByText("Running in background", { exact: true })).toBeVisible();
+      await expect(page.getByText("Subagent started in background", { exact: true })).toBeVisible();
+      await expect(page.locator("main")).not.toContainText("parent_session_id");
+    };
+    await assertReceipt();
+    await testInfo.attach("subagent-invocation", {
+      body: await page.screenshot(),
+      contentType: "image/png",
+    });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(page.getByText("Subagent started · Current:")).toBeVisible();
+    await testInfo.attach("subagent-invocation-mobile", {
+      body: await page.screenshot(),
+      contentType: "image/png",
+    });
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.reload();
+    await assertReceipt();
+    childGate.release();
+  });
+}
+
 test("renders a per-call command deadline distinctly through settlement and reload", async ({
   harness,
   page,

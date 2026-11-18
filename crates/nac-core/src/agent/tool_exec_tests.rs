@@ -518,3 +518,71 @@ async fn control_tools_report_duration_only_when_they_ran() {
     );
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[tokio::test]
+async fn slow_subagent_preview_keeps_mixed_admission_order() {
+    struct SlowProvider;
+    impl nac_contracts::CommandEnvironmentProvider for SlowProvider {
+        fn snapshot(&self) -> nac_contracts::CommandEnvironmentFuture<'_> {
+            panic!("preview must not refresh command environment")
+        }
+        fn redaction_snapshot(&self) -> anyhow::Result<nac_contracts::CommandEnvironmentSnapshot> {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            Ok(nac_contracts::CommandEnvironmentSnapshot::empty())
+        }
+        fn worker_environment(&self) -> nac_contracts::WorkerEnvironment {
+            Default::default()
+        }
+    }
+    let root = std::env::temp_dir().join(format!("nac-preview-admission-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("input.txt"), "content").unwrap();
+    let mut runtime = test_runtime();
+    runtime.workspace_cwd = root.clone();
+    runtime.backend = crate::sandbox::execution_backend_from_sandbox(None, &root);
+    runtime.command_environment = Some(Arc::new(SlowProvider));
+    let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+    let sink = crate::events::EventSink::channel(sender);
+    runtime.event_sink = sink.clone();
+    let calls = vec![
+        make_tool_call("read-before", "read", json!({"path":"input.txt"})),
+        make_tool_call(
+            "child",
+            "subagent",
+            json!({"profile":"general", "description":"RAW_SECRET", "prompt":"work", "child_session_id":null, "background":true}),
+        ),
+        make_tool_call("read-after", "read", json!({"path":"input.txt"})),
+    ];
+    let started = std::time::Instant::now();
+    let results = execute_tools_parallel(
+        calls,
+        runtime,
+        ModelClient::new_for_test(),
+        sink,
+        None,
+        true,
+    )
+    .await;
+    assert!(started.elapsed() < std::time::Duration::from_secs(2));
+    assert_eq!(
+        results.iter().map(|r| r.0.as_str()).collect::<Vec<_>>(),
+        ["read-before", "child", "read-after"]
+    );
+    let mut starts = Vec::new();
+    while let Ok(event) = receiver.try_recv() {
+        if let AgentEvent::ToolCallStarted {
+            call_id,
+            delegation_intent: None,
+            delegation_summary_verified: false,
+            ..
+        } = &event
+        {
+            starts.push(call_id.clone());
+        }
+        assert!(!serde_json::to_string(&event)
+            .unwrap()
+            .contains("RAW_SECRET"));
+    }
+    assert_eq!(starts, ["read-before", "child", "read-after"]);
+    let _ = std::fs::remove_dir_all(root);
+}

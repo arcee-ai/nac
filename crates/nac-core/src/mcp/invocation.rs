@@ -30,6 +30,8 @@ impl McpToolCapture {
                     is_error: true,
                     execution_duration_ms: None,
                     execution_duration_excludes_authorization: false,
+                    delegation_outcome: None,
+                    delegation_summary: None,
                 }
             }
         };
@@ -46,6 +48,8 @@ impl McpToolCapture {
             is_error: true,
             execution_duration_ms: None,
             execution_duration_excludes_authorization: false,
+            delegation_outcome: None,
+            delegation_summary: None,
         };
         let service = match self.server.admitted_service().await {
             Ok(service) => service,
@@ -97,6 +101,8 @@ impl McpToolCapture {
                                     is_error: true,
                                     execution_duration_ms: None,
                                     execution_duration_excludes_authorization: false,
+            delegation_outcome: None,
+            delegation_summary: None,
                                 };
                             }
                         }
@@ -124,6 +130,8 @@ impl McpToolCapture {
                         is_error: true,
                         execution_duration_ms: None,
                         execution_duration_excludes_authorization: false,
+                        delegation_outcome: None,
+                        delegation_summary: None,
                     },
                 }
             }
@@ -136,6 +144,8 @@ impl McpToolCapture {
                 is_error: true,
                 execution_duration_ms: None,
                 execution_duration_excludes_authorization: false,
+                delegation_outcome: None,
+                delegation_summary: None,
             },
         }
     }

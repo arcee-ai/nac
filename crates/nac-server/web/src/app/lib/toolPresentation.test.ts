@@ -65,7 +65,7 @@ describe("tool presentation mapper", () => {
       ["read_command_output", "Read command output"],
       ["web_search", "Search web"],
       ["web_fetch", "Fetch web page"],
-      ["subagent", "Start coding agent"],
+      ["subagent", "Subagent request in progress"],
       ["orchestrator_launch", "Start NAC orchestrator"],
       ["orchestrator_wait", "Wait for NAC orchestrator"],
     ] as const;
@@ -73,10 +73,291 @@ describe("tool presentation mapper", () => {
     for (const [name, label] of cases) {
       expect(present(name, [started(name, "safe preview")], true)).toMatchObject({
         label,
-        summary: "safe preview",
+        summary: name === "subagent" ? null : "safe preview",
         status: "running",
       });
     }
+  });
+
+  it.each([
+    ["background_started", false, "Subagent started"],
+    ["background_continued", false, "Instructions sent to subagent"],
+    ["completed", false, "Subagent completed"],
+    ["failed", true, "Subagent failed"],
+    ["cancelled", true, "Subagent cancelled"],
+    ["interrupted", true, "Subagent interrupted"],
+    [undefined, false, "Subagent request finished"],
+    [undefined, true, "Subagent request failed"],
+  ] as const)("maps trusted child outcome %s", (outcome, isError, label) => {
+    const item = present("subagent", [
+      started("subagent", "review store"),
+      finished("subagent", {
+        delegation_outcome: outcome,
+        delegation_summary: outcome ? "review store" : undefined,
+        is_error: isError,
+      }),
+    ]);
+    expect(item.label).toBe(label);
+    expect(item.summary).toBe(outcome ? "review store" : null);
+  });
+
+  it("names pending and approval without claiming a launch", () => {
+    const base = {
+      call: call("subagent"),
+      hasResult: false,
+      resultText: null,
+      resultHasImage: false,
+      active: true,
+      turnCancelled: false,
+    };
+    expect(presentToolCall(base).label).toBe("Subagent pending");
+    expect(presentToolCall({ ...base, awaitingApproval: true }).label).toBe(
+      "Subagent awaiting approval",
+    );
+    expect(presentToolCall({ ...base, active: false }).label).toBe("Subagent request interrupted");
+  });
+
+  it.each(["subagent", "subagent_status", "subagent_cancel"])(
+    "hides historical %s JSON previews",
+    (name) => {
+      const item = present(name, [
+        finished(name, { content_preview: '{"child_session_id":"secret"}' }),
+      ]);
+      expect(item.resultPreview).toBeNull();
+    },
+  );
+
+  it.each([
+    ["subagent", "Subagent request"],
+    ["subagent_status", "Subagent status request"],
+    ["subagent_cancel", "Subagent cancellation request"],
+  ])("uses safe authoritative deadline wording for %s", (name, request) => {
+    for (const [status, word] of [
+      ["timed_out", "timed out"],
+      ["cancelled", "cancelled"],
+    ] as const) {
+      const item = present(name, [
+        finished(name, {
+          is_error: true,
+          completion_status: status,
+          content_preview: "opaque-managed-secret",
+        }),
+      ]);
+      expect(item.resultPreview).toBe(`${request} ${word}`);
+      expect(JSON.stringify(item)).not.toContain("opaque-managed-secret");
+    }
+  });
+
+  it.each([
+    ["timed_out", "Subagent request timed out"],
+    ["cancelled", "Subagent request cancelled"],
+  ] as const)(
+    "gives %s status precedence over an incompatible child outcome",
+    (status, expected) => {
+      const item = present("subagent", [
+        finished("subagent", {
+          is_error: true,
+          completion_status: status,
+          delegation_outcome: "completed",
+          content_preview: "Subagent completed",
+        }),
+      ]);
+      expect(item.label).toBe(expected);
+      expect(item.resultPreview).toBe(expected);
+    },
+  );
+
+  it("repairs only a legacy confirmed cancel request, keeping request deadlines authoritative", () => {
+    const legacy = finished("subagent_cancel", {
+      is_error: true,
+      completion_status: "cancelled",
+      delegation_outcome: "cancelled",
+      content_preview: "Subagent cancellation request cancelled",
+    });
+    expect(present("subagent_cancel", [legacy])).toMatchObject({
+      status: "success",
+      resultPreview: "Subagent cancellation request finished",
+    });
+    expect(
+      present("subagent_cancel", [{ ...legacy, delegation_outcome: undefined }]),
+    ).toMatchObject({
+      status: "cancelled",
+      resultPreview: "Subagent cancellation request cancelled",
+    });
+    expect(
+      present("subagent_cancel", [{ ...legacy, completion_status: "timed_out" }]),
+    ).toMatchObject({
+      status: "timed-out",
+      resultPreview: "Subagent cancellation request timed out",
+    });
+  });
+
+  it("shows a successful child cancellation request as completed", () => {
+    const item = present("subagent_cancel", [
+      finished("subagent_cancel", {
+        is_error: false,
+        completion_status: "success",
+        delegation_outcome: "cancelled",
+        content_preview: "Subagent cancellation request finished",
+      }),
+    ]);
+    expect(item.status).toBe("success");
+    expect(item.resultPreview).toBe("Subagent cancellation request finished");
+  });
+
+  it("keeps a confirmed child cancellation distinct from a cancelled request", () => {
+    const item = present("subagent", [
+      finished("subagent", {
+        is_error: true,
+        completion_status: "cancelled",
+        delegation_outcome: "cancelled",
+        content_preview: "Subagent cancelled",
+      }),
+    ]);
+    expect(item.resultPreview).toBe("Subagent cancelled");
+    expect(item.label).toBe("Subagent cancelled");
+  });
+
+  it("omits legacy non-JSON child previews that may contain opaque credentials", () => {
+    const item = present("subagent", [
+      finished("subagent", { content_preview: "opaque-managed-exact-secret" }),
+    ]);
+    expect(item.resultPreview).toBeNull();
+  });
+
+  it.each([
+    ["background_launch", "Starting subagent…"],
+    ["background_continuation", "Working with subagent…"],
+    ["foreground", "Working with subagent…"],
+  ] as const)("uses authorized invocation intent %s only while active", (intent, label) => {
+    const event = { ...started("subagent", "Review store"), delegation_intent: intent };
+    expect(present("subagent", [event], true)).toMatchObject({ label, summary: "Review store" });
+    expect(
+      presentToolCall({
+        call: call("subagent"),
+        events: { started: event },
+        hasResult: false,
+        resultText: null,
+        resultHasImage: false,
+        active: true,
+        awaitingApproval: true,
+        turnCancelled: false,
+      }).label,
+    ).toBe("Subagent awaiting approval");
+  });
+
+  it("merges sanitized progress with the initial summary for durable replay", () => {
+    const start = started("subagent", "Review store");
+    const progress = {
+      ...start,
+      args_preview: "",
+      key_arg_preview: "Review store",
+      delegation_intent: "background_launch",
+    } as const;
+    expect(present("subagent", [start, progress], true)).toMatchObject({
+      label: "Starting subagent…",
+      summary: "Review store",
+    });
+  });
+
+  it("shows a native-verified summary before and during approval without claiming dispatch", () => {
+    const event = { ...started("subagent", "Review store"), delegation_summary_verified: true };
+    const base = {
+      call: call("subagent"),
+      events: { started: event },
+      hasResult: false,
+      resultText: null,
+      resultHasImage: false,
+      active: true,
+      turnCancelled: false,
+    };
+    expect(presentToolCall(base)).toMatchObject({
+      label: "Subagent request in progress",
+      summary: "Review store",
+    });
+    expect(presentToolCall({ ...base, awaitingApproval: true })).toMatchObject({
+      label: "Subagent awaiting approval",
+      summary: "Review store",
+    });
+  });
+
+  it("omits unproven legacy summaries even when they contain opaque secrets", () => {
+    const legacy = started("subagent", "opaque-managed-exact-secret");
+    expect(present("subagent", [legacy], true).summary).toBeNull();
+    expect(present("subagent", [legacy, finished("subagent")]).summary).toBeNull();
+    const safeProgress = {
+      ...legacy,
+      key_arg_preview: "Safe task",
+      delegation_intent: "background_launch",
+    } as const;
+    expect(present("subagent", [legacy, safeProgress], true).summary).toBe("Safe task");
+    const missingProgress = { ...safeProgress, key_arg_preview: "" };
+    expect(present("subagent", [legacy, missingProgress], true).summary).toBeNull();
+  });
+
+  it("omits prior continuation ID summaries on replay while retaining task text", () => {
+    const id = "a1234567-1234-4234-8234-123456789abc";
+    const continuation = {
+      ...started("subagent", id),
+      delegation_intent: "background_continuation",
+    } as const;
+    expect(present("subagent", [continuation], true).summary).toBeNull();
+    expect(
+      present("subagent", [{ ...continuation, delegation_intent: "background_launch" }], true)
+        .summary,
+    ).toBe(id);
+    expect(
+      present("subagent", [
+        finished("subagent", { delegation_outcome: "background_started", delegation_summary: id }),
+      ]).summary,
+    ).toBe(id);
+    expect(
+      present("subagent", [finished("subagent", { is_error: true, delegation_summary: id })])
+        .summary,
+    ).toBeNull();
+    expect(
+      present("subagent", [
+        finished("subagent", {
+          delegation_outcome: "background_continued",
+          delegation_summary: id,
+        }),
+      ]).summary,
+    ).toBeNull();
+    expect(
+      present("subagent", [{ ...continuation, key_arg_preview: "Review store" }], true).summary,
+    ).toBe("Review store");
+    const pending = {
+      ...started("subagent", "child-opaque-id"),
+      delegation_summary_verified: true,
+    };
+    expect(
+      presentToolCall({
+        call: call("subagent", JSON.stringify({ child_session_id: "child-opaque-id" })),
+        events: { started: pending },
+        hasResult: false,
+        resultText: null,
+        resultHasImage: false,
+        active: true,
+        turnCancelled: false,
+      }).summary,
+    ).toBeNull();
+  });
+
+  it("retains a sanitized task summary when the finished event is the only retained event", () => {
+    const item = present("subagent", [
+      finished("subagent", {
+        delegation_summary: "Review store",
+        delegation_outcome: "completed",
+        content_preview: "Subagent completed",
+      }),
+    ]);
+    expect(item).toMatchObject({ label: "Subagent completed", summary: "Review store" });
+  });
+
+  it("does not interpret a timed-out request as child completion", () => {
+    expect(
+      present("subagent", [finished("subagent", { completion_status: "timed_out" })]).label,
+    ).toBe("Subagent request timed out");
   });
 
   it("handles MCP and unknown names with bounded safe fallbacks", () => {

@@ -88,9 +88,9 @@ const ACTION_COPY: Record<ActionKind, ActionCopy> = {
     meta: "Edit",
   },
   "spawn-agent": {
-    type: "Spawn Agent",
-    running: "Spawn Agent…",
-    live: "Starting agent…",
+    type: "Subagent",
+    running: "Subagent request in progress…",
+    live: "Subagent request in progress…",
     meta: "Spawn",
   },
   "spawn-orchestrator": {
