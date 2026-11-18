@@ -15450,7 +15450,7 @@ function Mg({ sessionId: e, metadata: t, label: n, disabled: r }) {
 				value: _,
 				onSelect: (e) => void w(e)
 			}),
-			/* @__PURE__ */ Q(Ci, {
+			d.isError && i ? null : /* @__PURE__ */ Q(Ci, {
 				title: `Effort: ${x}`,
 				description: "How much the model reasons before it answers.",
 				position: oi.TopCenter,
@@ -15471,11 +15471,14 @@ function Mg({ sessionId: e, metadata: t, label: n, disabled: r }) {
 			d.isError ? /* @__PURE__ */ Q(V, {
 				size: z.Small,
 				variant: L.Ghost,
+				content: i ? B.Icon : B.Text,
+				className: i ? "min-h-11 min-w-11" : void 0,
+				"aria-label": "Retry settings refresh",
 				disabled: d.isFetching,
 				onClick: () => void d.refetch(),
-				children: "Retry settings refresh"
+				children: i ? /* @__PURE__ */ Q(R, { iconName: U.Retry }) : "Retry settings refresh"
 			}) : null,
-			/* @__PURE__ */ Q(nl, {
+			d.isError && i ? null : /* @__PURE__ */ Q(nl, {
 				tiers: t?.backend === "chatgpt-codex-responses" ? $c(v.model, m) : null,
 				value: g,
 				disabled: f,

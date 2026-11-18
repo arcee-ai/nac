@@ -3,8 +3,11 @@ import { useQueryClient } from "@tanstack/react-query";
 
 import {
   Button,
+  ButtonContent,
   ButtonSize,
   ButtonVariant,
+  Icon,
+  IconName,
   PopoverPlacement,
   Tooltip,
   TooltipPosition,
@@ -241,45 +244,52 @@ export function ModelPicker({
         value={currentPick}
         onSelect={(pick) => void chooseModel(pick)}
       />
-      <Tooltip
-        title={`Effort: ${effortLabel}`}
-        description="How much the model reasons before it answers."
-        position={TooltipPosition.TopCenter}
-        sticky
-        disabled={effortOpen}
-      >
-        <SmallSelect
-          items={effortItems}
-          value={currentEffort}
-          placeholder="Default"
-          disabled={controlsDisabled}
-          size={ButtonSize.Small}
-          trailingIcon={null}
-          placement={PopoverPlacement.TopCenter}
-          onOpenChange={setEffortOpen}
-          onValueChange={(effort) => void chooseEffort(effort)}
-        />
-      </Tooltip>
+      {!(snapshot.isError && isMobile) ? (
+        <Tooltip
+          title={`Effort: ${effortLabel}`}
+          description="How much the model reasons before it answers."
+          position={TooltipPosition.TopCenter}
+          sticky
+          disabled={effortOpen}
+        >
+          <SmallSelect
+            items={effortItems}
+            value={currentEffort}
+            placeholder="Default"
+            disabled={controlsDisabled}
+            size={ButtonSize.Small}
+            trailingIcon={null}
+            placement={PopoverPlacement.TopCenter}
+            onOpenChange={setEffortOpen}
+            onValueChange={(effort) => void chooseEffort(effort)}
+          />
+        </Tooltip>
+      ) : null}
       {snapshot.isError ? (
         <Button
           size={ButtonSize.Small}
           variant={ButtonVariant.Ghost}
+          content={isMobile ? ButtonContent.Icon : ButtonContent.Text}
+          className={isMobile ? "min-h-11 min-w-11" : undefined}
+          aria-label="Retry settings refresh"
           disabled={snapshot.isFetching}
           onClick={() => void snapshot.refetch()}
         >
-          Retry settings refresh
+          {isMobile ? <Icon iconName={IconName.Retry} /> : "Retry settings refresh"}
         </Button>
       ) : null}
-      <SpeedControl
-        tiers={
-          metadata?.backend === "chatgpt-codex-responses"
-            ? discoveredSpeed(resolved.model, currentModel)
-            : null
-        }
-        value={currentSpeed}
-        disabled={controlsDisabled}
-        onChange={(speed) => void chooseSpeed(speed)}
-      />
+      {!(snapshot.isError && isMobile) ? (
+        <SpeedControl
+          tiers={
+            metadata?.backend === "chatgpt-codex-responses"
+              ? discoveredSpeed(resolved.model, currentModel)
+              : null
+          }
+          value={currentSpeed}
+          disabled={controlsDisabled}
+          onChange={(speed) => void chooseSpeed(speed)}
+        />
+      ) : null}
     </div>
   );
 }
