@@ -12193,7 +12193,7 @@ function Ym({ fallbackLabel: e, pending: t, value: n, effort: r, supportedEffort
 		onClose: j,
 		sticky: !0,
 		placement: ci.BottomLeft,
-		size: h === "model" ? "w-[360px]" : "w-[280px]",
+		size: h === "model" ? "w-[360px]" : "w-max min-w-[200px] max-w-[280px]",
 		content: h === "effort" ? te : h === "model" ? P : ee,
 		children: /* @__PURE__ */ Q(Hm, {
 			disabled: s,

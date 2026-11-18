@@ -2166,6 +2166,10 @@
     min-width: 180px;
   }
 
+[data-nac-runtime]:is(.min-w-\[200px\]), [data-nac-runtime] .min-w-\[200px\] {
+    min-width: 200px;
+  }
+
 [data-nac-runtime]:is(.min-w-\[220px\]), [data-nac-runtime] .min-w-\[220px\] {
     min-width: 220px;
   }

@@ -316,7 +316,7 @@ export function ModelPicker({
       onClose={close}
       sticky
       placement={PopoverPlacement.BottomLeft}
-      size={view === "model" ? "w-[360px]" : "w-[280px]"}
+      size={view === "model" ? "w-[360px]" : "w-max min-w-[200px] max-w-[280px]"}
       content={view === "effort" ? effortList : view === "model" ? modelList : overview}
     >
       <Chip
