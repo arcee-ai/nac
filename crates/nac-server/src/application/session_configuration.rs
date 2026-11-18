@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use anyhow::{anyhow, Result};
 use nac_core::{
     light_model::LightModelSettings,
-    model::{validate_model_configuration, EffectiveModelSettings},
+    model::{validate_model_configuration, BackendKind, EffectiveModelSettings},
     sessions,
 };
 
@@ -88,6 +88,17 @@ impl<'a> SessionConfigurationApplication<'a> {
         // Hold the write lock through validation and persistence so other
         // attachment paths cannot observe or insert a stale service.
         let mut active = self.manager.inner.active_sessions.write().await;
+        let continuation_active = self
+            .manager
+            .inner
+            .continuation_owners
+            .reservations()
+            .contains_key(session_id);
+        if continuation_active {
+            return Err(anyhow!(
+                "session is busy with an active operation; wait for it before updating config"
+            ));
+        }
         if let Some(service) = active.get(session_id) {
             if let Some(conflict) =
                 config_replacement_conflict(service.has_active_operation(), service.has_sandbox())
@@ -181,6 +192,13 @@ impl<'a> SessionConfigurationApplication<'a> {
             extra_headers.clone(),
             prospective.allow_insecure_http,
         )?;
+        if prospective.automatic_compaction && backend != BackendKind::ChatGptCodexResponses {
+            // A Codex automatic policy must not follow later non-Codex
+            // catalog changes; freeze that provider's default on the switch.
+            prospective.orchestrator_compaction_threshold =
+                nac_core::model::automatic_compaction_threshold(backend, &prospective.model);
+            prospective.automatic_compaction = false;
+        }
         let mounted_override = self.manager.managed_model().filter(|profile| {
             profile.matches_settings_override(
                 backend,
@@ -311,10 +329,14 @@ fn apply_patch(config: &mut sessions::RawSessionConfig, request: SessionConfigPa
     }
     match request.orchestrator_compaction_threshold {
         Field::Unchanged => {}
-        Field::Clear => config.orchestrator_compaction_threshold = None,
+        Field::Clear => {
+            config.orchestrator_compaction_threshold = None;
+            config.automatic_compaction = false;
+        }
         Field::Set(threshold) => {
             let threshold = validated_compaction_threshold(threshold)?;
             config.orchestrator_compaction_threshold = (threshold != 0).then_some(threshold);
+            config.automatic_compaction = false;
         }
     }
     config.diagnostics.clear();

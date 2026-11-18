@@ -1,5 +1,6 @@
 pub(crate) mod attention;
 pub(crate) mod attention_runtime;
+pub(crate) mod continuation_owner;
 pub(crate) mod credentials;
 pub(crate) mod delegation;
 pub(crate) mod fleet_attention;

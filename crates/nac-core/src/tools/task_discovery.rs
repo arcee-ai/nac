@@ -321,7 +321,7 @@ impl NativeTool for FindTasksTool {
     fn definition(&self) -> ToolDefinition {
         definition(
             "find_tasks",
-            "Find existing independent direct tasks (separate visible chats) without launching, waking or attaching them. Defaults to this chat's saved project; pass project_id to search another project explicitly. Give at most one of: session_id for an exact lookup, reference for a work-unit/ticket token such as ALL-469 (whole-token, case-insensitive, in title or last prompt), or text for a case-insensitive substring. With none, lists recent tasks. Every candidate is a separate attempt; several matches are not duplicates and a match is discovery evidence, not identity. Session ID is task identity: use read_task with it for a full snapshot. Pages are bounded; continue with next_after. scan_limit_reached means more rows remain unexamined.",
+            "Find existing independent direct tasks (separate visible chats) without launching, waking or attaching them. Defaults to this chat's saved project; pass project_id to search another project explicitly. Give at most one of: session_id for an exact lookup, reference for a work-unit/ticket token such as ALL-469 (whole-token, case-insensitive, in title or last prompt), or text for a case-insensitive substring. With none, lists recent tasks. Every candidate is a separate attempt; several matches are not duplicates and a match is discovery evidence, not identity. Session ID is task identity: use read_task with it for a full snapshot. Pages are bounded; continue with next_after. scan_limit_reached means more rows remain unexamined. If an inline task reference is useful, use the exact returned route; do not invent one or claim the link opened the UI.",
             json!({
                 "type": "object",
                 "additionalProperties": false,
@@ -563,7 +563,7 @@ impl NativeTool for ReadTaskTool {
     fn definition(&self) -> ToolDefinition {
         definition(
             "read_task",
-            "Read a bounded passive snapshot of one exact independent direct task by session_id without attaching, waking, recovering or steering it. Returns durable facts (current run, pending inbox count, current goal with ID/version/status, recent prior goal outcomes, recent run outcomes with result excerpts, navigation route) separately from ephemeral approval state, which is always unknown to this read. Tasks outside this chat's saved project need their project_id named explicitly. A goal-free run ending is a result, not proof an objective was completed.",
+            "Read a bounded passive snapshot of one exact independent direct task by session_id without attaching, waking, recovering or steering it. Returns durable facts (current run, pending inbox count, current goal with ID/version/status, recent prior goal outcomes, recent run outcomes with result excerpts, navigation route) separately from ephemeral approval state, which is always unknown to this read. Tasks outside this chat's saved project need their project_id named explicitly. A goal-free run ending is a result, not proof an objective was completed. If an inline task reference is useful, use the exact returned route; do not invent one or claim the link opened the UI.",
             json!({
                 "type": "object",
                 "additionalProperties": false,

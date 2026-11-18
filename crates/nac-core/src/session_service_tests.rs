@@ -112,6 +112,7 @@ fn legacy_page_messages(messages: &[Message], request: MessagePageRequest) -> Me
     let end = request.before.unwrap_or(total).min(total);
     let start = end.saturating_sub(request.limit.max(1));
     MessagesPageSnapshot {
+        tool_call_occurrences: Vec::new(),
         canonical_message_indices: messages
             .iter()
             .enumerate()

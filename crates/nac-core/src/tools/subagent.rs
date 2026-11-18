@@ -107,6 +107,10 @@ impl NativeTool for SubagentTool {
         })
     }
 
+    fn certifies_delegation_summary(&self) -> bool {
+        true
+    }
+
     fn decode(&self, input: serde_json::Value) -> Result<Self::Input, ToolResult> {
         let input: SubagentInput = serde_json::from_value(input).map_err(|error| {
             ToolResult::text(format!("Error: invalid subagent input: {error}"), true)
@@ -146,6 +150,7 @@ impl NativeTool for SubagentTool {
         context: &'a ToolCallContext,
     ) -> BoxFuture<'a, ToolResult> {
         Box::pin(async move {
+            let mut result = async {
             let Some(parent_session_id) = services.runtime.session_id.clone() else {
                 return ToolResult::text(
                     "Error: subagent requires a persistent parent session",
@@ -158,6 +163,28 @@ impl NativeTool for SubagentTool {
                     Err(error) => return ToolResult::text(format!("Error: {error:#}"), true),
                 };
             let background = input.background;
+            let continuing = input.child_session_id.is_some();
+            if let Some(call_id) = context.call_id.as_ref() {
+                let intent = match (background, continuing) {
+                    (true, false) => crate::events::DelegationIntent::BackgroundLaunch,
+                    (true, true) => crate::events::DelegationIntent::BackgroundContinuation,
+                    (false, _) => crate::events::DelegationIntent::Foreground,
+                };
+                services
+                    .runtime
+                    .event_sink
+                    .emit_async(crate::events::AgentEvent::ToolCallStarted {
+                        thread_name: context.thread_name.clone(),
+                        call_id: call_id.clone(),
+                        name: "subagent".to_string(),
+                        args_preview: String::new(),
+                        key_arg_preview: context.presentation_key_arg.clone(),
+                        args_detail: None,
+                        delegation_intent: Some(intent),
+                        delegation_summary_verified: true,
+                    })
+                    .await;
+            }
             let started = controller
                 .start(TraditionalChildStartRequest {
                     parent_session_id: parent_session_id.clone(),
@@ -178,7 +205,7 @@ impl NativeTool for SubagentTool {
                 Err(error) => return ToolResult::text(format!("Error: {error:#}"), true),
             };
             if background {
-                return ToolResult::text(
+                let mut result = ToolResult::text(
                     serde_json::to_string(&json!({
                         "child_session_id": started.child_session_id,
                         "generation": started.generation,
@@ -188,6 +215,12 @@ impl NativeTool for SubagentTool {
                     .expect("subagent background output serializes"),
                     false,
                 );
+                result.delegation_outcome = Some(if continuing {
+                    crate::events::DelegationOutcome::BackgroundContinued
+                } else {
+                    crate::events::DelegationOutcome::BackgroundStarted
+                });
+                return result;
             }
 
             let child_session_id = started.child_session_id.clone();
@@ -217,6 +250,9 @@ impl NativeTool for SubagentTool {
                     true,
                 ),
             }
+            }.await;
+            result.delegation_summary = context.presentation_key_arg.clone();
+            result
         })
     }
 }
@@ -270,8 +306,8 @@ impl NativeTool for SubagentStatusTool {
                     true,
                 );
             };
-            match owned_child(services.runtime, parent_session_id, &input.child_session_id) {
-                Ok(child) => outcome_result(child),
+            match owned_child(services.runtime, parent_session_id, &input.child_session_id).await {
+                Ok(child) => control_result(child),
                 Err(error) => ToolResult::text(format!("Error: {error:#}"), true),
             }
         })
@@ -348,7 +384,9 @@ impl NativeTool for SubagentCancelTool {
                 services.runtime,
                 &parent_session_id,
                 &input.child_session_id,
-            ) {
+            )
+            .await
+            {
                 Ok(child) => child,
                 Err(error) => return ToolResult::text(format!("Error: {error:#}"), true),
             };
@@ -360,24 +398,34 @@ impl NativeTool for SubagentCancelTool {
                 )
                 .await
             {
-                Ok(child) => outcome_result(child),
+                Ok(child) => control_result(child),
                 Err(error) => ToolResult::text(format!("Error: {error:#}"), true),
             }
         })
     }
 }
 
-fn owned_child(
+async fn owned_child(
     runtime: &super::ToolRuntime,
     parent_session_id: &str,
     child_session_id: &str,
 ) -> anyhow::Result<TraditionalChildRecord> {
-    crate::store::load_traditional_child_for_parent(
-        &runtime.store_path,
-        parent_session_id,
-        child_session_id,
-    )?
-    .ok_or_else(|| anyhow::anyhow!("traditional child was not found"))
+    let path = runtime.store_path.clone();
+    let parent = parent_session_id.to_owned();
+    let child = child_session_id.to_owned();
+    crate::store::call_legacy_store(&runtime.store_path, move || {
+        crate::store::load_traditional_child_for_parent(&path, &parent, &child)?
+            .ok_or_else(|| anyhow::anyhow!("traditional child was not found"))
+    })
+    .await?
+}
+
+/// A successful status or cancel operation reports a child outcome without
+/// turning that outcome into a failure of the operation itself.
+fn control_result(child: TraditionalChildRecord) -> ToolResult {
+    let mut result = outcome_result(child);
+    result.is_error = false;
+    result
 }
 
 #[expect(
@@ -391,324 +439,21 @@ fn outcome_result(child: TraditionalChildRecord) -> ToolResult {
             | TraditionalChildStatus::Cancelled
             | TraditionalChildStatus::Interrupted
     );
-    ToolResult::text(
+    let outcome = match child.status {
+        TraditionalChildStatus::Completed => Some(crate::events::DelegationOutcome::Completed),
+        TraditionalChildStatus::Failed => Some(crate::events::DelegationOutcome::Failed),
+        TraditionalChildStatus::Cancelled => Some(crate::events::DelegationOutcome::Cancelled),
+        TraditionalChildStatus::Interrupted => Some(crate::events::DelegationOutcome::Interrupted),
+        _ => None,
+    };
+    let mut result = ToolResult::text(
         serde_json::to_string(&child).expect("traditional child outcome serializes"),
         is_error,
-    )
+    );
+    result.delegation_outcome = outcome;
+    result
 }
 
 #[cfg(test)]
-mod tests {
-    use std::sync::{Arc, Mutex};
-
-    use super::*;
-    use crate::traditional_children::{ChildFuture, TraditionalChildController};
-
-    struct FakeController {
-        starts: Mutex<Vec<TraditionalChildStartRequest>>,
-    }
-
-    fn child(
-        status: TraditionalChildStatus,
-        mode: TraditionalChildExecutionMode,
-    ) -> TraditionalChildRecord {
-        TraditionalChildRecord {
-            child_session_id: "child-1".to_string(),
-            parent_session_id: "parent-1".to_string(),
-            root_session_id: "parent-1".to_string(),
-            profile: GENERAL_CHILD_PROFILE.to_string(),
-            description: "review store".to_string(),
-            nesting_depth: 1,
-            status,
-            generation: 1,
-            run_id: Some("run-1".to_string()),
-            execution_mode: Some(mode),
-            report: status.is_terminal().then(|| "review complete".to_string()),
-            failure: None,
-            change_summary: None,
-            verification_summary: None,
-            completion_inbox_id: None,
-            created_at: "2026-01-01T00:00:00Z".to_string(),
-            updated_at: "2026-01-01T00:00:00Z".to_string(),
-            version: 1,
-        }
-    }
-
-    impl TraditionalChildController for FakeController {
-        fn start<'a>(
-            &'a self,
-            request: TraditionalChildStartRequest,
-        ) -> ChildFuture<'a, TraditionalChildRecord> {
-            let mode = request.execution_mode;
-            self.starts.lock().unwrap().push(request);
-            Box::pin(async move { Ok(child(TraditionalChildStatus::Running, mode)) })
-        }
-
-        fn wait<'a>(
-            &'a self,
-            _child_session_id: &'a str,
-            _generation: u64,
-        ) -> ChildFuture<'a, TraditionalChildRecord> {
-            Box::pin(async {
-                Ok(child(
-                    TraditionalChildStatus::Completed,
-                    TraditionalChildExecutionMode::Foreground,
-                ))
-            })
-        }
-
-        fn cancel<'a>(
-            &'a self,
-            _parent_session_id: &'a str,
-            _child_session_id: &'a str,
-            _expected_generation: u64,
-        ) -> ChildFuture<'a, TraditionalChildRecord> {
-            Box::pin(async {
-                Ok(child(
-                    TraditionalChildStatus::Cancelled,
-                    TraditionalChildExecutionMode::Foreground,
-                ))
-            })
-        }
-
-        fn wake<'a>(&'a self, _session_id: &'a str) -> ChildFuture<'a, ()> {
-            Box::pin(async { Ok(()) })
-        }
-    }
-
-    #[tokio::test]
-    async fn model_visible_subagent_tool_uses_native_controller_for_foreground_and_background() {
-        let store_path =
-            std::env::temp_dir().join(format!("nac_subagent_native_{}.db", uuid::Uuid::new_v4()));
-        let controller = Arc::new(FakeController {
-            starts: Mutex::new(Vec::new()),
-        });
-        crate::traditional_children::register_controller(store_path.clone(), controller.clone());
-        let mut runtime = crate::tools::test_runtime();
-        runtime.store_path = store_path;
-        runtime.session_id = Some("parent-1".to_string());
-        runtime.allowed_tools = Some(Arc::new(
-            crate::tools::DIRECT_TOOL_NAMES
-                .into_iter()
-                .map(str::to_string)
-                .collect(),
-        ));
-        let client = crate::model::ModelClient::new_for_test();
-
-        let foreground = crate::tools::execute_tool(
-            "subagent",
-            json!({
-                "profile": "general",
-                "description": "review store",
-                "prompt": "inspect persistence",
-                "child_session_id": null,
-                "background": false
-            }),
-            &runtime,
-            &client,
-        )
-        .await;
-        assert!(!foreground.is_error, "{}", foreground.content);
-        let foreground: TraditionalChildRecord = serde_json::from_str(
-            foreground
-                .content
-                .as_text()
-                .expect("text foreground outcome"),
-        )
-        .unwrap();
-        assert_eq!(foreground.status, TraditionalChildStatus::Completed);
-
-        let background = crate::tools::execute_tool(
-            "subagent",
-            json!({
-                "profile": "general",
-                "description": "review store",
-                "prompt": "inspect in background",
-                "background": true
-            }),
-            &runtime,
-            &client,
-        )
-        .await;
-        assert!(!background.is_error, "{}", background.content);
-        let background: serde_json::Value = serde_json::from_str(
-            background
-                .content
-                .as_text()
-                .expect("text background handle"),
-        )
-        .unwrap();
-        assert_eq!(background["status"], "running");
-        assert!(background["message"]
-            .as_str()
-            .unwrap()
-            .contains("do not poll"));
-
-        let forged = crate::tools::execute_tool(
-            "subagent",
-            json!({
-                "profile": "general", "description": "review store", "prompt": "publish",
-                "background": true, "origin": "person"
-            }),
-            &runtime,
-            &client,
-        )
-        .await;
-        assert!(forged.is_error, "model arguments cannot claim human origin");
-
-        let starts = controller.starts.lock().unwrap();
-        assert_eq!(starts.len(), 2);
-        assert!(starts
-            .iter()
-            .all(|start| start.origin == crate::store::InputOrigin::Automation));
-        assert!(starts[0].child_session_id.is_none());
-        assert!(starts[1].child_session_id.is_none());
-        assert_eq!(
-            starts[0].execution_mode,
-            TraditionalChildExecutionMode::Foreground
-        );
-        assert_eq!(
-            starts[1].execution_mode,
-            TraditionalChildExecutionMode::Background
-        );
-    }
-
-    #[tokio::test]
-    async fn native_continuation_resolves_label_but_launch_requires_one() {
-        let store_path =
-            std::env::temp_dir().join(format!("nac_subagent_label_{}.db", uuid::Uuid::new_v4()));
-        let controller = Arc::new(FakeController {
-            starts: Mutex::new(Vec::new()),
-        });
-        crate::traditional_children::register_controller(store_path.clone(), controller.clone());
-        let mut runtime = crate::tools::test_runtime();
-        runtime.store_path = store_path;
-        runtime.session_id = Some("parent-1".to_string());
-        runtime.allowed_tools = Some(Arc::new(
-            crate::tools::DIRECT_TOOL_NAMES
-                .into_iter()
-                .map(str::to_string)
-                .collect(),
-        ));
-        let client = crate::model::ModelClient::new_for_test();
-        let call = |arguments: serde_json::Value| {
-            crate::tools::execute_tool("subagent", arguments, &runtime, &client)
-        };
-
-        let schema = SubagentTool.definition().function.parameters;
-        assert_eq!(
-            schema["properties"]["description"]["type"],
-            json!(["string", "null"])
-        );
-        assert!(schema["required"]
-            .as_array()
-            .unwrap()
-            .contains(&json!("description")));
-
-        for launch in [
-            json!({"profile": "general", "prompt": "work", "child_session_id": null, "background": true}),
-            json!({"profile": "general", "description": null, "prompt": "work", "child_session_id": null, "background": true}),
-        ] {
-            let rejected = call(launch).await;
-            assert!(rejected.is_error);
-            assert_eq!(
-                rejected.content.as_text(),
-                Some("Error: invalid subagent input: traditional child description is required to launch a new child; omit it (or pass null) only when continuing an existing child_session_id")
-            );
-        }
-        assert!(controller.starts.lock().unwrap().is_empty());
-
-        for continuation in [
-            json!({"profile": "general", "prompt": "continue", "child_session_id": "child-1", "background": true}),
-            json!({"profile": "general", "description": null, "prompt": "continue", "child_session_id": "child-1", "background": true}),
-            json!({"profile": "general", "description": "review store", "prompt": "continue", "child_session_id": "child-1", "background": true}),
-        ] {
-            let continued = call(continuation).await;
-            assert!(!continued.is_error, "{}", continued.content);
-        }
-        let starts = controller.starts.lock().unwrap();
-        assert_eq!(
-            starts
-                .iter()
-                .map(|start| (
-                    start.child_session_id.as_deref(),
-                    start.description.as_deref()
-                ))
-                .collect::<Vec<_>>(),
-            [
-                (Some("child-1"), None),
-                (Some("child-1"), None),
-                (Some("child-1"), Some("review store")),
-            ]
-        );
-    }
-
-    #[tokio::test]
-    async fn native_status_and_cancel_hide_foreign_child_ownership() {
-        let root =
-            std::env::temp_dir().join(format!("nac_subagent_opaque_{}", uuid::Uuid::new_v4()));
-        let store_path = root.join("store.db");
-        crate::store::initialize(&store_path).unwrap();
-        for session_id in ["parent-a", "parent-b", "child-a"] {
-            crate::store::insert_test_session(&store_path, session_id);
-        }
-        let connection = crate::store::open_runtime_connection(&store_path).unwrap();
-        connection
-            .execute(
-                "UPDATE sessions SET behavior = 'direct' WHERE session_id IN ('parent-a', 'parent-b', 'child-a')",
-                [],
-            )
-            .unwrap();
-        crate::store::create_traditional_child_relationship(
-            &store_path,
-            "parent-a",
-            "child-a",
-            GENERAL_CHILD_PROFILE,
-            "review ownership",
-        )
-        .unwrap();
-        let controller = Arc::new(FakeController {
-            starts: Mutex::new(Vec::new()),
-        });
-        crate::traditional_children::register_controller(store_path.clone(), controller);
-        let mut runtime = crate::tools::test_runtime();
-        runtime.store_path = store_path.clone();
-        runtime.session_id = Some("parent-b".to_string());
-        runtime.allowed_tools = Some(Arc::new(
-            crate::tools::DIRECT_TOOL_NAMES
-                .into_iter()
-                .map(str::to_string)
-                .collect(),
-        ));
-        let client = crate::model::ModelClient::new_for_test();
-
-        for tool in ["subagent_status", "subagent_cancel"] {
-            let foreign = crate::tools::execute_tool(
-                tool,
-                json!({"child_session_id": "child-a"}),
-                &runtime,
-                &client,
-            )
-            .await;
-            let missing = crate::tools::execute_tool(
-                tool,
-                json!({"child_session_id": "missing"}),
-                &runtime,
-                &client,
-            )
-            .await;
-            assert!(foreign.is_error && missing.is_error);
-            assert_eq!(
-                foreign.content.as_text(),
-                missing.content.as_text(),
-                "{tool}"
-            );
-            assert_eq!(
-                foreign.content.as_text(),
-                Some("Error: traditional child was not found")
-            );
-        }
-
-        let _ = std::fs::remove_dir_all(root);
-    }
-}
+#[path = "subagent_tests.rs"]
+mod tests;

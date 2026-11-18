@@ -24,6 +24,35 @@ use tower::ServiceExt;
 
 pub(crate) static SERVER_MODEL_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+type ChildCreationPause = (
+    PathBuf,
+    String,
+    tokio::sync::oneshot::Sender<()>,
+    std::sync::mpsc::Receiver<()>,
+);
+static CHILD_CREATION_PAUSE: std::sync::Mutex<Option<ChildCreationPause>> =
+    std::sync::Mutex::new(None);
+
+pub(super) fn pause_child_creation_for_test(path: &std::path::Path, parent: &str) {
+    let pause = {
+        let mut slot = CHILD_CREATION_PAUSE.lock().unwrap();
+        if slot
+            .as_ref()
+            .is_some_and(|(selected_path, selected_parent, _, _)| {
+                selected_path == path && selected_parent == parent
+            })
+        {
+            slot.take()
+        } else {
+            None
+        }
+    };
+    if let Some((_, _, started, release)) = pause {
+        let _ = started.send(());
+        let _ = release.recv();
+    }
+}
+
 async fn point_session_at_hanging_endpoint(
     root: &std::path::Path,
     session_id: &str,
@@ -1057,6 +1086,8 @@ mod managed_gate_order;
 mod managed_load;
 #[path = "tests/managed_topology.rs"]
 mod managed_topology;
+#[path = "tests/owned_children.rs"]
+mod owned_children;
 #[path = "tests/resume_composition.rs"]
 mod resume_composition;
 

@@ -23,16 +23,19 @@ export interface WorkFold {
 }
 /** A turn as the transcript lays it out: the fold where its work began, then everything else. */
 export type TurnLayoutItem = WorkFold | InsightSessionEntry | {
+    kind: "session-group";
+    key: string;
+    entries: InsightSessionEntry[];
+} | {
     kind: "block";
     key: string;
     block: ModelTurnBlock;
 };
 /**
  * Lays a partitioned model turn out as the transcript shows it. Reasoning and
- * tool groups fold into one entry at the place the first of them appeared, and
- * so does prose the model wrote between them ("Let me look at the tests").
- * Launched sessions, thread waves and the prose after the last group stay in
- * the open, in their order: they are what the turn has to say.
+ * tool groups fold at the place they appeared. Prose remains in the open in
+ * its original position, including when later activity arrives: moving it into
+ * a fold would discard the reader's selection and could hide visible text.
  */
 export declare function layoutModelTurn(items: readonly ModelTurnItem[]): TurnLayoutItem[];
 export declare function foldSegments(fold: WorkFold): InsightSegment[];

@@ -12,6 +12,7 @@ const STATUS_TONE: Record<ToolPresentation["status"], string> = {
   "timed-out": "text-error-primary",
   cancelled: "text-basic-muted",
   interrupted: "text-error-primary",
+  unknown: "text-basic-muted",
 };
 
 /**

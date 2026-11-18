@@ -128,6 +128,7 @@ fn drain_events(
 }
 
 mod automatic_flow;
+mod image_switch;
 mod lifecycle;
 mod manual_flow;
 mod projection_durability;

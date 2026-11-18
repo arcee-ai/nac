@@ -27,6 +27,8 @@ export interface components {
           args_detail?: string | null;
           args_preview: string;
           call_id: string;
+          delegation_intent?: components["schemas"]["DelegationIntent"] | null;
+          delegation_summary_verified?: boolean;
           key_arg_preview?: string | null;
           name: string;
           thread_name?: string | null;
@@ -38,6 +40,8 @@ export interface components {
           command_status?: components["schemas"]["CommandStatus"] | null;
           completion_status?: components["schemas"]["ToolCompletionStatus"] | null;
           content_preview: string;
+          delegation_outcome?: components["schemas"]["DelegationOutcome"] | null;
+          delegation_summary?: string | null;
           effective_timeout_ms?: number | null;
           execution_duration_ms?: number | null;
           exit_code?: number | null;
@@ -383,9 +387,18 @@ export interface components {
     };
     DefaultLimits: {
       context_window: number;
+      limits?: components["schemas"]["ResolvedLimits"] | null;
       max_tokens: number;
       supported_efforts: components["schemas"]["ReasoningEffort"][];
     };
+    DelegationIntent: "background_launch" | "background_continuation" | "foreground";
+    DelegationOutcome:
+      | "background_started"
+      | "background_continued"
+      | "completed"
+      | "failed"
+      | "cancelled"
+      | "interrupted";
     DeleteProjectResponse: { deleted_session_ids: string[]; released_session_ids: string[] };
     DeleteProjectSessions: "keep" | "delete";
     DeviceLoginStartedResponse: {
@@ -823,6 +836,7 @@ export interface components {
       model: string;
       reasoning_effort?: components["schemas"]["ReasoningEffort"] | null;
     };
+    LimitOrigin: "observed" | "profile" | "inherited" | "customized" | "estimated";
     ManagedAcceptedIdentity: {
       host_incarnation_id: string;
       managed_host_id: string;
@@ -1105,6 +1119,7 @@ export interface components {
       messages: components["schemas"]["Message"][];
       page: components["schemas"]["MessagePageMetadata"];
       terminal_selection_attributions?: components["schemas"]["TerminalSelectionMessageReference"][];
+      tool_call_occurrences?: (string | null)[];
     };
     ModelConfigFromFileRequest: { path: string };
     ModelConfigurationList: { configurations: components["schemas"]["ModelConfigurationRecord"][] };
@@ -1136,6 +1151,7 @@ export interface components {
       cost: components["schemas"]["ModelCostRates"];
       display_name: string | null;
       id: string;
+      limits?: components["schemas"]["ResolvedLimits"] | null;
       max_tokens: number;
       reasoning: boolean;
       source: components["schemas"]["ModelSource"];
@@ -1393,6 +1409,7 @@ export interface components {
     RawSessionConfig: {
       allow_insecure_http: boolean;
       api_key_env: string | null;
+      automatic_compaction?: boolean;
       backend: string | null;
       base_url: string;
       config_version: number;
@@ -1499,6 +1516,17 @@ export interface components {
     };
     RequestField_Vec_Vec_String: null | string[];
     ResizeUserTerminalRequest: { cols: number; protocol_version: number; rows: number };
+    ResolvedLimits: {
+      automatic_compaction_origin?: components["schemas"]["LimitOrigin"] | null;
+      automatic_compaction_threshold?: number | null;
+      context_origin: components["schemas"]["LimitOrigin"];
+      context_window: number;
+      effective_input_tokens: number;
+      input_origin: components["schemas"]["LimitOrigin"];
+      max_input_tokens?: number | null;
+      max_output_tokens: number;
+      output_origin: components["schemas"]["LimitOrigin"];
+    };
     ResolvedModelConfiguration: {
       allow_insecure_http: boolean;
       api_key_env: string | null;
@@ -1720,6 +1748,7 @@ export interface components {
       message_cycle?: components["schemas"]["MessageCycleMetadata"] | null;
       message_page?: components["schemas"]["MessagePageMetadata"] | null;
       terminal_selection_attributions?: components["schemas"]["TerminalSelectionMessageReference"][];
+      tool_call_occurrences?: (string | null)[];
     };
     SessionSummarySnapshot: {
       backend: string;

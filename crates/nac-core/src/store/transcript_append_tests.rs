@@ -49,6 +49,19 @@ fn private_fixture_ack_failure_follows_real_commit_and_replay_is_once() {
     let session = format!("fixture-{id}");
     let run = format!("run-{id}");
     insert_test_session(&path, &session);
+    open_runtime_connection(&path)
+        .unwrap()
+        .execute(
+            "UPDATE sessions SET behavior = 'direct', backend = 'arcee-api' WHERE session_id = ?1",
+            [&session],
+        )
+        .unwrap();
+    assert_eq!(
+        crate::sessions::load_session(&path, &session)
+            .unwrap()
+            .behavior,
+        crate::sessions::SessionBehavior::Direct
+    );
     let control_root = PathBuf::from(format!("/tmp/all117-fault-{id}"));
     std::fs::create_dir(&control_root).unwrap();
     std::fs::set_permissions(&control_root, std::fs::Permissions::from_mode(0o700)).unwrap();

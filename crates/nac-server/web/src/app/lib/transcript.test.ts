@@ -372,6 +372,49 @@ describe("delegated completion turns", () => {
     });
   });
 
+  it("retains generation identity, order and outcomes when an older page is loaded", () => {
+    const receipt = (generation: number, status: "completed" | "failed", outcome: string) => ({
+      role: "user" as const,
+      content: `${prefix}${JSON.stringify({
+        source: "traditional_child",
+        child_session_id: "child",
+        generation,
+        status,
+        description: "Audit lifecycle",
+        report: status === "completed" ? outcome : null,
+        failure: status === "failed" ? outcome : null,
+        change_summary: null,
+        verification_summary: null,
+      })}`,
+    });
+    const messages = [
+      receipt(1, "failed", "first failure"),
+      { role: "user" as const, content: "Continue" },
+      receipt(2, "completed", "second result"),
+    ];
+    const full = snapshot(messages);
+    full.message_page = { start: 8, end: 11, total: 11, has_older: true };
+    const tail = snapshot(messages.slice(2));
+    tail.message_created_at = ["t-2"];
+    tail.message_page = { start: 10, end: 11, total: 11, has_older: true };
+    const fullTurns = buildTranscript(full, {});
+    const tailTurns = buildTranscript(tail, {});
+    expect(fullTurns.map((turn) => turn.key)).toEqual([
+      "delegated-completion-8",
+      "user-9",
+      "delegated-completion-10",
+    ]);
+    expect(fullTurns[0]).toMatchObject({
+      messageIndex: 8,
+      completion: { generation: 1, status: "failed", outcome: "first failure" },
+    });
+    expect(fullTurns[2]).toMatchObject({
+      messageIndex: 10,
+      completion: { generation: 2, status: "completed", outcome: "second result" },
+    });
+    expect(tailTurns[0]).toEqual(fullTurns[2]);
+  });
+
   it("keeps malformed prefix text as an ordinary user-authored turn", () => {
     const content = `${prefix}not json`;
     expect(buildTranscript(snapshot([{ role: "user", content }]), {})[0]).toMatchObject({
@@ -410,6 +453,40 @@ describe("delegated completion turns", () => {
 describe.each<SessionBehavior>(["direct", "direct-with-orchestrator"])(
   "%s primary tool transcript",
   (behavior) => {
+    it("does not claim interruption for ambiguous settled delegation results", () => {
+      const call = genericToolCall("subagent", "reused", "{}");
+      const snapshot = directSnapshot(
+        [
+          { role: "assistant", content: null, tool_calls: [call, call] },
+          { role: "tool", tool_call_id: "reused", content: "first" },
+          { role: "tool", tool_call_id: "reused", content: "second" },
+        ],
+        behavior,
+      );
+      snapshot.tool_call_occurrences = ["log:session:store:1:digest:3", null, null];
+      const tools = toolDetails(buildTranscript(snapshot, {}));
+      expect(tools).toHaveLength(2);
+      expect(tools.every((item) => item.status === "unknown" && item.resultPreview === null)).toBe(
+        true,
+      );
+    });
+
+    it("marks two result rows for one delegation call as unavailable", () => {
+      const call = genericToolCall("subagent", "reused", "{}");
+      const snapshot = directSnapshot(
+        [
+          { role: "assistant", content: null, tool_calls: [call] },
+          { role: "tool", tool_call_id: "reused", content: "first" },
+          { role: "tool", tool_call_id: "reused", content: "second" },
+        ],
+        behavior,
+      );
+      snapshot.tool_call_occurrences = ["log:session:store:1:digest:3", null, null];
+      expect(toolDetails(buildTranscript(snapshot, {}))).toMatchObject([
+        { status: "unknown", statusLabel: "Outcome unavailable", resultPreview: null },
+      ]);
+    });
+
     it("keeps one semantic entry across live, settled, and reload projections", () => {
       const call = genericToolCall(
         "exec_command",
@@ -467,6 +544,48 @@ describe.each<SessionBehavior>(["direct", "direct-with-orchestrator"])(
       expect(JSON.stringify(settled)).not.toContain("SECRET_RAW_COMMAND");
       expect(JSON.stringify(settled)).not.toContain("SECRET_ENV");
       expect(JSON.stringify(settled)).not.toContain("RAW_SECRET_RESULT");
+    });
+
+    it("does not attach unbound lifecycle facts to a live or durable subagent invocation", () => {
+      const call = genericToolCall("subagent", "child-call", '{"prompt":"RAW_SECRET"}');
+      const base = directSnapshot(
+        [
+          { role: "user", content: "delegate" },
+          { role: "assistant", content: null, tool_calls: [call] },
+        ],
+        behavior,
+      );
+      base.active_run = { run_id: "run-child", prompt_preview: "delegate", started_at_epoch_ms: 1 };
+      const start = primaryStart("child-call", "subagent", "Review store");
+      const finish = {
+        ...primaryFinish("child-call", "subagent"),
+        delegation_outcome: "background_continued",
+        delegation_summary: "Review store",
+        content_preview: "Instructions sent to subagent",
+      } as AgentEvent;
+      expect(toolDetails(buildTranscript(base, {}, {}, [start]))[0]).toMatchObject({
+        label: "Subagent request outcome unavailable",
+        summary: null,
+      });
+      const settled = toolDetails(buildTranscript(base, {}, {}, [start, finish]));
+      expect(settled).toHaveLength(1);
+      expect(settled[0]).toMatchObject({
+        label: "Subagent request outcome unavailable",
+        summary: null,
+      });
+      expect(settled[0]).not.toHaveProperty("delegationOutcome");
+      const reloaded = directSnapshot(
+        [
+          ...base.messages,
+          { role: "tool", tool_call_id: "child-call", content: "RAW_SECRET_RESULT" },
+        ],
+        behavior,
+      );
+      reloaded.primary_tool_events = [start, finish];
+      const retained = toolDetails(buildTranscript(reloaded, {}));
+      expect(retained[0]).toMatchObject({ status: "unknown", summary: null });
+      expect(retained[0]).not.toHaveProperty("delegationOutcome");
+      expect(JSON.stringify(retained)).not.toContain("RAW_SECRET");
     });
 
     it("uses a bounded image fallback and does not render base64 payloads", () => {

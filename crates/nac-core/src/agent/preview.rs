@@ -168,7 +168,6 @@ pub(crate) fn key_arg_preview(
             .map(|value| truncate_string(&value, 120))
             .unwrap_or_default(),
         "subagent" => get_str("description")
-            .or_else(|| get_str("child_session_id"))
             .map(|value| truncate_string(&value, 120))
             .unwrap_or_default(),
         "subagent_status" | "subagent_cancel" => get_str("child_session_id")
@@ -235,7 +234,143 @@ pub(crate) fn key_arg_preview(
     }
 }
 
+/// Redact values before truncation or JSON escaping can split a secret.
+pub(super) fn redact_presentation_arguments(
+    raw: &str,
+    snapshot: &nac_contracts::CommandEnvironmentSnapshot,
+) -> Option<String> {
+    fn redact(value: &mut serde_json::Value, snapshot: &nac_contracts::CommandEnvironmentSnapshot) {
+        match value {
+            serde_json::Value::String(text) => *text = snapshot.redact(text),
+            serde_json::Value::Array(items) => {
+                items.iter_mut().for_each(|item| redact(item, snapshot));
+            }
+            serde_json::Value::Object(map) => {
+                let old = std::mem::take(map);
+                for (key, mut item) in old {
+                    redact(&mut item, snapshot);
+                    map.insert(snapshot.redact(&key), item);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut value = serde_json::from_str(raw).ok()?;
+    redact(&mut value, snapshot);
+    serde_json::to_string(&value).ok()
+}
+
+// Timed-out blocking lookups retain their slot until they actually finish.
+// Saturation only suppresses presentation, never authorization or execution.
+static PRESENTATION_REDACTION_SLOTS: std::sync::LazyLock<Arc<tokio::sync::Semaphore>> =
+    std::sync::LazyLock::new(|| Arc::new(tokio::sync::Semaphore::new(4)));
+
+/// Preview failure or a slow credential provider must not block tool admission.
+pub(super) async fn subagent_presentation_arguments(
+    runtime: &ToolRuntime,
+    args: &str,
+) -> Option<String> {
+    let captured = if runtime.command_environment.is_some() {
+        crate::managed_native_credentials::captured_managed_native_redactions()
+    } else {
+        Vec::new()
+    };
+    subagent_presentation_arguments_with_captured(runtime, args, captured).await
+}
+
+pub(super) async fn subagent_presentation_arguments_with_captured(
+    runtime: &ToolRuntime,
+    args: &str,
+    captured: Vec<String>,
+) -> Option<String> {
+    // Redaction-only snapshots avoid refreshing credentials or constructing a
+    // command environment. Isolate a blocking provider from the agent loop.
+    let provider = runtime.command_environment.clone();
+    let web_secret = runtime
+        .web_credential
+        .as_ref()
+        .map(|credential| credential.secret().to_string());
+    if provider.is_none() && web_secret.is_none() && captured.is_empty() {
+        return redact_presentation_arguments(
+            args,
+            &nac_contracts::CommandEnvironmentSnapshot::empty(),
+        );
+    }
+    let permit = Arc::clone(&PRESENTATION_REDACTION_SLOTS)
+        .try_acquire_owned()
+        .ok()?;
+    let lookup = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        let mut snapshot = match provider {
+            Some(provider) => provider.redaction_snapshot()?,
+            None => nac_contracts::CommandEnvironmentSnapshot::empty(),
+        };
+        if let Some(secret) = web_secret {
+            snapshot.extend_redactions([secret]);
+        }
+        snapshot.extend_redactions(captured);
+        Ok::<_, anyhow::Error>(snapshot)
+    });
+    let snapshot = tokio::time::timeout(std::time::Duration::from_millis(100), lookup)
+        .await
+        .ok()?
+        .ok()?
+        .ok()?;
+    redact_presentation_arguments(args, &snapshot)
+}
+
+pub(crate) fn preview_tool_result_with_completion(
+    name: &str,
+    result: &ToolResult,
+    completion: Option<crate::events::ToolCompletionStatus>,
+) -> String {
+    use crate::events::{DelegationOutcome, ToolCompletionStatus};
+    let request = match name {
+        "subagent" => Some("Subagent request"),
+        "subagent_status" => Some("Subagent status request"),
+        "subagent_cancel" => Some("Subagent cancellation request"),
+        _ => None,
+    };
+    if let Some(request) = request {
+        match completion {
+            Some(ToolCompletionStatus::TimedOut) => return format!("{request} timed out"),
+            Some(ToolCompletionStatus::Cancelled)
+                if !(name == "subagent"
+                    && result.delegation_outcome == Some(DelegationOutcome::Cancelled)) =>
+            {
+                return format!("{request} cancelled");
+            }
+            _ => {}
+        }
+    }
+    preview_tool_result(name, result)
+}
+
 pub(crate) fn preview_tool_result(name: &str, result: &ToolResult) -> String {
+    if matches!(name, "subagent_status" | "subagent_cancel") {
+        return if result.delegation_outcome.is_none() && result.is_error {
+            "Subagent request failed"
+        } else if name == "subagent_status" {
+            "Subagent status retrieved"
+        } else {
+            "Subagent cancellation request finished"
+        }
+        .to_string();
+    }
+    if name == "subagent" {
+        use crate::events::DelegationOutcome;
+        return match result.delegation_outcome {
+            Some(DelegationOutcome::BackgroundStarted) => "Subagent started in background",
+            Some(DelegationOutcome::BackgroundContinued) => "Instructions sent to subagent",
+            Some(DelegationOutcome::Completed) => "Subagent completed",
+            Some(DelegationOutcome::Failed) => "Subagent failed",
+            Some(DelegationOutcome::Cancelled) => "Subagent cancelled",
+            Some(DelegationOutcome::Interrupted) => "Subagent interrupted",
+            None if result.is_error => "Subagent request failed",
+            None => "Subagent request finished",
+        }
+        .to_string();
+    }
     let rendered = match result.content.as_text() {
         Some(text) => Cow::Borrowed(text),
         None => Cow::Owned(result.content.preview()),

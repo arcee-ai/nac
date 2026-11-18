@@ -52,6 +52,19 @@ pub trait TraditionalChildController: Send + Sync + 'static {
         expected_generation: u64,
     ) -> ChildFuture<'a, TraditionalChildRecord>;
 
+    /// Register a serving-owned wake without acquiring a parent lifecycle gate.
+    /// Older controllers keep their existing asynchronous wake behavior.
+    #[doc(hidden)]
+    fn retain_wake(&self, _session_id: &str) -> Option<Result<()>> {
+        None
+    }
+
+    /// Retain an unsettled generation when a terminal acknowledgement failed.
+    #[doc(hidden)]
+    fn retain_recovery(&self, _session_id: &str) -> Option<Result<()>> {
+        None
+    }
+
     fn wake<'a>(&'a self, session_id: &'a str) -> ChildFuture<'a, ()>;
 }
 

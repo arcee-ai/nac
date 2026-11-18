@@ -280,6 +280,61 @@ pub fn last_transcript_log_user_prompt(
 
 /// One transcript-log row: its row id, transcript `idx` and message.
 pub(crate) type TranscriptLogRow = (i64, u64, Message);
+pub(crate) type TranscriptWindowRow = (i64, u64, Message, Option<(i64, String, String)>);
+
+fn occurrence_batch_identity(
+    connection: &Connection,
+    batch: &[TranscriptLogRow],
+) -> Result<(String, String)> {
+    use sha2::{Digest, Sha256};
+    let store_id = connection.query_row(
+        "SELECT store_id FROM session_completion_feed WHERE singleton=1",
+        [],
+        |row| row.get::<_, String>(0),
+    )?;
+    let digest = format!("{:x}", Sha256::digest(serde_json::to_vec(batch)?));
+    Ok((store_id, digest))
+}
+
+fn read_assistant_batch_in_snapshot(
+    connection: &rusqlite::Connection,
+    session_id: &str,
+    row_id: i64,
+) -> Result<Option<Vec<TranscriptLogRow>>> {
+    let mut statement = connection.prepare(
+        "SELECT id, event_json FROM thread_events
+         WHERE session_id = ?1 AND thread_name = ?2 AND id >= ?3 ORDER BY id ASC",
+    )?;
+    let mut rows = statement.query(params![session_id, ORCHESTRATOR_STEERING_TARGET, row_id])?;
+    let mut batch: Vec<TranscriptLogRow> = Vec::new();
+    while let Some(row) = rows.next()? {
+        let id: i64 = row.get(0)?;
+        if batch.is_empty() && id != row_id {
+            return Ok(None);
+        }
+        let json: String = row.get(1)?;
+        let entry = decode_transcript_log_entry(&json)
+            .ok_or_else(|| anyhow!("thread_events row {id} is not a transcript log entry"))?;
+        let message: Message = serde_json::from_str(&entry.message_json).with_context(|| {
+            format!("thread_events row {id} holds an undecodable transcript message")
+        })?;
+        if batch.is_empty() {
+            if !matches!(message, Message::Assistant { .. }) {
+                return Ok(None);
+            }
+        } else if matches!(message, Message::Assistant { .. } | Message::User { .. }) {
+            break;
+        }
+        if batch
+            .last()
+            .is_some_and(|(_, idx, _)| idx.checked_add(1) != Some(entry.idx))
+        {
+            return Err(anyhow!("transcript batch is not contiguous"));
+        }
+        batch.push((id, entry.idx, message));
+    }
+    Ok((!batch.is_empty()).then_some(batch))
+}
 
 /// Dedicated path-backed writer/reader for the transcript log. Connections
 /// are checked out only for the duration of each operation. All methods are
@@ -937,6 +992,36 @@ impl TranscriptLogWriter {
         Ok((retained, entries))
     }
 
+    /// Read one retained assistant row and its contiguous result batch in a
+    /// single database snapshot. Row ids are session-scoped and never reused.
+    pub(crate) fn read_assistant_batch_by_row(
+        &self,
+        session_id: &str,
+        row_id: i64,
+    ) -> Result<Option<(String, String, Vec<TranscriptLogRow>)>> {
+        coordinate_writer!(self, Result<Option<(String, String, Vec<TranscriptLogRow>)>>, {
+            session_id: String = session_id.to_owned(),
+            row_id: i64 = row_id,
+        }, call |command| command.writer.read_assistant_batch_by_row(&command.session_id, command.row_id),
+        correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id)));
+
+        if row_id <= 0 {
+            return Ok(None);
+        }
+        let _operation = self
+            .operation
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut connection = open_runtime_connection(&self.store_path)?;
+        let snapshot =
+            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Deferred)?;
+        let Some(batch) = read_assistant_batch_in_snapshot(&snapshot, session_id, row_id)? else {
+            return Ok(None);
+        };
+        let (store_id, digest) = occurrence_batch_identity(&snapshot, &batch)?;
+        Ok(Some((store_id, digest, batch)))
+    }
+
     /// Read a window of the log tail relative to a snapshot blob of
     /// `blob_len` messages: tail position `p` is the row with
     /// `idx == blob_len + p`. Returns `(tail_len, rows)` where `rows` covers
@@ -957,12 +1042,32 @@ impl TranscriptLogWriter {
         tail_start: u64,
         limit: usize,
     ) -> Result<(u64, Vec<(u64, Message)>)> {
-        coordinate_writer!(self, Result<(u64, Vec<(u64, Message)>)>, {
+        let (len, rows) =
+            self.read_tail_window_rows(session_id, blob_len, tail_start, limit, false)?;
+        Ok((
+            len,
+            rows.into_iter()
+                .map(|(_, idx, message, _)| (idx, message))
+                .collect(),
+        ))
+    }
+
+    /// The same atomic window with stable, never-reused row identities.
+    pub(crate) fn read_tail_window_rows(
+        &self,
+        session_id: &str,
+        blob_len: u64,
+        tail_start: u64,
+        limit: usize,
+        include_batches: bool,
+    ) -> Result<(u64, Vec<TranscriptWindowRow>)> {
+        coordinate_writer!(self, Result<(u64, Vec<TranscriptWindowRow>)>, {
             session_id: String = session_id.to_owned(),
             blob_len: u64 = blob_len,
             tail_start: u64 = tail_start,
             limit: usize = limit,
-        }, call |command| command.writer.read_tail_window(&command.session_id, command.blob_len, command.tail_start, command.limit),
+            include_batches: bool = include_batches,
+        }, call |command| command.writer.read_tail_window_rows(&command.session_id, command.blob_len, command.tail_start, command.limit, command.include_batches),
         correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id)));
 
         let _operation = self
@@ -1009,17 +1114,38 @@ impl TranscriptLogWriter {
                 serde_json::from_str(&entry.message_json).with_context(|| {
                     format!("thread_events row {id} holds an undecodable transcript message")
                 })?;
-            entries.push((entry.idx, message));
+            entries.push((id, entry.idx, message));
         }
         entries.reverse();
-        for (expected_idx, (idx, _)) in (blob_len + tail_start..).zip(entries.iter()) {
+        for (expected_idx, (_, idx, _)) in (blob_len + tail_start..).zip(entries.iter()) {
             if *idx != expected_idx {
                 return Err(anyhow!(
                     "transcript log tail window is not contiguous: expected idx {expected_idx}, found {idx}"
                 ));
             }
         }
-        Ok((tail_len, entries))
+        drop(statement);
+        let mut window = Vec::with_capacity(entries.len());
+        for (id, idx, message) in entries {
+            let batch_end = match &message {
+                Message::Assistant {
+                    tool_calls: Some(calls),
+                    ..
+                } if include_batches && !calls.is_empty() => {
+                    if let Some(batch) =
+                        read_assistant_batch_in_snapshot(&snapshot, session_id, id)?
+                    {
+                        let (store_id, digest) = occurrence_batch_identity(&snapshot, &batch)?;
+                        batch.last().map(|(last, _, _)| (*last, store_id, digest))
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            };
+            window.push((id, idx, message, batch_end));
+        }
+        Ok((tail_len, window))
     }
 
     /// Row creation times for the same window [`TranscriptLogWriter::read_tail_window`]

@@ -364,6 +364,17 @@ fn map_arcee_model(model: &ArceeApiModel) -> ArceeOverlayEntry {
             display_name: model.name.clone(),
             context_window,
             max_tokens,
+            max_input_tokens: None,
+            context_origin: Some(if model.context_length.is_some_and(|v| v > 0) {
+                super::LimitOrigin::Observed
+            } else {
+                super::LimitOrigin::Estimated
+            }),
+            output_origin: Some(if model.max_output_length.is_some_and(|v| v > 0) {
+                super::LimitOrigin::Observed
+            } else {
+                super::LimitOrigin::Estimated
+            }),
             cost,
             reasoning,
             image_input: false,

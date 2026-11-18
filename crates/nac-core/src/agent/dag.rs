@@ -216,6 +216,8 @@ pub(crate) async fn execute_with_dag(
                 is_error: true,
                 execution_duration_ms: None,
                 execution_duration_excludes_authorization: false,
+                delegation_outcome: None,
+                delegation_summary: None,
             };
             event_sink
                 .emit_async(AgentEvent::ToolCallStarted {
@@ -225,6 +227,8 @@ pub(crate) async fn execute_with_dag(
                     args_preview: preview_tool_args("thread", &dispatch.args_str),
                     key_arg_preview: None,
                     args_detail: Some(tool_args_detail(&dispatch.args_str)),
+                    delegation_intent: None,
+                    delegation_summary_verified: false,
                 })
                 .await;
             event_sink
@@ -308,6 +312,8 @@ pub(crate) async fn execute_with_dag(
                     is_error: true,
                     execution_duration_ms: None,
                     execution_duration_excludes_authorization: false,
+                    delegation_outcome: None,
+                    delegation_summary: None,
                 };
 
                 event_sink
@@ -318,6 +324,8 @@ pub(crate) async fn execute_with_dag(
                         args_preview: preview_tool_args("thread", &dispatch.args_str),
                         key_arg_preview: None,
                         args_detail: Some(tool_args_detail(&dispatch.args_str)),
+                        delegation_intent: None,
+                        delegation_summary_verified: false,
                     })
                     .await;
                 event_sink
@@ -349,6 +357,8 @@ pub(crate) async fn execute_with_dag(
                     args_preview: preview_tool_args("thread", &dispatch.args_str),
                     key_arg_preview: None,
                     args_detail: Some(tool_args_detail(&dispatch.args_str)),
+                    delegation_intent: None,
+                    delegation_summary_verified: false,
                 })
                 .await;
 
@@ -421,6 +431,8 @@ pub(crate) async fn execute_with_dag(
                                         is_error: true,
                                         execution_duration_ms: None,
                                         execution_duration_excludes_authorization: false,
+                                    delegation_outcome: None,
+                                    delegation_summary: None,
                                     },
                                 ));
                             }
@@ -474,6 +486,8 @@ pub(crate) async fn execute_with_dag(
                             is_error: true,
                             execution_duration_ms: None,
                             execution_duration_excludes_authorization: false,
+                            delegation_outcome: None,
+                            delegation_summary: None,
                         },
                     ));
                 }
@@ -510,6 +524,8 @@ pub(crate) async fn execute_with_dag(
                         is_error: true,
                         execution_duration_ms: None,
                         execution_duration_excludes_authorization: false,
+                        delegation_outcome: None,
+                        delegation_summary: None,
                     },
                 ));
             }

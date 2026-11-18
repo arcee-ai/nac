@@ -90,13 +90,19 @@ transaction results, schema, connection limits, or shutdown budgets.
 | --- | --- | --- | --- |
 | `nac.store.operation.duration` | span | operation, outcome, engine, error codes | `nac-core::store` |
 | `nac.store.connection.active` | gauge | process/store scope, engine | `nac-core::store::schema` |
+| `nac.store.terminal_settlement.active` | gauge | engine | `nac-core::telemetry` observed in-flight terminal settlements |
 | `nac.persistence.queue.active` | gauge | engine | `nac-core::telemetry` observed in-flight persistence operations |
-| `nac.runtime.activity.active` | gauge | orchestrator/worker/child-process | `nac-core::agent` and process call sites |
+| `nac.runtime.activity.active` | gauge | orchestrator/worker/direct/child-process | `nac-core::agent` and process call sites |
 | `nac.runtime.child_process` | diagnostic | started/stopped; PID as a non-series field | `nac-core` process call sites |
 | `nac.runtime.resource.sample` | gauge | engine; correlation digests are exemplars, not series dimensions | `nac-core::telemetry` |
 | `nac.mcp.oauth.callback.listening` | diagnostic | numeric generation, started | `nac-server` loopback OAuth task |
 | `nac.mcp.oauth.callback.state_rejected` | diagnostic | numeric generation, error | `nac-server` loopback OAuth task |
 | `nac.http.request.duration` | span | matched route pattern, outcome | `nac-server::delivery` |
+
+The `direct` activity counts active direct agent turns, including traditional
+child sessions. It does not count operating-system processes. The separate
+`child_process` activity and started/stopped diagnostics observe actual owned
+subprocesses, including those launched by native tools.
 
 `nac.store.operation.duration` uses these exact operation values:
 
@@ -104,8 +110,9 @@ transaction results, schema, connection limits, or shutdown budgets.
   `readiness` for SQLite access and probes;
 - `transcript_append`, `event_persistence`, and `worker_episode_commit` for
   durable execution history;
-- `managed_monitor_poll`, `recovery`, and `terminal_settlement` for managed
-  lifecycle attribution.
+- `managed_monitor_poll`, `recovery`, and `terminal_settlement` for lifecycle
+  attribution; terminal settlement covers both traditional children and
+  managed orchestrators.
 
 Every event includes bounded build ID, source revision, store engine, journal
 mode, and schema version. Managed server events also include the host digest.

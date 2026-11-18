@@ -160,6 +160,8 @@ export declare function createRuntimeStore(_storage?: Pick<Storage, "getItem" | 
         args_detail?: string | null;
         args_preview: string;
         call_id: string;
+        delegation_intent?: import("../types/openapi.generated").components["schemas"]["DelegationIntent"] | null;
+        delegation_summary_verified?: boolean;
         key_arg_preview?: string | null;
         name: string;
         thread_name?: string | null;
@@ -170,6 +172,8 @@ export declare function createRuntimeStore(_storage?: Pick<Storage, "getItem" | 
         command_status?: import("../types/openapi.generated").components["schemas"]["CommandStatus"] | null;
         completion_status?: import("../types/openapi.generated").components["schemas"]["ToolCompletionStatus"] | null;
         content_preview: string;
+        delegation_outcome?: import("../types/openapi.generated").components["schemas"]["DelegationOutcome"] | null;
+        delegation_summary?: string | null;
         effective_timeout_ms?: number | null;
         execution_duration_ms?: number | null;
         exit_code?: number | null;
@@ -320,6 +324,8 @@ export declare const release: () => void, runtimeStore: import("../lib/store").S
     args_detail?: string | null;
     args_preview: string;
     call_id: string;
+    delegation_intent?: import("../types/openapi.generated").components["schemas"]["DelegationIntent"] | null;
+    delegation_summary_verified?: boolean;
     key_arg_preview?: string | null;
     name: string;
     thread_name?: string | null;
@@ -330,6 +336,8 @@ export declare const release: () => void, runtimeStore: import("../lib/store").S
     command_status?: import("../types/openapi.generated").components["schemas"]["CommandStatus"] | null;
     completion_status?: import("../types/openapi.generated").components["schemas"]["ToolCompletionStatus"] | null;
     content_preview: string;
+    delegation_outcome?: import("../types/openapi.generated").components["schemas"]["DelegationOutcome"] | null;
+    delegation_summary?: string | null;
     effective_timeout_ms?: number | null;
     execution_duration_ms?: number | null;
     exit_code?: number | null;

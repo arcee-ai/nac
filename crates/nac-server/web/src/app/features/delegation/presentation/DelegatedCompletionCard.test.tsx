@@ -1,166 +1,113 @@
 /** @vitest-environment jsdom */
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { afterEach, expect, it, vi } from "vitest";
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { MemoryRouter, useLocation } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
-
-import { DelegatedCompletionCard } from "@/app/features/delegation/presentation/DelegatedCompletionCard";
+import { DelegatedCompletionCard } from "./DelegatedCompletionCard";
 import { InsightsNavigationContext } from "@/app/features/insights/useInsightsNavigation";
-import { UiPolicyContext } from "@/app/features/ui-policy/UiPolicyContext";
-import { ORCHESTRATION_UI_POLICY } from "@/app/features/ui-policy/policy";
+import { api } from "@/app/services/api";
+import { queryKeys } from "@/app/services/queries/keys";
 import { sessionLayoutStore } from "@/app/store/sessionLayoutStore";
+import type { DelegatedCompletionTurn } from "@/app/lib/transcript";
 
 afterEach(() => {
   cleanup();
   sessionLayoutStore.setState({ selectedSubagents: new Map() });
 });
 
-describe("delegated completion card", () => {
-  it("renders the child's status card with its links and without user/model actions", () => {
-    const focusPanel = vi.fn();
-    render(
-      <MemoryRouter>
-        <UiPolicyContext.Provider value={ORCHESTRATION_UI_POLICY}>
-          <InsightsNavigationContext.Provider
-            value={{
-              sessionId: "parent-1",
-              panels: ["insights", "delegated"],
-              focusPanel,
-              detailFocusRef: { current: null },
-            }}
-          >
-            <DelegatedCompletionCard
-              turn={{
-                kind: "delegated-completion",
-                key: "event-1",
-                messageIndex: 9,
-                createdAt: null,
-                completion: {
-                  kind: "coding-agent",
-                  sessionId: "child/exact",
-                  generation: 2,
-                  status: "completed",
-                  description: "Audit persistence",
-                  outcome: "All checks passed",
-                  changes: null,
-                  verification: "Vitest passed",
-                },
-              }}
-            />
-          </InsightsNavigationContext.Provider>
-        </UiPolicyContext.Provider>
-      </MemoryRouter>,
-    );
-
-    expect(screen.getByRole("status", { name: "Subagent completed" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Regenerate from original prompt" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Revert to this snapshot" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Create fork" })).toBeNull();
-    expect(
-      screen.getByRole("link", { name: "Go to session Audit persistence" }).getAttribute("href"),
-    ).toBe("/session/child%2Fexact/insights");
-
-    fireEvent.click(
-      screen.getByRole("button", {
-        name: "Open Audit persistence in Subagents, Subagent",
-      }),
-    );
-    expect(focusPanel).toHaveBeenCalledWith("delegated");
-    expect(sessionLayoutStore.getState().selectedSubagents.get("parent-1")).toBe(
-      "child:child/exact",
-    );
+function receipt(generation: number): DelegatedCompletionTurn {
+  return {
+    kind: "delegated-completion",
+    key: `receipt-${generation}`,
+    messageIndex: generation,
+    createdAt: null,
+    completion: {
+      kind: "coding-agent",
+      sessionId: "child",
+      generation,
+      status: generation === 1 ? "failed" : "completed",
+      description: "Audit",
+      outcome: `Outcome ${generation}`,
+      changes: null,
+      verification: null,
+    },
+  };
+}
+function mount(records: unknown[] | undefined, interactive = true) {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
   });
+  if (records) client.setQueryData(queryKeys.traditionalChildren("parent"), records);
+  const focusPanel = vi.fn();
+  render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={["/session/parent/insights"]}>
+        <InsightsNavigationContext.Provider
+          value={{
+            sessionId: "parent",
+            panels: ["delegated"],
+            focusPanel,
+            detailFocusRef: { current: null },
+          }}
+        >
+          <Routes>
+            <Route
+              path="/session/:sessionId/insights"
+              element={
+                <>
+                  {[1, 2].map((n) => (
+                    <DelegatedCompletionCard key={n} turn={receipt(n)} interactive={interactive} />
+                  ))}
+                </>
+              }
+            />
+          </Routes>
+        </InsightsNavigationContext.Provider>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  return focusPanel;
+}
+it("keeps each historical outcome and selects the verified child in the parent panel", () => {
+  const focus = mount([{ child_session_id: "child", generation: 2, status: "completed" }]);
+  for (const n of [1, 2]) {
+    const summary = screen.getByText(`Generation ${n} result`);
+    fireEvent.click(summary);
+    expect(summary.closest("details")?.textContent).toContain(`Outcome ${n}`);
+  }
+  expect(screen.getByText("Subagent · Generation 1 · failed")).toBeTruthy();
+  fireEvent.click(screen.getAllByRole("button", { name: "Open Audit in Subagents" })[0]);
+  expect(focus).toHaveBeenCalledWith("delegated");
+  expect(sessionLayoutStore.getState().selectedSubagents.get("parent")).toBe("child:child");
+  expect(screen.queryByRole("link")).toBeNull();
+});
+it("keeps deleted or unowned receipts readable without creating a target", () => {
+  mount([]);
+  expect(screen.queryByRole("button")).toBeNull();
+  expect(screen.getAllByText("Session not found")).toHaveLength(2);
+  fireEvent.click(screen.getByText("Generation 1 result"));
+  expect(screen.getByText("Outcome 1")).toBeTruthy();
+});
+it("keeps preview receipts noninteractive", () => {
+  mount([{ child_session_id: "child" }], false);
+  expect(screen.queryByRole("button")).toBeNull();
+  expect(screen.getByText("Generation 2 result")).toBeTruthy();
 });
 
-function CurrentRoute() {
-  return <output aria-label="Route">{useLocation().pathname}</output>;
-}
-
-it.each([
-  { interactive: true, orchestrationEnabled: true },
-  { interactive: false, orchestrationEnabled: true },
-  { interactive: true, orchestrationEnabled: false },
-  { interactive: false, orchestrationEnabled: false },
-])(
-  "keeps generation reports reachable with interactive=$interactive and orchestration=$orchestrationEnabled",
-  ({ interactive, orchestrationEnabled }) => {
-    render(
-      <MemoryRouter>
-        <UiPolicyContext.Provider value={{ orchestrationEnabled }}>
-          {[1, 2].map((generation) => (
-            <DelegatedCompletionCard
-              key={generation}
-              interactive={interactive}
-              turn={{
-                kind: "delegated-completion",
-                key: `event-${generation}`,
-                messageIndex: generation,
-                createdAt: null,
-                completion: {
-                  kind: "nac-orchestrator",
-                  sessionId: "orchestrator",
-                  generation,
-                  status: "failed",
-                  description: "Plan changes",
-                  outcome: `Failure generation ${generation}`,
-                  changes: `Changes generation ${generation}`,
-                  verification: `Checks generation ${generation}`,
-                },
-              }}
-            />
-          ))}
-        </UiPolicyContext.Provider>
-      </MemoryRouter>,
-    );
-    for (const generation of [1, 2]) {
-      const summary = screen.getByText(`Generation ${generation} result`);
-      fireEvent.click(summary);
-      const details = summary.closest("details")!;
-      expect(details.textContent).toContain(`Failure generation ${generation}`);
-      expect(details.textContent).toContain(`Changes: Changes generation ${generation}`);
-      expect(details.textContent).toContain(`Verification: Checks generation ${generation}`);
-    }
-    expect(screen.queryAllByRole("link")).toHaveLength(interactive && orchestrationEnabled ? 2 : 0);
-  },
-);
-
-it("keeps completion links inside a hosted MemoryRouter", () => {
-  render(
-    <MemoryRouter initialEntries={["/session/parent/insights"]}>
-      <CurrentRoute />
-      <DelegatedCompletionCard
-        turn={{
-          kind: "delegated-completion",
-          key: "event",
-          messageIndex: 1,
-          createdAt: null,
-          completion: {
-            kind: "coding-agent",
-            sessionId: "child",
-            generation: 1,
-            status: "completed",
-            description: "Audit",
-            outcome: null,
-            changes: null,
-            verification: null,
-          },
-        }}
-      />
-    </MemoryRouter>,
+it("does not offer a target while inventory loads or after it fails", async () => {
+  let reject!: (reason: Error) => void;
+  const query = vi.spyOn(api, "listTraditionalChildren").mockImplementation(
+    () =>
+      new Promise((_, fail) => {
+        reject = fail;
+      }),
   );
-  const link = screen.getByRole("link", { name: "Go to session Audit" });
-  const modified = new MouseEvent("click", { bubbles: true, cancelable: true, ctrlKey: true });
-  let routerPrevented = true;
-  const stopBrowserNavigation = (event: MouseEvent) => {
-    routerPrevented = event.defaultPrevented;
-    event.preventDefault();
-  };
-  document.addEventListener("click", stopBrowserNavigation, { once: true });
-  fireEvent(link, modified);
-  expect(routerPrevented).toBe(false);
-  expect(screen.getByRole("status", { name: "Route" }).textContent).toBe(
-    "/session/parent/insights",
-  );
-  fireEvent.click(link);
-  expect(screen.getByRole("status", { name: "Route" }).textContent).toBe("/session/child/insights");
+  mount(undefined);
+  expect(screen.getAllByText("Checking session…")).toHaveLength(2);
+  expect(screen.queryByRole("button")).toBeNull();
+  reject(new Error("offline"));
+  await waitFor(() => expect(screen.getAllByText("Session unavailable")).toHaveLength(2));
+  expect(screen.queryByRole("button")).toBeNull();
+  query.mockRestore();
 });

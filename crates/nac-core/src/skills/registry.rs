@@ -117,6 +117,8 @@ impl SkillRegistry {
                 is_error: true,
                 execution_duration_ms: None,
                 execution_duration_excludes_authorization: false,
+                delegation_outcome: None,
+                delegation_summary: None,
             };
         };
 
@@ -125,6 +127,8 @@ impl SkillRegistry {
             is_error: false,
             execution_duration_ms: None,
             execution_duration_excludes_authorization: false,
+            delegation_outcome: None,
+            delegation_summary: None,
         }
     }
 

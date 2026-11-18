@@ -517,6 +517,9 @@ pub(super) async fn build_resume_config_from_snapshot(
     } else {
         Agent::with_config(agent_client, agent_config)?
     };
+    if snapshot.automatic_compaction {
+        agent.enable_automatic_compaction();
+    }
     // Restore is blob ++ transcript log: rows the crashed previous run
     // appended after the last snapshot save are merged over the blob, and a
     // dangling tool turn is trimmed from both (crash-resume normalization).

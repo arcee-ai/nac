@@ -4,9 +4,10 @@ import type { WorkStep } from "./foldLayout";
  * how long it took. A step with something to show opens it in place: the
  * reasoning it wrote, or what its tool call returned.
  */
-export declare const WorkStepRow: import("react").MemoExoticComponent<({ step, streaming, interactive, }: {
+export declare const WorkStepRow: import("react").MemoExoticComponent<({ step, streaming, interactive, choiceKey, }: {
     step: WorkStep;
     /** The turn is live, so reasoning may still be arriving. */
     streaming: boolean;
     interactive: boolean;
+    choiceKey?: string;
 }) => import("react").JSX.Element>;

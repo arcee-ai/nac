@@ -322,11 +322,13 @@ impl SessionService {
         };
         let loaded_messages = match options.messages {
             FrontendSnapshotMessages::All => {
-                let messages = self.store_backed_transcript().await?;
+                let (canonical_message_indices, messages, tool_call_occurrences) =
+                    self.all_store_transcript_with_occurrences().await?;
                 let (created_at, terminal_selection_attributions) =
                     self.store_backed_transcript_metadata(&messages).await?;
                 LoadedFrontendMessages {
-                    canonical_message_indices: (0..messages.len() as u64).collect(),
+                    canonical_message_indices,
+                    tool_call_occurrences,
                     terminal_selection_attributions,
                     messages,
                     created_at,
@@ -339,6 +341,7 @@ impl SessionService {
                 let cycle = self.message_cycle_from_store().await?;
                 LoadedFrontendMessages {
                     canonical_message_indices: page.canonical_message_indices,
+                    tool_call_occurrences: page.tool_call_occurrences,
                     terminal_selection_attributions: page.terminal_selection_attributions,
                     messages: page.messages,
                     created_at: page.created_at,
@@ -385,6 +388,7 @@ impl SessionService {
         };
         Ok(SessionFrontendSnapshotLoad {
             canonical_message_indices: loaded_messages.canonical_message_indices,
+            tool_call_occurrences: loaded_messages.tool_call_occurrences,
             terminal_selection_attributions: loaded_messages.terminal_selection_attributions,
             snapshot,
             message_page: loaded_messages.page,

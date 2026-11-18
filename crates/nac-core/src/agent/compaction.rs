@@ -298,6 +298,7 @@ impl super::Agent {
         event_sink: EventSink,
         commit: CompactionCommitMarker,
     ) -> CompactionCompletion {
+        self.refresh_model_at_operation_boundary();
         // Manual compaction is a separate admitted operation. A cancelled
         // earlier run must not cancel its pending mount preparation.
         self.begin_run_cancellation();

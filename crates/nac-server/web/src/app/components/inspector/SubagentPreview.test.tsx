@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, expect, it, vi } from "vitest";
 
@@ -385,7 +385,8 @@ it("pins a child approval-wait step without presenting a second approval prompt"
       </MemoryRouter>
     </QueryClientProvider>,
   );
-  expect(await screen.findByRole("button", { name: /Waiting for approval/ })).toBeTruthy();
+  const attention = await screen.findByRole("list", { name: "Steps that need attention" });
+  expect(within(attention).getByRole("button", { name: /Waiting for approval/ })).toBeTruthy();
   expect(screen.queryByRole("button", { name: /approve/i })).toBeNull();
   expect(client.getQueryData(queryKeys.sessionSnapshot("parent"))).toBe(parent);
 });

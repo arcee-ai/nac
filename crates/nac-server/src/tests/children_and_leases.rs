@@ -1338,7 +1338,11 @@ async fn cancelled_workspace_request_keeps_leases_until_blocking_git_settles() {
 
 #[tokio::test]
 async fn parent_deletion_excludes_late_child_relationship_commit() {
+    let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let root = temp_root("delete_excludes_child_create");
+    let home = root.join("nac-home");
+    std::fs::create_dir_all(&home).unwrap();
+    let _env = ScopedModelEnv::isolated(&home, None);
     seed_direct_session(&root, "parent");
     let manager = test_manager(&root);
     let gate = manager.lifecycle_gate("parent");

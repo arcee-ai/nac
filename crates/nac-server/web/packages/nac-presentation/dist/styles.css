@@ -1694,6 +1694,10 @@
     min-height: calc(var(--spacing) * 6);
   }
 
+[data-nac-runtime]:is(.min-h-7), [data-nac-runtime] .min-h-7 {
+    min-height: calc(var(--spacing) * 7);
+  }
+
 [data-nac-runtime]:is(.min-h-8), [data-nac-runtime] .min-h-8 {
     min-height: calc(var(--spacing) * 8);
   }
@@ -1892,10 +1896,6 @@
 
 [data-nac-runtime]:is(.w-\[320px\]), [data-nac-runtime] .w-\[320px\] {
     width: 320px;
-  }
-
-[data-nac-runtime]:is(.w-\[360px\]), [data-nac-runtime] .w-\[360px\] {
-    width: 360px;
   }
 
 [data-nac-runtime]:is(.w-\[380px\]), [data-nac-runtime] .w-\[380px\] {
@@ -4940,22 +4940,6 @@
     opacity: 1;
   }
 
-[data-nac-runtime] .marker\:text-basic-muted ::marker {
-    color: var(--color-text-basic-muted);
-  }
-
-[data-nac-runtime] .marker\:text-basic-muted::marker {
-    color: var(--color-text-basic-muted);
-  }
-
-[data-nac-runtime] .marker\:text-basic-muted ::-webkit-details-marker {
-    color: var(--color-text-basic-muted);
-  }
-
-[data-nac-runtime] .marker\:text-basic-muted::-webkit-details-marker {
-    color: var(--color-text-basic-muted);
-  }
-
 [data-nac-runtime] .placeholder\:whitespace-nowrap::placeholder {
     white-space: nowrap;
   }
@@ -5094,10 +5078,6 @@
     padding-bottom: 0;
   }
 
-[data-nac-runtime]:is(.open\:bg-\[var\(--f-wash-1\)\]:is([open], :popover-open, :open)), [data-nac-runtime] .open\:bg-\[var\(--f-wash-1\)\]:is([open], :popover-open, :open) {
-    background-color: var(--f-wash-1);
-  }
-
 [data-nac-runtime]:is(.empty\:hidden:empty), [data-nac-runtime] .empty\:hidden:empty {
     display: none;
   }
@@ -5223,6 +5203,10 @@
 [data-nac-runtime]:is(.focus\:outline-2:focus), [data-nac-runtime] .focus\:outline-2:focus {
     outline-style: var(--nac-presentation-tw-outline-style);
     outline-width: 2px;
+  }
+
+[data-nac-runtime]:is(.focus\:outline-\[var\(--color-border-focus-outline\)\]:focus), [data-nac-runtime] .focus\:outline-\[var\(--color-border-focus-outline\)\]:focus {
+    outline-color: var(--color-border-focus-outline);
   }
 
 [data-nac-runtime] .focus\:placeholder\:text-transparent:focus::placeholder {

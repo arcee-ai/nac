@@ -57,7 +57,8 @@ pub fn effective_model_settings(
 /// session snapshot instead.
 ///
 /// When no threshold is requested, the default is 70% of the resolved model's
-/// context window (rounded to the nearest whole token). `Some(0)` explicitly
+/// input budget (rounded to the nearest whole token). The caller can supply a
+/// lower provider-derived automatic threshold. `Some(0)` explicitly
 /// disables compaction. Config.toml `[compaction].threshold_tokens` is no
 /// longer consulted — the section is silently ignored if present.
 pub fn effective_orchestrator_compaction_threshold(

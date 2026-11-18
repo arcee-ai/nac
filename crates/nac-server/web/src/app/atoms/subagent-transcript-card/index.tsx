@@ -8,6 +8,7 @@ import Icon, { IconName } from "../icon";
 
 export enum SubagentCardStatus {
   Ready = "ready",
+  Pending = "pending",
   Running = "running",
   /** Ready's layout with an error mark; `statusLabel` names the outcome. */
   Failed = "failed",
@@ -23,6 +24,9 @@ interface SubagentTranscriptCardProps {
    * failed card's name ends with it, lowercased.
    */
   statusLabel?: string;
+  /** Historical invocation wording, separate from the current child state. */
+  invocationLabel?: string;
+  currentSessionStatus?: boolean;
   /** Why a failed card's call did not go through, under the title. */
   error?: string | null;
   /** Session type, drawn in the header while the child is ready. */
@@ -46,6 +50,7 @@ interface SubagentTranscriptCardProps {
  */
 const DOT: Record<SubagentCardStatus, string> = {
   [SubagentCardStatus.Ready]: "bg-[var(--f-green)]",
+  [SubagentCardStatus.Pending]: "bg-[var(--f-ink-5)]",
   [SubagentCardStatus.Running]: "bg-[var(--f-ink)] status-dot-pulse",
   [SubagentCardStatus.Failed]: "bg-[var(--f-red)]",
   [SubagentCardStatus.NotFound]: "bg-[var(--f-ink-5)] opacity-60",
@@ -54,6 +59,7 @@ const DOT: Record<SubagentCardStatus, string> = {
 /** What the state line says when the card is given no outcome of its own. */
 const STATE_TEXT: Record<SubagentCardStatus, string> = {
   [SubagentCardStatus.Ready]: "Ready",
+  [SubagentCardStatus.Pending]: "Pending",
   [SubagentCardStatus.Running]: "Working…",
   [SubagentCardStatus.Failed]: "Failed",
   [SubagentCardStatus.NotFound]: "No session found",
@@ -61,6 +67,7 @@ const STATE_TEXT: Record<SubagentCardStatus, string> = {
 
 const STATUS_NAME: Record<SubagentCardStatus, string | null> = {
   [SubagentCardStatus.Ready]: null,
+  [SubagentCardStatus.Pending]: "pending",
   [SubagentCardStatus.Running]: "running",
   [SubagentCardStatus.Failed]: "failed",
   [SubagentCardStatus.NotFound]: null,
@@ -86,6 +93,8 @@ const SubagentTranscriptCard: React.FC<SubagentTranscriptCardProps> = ({
   title,
   status,
   statusLabel,
+  invocationLabel,
+  currentSessionStatus,
   error,
   behavior,
   lineage,
@@ -150,10 +159,15 @@ const SubagentTranscriptCard: React.FC<SubagentTranscriptCardProps> = ({
         <span
           title={reason ?? undefined}
           className={cn(
-            "truncate type-meta",
+            "min-w-0 break-words type-meta",
             status === SubagentCardStatus.Failed ? "text-error-primary" : "text-basic-tertiary",
           )}
         >
+          {invocationLabel ? (
+            <span>
+              {invocationLabel} · {currentSessionStatus ? "Current: " : ""}
+            </span>
+          ) : null}
           <span>{state}</span>
           {reason ? (
             <>

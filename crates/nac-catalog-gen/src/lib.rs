@@ -38,12 +38,13 @@ pub const FALLBACK_MAX_TOKENS: u64 = 16_384;
 /// models.dev provider id → nac `BackendKind` kebab id. Arcee and
 /// chatgpt-codex-responses are not models.dev providers; their catalog data
 /// stays hand-written in nac-core's seed module.
-pub const PROVIDER_MAP: [(&str, &str); 6] = [
+pub const PROVIDER_MAP: [(&str, &str); 7] = [
     ("deepseek", "deepseek-chat"),
     ("fireworks-ai", "fireworks-chat"),
     ("togetherai", "together-chat"),
     ("openai", "openai-responses"),
     ("openai", "openai-chat-completions"),
+    ("openai", "chatgpt-codex-responses"),
     ("anthropic", "anthropic-messages"),
 ];
 
@@ -91,6 +92,7 @@ struct ModelsDevModalities {
 #[derive(Debug, Deserialize)]
 struct ModelsDevLimit {
     context: Option<u64>,
+    input: Option<u64>,
     output: Option<u64>,
 }
 
@@ -175,6 +177,12 @@ pub struct ModelDoc {
     pub display_name: Option<String>,
     pub context_window: u64,
     pub max_tokens: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_input_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_origin: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_origin: Option<String>,
     pub cost: CostDoc,
     pub reasoning: bool,
     #[serde(default)]
@@ -592,8 +600,12 @@ pub fn generate(api_json: &str, overrides_toml: &str) -> Result<Generation> {
                 .then(|| overrides.providers.get("openai-responses"))
                 .flatten()
         });
-        let default_base_url =
-            provider_default_base_url(models_dev_id, provider.api.as_deref(), provider_override)?;
+        let is_codex = nac_id == "chatgpt-codex-responses";
+        let default_base_url = if is_codex {
+            None
+        } else {
+            provider_default_base_url(models_dev_id, provider.api.as_deref(), provider_override)?
+        };
         let mut models = BTreeMap::new();
         for (id, model) in &provider.models {
             if !is_agent_compatible(model) {
@@ -602,20 +614,72 @@ pub fn generate(api_json: &str, overrides_toml: &str) -> Result<Generation> {
             let seed_map =
                 seed_thinking_levels(models_dev_id, id, model.reasoning_options.as_deref())?;
             let (context_window, max_tokens) = seed_limits(model.limit.as_ref());
-            let mut entry = ModelDoc {
-                display_name: model.name.clone(),
-                context_window,
-                max_tokens,
-                cost: seed_cost(models_dev_id, id, model.cost.as_ref())?,
-                reasoning: model.reasoning.unwrap_or(false),
-                image_input: model
-                    .modalities
-                    .as_ref()
-                    .and_then(|modalities| modalities.input.as_ref())
-                    .is_some_and(|inputs| inputs.iter().any(|input| input == "image")),
-                thinking_level_map: seed_map,
-            };
+            let mut entry =
+                ModelDoc {
+                    display_name: model.name.clone(),
+                    context_window,
+                    max_tokens,
+                    max_input_tokens: model.limit.as_ref().and_then(|limit| limit.input).filter(
+                        |&v| {
+                            v > 0
+                                && model
+                                    .limit
+                                    .as_ref()
+                                    .and_then(|limit| limit.context)
+                                    .filter(|&context| context > 0)
+                                    .is_none_or(|context| v <= context)
+                        },
+                    ),
+                    context_origin: Some(
+                        if model
+                            .limit
+                            .as_ref()
+                            .and_then(|limit| limit.context)
+                            .is_some_and(|v| v > 0)
+                        {
+                            "inherited"
+                        } else {
+                            "estimated"
+                        }
+                        .to_string(),
+                    ),
+                    output_origin: Some(
+                        if model
+                            .limit
+                            .as_ref()
+                            .and_then(|limit| limit.output)
+                            .is_some_and(|v| v > 0)
+                        {
+                            "inherited"
+                        } else {
+                            "estimated"
+                        }
+                        .to_string(),
+                    ),
+                    cost: seed_cost(models_dev_id, id, model.cost.as_ref())?,
+                    reasoning: model.reasoning.unwrap_or(false),
+                    image_input: model
+                        .modalities
+                        .as_ref()
+                        .and_then(|modalities| modalities.input.as_ref())
+                        .is_some_and(|inputs| inputs.iter().any(|input| input == "image")),
+                    thinking_level_map: seed_map,
+                };
             let seed_map = entry.thinking_level_map.clone();
+            if is_codex {
+                // OpenAI API limits and transport details are not Codex limits.
+                // Until authenticated metadata is available use the conservative
+                // fallback, while retaining shared pricing and modalities.
+                entry.context_window = FALLBACK_CONTEXT_WINDOW;
+                entry.max_tokens = FALLBACK_MAX_TOKENS;
+                entry.max_input_tokens = None;
+                entry.context_origin = Some("estimated".to_string());
+                entry.output_origin = Some("estimated".to_string());
+                entry.thinking_level_map = ["none", "minimal", "low", "medium", "high", "xhigh"]
+                    .into_iter()
+                    .map(|level| (level.to_string(), Some(level.to_string())))
+                    .collect();
+            }
             apply_overrides(
                 nac_id,
                 id,
@@ -632,10 +696,11 @@ pub fn generate(api_json: &str, overrides_toml: &str) -> Result<Generation> {
         providers.insert(
             nac_id.to_string(),
             ProviderDoc {
-                credential_env_var: seed_credential_env_var(
-                    models_dev_id,
-                    provider.env.as_deref(),
-                )?,
+                credential_env_var: if is_codex {
+                    None
+                } else {
+                    seed_credential_env_var(models_dev_id, provider.env.as_deref())?
+                },
                 default_base_url,
                 models,
             },
@@ -703,9 +768,14 @@ fn apply_overrides(
         }
         if let Some(context_window) = model_override.context_window {
             entry.context_window = context_window;
+            entry.context_origin = Some("profile".to_string());
+            entry.max_input_tokens = entry
+                .max_input_tokens
+                .filter(|input| *input <= context_window);
         }
         if let Some(max_tokens) = model_override.max_tokens {
             entry.max_tokens = max_tokens;
+            entry.output_origin = Some("profile".to_string());
         }
         if let Some(cost) = &model_override.cost {
             entry.cost = cost.clone();

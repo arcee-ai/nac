@@ -76,19 +76,28 @@ function pricing(cost: ModelCostRates): string {
   return input && output ? `${input}/${output} per 1M` : "pricing unknown";
 }
 
-/** The id, context and pricing in words, for a row's tooltip. */
+/** The input budget a model accepts: the provider's effective limit when known, else its context window. */
+function inputBudget(model: CatalogModel): number {
+  return model.limits?.effective_input_tokens ?? model.context_window;
+}
+
+/** The id, input budget and pricing in words, for a row's tooltip. */
 function modelDetails(model: CatalogModel): string {
+  const budget = inputBudget(model);
   const context =
-    model.context_window > 0 ? `${formatTokensCompact(model.context_window)} context` : "";
+    budget > 0
+      ? `${formatTokensCompact(budget)} input${model.limits?.input_origin === "estimated" ? " (est.)" : ""}`
+      : "";
   return [model.id, context, pricing(model.cost)].filter(Boolean).join(" · ");
 }
 
-/** A model row's trailing facts, "1.0M · $0.22/$1.2": context, then input/output $ per 1M tokens. */
+/** A model row's trailing facts, "1.0M · $0.22/$1.2": input budget, then input/output $ per 1M tokens. */
 export function ModelFacts({ model }: { model: CatalogModel }) {
+  const budget = inputBudget(model);
   const input = rate(model.cost.input);
   const output = rate(model.cost.output);
   const facts = [
-    model.context_window > 0 ? formatTokensCompact(model.context_window) : null,
+    budget > 0 ? formatTokensCompact(budget) : null,
     input && output ? `${input}/${output}` : null,
   ].filter(Boolean);
   if (facts.length === 0) return null;

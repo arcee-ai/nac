@@ -61,6 +61,7 @@ export interface SettingsInitialValues {
     api_key_env: string | null;
     extra_headers: Record<string, string>;
     orchestrator_compaction_threshold: number | null;
+    automatic_compaction?: boolean;
     /** Forces an extra-headers patch even when the parsed maps look equal. */
     extra_headers_invalid?: boolean;
 }

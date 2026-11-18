@@ -1,5 +1,5 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -87,6 +87,7 @@ type Options = {
   /** Extra server environment for fixture-only builds, such as a scripted reviewer. */
   serverEnvironment: Record<string, string>;
   managedNativeWeb: boolean;
+  codexCatalogFixture: boolean;
 };
 
 export const test = base.extend<Fixtures & Options>({
@@ -94,8 +95,16 @@ export const test = base.extend<Fixtures & Options>({
   orchestration: ["1", { option: true }],
   serverEnvironment: [{}, { option: true }],
   managedNativeWeb: [true, { option: true }],
+  codexCatalogFixture: [false, { option: true }],
   harness: async (
-    { request, exaCredential, orchestration, serverEnvironment, managedNativeWeb },
+    {
+      request,
+      exaCredential,
+      orchestration,
+      serverEnvironment,
+      managedNativeWeb,
+      codexCatalogFixture,
+    },
     use,
     testInfo,
   ) => {
@@ -107,6 +116,9 @@ export const test = base.extend<Fixtures & Options>({
       serverEnvironment,
       undefined,
       managedNativeWeb,
+      undefined,
+      undefined,
+      codexCatalogFixture,
     );
     const harness: EmbeddedHarness = {
       ...running,
@@ -122,6 +134,7 @@ export const test = base.extend<Fixtures & Options>({
           managedNativeWeb,
           running.exa,
           preserveOrigin ? new URL(running.baseUrl).host : undefined,
+          codexCatalogFixture,
         );
         running.output.unshift(...previousOutput);
         Object.assign(harness, running);
@@ -355,6 +368,7 @@ async function startHarness(
   managedNativeWeb = true,
   existingExa?: ExaDouble,
   bindAddress = "127.0.0.1:0",
+  codexCatalogFixture = false,
 ): Promise<RunningHarness> {
   if (process.platform === "win32") {
     throw new Error(
@@ -371,6 +385,40 @@ async function startHarness(
     [runRoot, nacHome, home, xdg, tmp].map((directory) => fs.mkdir(directory, { recursive: true })),
   );
   await initializeHarnessWorkspace(workspace);
+  if (codexCatalogFixture) {
+    const account = "codex-e2e-account";
+    const fingerprint = createHash("sha256").update(account).digest("hex");
+    const catalogDir = path.join(nacHome, "model-catalog");
+    await fs.mkdir(catalogDir, { recursive: true });
+    const cache = {
+      account_fingerprint: fingerprint,
+      fetched_at_unix: Math.floor(Date.now() / 1000),
+      models: [
+        {
+          id: "gpt-6.1-sol",
+          display_name: "GPT-6.1-Sol",
+          context_window: 500_000,
+          max_context_window: 872_000,
+          auto_compact_token_limit: null,
+          image_input: true,
+        },
+      ],
+    };
+    await fs.writeFile(path.join(catalogDir, `codex-${fingerprint}.json`), JSON.stringify(cache), {
+      mode: 0o600,
+    });
+    await fs.writeFile(
+      path.join(nacHome, "auth.json"),
+      JSON.stringify({
+        type: "chatgpt-codex",
+        access: "e2e-only",
+        refresh: "e2e-only",
+        expires_at_ms: 8_000_000_000_000,
+        account_id: account,
+      }),
+      { mode: 0o600 },
+    );
+  }
 
   const binaryPath = path.resolve(
     process.env.NAC_E2E_BINARY ?? path.join(repoRoot, "target/debug/nac-web"),

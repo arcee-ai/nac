@@ -26,6 +26,25 @@ separate owners.
   only where the current policy requires it.
 - Shell wrappers, redirections, mutable project launchers, interpreters, and
   opaque command forms must retain their conservative classification.
+- Git hard policy identifies the operation through the shared global-option parser.
+  Unknown or incomplete global options fail closed as ambiguous. Unrecognized
+  operations with protected-word arguments remain denied because they may be
+  aliases or contain nested commands. Only `checkout -b <name>` without a
+  start point is exempt from the checkout rewrite denial, and alternate
+  repository or worktree options are unsupported for that exception. Explicit
+  Git repository-location and executable-configuration environment overrides
+  are denied, including stateful shell assignments. Newly admitted Git forms
+  run through the selected backend with inherited repository redirects and
+  command-scoped Git configuration variables unset; other environment stays intact.
+  Newly admitted Git forms
+  cannot follow another shell segment, whose cwd and environment are unbound.
+  Simple `branch <name>`
+  also receives its normal policy. Command-scoped `core.quotepath=false` is allowed only for
+  `status`. Git add accepts recognized flags and literal operands that can be
+  bound relative to `-C`, preserving the final symlink; unsupported options and
+  pathspec magic or patterns fail closed until they can be bound safely. Other
+  configuration overrides remain denied, and Git remains broad execution
+  authority subject to configured rules and the selected backend.
 - Approval authorizes a prepared invocation on the already-selected backend.
   It never changes Local/SSH/Podman selection and never claims to be a sandbox.
 - Explicit PTY controller transfer is private service-issued human intent, with
@@ -45,7 +64,11 @@ separate owners.
 - `hard_policy.rs` / `opaque_policy.rs` — non-overridable and broad authority.
 - `shell_parser.rs` / `command_classification.rs` — token/command semantics.
 - `resource_projection.rs` / `resource_binding.rs` — prepared resource identity
-  before and after approval.
+  before and after approval. `resource_binding.rs` stays together above 800 lines
+  because shell token positions, Git option semantics, canonical projection and
+  rewriting must share one binding owner.
+- `hard_policy.rs` stays together above 800 lines because shell wrapper, stateful
+  environment and non-overridable command checks share one ordered policy owner.
 - `human_operations.rs` — hard/configured Deny for authenticated human product
   mutations outside a session (picker folder creation in
   `../project_folders.rs`); Ask is the invocation itself, never a request or grant.

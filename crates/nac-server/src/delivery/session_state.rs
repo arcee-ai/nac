@@ -48,6 +48,7 @@ pub(crate) async fn session_snapshot(
     let loaded = manager.snapshot_with_options(&session_id, options).await?;
     let lineage = manager.session_lineage(&session_id)?;
     Ok(Json(SessionSnapshotResponse {
+        tool_call_occurrences: loaded.tool_call_occurrences,
         terminal_selection_attributions: super::contracts::selection_message_references(
             loaded.terminal_selection_attributions,
             &loaded.snapshot.messages,
@@ -89,20 +90,26 @@ pub(crate) async fn session_messages(
     Ok(Json(page.into()))
 }
 
+#[derive(serde::Deserialize)]
+pub(crate) struct ToolCallContentQuery {
+    occurrence: Option<String>,
+}
+
 #[utoipa::path(
     get,
     path = "/sessions/{session_id}/tool-calls/{call_id}",
     operation_id = "get_sessions_session_id_tool_calls_call_id",
     tag = "conversation",
-    params(("session_id" = String, Path), ("call_id" = String, Path)),
+    params(("session_id" = String, Path), ("call_id" = String, Path), ("occurrence" = Option<String>, Query, description = "Stable transcript occurrence token")),
     responses((status = 200, description = "Success", body = ToolCallContentResponse, content_type = "application/json"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 404, description = "Session or tool call not found", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
 )]
 pub(crate) async fn session_tool_call(
     State(manager): State<SessionManager>,
     AxumPath((session_id, call_id)): AxumPath<(String, String)>,
+    Query(query): Query<ToolCallContentQuery>,
 ) -> std::result::Result<Json<ToolCallContentResponse>, ApiError> {
     let content = manager
-        .tool_call_content(&session_id, &call_id)
+        .tool_call_content_at(&session_id, &call_id, query.occurrence.as_deref())
         .await?
         .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "tool call not found".into()))?;
     Ok(Json(content.into()))

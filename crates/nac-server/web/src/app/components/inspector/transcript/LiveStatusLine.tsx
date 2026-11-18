@@ -3,7 +3,7 @@ import { memo, useEffect, useState } from "react";
 import { formatElapsed } from "./foldLayout";
 
 /** Ticks once a second, and only itself: nothing around it re-renders. */
-const ElapsedClock = memo(function ElapsedClock({ since }: { since: number }) {
+export const ElapsedClock = memo(function ElapsedClock({ since }: { since: number }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);

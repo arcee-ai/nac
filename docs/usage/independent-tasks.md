@@ -101,7 +101,7 @@ Two intentional tasks need different keys even when their briefs are identical.
 The durable receipt reports preparation, errors, session/project identity and
 the exact `/session/<id>` route. The transcript opens a receipt link only after
 the passive session inventory confirms the independent direct task and project.
-Markdown URL policy is unchanged.
+Interactive model answers can reference a verified independent task with the exact returned `/session/<id>` route in a Markdown link. NAC checks the current runtime’s passive task inventory before allowing navigation. Unavailable tasks remain non-actionable; emitting a link does not open a task.
 
 `workspace: "auto"` starts Git projects in a retained isolated worktree through
 the shared clean-ref launch service. Same-project launches default to the

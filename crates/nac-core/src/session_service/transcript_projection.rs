@@ -31,6 +31,33 @@ impl SessionService {
         .map(|(tail_len, rows)| (tail_len as usize, rows))
     }
 
+    /// Read the same page with its retained log-row identities in one snapshot.
+    async fn read_log_tail_window_rows(
+        &self,
+        blob_len: usize,
+        tail_start: usize,
+        limit: usize,
+    ) -> Result<(usize, Vec<crate::store::TranscriptWindowRow>)> {
+        let (Some(writer), Some(session_id)) = (
+            self.transcript_log.as_ref().map(Arc::clone),
+            self.metadata.session_id.clone(),
+        ) else {
+            return Ok((0, Vec::new()));
+        };
+        crate::store::spawn_blocking_store_caller(move || {
+            writer.read_tail_window_rows(
+                &session_id,
+                blob_len as u64,
+                tail_start as u64,
+                limit,
+                true,
+            )
+        })
+        .await
+        .map_err(|error| anyhow::anyhow!("transcript log tail read task failed: {error}"))?
+        .map(|(tail_len, rows)| (tail_len as usize, rows))
+    }
+
     /// Row creation times for the window [`Self::read_log_tail_window`]
     /// returns. Empty for services without a transcript log (pickers).
     async fn read_log_tail_window_times(
@@ -88,6 +115,61 @@ impl SessionService {
         Ok(messages)
     }
 
+    /// Load the complete transcript and occurrence identities in one log
+    /// checkout; full snapshots obtain timestamps and attribution together.
+    pub(super) async fn all_store_transcript_with_occurrences(
+        &self,
+    ) -> Result<(Vec<u64>, Vec<Message>, Vec<Option<String>>)> {
+        let (mut messages, mut occurrences) = {
+            let snapshot = self.session_snapshot.lock().await;
+            let blob = snapshot
+                .as_ref()
+                .map(|s| s.messages.as_slice())
+                .unwrap_or_default();
+            let owner = self.metadata.session_id.as_deref();
+            let fingerprint = owner
+                .map(|id| super::tool_call_content::blob_fingerprint(id, blob))
+                .transpose()?;
+            let occurrences = blob
+                .iter()
+                .enumerate()
+                .map(
+                    |(index, message)| match (owner, fingerprint.as_deref(), message) {
+                        (
+                            Some(id),
+                            Some(digest),
+                            Message::Assistant {
+                                tool_calls: Some(calls),
+                                ..
+                            },
+                        ) if !calls.is_empty() => Some(format!("blob:{id}:{digest}:{index}")),
+                        _ => None,
+                    },
+                )
+                .collect::<Vec<_>>();
+            (blob.to_vec(), occurrences)
+        };
+        let blob_len = messages.len();
+        let (_, rows) = self
+            .read_log_tail_window_rows(blob_len, 0, usize::MAX)
+            .await?;
+        let mut indices: Vec<u64> = (0..blob_len as u64).collect();
+        for (row_id, index, message, identity) in rows {
+            occurrences.push(
+                self.metadata
+                    .session_id
+                    .as_ref()
+                    .zip(identity.as_ref())
+                    .map(|(session_id, (end, store_id, digest))| {
+                        format!("log:{session_id}:{store_id}:{row_id}:{digest}:{end}")
+                    }),
+            );
+            indices.push(index);
+            messages.push(message);
+        }
+        Ok((indices, messages, occurrences))
+    }
+
     /// Page the merged store transcript without decoding rows outside the
     /// requested visible window. Visible↔raw mapping: the blob contributes
     /// `blob_visible` visible messages (all but the system head), and every
@@ -116,27 +198,58 @@ impl SessionService {
         let start = end.saturating_sub(limit);
 
         let blob_end = end.min(blob_visible);
-        let blob_part: Vec<(u64, Message)> = if start < blob_end {
+        let (blob_part, blob_occurrences): (Vec<(u64, Message)>, Vec<Option<String>>) = if start
+            < blob_end
+        {
             let snapshot = self.session_snapshot.lock().await;
             let blob = snapshot
                 .as_ref()
                 .map(|snapshot| snapshot.messages.as_slice())
                 .unwrap_or_default();
-            blob.iter()
+            let owner = self.metadata.session_id.as_deref();
+            let fingerprint = owner
+                .map(|session_id| super::tool_call_content::blob_fingerprint(session_id, blob))
+                .transpose()?;
+            let selected: Vec<(usize, &Message)> = blob
+                .iter()
                 .enumerate()
                 .filter(|(_, message)| include_system || !matches!(message, Message::System { .. }))
                 .skip(start)
                 .take(blob_end - start)
-                .map(|(index, message)| (index as u64, message.clone()))
-                .collect()
+                .collect();
+            let tokens = selected
+                .iter()
+                .map(
+                    |(index, message)| match (owner, fingerprint.as_deref(), message) {
+                        (
+                            Some(session_id),
+                            Some(digest),
+                            Message::Assistant {
+                                tool_calls: Some(calls),
+                                ..
+                            },
+                        ) if !calls.is_empty() => {
+                            Some(format!("blob:{session_id}:{digest}:{index}"))
+                        }
+                        _ => None,
+                    },
+                )
+                .collect();
+            (
+                selected
+                    .into_iter()
+                    .map(|(index, message)| (index as u64, message.clone()))
+                    .collect(),
+                tokens,
+            )
         } else {
-            Vec::new()
+            (Vec::new(), Vec::new())
         };
-        let (log_part, log_times): (Vec<(u64, Message)>, Vec<String>) = if end > blob_visible {
+        let (log_rows, log_times) = if end > blob_visible {
             let tail_start = start.saturating_sub(blob_visible);
             let count = end - blob_visible - tail_start;
             let (_, rows) = self
-                .read_log_tail_window(blob_len, tail_start, count)
+                .read_log_tail_window_rows(blob_len, tail_start, count)
                 .await?;
             let times = self
                 .read_log_tail_window_times(blob_len, tail_start, count)
@@ -147,6 +260,26 @@ impl SessionService {
         };
         let mut created_at: Vec<Option<String>> = vec![None; blob_part.len()];
         created_at.extend(log_times.into_iter().map(Some));
+        let mut tool_call_occurrences = blob_occurrences;
+        tool_call_occurrences.extend(log_rows.iter().map(|(id, _, message, batch_end)| {
+            match message {
+                Message::Assistant {
+                    tool_calls: Some(calls),
+                    ..
+                } if !calls.is_empty() => self
+                    .metadata
+                    .session_id
+                    .as_ref()
+                    .zip(batch_end.as_ref())
+                    .map(|(session_id, (end, store_id, digest))| {
+                        format!("log:{session_id}:{store_id}:{id}:{digest}:{end}")
+                    }),
+                _ => None,
+            }
+        }));
+        let log_part = log_rows
+            .into_iter()
+            .map(|(_, idx, message, _)| (idx, message));
         let (canonical_message_indices, messages): (Vec<u64>, Vec<Message>) =
             blob_part.into_iter().chain(log_part).unzip();
         created_at.resize(messages.len(), None);
@@ -158,6 +291,7 @@ impl SessionService {
             self.read_selection_attributions(raw_start, raw_end).await?;
         Ok(MessagesPageSnapshot {
             canonical_message_indices,
+            tool_call_occurrences,
             terminal_selection_attributions,
             messages,
             created_at,

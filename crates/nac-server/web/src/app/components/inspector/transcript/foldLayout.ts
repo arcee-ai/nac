@@ -31,6 +31,7 @@ export interface WorkFold {
 export type TurnLayoutItem =
   | WorkFold
   | InsightSessionEntry
+  | { kind: "session-group"; key: string; entries: InsightSessionEntry[] }
   | { kind: "block"; key: string; block: ModelTurnBlock };
 
 function blockOf(item: ModelTurnItem): ModelTurnBlock | null {
@@ -41,16 +42,11 @@ function blockOf(item: ModelTurnItem): ModelTurnBlock | null {
 
 /**
  * Lays a partitioned model turn out as the transcript shows it. Reasoning and
- * tool groups fold into one entry at the place the first of them appeared, and
- * so does prose the model wrote between them ("Let me look at the tests").
- * Launched sessions, thread waves and the prose after the last group stay in
- * the open, in their order: they are what the turn has to say.
+ * tool groups fold at the place they appeared. Prose remains in the open in
+ * its original position, including when later activity arrives: moving it into
+ * a fold would discard the reader's selection and could hide visible text.
  */
 export function layoutModelTurn(items: readonly ModelTurnItem[]): TurnLayoutItem[] {
-  let lastGroup = -1;
-  items.forEach((item, index) => {
-    if (item.kind === "group") lastGroup = index;
-  });
   const layout: TurnLayoutItem[] = [];
   let fold: WorkFold | null = null;
   const openFold = (key: string): WorkFold => {
@@ -62,24 +58,53 @@ export function layoutModelTurn(items: readonly ModelTurnItem[]): TurnLayoutItem
   };
   items.forEach((item, index) => {
     if (item.kind === "group") {
-      const target = openFold(item.id);
+      // Group IDs include the prompt anchor, which can change as a streamed
+      // child prompt reaches its snapshot. Step keys are stable within the
+      // turn and keep the reader's fold choice across that transition.
+      const target = openFold(item.group.segments[0]?.key ?? item.id);
       target.groupIds.push(item.id);
       for (const segment of item.group.segments) {
-        target.steps.push({ kind: "segment", key: segment.key, groupId: item.id, segment });
+        target.steps.push({
+          kind: "segment",
+          key: segment.key,
+          groupId: item.id,
+          segment,
+        });
       }
       return;
     }
     if (item.kind === "session") {
+      // Only adjacent calls with the same resolved identity may share a
+      // control. Intervening prose or work remains in its original position.
+      const previous = items[index - 1];
+      const last = layout.at(-1);
+      if (
+        item.rowKey &&
+        previous?.kind === "session" &&
+        previous.rowKey === item.rowKey &&
+        previous.action === item.action
+      ) {
+        if (last?.kind === "session-group") {
+          last.entries.push(item);
+          return;
+        }
+        if (last?.kind === "session") {
+          layout[layout.length - 1] = {
+            kind: "session-group",
+            key: last.id,
+            entries: [last, item],
+          };
+          return;
+        }
+      }
       layout.push(item);
+      fold = null;
       return;
     }
     const block = blockOf(item);
     if (!block) return;
-    if (block.kind === "text" && index < lastGroup && block.text.trim()) {
-      openFold(block.key).steps.push({ kind: "note", key: block.key, text: block.text });
-      return;
-    }
     layout.push({ kind: "block", key: block.key, block });
+    fold = null;
   });
   return layout;
 }
@@ -106,6 +131,8 @@ type Phrase =
   | "edit"
   | "command"
   | "spawn"
+  | "delegate"
+  | "orchestrator"
   | "thread"
   | "check"
   | "workset"
@@ -123,7 +150,7 @@ const PHRASE_OF: Partial<Record<ActionKind, Phrase>> = {
   "run-command": "command",
   "write-command": "command",
   "spawn-agent": "spawn",
-  "spawn-orchestrator": "spawn",
+  "spawn-orchestrator": "orchestrator",
   thread: "thread",
   "session-status": "check",
   "session-read": "check",
@@ -146,6 +173,8 @@ const ORDER: readonly Phrase[] = [
   "edit",
   "command",
   "spawn",
+  "delegate",
+  "orchestrator",
   "thread",
   "check",
   "workset",
@@ -169,6 +198,8 @@ const PHRASES: Record<Phrase, (count: number) => string> = {
   edit: (n) => `edited ${plural(n, "file")}`,
   command: (n) => `ran ${plural(n, "command")}`,
   spawn: (n) => `started ${plural(n, "subagent")}`,
+  delegate: (n) => `made ${plural(n, "subagent request")}`,
+  orchestrator: (n) => `requested ${plural(n, "orchestrator")}`,
   thread: (n) => `ran ${plural(n, "thread")}`,
   check: (n) => `checked on subagents${times(n)}`,
   workset: (n) => `defined ${plural(n, "workset")}`,
@@ -192,7 +223,14 @@ export function workSentence(segments: readonly InsightSegment[]): string {
   const seen = new Map<Phrase, Set<string>>();
   for (const segment of segments) {
     if (segment.kind === "reasoning") continue;
-    const phrase = PHRASE_OF[segmentAction(segment)] ?? "tool";
+    const action = segmentAction(segment);
+    const phrase =
+      action === "spawn-agent" &&
+      (segment.kind !== "tool" ||
+        segment.presentation?.delegationOutcome !== "background_started" ||
+        segment.presentation.status !== "success")
+        ? "delegate"
+        : (PHRASE_OF[action] ?? "tool");
     const keys = seen.get(phrase) ?? new Set<string>();
     keys.add(countKey(segment, phrase));
     seen.set(phrase, keys);

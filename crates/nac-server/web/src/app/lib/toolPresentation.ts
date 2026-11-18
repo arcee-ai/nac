@@ -10,7 +10,8 @@ export type ToolPresentationStatus =
   | "error"
   | "timed-out"
   | "cancelled"
-  | "interrupted";
+  | "interrupted"
+  | "unknown";
 
 export interface ToolPresentation {
   callId: string;
@@ -24,6 +25,9 @@ export interface ToolPresentation {
   resultPreview: string | null;
   status: ToolPresentationStatus;
   statusLabel: string;
+  /** Native-owned historical invocation outcome, absent for legacy events. */
+  delegationOutcome?: NonNullable<ToolFinished["delegation_outcome"]>;
+  delegationIntent?: NonNullable<ToolStarted["delegation_intent"]>;
   /**
    * Execution time from the call's finish event. Absent when the call never
    * ran, or when no finish event reports one.
@@ -35,8 +39,23 @@ export interface ToolPresentation {
    * consumers must resolve it against the delegation queries before trusting it.
    */
   spawnedSessionId?: string;
+  /** Server-issued occurrence for a specific retained assistant row. */
+  occurrence?: string;
+  /** Whether a delegation call addressed an existing session. */
+  delegationContinuation?: boolean;
+  /** A live turn can still commit its result with the rest of its tool batch. */
+  resultMayBePending?: boolean;
+  /** This invocation cannot be distinguished from another call in its batch. */
+  resultAmbiguous?: boolean;
+  /** A live delegation turn may change parent inventory, without binding its events. */
+  inventoryMayChange?: boolean;
   /** Native launch identity hint; consumers validate it against passive session inventory. */
-  launchedTask?: { sessionId: string; projectId: string; callerId: string; title: string };
+  launchedTask?: {
+    sessionId: string;
+    projectId: string;
+    callerId: string;
+    title: string;
+  };
 }
 
 type ToolStarted = Extract<AgentEvent, { type: "tool_call_started" }>;
@@ -70,15 +89,38 @@ export function collectToolResults(
   assistantIndex: number,
 ): Map<string, ToolResultRecord> {
   const results = new Map<string, ToolResultRecord>();
+  const ambiguous = new Set<string>();
   for (let index = assistantIndex + 1; index < messages.length; index += 1) {
     const message = messages[index];
     if (message.role === "tool") {
-      results.set(message.tool_call_id, toolResultRecord(message.content));
+      if (results.has(message.tool_call_id) || ambiguous.has(message.tool_call_id)) {
+        results.delete(message.tool_call_id);
+        ambiguous.add(message.tool_call_id);
+      } else {
+        results.set(message.tool_call_id, toolResultRecord(message.content));
+      }
       continue;
     }
     if (message.role === "assistant" || message.role === "user") break;
   }
   return results;
+}
+
+/** IDs repeated among result rows cannot be paired to one call. */
+export function ambiguousToolResultIds(
+  messages: SessionSnapshotResponse["messages"],
+  assistantIndex: number,
+): Set<string> {
+  const seen = new Set<string>();
+  const ambiguous = new Set<string>();
+  for (let index = assistantIndex + 1; index < messages.length; index += 1) {
+    const message = messages[index];
+    if (message.role === "assistant" || message.role === "user") break;
+    if (message.role !== "tool") continue;
+    if (seen.has(message.tool_call_id)) ambiguous.add(message.tool_call_id);
+    seen.add(message.tool_call_id);
+  }
+  return ambiguous;
 }
 
 export function assistantTurnCancelled(
@@ -113,12 +155,12 @@ const TOOL_LABELS: Record<string, string> = {
   update_goal: "Update goal",
   find_tasks: "Find tasks",
   read_task: "Read task",
-  subagent: "Start coding agent",
+  subagent: "Subagent",
   list_projects: "Find saved projects",
   launch_task: "Start separate task",
   task_launch_status: "Read task preparation",
-  subagent_status: "Check coding agent",
-  subagent_cancel: "Cancel coding agent",
+  subagent_status: "Check subagent",
+  subagent_cancel: "Cancel subagent",
   orchestrator_launch: "Start NAC orchestrator",
   orchestrator_status: "Check NAC orchestrator",
   orchestrator_steer: "Steer NAC orchestrator",
@@ -136,6 +178,7 @@ const STATUS_LABELS: Record<ToolPresentationStatus, string> = {
   "timed-out": "Timed out",
   cancelled: "Cancelled",
   interrupted: "Interrupted",
+  unknown: "Outcome unavailable",
 };
 
 const CANCELLED_MARKER = "[tool call cancelled by user]";
@@ -235,7 +278,19 @@ function launchedTask(name: string, text: string | null): ToolPresentation["laun
   };
 }
 
+// Earlier native control results marked a confirmed cancelled child as a
+// cancelled request. Only native typed outcome establishes this legacy case.
+function isLegacyConfirmedCancellation(event: ToolFinished): boolean {
+  return (
+    event.name === "subagent_cancel" &&
+    event.is_error &&
+    event.completion_status === "cancelled" &&
+    event.delegation_outcome === "cancelled"
+  );
+}
+
 function statusFromFinished(event: ToolFinished): ToolPresentationStatus {
+  if (isLegacyConfirmedCancellation(event)) return "success";
   if (event.completion_status === "timed_out") return "timed-out";
   if (event.completion_status === "cancelled") return "cancelled";
   if (event.completion_status === "error") return "error";
@@ -265,6 +320,33 @@ export function indexToolEvents(events: AgentEvent[]): Map<string, ToolEventPair
   return byCall;
 }
 
+function subagentLabel(
+  status: ToolPresentationStatus,
+  outcome: ToolFinished["delegation_outcome"],
+  intent: ToolStarted["delegation_intent"],
+): string {
+  if (status === "unknown") return "Subagent request outcome unavailable";
+  if (status === "pending") return "Subagent pending";
+  if (status === "awaiting-approval") return "Subagent awaiting approval";
+  if (status === "running") {
+    if (intent === "background_launch") return "Starting subagent…";
+    if (intent) return "Working with subagent…";
+    return "Subagent request in progress";
+  }
+  if (status === "timed-out") return "Subagent request timed out";
+  if (status === "cancelled" && outcome !== "cancelled") return "Subagent request cancelled";
+  if (outcome === "failed") return "Subagent failed";
+  if (outcome === "cancelled") return "Subagent cancelled";
+  if (outcome === "interrupted") return "Subagent interrupted";
+  if (status === "cancelled") return "Subagent request cancelled";
+  if (status === "interrupted") return "Subagent request interrupted";
+  if (status === "error") return "Subagent request failed";
+  if (outcome === "background_started") return "Subagent started";
+  if (outcome === "background_continued") return "Instructions sent to subagent";
+  if (outcome === "completed") return "Subagent completed";
+  return "Subagent request finished";
+}
+
 export function presentToolCall({
   call,
   events,
@@ -274,6 +356,9 @@ export function presentToolCall({
   active,
   awaitingApproval,
   turnCancelled,
+  occurrence,
+  ambiguousResult,
+  unboundEvents,
 }: {
   call: ToolCall;
   events?: ToolEventPair;
@@ -285,39 +370,144 @@ export function presentToolCall({
   /** Canonical pending permission state correlated by the backend call id. */
   awaitingApproval?: boolean;
   turnCancelled: boolean;
+  occurrence?: string | null;
+  ambiguousResult?: boolean;
+  /** Event IDs cannot be bound to this transcript invocation. */
+  unboundEvents?: boolean;
 }): ToolPresentation {
-  const rawName = events?.started?.name ?? events?.finished?.name ?? call.function?.name ?? "tool";
+  // Lifecycle events are indexed only by provider call ID, which can be reused
+  // across turns. A delegation occurrence must use its own transcript batch.
+  const delegation = SPAWNED_SESSION_FIELDS.has(call.function?.name ?? "");
+  const occurrenceDelegation = !!occurrence && delegation;
+  // Delegation lifecycle events have no per-invocation identity. Even
+  // a single visible event can belong to another retained or paged-out call.
+  const unboundDelegation = delegation && (unboundEvents === true || occurrenceDelegation);
+  const correlatedEvents =
+    unboundDelegation || (delegation && ambiguousResult) ? undefined : events;
+  const rawName =
+    correlatedEvents?.started?.name ??
+    correlatedEvents?.finished?.name ??
+    call.function?.name ??
+    "tool";
   const name = bounded(rawName, NAME_LIMIT) || "tool";
   let status: ToolPresentationStatus;
-  if (events?.finished) status = statusFromFinished(events.finished);
+  if ((delegation && ambiguousResult) || unboundDelegation) status = "unknown";
+  else if (correlatedEvents?.finished) status = statusFromFinished(correlatedEvents.finished);
   else if (resultText?.startsWith(CANCELLED_MARKER) || (turnCancelled && !hasResult)) {
     status = "cancelled";
   } else if (resultText?.trim() === INTERRUPTED_MARKER) status = "interrupted";
   else if (hasResult) status = "success";
   else if (active && awaitingApproval) status = "awaiting-approval";
-  else if (active && events?.started) status = "running";
+  else if (active && correlatedEvents?.started) status = "running";
   else if (active) status = "pending";
   else status = "interrupted";
 
-  let resultPreview = bounded(events?.finished?.content_preview, PREVIEW_LIMIT) || null;
+  let resultPreview = bounded(correlatedEvents?.finished?.content_preview, PREVIEW_LIMIT) || null;
+  // Older traditional-child events have no exact-value redaction provenance.
+  // Native outcome/summary facts are stripped at untrusted worker ingress.
+  if (
+    ["subagent", "subagent_status", "subagent_cancel"].includes(name) &&
+    !correlatedEvents?.finished?.delegation_outcome &&
+    !correlatedEvents?.finished?.delegation_summary
+  ) {
+    resultPreview = null;
+  }
+  // Durable legacy previews may predate typed request timeout/cancel wording.
+  // Reconstruct only fixed text from the authoritative status; never raw output.
+  if (correlatedEvents?.finished) {
+    const request =
+      name === "subagent"
+        ? "Subagent request"
+        : name === "subagent_status"
+          ? "Subagent status request"
+          : name === "subagent_cancel"
+            ? "Subagent cancellation request"
+            : null;
+    if (isLegacyConfirmedCancellation(correlatedEvents.finished))
+      resultPreview = "Subagent cancellation request finished";
+    if (request && correlatedEvents.finished.completion_status === "timed_out")
+      resultPreview = `${request} timed out`;
+    if (
+      request &&
+      correlatedEvents.finished.completion_status === "cancelled" &&
+      !(name === "subagent" && correlatedEvents.finished.delegation_outcome === "cancelled") &&
+      !isLegacyConfirmedCancellation(correlatedEvents.finished)
+    )
+      resultPreview = `${request} cancelled`;
+  }
   if (!resultPreview && resultHasImage) resultPreview = "Image result";
-  if (!resultPreview && status === "cancelled") resultPreview = "No result was retained.";
-  if (!resultPreview && status === "interrupted") resultPreview = "No result was recorded.";
+  if (!resultPreview && status === "cancelled" && (!occurrenceDelegation || !hasResult))
+    resultPreview = "No result was retained.";
+  if (!resultPreview && status === "interrupted" && (!occurrenceDelegation || !hasResult))
+    resultPreview = "No result was recorded.";
+
+  const spawnedSessionId = spawnedSession(name, call, resultText);
+  const summary =
+    bounded(
+      name === "subagent"
+        ? (correlatedEvents?.started?.delegation_summary_verified ||
+          correlatedEvents?.started?.delegation_intent
+            ? correlatedEvents.started.key_arg_preview
+            : null) || correlatedEvents?.finished?.delegation_summary
+        : correlatedEvents?.started?.key_arg_preview,
+      PREVIEW_LIMIT,
+    ) || null;
+  // Prior candidate events could certify a continuation's ID as its summary.
+  // Suppress canonical IDs even when only a finish event remains in the window.
+  const provenBackgroundLaunch =
+    correlatedEvents?.started?.delegation_intent === "background_launch" ||
+    correlatedEvents?.finished?.delegation_outcome === "background_started";
+  const idOnlySummary =
+    name === "subagent" &&
+    summary &&
+    (summary === spawnedSessionId ||
+      (!provenBackgroundLaunch &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(summary)));
 
   const presentation: ToolPresentation = {
     callId: call.id,
     name,
-    label: toolLabel(name),
-    summary: bounded(events?.started?.key_arg_preview, PREVIEW_LIMIT) || null,
+    label:
+      name === "subagent"
+        ? subagentLabel(
+            status,
+            correlatedEvents?.finished?.delegation_outcome,
+            correlatedEvents?.started?.delegation_intent,
+          )
+        : toolLabel(name),
+    summary: idOnlySummary ? null : summary,
     resultPreview,
     status,
-    statusLabel: STATUS_LABELS[status],
+    statusLabel:
+      name === "subagent" &&
+      correlatedEvents?.finished?.delegation_outcome === "background_started" &&
+      status === "success"
+        ? "Running in background"
+        : STATUS_LABELS[status],
   };
-  const durationMs = events?.finished?.execution_duration_ms;
+  if (name === "subagent" && correlatedEvents?.started?.delegation_intent) {
+    presentation.delegationIntent = correlatedEvents.started.delegation_intent;
+  }
+  if (name === "subagent" && correlatedEvents?.finished?.delegation_outcome) {
+    presentation.delegationOutcome = correlatedEvents.finished.delegation_outcome;
+  }
+  if (occurrenceDelegation && occurrence) presentation.occurrence = occurrence;
+  const durationMs = correlatedEvents?.finished?.execution_duration_ms;
   if (durationMs != null && Number.isFinite(durationMs) && durationMs >= 0) {
     presentation.durationMs = durationMs;
   }
-  const spawnedSessionId = spawnedSession(name, call, resultText);
+  const field = SPAWNED_SESSION_FIELDS.get(name);
+  if (field) {
+    presentation.resultMayBePending = active && !hasResult && !ambiguousResult;
+    presentation.inventoryMayChange = active && (!hasResult || ambiguousResult === true);
+    if (ambiguousResult) presentation.resultAmbiguous = true;
+  }
+  const args = field ? parseObject(call.function?.arguments) : null;
+  if (field && args) {
+    const value = args[field];
+    if (value == null) presentation.delegationContinuation = false;
+    else if (sessionId(value)) presentation.delegationContinuation = true;
+  }
   if (spawnedSessionId) presentation.spawnedSessionId = spawnedSessionId;
   const task = launchedTask(name, resultText);
   if (task) presentation.launchedTask = task;

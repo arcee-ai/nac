@@ -15,6 +15,7 @@ import type { JsonObject, JsonValue } from "@/app/lib/json";
 import { isString } from "@/app/lib/primitive";
 import { stripNativeToolMarkup } from "@/app/lib/toolMarkup";
 import {
+  ambiguousToolResultIds,
   assistantTurnCancelled,
   collectToolResults,
   indexToolEvents,
@@ -739,6 +740,7 @@ export function buildTranscript(
 
     const results = collectToolResults(messages, index);
     const threadCalls: ToolCall[] = [];
+    const ambiguousResults = ambiguousToolResultIds(messages, index);
     (message.tool_calls ?? []).forEach((call, callIndex) => {
       const name = call.function?.name ?? "tool";
       const key = `${name}-${absoluteIndex}-${callIndex}`;
@@ -753,11 +755,13 @@ export function buildTranscript(
           pending: worksetDefinePending(call.id, worksetId, results, createdAt[index] ?? null, ctx),
         });
       } else if (!SILENT_TOOLS.has(name)) {
-        const result = results.get(call.id);
+        const repeatedInBatch =
+          (message.tool_calls ?? []).filter((item) => item.id === call.id).length > 1;
+        const result = repeatedInBatch ? undefined : results.get(call.id);
         if (direct) {
           blocks.push({
             kind: "tool-detail",
-            key: `tool-${absoluteIndex}-${call.id}`,
+            key: `tool-${absoluteIndex}-${call.id}${repeatedInBatch ? `-${callIndex}` : ""}`,
             presentation: presentToolCall({
               call,
               events: toolEvents.get(call.id),
@@ -767,6 +771,9 @@ export function buildTranscript(
               active: Boolean(snapshot?.active_run) && index > lastUserIndex,
               awaitingApproval: pendingPermissionCallIds.has(call.id),
               turnCancelled: assistantTurnCancelled(messages, index, RUN_CANCELLED_MARKER),
+              occurrence: snapshot?.tool_call_occurrences?.[index],
+              ambiguousResult: repeatedInBatch || ambiguousResults.has(call.id),
+              unboundEvents: name === "subagent" || name === "orchestrator_launch",
             }),
           });
         } else {

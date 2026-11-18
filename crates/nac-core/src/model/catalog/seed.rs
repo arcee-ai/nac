@@ -11,10 +11,8 @@
 //! models.dev, so their known-model entries are maintained by hand here
 //! (`codex_seed_models`/`arcee_seed_models`): limits and pricing come from
 //! the providers' own documentation. The codex entries' context windows
-//! reflect the Codex subscription endpoint's server-side cap of 272K
-//! (confirmed via the live Codex models API at
-//! chatgpt.com/backend-api/codex/models), which is ~3.9× smaller than the
-//! standard OpenAI API's 1.05M for the same GPT-5.6 models; max output
+//! retain a historical 272K profile pending newer authenticated metadata;
+//! this value is not a universal subscription endpoint cap. Max output
 //! tokens and pricing match the models.dev openai baseline. Every entry's
 //! thinking map still matches the provider's matrix behavior exactly —
 //! codex all-levels verbatim, arcee rejects every explicit effort except on
@@ -175,6 +173,8 @@ fn seeded_model(
     model.display_name = Some(display_name.to_string());
     model.context_window = context_window;
     model.max_tokens = max_tokens;
+    model.context_origin = super::LimitOrigin::Profile;
+    model.output_origin = super::LimitOrigin::Profile;
     model.cost = cost;
     model
 }
@@ -182,11 +182,9 @@ fn seeded_model(
 /// chatgpt-codex-responses known models: OpenAI's documented Codex lineup
 /// for ChatGPT sign-in (developers.openai.com/codex/models — Sol/Terra/Luna,
 /// gpt-5.6, and the Pro-tier Spark preview; deprecated codex models are
-/// deliberately omitted). Context windows reflect the Codex subscription
-/// endpoint's server-side cap of 272K (confirmed via the live Codex models
-/// API at chatgpt.com/backend-api/codex/models), not the standard OpenAI
-/// API's 1.05M — the same GPT-5.6 models accept 1.05M through
-/// api.openai.com but only 272K through the ChatGPT-sign-in transport.
+/// deliberately omitted). Context windows retain a historical 272K profile
+/// observed in the Codex models API; it is a historical profile,
+/// not a universal subscription limit. Authenticated metadata can override it.
 /// Max output tokens and pricing reference the overlapping models.dev
 /// openai baseline entries; ChatGPT-sign-in usage is subscription-billed,
 /// so the rates are the API-equivalent prices. Effort maps stay all-levels
@@ -594,5 +592,8 @@ pub(super) fn seed_catalog() -> ModelCatalog {
         );
     }
 
-    ModelCatalog { providers }
+    ModelCatalog {
+        providers,
+        codex_account_fingerprint: None,
+    }
 }

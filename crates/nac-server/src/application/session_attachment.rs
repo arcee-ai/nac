@@ -114,6 +114,12 @@ impl<'a> SessionAttachmentApplication<'a> {
             drop(operation_lease);
             let service = Arc::new(service);
             if !cacheable {
+                // An observer cannot own a peer's operation. Retain the wake
+                // so a pending durable inbox is reconsidered after that peer
+                // releases its lease, even if no later request arrives.
+                if wake && !self.manager.inner.task_preparations.is_stopping() {
+                    self.retain_pending_wake(session_id).await?;
+                }
                 return Ok(service);
             }
             let version = self
@@ -214,7 +220,31 @@ impl<'a> SessionAttachmentApplication<'a> {
             }
         }
         if service.metadata().behavior != sessions::SessionBehavior::Orchestrator {
+            if let Some(session_id) = service.metadata().session_id.as_deref() {
+                self.retain_pending_wake(session_id).await?;
+            }
             service.start_next_direct_inbox_item().await?;
+        }
+        Ok(())
+    }
+
+    /// A peer can retain its operation lease before a recovery row exists.
+    /// Retain only actual inbox obligations; empty attachment is read-only.
+    async fn retain_pending_wake(&self, session_id: &str) -> Result<()> {
+        let path = self.manager.inner.store_path.clone();
+        let id = session_id.to_owned();
+        let pending = self
+            .manager
+            .inner
+            ._store_ownership
+            .call_legacy(move || {
+                Ok::<_, anyhow::Error>(
+                    nac_core::store::next_pending_session_inbox_item(&path, &id)?.is_some(),
+                )
+            })
+            .await??;
+        if pending {
+            self.manager.schedule_continuation(session_id)?;
         }
         Ok(())
     }

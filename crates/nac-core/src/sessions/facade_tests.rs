@@ -32,7 +32,7 @@ fn point_summary_preserves_catalog_projection_and_isolates_other_rows() {
     std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
 }
 
-fn temp_store_path(label: &str) -> PathBuf {
+pub(super) fn temp_store_path(label: &str) -> PathBuf {
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .expect("time went backwards")
@@ -42,7 +42,11 @@ fn temp_store_path(label: &str) -> PathBuf {
         .join("store.db")
 }
 
-fn test_snapshot(session_id: &str, created_at: &str, updated_at: &str) -> SessionSnapshot {
+pub(super) fn test_snapshot(
+    session_id: &str,
+    created_at: &str,
+    updated_at: &str,
+) -> SessionSnapshot {
     let mut snapshot = new_snapshot(
         session_id.to_string(),
         PathBuf::from(format!("/repo/{session_id}")),

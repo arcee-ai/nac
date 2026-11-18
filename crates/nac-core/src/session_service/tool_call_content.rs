@@ -2,6 +2,7 @@
 //! transcript and never waits on the agent lock, which a running turn holds.
 use super::*;
 use crate::types::{ToolContent, ToolContentPart};
+use sha2::{Digest, Sha256};
 
 const MAX_TOOL_CALL_CONTENT_BYTES: usize = 256 * 1024;
 
@@ -19,19 +20,35 @@ impl SessionService {
     /// Each field is redacted in full before it is bounded, so a cut never
     /// leaves part of a secret behind.
     pub async fn tool_call_content(&self, call_id: &str) -> Result<Option<ToolCallContent>> {
-        let found = match self.indexed_tool_call(call_id).await? {
-            IndexedToolCall::Found(found) => Some(found),
-            IndexedToolCall::Absent => None,
-            IndexedToolCall::Unindexed => {
-                let messages = self.store_backed_transcript().await?;
-                let call_id = call_id.to_owned();
-                tokio::task::spawn_blocking(move || {
-                    find_tool_call(&messages, &call_id).map(|(arguments, output)| FoundToolCall {
-                        arguments: arguments.to_owned(),
-                        output: output.cloned(),
+        self.tool_call_content_at(call_id, None).await
+    }
+
+    /// An occurrence binds a read to one retained assistant row; the legacy
+    /// ID-only lookup remains fail-closed for reused provider IDs.
+    pub async fn tool_call_content_at(
+        &self,
+        call_id: &str,
+        occurrence: Option<&str>,
+    ) -> Result<Option<ToolCallContent>> {
+        let found = if let Some(occurrence) = occurrence {
+            self.occurrence_tool_call(call_id, occurrence).await?
+        } else {
+            match self.indexed_tool_call(call_id).await? {
+                IndexedToolCall::Found(found) => Some(found),
+                IndexedToolCall::Absent => None,
+                IndexedToolCall::Unindexed => {
+                    let messages = self.store_backed_transcript().await?;
+                    let call_id = call_id.to_owned();
+                    tokio::task::spawn_blocking(move || {
+                        find_tool_call(&messages, &call_id).map(|(arguments, output)| {
+                            FoundToolCall {
+                                arguments: arguments.to_owned(),
+                                output: output.cloned(),
+                            }
+                        })
                     })
-                })
-                .await?
+                    .await?
+                }
             }
         };
         let Some(FoundToolCall { arguments, output }) = found else {
@@ -70,6 +87,125 @@ impl SessionService {
             }))
         })
         .await?
+    }
+
+    async fn occurrence_tool_call(
+        &self,
+        call_id: &str,
+        occurrence: &str,
+    ) -> Result<Option<FoundToolCall>> {
+        if let Some(blob) = occurrence.strip_prefix("blob:") {
+            let Some((owner_digest, index)) = blob.rsplit_once(':') else {
+                return Ok(None);
+            };
+            let Some((owner, digest)) = owner_digest.rsplit_once(':') else {
+                return Ok(None);
+            };
+            let (Some(session_id), Ok(index)) =
+                (self.metadata.session_id.as_deref(), index.parse::<usize>())
+            else {
+                return Ok(None);
+            };
+            if owner != session_id {
+                return Ok(None);
+            }
+            let snapshot = self.session_snapshot.lock().await;
+            let Some(snapshot) = snapshot.as_ref() else {
+                return Ok(None);
+            };
+            if blob_fingerprint(session_id, &snapshot.messages)? != digest {
+                return Ok(None);
+            }
+            let Some(tail) = snapshot.messages.get(index..) else {
+                return Ok(None);
+            };
+            let end = tail
+                .iter()
+                .skip(1)
+                .position(|message| {
+                    matches!(message, Message::Assistant { .. } | Message::User { .. })
+                })
+                .map_or(tail.len(), |offset| offset + 1);
+            return Ok(
+                find_occurrence_call(&tail[..end], call_id).map(|(arguments, output)| {
+                    FoundToolCall {
+                        arguments: arguments.to_owned(),
+                        output: output.cloned(),
+                    }
+                }),
+            );
+        }
+        let Some((owner_row, end)) = occurrence
+            .strip_prefix("log:")
+            .and_then(|value| value.rsplit_once(':'))
+        else {
+            return Ok(None);
+        };
+        let Some((owner_row, digest)) = owner_row.rsplit_once(':') else {
+            return Ok(None);
+        };
+        let Some((owner_store, row)) = owner_row.rsplit_once(':') else {
+            return Ok(None);
+        };
+        let Some((owner, expected_store)) = owner_store.rsplit_once(':') else {
+            return Ok(None);
+        };
+        let (Some(row_id), Some(batch_end)) = (
+            row.parse::<i64>().ok().filter(|id| *id > 0),
+            end.parse::<i64>().ok().filter(|id| *id > 0),
+        ) else {
+            return Ok(None);
+        };
+        let (Some(writer), Some(session_id)) = (
+            self.transcript_log.as_ref().map(Arc::clone),
+            self.metadata.session_id.clone(),
+        ) else {
+            return Ok(None);
+        };
+        if owner != session_id {
+            return Ok(None);
+        }
+        let blob_len = self
+            .session_snapshot
+            .lock()
+            .await
+            .as_ref()
+            .map_or(0, |snapshot| snapshot.messages.len());
+        let batch = crate::store::spawn_blocking_store_caller(move || {
+            writer.read_assistant_batch_by_row(&session_id, row_id)
+        })
+        .await
+        .map_err(|error| anyhow::anyhow!("tool occurrence read task failed: {error}"))??;
+        let current_blob_len = self
+            .session_snapshot
+            .lock()
+            .await
+            .as_ref()
+            .map_or(0, |snapshot| snapshot.messages.len());
+        let Some((store_id, batch_digest, batch)) = batch else {
+            return Ok(None);
+        };
+        if store_id != expected_store
+            || batch_digest != digest
+            || blob_len != current_blob_len
+            || batch_end < row_id
+            // A pending batch can later grow. Require a fresh projection in
+            // that case: retaining only an earlier prefix cannot prove that a
+            // subsequently removed result was not replaced after a revert.
+            || batch.last().is_none_or(|(id, _, _)| *id != batch_end)
+            || batch
+                .first()
+                .is_none_or(|(_, idx, _)| *idx < blob_len as u64)
+        {
+            return Ok(None);
+        }
+        let messages: Vec<Message> = batch.into_iter().map(|(_, _, message)| message).collect();
+        Ok(
+            find_occurrence_call(&messages, call_id).map(|(arguments, output)| FoundToolCall {
+                arguments: arguments.to_owned(),
+                output: output.cloned(),
+            }),
+        )
     }
 
     /// Find a call through the index instead of decoding the whole transcript.
@@ -467,6 +603,47 @@ fn exact_secrets(
     secrets
         .extend_redactions(crate::managed_native_credentials::captured_managed_native_redactions());
     Ok(secrets)
+}
+
+/// A legacy blob has no row identities. Bind its token to the entire exact
+/// snapshot and owning session so rewrites and cross-session use fail closed.
+pub(super) fn blob_fingerprint(session_id: &str, messages: &[Message]) -> Result<String> {
+    let mut hash = Sha256::new();
+    hash.update((session_id.len() as u64).to_be_bytes());
+    hash.update(session_id.as_bytes());
+    hash.update(serde_json::to_vec(messages)?);
+    Ok(format!("{:x}", hash.finalize()))
+}
+
+/// Match only one call and at most one result within the bound assistant batch.
+fn find_occurrence_call<'a>(
+    messages: &'a [Message],
+    call_id: &str,
+) -> Option<(&'a str, Option<&'a ToolContent>)> {
+    let Message::Assistant {
+        tool_calls: Some(calls),
+        ..
+    } = messages.first()?
+    else {
+        return None;
+    };
+    let mut calls = calls.iter().filter(|call| call.id == call_id);
+    let call = calls.next()?;
+    if calls.next().is_some() {
+        return None;
+    }
+    let mut results = messages.iter().skip(1).filter_map(|message| match message {
+        Message::Tool {
+            tool_call_id,
+            content,
+        } if tool_call_id == call_id => Some(content),
+        _ => None,
+    });
+    let output = results.next();
+    if results.next().is_some() {
+        return None;
+    }
+    Some((call.function.arguments.as_str(), output))
 }
 
 /// Provider call ids are not guaranteed unique across turns, and an id the

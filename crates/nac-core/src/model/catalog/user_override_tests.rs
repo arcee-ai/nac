@@ -53,6 +53,24 @@ fn user_override_patches_an_exact_model() {
 }
 
 #[test]
+fn user_input_budget_override_is_preserved_and_identified() {
+    let home = TempHome::new("input-budget");
+    write_models_json(
+        &home,
+        serde_json::json!({"overrides":[{"provider":"chatgpt-codex-responses", "model":"gpt-6.1-sol", "set":{"context_window":400000,"max_input_tokens":272000,"max_tokens":128000}}]}),
+    );
+    let (catalog, warnings) = ModelCatalog::load_from_home(Some(home.path()));
+    assert!(warnings.is_empty(), "{warnings:?}");
+    let limits = catalog
+        .resolve(BackendKind::ChatGptCodexResponses, "gpt-6.1-sol")
+        .resolved_limits();
+    assert_eq!(limits.effective_input_tokens, 272000);
+    assert_eq!(limits.context_origin, LimitOrigin::Customized);
+    assert_eq!(limits.input_origin, LimitOrigin::Customized);
+    assert_eq!(limits.output_origin, LimitOrigin::Customized);
+}
+
+#[test]
 fn chat_completion_request_caps_are_explicit_and_mutually_exclusive() {
     for (field, expected) in [
         (

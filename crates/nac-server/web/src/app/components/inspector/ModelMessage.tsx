@@ -26,7 +26,7 @@ import {
 import type { ModelTurnItem } from "@/app/features/insights/model/types";
 import { partitionModelTurn } from "@/app/features/insights/model/segments";
 import { formatMessageDate } from "@/app/features/insights/transcript/messageDate";
-import { TranscriptSessionCard } from "@/app/features/insights/transcript/TranscriptSessionCard";
+import { TranscriptSessionGroup } from "@/app/features/insights/transcript/TranscriptSessionCard";
 import {
   usePreviousTurn,
   usePromptCreatedAt,
@@ -174,6 +174,12 @@ const ModelMessageBody = memo(function ModelMessageBody({
       ? COMPACTION_ACTIVITY
       : (liveTurnLabel(items) ?? "Working…")
     : null;
+  const lastFold = layout.reduce(
+    (last, entry, index) => (entry.kind === "fold" ? index : last),
+    -1,
+  );
+  const hasWorkFold = lastFold >= 0;
+  const foldCount = layout.filter((entry) => entry.kind === "fold").length;
 
   return (
     <div
@@ -183,22 +189,30 @@ const ModelMessageBody = memo(function ModelMessageBody({
         isLast && "min-h-[calc(70vh-316px)]",
       )}
     >
-      {layout.map((entry) => {
+      {layout.map((entry, index) => {
         if (entry.kind === "fold") {
           return (
             <WorkFoldView
               key={entry.key}
               turnKey={turn.key}
               fold={entry}
-              active={active}
-              turnDurationMs={turn.durationMs}
+              active={active && index === lastFold}
+              turnDurationMs={index === lastFold ? turn.durationMs : null}
+              totalTurnDuration={foldCount > 1}
               selectedGroupId={selectedGroupId}
               interactive={interactive}
+              liveLabel={index === lastFold ? liveLabel : null}
+              runStartedAt={runStartedAt}
             />
           );
         }
-        if (entry.kind === "session") {
-          return <TranscriptSessionCard key={entry.id} entry={entry} interactive={interactive} />;
+        if (entry.kind === "session" || entry.kind === "session-group") {
+          const entries = entry.kind === "session" ? [entry] : entry.entries;
+          return (
+            <div key={entries[0].id} className="min-w-0 max-w-full">
+              <TranscriptSessionGroup entries={entries} interactive={interactive} />
+            </div>
+          );
         }
         const { block } = entry;
         if (block.kind === "wave") {
@@ -216,6 +230,7 @@ const ModelMessageBody = memo(function ModelMessageBody({
           <Markdown
             key={block.key}
             streaming={active}
+            taskReferences={interactive}
             // The prose skin's paragraph margins would add to the gap between items.
             className="transcript-prose [&>:first-child]:!mt-0 [&>:last-child]:!mb-0"
           >
@@ -254,10 +269,11 @@ const ModelMessageBody = memo(function ModelMessageBody({
       {/* The live line and the actions take the same height, so the turn does
           not move when one gives way to the other. The actions address the
           prompt above — same resend / revert endpoints as its bubble. */}
-      {liveLabel ? (
+      {liveLabel && !hasWorkFold ? (
         <LiveStatusLine label={liveLabel} since={runStartedAt} />
-      ) : (
+      ) : !active ? (
         <div
+          data-action-slot=""
           className={cn(
             "-ml-1 -mt-2 flex h-8 w-full min-w-0 items-center gap-0.5 max-md:h-11",
             "transition-opacity duration-150 ease-out motion-reduce:transition-none",
@@ -353,6 +369,8 @@ const ModelMessageBody = memo(function ModelMessageBody({
             </span>
           ) : null}
         </div>
+      ) : (
+        <div aria-hidden="true" data-action-slot="" className="-mt-2 h-8 w-full max-md:h-11" />
       )}
     </div>
   );

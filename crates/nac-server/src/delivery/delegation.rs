@@ -103,7 +103,8 @@ pub(crate) async fn get_traditional_child(
     Ok(Json(
         manager
             .delegation()
-            .traditional_child(&session_id, &child_session_id)?,
+            .traditional_child_async(&session_id, &child_session_id)
+            .await?,
     ))
 }
 

@@ -178,6 +178,8 @@ pub fn parse_dispatch_args(
                     is_error: true,
                     execution_duration_ms: None,
                     execution_duration_excludes_authorization: false,
+                    delegation_outcome: None,
+                    delegation_summary: None,
                 })?,
         )
     } else {
@@ -247,6 +249,8 @@ pub async fn execute_parsed_dispatch(
             is_error: true,
             execution_duration_ms: None,
             execution_duration_excludes_authorization: false,
+            delegation_outcome: None,
+            delegation_summary: None,
         };
     };
 
@@ -280,7 +284,7 @@ pub async fn execute_parsed_dispatch(
         Err(error) => {
             close_thread_dispatch_async(runtime, &session_id, &thread_name, &dispatch_id).await;
             if cancellation.is_cancelled() {
-                return ToolResult { content: format!("{TOOL_CALL_CANCELLED_MARKER} Thread '{thread_name}' was cancelled before host admission.").into(), is_error: true, execution_duration_ms: None, execution_duration_excludes_authorization: false };
+                return ToolResult { content: format!("{TOOL_CALL_CANCELLED_MARKER} Thread '{thread_name}' was cancelled before host admission.").into(), is_error: true, execution_duration_ms: None, execution_duration_excludes_authorization: false, delegation_outcome: None, delegation_summary: None };
             }
             let message = format!("Failed to admit worker dispatch: {error}");
             runtime
@@ -305,6 +309,8 @@ pub async fn execute_parsed_dispatch(
                 is_error: true,
                 execution_duration_ms: None,
                 execution_duration_excludes_authorization: false,
+                delegation_outcome: None,
+                delegation_summary: None,
             };
         }
     };
@@ -333,6 +339,8 @@ pub async fn execute_parsed_dispatch(
             is_error: true,
             execution_duration_ms: None,
             execution_duration_excludes_authorization: false,
+            delegation_outcome: None,
+            delegation_summary: None,
         }
         .executed_since(started);
     }
@@ -361,6 +369,8 @@ pub async fn execute_parsed_dispatch(
             is_error: true,
             execution_duration_ms: None,
             execution_duration_excludes_authorization: false,
+            delegation_outcome: None,
+            delegation_summary: None,
         }
         .executed_since(started);
     }
@@ -417,6 +427,8 @@ pub async fn execute_parsed_dispatch(
                 is_error: true,
                 execution_duration_ms: None,
                 execution_duration_excludes_authorization: false,
+                delegation_outcome: None,
+                delegation_summary: None,
             }
             .executed_since(started);
         }
@@ -494,6 +506,8 @@ pub async fn execute_parsed_dispatch(
             is_error: finish.is_err(),
             execution_duration_ms: None,
             execution_duration_excludes_authorization: false,
+            delegation_outcome: None,
+            delegation_summary: None,
         }
         .executed_since(started);
     };
@@ -507,6 +521,8 @@ pub async fn execute_parsed_dispatch(
             is_error: true,
             execution_duration_ms: None,
             execution_duration_excludes_authorization: false,
+            delegation_outcome: None,
+            delegation_summary: None,
         }
         .executed_since(started);
     }
@@ -527,6 +543,8 @@ pub async fn execute_parsed_dispatch(
         is_error: true,
         execution_duration_ms: None,
         execution_duration_excludes_authorization: false,
+        delegation_outcome: None,
+        delegation_summary: None,
     }
     .executed_since(started)
 }
@@ -664,6 +682,8 @@ pub async fn execute_dispatch(
             is_error: true,
             execution_duration_ms: None,
             execution_duration_excludes_authorization: false,
+            delegation_outcome: None,
+            delegation_summary: None,
         };
     }
     let result = execute_parsed_dispatch(params, runtime, &client).await;
@@ -694,6 +714,8 @@ pub async fn execute_threads(runtime: &ToolRuntime) -> ToolResult {
                 is_error: true,
                 execution_duration_ms: None,
                 execution_duration_excludes_authorization: false,
+                delegation_outcome: None,
+                delegation_summary: None,
             }
             .executed_since(started)
         }
@@ -703,6 +725,8 @@ pub async fn execute_threads(runtime: &ToolRuntime) -> ToolResult {
                 is_error: true,
                 execution_duration_ms: None,
                 execution_duration_excludes_authorization: false,
+                delegation_outcome: None,
+                delegation_summary: None,
             }
             .executed_since(started)
         }
@@ -714,6 +738,8 @@ pub async fn execute_threads(runtime: &ToolRuntime) -> ToolResult {
             is_error: false,
             execution_duration_ms: None,
             execution_duration_excludes_authorization: false,
+            delegation_outcome: None,
+            delegation_summary: None,
         }
         .executed_since(started);
     }
@@ -734,6 +760,8 @@ pub async fn execute_threads(runtime: &ToolRuntime) -> ToolResult {
         is_error: false,
         execution_duration_ms: None,
         execution_duration_excludes_authorization: false,
+        delegation_outcome: None,
+        delegation_summary: None,
     }
     .executed_since(started)
 }
@@ -762,12 +790,16 @@ pub async fn execute_thread_read(args: Value, runtime: &ToolRuntime) -> ToolResu
             is_error: false,
             execution_duration_ms: None,
             execution_duration_excludes_authorization: false,
+            delegation_outcome: None,
+            delegation_summary: None,
         },
         Ok(Err(error)) => ToolResult {
             content: (format!("Error reading thread '{thread_name}': {error}")).into(),
             is_error: true,
             execution_duration_ms: None,
             execution_duration_excludes_authorization: false,
+            delegation_outcome: None,
+            delegation_summary: None,
         },
         Err(join_error) => ToolResult {
             content: (format!("Internal error reading thread '{thread_name}': {join_error}"))
@@ -775,6 +807,8 @@ pub async fn execute_thread_read(args: Value, runtime: &ToolRuntime) -> ToolResu
             is_error: true,
             execution_duration_ms: None,
             execution_duration_excludes_authorization: false,
+            delegation_outcome: None,
+            delegation_summary: None,
         },
     };
     result.executed_since(started)
@@ -799,6 +833,8 @@ pub async fn execute_thread_delete(args: Value, runtime: &ToolRuntime) -> ToolRe
             is_error: true,
             execution_duration_ms: None,
             execution_duration_excludes_authorization: false,
+            delegation_outcome: None,
+            delegation_summary: None,
         };
     }
     let started = Instant::now();
@@ -816,18 +852,24 @@ pub async fn execute_thread_delete(args: Value, runtime: &ToolRuntime) -> ToolRe
             is_error: false,
             execution_duration_ms: None,
             execution_duration_excludes_authorization: false,
+            delegation_outcome: None,
+            delegation_summary: None,
         },
         Ok(Ok(false)) => ToolResult {
             content: (format!("Thread '{thread_name}' does not exist in this session.")).into(),
             is_error: true,
             execution_duration_ms: None,
             execution_duration_excludes_authorization: false,
+            delegation_outcome: None,
+            delegation_summary: None,
         },
         Ok(Err(error)) => ToolResult {
             content: (format!("Error deleting thread '{thread_name}': {error}")).into(),
             is_error: true,
             execution_duration_ms: None,
             execution_duration_excludes_authorization: false,
+            delegation_outcome: None,
+            delegation_summary: None,
         },
         Err(join_error) => ToolResult {
             content: (format!("Internal error deleting thread '{thread_name}': {join_error}"))
@@ -835,6 +877,8 @@ pub async fn execute_thread_delete(args: Value, runtime: &ToolRuntime) -> ToolRe
             is_error: true,
             execution_duration_ms: None,
             execution_duration_excludes_authorization: false,
+            delegation_outcome: None,
+            delegation_summary: None,
         },
     };
     result.executed_since(started)
@@ -857,6 +901,8 @@ fn require_session(runtime: &ToolRuntime) -> Result<&str, ToolResult> {
         is_error: true,
         execution_duration_ms: None,
         execution_duration_excludes_authorization: false,
+        delegation_outcome: None,
+        delegation_summary: None,
     })
 }
 
@@ -880,6 +926,8 @@ fn resolve_scheduled_skills(
             is_error: true,
             execution_duration_ms: None,
             execution_duration_excludes_authorization: false,
+            delegation_outcome: None,
+            delegation_summary: None,
         });
     };
 
@@ -890,6 +938,8 @@ fn resolve_scheduled_skills(
                 is_error: true,
                 execution_duration_ms: None,
                 execution_duration_excludes_authorization: false,
+                delegation_outcome: None,
+                delegation_summary: None,
             });
         }
     }

@@ -29,6 +29,26 @@ function validRange(
   );
 }
 
+/** Older servers omit occurrence identities; never invent one for their messages. */
+function occurrences(values: (string | null)[] | undefined, count: number): (string | null)[] {
+  return values?.length === count ? values : Array.from({ length: count }, () => null);
+}
+function validOccurrences(values: (string | null)[] | undefined, count: number): boolean {
+  return (
+    values === undefined ||
+    (values.length === count &&
+      values.every((value) => value === null || typeof value === "string"))
+  );
+}
+
+/** Batch boundaries may grow, but a replaced log row is a different occurrence. */
+function occurrenceIdentity(token: string): string {
+  if (!token.startsWith("log:")) return token;
+  const end = token.lastIndexOf(":");
+  const digest = token.lastIndexOf(":", end - 1);
+  return digest > 4 ? token.slice(0, digest) : token;
+}
+
 /** References always address absolute canonical User indices, including the system head. */
 function validReferences(
   references: TerminalSelectionMessageReference[] | undefined,
@@ -57,6 +77,7 @@ function referencesInRange(
 export function validMessagesPage(page: MessagesPageResponse): boolean {
   return (
     validRange(page.page, page.messages.length, page.created_at.length) &&
+    validOccurrences(page.tool_call_occurrences, page.messages.length) &&
     validReferences(page.terminal_selection_attributions, page.messages, page.page.start)
   );
 }
@@ -66,6 +87,7 @@ export function validSnapshotWindow(snapshot: SessionSnapshotResponse): boolean 
   return Boolean(
     page &&
     validRange(page, snapshot.messages.length, createdAt.length) &&
+    validOccurrences(snapshot.tool_call_occurrences, snapshot.messages.length) &&
     validReferences(snapshot.terminal_selection_attributions, snapshot.messages, page.start),
   );
 }
@@ -123,7 +145,16 @@ export function mergeMessageTail(
       JSON.stringify(current.messages[index - currentPage.start]) !==
         JSON.stringify(incoming.messages[index - incoming.page.start]) ||
       currentCreatedAt[index - currentPage.start] !==
-        incoming.created_at[index - incoming.page.start]
+        incoming.created_at[index - incoming.page.start] ||
+      (() => {
+        const oldToken = current.tool_call_occurrences?.[index - currentPage.start];
+        const newToken = incoming.tool_call_occurrences?.[index - incoming.page.start];
+        return (
+          oldToken != null &&
+          newToken != null &&
+          occurrenceIdentity(oldToken) !== occurrenceIdentity(newToken)
+        );
+      })()
     ) {
       return { kind: "snapshot-required" };
     }
@@ -136,6 +167,10 @@ export function mergeMessageTail(
         ...current,
         messages: incoming.messages,
         message_created_at: incoming.created_at,
+        tool_call_occurrences: occurrences(
+          incoming.tool_call_occurrences,
+          incoming.messages.length,
+        ),
         message_page: incoming.page,
         terminal_selection_attributions: incoming.terminal_selection_attributions ?? [],
       },
@@ -147,12 +182,44 @@ export function mergeMessageTail(
     return { kind: "snapshot-required" };
   }
 
+  const prefixOccurrences = occurrences(
+    current.tool_call_occurrences,
+    current.messages.length,
+  ).slice(0, prefixLength);
+  // A growing batch can cross the page boundary while its assistant remains
+  // in the retained prefix. Its old token is no longer valid and the incoming
+  // page cannot supply a new one. Keep the loaded history but fail closed
+  // until a page including that assistant provides a fresh token.
+  if (incoming.messages[0]?.role === "tool" && incoming.page.end > currentPage.end) {
+    const prefix = current.messages.slice(0, prefixLength);
+    let owner = prefix.length - 1;
+    while (owner >= 0 && prefix[owner].role !== "assistant" && prefix[owner].role !== "user") {
+      owner -= 1;
+    }
+    const firstBoundary = incoming.messages.findIndex(
+      (message) => message.role === "assistant" || message.role === "user",
+    );
+    const batchEnd = firstBoundary < 0 ? incoming.page.end : incoming.page.start + firstBoundary;
+    if (
+      owner >= 0 &&
+      prefix[owner].role === "assistant" &&
+      current.tool_call_occurrences?.[owner] != null &&
+      currentPage.end < batchEnd
+    ) {
+      prefixOccurrences[owner] = null;
+    }
+  }
+
   return {
     kind: "accepted",
     snapshot: {
       ...current,
       messages: [...current.messages.slice(0, prefixLength), ...incoming.messages],
       message_created_at: [...currentCreatedAt.slice(0, prefixLength), ...incoming.created_at],
+      tool_call_occurrences: [
+        ...prefixOccurrences,
+        ...occurrences(incoming.tool_call_occurrences, incoming.messages.length),
+      ],
       terminal_selection_attributions: [
         ...referencesInRange(
           current.terminal_selection_attributions,
@@ -192,6 +259,10 @@ export function prependMessagePage(
     ...current,
     messages: [...incoming.messages, ...current.messages],
     message_created_at: [...incoming.created_at, ...currentCreatedAt],
+    tool_call_occurrences: [
+      ...occurrences(incoming.tool_call_occurrences, incoming.messages.length),
+      ...occurrences(current.tool_call_occurrences, current.messages.length),
+    ],
     terminal_selection_attributions: [
       ...(incoming.terminal_selection_attributions ?? []),
       ...referencesInRange(
@@ -223,12 +294,14 @@ export function mergeFocusedSnapshot(
     created_at: createdAt,
     page: incoming.message_page,
     terminal_selection_attributions: incoming.terminal_selection_attributions,
+    tool_call_occurrences: incoming.tool_call_occurrences,
   });
   return merged.kind === "accepted"
     ? {
         ...incoming,
         messages: merged.snapshot.messages,
         message_created_at: merged.snapshot.message_created_at,
+        tool_call_occurrences: merged.snapshot.tool_call_occurrences,
         message_page: merged.snapshot.message_page,
         terminal_selection_attributions: merged.snapshot.terminal_selection_attributions,
       }

@@ -13,7 +13,8 @@ pub(super) fn shell_path_resources(
             let effective = effective_command_tokens(tokens);
             let command_index = tokens.len().saturating_sub(effective.len());
             let preserve_final_component =
-                deletion_operand_path_position(tokens, command_index, index);
+                deletion_operand_path_position(tokens, command_index, index)
+                    || git_add_path_position(tokens, command_index, index);
             if let Some((_, existing_mutating, existing_preserve_final)) =
                 paths.iter_mut().find(|(existing, _, _)| existing == &path)
             {
@@ -78,6 +79,11 @@ pub(super) fn shell_path_candidate(
             return Some((Some("-C"), Path::new(candidate)));
         }
     }
+    // After Git add's option boundary, even a leading dash or '=' belongs to
+    // the literal path rather than to a shell option assignment.
+    if git_command && git_add_path_position(tokens, command_index, index) {
+        return Some((None, Path::new(token)));
+    }
     if command == "dd" {
         if let Some(candidate) = token.strip_prefix("of=") {
             return Some((Some("of"), Path::new(candidate)));
@@ -98,7 +104,9 @@ pub(super) fn shell_path_candidate(
         && tokens[index - 1] == "--config"
         && token.contains('=')
         && !looks_like_shell_path(token);
+    let git_add = git_subcommand.is_some_and(|subcommand| tokens[subcommand] == "add");
     let previous_takes_path = index > 0
+        && !git_add
         && matches!(
             tokens[index - 1].as_str(),
             "--manifest-path" | "--config" | "--output" | "-o" | "-f" | "--file"
@@ -431,6 +439,11 @@ pub(super) fn git_bare_relative_path_position(
         return false;
     };
     let subcommand = tokens[subcommand_index].as_str();
+    // Simple add operands are pathspecs relative to Git's effective -C cwd.
+    // Do not infer operands of option-bearing forms whose values may be data.
+    if subcommand == "add" {
+        return git_add_path_position(tokens, command_index, index);
+    }
     if !matches!(subcommand, "diff" | "log" | "show" | "status") {
         return false;
     }
@@ -458,6 +471,74 @@ pub(super) fn git_bare_relative_path_position(
         .any(|candidate| *candidate == index)
 }
 
+// Return literal add operand positions only when every argument can be bound.
+// Git pathspec magic, patterns and value-taking/unknown options need a separate
+// projection model and are deliberately rejected by hard policy.
+pub(super) fn git_add_operands(
+    tokens: &[String],
+    command_index: usize,
+    subcommand: usize,
+) -> Option<Vec<usize>> {
+    if tokens[command_index + 1..subcommand]
+        .iter()
+        .any(|arg| matches!(arg.as_str(), "--glob-pathspecs" | "--icase-pathspecs"))
+    {
+        return None;
+    }
+    let mut operands = Vec::new();
+    let mut options = true;
+    for (index, arg) in tokens.iter().enumerate().skip(subcommand + 1) {
+        if options && arg == "--" {
+            options = false;
+        } else if options && arg.starts_with('-') {
+            let known_long = matches!(
+                arg.as_str(),
+                "--force"
+                    | "--all"
+                    | "--update"
+                    | "--dry-run"
+                    | "--verbose"
+                    | "--intent-to-add"
+                    | "--ignore-errors"
+                    | "--ignore-missing"
+                    | "--renormalize"
+                    | "--sparse"
+            );
+            let known_short = !arg.starts_with("--")
+                && arg.len() > 1
+                && arg[1..]
+                    .chars()
+                    .all(|ch| matches!(ch, 'f' | 'A' | 'u' | 'n' | 'v' | 'N'));
+            if !known_long && !known_short {
+                return None;
+            }
+        } else if arg.starts_with(':') || arg.contains(['*', '?', '[']) {
+            return None;
+        } else {
+            operands.push(index);
+        }
+    }
+    Some(operands)
+}
+
+fn git_add_path_position(tokens: &[String], command_index: usize, index: usize) -> bool {
+    if !tokens
+        .get(command_index)
+        .and_then(|command| command.rsplit('/').next())
+        .is_some_and(|command| command.eq_ignore_ascii_case("git"))
+    {
+        return false;
+    }
+    let Some(subcommand) = git_subcommand_index(tokens, command_index) else {
+        return false;
+    };
+    tokens[subcommand] == "add"
+        && git_add_operands(tokens, command_index, subcommand)
+            .is_some_and(|operands| operands.contains(&index))
+}
+
+// Parse global options once for both policy and resource binding. Unknown or
+// incomplete options cannot safely identify the operation or its operands.
 pub(super) fn git_subcommand_index(tokens: &[String], command_index: usize) -> Option<usize> {
     let mut index = command_index + 1;
     while let Some(option) = tokens.get(index) {
@@ -470,9 +551,41 @@ pub(super) fn git_subcommand_index(tokens: &[String], command_index: usize) -> O
                 | "--super-prefix"
                 | "--config-env"
         ) {
+            tokens.get(index + 1)?;
             index += 2;
-        } else if option.starts_with('-') {
+        } else if [
+            "-C",
+            "-c",
+            "--git-dir=",
+            "--work-tree=",
+            "--namespace=",
+            "--super-prefix=",
+            "--config-env=",
+        ]
+        .iter()
+        .any(|prefix| {
+            option
+                .strip_prefix(prefix)
+                .is_some_and(|value| !value.is_empty())
+        }) || matches!(
+            option.as_str(),
+            "--no-pager"
+                | "--paginate"
+                | "-p"
+                | "-P"
+                | "--bare"
+                | "--no-replace-objects"
+                | "--literal-pathspecs"
+                | "--glob-pathspecs"
+                | "--noglob-pathspecs"
+                | "--icase-pathspecs"
+                | "--no-optional-locks"
+        ) {
             index += 1;
+        } else if option == "--version" && index + 1 == tokens.len() {
+            return Some(index);
+        } else if option.starts_with('-') {
+            return None;
         } else {
             return Some(index);
         }
@@ -557,6 +670,20 @@ pub(super) fn git_effective_cwd(tokens: &[String], command_index: usize, cwd: &P
     git_effective_cwd_before(tokens, command_index, tokens.len(), cwd)
 }
 
+// Newly admitted Git forms execute without inherited repository redirects or
+// command-scoped configuration, on the already-selected backend.
+fn git_environment_prefix(tokens: &[String]) -> Option<(usize, &'static str)> {
+    if !super::resource_projection::newly_permitted_git_segment(tokens) {
+        return None;
+    }
+    let effective = effective_command_tokens(tokens);
+    let command_index = tokens.len().saturating_sub(effective.len());
+    Some((
+        command_index,
+        r#"/usr/bin/env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_COMMON_DIR -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES -u GIT_NAMESPACE -u GIT_CEILING_DIRECTORIES -u GIT_DISCOVERY_ACROSS_FILESYSTEM -u GIT_CONFIG -u GIT_CONFIG_COUNT -u GIT_CONFIG_PARAMETERS -u GIT_CONFIG_GLOBAL -u GIT_CONFIG_SYSTEM $(for nac_git_var in ${!GIT_CONFIG_KEY_@} ${!GIT_CONFIG_VALUE_@}; do builtin printf '%s\n' -u "$nac_git_var"; done) "#,
+    ))
+}
+
 pub(crate) fn bind_authorized_shell_command(
     command: &str,
     cwd: &Path,
@@ -590,9 +717,19 @@ pub(crate) fn bind_authorized_shell_command(
     let cwd = lexical_normalize(cwd);
     let mut replacements = Vec::<(usize, usize, String)>::new();
     for (tokens, spans) in segments.iter().zip(spans) {
+        let git_environment_prefix = git_environment_prefix(tokens);
         let mut canonical_by_requested = Vec::<(PathBuf, String)>::new();
         for (index, span) in spans.iter().enumerate() {
             let Some((option, requested)) = shell_path_candidate(tokens, index) else {
+                if let Some((_, prefix)) =
+                    git_environment_prefix.filter(|(command_index, _)| *command_index == index)
+                {
+                    replacements.push((
+                        span.start,
+                        span.end,
+                        format!("{prefix}{}", &command[span.start..span.end]),
+                    ));
+                }
                 continue;
             };
             let requested = shell_path_requested_path(tokens, index, requested, &cwd);
@@ -616,7 +753,14 @@ pub(crate) fn bind_authorized_shell_command(
                     format!("{option}={canonical}")
                 }
             });
-            replacements.push((span.start, span.end, shell_quote(&bound)));
+            let prefix = git_environment_prefix
+                .filter(|(command_index, _)| *command_index == index)
+                .map_or("", |(_, prefix)| prefix);
+            replacements.push((
+                span.start,
+                span.end,
+                format!("{prefix}{}", shell_quote(&bound)),
+            ));
         }
     }
     if authorized_paths.next().is_some() {

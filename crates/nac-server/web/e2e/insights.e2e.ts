@@ -184,7 +184,7 @@ test("opens a transcript group in Insights from its badge", async ({ harness, pa
   await expect(fileRead).toContainText("badge-notes.txt");
 });
 
-test("opens a launched session in Subagents and on its own page from its card", async ({
+test("opens a launched session in the parent Subagents panel", async ({
   harness,
   page,
   request,
@@ -232,24 +232,14 @@ test("opens a launched session in Subagents and on its own page from its card", 
   await page.goto(`${harness.baseUrl}/#/session/${parentId}/insights`);
   await expect(page.getByText("parent saw the card")).toBeVisible();
   await page
-    .getByRole("button", { name: `Open ${title} in Subagents, Subagent`, exact: true })
+    .locator("[data-turn]")
+    .getByRole("button", { name: "Open Subagent in Subagents", exact: true })
     .click();
   await expect(page).toHaveURL(new RegExp(`/session/${parentId}/delegated$`));
   await expect(page.getByRole("tab", { name: "Subagents" })).toHaveAttribute(
     "aria-selected",
     "true",
   );
-  await expect(page.getByRole("button", { name: title, exact: true })).toHaveAttribute(
-    "aria-current",
-    "true",
-  );
   await expect(page.getByText("card child finished", { exact: true })).toBeVisible();
-
-  const goToSession = page.getByRole("link", { name: `Go to session ${title}`, exact: true });
-  await expect(goToSession).toHaveAttribute("href", `#/session/${childId}/insights`);
-  // The card's link sits in the chat, under the floating drawer.
-  await page.getByRole("button", { name: "Hide panel", exact: true }).click();
-  await goToSession.click();
-  await expect(page).toHaveURL(new RegExp(`/session/${childId}/insights$`));
-  await expect(page.getByRole("button", { name: /, parent chat$/ })).toBeVisible();
+  await expect(page.getByText("parent saw the card", { exact: true })).toBeVisible();
 });
