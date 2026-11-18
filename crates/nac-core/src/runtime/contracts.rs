@@ -336,20 +336,9 @@ impl SessionRunConfig {
         self.agent.set_command_environment_provider(provider);
     }
 }
-
 #[derive(Debug, Clone)]
 pub struct ResumePickerRunConfig {
     pub store_path: PathBuf,
     pub lookup_cwd: PathBuf,
     pub worker_executable: Option<PathBuf>,
-}
-
-#[expect(
-    clippy::large_enum_variant,
-    reason = "run-state variants own construction inputs and avoid heap indirection on the hot path"
-)]
-pub enum RunState {
-    Session { run_config: SessionRunConfig },
-    ResumePicker(ResumePickerRunConfig),
-    ManagedWorker(ManagedWorkerRunConfig),
 }

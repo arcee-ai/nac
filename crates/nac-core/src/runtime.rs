@@ -67,7 +67,7 @@ pub use configuration::{
 pub(crate) use contracts::RuntimeSession;
 pub use contracts::{
     EffectiveSandboxOptions, ManagedWorkerOptions, ModelOptions, OptionalModelOption,
-    ResumeModelOptions, ResumeOptions, ResumePickerRunConfig, RunOptions, RunState, SandboxOptions,
+    ResumeModelOptions, ResumeOptions, ResumePickerRunConfig, RunOptions, SandboxOptions,
     SessionRunConfig, SshOptions, StoreOptions, WorkerDispatchOptions,
 };
 use model_resolution::{
