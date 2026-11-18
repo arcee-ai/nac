@@ -1273,3 +1273,45 @@ async fn check_owned_input_failure_recovery(lost_ack: bool) {
     drop(manager);
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn owned_child_creation_inherits_automatic_compaction_setting() {
+    let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("owned_child_compaction_inheritance");
+    let home = root.join("nac-home");
+    std::fs::create_dir_all(&home).unwrap();
+    let _env = ScopedModelEnv::isolated(&home, Some("owned-child-fixture-key"));
+    for (id, enabled) in [("parent-enabled", true), ("parent-disabled", false)] {
+        seed_direct_session(&root, id);
+        let path = root.join("store.db");
+        let mut parent = sessions::load_session(&path, id).unwrap();
+        parent.automatic_compaction = enabled;
+        sessions::update_session_config(&path, &parent).unwrap();
+    }
+    let manager = SessionManager::new_async(ServerOptions {
+        root_cwd: root.clone(),
+        store_path: Some(root.join("store.db")),
+        worker_executable: None,
+        managed_host: None,
+    })
+    .await
+    .unwrap();
+    for (parent, expected) in [("parent-enabled", true), ("parent-disabled", false)] {
+        let id = manager
+            .create_traditional_child_session(parent, "general", "inherited settings")
+            .await
+            .unwrap();
+        let path = root.join("store.db");
+        let child = nac_core::store::spawn_blocking_store_caller(move || {
+            sessions::load_session(&path, &id)
+        })
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(child.automatic_compaction, expected);
+    }
+    manager.quiesce_persistence_callers().await;
+    manager.drain_persistence().await.unwrap();
+    drop(manager);
+    let _ = std::fs::remove_dir_all(root);
+}
