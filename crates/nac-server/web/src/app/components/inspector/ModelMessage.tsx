@@ -197,7 +197,8 @@ const ModelMessageBody = memo(function ModelMessageBody({
               turnKey={turn.key}
               fold={entry}
               active={active && index === lastFold}
-              turnDurationMs={foldCount === 1 ? turn.durationMs : null}
+              turnDurationMs={index === lastFold ? turn.durationMs : null}
+              totalTurnDuration={foldCount > 1}
               selectedGroupId={selectedGroupId}
               interactive={interactive}
               liveLabel={index === lastFold ? liveLabel : null}

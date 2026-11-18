@@ -14,6 +14,7 @@ import { FoldChoicesContext } from "./foldChoices";
 
 import {
   foldSegments,
+  formatWorkDuration,
   isPinnedStatus,
   liveFoldLabel,
   settledFoldLabel,
@@ -41,6 +42,7 @@ export const WorkFoldView = memo(function WorkFoldView({
   turnKey,
   active,
   turnDurationMs,
+  totalTurnDuration = false,
   selectedGroupId,
   interactive,
   liveLabel = null,
@@ -52,6 +54,8 @@ export const WorkFoldView = memo(function WorkFoldView({
   active: boolean;
   /** Wall-clock time of the run behind the turn, once it finished. */
   turnDurationMs: number | null;
+  /** Duration covers the whole turn when activity spans several folds. */
+  totalTurnDuration?: boolean;
   /** The Insights group the panels point at, if it is one of these. */
   selectedGroupId: string | null;
   interactive: boolean;
@@ -72,11 +76,14 @@ export const WorkFoldView = memo(function WorkFoldView({
 
   const segments = useMemo(() => foldSegments(fold), [fold]);
   const summary = workSentence(segments);
+  const totalTime = totalTurnDuration ? formatWorkDuration(turnDurationMs) : null;
   const label = active
     ? liveLabel
       ? `${liveLabel}${summary ? ` · ${summary}` : ""}`
       : liveFoldLabel(segments)
-    : settledFoldLabel(segments, turnDurationMs);
+    : totalTime
+      ? `Total time ${totalTime} · ${settledFoldLabel(segments, null)}`
+      : settledFoldLabel(segments, turnDurationMs);
   const failedCount = useMemo(
     () => fold.steps.filter((step) => stepStatus(step) === "failed").length,
     [fold],

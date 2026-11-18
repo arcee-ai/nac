@@ -15,6 +15,44 @@ afterEach(() => {
 });
 
 describe("transcript topology badge navigation", () => {
+  it("shows the total turn duration once when prose separates activity folds", () => {
+    const turn: ModelTurn = {
+      kind: "model",
+      key: "model-duration",
+      durationMs: 2300,
+      messageIndex: 1,
+      blocks: [
+        {
+          kind: "thoughts",
+          key: "first",
+          text: "First thought",
+          durationMs: null,
+          streaming: false,
+        },
+        { kind: "text", key: "note", text: "Checking the result." },
+        {
+          kind: "thoughts",
+          key: "second",
+          text: "Second thought",
+          durationMs: null,
+          streaming: false,
+        },
+      ],
+    };
+    render(
+      <ModelMessage
+        turn={turn}
+        model="model"
+        active={false}
+        selectedThreadEpisode={null}
+        onSelectThread={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Thought" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Total time 2.3s · Thought" })).toBeTruthy();
+    expect(screen.getAllByText(/Total time/)).toHaveLength(1);
+  });
+
   it("keeps visible prose and its selection in place when later work arrives and settles", () => {
     const props = {
       model: "model",
