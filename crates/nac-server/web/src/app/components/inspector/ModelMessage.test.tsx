@@ -181,6 +181,45 @@ describe("transcript topology badge navigation", () => {
     expect(screen.getByText("First thought extended")).toBeTruthy();
   });
 
+  it("keeps reasoning discoverable while the turn starts writing", () => {
+    const turn: ModelTurn = {
+      kind: "model",
+      key: "model-writing",
+      durationMs: null,
+      messageIndex: 1,
+      blocks: [
+        {
+          kind: "thoughts",
+          key: "thought",
+          text: "A thought",
+          durationMs: null,
+          streaming: false,
+        },
+      ],
+    };
+    const props = { model: "model", selectedThreadEpisode: null, onSelectThread: vi.fn() };
+    const view = render(<ModelMessage {...props} turn={turn} active />);
+    expect(screen.getByRole("button", { name: "Thinking…", expanded: false })).toBeTruthy();
+    view.rerender(
+      <ModelMessage
+        {...props}
+        active
+        turn={{
+          ...turn,
+          blocks: [...turn.blocks, { kind: "text", key: "answer", text: "The answer so far." }],
+        }}
+      />,
+    );
+    const fold = screen.getByRole("button", {
+      name: "Writing… · Thought",
+      expanded: false,
+    });
+    expect(screen.getByText("The answer so far.")).toBeTruthy();
+    fireEvent.click(fold);
+    fireEvent.click(screen.getByRole("button", { name: "Thought" }));
+    expect(screen.getByText("A thought")).toBeTruthy();
+  });
+
   it("shows noninteractive progress without a trace and shares density with read-only turns", () => {
     const props = {
       model: "model",

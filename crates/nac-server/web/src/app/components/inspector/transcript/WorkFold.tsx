@@ -76,10 +76,17 @@ export const WorkFoldView = memo(function WorkFoldView({
 
   const segments = useMemo(() => foldSegments(fold), [fold]);
   const summary = workSentence(segments);
+  const liveSummary =
+    summary ||
+    (liveLabel &&
+    liveLabel !== "Thinking…" &&
+    segments.some((segment) => segment.kind === "reasoning")
+      ? "Thought"
+      : "");
   const totalTime = totalTurnDuration ? formatWorkDuration(turnDurationMs) : null;
   const label = active
     ? liveLabel
-      ? `${liveLabel}${summary ? ` · ${summary}` : ""}`
+      ? `${liveLabel}${liveSummary ? ` · ${liveSummary}` : ""}`
       : liveFoldLabel(segments)
     : totalTime
       ? `Total time ${totalTime} · ${settledFoldLabel(segments, null)}`

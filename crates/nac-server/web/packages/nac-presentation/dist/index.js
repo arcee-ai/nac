@@ -19118,7 +19118,7 @@ var Zy = "group/row flex w-full min-w-0 items-center gap-2.5 rounded-md px-1.5 t
 		h,
 		t,
 		e.key
-	]), [_, v] = X(() => m?.get(g) ?? null), { openGroup: y } = Fh(), b = _ ?? d === "detailed", x = J(() => ay(e), [e]), S = my(x), C = i ? hy(r) : null, w = n ? s ? `${s}${S ? ` · ${S}` : ""}` : yy(x) : C ? `Total time ${C} · ${vy(x, null)}` : vy(x, r), T = J(() => e.steps.filter((e) => sy(e) === "failed").length, [e]), D = J(() => b ? [] : e.steps.filter((e) => oy(sy(e))), [e, b]), O = e.steps.flatMap((e) => e.kind === "segment" && e.segment.kind === "tool" && e.segment.presentation?.launchedTask ? [{
+	]), [_, v] = X(() => m?.get(g) ?? null), { openGroup: y } = Fh(), b = _ ?? d === "detailed", x = J(() => ay(e), [e]), S = my(x) || (s && s !== "Thinking…" && x.some((e) => e.kind === "reasoning") ? "Thought" : ""), C = i ? hy(r) : null, w = n ? s ? `${s}${S ? ` · ${S}` : ""}` : yy(x) : C ? `Total time ${C} · ${vy(x, null)}` : vy(x, r), T = J(() => e.steps.filter((e) => sy(e) === "failed").length, [e]), D = J(() => b ? [] : e.steps.filter((e) => oy(sy(e))), [e, b]), O = e.steps.flatMap((e) => e.kind === "segment" && e.segment.kind === "tool" && e.segment.presentation?.launchedTask ? [{
 		key: e.key,
 		groupId: e.groupId,
 		task: e.segment.presentation.launchedTask
