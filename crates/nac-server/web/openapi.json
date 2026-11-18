@@ -20262,8 +20262,7 @@
           "current",
           "pending",
           "degraded",
-          "failed",
-          "scheduled_for_workers"
+          "failed"
         ]
       },
       "SessionMcpRefreshStatus": {
@@ -20283,7 +20282,7 @@
               "null"
             ],
             "format": "int64",
-            "description": "Process-local acknowledgement for this direct agent incarnation. An\norchestrator has independent workers and does not claim an aggregate acknowledgement."
+            "description": "Process-local acknowledgement for this agent incarnation."
           },
           "incarnation_id": {
             "type": [

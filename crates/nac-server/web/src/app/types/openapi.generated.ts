@@ -1631,13 +1631,7 @@ export interface components {
       parent_session_id: string;
       root_session_id: string;
     };
-    SessionMcpRefreshState:
-      | "not_requested"
-      | "current"
-      | "pending"
-      | "degraded"
-      | "failed"
-      | "scheduled_for_workers";
+    SessionMcpRefreshState: "not_requested" | "current" | "pending" | "degraded" | "failed";
     SessionMcpRefreshStatus: {
       applied_revision: number | null;
       incarnation_id: string | null;

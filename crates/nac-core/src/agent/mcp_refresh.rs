@@ -9,9 +9,6 @@ impl Agent {
     /// Runs only between completed tool rounds, never from a dashboard
     /// connection callback or while a captured tool is waiting for approval.
     pub(super) async fn admit_mcp_mount_refresh(&mut self) -> Result<()> {
-        if self.mode == AgentMode::Orchestrator {
-            return Ok(());
-        }
         let Some(session) = self.tool_runtime.session_id.clone() else {
             return Ok(());
         };

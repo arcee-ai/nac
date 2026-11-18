@@ -378,10 +378,7 @@ impl Agent {
         let mcp_observation = config.mcp.as_ref().map(|mcp| {
             mcp.register_event_sink(config.event_sink.clone(), config.thread_name.clone())
         });
-        let mcp_mounts = Arc::new(crate::mcp::SessionMcpMounts::new(
-            config.mcp.clone(),
-            mode == AgentMode::Orchestrator,
-        ));
+        let mcp_mounts = Arc::new(crate::mcp::SessionMcpMounts::new(config.mcp.clone()));
         let workspace_lease_identity =
             crate::workspace::workspace_lease_identity(config.ssh.as_ref(), &config.workspace_cwd);
         let backend = crate::sandbox::select_execution_backend(
