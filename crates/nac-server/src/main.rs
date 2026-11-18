@@ -1254,7 +1254,7 @@ mod tests {
     }
 
     #[test]
-    fn managed_worker_ignores_invalid_ambient_model_config() {
+    fn retired_ambient_model_config_is_ignored() {
         let _guard = CONFIG_ENV_LOCK.lock().unwrap();
         let original_nac_home = std::env::var_os("NAC_HOME");
         let root = std::env::temp_dir().join(format!(
@@ -1288,7 +1288,11 @@ thread_timeout_secs = 7200
             Some(std::path::Path::new("worker-store.db"))
         );
         assert_eq!(config.worker.thread_timeout_secs, Some(7_200));
-        assert!(runtime::NacConfig::load_from_cwd(&root).is_err());
+        let direct = runtime::NacConfig::load_from_cwd(&root).unwrap();
+        assert_eq!(
+            direct.storage.store_path.as_deref(),
+            Some(std::path::Path::new("worker-store.db"))
+        );
 
         unsafe {
             match original_nac_home {

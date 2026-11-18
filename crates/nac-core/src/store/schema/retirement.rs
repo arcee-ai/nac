@@ -118,7 +118,7 @@ pub(super) fn doomed_sessions(conn: &Connection) -> Result<BTreeSet<String>> {
             }
         }
         if let Some(root) = roots.get(id) {
-            if root == id || !seen.contains(root.as_str()) {
+            if root == id || root != cursor {
                 anyhow::bail!("session {id} has a contradictory ownership root");
             }
         }

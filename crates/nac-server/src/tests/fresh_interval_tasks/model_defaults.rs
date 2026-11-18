@@ -102,7 +102,26 @@ async fn reservation(
         .unwrap();
     let destination = FreshTaskDestination {
         project_id: project.clone(),
-        model_selection: None,
+        model_selection: Some(store::TaskModelSelection {
+            backend: "openai-responses".into(),
+            model: if explicit { "gpt-5.1" } else { "gpt-5.2" }.into(),
+            base_url: "http://127.0.0.1:9/v1".into(),
+            allow_insecure_http: false,
+            api_key_env: Some(
+                if missing_credential {
+                    "NAC_TEST_FRESH_MISSING_CREDENTIAL"
+                } else {
+                    "OPENAI_API_KEY"
+                }
+                .into(),
+            ),
+            reasoning_effort: Some(if explicit { "low" } else { "high" }.into()),
+            extra_headers: Some(BTreeMap::from([(
+                "X-Fixture-Model".into(),
+                "original".into(),
+            )])),
+            orchestrator_compaction_threshold: None,
+        }),
         pinned_commit: None,
         default_ref: git_project.then(|| "refs/heads/dev".into()),
         model: explicit.then(|| "gpt-5.1".into()),
@@ -184,7 +203,7 @@ async fn frozen_model_defaults_and_explicit_choices_survive_project_changes_for_
                 assert_eq!(snapshot.base_url, "http://127.0.0.1:9/v1");
                 assert_eq!(snapshot.api_key_env.as_deref(), Some("OPENAI_API_KEY"));
                 assert_eq!(snapshot.extra_headers.get("X-Fixture-Model").map(String::as_str), Some("original"));
-                assert!(snapshot.orchestrator_compaction_threshold.is_some_and(|threshold| threshold > 1), "absent frozen compaction default must not inherit the new preset's explicit threshold");
+                assert_ne!(snapshot.orchestrator_compaction_threshold, Some(1), "absent selected threshold must not inherit the new preset's explicit threshold");
                 assert_eq!(snapshot.behavior, sessions::SessionBehavior::Direct);
                 let published = store::read_fresh_heartbeat_launch(&manager.inner.store_path, &original.occurrence_id).unwrap().unwrap();
                 assert_eq!(published.model_defaults(), prepared.model_defaults());
@@ -255,5 +274,38 @@ async fn changed_project_defaults_do_not_bypass_current_policy_or_frozen_credent
         if let Err(panic) = primary {
             std::panic::resume_unwind(panic);
         }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn legacy_reserved_task_without_selection_cannot_launch() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("legacy_fresh_reservation")
+        .canonicalize()
+        .unwrap();
+    let home = root.join("nac-home");
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::write(
+        home.join("config.toml"),
+        "[[permissions.rules]]\naction='*'\nresource='*'\neffect='allow'\n",
+    )
+    .unwrap();
+    let _env = ScopedModelEnv::isolated(&home, Some("fixture-key"));
+    let manager = test_manager(&root);
+    let primary = catch_fixture_panic(async {
+        let prepared = reservation(&root, &manager, false, false, false).await;
+        let occurrence = prepared.receipt().occurrence_id.clone();
+        let conn = rusqlite::Connection::open(&manager.inner.store_path).unwrap();
+        conn.execute("UPDATE heartbeat_task_launches SET launch_json=json_remove(launch_json, '$.receipt.destination.model_selection', '$.receipt.request.model_selection') WHERE occurrence_id=?1", [&occurrence]).unwrap();
+        drop(conn);
+        let legacy = store::read_fresh_heartbeat_launch(&manager.inner.store_path, &occurrence).unwrap().unwrap();
+        let error = TaskLaunchApplication::new(&manager).prepare(legacy).await.unwrap_err();
+        assert!(format!("{error:#}").contains("predates explicit model selection"), "{error:#}");
+        assert!(sessions::list_sessions(&manager.inner.store_path).unwrap().is_empty());
+        assert!(store::read_fresh_heartbeat_launch(&manager.inner.store_path, &occurrence).unwrap().is_some());
+    }).await;
+    retire(manager).await;
+    if let Err(panic) = primary {
+        std::panic::resume_unwind(panic);
     }
 }

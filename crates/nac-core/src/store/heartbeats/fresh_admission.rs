@@ -85,13 +85,15 @@ pub fn reserve_fresh_heartbeat_launch(path:&Path,occurrence_id:&str,expected_rev
     let current=current_project_binding(&tx,&destination.project_id);
     let reason=if !current.as_ref().is_ok_and(|current|current.same_fresh_project_target(&schedule.binding)) {
         Some("The saved project is missing or its Local destination binding changed.")
+    } else if destination.model_selection.is_none() {
+        Some("This schedule predates explicit model selection. Create a new schedule with a selected model.")
     } else if schedule.starts>=schedule.spec.max_occurrences {
         Some("The fresh schedule occurrence allowance is exhausted.")
     } else if schedule.spec.token_allowance.is_some_and(|limit|schedule.tokens_used>=limit || schedule.usage_unknown) {
         Some("The fresh schedule usage allowance is exhausted or unknown.")
     } else {None};
     if let Some(reason)=reason {execution::suspend(&tx,&schedule.schedule_id,reason,now_ms)?;tx.commit()?;return Ok(None);}
-    let current=current?;
+    current?;
     if !execution::admission_capacity(&tx,&schedule.schedule_id,now_ms)? {return Ok(None);}
     let host_limit:i64=tx.query_row("SELECT retained_limit FROM heartbeat_retained_allowance WHERE singleton=1",[],|row|row.get(0))?;
     let (host_count,schedule_count):(i64,i64)=tx.query_row("SELECT count(*),coalesce(sum(schedule_id=?1),0) FROM heartbeat_task_launches",[&schedule.schedule_id],|row|Ok((row.get(0)?,row.get(1)?)))?;
@@ -109,11 +111,9 @@ pub fn reserve_fresh_heartbeat_launch(path:&Path,occurrence_id:&str,expected_rev
     request.validate()?;
     let occupied:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM native_task_launches WHERE request_id=?1 UNION ALL SELECT 1 FROM task_launches WHERE request_id=?1)",[&request.request_id],|row|row.get(0))?;
     ensure!(!occupied,"conflict: scheduled launch identity already belongs to another launch request");
-    let model_defaults=if destination.model_selection.is_some() { None } else { current.model_configuration_id.as_deref().map(|id| {
-        tx.query_row(&format!("SELECT {} FROM model_configurations c WHERE c.config_id=?1",super::super::model_configurations::model_configuration_columns("c")),[id],|row|super::super::model_configurations::row_to_record_at(row,0)).optional()?.context("saved destination model configuration is unavailable")
-    }).transpose()? };
+    let model_defaults=None;
     let mut binding=schedule.binding.clone();
-    binding.model_configuration_id=if destination.model_selection.is_some() { None } else { current.model_configuration_id };
+    binding.model_configuration_id=None;
     let receipt=FreshTaskLaunchReceipt {
         occurrence_id:pending.occurrence_id.clone(),schedule_id:schedule.schedule_id.clone(),request,
         destination:destination.clone(),binding,session_id:uuid::Uuid::new_v4().to_string(),

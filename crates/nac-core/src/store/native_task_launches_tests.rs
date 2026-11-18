@@ -643,7 +643,16 @@ fn native_and_scheduled_reservations_reject_shared_request_identity_in_both_orde
                 &path,
                 &FreshTaskDestination {
                     project_id: "p".into(),
-                    model_selection: None,
+                    model_selection: Some(TaskModelSelection {
+                        backend: "openai-responses".into(),
+                        model: "fixture-model".into(),
+                        base_url: "https://fixture.invalid/v1".into(),
+                        allow_insecure_http: false,
+                        api_key_env: None,
+                        reasoning_effort: None,
+                        extra_headers: None,
+                        orchestrator_compaction_threshold: None,
+                    }),
                     pinned_commit: None,
                     default_ref: None,
                     model: None,

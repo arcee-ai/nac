@@ -1,9 +1,8 @@
 use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use nac_core::{
     light_model::{LightModelError, LightModelSettings},
-    model_configurations::ModelConfigurationRecord,
     projects,
     runtime::{self, NacConfig, OptionalModelOption, RunOptions, StoreOptions},
     session_service::{SessionFrontendSnapshot, SessionService},
@@ -55,46 +54,6 @@ fn apply_task_model_selection(
         .orchestrator_compaction_threshold
         .map(Field::Set)
         .unwrap_or(Field::Clear);
-}
-
-fn inherit_project_field<T>(field: &mut Field<T>, inherited: Field<T>) {
-    if matches!(field, Field::Unchanged) {
-        *field = inherited;
-    }
-}
-
-fn apply_project_model_defaults(
-    request: &mut SessionCreationCommand,
-    defaults: ModelConfigurationRecord,
-) {
-    inherit_project_field(&mut request.model, Field::Set(defaults.model));
-    inherit_project_field(&mut request.base_url, Field::Set(defaults.base_url));
-    inherit_project_field(
-        &mut request.allow_insecure_http,
-        Field::Set(defaults.allow_insecure_http),
-    );
-    inherit_project_field(&mut request.backend, Field::Set(defaults.backend));
-    inherit_project_field(
-        &mut request.reasoning_effort,
-        defaults
-            .reasoning_effort
-            .map(Field::Set)
-            .unwrap_or(Field::Clear),
-    );
-    inherit_project_field(
-        &mut request.api_key_env,
-        defaults.api_key_env.map(Field::Set).unwrap_or(Field::Clear),
-    );
-    inherit_project_field(
-        &mut request.extra_headers,
-        Field::Set(defaults.extra_headers),
-    );
-    if let Some(threshold) = defaults.orchestrator_compaction_threshold {
-        inherit_project_field(
-            &mut request.orchestrator_compaction_threshold,
-            Field::Set(threshold),
-        );
-    }
 }
 
 fn newest_primary_project_session_id(
@@ -255,12 +214,10 @@ impl<'a> SessionCreationApplication<'a> {
                 .unwrap_or(Field::Unchanged),
             ..SessionCreationCommand::default()
         };
-        if let Some(selected) = &destination.model_selection {
-            apply_task_model_selection(&mut request, selected);
-        }
-        if let Some(defaults) = scheduled.model_defaults() {
-            apply_project_model_defaults(&mut request, defaults.clone());
-        }
+        let selected = destination.model_selection.as_ref().ok_or_else(|| {
+            anyhow!("scheduled task predates explicit model selection; create a new schedule with a selected model")
+        })?;
+        apply_task_model_selection(&mut request, selected);
         self.create_prepared_session(request, retained, None, Some(scheduled))
             .await
     }
@@ -464,53 +421,6 @@ impl<'a> SessionCreationApplication<'a> {
                 _ => error,
             }
         })?;
-        if let Some(scheduled) = scheduled
-            .as_ref()
-            .filter(|scheduled| scheduled.model_defaults().is_none())
-        {
-            let pin = async {
-                let snapshot = prepared
-                    .snapshot()
-                    .ok_or_else(|| anyhow!("scheduled prepared metadata is unavailable"))?;
-                let defaults = ModelConfigurationRecord {
-                    config_id: format!("scheduled-defaults:{}", scheduled.receipt().occurrence_id),
-                    name: "Resolved destination defaults".into(),
-                    backend: snapshot.backend.as_str().into(),
-                    model: snapshot.model.clone(),
-                    base_url: snapshot.base_url.clone(),
-                    allow_insecure_http: snapshot.allow_insecure_http,
-                    api_key_env: snapshot.api_key_env.clone(),
-                    reasoning_effort: snapshot
-                        .reasoning_effort
-                        .map(|effort| effort.as_str().into()),
-                    extra_headers: snapshot.extra_headers.clone(),
-                    orchestrator_compaction_threshold: snapshot.orchestrator_compaction_threshold,
-                    initial_prompt: None,
-                    light_model: snapshot.light_model.clone(),
-                    created_at: snapshot.created_at.clone(),
-                    updated_at: snapshot.updated_at.clone(),
-                };
-                let path = self.manager.inner.store_path.clone();
-                let occurrence = scheduled.receipt().occurrence_id.clone();
-                nac_core::store::spawn_blocking_store_caller(move || {
-                    nac_core::store::pin_fresh_heartbeat_model_defaults(
-                        &path,
-                        &occurrence,
-                        defaults,
-                    )
-                })
-                .await??;
-                Ok::<_, anyhow::Error>(())
-            }
-            .await;
-            if let Err(error) = pin {
-                prepared
-                    .rollback()
-                    .await
-                    .context("scheduled preparation rollback failed")?;
-                return Err(error);
-            }
-        }
         if let Err(error) = self
             .manager
             .attach_managed_command_environment(prepared.run_config_mut())

@@ -123,7 +123,7 @@ async fn seed_occurrence(
     std::fs::write(cwd.join("untracked"), "untracked source").unwrap();
     let destination = FreshTaskDestination {
         project_id: request.project_id.clone(),
-        model_selection: None,
+        model_selection: Some(selected_model(endpoint)),
         pinned_commit: None,
         default_ref: Some("refs/heads/dev".into()),
         model: None,

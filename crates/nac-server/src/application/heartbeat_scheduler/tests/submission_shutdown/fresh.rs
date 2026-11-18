@@ -96,6 +96,7 @@ async fn observe_fresh(boundary: Boundary, git: bool) -> Result<()> {
     })
     .await?;
     let setup_path = path.clone();
+    let fixture_url = url.clone();
     store::spawn_blocking_store_caller(move || {
         store::insert_model_configuration(
             &setup_path,
@@ -104,7 +105,7 @@ async fn observe_fresh(boundary: Boundary, git: bool) -> Result<()> {
                 name: "Fresh Stop fixture".into(),
                 backend: "openai-responses".into(),
                 model: "gpt-5.2".into(),
-                base_url: url,
+                base_url: fixture_url,
                 allow_insecure_http: false,
                 api_key_env: Some("OPENAI_API_KEY".into()),
                 reasoning_effort: None,
@@ -133,7 +134,16 @@ async fn observe_fresh(boundary: Boundary, git: bool) -> Result<()> {
     let pending = store::spawn_blocking_store_caller(move || -> Result<_> {
         let destination = FreshTaskDestination {
             project_id: project.project_id.clone(),
-            model_selection: None,
+            model_selection: Some(store::TaskModelSelection {
+                backend: "openai-responses".into(),
+                model: "gpt-5.2".into(),
+                base_url: url,
+                allow_insecure_http: false,
+                api_key_env: Some("OPENAI_API_KEY".into()),
+                reasoning_effort: None,
+                extra_headers: None,
+                orchestrator_compaction_threshold: None,
+            }),
             pinned_commit: None,
             default_ref: git.then(|| "refs/heads/dev".into()),
             model: None,

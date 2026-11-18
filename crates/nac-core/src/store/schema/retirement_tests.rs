@@ -45,6 +45,7 @@ fn malformed_ownership_and_unknown_behavior_fail_closed() {
         "INSERT INTO traditional_children VALUES('managed','direct','direct')",
         "INSERT INTO traditional_children VALUES('direct','direct-child','direct-child')",
         "UPDATE traditional_children SET root_session_id='direct' WHERE child_session_id='child'",
+        "UPDATE traditional_children SET root_session_id='child' WHERE child_session_id='nested'",
     ] {
         let conn = fixture();
         conn.execute_batch(change).unwrap();
@@ -463,6 +464,47 @@ fn previous_schema_with_retired(path: &Path, cleanup: bool) {
     if cleanup {
         conn.execute("INSERT INTO terminal_remote_cleanups(session_id,pidfile,created_at) VALUES('retired','/remote/pid','now')", []).unwrap();
     }
+}
+
+#[test]
+fn contradictory_intermediate_root_refuses_upgrade_without_mutation() {
+    let root = std::env::temp_dir().join(format!("nac-retirement-root-{}", uuid::Uuid::new_v4()));
+    let path = root.join("store.db");
+    let conn = create_v52_store(&path);
+    for id in ["retired", "child", "nested"] {
+        insert_v52_session(&conn, id);
+    }
+    conn.execute_batch(
+        "UPDATE sessions SET behavior='direct' WHERE session_id IN ('child','nested');
+         INSERT INTO traditional_children(child_session_id,parent_session_id,root_session_id,profile,description,nesting_depth,status,generation,created_at,updated_at)
+         VALUES('child','retired','retired','general','child',1,'idle',0,'now','now'),
+               ('nested','child','child','general','nested',1,'idle',0,'now','now');",
+    ).unwrap();
+    let before: i64 = conn
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .unwrap();
+    drop(conn);
+    let error = crate::store::initialize(&path).unwrap_err();
+    assert!(format!("{error:#}").contains("contradictory ownership root"));
+    let conn = Connection::open(&path).unwrap();
+    assert_eq!(
+        conn.query_row::<i64, _, _>("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap(),
+        before
+    );
+    assert_eq!(
+        conn.query_row::<i64, _, _>("SELECT count(*) FROM sessions", [], |row| row.get(0))
+            .unwrap(),
+        3
+    );
+    assert_eq!(
+        conn.query_row::<i64, _, _>("SELECT count(*) FROM traditional_children", [], |row| row
+            .get(0))
+            .unwrap(),
+        2
+    );
+    drop(conn);
+    std::fs::remove_dir_all(root).unwrap();
 }
 
 #[test]

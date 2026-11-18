@@ -221,10 +221,13 @@ async fn attachment_recovery_child() {
             "retained human evidence",
         )
         .unwrap();
-        // A's persisted snapshot is frozen. B inherits the next intentional
-        // occurrence's updated dummy selector through the normal config API.
+        // A's persisted snapshot is frozen. B explicitly selects its own
+        // dummy endpoint and credential for the next schedule.
         let write_path = path.clone();
-        let destination = published.destination.clone();
+        let mut destination = published.destination.clone();
+        let selected = destination.model_selection.as_mut().unwrap();
+        selected.base_url = endpoint.clone();
+        selected.api_key_env = Some("SECOND_API_KEY".into());
         let cwd = published.binding.cwd.clone();
         let owner = format!("project:{}", published.destination.project_id);
         let write_owner = owner.clone();

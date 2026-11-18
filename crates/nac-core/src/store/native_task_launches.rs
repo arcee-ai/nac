@@ -2,6 +2,17 @@
 use super::*;
 use crate::task_launch_control::{NativeTaskLaunch, NativeTaskRequest};
 
+type SessionModelRow = (
+    Option<String>,
+    String,
+    String,
+    bool,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<u64>,
+);
+
 fn load(conn: &Connection, request_id: &str) -> Result<Option<NativeTaskLaunch>> {
     conn.query_row("SELECT request_json,caller_session_id,project_id,source_cwd,session_id,retained,phase,CASE WHEN phase='ready' AND EXISTS(SELECT 1 FROM session_inbox i WHERE i.id=native_task_launches.first_input_id AND i.session_id=native_task_launches.session_id AND i.status='delivered') THEN NULL ELSE error END,first_input_id,created_at,updated_at
         FROM native_task_launches WHERE request_id=?1", params![request_id], |row| {
@@ -122,7 +133,7 @@ pub fn reserve_native_task_launch(path: &Path, caller: &str, project_id: &str, s
         anyhow::ensure!(request.project_id.as_deref() == Some(project_id), "conflict: explicit destination changed");
     }
     let (backend, model, base_url, allow_insecure_http, api_key_env, reasoning_effort, headers, threshold):
-        (Option<String>, String, String, bool, Option<String>, Option<String>, Option<String>, Option<u64>) =
+        SessionModelRow =
         tx.query_row("SELECT backend,model,base_url,allow_insecure_http,api_key_env,reasoning_effort,extra_headers_json,orchestrator_compaction_threshold FROM sessions WHERE session_id=?1", params![caller], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?,row.get(6)?,row.get(7)?)))?;
     let backend = backend.ok_or_else(|| anyhow!("stored session has no backend; session settings repair required: select an explicit backend"))?;
     let selection = TaskModelSelection {

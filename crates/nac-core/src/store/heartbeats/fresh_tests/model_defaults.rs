@@ -45,24 +45,35 @@ fn configured() -> Fixture {
 }
 
 #[test]
-fn new_occurrence_uses_current_project_default_after_pointer_change() {
-    let f = configured();
-    f.create();
+fn legacy_schedule_without_selection_suspends_without_reserving_or_guessing() {
+    let mut f = configured();
+    f.binding.fresh_task.as_mut().unwrap().model_selection = None;
+    let schedule = f.create();
     select(&f, Some("model-b"));
     let pending = f.pending();
-    let prepared =
-        reserve_fresh_heartbeat_launch(&f.path, &pending.occurrence_id, pending.revision, 61_000)
-            .unwrap()
-            .expect("changing only project model defaults must not suspend a fresh schedule");
-    assert_eq!(prepared.model_defaults().unwrap().model, "model-b");
-    assert_eq!(
-        prepared.receipt().binding.model_configuration_id.as_deref(),
-        Some("model-b")
-    );
-    assert_eq!(
-        list_heartbeats(&f.path, None).unwrap()[0].state,
-        HeartbeatState::Active
-    );
+    assert!(reserve_fresh_heartbeat_launch(
+        &f.path,
+        &pending.occurrence_id,
+        pending.revision,
+        61_000
+    )
+    .unwrap()
+    .is_none());
+    assert!(read_fresh_heartbeat_launch(&f.path, &pending.occurrence_id)
+        .unwrap()
+        .is_none());
+    initialize(&f.path).unwrap();
+    let reopened = read_heartbeat(&f.path, "project:project", &schedule.schedule_id).unwrap();
+    assert_eq!(reopened.state, HeartbeatState::Suspended);
+    assert_eq!(reopened.starts, 0);
+    assert!(reopened
+        .reason
+        .as_deref()
+        .unwrap_or_default()
+        .contains("explicit model selection"));
+    assert!(fresh_heartbeat_inventory(&f.path, "project", None)
+        .unwrap()
+        .is_empty());
 }
 
 #[test]
@@ -86,11 +97,10 @@ fn absent_defaults_and_explicit_choices_do_not_change_project_identity() {
         )
         .unwrap()
         .unwrap();
+        assert!(prepared.model_defaults().is_none());
         assert_eq!(
-            prepared
-                .model_defaults()
-                .map(|record| record.model.as_str()),
-            after
+            prepared.receipt().request.model_selection,
+            destination.model_selection
         );
         assert_eq!(prepared.receipt().destination, destination);
         let saved = read_heartbeat(&f.path, "project:project", &schedule.schedule_id).unwrap();
@@ -170,7 +180,14 @@ fn publish(
 ) -> crate::sessions::SessionSnapshot {
     pin_fresh_heartbeat_workspace_mode(&f.path, &pending.occurrence_id, true).unwrap();
     let mut snapshot = prepared_shared_snapshot(f, prepared);
-    snapshot.model = prepared.model_defaults().unwrap().model.clone();
+    snapshot.model = prepared
+        .receipt()
+        .request
+        .model_selection
+        .as_ref()
+        .unwrap()
+        .model
+        .clone();
     let mut conn = open_runtime_connection(&f.path).unwrap();
     let tx = conn.transaction().unwrap();
     crate::sessions::insert_new_session_in_transaction(&tx, &f.path, &snapshot).unwrap();
