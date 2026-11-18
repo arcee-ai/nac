@@ -105,6 +105,7 @@ pub(in crate::agent) struct CompactionState {
     store_path: PathBuf,
     session_id: String,
     threshold_tokens: Option<u64>,
+    automatic_threshold: bool,
     policy: CompactionPolicy,
     active_checkpoint: Option<OrchestratorCompactionCheckpoint>,
     context_sample: Option<ContextSample>,
@@ -123,12 +124,29 @@ impl CompactionState {
             store_path,
             session_id,
             threshold_tokens,
+            automatic_threshold: false,
             policy,
             active_checkpoint: None,
             context_sample: None,
             selection_sources: BTreeMap::new(),
             verified_prefix: None,
         }
+    }
+
+    pub fn set_automatic_threshold(&mut self, threshold: Option<u64>) {
+        self.automatic_threshold = true;
+        self.threshold_tokens = threshold;
+    }
+
+    pub fn refresh_automatic_threshold(&mut self, threshold: Option<u64>) {
+        if self.automatic_threshold {
+            self.threshold_tokens = threshold;
+        }
+    }
+
+    #[cfg(test)]
+    pub fn threshold_for_test(&self) -> Option<u64> {
+        self.threshold_tokens
     }
 
     pub fn restore_newest_valid_checkpoint(&mut self, messages: &[Message]) -> Result<()> {

@@ -224,6 +224,24 @@ pub(super) fn stored_credential_present() -> bool {
     matches!(read_auth_file_optional_for_status(), Ok(Some(_)))
 }
 
+pub(super) fn stored_account_for_home(home: &Path) -> Option<String> {
+    read_auth_file_optional_from_path_with_policy(&home.join("auth.json"), true)
+        .ok()
+        .flatten()
+        .map(|auth| auth.account_id)
+}
+
+pub(super) fn account_fingerprint(account: &str) -> String {
+    format!("{:x}", Sha256::digest(account.as_bytes()))
+}
+
+fn ensure_account_binding(expected: Option<&str>, account: &str) -> Result<()> {
+    if expected != Some(account_fingerprint(account).as_str()) {
+        return Err(anyhow!("Codex account changed since model settings were resolved; retry with the current account"));
+    }
+    Ok(())
+}
+
 /// Exact stored tokens for outbound-text redaction, including expired values.
 /// Reuse secure status loading so foreign-provider files remain absent while
 /// malformed or unsafe Codex files fail closed. This never refreshes credentials.
@@ -352,6 +370,8 @@ async fn store_tokens(tokens: TokenResponse) -> Result<ManagedAuthSnapshot> {
     let guard = lock_auth_store().await?;
     write_auth_file(&auth)?;
     drop(guard);
+    #[cfg(not(test))]
+    super::catalog::codex_refresh_after_login();
     Ok(snapshot_from_stored(Some(auth), auth_file_path()?))
 }
 
@@ -512,6 +532,7 @@ pub async fn send_responses(
     messages: Vec<Message>,
     tools: Vec<ToolDefinition>,
     thinking_levels: &ThinkingLevelMap,
+    account_binding: Option<&str>,
     prompt_cache_key: Option<&str>,
     on_delta: DeltaSink<'_>,
 ) -> Result<ModelTurnResponse> {
@@ -527,6 +548,7 @@ pub async fn send_responses(
     let auth = fresh_auth(client)
         .await
         .map_err(|error| anyhow::Error::new(codex_auth_run_failure(error)))?;
+    ensure_account_binding(account_binding, &auth.account_id)?;
 
     match post_codex_json_with_retry(client, &url, &request, &auth, prompt_cache_key, on_delta)
         .await
@@ -536,6 +558,7 @@ pub async fn send_responses(
             let refreshed = force_refresh_auth(client, &auth.access)
                 .await
                 .map_err(|error| anyhow::Error::new(codex_auth_run_failure(error)))?;
+            ensure_account_binding(account_binding, &refreshed.account_id)?;
             let value = post_codex_json_with_retry(
                 client,
                 &url,
@@ -550,6 +573,46 @@ pub async fn send_responses(
         }
         Err(error) => Err(anyhow::Error::new(error.into_run_failure())),
     }
+}
+
+/// Exercise the production Codex request mapper and HTTP writer against a
+/// scripted endpoint without relaxing canonical endpoint admission in builds.
+#[cfg(test)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "mirrors the production adapter test seam"
+)]
+pub(super) async fn send_test_responses(
+    client: &Client,
+    url: &str,
+    model: &str,
+    reasoning_effort: Option<ReasoningEffort>,
+    messages: Vec<Message>,
+    tools: Vec<ToolDefinition>,
+    thinking_levels: &ThinkingLevelMap,
+    prompt_cache_key: Option<&str>,
+    on_delta: DeltaSink<'_>,
+) -> Result<ModelTurnResponse> {
+    let request = codex_responses_request(
+        model,
+        reasoning_effort,
+        &messages,
+        &tools,
+        thinking_levels,
+        prompt_cache_key,
+    );
+    let auth = StoredCodexAuth {
+        auth_type: "chatgpt-codex".into(),
+        access: "test-access".into(),
+        refresh: "test-refresh".into(),
+        expires_at_ms: u64::MAX,
+        account_id: "test-account".into(),
+    };
+    let value =
+        post_codex_json_with_retry(client, url, &request, &auth, prompt_cache_key, on_delta)
+            .await
+            .map_err(|error| anyhow::Error::new(error.into_run_failure()))?;
+    parse_openai_responses_response(&value, url)
 }
 
 async fn request_device_code(client: &Client) -> Result<DeviceCode> {

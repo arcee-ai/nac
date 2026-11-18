@@ -484,9 +484,13 @@ pub(super) fn merge_anthropic_overlay(
             }
             if let Some(context_window) = entry.context_window {
                 existing.context_window = context_window;
+                existing.max_input_tokens = Some(context_window);
+                existing.input_origin = super::LimitOrigin::Observed;
+                existing.context_origin = super::LimitOrigin::Estimated;
             }
             if let Some(max_tokens) = entry.max_tokens {
                 existing.max_tokens = max_tokens;
+                existing.output_origin = super::LimitOrigin::Observed;
             }
             existing.reasoning = entry.reasoning;
             existing.thinking_level_map = thinking_level_map.clone();
@@ -504,6 +508,13 @@ pub(super) fn merge_anthropic_overlay(
                 display_name: entry.display_name.clone(),
                 context_window: entry.context_window.unwrap_or(FALLBACK_CONTEXT_WINDOW),
                 max_tokens: entry.max_tokens.unwrap_or(FALLBACK_MAX_TOKENS),
+                max_input_tokens: entry.context_window,
+                context_origin: Some(super::LimitOrigin::Estimated),
+                output_origin: Some(if entry.max_tokens.is_some() {
+                    super::LimitOrigin::Observed
+                } else {
+                    super::LimitOrigin::Estimated
+                }),
                 cost: super::ModelCostRates::default(),
                 reasoning: entry.reasoning,
                 image_input: false,
@@ -513,13 +524,16 @@ pub(super) fn merge_anthropic_overlay(
                 context_management: entry.context_management,
                 clear_thinking: entry.clear_thinking,
             };
-            let metadata = hydrate_entry(
+            let mut metadata = hydrate_entry(
                 BackendKind::AnthropicMessages,
                 entry.id.clone(),
                 generated,
                 &compat,
                 ModelSource::Overlay,
             );
+            if metadata.max_input_tokens.is_some() {
+                metadata.input_origin = super::LimitOrigin::Observed;
+            }
             provider_catalog.models.insert(entry.id.clone(), metadata);
         }
 
@@ -538,9 +552,13 @@ pub(super) fn merge_anthropic_overlay(
                     }
                     if let Some(context_window) = entry.context_window {
                         snapshot.context_window = context_window;
+                        snapshot.max_input_tokens = Some(context_window);
+                        snapshot.input_origin = super::LimitOrigin::Observed;
+                        snapshot.context_origin = super::LimitOrigin::Estimated;
                     }
                     if let Some(max_tokens) = entry.max_tokens {
                         snapshot.max_tokens = max_tokens;
+                        snapshot.output_origin = super::LimitOrigin::Observed;
                     }
                     snapshot.reasoning = entry.reasoning;
                     snapshot.thinking_level_map = thinking_level_map.clone();

@@ -110,6 +110,7 @@ function initialFromConfig(config: RawSessionConfig): SettingsInitialValues {
     extra_headers: headers.headers,
     extra_headers_invalid: headers.invalid,
     orchestrator_compaction_threshold: config.orchestrator_compaction_threshold,
+    automatic_compaction: config.automatic_compaction ?? false,
   };
 }
 
@@ -278,7 +279,7 @@ function SettingsForm({
       : "",
   );
   // A persisted null is disabled, not an invitation to change it on mount.
-  const compactionAutoRef = useRef(false);
+  const compactionAutoRef = useRef(initial.automatic_compaction ?? false);
   // An explicitly selected saved preset owns even a disabled (`null`)
   // compaction policy. Keep an empty explicit value from being replaced by
   // the catalog's automatic 70% suggestion until the user edits it.
@@ -363,11 +364,11 @@ function SettingsForm({
 
   const compactionPlaceholder = useMemo(() => {
     const resolved = resolveCatalogModel(catalog.data, backend, model);
-    const contextWindow = resolved.contextWindow;
-    return contextWindow ? String(Math.round(contextWindow * 0.7)) : "auto";
+    const threshold = resolved.automaticThreshold;
+    return threshold != null ? String(threshold) : "auto";
   }, [catalog.data, backend, model]);
 
-  // Auto-suggest 70% of the selected model's context window as the compaction
+  // Auto-suggest 70% of the selected model's effective input budget as the compaction
   // threshold. A manually entered value is preserved across model changes —
   // the suggestion only fills the field when it is empty or was itself last
   // auto-suggested.
@@ -443,6 +444,13 @@ function SettingsForm({
         initial,
         allowsCredentiallessSelection,
       );
+      if (initial.automatic_compaction && compactionAutoRef.current) {
+        delete patch.orchestrator_compaction_threshold;
+      } else if (initial.automatic_compaction) {
+        // Editing an automatic value makes it intentional even when the
+        // entered number happens to equal the current suggestion.
+        patch.orchestrator_compaction_threshold = compaction.trim() ? Number(compaction) : null;
+      }
     } catch (validationError) {
       throw new SetupValidation(
         validationError instanceof Error ? validationError.message : String(validationError),
@@ -749,7 +757,7 @@ function SettingsForm({
                 <ConfigRow
                   presentation="form"
                   label="Context Limit"
-                  hint="Context size that triggers compaction. Defaults to 70% of the model's context length."
+                  hint="Context size that triggers compaction. Defaults to 70% of the model's effective input budget, subject to provider limits."
                   control={
                     <div className="flex min-w-0 items-center gap-2">
                       <Input

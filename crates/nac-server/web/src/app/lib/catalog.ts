@@ -66,17 +66,21 @@ export interface ResolvedCatalogModel {
   /** The catalog entry, absent when only the provider defaults matched. */
   model: CatalogModel | null;
   contextWindow: number | null;
+  automaticThreshold: number | null;
   supportedEfforts: ReasoningEffort[];
   /** The numbers come from the provider default, not from a real entry. */
   estimated: boolean;
+  inputOrigin: "observed" | "profile" | "inherited" | "customized" | "estimated" | null;
 }
 
 const EMPTY: ResolvedCatalogModel = {
   provider: null,
   model: null,
   contextWindow: null,
+  automaticThreshold: null,
   supportedEfforts: [],
   estimated: false,
+  inputOrigin: null,
 };
 
 /** Strips a `-YYYYMMDD` snapshot suffix, as `dated_snapshot_family` does. */
@@ -115,20 +119,31 @@ export function resolveCatalogModel(
 
   const entry = findEntry(provider, id);
   if (entry) {
+    const budget = entry.limits?.effective_input_tokens ?? (entry.context_window || null);
     return {
       provider,
       model: entry,
-      contextWindow: entry.context_window || null,
+      contextWindow: budget,
+      automaticThreshold:
+        entry.limits?.automatic_compaction_threshold ?? (budget ? Math.round(budget * 0.7) : null),
       supportedEfforts: entry.supported_efforts,
-      estimated: false,
+      estimated: entry.limits?.input_origin === "estimated",
+      inputOrigin: entry.limits?.input_origin ?? null,
     };
   }
+  const budget =
+    provider.default_limits.limits?.effective_input_tokens ??
+    (provider.default_limits.context_window || null);
   return {
     provider,
     model: null,
-    contextWindow: provider.default_limits.context_window || null,
+    contextWindow: budget,
+    automaticThreshold:
+      provider.default_limits.limits?.automatic_compaction_threshold ??
+      (budget ? Math.round(budget * 0.7) : null),
     supportedEfforts: provider.default_limits.supported_efforts,
     estimated: true,
+    inputOrigin: "estimated",
   };
 }
 
@@ -142,9 +157,19 @@ export function contextShare(used: number | null, resolved: ResolvedCatalogModel
   if (!window || used == null) return null;
   const share = `${Math.round((used / window) * 100)}%`;
   if (resolved.estimated) {
-    return `${share} of ${resolved.provider?.id ?? "the provider"}'s default window. The catalog does not know this model, so the limit is an estimate.`;
+    return resolved.model
+      ? `${share} of the estimated input budget for this model.`
+      : `${share} of ${resolved.provider?.id ?? "the provider"}'s default input budget. The catalog does not know this model, so the limit is an estimate.`;
   }
-  return `${share} of the model's context window`;
+  const source =
+    resolved.inputOrigin === "profile"
+      ? " (provider profile)"
+      : resolved.inputOrigin === "customized"
+        ? " (customized)"
+        : resolved.inputOrigin === "inherited"
+          ? " (inherited metadata)"
+          : "";
+  return `${share} of the model's effective input budget${source}`;
 }
 
 /**

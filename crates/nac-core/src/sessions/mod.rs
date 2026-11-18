@@ -153,6 +153,10 @@ pub struct RawSessionConfig {
     pub light_model: Option<LightModelSettings>,
     #[cfg_attr(feature = "openapi", schema(required))]
     pub orchestrator_compaction_threshold: Option<u64>,
+    /// New sessions may follow the locally resolved model's automatic budget.
+    /// Older sessions retain their saved threshold as an explicit setting.
+    #[serde(default)]
+    pub automatic_compaction: bool,
     pub config_version: i64,
     /// Structural parse failures in the persisted values. These are diagnostics,
     /// not migrations: callers must explicitly PATCH every invalid value.
@@ -229,6 +233,7 @@ pub struct SessionSnapshot {
     /// Absolute compaction threshold captured for this orchestrator session.
     /// `None` disables new checkpoint generation; valid stored checkpoints still project.
     pub orchestrator_compaction_threshold: Option<u64>,
+    pub automatic_compaction: bool,
     /// Monotonic revision for optimistic session-configuration updates.
     pub config_version: i64,
     pub messages: Vec<Message>,
@@ -344,6 +349,8 @@ impl From<anyhow::Error> for SessionPresentationError {
     }
 }
 
+#[cfg(test)]
+mod automatic_compaction_tests;
 #[cfg(test)]
 #[path = "facade_tests.rs"]
 mod tests;

@@ -31,6 +31,7 @@ mod arcee_overlay;
 mod auth_status;
 #[cfg(test)]
 mod auth_status_tests;
+mod codex_overlay;
 mod data;
 mod overlay;
 #[cfg(test)]
@@ -47,12 +48,22 @@ mod user_overrides;
 
 pub use anthropic_overlay::spawn_anthropic_model_refresh;
 pub use arcee_overlay::spawn_arcee_model_refresh;
+pub use codex_overlay::spawn_codex_model_refresh;
+
+#[cfg(not(test))]
+pub(super) fn codex_refresh_after_login() {
+    codex_overlay::request_refresh(true);
+}
+
+pub(super) fn record_codex_discovery(account: &str, body: &str) {
+    codex_overlay::record_discovery(account, body);
+}
 pub use overlay::spawn_overlay_refresh;
 pub use types::{
     ApiKind, AuthStatus, Compat, CompletionsThinkingFormat, CompletionsTokenLimit, CostTier,
-    DefaultLimits, ModelCostRates, ModelEntry, ModelListing, ModelMetadata, ModelSource,
-    ProviderAuth, ProviderConnection, ProviderListing, ThinkingLevelMap, FALLBACK_CONTEXT_WINDOW,
-    FALLBACK_MAX_TOKENS,
+    DefaultLimits, LimitOrigin, ModelCostRates, ModelEntry, ModelListing, ModelMetadata,
+    ModelSource, ProviderAuth, ProviderConnection, ProviderListing, ThinkingLevelMap,
+    FALLBACK_CONTEXT_WINDOW, FALLBACK_MAX_TOKENS,
 };
 
 /// Well-known id of each provider's fallback entry.
@@ -249,6 +260,7 @@ impl ProviderCatalog {
 #[derive(Debug)]
 pub struct ModelCatalog {
     providers: BTreeMap<BackendKind, ProviderCatalog>,
+    codex_account_fingerprint: Option<String>,
 }
 
 impl ModelCatalog {
@@ -278,10 +290,13 @@ impl ModelCatalog {
         let mut warnings = Vec::new();
         data::merge_generated_baseline(&mut catalog);
         if env_layers {
+            catalog.codex_account_fingerprint =
+                home.and_then(codex_overlay::account_fingerprint_for_home);
             if let Some(home) = home {
                 overlay::merge_overlay(&mut catalog, home, &mut warnings);
                 arcee_overlay::merge_arcee_overlay(&mut catalog, home, &mut warnings);
                 anthropic_overlay::merge_anthropic_overlay(&mut catalog, home, &mut warnings);
+                codex_overlay::merge_cache(&mut catalog, home);
                 user_overrides::apply_user_overrides(&mut catalog, home, &mut warnings);
             }
         }
@@ -359,7 +374,11 @@ impl ModelCatalog {
                 ModelSource::Fallback,
             );
         };
-        catalog.resolve_entry(model)
+        let mut resolved = catalog.resolve_entry(model);
+        if provider == BackendKind::ChatGptCodexResponses {
+            resolved.codex_account_fingerprint = self.codex_account_fingerprint.clone();
+        }
+        resolved
     }
 }
 
@@ -377,10 +396,20 @@ static CATALOG: OnceLock<RwLock<ModelCatalog>> = OnceLock::new();
 /// on first use; recovers from lock poisoning (catalog data is immutable
 /// between loads, so a poisoned lock still holds valid data).
 pub(crate) fn current() -> RwLockReadGuard<'static, ModelCatalog> {
-    CATALOG
-        .get_or_init(|| RwLock::new(ModelCatalog::load()))
+    let lock = CATALOG.get_or_init(|| RwLock::new(ModelCatalog::load()));
+    let guard = lock
         .read()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if env_layers_for_global()
+        && guard.codex_account_fingerprint != codex_overlay::current_account_fingerprint()
+    {
+        drop(guard);
+        reload();
+        return lock
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+    }
+    guard
 }
 
 /// Resolve via the process-global catalog. Never fails for unknown models.
@@ -457,6 +486,13 @@ pub fn api_listing() -> ModelListing {
     api_listing_for_invocation("nac-web")
 }
 
+/// Resolve the local planning budget without fetching provider metadata.
+pub fn automatic_compaction_threshold(provider: BackendKind, model: &str) -> Option<u64> {
+    resolve(provider, model)
+        .resolved_limits()
+        .automatic_compaction_threshold
+}
+
 /// Build the model listing while rendering actionable login hints with the
 /// exact executable name the caller is running. Product and protocol identity
 /// remain `nac-web`; only commands intended for copy/paste are invocation-aware.
@@ -499,6 +535,7 @@ pub fn api_listing_for_invocation(invocation_name: &str) -> ModelListing {
                         .default
                         .thinking_level_map
                         .supported_efforts(),
+                    limits: Some(provider_catalog.default.resolved_limits()),
                 },
                 models: provider_catalog
                     .models
@@ -513,6 +550,7 @@ pub fn api_listing_for_invocation(invocation_name: &str) -> ModelListing {
                         reasoning: metadata.reasoning,
                         supported_efforts: metadata.thinking_level_map.supported_efforts(),
                         source: metadata.source,
+                        limits: Some(metadata.resolved_limits()),
                     })
                     .collect(),
             }

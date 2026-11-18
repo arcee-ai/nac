@@ -21,6 +21,7 @@ mod heartbeat;
 mod mcp_refresh;
 #[cfg(test)]
 mod mcp_refresh_tests;
+mod model_refresh;
 pub(crate) mod preview;
 mod prompt_rendering;
 mod questions;
@@ -760,6 +761,7 @@ impl Agent {
         prompt: &str,
         session_run: Option<SessionRunPrompt<'_>>,
     ) -> Result<String> {
+        self.refresh_model_at_operation_boundary();
         if session_run.is_none() {
             self.tool_runtime.heartbeat_human_request = None;
             self.bind_heartbeat_execution(None);

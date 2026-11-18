@@ -7,6 +7,7 @@ export type ScriptedResponse =
       stream?: boolean | "request";
       reasoning?: string;
       failAfterReasoning?: boolean;
+      usage?: { input_tokens: number; output_tokens: number; total_tokens: number };
     }
   | {
       kind: "function_call";
@@ -305,7 +306,10 @@ export class ScriptedProvider {
               item,
             ]
           : [item],
-      usage: { input_tokens: 7, output_tokens: 3, total_tokens: 10 },
+      usage:
+        scripted.kind === "text" && scripted.usage
+          ? scripted.usage
+          : { input_tokens: 7, output_tokens: 3, total_tokens: 10 },
     };
     if (scripted.stream === true) {
       if (!response.headersSent) {

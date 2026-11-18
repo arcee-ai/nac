@@ -22,6 +22,22 @@ use crate::{
     SessionLineageSnapshot, SessionManager, WorkspaceDiffCacheEntry, WORKSPACE_DIFF_MEASURE_BUDGET,
 };
 
+fn project_automatic_compaction(
+    mut config: sessions::RawSessionConfig,
+) -> sessions::RawSessionConfig {
+    if config.automatic_compaction {
+        if let Some(backend) = config
+            .backend
+            .as_deref()
+            .and_then(|value| value.parse().ok())
+        {
+            config.orchestrator_compaction_threshold =
+                nac_core::model::automatic_compaction_threshold(backend, &config.model);
+        }
+    }
+    config
+}
+
 pub(crate) struct CreateInboxItem {
     pub(crate) delivery: InboxDelivery,
     pub(crate) prompt: String,
@@ -274,16 +290,18 @@ impl<'a> SessionStateApplication<'a> {
 
     pub(crate) fn config(&self, session_id: &str) -> Result<sessions::RawSessionConfig> {
         sessions::load_session_config(&self.manager.inner.store_path, session_id)
+            .map(project_automatic_compaction)
     }
 
     pub(crate) async fn config_async(
         &self,
         session_id: &str,
     ) -> Result<sessions::RawSessionConfig> {
-        match self.manager.inner._store_ownership.coordinator() {
+        let config = match self.manager.inner._store_ownership.coordinator() {
             Some(owner) => owner.load_session_config(session_id.to_owned()).await,
-            None => self.config(session_id),
-        }
+            None => sessions::load_session_config(&self.manager.inner.store_path, session_id),
+        }?;
+        Ok(project_automatic_compaction(config))
     }
 
     pub(crate) async fn snapshot(&self, session_id: &str) -> Result<SessionFrontendSnapshot> {

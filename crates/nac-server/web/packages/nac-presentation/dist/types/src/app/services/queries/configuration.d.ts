@@ -260,8 +260,8 @@ export declare function useStoredKeyProviderModels(backend: BackendKind, apiKeyE
  */
 /**
  * The server's model catalog: context windows, prices and the efforts each
- * model accepts. It only changes when the server reloads it, and a failure is
- * never fatal — every consumer falls back to showing the raw numbers.
+ * model accepts. Poll while mounted so background catalog reloads reach a
+ * long-lived client; a failure is never fatal.
  */
 export declare function useModelCatalog(enabled?: boolean): import("@tanstack/react-query").UseQueryResult<NoInfer<{
     catalog_version: number;

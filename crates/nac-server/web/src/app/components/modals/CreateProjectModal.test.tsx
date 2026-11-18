@@ -42,6 +42,23 @@ vi.mock("@/app/components/modals/ConfigurationsPanel", () => {
       children?: import("react").ReactNode;
     }) => (
       <section>
+        <button
+          type="button"
+          onClick={() =>
+            onChange({
+              kind: "resolved",
+              backend: "chatgpt-codex-responses",
+              model: "gpt-6.1-sol",
+              base_url: "https://chatgpt.com/backend-api",
+              allow_insecure_http: false,
+              api_key_env: null,
+              reasoning_effort: "medium",
+              extra_headers: {},
+            })
+          }
+        >
+          Select Codex model
+        </button>
         <button type="button" onClick={() => onChange(selection(222, null))}>
           Select preset threshold 222
         </button>
@@ -188,6 +205,41 @@ function renderModal(orchestration = true) {
   );
   return { client, view };
 }
+
+it("leaves an untouched Codex suggestion automatic when creating the first chat", async () => {
+  vi.mocked(api.getModelCatalog).mockResolvedValue({
+    catalog_version: 1,
+    providers: [
+      {
+        id: "chatgpt-codex-responses",
+        default_limits: {
+          context_window: 500000,
+          max_tokens: 16000,
+          supported_efforts: [],
+          limits: { effective_input_tokens: 475000, automatic_compaction_threshold: 332500 },
+        },
+        models: [],
+      },
+    ],
+  } as unknown as ModelCatalog);
+  const { client, view } = renderModal();
+  try {
+    fireEvent.click(await screen.findByRole("button", { name: "Select Codex model" }));
+    await waitFor(() =>
+      expect(document.querySelector<HTMLInputElement>('input[inputmode="numeric"]')?.value).toBe(
+        "332500",
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Create Project" }));
+    await waitFor(() => expect(api.createSession).toHaveBeenCalled());
+    expect(vi.mocked(api.createSession).mock.calls[0]?.[0]).not.toHaveProperty(
+      "orchestrator_compaction_threshold",
+    );
+  } finally {
+    view.unmount();
+    client.clear();
+  }
+});
 
 it.each([
   ["numeric", "Select preset threshold 222", 222],

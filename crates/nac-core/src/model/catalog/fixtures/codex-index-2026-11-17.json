@@ -1,0 +1,32 @@
+{
+  "capture_date": "2026-11-17",
+  "client_version": "0.200.0",
+  "source": "Authenticated Codex model index; selected public model records only, with account availability and unrelated fields omitted",
+  "semantics_reference": "https://github.com/openai/codex/blob/8dcd56d0cb84fa8220c6056d3ecdb861b7b7b61c/codex-rs/protocol/src/openai_models.rs",
+  "models": [
+    {
+      "slug": "gpt-6.1-sol",
+      "display_name": "GPT-6.1-Sol",
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "context_window": 500000,
+      "max_context_window": 872000,
+      "auto_compact_token_limit": null,
+      "visibility": "list"
+    },
+    {
+      "slug": "gpt-6-astra",
+      "display_name": "GPT-6-Astra",
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "context_window": 272000,
+      "max_context_window": 872000,
+      "auto_compact_token_limit": null,
+      "visibility": "list"
+    }
+  ]
+}
