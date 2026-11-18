@@ -50,17 +50,36 @@ test("native OpenAI speed survives settings, protocol changes and restart", asyn
     });
     return;
   }
-  await expect(page.getByText(/Higher token cost; subject to your OpenAI project/)).toBeVisible();
-  await expect(page.getByRole("link", { name: "OpenAI pricing" })).toHaveAttribute(
-    "href",
-    "https://developers.openai.com/api/docs/pricing",
-  );
   if (process.env.NAC_VISUAL_DIR && process.env.NAC_VISUAL_LABEL === "after") {
     await page.screenshot({
       path: path.join(process.env.NAC_VISUAL_DIR, mobile ? "after-mobile.png" : "after.png"),
       animations: "disabled",
     });
-    if (mobile) return;
+  }
+  if (mobile) {
+    const info = page.getByRole("button", { name: "Speed pricing and access" });
+    await expect(info).toBeVisible();
+    const size = await info.boundingBox();
+    expect(size?.width).toBeGreaterThanOrEqual(44);
+    expect(size?.height).toBeGreaterThanOrEqual(44);
+    await info.click();
+    await expect(info).toHaveAttribute("aria-expanded", "true");
+  }
+  await expect(page.getByText(/Higher token cost; subject to your OpenAI project/)).toBeVisible();
+  await expect(page.getByRole("link", { name: "OpenAI pricing" })).toHaveAttribute(
+    "href",
+    "https://developers.openai.com/api/docs/pricing",
+  );
+  if (mobile) {
+    if (process.env.NAC_VISUAL_DIR && process.env.NAC_VISUAL_LABEL === "after") {
+      await page.screenshot({
+        path: path.join(process.env.NAC_VISUAL_DIR, "after-mobile-info.png"),
+        animations: "disabled",
+      });
+    }
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("button", { name: "Speed pricing and access" })).toBeFocused();
+    return;
   }
   const speed = (name: string) => page.getByRole("button", { name: `Speed: ${name}` });
   await speed("Provider default").click();
