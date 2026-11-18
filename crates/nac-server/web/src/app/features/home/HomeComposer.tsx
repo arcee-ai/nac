@@ -24,7 +24,7 @@ import type {
 import { defaultBehavior } from "./behaviors";
 import { Chip } from "./Chip";
 import { ModelPicker } from "./ComposerModelPickers";
-import { BehaviorPicker, ProjectPicker } from "./ComposerPickers";
+import { BehaviorPicker, LocationPicker, ProjectPicker } from "./ComposerPickers";
 import { WorkspaceSettings } from "./WorkspaceSettings";
 import {
   modelChipLabel,
@@ -62,9 +62,9 @@ function recentProjectId(
 }
 
 /**
- * Home's hero composer — the app's one new-session flow. The strip on top says
- * where the session runs (this computer or the project's SSH host) and picks
- * the project; its "⋯" button holds the isolated-checkout choice and ref,
+ * Home's hero composer — the app's one new-session flow. The strip on top picks
+ * where the session runs (this computer or an SSH host the projects use) and
+ * the project there; its "⋯" button holds the isolated-checkout choice and ref,
  * out of the way of a plain session. The composer's chips pick the behavior and
  * model. Sending creates the session with the prompt as its first message.
  */
@@ -96,6 +96,14 @@ export function HomeComposer({
     if (requested) setChosen(null);
   }
   const fallback = useMemo(() => recentProjectId(projects, sessions), [projects, sessions]);
+  const locations = useMemo(() => {
+    const counts = new Map<string | null, number>([[null, 0]]);
+    for (const entry of projects) {
+      const at = entry.ssh_host ?? null;
+      counts.set(at, (counts.get(at) ?? 0) + 1);
+    }
+    return [...counts].map(([at, projectCount]) => ({ host: at, projectCount }));
+  }, [projects]);
   const candidate = chosen ?? requested ?? fallback;
   // A requested project that no longer exists leaves the choice to the user
   // rather than quietly starting somewhere else.
@@ -212,12 +220,29 @@ export function HomeComposer({
     }
   };
 
-  const addProject = managed.isManaged ? managed.addRepository : projectActions.create;
-  const host = project?.ssh_host
-    ? project.ssh_host
-    : managed.isManaged
-      ? "Managed host"
-      : "This computer";
+  const host = project?.ssh_host ?? null;
+  const hereProjects = projects.filter((entry) => (entry.ssh_host ?? null) === host);
+  const addProject = managed.isManaged
+    ? managed.addRepository
+    : host
+      ? projectActions.createSsh
+      : projectActions.create;
+  const chooseProject = (id: string) => {
+    setChosen(id);
+    if (prompt) draft.update(prompt, id);
+    if (requested) {
+      const next = new URLSearchParams(params);
+      next.delete("project");
+      setParams(next, { replace: true });
+    }
+  };
+  const chooseLocation = (next: string | null) => {
+    const there = projects.filter((entry) => (entry.ssh_host ?? null) === next);
+    const id = recentProjectId(there, sessions);
+    if (id) chooseProject(id);
+    else if (next) projectActions.createSsh();
+    else projectActions.create();
+  };
 
   return (
     <div className="flex w-full flex-col gap-2">
@@ -227,29 +252,29 @@ export function HomeComposer({
           aria-label="Workspace"
           className="flex min-w-0 items-center gap-1 py-1 pr-1 pl-2 max-md:pl-1"
         >
-          <span className="type-label inline-flex shrink-0 items-center gap-1.5 px-1.5 text-basic-secondary max-md:hidden">
-            <Icon
-              iconName={project?.ssh_host ? IconName.Server : IconName.Desktop}
-              size={14}
-              className="text-basic-tertiary"
+          {managed.isManaged ? (
+            <span className="type-label inline-flex shrink-0 items-center gap-1.5 px-1.5 text-basic-secondary max-md:hidden">
+              <Icon iconName={IconName.Desktop} size={14} className="text-basic-tertiary" />
+              Managed host
+            </span>
+          ) : (
+            <LocationPicker
+              locations={locations}
+              value={host}
+              disabled={busy}
+              onChange={chooseLocation}
+              onAddSsh={projectActions.createSsh}
             />
-            {host}
-          </span>
+          )}
           <ProjectPicker
-            projects={projects}
+            projects={hereProjects}
             value={project}
             disabled={busy}
-            addLabel={managed.isManaged ? "Add repository…" : "Add project…"}
+            addLabel={
+              managed.isManaged ? "Add repository…" : host ? "Add SSH project…" : "Add project…"
+            }
             onAddProject={addProject}
-            onChange={(id) => {
-              setChosen(id);
-              if (prompt) draft.update(prompt, id);
-              if (requested) {
-                const next = new URLSearchParams(params);
-                next.delete("project");
-                setParams(next, { replace: true });
-              }
-            }}
+            onChange={chooseProject}
           />
           {project ? (
             <span className="shrink-0">

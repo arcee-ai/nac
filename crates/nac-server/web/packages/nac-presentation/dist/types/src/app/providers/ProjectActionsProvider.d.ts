@@ -2,6 +2,8 @@ import React from "react";
 import type { ProjectRecord, SessionSummarySnapshot } from "../types/api";
 interface ProjectActions {
     create: () => void;
+    /** Opens New project on its SSH location. */
+    createSsh: () => void;
     /**
      * Files a session that belongs to no project. Asks nothing when a project
      * already covers the session's location — there is only ever the one it can

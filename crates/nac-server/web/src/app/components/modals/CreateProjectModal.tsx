@@ -48,7 +48,15 @@ const MODES: { id: Mode; label: string; description: string }[] = [
 const CWD_BUTTON_PADDING = { paddingInline: "8px" };
 
 /** Remounted on every open so the form always starts from the configured defaults. */
-export function CreateProjectModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function CreateProjectModal({
+  open,
+  onClose,
+  initialMode = "local",
+}: {
+  open: boolean;
+  onClose: () => void;
+  initialMode?: "local" | "ssh";
+}) {
   const { data: storeInfo } = useStoreInfo();
   const mounted = useExitTransition(open);
   if (!mounted) return null;
@@ -59,6 +67,7 @@ export function CreateProjectModal({ open, onClose }: { open: boolean; onClose: 
       key={open ? "open" : "closing"}
       open={open}
       defaultCwd={storeInfo?.root_cwd ?? ""}
+      initialMode={initialMode}
       onClose={onClose}
     />
   );
@@ -72,10 +81,12 @@ export function CreateProjectModal({ open, onClose }: { open: boolean; onClose: 
 function CreateProjectForm({
   open,
   defaultCwd,
+  initialMode,
   onClose,
 }: {
   open: boolean;
   defaultCwd: string;
+  initialMode: Mode;
   onClose: () => void;
 }) {
   const navigate = useNavigate();
@@ -83,8 +94,8 @@ function CreateProjectForm({
   const createProject = useCreateProject();
   const isMobile = useIsMobile();
 
-  const [mode, setMode] = useState<Mode>("local");
-  const [cwd, setCwd] = useState(defaultCwd);
+  const [mode, setMode] = useState<Mode>(initialMode);
+  const [cwd, setCwd] = useState(initialMode === "ssh" ? "" : defaultCwd);
   const [name, setName] = useState("");
   const [picking, setPicking] = useState(false);
   const [error, setError] = useState<string | null>(null);

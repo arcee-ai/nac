@@ -79,14 +79,14 @@ function LocationProbe() {
   return <output data-testid="location">{location.pathname + location.search}</output>;
 }
 
-function renderModal(onClose = vi.fn()) {
+function renderModal(onClose = vi.fn(), initialMode: "local" | "ssh" = "local") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(queryKeys.storeInfo, { root_cwd: "/workspace" } as StoreInfo);
   const view = render(
     <QueryClientProvider client={client}>
       <ToastProvider>
         <MemoryRouter>
-          <CreateProjectModal open onClose={onClose} />
+          <CreateProjectModal open onClose={onClose} initialMode={initialMode} />
           <LocationProbe />
         </MemoryRouter>
       </ToastProvider>
@@ -143,6 +143,18 @@ it("creates an SSH project at the connected host's folder once", async () => {
       ssh_port: null,
       ssh_identity_file: null,
     });
+  } finally {
+    view.unmount();
+    client.clear();
+  }
+});
+
+it("opens on SSH when asked, waiting for a connection before any folder", () => {
+  const { client, view } = renderModal(vi.fn(), "ssh");
+  try {
+    expect(screen.getByRole("button", { name: "SSH" }).getAttribute("aria-pressed")).toBe("true");
+    expect((create() as HTMLButtonElement).disabled).toBe(true);
+    expect(api.createProject).not.toHaveBeenCalled();
   } finally {
     view.unmount();
     client.clear();

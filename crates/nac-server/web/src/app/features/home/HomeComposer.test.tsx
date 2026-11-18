@@ -14,6 +14,7 @@ import { standaloneHomeDraftStore } from "./homeDraftStore";
 const fakes = vi.hoisted(() => ({
   start: vi.fn(),
   create: vi.fn(),
+  createSsh: vi.fn(),
   addRepository: vi.fn(),
   managed: false,
   eligible: false,
@@ -90,7 +91,7 @@ vi.mock("@/app/features/managed/controller/useManagedHost", () => ({
   useManagedHost: () => ({ isManaged: fakes.managed, addRepository: fakes.addRepository }),
 }));
 vi.mock("@/app/providers/ProjectActionsProvider", () => ({
-  useProjectActions: () => ({ create: fakes.create }),
+  useProjectActions: () => ({ create: fakes.create, createSsh: fakes.createSsh }),
 }));
 
 const projects = [
@@ -103,11 +104,11 @@ const sessions = [
   { summary: { session_id: "s", project_id: "p2", updated_at: "2026-11-16T10:00:00Z" } },
 ] as ManagedSessionSummary[];
 
-function mount(path = "/", orchestration = true) {
+function mount(path = "/", orchestration = true, list: readonly ProjectRecord[] = projects) {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <UiPolicyContext.Provider value={orchestration ? ORCHESTRATION_UI_POLICY : DIRECT_UI_POLICY}>
-        <HomeComposer projects={projects} sessions={sessions} />
+        <HomeComposer projects={list} sessions={sessions} />
       </UiPolicyContext.Provider>
     </MemoryRouter>,
   );
@@ -121,6 +122,7 @@ beforeEach(() => {
   }));
   fakes.start.mockReset().mockResolvedValue(true);
   fakes.create.mockReset();
+  fakes.createSsh.mockReset();
   fakes.addRepository.mockReset();
   fakes.managed = false;
   fakes.eligible = false;
@@ -313,6 +315,40 @@ describe("Home composer", () => {
     expect(screen.getByRole("dialog", { name: "New isolated task" }).getAttribute("data-ref")).toBe(
       "release/2.4",
     );
+  });
+
+  it("picks where the session runs, then that location's projects", () => {
+    const withRemote = [
+      ...projects,
+      {
+        project_id: "p3",
+        name: "Render farm",
+        cwd: "/srv/render",
+        ssh_host: "build-box",
+        pinned: false,
+      },
+    ] as ProjectRecord[];
+    mount("/", false, withRemote);
+    fireEvent.click(screen.getByRole("button", { name: "Location: This computer" }));
+    const options = screen.getAllByRole("menuitemradio").map((item) => item.textContent);
+    expect(options).toEqual(["This computer2 projects", "build-box1 project"]);
+
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /build-box/ }));
+    expect(screen.getByRole("button", { name: "Location: build-box" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Project: Render farm" }));
+    expect(screen.getAllByRole("menuitemradio").map((item) => item.textContent)).toEqual([
+      expect.stringContaining("Render farm"),
+    ]);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Add SSH project…" }));
+    expect(fakes.createSsh).toHaveBeenCalledOnce();
+    expect(fakes.create).not.toHaveBeenCalled();
+  });
+
+  it("adds an SSH project from the location menu", () => {
+    mount();
+    fireEvent.click(screen.getByRole("button", { name: "Location: This computer" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Add SSH project…" }));
+    expect(fakes.createSsh).toHaveBeenCalledOnce();
   });
 
   it("adds a repository from the project picker on a managed host", () => {
