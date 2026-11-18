@@ -145,11 +145,33 @@ fn scheduled_model_selection_is_frozen_in_the_durable_launch_receipt() {
         first.receipt().request.model_selection,
         Some(selection.clone())
     );
-    assert!(first.model_defaults().is_none());
     let reloaded = read_fresh_heartbeat_launch(&f.path, &pending.occurrence_id)
         .unwrap()
         .unwrap();
     assert_eq!(reloaded.receipt().request.model_selection, Some(selection));
+}
+
+#[test]
+fn legacy_receipt_defaults_remain_in_storage_but_never_replace_the_selection() {
+    let f = Fixture::new();
+    f.create();
+    let pending = f.pending();
+    let original = reserve_fresh_heartbeat_launch(&f.path, &pending.occurrence_id, pending.revision, 61_000)
+        .unwrap().unwrap();
+    let conn = open_runtime_connection(&f.path).unwrap();
+    conn.execute(
+        "UPDATE heartbeat_task_launches SET launch_json=json_set(launch_json,'$.model_defaults',json('{\"model\":\"retired-preset\"}')) WHERE occurrence_id=?1",
+        [&pending.occurrence_id],
+    ).unwrap();
+    drop(conn);
+    let replay = read_fresh_heartbeat_launch(&f.path, &pending.occurrence_id).unwrap().unwrap();
+    assert_eq!(replay.receipt().request.model_selection, original.receipt().request.model_selection);
+    let conn = open_runtime_connection(&f.path).unwrap();
+    let retained: String = conn.query_row(
+        "SELECT json_extract(launch_json,'$.model_defaults.model') FROM heartbeat_task_launches WHERE occurrence_id=?1",
+        [&pending.occurrence_id], |row| row.get(0),
+    ).unwrap();
+    assert_eq!(retained, "retired-preset");
 }
 
 #[test]
@@ -740,7 +762,6 @@ fn selected_model_ignores_project_defaults_and_keeps_configuration_headers_priva
         reserve_fresh_heartbeat_launch(&f.path, &pending.occurrence_id, pending.revision, 61_000)
             .unwrap()
             .unwrap();
-    assert!(reserved.model_defaults().is_none());
     assert_eq!(
         reserved
             .receipt()
@@ -756,7 +777,10 @@ fn selected_model_ignores_project_defaults_and_keeps_configuration_headers_priva
         reserve_fresh_heartbeat_launch(&f.path, &pending.occurrence_id, pending.revision, 99_000)
             .unwrap()
             .unwrap();
-    assert_eq!(replay.model_defaults(), reserved.model_defaults());
+    assert_eq!(
+        replay.receipt().request.model_selection,
+        reserved.receipt().request.model_selection
+    );
     assert!(
         !encode(&fresh_heartbeat_inventory(&f.path, "project", None).unwrap())
             .unwrap()

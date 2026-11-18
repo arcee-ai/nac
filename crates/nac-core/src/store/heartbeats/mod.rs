@@ -31,10 +31,7 @@ pub(crate) use fresh_launches::{
     fresh_launch_for_request_with_connection, link_fresh_launch_input_with_connection,
     publish_shared_fresh_launch_with_connection,
 };
-pub use fresh_launches::{
-    pin_fresh_heartbeat_model_defaults, pin_fresh_heartbeat_workspace_mode,
-    read_fresh_heartbeat_launch,
-};
+pub use fresh_launches::{pin_fresh_heartbeat_workspace_mode, read_fresh_heartbeat_launch};
 mod fresh_model;
 pub use fresh_admission::*;
 pub use fresh_model::{

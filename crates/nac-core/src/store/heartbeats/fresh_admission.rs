@@ -5,7 +5,6 @@ use super::*;
 #[derive(Serialize, serde::Deserialize)]
 struct ReservedLaunch {
     receipt: FreshTaskLaunchReceipt,
-    model_defaults: Option<ModelConfigurationRecord>,
 }
 
 type ReservedLaunchRow = (String, Option<i64>, bool, Option<String>, Option<String>);
@@ -48,10 +47,7 @@ pub(super) fn load_reserved(
 ) -> Result<Option<PreparedFreshTaskLaunch>> {
     let row:Option<ReservedLaunchRow>=conn.query_row("SELECT launch_json,first_input_id,stop_requested,initial_run_id,initial_outcome_json FROM heartbeat_task_launches WHERE occurrence_id=?1",[occurrence_id],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?))).optional()?;
     row.map(|(json, input, stop, run, outcome)| {
-        let ReservedLaunch {
-            mut receipt,
-            model_defaults,
-        } = serde_json::from_str(&json)?;
+        let ReservedLaunch { mut receipt } = serde_json::from_str(&json)?;
         receipt.first_input_id = input;
         receipt.stop_requested = stop;
         receipt.initial_run_id = run;
@@ -59,10 +55,7 @@ pub(super) fn load_reserved(
         receipt.initial_outcome = outcome
             .map(|json| serde_json::from_str(&json))
             .transpose()?;
-        Ok(PreparedFreshTaskLaunch {
-            receipt,
-            model_defaults,
-        })
+        Ok(PreparedFreshTaskLaunch { receipt })
     })
     .transpose()
 }
@@ -111,7 +104,6 @@ pub fn reserve_fresh_heartbeat_launch(path:&Path,occurrence_id:&str,expected_rev
     request.validate()?;
     let occupied:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM native_task_launches WHERE request_id=?1 UNION ALL SELECT 1 FROM task_launches WHERE request_id=?1)",[&request.request_id],|row|row.get(0))?;
     ensure!(!occupied,"conflict: scheduled launch identity already belongs to another launch request");
-    let model_defaults=None;
     let mut binding=schedule.binding.clone();
     binding.model_configuration_id=None;
     let receipt=FreshTaskLaunchReceipt {
@@ -119,12 +111,12 @@ pub fn reserve_fresh_heartbeat_launch(path:&Path,occurrence_id:&str,expected_rev
         destination:destination.clone(),binding,session_id:uuid::Uuid::new_v4().to_string(),
         first_input_id:None,stop_requested:false,initial_run_id:None,initial_outcome:None,shared_directory:None,created_at_ms:now_ms,
     };
-    let json=encode(&ReservedLaunch{receipt:receipt.clone(),model_defaults:model_defaults.clone()})?;
+    let json=encode(&ReservedLaunch{receipt:receipt.clone()})?;
     tx.execute("INSERT INTO heartbeat_task_launches(occurrence_id,schedule_id,request_id,project_id,launch_json,session_id,created_at_ms) VALUES(?1,?2,?3,?4,?5,?6,?7)",params![receipt.occurrence_id,receipt.schedule_id,receipt.request.request_id,receipt.destination.project_id,json,receipt.session_id,now_ms])?;
     tx.execute("UPDATE heartbeat_occurrences SET state='admitted',session_id=?2,started_at_ms=?3,attempt_count=attempt_count+1,expected_revision=expected_revision+1 WHERE occurrence_id=?1",params![pending.occurrence_id,receipt.session_id,now_ms])?;
     tx.execute("UPDATE heartbeat_schedules SET starts=starts+1,updated_at_ms=?2 WHERE schedule_id=?1",params![schedule.schedule_id,now_ms])?;
     tx.commit()?;
-    Ok(Some(PreparedFreshTaskLaunch{receipt,model_defaults}))
+    Ok(Some(PreparedFreshTaskLaunch{receipt}))
 }
 command ReserveFreshHeartbeatLaunchCommand {occurrence_id:String=occurrence_id.to_owned(),expected_revision:i64=expected_revision,now_ms:i64=now_ms}
 call |c| (&c.occurrence_id,c.expected_revision,c.now_ms)

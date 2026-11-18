@@ -206,7 +206,6 @@ async fn frozen_model_defaults_and_explicit_choices_survive_project_changes_for_
                 assert_ne!(snapshot.orchestrator_compaction_threshold, Some(1), "absent selected threshold must not inherit the new preset's explicit threshold");
                 assert_eq!(snapshot.behavior, sessions::SessionBehavior::Direct);
                 let published = store::read_fresh_heartbeat_launch(&manager.inner.store_path, &original.occurrence_id).unwrap().unwrap();
-                assert_eq!(published.model_defaults(), prepared.model_defaults());
                 assert_eq!(published.receipt().session_id, original.session_id);
                 assert_eq!(published.receipt().request, original.request);
                 assert_eq!(published.receipt().shared_directory, Some(!git_project));
@@ -268,7 +267,6 @@ async fn changed_project_defaults_do_not_bypass_current_policy_or_frozen_credent
                 expected.shared_directory = Some(true);
             }
             assert_eq!(retained.receipt(), &expected);
-            assert_eq!(retained.model_defaults(), prepared.model_defaults());
         }).await;
         retire(manager).await;
         if let Err(panic) = primary {

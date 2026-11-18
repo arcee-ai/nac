@@ -97,7 +97,6 @@ fn absent_defaults_and_explicit_choices_do_not_change_project_identity() {
         )
         .unwrap()
         .unwrap();
-        assert!(prepared.model_defaults().is_none());
         assert_eq!(
             prepared.receipt().request.model_selection,
             destination.model_selection
@@ -218,7 +217,6 @@ fn reserved_defaults_survive_reopen_publication_and_initial_admission_after_poin
         .unwrap()
         .unwrap();
     assert_eq!(replay.receipt(), prepared.receipt());
-    assert_eq!(replay.model_defaults(), prepared.model_defaults());
     let snapshot = publish(&f, &pending, &replay);
     select(&f, None);
     let published = heartbeat_history(&f.path, "project:project", &pending.schedule_id)
@@ -242,7 +240,6 @@ fn reserved_defaults_survive_reopen_publication_and_initial_admission_after_poin
     let final_receipt = read_fresh_heartbeat_launch(&f.path, &pending.occurrence_id)
         .unwrap()
         .unwrap();
-    assert_eq!(final_receipt.model_defaults(), prepared.model_defaults());
     assert_eq!(
         final_receipt.receipt().session_id,
         prepared.receipt().session_id

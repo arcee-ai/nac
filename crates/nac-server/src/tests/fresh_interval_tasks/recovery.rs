@@ -662,7 +662,7 @@ fn boundary_snapshot(root: &Path, id: &str) -> serde_json::Value {
         "request":receipt.request.request_id,"session":receipt.session_id,
         "selector":receipt.request.default_ref,"pin_selector":receipt.request.git_ref,
         "request_sha256":digest(&serde_json::to_vec(&receipt.request).unwrap()),
-        "defaults_sha256":digest(&serde_json::to_vec(&work.model_defaults()).unwrap()),
+        "selection_sha256":digest(&serde_json::to_vec(&receipt.request.model_selection).unwrap()),
         "input":receipt.first_input_id,"run":receipt.initial_run_id,
         "generation":history[0].generation,"started_at_ms":history[0].started_at_ms,
         "execution_timeout_ms":history[0].spec.execution_timeout_ms,
@@ -842,7 +842,7 @@ fn same_boundary(before: &serde_json::Value, after: &serde_json::Value) {
         "selector",
         "pin_selector",
         "request_sha256",
-        "defaults_sha256",
+        "selection_sha256",
         "retained",
     ] {
         assert_eq!(

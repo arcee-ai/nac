@@ -86,17 +86,11 @@ pub struct FreshTaskLaunchReceipt {
 #[derive(Clone)]
 pub struct PreparedFreshTaskLaunch {
     pub(super) receipt: FreshTaskLaunchReceipt,
-    pub(super) model_defaults: Option<ModelConfigurationRecord>,
 }
 
 impl PreparedFreshTaskLaunch {
     pub fn receipt(&self) -> &FreshTaskLaunchReceipt {
         &self.receipt
-    }
-
-    /// Saved defaults are preparation input, excluded from passive inventory.
-    pub fn model_defaults(&self) -> Option<&ModelConfigurationRecord> {
-        self.model_defaults.as_ref()
     }
 }
 
