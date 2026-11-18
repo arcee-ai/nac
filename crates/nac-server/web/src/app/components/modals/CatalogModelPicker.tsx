@@ -4,10 +4,9 @@
 // `POST /providers/models` index (same path Create New uses after login).
 
 import { useEffect, useMemo, useRef, useState, type AriaAttributes } from "react";
+import { Link } from "react-router-dom";
 
 import {
-  Badge,
-  BadgeColor,
   Button,
   ButtonContent,
   ButtonSize,
@@ -19,15 +18,13 @@ import {
   InputSize,
   Popover,
   PopoverPlacement,
-  TabButton,
-  TabButtonSize,
-  TabButtonVariant,
 } from "@/app/atoms";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { catalogBaseUrl, type CatalogPick } from "@/app/lib/catalog";
 import { cn } from "@/app/lib/cn";
 import { formatTokensCompact } from "@/app/lib/format";
-import { providerLabel, providerOrder } from "@/app/lib/providers";
+import { routes } from "@/app/lib/routes";
+import { providerAccountLabel, providerOrder } from "@/app/lib/providers";
 import { modelsForProvider } from "@/app/components/modals/catalogModelOverlay";
 import type {
   BackendKind,
@@ -79,33 +76,32 @@ function pricing(cost: ModelCostRates): string {
   return input && output ? `${input}/${output} per 1M` : "pricing unknown";
 }
 
-function modelMeta(model: CatalogModel): string {
+/** The id, context and pricing in words, for a row's tooltip. */
+function modelDetails(model: CatalogModel): string {
   const context =
-    model.context_window > 0 ? `${formatTokensCompact(model.context_window)} ctx` : "";
-  return [context, pricing(model.cost)].filter(Boolean).join(" · ");
+    model.context_window > 0 ? `${formatTokensCompact(model.context_window)} context` : "";
+  return [model.id, context, pricing(model.cost)].filter(Boolean).join(" · ");
 }
 
-const modelName = (model: CatalogModel) => model.display_name || model.id;
-
-/**
- * A missing credential never blocks a pick — the badge only says what has to
- * happen before the session can run, which for an API-key provider is the key
- * asked for right below this row.
- */
-function ProviderBadges({ provider }: { provider: CatalogProvider }) {
-  if (provider.auth_status === "ready") {
-    return (
-      <Badge text="available" color={BadgeColor.Green} className="shrink-0 whitespace-nowrap" />
-    );
-  }
+/** A model row's trailing facts, "1.0M · $0.22/$1.2": context, then input/output $ per 1M tokens. */
+export function ModelFacts({ model }: { model: CatalogModel }) {
+  const input = rate(model.cost.input);
+  const output = rate(model.cost.output);
+  const facts = [
+    model.context_window > 0 ? formatTokensCompact(model.context_window) : null,
+    input && output ? `${input}/${output}` : null,
+  ].filter(Boolean);
+  if (facts.length === 0) return null;
   return (
-    <Badge
-      text={provider.managed_base_url ? "login required" : "no credential detected"}
-      color={BadgeColor.Yellow}
-      className="shrink-0 whitespace-nowrap"
-    />
+    <span className="type-meta shrink-0 whitespace-nowrap text-basic-muted tabular-nums">
+      {facts.join(" · ")}
+    </span>
   );
 }
+
+/** "DeepSeek: DeepSeek V4.1 Flash" reads "DeepSeek V4.1 Flash"; the heading already names the provider. */
+const modelName = (model: CatalogModel) =>
+  (model.display_name || model.id).replace(/^[^:]+:\s+/, "");
 
 export function CatalogModelPicker({
   catalog,
@@ -141,7 +137,6 @@ export function CatalogModelPicker({
   // though it were picked.
   const [hovered, setHovered] = useState<number | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
-  const tabSize = isMobile ? TabButtonSize.Large : TabButtonSize.Medium;
   const rows = useMemo(
     () => rowsFor(catalog, query, liveByBackend),
     [catalog, query, liveByBackend],
@@ -237,7 +232,7 @@ export function CatalogModelPicker({
       // Grows leftwards from the control column, which keeps a panel this wide
       // inside the dialog instead of hanging off its right edge.
       placement={compact ? PopoverPlacement.TopRight : PopoverPlacement.BottomLeft}
-      size="w-[520px]"
+      size="w-[360px]"
       // Portalled: the dialog scrolls its own body, which would clip the list.
       sticky
       // Popover's root defaults to `w-fit`, which swallows `w-full` on the trigger.
@@ -267,7 +262,7 @@ export function CatalogModelPicker({
             ref={listRef}
             role="group"
             aria-label="Model results"
-            className="flex flex-col flex-1 gap-1 min-h-0 overflow-auto [&>*]:shrink-0"
+            className="flex flex-col flex-1 gap-0.5 min-h-0 overflow-auto [&>*]:shrink-0"
           >
             {rows.length === 0 ? (
               <p
@@ -284,24 +279,34 @@ export function CatalogModelPicker({
               rows.map((row, position) => {
                 const first = position === 0 || rows[position - 1].provider.id !== row.provider.id;
                 const chosen = row.provider.id === value?.backend && row.model.id === value?.model;
+                const ready = row.provider.auth_status === "ready";
                 return (
                   <div key={`${row.provider.id}/${row.model.id}`} className="px-2 md:px-0">
                     {first ? (
-                      <div className="flex flex-wrap items-center justify-between gap-2 px-2 pt-4 pb-2">
-                        <span className="label-small text-basic-secondary whitespace-nowrap shrink-0">
-                          {providerLabel(row.provider.id)}
+                      <div className="flex items-center justify-between gap-2 px-2.5 pt-2.5 pb-1">
+                        <span className="type-meta truncate text-basic-tertiary">
+                          {providerAccountLabel(row.provider.id)}
                         </span>
-                        <ProviderBadges provider={row.provider} />
+                        {ready ? null : (
+                          <Link
+                            to={routes.settings("accounts")}
+                            className="type-meta shrink-0 rounded-md text-basic-tertiary underline-offset-2 outline-none hover:text-basic-primary hover:underline focus-visible:ring-2 focus-visible:ring-[var(--f-focus)]"
+                          >
+                            Connect
+                          </Link>
+                        )}
                       </div>
                     ) : null}
-                    <TabButton
-                      size={tabSize}
-                      variant={TabButtonVariant.Regular}
-                      active={chosen}
+                    <button
+                      type="button"
                       aria-pressed={chosen}
+                      title={modelDetails(row.model)}
                       className={cn(
-                        "!h-auto min-h-11 !items-start !py-3",
-                        position === index && "bg-elevation-sublevel-variant-A",
+                        "flex min-h-8 w-full min-w-0 items-center gap-2.5 rounded-md px-2.5 text-left outline-none max-md:min-h-11",
+                        "transition-colors duration-150 ease-out motion-reduce:transition-none",
+                        "focus-visible:bg-[var(--f-wash-1)]",
+                        position === index && "bg-[var(--f-wash-1)]",
+                        ready ? "text-basic-primary" : "text-basic-muted",
                       )}
                       data-row={position}
                       onMouseEnter={() => setHovered(position)}
@@ -310,20 +315,20 @@ export function CatalogModelPicker({
                       }
                       onClick={() => pick(row)}
                     >
-                      <span className="flex min-w-0 flex-1 flex-col gap-1 text-left whitespace-normal">
-                        <span className="label-small !leading-[22px] break-words">
-                          {modelName(row.model)}
-                        </span>
-                        {modelName(row.model) !== row.model.id ? (
-                          <span className="code-small text-basic-secondary break-all">
-                            {row.model.id}
-                          </span>
-                        ) : null}
-                        <span className="text-micro text-basic-secondary font-normal">
-                          {modelMeta(row.model)}
-                        </span>
+                      <span className="type-label min-w-0 flex-1 truncate">
+                        {modelName(row.model)}
                       </span>
-                    </TabButton>
+                      <ModelFacts model={row.model} />
+                      <span className="flex w-3.5 shrink-0 justify-center">
+                        {chosen ? (
+                          <Icon
+                            iconName={IconName.Check}
+                            size={14}
+                            className="text-basic-primary"
+                          />
+                        ) : null}
+                      </span>
+                    </button>
                   </div>
                 );
               })
@@ -340,7 +345,7 @@ export function CatalogModelPicker({
         onClick={() => (open ? close() : setOpen(true))}
         aria-expanded={open}
         aria-label={compact ? "Model" : undefined}
-        title={compact && value ? `${label} · ${providerLabel(value.backend)}` : undefined}
+        title={compact && value ? `${label} · ${providerAccountLabel(value.backend)}` : undefined}
         aria-invalid={ariaInvalid}
         aria-describedby={ariaDescribedBy}
         className={
@@ -358,9 +363,9 @@ export function CatalogModelPicker({
           )}
         >
           <span className={compact ? "truncate" : "whitespace-normal break-words"}>{label}</span>
-          {!compact && value && providerLabel(value.backend) !== label ? (
+          {!compact && value && providerAccountLabel(value.backend) !== label ? (
             <span className="text-micro text-basic-secondary whitespace-normal break-words font-normal">
-              {providerLabel(value.backend)}
+              {providerAccountLabel(value.backend)}
             </span>
           ) : null}
         </span>

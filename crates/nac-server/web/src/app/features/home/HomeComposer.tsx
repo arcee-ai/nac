@@ -1,5 +1,5 @@
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useLocation, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
 import { Icon, IconName, Loader, LoaderSize, Tooltip } from "@/app/atoms";
 import { useManagedHost } from "@/app/features/managed/controller/useManagedHost";
@@ -8,18 +8,37 @@ import { useTaskLaunchSource } from "@/app/features/task-launches/useTaskLaunch"
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { useMediaQuery } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
+import { routes } from "@/app/lib/routes";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
+import { resolveCatalogModel } from "@/app/lib/catalog";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
-import type { ManagedSessionSummary, ProjectRecord, SessionBehavior } from "@/app/types/api";
+import { useModelCatalog } from "@/app/services/queries";
+import type {
+  ManagedSessionSummary,
+  ProjectRecord,
+  ReasoningEffort,
+  SessionBehavior,
+} from "@/app/types/api";
 
 import { defaultBehavior } from "./behaviors";
 import { Chip } from "./Chip";
+import { ModelPicker } from "./ComposerModelPickers";
 import { BehaviorPicker, IsolatedToggle, ProjectPicker } from "./ComposerPickers";
-import { modelChipLabel, useInheritedModel, type ModelOverride } from "./modelChoice";
+import {
+  modelChipLabel,
+  sessionRoute,
+  useInheritedModel,
+  withEffort,
+  type ModelOverride,
+} from "./modelChoice";
 import { ModelOverrideModal } from "./ModelOverrideModal";
+import { useSuggestedModel } from "./suggestedModel";
 import { useStartSession } from "./useStartSession";
 
 const MAX_TITLE = 120;
+
+/** Offered when the catalog says nothing about a model's reasoning levels. */
+const COMMON_EFFORTS: readonly ReasoningEffort[] = ["low", "medium", "high"];
 
 /** A task title from the prompt's first line, for the isolated-task form. */
 function titleFrom(prompt: string): string {
@@ -62,6 +81,7 @@ export function HomeComposer({
   const managed = useManagedHost();
   const projectActions = useProjectActions();
   const location = useLocation();
+  const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const coarse = useMediaQuery("(pointer: coarse)");
   const textarea = useRef<HTMLTextAreaElement>(null);
@@ -101,6 +121,32 @@ export function HomeComposer({
   const effectiveBehavior = policy.orchestrationEnabled ? behavior : "direct";
 
   const model = useInheritedModel(projectId);
+  const suggestion = useSuggestedModel(
+    Boolean(projectId) && !model.pending && !model.inherited && !model.error,
+  );
+  // Nothing picked and nothing inherited: start on the suggested model rather
+  // than leaving the server without one.
+  const chosenModel = override ?? (model.inherited ? null : suggestion.override);
+  const route = sessionRoute(chosenModel, model.inherited);
+  const catalog = useModelCatalog(Boolean(route));
+  const known = route
+    ? resolveCatalogModel(catalog.data, route.backend, route.model).supportedEfforts
+    : [];
+  const supported = known.length ? known : COMMON_EFFORTS;
+  // A level picked for one model carries over to the next one that accepts it.
+  const [effortChoice, setEffortChoice] = useState<string | null>(null);
+  const effortAllowed = (effort: string) =>
+    effort === "" || supported.includes(effort as ReasoningEffort);
+  const effort =
+    route && effortChoice !== null && effortAllowed(effortChoice)
+      ? effortChoice
+      : (route?.effort ?? "");
+  const sessionModel =
+    route && effort !== route.effort
+      ? withEffort(chosenModel, model.inherited, effort)
+      : chosenModel;
+  const modelPending = model.pending || suggestion.pending;
+  const needsProvider = !override && !model.inherited && suggestion.noProviders;
   const source = useTaskLaunchSource(projectId, effectiveBehavior === "direct");
   const isolationAvailable = effectiveBehavior === "direct" && source.data?.eligible === true;
   const useIsolation = isolated && isolationAvailable;
@@ -124,7 +170,13 @@ export function HomeComposer({
   }, [prompt]);
 
   const busy = starter.busy;
-  const canSend = Boolean(projectId) && prompt.trim().length > 0 && !busy && !starter.needsReview;
+  const canSend =
+    Boolean(projectId) &&
+    prompt.trim().length > 0 &&
+    !busy &&
+    !starter.needsReview &&
+    !needsProvider &&
+    !suggestion.pending;
 
   const send = async () => {
     if (!canSend || !projectId) return;
@@ -138,7 +190,7 @@ export function HomeComposer({
       projectId,
       behavior: effectiveBehavior,
       prompt: text,
-      model: override,
+      model: sessionModel,
     });
     if (started) {
       draft.acknowledge(revision);
@@ -146,7 +198,6 @@ export function HomeComposer({
   };
 
   const addProject = managed.isManaged ? managed.addRepository : projectActions.create;
-  const modelLabel = modelChipLabel(override, model.inherited);
 
   return (
     <div className="flex w-full flex-col gap-2">
@@ -206,22 +257,36 @@ export function HomeComposer({
             {policy.orchestrationEnabled ? (
               <BehaviorPicker value={behavior} onChange={setBehavior} disabled={busy} />
             ) : null}
-            {project ? (
+            {project && needsProvider ? (
               <Chip
-                icon={IconName.Ai}
+                icon={IconName.Key}
+                menu={false}
                 disabled={busy}
-                aria-label={modelLabel ? `Model: ${modelLabel}` : "Choose a model"}
-                aria-haspopup="dialog"
-                pressed={override != null || undefined}
-                onClick={() => setModelOpen(true)}
+                onClick={() => navigate(routes.settings("accounts"))}
               >
-                {model.pending ? "Model…" : (modelLabel ?? "Project default model")}
+                Connect a provider
               </Chip>
             ) : null}
             {isolationAvailable ? (
               <IsolatedToggle value={isolated} onChange={setIsolated} disabled={busy} />
             ) : null}
           </div>
+          {project && !needsProvider ? (
+            <ModelPicker
+              fallbackLabel={modelChipLabel(chosenModel, model.inherited)}
+              pending={modelPending}
+              value={route}
+              effort={effort}
+              supportedEfforts={supported}
+              inheritedLabel={model.inherited ? modelChipLabel(null, model.inherited) : null}
+              usingInherited={!override && model.inherited != null}
+              disabled={busy}
+              onPick={setOverride}
+              onEffort={setEffortChoice}
+              onUseInherited={() => setOverride(null)}
+              onAdvanced={policy.orchestrationEnabled ? () => setModelOpen(true) : undefined}
+            />
+          ) : null}
           <Tooltip title={useIsolation ? "Set up isolated task" : "Start session"} sticky>
             <button
               type="button"
@@ -246,7 +311,11 @@ export function HomeComposer({
         </div>
       </div>
       <div className="px-5 md:min-h-5" aria-live="polite">
-        {starter.error ? (
+        {project && needsProvider ? (
+          <p className="type-meta text-basic-tertiary">
+            Connect a model provider in Settings to start a session.
+          </p>
+        ) : starter.error ? (
           <p role="alert" className="type-meta text-error-primary">
             {starter.error}
             {starter.needsReview
@@ -257,14 +326,16 @@ export function HomeComposer({
       </div>
 
       <ModelOverrideModal
-        open={modelOpen}
+        open={modelOpen && policy.orchestrationEnabled}
         behavior={effectiveBehavior}
         inherited={model.inherited}
         inheritancePending={model.pending}
         inheritanceError={model.error}
-        current={override}
+        current={sessionModel}
+        overridden={override != null}
         onApply={(next) => {
           setOverride(next);
+          setEffortChoice(null);
           setModelOpen(false);
         }}
         onReset={() => setOverride(null)}
@@ -282,7 +353,7 @@ export function HomeComposer({
             const revision = draft.get().revision;
             setIsolatedTask(null);
             void starter
-              .start({ projectId, behavior: "direct", prompt: text, model: override })
+              .start({ projectId, behavior: "direct", prompt: text, model: sessionModel })
               .then((started) => {
                 if (started) {
                   draft.acknowledge(revision);

@@ -135,7 +135,12 @@ export function useInheritedModel(projectId: string | null) {
   return { inherited, pending, error: error || null };
 }
 
-/** A short chip label: "model · effort". */
+/** A model id without its vendor prefix: "deepseek/deepseek-v4" reads "deepseek-v4". */
+function shortModel(model: string): string {
+  return model.split("/").pop() || model;
+}
+
+/** The model chip's label; reasoning effort has its own chip. */
 export function modelChipLabel(
   override: ModelOverride | null,
   inherited: InheritedModel | null,
@@ -143,10 +148,65 @@ export function modelChipLabel(
   if (override) {
     const selection = override.selection;
     if (selection.kind === "save") return selection.request.model || selection.request.name;
-    return [selection.model, selection.reasoning_effort].filter(Boolean).join(" · ");
+    return shortModel(selection.model);
   }
-  if (!inherited) return null;
-  return [inherited.initial.model, inherited.initial.reasoning_effort].filter(Boolean).join(" · ");
+  return inherited ? shortModel(inherited.initial.model) : null;
+}
+
+/** The backend, model and effort a session will start on, whichever way it was chosen. */
+export function sessionRoute(
+  override: ModelOverride | null,
+  inherited: InheritedModel | null,
+): { backend: BackendKind; model: string; effort: string } | null {
+  const selection = override?.selection;
+  if (selection?.kind === "resolved") {
+    return {
+      backend: selection.backend,
+      model: selection.model,
+      effort: selection.reasoning_effort ?? "",
+    };
+  }
+  if (selection || !inherited) return null;
+  return {
+    backend: inherited.initial.backend,
+    model: inherited.initial.model,
+    effort: inherited.initial.reasoning_effort ?? "",
+  };
+}
+
+/** The inherited model as an explicit override, so one setting can change for this session. */
+function inheritedOverride(inherited: InheritedModel): ModelOverride {
+  const initial = inherited.initial;
+  return {
+    selection: {
+      kind: "resolved",
+      backend: initial.backend,
+      model: initial.model,
+      base_url: initial.base_url,
+      allow_insecure_http: initial.allow_insecure_http ?? false,
+      api_key_env: initial.api_key_env,
+      reasoning_effort: initial.reasoning_effort,
+      extra_headers: initial.extra_headers,
+      orchestrator_compaction_threshold: initial.orchestrator_compaction_threshold,
+      light_model: inherited.light,
+      config_id: initial.config_id,
+    },
+    light: inherited.light
+      ? { mode: "dual", light: inherited.light }
+      : { mode: "single", light: null },
+    selectedLight: inherited.light,
+  };
+}
+
+/** `override` (or the inherited model) with a different reasoning effort; "" is the model's default. */
+export function withEffort(
+  override: ModelOverride | null,
+  inherited: InheritedModel | null,
+  effort: string,
+): ModelOverride | null {
+  const base = override ?? (inherited ? inheritedOverride(inherited) : null);
+  if (base?.selection.kind !== "resolved") return base;
+  return { ...base, selection: { ...base.selection, reasoning_effort: effort || null } };
 }
 
 /** The resolved tuple a configured session is created with. */

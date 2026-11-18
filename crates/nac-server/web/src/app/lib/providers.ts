@@ -104,6 +104,23 @@ export function providerLabel(backend: string | null | undefined): string {
   return isBackendKind(kind) ? PROVIDER_LABELS[kind] : kind;
 }
 
+/** The account a provider belongs to, for pickers that group models by who serves them. */
+const ACCOUNT_LABELS = {
+  "arcee-auth": "Arcee",
+  "arcee-api": "Arcee (API key)",
+  "openai-responses": "OpenAI",
+  "openai-chat-completions": "OpenAI (Chat Completions)",
+  "chatgpt-codex-responses": "ChatGPT",
+  "anthropic-messages": "Anthropic",
+  "deepseek-chat": "DeepSeek",
+  "fireworks-chat": "Fireworks",
+  "together-chat": "Together AI",
+} satisfies Record<BackendKind, string>;
+
+export function providerAccountLabel(backend: string): string {
+  return isBackendKind(backend) ? ACCOUNT_LABELS[backend] : providerLabel(backend);
+}
+
 /** Providers present in the given sessions, in canonical display order. */
 export function providersFromBackends(backends: Iterable<string>): string[] {
   const seen = new Set<string>();

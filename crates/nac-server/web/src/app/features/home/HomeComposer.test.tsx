@@ -40,6 +40,27 @@ vi.mock("./modelChoice", async (importOriginal) => ({
   }),
 }));
 vi.mock("./ModelOverrideModal", () => ({ ModelOverrideModal: () => null }));
+vi.mock("./suggestedModel", () => ({
+  useSuggestedModel: () => ({ override: null, pending: false, noProviders: false }),
+  catalogOverride: vi.fn(),
+}));
+vi.mock("@/app/services/queries", () => ({
+  useModelCatalog: () => ({
+    data: {
+      providers: [
+        {
+          id: "arcee-api",
+          auth_status: "ready",
+          models: [{ id: "glm-5", supported_efforts: ["low", "medium", "high"] }],
+          default_limits: { supported_efforts: [] },
+        },
+      ],
+    },
+    isPending: false,
+    isError: false,
+  }),
+  useReadyProviderModels: () => new Map(),
+}));
 vi.mock("@/app/features/task-launches/useTaskLaunch", () => ({
   useTaskLaunchSource: (_id: string | null, enabled: boolean) => ({
     data: enabled ? { eligible: fakes.eligible, default_ref: "main" } : undefined,
@@ -128,11 +149,36 @@ describe("Home composer", () => {
 
   it("shows the inherited model and the behaviors only where orchestration exists", () => {
     mount("/", false);
-    expect(screen.getByRole("button", { name: "Model: glm-5 · high" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Model: glm-5, High reasoning" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /^Behavior:/ })).toBeNull();
     cleanup();
     mount("/", true);
     expect(screen.getByRole("button", { name: "Behavior: Orchestrator" })).toBeTruthy();
+  });
+
+  it("offers only the model's reasoning levels and sends the one picked", async () => {
+    mount("/", false);
+    fireEvent.click(screen.getByRole("button", { name: "Model: glm-5, High reasoning" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /^Effort/ }));
+    expect(screen.getAllByRole("menuitemradio").map((item) => item.textContent)).toEqual([
+      "Default",
+      "Low",
+      "Medium",
+      "High",
+    ]);
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Low" }));
+    expect(screen.getByRole("button", { name: "Model: glm-5, Low reasoning" })).toBeTruthy();
+    fireEvent.change(prompt(), { target: { value: "Go" } });
+    fireEvent.keyDown(prompt(), { key: "Enter" });
+    await vi.waitFor(() =>
+      expect(fakes.start).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: expect.objectContaining({
+            selection: expect.objectContaining({ model: "glm-5", reasoning_effort: "low" }),
+          }),
+        }),
+      ),
+    );
   });
 
   it("keeps an unsent draft across visits and sends nothing without a prompt", () => {

@@ -196,10 +196,7 @@ export function PrimaryModelSection({
   );
 
   return (
-    <FormSection
-      title="Primary model"
-      description="Choose a model across your providers. Connection status and advanced presets are available below."
-    >
+    <FormSection title="Primary model" description="Choose from the providers you've connected.">
       <ConfigRow
         presentation="form"
         label="Model"
@@ -253,8 +250,8 @@ export function PrimaryModelSection({
       ) : null}
       {effective && !preservesInitialRoute && !providerReady ? (
         <p className="text-small !leading-[22px] text-error-primary" role="alert">
-          Connect {providerLabel(effective.pick.backend)} in Provider connections or Advanced before
-          selecting this model.
+          Connect {providerLabel(effective.pick.backend)} in Settings › Accounts &amp; keys to use
+          this model.
         </p>
       ) : null}
     </FormSection>
