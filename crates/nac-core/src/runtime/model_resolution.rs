@@ -69,6 +69,21 @@ pub fn effective_orchestrator_compaction_threshold(
     Ok(threshold)
 }
 
+pub(super) fn managed_worker_effective_model_settings(
+    model: &ModelOptions,
+) -> Result<EffectiveModelSettings> {
+    EffectiveModelSettings::from_optional_with_http_policy(
+        model.backend,
+        model.api_model.clone(),
+        model.api_base_url.clone(),
+        model.reasoning_effort.snapshot_value(),
+        model.api_key_env.snapshot_value(),
+        model.extra_headers.clone().unwrap_or_default(),
+        model.allow_insecure_http,
+    )?
+    .with_trusted_api_key_file(model.trusted_api_key_file.clone())
+}
+
 /// Parse the hidden worker header transport as a JSON object.
 ///
 /// A present argument must be valid JSON. In particular, workers use `{}` to
