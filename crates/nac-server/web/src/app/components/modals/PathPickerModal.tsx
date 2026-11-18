@@ -25,6 +25,7 @@ import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { localDirectoryCapability } from "@/app/features/setup/localFolder";
 import { NativeFolderPicker } from "@/app/features/setup/NativeFolderPicker";
 
+import { PathCrumbs } from "./PathCrumbs";
 import { PathPickerNewFolder } from "./PathPickerNewFolder";
 import { useNewFolder } from "./useNewFolder";
 import { usePathPicker } from "./usePathPicker";
@@ -107,6 +108,10 @@ function PathPicker({
   const { pickingFile, draft, hidden, chosen, checking, failure } = picker;
   const { data, error, isFetching } = picker.listing;
   const selectDisabled = !chosen || checking !== null;
+  const [typingPath, setTyping] = useState(false);
+  const typing = typingPath || failure !== null;
+  const chosenName = chosen ? chosen.replace(/\/+$/, "").split("/").pop() || chosen : "";
+  const selectLabel = pickingFile || !chosenName ? "Select" : `Choose “${chosenName}”`;
   // Only a working-folder picker offers to make one. The folder goes in the
   // listed directory, and leaving that directory abandons the form.
   const creating = kind === "directory";
@@ -129,8 +134,8 @@ function PathPicker({
           : kind === "file"
             ? "Select File"
             : ssh
-              ? `Select Working Folder on ${ssh.ssh_host}`
-              : "Select Working Folder")
+              ? `Choose a folder on ${ssh.ssh_host}`
+              : "Choose a folder")
       }
       size={ModalSize.Wide}
       flush
@@ -192,7 +197,7 @@ function PathPicker({
               aria-busy={checking !== null}
               onClick={picker.select}
             >
-              Select
+              <span className="min-w-0 truncate">{selectLabel}</span>
             </StickyButton>
           ) : (
             <Button
@@ -202,68 +207,55 @@ function PathPicker({
               disabled={selectDisabled}
               aria-busy={checking !== null}
               onClick={picker.select}
+              className="max-w-[260px]"
             >
-              Select
+              <span className="min-w-0 truncate">{selectLabel}</span>
             </Button>
           )}
         </div>
       }
     >
       <div className="flex flex-col gap-3 h-full min-h-0">
-        <p className="type-body-chrome shrink-0 text-basic-tertiary">
-          {ssh
-            ? "Browse folders on the connected SSH host."
-            : "Browse files on the NAC server, including existing Git working folders."}
-        </p>
-        <div className="flex flex-wrap items-center gap-2 shrink-0">
-          <Button
-            variant={ButtonVariant.Secondary}
-            size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
-            content={ButtonContent.Icon}
-            disabled={!data?.parent}
-            onClick={() => data?.parent && picker.goTo(data.parent)}
-            aria-label="Parent directory"
-          >
-            <Icon iconName={IconName.Top} />
-          </Button>
-          <Button
-            variant={ButtonVariant.Secondary}
-            size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
-            content={ButtonContent.Icon}
-            disabled={!data?.home}
-            onClick={() => data?.home && picker.goTo(data.home)}
-            aria-label="Home directory"
-          >
-            <Icon iconName={IconName.Home} />
-          </Button>
-          <Input
-            inputSize={isMobile ? InputSize.Large : InputSize.Medium}
-            className="order-last w-full min-w-0 md:order-none md:w-auto md:flex-1"
-            placeholder={ssh ? "~/path/on/the/host" : "/path/to/directory"}
-            aria-label={pickingFile ? "Directory path" : "Folder path"}
-            aria-invalid={failure !== null}
-            value={draft}
-            onChange={(event) => picker.setDraft(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.nativeEvent.isComposing) picker.goTo(draft);
-            }}
-          />
-          <Button
-            variant={hidden ? ButtonVariant.SecondaryHighlighted : ButtonVariant.Secondary}
-            size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
-            content={ButtonContent.Icon}
-            onClick={picker.toggleHidden}
-            aria-pressed={hidden}
-            title={hidden ? "Hide dot-prefixed entries" : "Show hidden entries"}
-            aria-label={hidden ? "Hide dot-prefixed entries" : "Show hidden entries"}
-          >
-            <Icon iconName={hidden ? IconName.Eye : IconName.EyeStrikethrough} />
-          </Button>
+        <div className="flex min-h-9 items-center gap-2 shrink-0">
+          {typing || !data?.path ? (
+            <Input
+              inputSize={isMobile ? InputSize.Large : InputSize.Medium}
+              className="min-w-0 flex-1"
+              placeholder={ssh ? "~/path/on/the/host" : "/path/to/folder"}
+              aria-label={pickingFile ? "Directory path" : "Folder path"}
+              aria-invalid={failure !== null}
+              autoFocus={typing}
+              value={draft}
+              onChange={(event) => picker.setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+                  picker.goTo(draft);
+                  setTyping(false);
+                }
+                if (event.key === "Escape" && typing) {
+                  event.stopPropagation();
+                  setTyping(false);
+                }
+              }}
+            />
+          ) : (
+            <>
+              <PathCrumbs path={data.path} home={data.home ?? null} onOpen={picker.goTo} />
+              <Button
+                variant={ButtonVariant.Ghost}
+                size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
+                content={ButtonContent.Icon}
+                onClick={() => setTyping(true)}
+                aria-label="Type a path"
+                title="Type a path"
+              >
+                <Icon iconName={IconName.Edit} />
+              </Button>
+            </>
+          )}
           {creating ? (
             <Button
-              variant={
-                newFolder.open ? ButtonVariant.SecondaryHighlighted : ButtonVariant.Secondary
-              }
+              variant={newFolder.open ? ButtonVariant.SecondaryHighlighted : ButtonVariant.Ghost}
               size={ButtonSize.Medium}
               content={isMobile ? ButtonContent.Icon : ButtonContent.IconLeft}
               disabled={!data?.path}
@@ -304,8 +296,7 @@ function PathPicker({
                 ? "No directories or .toml files here."
                 : kind === "file"
                   ? "Nothing here."
-                  : "No subdirectories here."}
-              {hidden ? "" : " Hidden entries are not listed."}
+                  : "No folders inside. You can still choose this one."}
             </p>
           ) : null}
           {data?.entries.map((entry) => (
@@ -317,9 +308,11 @@ function PathPicker({
                 "hover:bg-elevation-sublevel-variant-B focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-border-focus-outline)]",
                 picker.file === entry.path && "bg-elevation-sublevel-variant-B",
               )}
-              onClick={() =>
-                entry.is_directory ? picker.goTo(entry.path) : picker.chooseFile(entry.path)
-              }
+              onClick={() => {
+                if (!entry.is_directory) return picker.chooseFile(entry.path);
+                setTyping(false);
+                picker.goTo(entry.path);
+              }}
               onDoubleClick={() => {
                 if (!entry.is_directory) onSelect(entry.path);
               }}
@@ -339,13 +332,23 @@ function PathPicker({
           ) : null}
         </div>
 
-        <p className="type-body-chrome shrink-0 break-all text-basic-secondary">
-          {checking !== null
-            ? `Checking ${checking || "this folder"}…`
-            : chosen
-              ? `Selected: ${chosen}`
-              : "Nothing selected yet."}
-        </p>
+        <div className="flex shrink-0 items-center justify-between gap-3">
+          <button
+            type="button"
+            aria-pressed={hidden}
+            onClick={picker.toggleHidden}
+            className="type-meta rounded-md text-basic-tertiary outline-none hover:text-basic-primary focus-visible:ring-2 focus-visible:ring-[var(--f-focus)]"
+          >
+            {hidden ? "Hide hidden folders" : "Show hidden folders"}
+          </button>
+          {checking !== null ? (
+            <p role="status" className="type-meta min-w-0 truncate text-basic-tertiary">
+              Checking {checking || "this folder"}…
+            </p>
+          ) : pickingFile && chosen ? (
+            <p className="type-meta min-w-0 truncate text-basic-tertiary">{chosen}</p>
+          ) : null}
+        </div>
       </div>
     </Modal>
   );
