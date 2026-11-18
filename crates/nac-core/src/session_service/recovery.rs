@@ -50,7 +50,7 @@ impl SessionService {
             .validate(&self.metadata.store_path, session_id)
             .map_err(anyhow::Error::new)?;
         let owner = crate::store::coordinator::owner_for(&self.metadata.store_path)?;
-        let recovery = match &owner {
+        let mut recovery = match &owner {
             Some(owner) => owner.reconcile_active_run(session_id.to_owned()).await?,
             None => crate::store::reconcile_active_run(&self.metadata.store_path, session_id)?,
         };
@@ -77,12 +77,6 @@ impl SessionService {
                 latest_terminal_assistant_report(&agent.messages),
             )
         };
-        *self.session_snapshot.lock().await = Some(snapshot);
-        *self.lock_transcript_scan() = transcript_scan;
-        *self
-            .transcript_recovery_warning
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = transcript_warning;
         let recovered_record = match &owner {
             Some(owner) => owner.load_run_recovery(session_id.to_owned()).await?,
             None => crate::store::load_run_recovery(&self.metadata.store_path, session_id)?,
@@ -90,7 +84,45 @@ impl SessionService {
         let reconciled_run_id = recovered_record
             .as_ref()
             .map(|record| record.run_id.clone());
-        match &recovery {
+        // The store records interruption/failure before child settlement. If
+        // settlement fails, the next store reconciliation reports None; the
+        // durable recovery record still owns the unpublished outcome.
+        if matches!(recovery, crate::store::ActiveRunReconciliation::None) {
+            let already_reconciled = self
+                .reconciled_recovery_run_id
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone();
+            let child = match &owner {
+                Some(owner) => owner.load_traditional_child(session_id.to_owned()).await?,
+                None => {
+                    crate::store::load_traditional_child(&self.metadata.store_path, session_id)?
+                }
+            };
+            if let Some(record) = recovered_record.as_ref().filter(|record| {
+                record.terminal_disposition.is_none()
+                    && already_reconciled.as_deref() != Some(record.run_id.as_str())
+                    && child.as_ref().is_some_and(|child| {
+                        child.status == crate::store::TraditionalChildStatus::Running
+                    })
+            }) {
+                recovery = match record.status {
+                    crate::store::RunRecoveryStatus::Interrupted => {
+                        crate::store::ActiveRunReconciliation::Interrupted {
+                            run_id: record.run_id.clone(),
+                        }
+                    }
+                    crate::store::RunRecoveryStatus::Failed => {
+                        crate::store::ActiveRunReconciliation::Failed {
+                            run_id: record.run_id.clone(),
+                            failure: record.failure.clone(),
+                        }
+                    }
+                    crate::store::RunRecoveryStatus::Active => recovery,
+                };
+            }
+        }
+        let failure_event = match &recovery {
             crate::store::ActiveRunReconciliation::CanonicalTerminal => {
                 if let Some(record) = recovered_record {
                     if let Some(disposition) = record.terminal_disposition {
@@ -113,42 +145,22 @@ impl SessionService {
                         .await?;
                     }
                 }
+                None
             }
             crate::store::ActiveRunReconciliation::Failed { run_id, failure } => {
                 let failure = failure
                     .clone()
                     .unwrap_or_else(|| crate::run_failure::RunFailure::unknown(FAILED_RUN_WARNING));
-                self.event_bus
-                    .emit_with_context_async(
-                        SessionEvent::RunFailed {
-                            message: failure.diagnostic.clone(),
-                            failure: Some(failure.clone()),
-                        },
-                        Some(SessionRunId::from_stored(run_id.clone())),
-                        None,
-                    )
-                    .await?;
                 self.try_settle_traditional_child_run(
                     &SessionRunId::from_stored(run_id.clone()),
                     crate::store::TraditionalChildStatus::Failed,
                     None,
-                    Some(failure.diagnostic),
+                    Some(failure.diagnostic.clone()),
                 )
                 .await?;
+                Some((run_id.clone(), failure))
             }
             crate::store::ActiveRunReconciliation::Interrupted { run_id } => {
-                self.event_bus
-                    .emit_with_context_async(
-                        SessionEvent::RunFailed {
-                            message: INTERRUPTED_RUN_EVENT_MESSAGE.to_string(),
-                            failure: Some(crate::run_failure::RunFailure::interrupted(
-                                INTERRUPTED_RUN_EVENT_MESSAGE,
-                            )),
-                        },
-                        Some(SessionRunId::from_stored(run_id.clone())),
-                        None,
-                    )
-                    .await?;
                 self.try_settle_traditional_child_run(
                     &SessionRunId::from_stored(run_id.clone()),
                     crate::store::TraditionalChildStatus::Interrupted,
@@ -156,8 +168,30 @@ impl SessionService {
                     Some(INTERRUPTED_RUN_WARNING.to_string()),
                 )
                 .await?;
+                Some((
+                    run_id.clone(),
+                    crate::run_failure::RunFailure::interrupted(INTERRUPTED_RUN_EVENT_MESSAGE),
+                ))
             }
-            crate::store::ActiveRunReconciliation::None => {}
+            crate::store::ActiveRunReconciliation::None => None,
+        };
+        *self.session_snapshot.lock().await = Some(snapshot);
+        *self.lock_transcript_scan() = transcript_scan;
+        *self
+            .transcript_recovery_warning
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = transcript_warning;
+        if let Some((run_id, failure)) = failure_event {
+            self.event_bus
+                .emit_with_context_async(
+                    SessionEvent::RunFailed {
+                        message: failure.diagnostic.clone(),
+                        failure: Some(failure),
+                    },
+                    Some(SessionRunId::from_stored(run_id)),
+                    None,
+                )
+                .await?;
         }
         *self
             .reconciled_recovery_run_id

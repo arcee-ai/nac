@@ -155,7 +155,7 @@ impl SessionManager {
         &self,
         session: &str,
     ) -> Result<Arc<ContinuationReservation>> {
-        let guard = self.inner.task_preparations.admit().await?;
+        let guard = self.inner.task_preparations.admit_continuation().await?;
         // Serialize pre-dispatch reservation with idle eviction and config
         // replacement before the request can transfer work to a task.
         let _active = self.inner.active_sessions.write().await;
@@ -163,10 +163,10 @@ impl SessionManager {
     }
 
     pub(crate) fn schedule_continuation(&self, session: &str) -> Result<()> {
-        let guard = self
-            .inner
-            .continuation_owners
-            .reserve(session, self.inner.task_preparations.try_admit()?);
+        let guard = self.inner.continuation_owners.reserve(
+            session,
+            self.inner.task_preparations.try_admit_continuation()?,
+        );
         self.inner.continuation_owners.schedule(
             self.clone(),
             session.to_owned(),
@@ -178,10 +178,10 @@ impl SessionManager {
     }
 
     pub(crate) fn schedule_recovery(&self, session: &str) -> Result<()> {
-        let guard = self
-            .inner
-            .continuation_owners
-            .reserve(session, self.inner.task_preparations.try_admit()?);
+        let guard = self.inner.continuation_owners.reserve(
+            session,
+            self.inner.task_preparations.try_admit_continuation()?,
+        );
         self.inner.continuation_owners.schedule(
             self.clone(),
             session.to_owned(),

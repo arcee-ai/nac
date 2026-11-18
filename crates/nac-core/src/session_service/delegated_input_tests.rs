@@ -6,6 +6,92 @@ use crate::session_service::tests::test_direct_active_service;
 const QUEUED_PROMPT: &str = "foreground input sent before peer exit";
 
 #[tokio::test]
+async fn recovery_settlement_failure_does_not_publish_duplicate_run_failures() {
+    for failed in [false, true] {
+        let (service, path, child) = abandoned_child("recovery_event_retry", Some("recovery-run"));
+        if failed {
+            crate::store::stage_active_run_failure(
+                &path,
+                "child",
+                "recovery-run",
+                &crate::run_failure::RunFailure::unknown("fixture failure"),
+            )
+            .unwrap();
+        }
+        let mut events = service.event_bus.subscribe();
+        let lease = sessions::SessionOperationLease::try_acquire(&path, "child").unwrap();
+        for _ in 0..2 {
+            assert!(service
+                .reconcile_durable_run_recovery(&lease)
+                .await
+                .is_err());
+            assert!(
+                events.try_recv().is_err(),
+                "failed settlement must not publish"
+            );
+            assert!(service.has_unreconciled_durable_run_recovery().unwrap());
+        }
+        let connection = crate::store::open_runtime_connection(&path).unwrap();
+        connection
+            .execute(
+                "UPDATE traditional_children SET run_id = ?1, execution_mode = 'background' WHERE child_session_id = ?2",
+                rusqlite::params!["recovery-run", "child"],
+            )
+            .unwrap();
+        drop(connection);
+        service
+            .reconcile_durable_run_recovery(&lease)
+            .await
+            .unwrap();
+        let event = events.try_recv().expect("settlement publishes one failure");
+        assert!(matches!(event.event, SessionEvent::RunFailed { .. }));
+        assert!(events.try_recv().is_err());
+        let receipt =
+            crate::store::load_traditional_child_terminal_receipt(&path, "child", child.generation)
+                .unwrap()
+                .unwrap();
+        assert_eq!(
+            receipt.status,
+            if failed {
+                crate::store::TraditionalChildStatus::Failed
+            } else {
+                crate::store::TraditionalChildStatus::Interrupted
+            }
+        );
+        assert_eq!(
+            crate::store::list_session_inbox(&path, "parent")
+                .unwrap()
+                .len(),
+            1
+        );
+        service
+            .reconcile_durable_run_recovery(&lease)
+            .await
+            .unwrap();
+        assert!(events.try_recv().is_err(), "replay must not republish");
+        drop(lease);
+        let (rebuilt, _) = crate::session_service::tests::test_direct_active_service_at(
+            "child",
+            ModelClient::new_for_test(),
+            path.clone(),
+        );
+        let mut rebuilt_events = rebuilt.service.event_bus.subscribe();
+        let lease = sessions::SessionOperationLease::try_acquire(&path, "child").unwrap();
+        rebuilt
+            .service
+            .reconcile_durable_run_recovery(&lease)
+            .await
+            .unwrap();
+        assert!(
+            rebuilt_events.try_recv().is_err(),
+            "reattachment must not republish"
+        );
+        drop(lease);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+}
+
+#[tokio::test]
 async fn owned_continuation_rejects_a_lease_for_another_session() {
     let (service, path, original) =
         abandoned_child("owned_continuation_wrong_lease", Some("relationship-run"));
