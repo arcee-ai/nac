@@ -453,10 +453,10 @@ fn parses_together_chat_response_nested_usage() {
 }
 
 #[test]
-fn responses_preserve_reported_tier_without_inventing_one() {
+fn responses_recognize_reported_tiers_without_inventing_one() {
     for (field, expected) in [
         (json!("priority"), Some("priority")),
-        (json!("future-tier"), Some("future-tier")),
+        (json!("future-tier"), None),
         (Value::Null, None),
     ] {
         let response = parse_openai_responses_response(

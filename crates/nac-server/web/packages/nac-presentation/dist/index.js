@@ -2074,7 +2074,7 @@ function Jc({ invalid: e, errorText: t, onChange: n, initial: r, children: i }) 
 				allow_insecure_http: r.allow_insecure_http ?? !1,
 				api_key_env: r.api_key_env,
 				reasoning_effort: r.reasoning_effort,
-				...r.service_tier == null ? {} : { service_tier: r.service_tier },
+				...r.service_tier === void 0 ? {} : { service_tier: r.service_tier },
 				extra_headers: r.extra_headers,
 				orchestrator_compaction_threshold: r.orchestrator_compaction_threshold,
 				light_model: r.light_model
@@ -2147,7 +2147,9 @@ function Jc({ invalid: e, errorText: t, onChange: n, initial: r, children: i }) 
 		}
 		if (!Ge || !qe) return null;
 		let e = Ze || Ge.model || "", t = Je.trim();
-		return !e || !t ? null : {
+		if (!e || !t) return null;
+		let n = r && p === null ? r.service_tier : Ge.service_tier;
+		return {
 			kind: "resolved",
 			backend: qe,
 			model: e,
@@ -2155,7 +2157,7 @@ function Jc({ invalid: e, errorText: t, onChange: n, initial: r, children: i }) 
 			allow_insecure_http: Ge.allow_insecure_http,
 			api_key_env: Ge.api_key_env,
 			reasoning_effort: Ge.reasoning_effort,
-			...Ge.service_tier == null ? {} : { service_tier: Ge.service_tier },
+			...n === void 0 ? {} : { service_tier: n },
 			extra_headers: $e?.extra_headers ?? null,
 			orchestrator_compaction_threshold: r && p === null ? r.orchestrator_compaction_threshold : $e ? $e.orchestrator_compaction_threshold ?? null : void 0,
 			light_model: r && p === null ? r.light_model : $e ? $e.light_model ?? null : void 0,
@@ -3171,7 +3173,7 @@ function bl(e) {
 		allow_insecure_http: e.allow_insecure_http ?? !1,
 		api_key_env: e.api_key_env ?? null,
 		reasoning_effort: e.reasoning_effort ?? null,
-		service_tier: e.service_tier ?? null,
+		...e.service_tier === void 0 ? {} : { service_tier: e.service_tier },
 		extra_headers: e.extra_headers,
 		orchestrator_compaction_threshold: e.orchestrator_compaction_threshold,
 		light_model: e.light_model ?? null,
@@ -3190,10 +3192,10 @@ function Sl(e, t) {
 function Cl(e, t) {
 	if (e === t) return !0;
 	if (!e || !t) return !1;
-	if (e.kind === "resolved" && t.kind === "resolved") return e.backend === t.backend && e.model === t.model && e.base_url === t.base_url && e.allow_insecure_http === t.allow_insecure_http && e.api_key_env === t.api_key_env && e.reasoning_effort === t.reasoning_effort && (e.service_tier ?? null) === (t.service_tier ?? null) && xl(e.extra_headers, t.extra_headers) && e.orchestrator_compaction_threshold === t.orchestrator_compaction_threshold && Sl(e.light_model, t.light_model);
+	if (e.kind === "resolved" && t.kind === "resolved") return e.backend === t.backend && e.model === t.model && e.base_url === t.base_url && e.allow_insecure_http === t.allow_insecure_http && e.api_key_env === t.api_key_env && e.reasoning_effort === t.reasoning_effort && e.service_tier === t.service_tier && xl(e.extra_headers, t.extra_headers) && e.orchestrator_compaction_threshold === t.orchestrator_compaction_threshold && Sl(e.light_model, t.light_model);
 	if (e.kind !== "save" || t.kind !== "save") return !1;
 	let n = e.request, r = t.request;
-	return n.name === r.name && n.backend === r.backend && n.model === r.model && n.base_url === r.base_url && n.allow_insecure_http === r.allow_insecure_http && n.api_key === r.api_key && n.reasoning_effort === r.reasoning_effort && (n.service_tier ?? null) === (r.service_tier ?? null) && n.initial_prompt === r.initial_prompt && xl(n.extra_headers, r.extra_headers) && n.orchestrator_compaction_threshold === r.orchestrator_compaction_threshold && Sl(n.light_model, r.light_model);
+	return n.name === r.name && n.backend === r.backend && n.model === r.model && n.base_url === r.base_url && n.allow_insecure_http === r.allow_insecure_http && n.api_key === r.api_key && n.reasoning_effort === r.reasoning_effort && n.service_tier === r.service_tier && n.initial_prompt === r.initial_prompt && xl(n.extra_headers, r.extra_headers) && n.orchestrator_compaction_threshold === r.orchestrator_compaction_threshold && Sl(n.light_model, r.light_model);
 }
 // src/app/components/modals/PrimaryModelSection.tsx
 var wl = [{
@@ -3211,15 +3213,15 @@ function Tl({ initial: e, inheritSavedDefault: t = !1, existingSession: n = !1, 
 			baseUrl: p.base_url
 		},
 		effort: p.reasoning_effort ?? "",
-		speed: p.service_tier ?? null
+		speed: p.service_tier
 	} : null, [p]), _ = a.defaultPick ? o.get(a.defaultPick.backend) : void 0, v = a.configured && a.credentialReady && (i.isPending || _ === null), b = _ === void 0 || a.defaultPick && _?.some((e) => e.id === a.defaultPick?.model) ? a.defaultPick : null, x = J(() => As(i.data), [i.data]), S = J(() => s ?? g ?? (a.configured ? b ? {
 		pick: b,
 		effort: "",
-		speed: null
+		speed: void 0
 	} : null : x ? {
 		pick: x,
 		effort: "",
-		speed: null
+		speed: void 0
 	} : null), [
 		s,
 		g,
@@ -3242,7 +3244,7 @@ function Tl({ initial: e, inheritSavedDefault: t = !1, existingSession: n = !1, 
 			allow_insecure_http: p.allow_insecure_http ?? !1,
 			api_key_env: p.api_key_env,
 			reasoning_effort: S.effort || null,
-			service_tier: S.speed,
+			...S.speed === void 0 ? {} : { service_tier: S.speed },
 			extra_headers: p.extra_headers,
 			light_model: p.light_model,
 			orchestrator_compaction_threshold: p.orchestrator_compaction_threshold,
@@ -3255,7 +3257,7 @@ function Tl({ initial: e, inheritSavedDefault: t = !1, existingSession: n = !1, 
 			allow_insecure_http: !1,
 			api_key_env: C?.connection?.api_key_env ?? null,
 			reasoning_effort: S.effort || null,
-			service_tier: S.speed,
+			...S.speed === void 0 ? {} : { service_tier: S.speed },
 			extra_headers: null,
 			light_model: void 0
 		} : null;
@@ -3291,8 +3293,8 @@ function Tl({ initial: e, inheritSavedDefault: t = !1, existingSession: n = !1, 
 					liveByBackend: o,
 					value: S?.pick ?? null,
 					onSelect: (e) => {
-						let t = Fs(i.data, e.backend, e.model).supportedEfforts, n = S?.effort ?? "", r = S?.speed ?? null, a = $c(Fs(i.data, e.backend, e.model).model, e.model);
-						if (r && (e.backend !== "chatgpt-codex-responses" || r !== "standard" && !a)) {
+						let t = Fs(i.data, e.backend, e.model).supportedEfforts, n = S?.effort ?? "", r = S?.speed, a = $c(Fs(i.data, e.backend, e.model).model, e.model);
+						if (r && e.backend !== "chatgpt-codex-responses") {
 							u("Clear the speed preference before choosing this model.");
 							return;
 						}
@@ -3382,7 +3384,7 @@ function Dl({ initial: e, onChange: t, invalid: n, errorText: r, children: i, si
 	}, [t]), v = K((e) => {
 		let n = m.current;
 		if (e?.kind === "resolved" && n?.kind === "resolved") {
-			let t = e.backend === n.backend && e.model === n.model && e.base_url === n.base_url && e.allow_insecure_http === n.allow_insecure_http && e.api_key_env === n.api_key_env && e.reasoning_effort === n.reasoning_effort && (e.service_tier ?? null) === (n.service_tier ?? null) && JSON.stringify(e.extra_headers) === JSON.stringify(n.extra_headers);
+			let t = e.backend === n.backend && e.model === n.model && e.base_url === n.base_url && e.allow_insecure_http === n.allow_insecure_http && e.api_key_env === n.api_key_env && e.reasoning_effort === n.reasoning_effort && e.service_tier === n.service_tier && JSON.stringify(e.extra_headers) === JSON.stringify(n.extra_headers);
 			e = {
 				...e,
 				light_model: n.light_model,
@@ -3585,7 +3587,7 @@ function Vl(e) {
 		allow_insecure_http: t.allow_insecure_http,
 		api_key_env: t.api_key_env,
 		reasoning_effort: e.reasoning === "__clear__" ? null : e.reasoning || t.reasoning_effort || null,
-		...t.service_tier == null ? {} : { service_tier: t.service_tier },
+		...t.service_tier === void 0 ? {} : { service_tier: t.service_tier },
 		light_model: n.orchestrationEnabled ? r.mode === "dual" && r.light ? ic(r.light, t.backend, t.api_key_env) : null : e.savedLight ?? null
 	}, o = e.headers ?? t.extra_headers ?? void 0;
 	return o !== void 0 && (a.extra_headers = o), e.presetCompaction && t.orchestrator_compaction_threshold !== void 0 ? a.orchestrator_compaction_threshold = t.orchestrator_compaction_threshold : !(t.backend === "chatgpt-codex-responses" && e.automaticCompaction) && dc(e.compaction) !== null && (a.orchestrator_compaction_threshold = Number(e.compaction)), e.execution !== "ssh" && (a.sandbox = {
@@ -3637,7 +3639,7 @@ function Kl({ open: e, onClose: t }) {
 	}, e ? "open" : "closing") : null;
 }
 function ql({ open: e, defaultCwd: t, onClose: n }) {
-	let { loadLastLight: r, storeLastLight: i } = E().stores.lastLight, a = ko(), o = tr(), s = Fl(e), c = So(), l = Ue(), u = Yt(), d = fn(), [f, p] = X("local"), m = Jt(), [h, g] = X(m.orchestrationEnabled ? "orchestrator" : "direct"), [_, v] = X(t), [y, b] = X(""), [x, S] = X(""), [C, w] = X(null), [T, D] = X(""), [O, k] = X(""), [A, j] = X(Gl), [M, ee] = X(!1), [N, te] = X(!1), [ne, re] = X(!1), [P, ie] = X(null), [ae, oe] = X({
+	let { loadLastLight: r, storeLastLight: i } = E().stores.lastLight, a = ko(), o = tr(), s = Fl(e), c = So(), l = Ue(), u = Yt(), d = fn(), [f, p] = X("local"), m = Jt(), [h, g] = X(m.orchestrationEnabled ? "orchestrator" : "direct"), [_, v] = X(t), [y, b] = X(""), [x, S] = X(""), [C, w] = X(void 0), [T, D] = X(""), [O, k] = X(""), [A, j] = X(Gl), [M, ee] = X(!1), [N, te] = X(!1), [ne, re] = X(!1), [P, ie] = X(null), [ae, oe] = X({
 		mode: "single",
 		light: null
 	}), [se, ce] = X(null), [le, ue] = X(""), [de, fe] = X(null), pe = Y(""), me = Y(!0), he = Y(!1), ge = $t(), _e = P?.kind === "save" ? P.request : P ?? null, ve = Cc(Fs(ge.data, _e?.backend, _e?.model).supportedEfforts, x, Ul), ye = bi(), be = f === "ssh", xe = Qn(f === "sandbox").data, Se = be ? de : null, F = !be || Se !== null, Ce = s.busy, [we, Te] = X(null), Ee = u.isPending && f === "sandbox", De = xr(Ee, we).data, Oe = De?.since_epoch_ms, [ke, Ae] = X(0);
@@ -3658,7 +3660,7 @@ function ql({ open: e, defaultCwd: t, onClose: n }) {
 	}, Ne = Y(null), Pe = K((e, t) => {
 		if (ie(e), !e || Cl(Ne.current, e)) return;
 		let n = Ne.current;
-		if (Ne.current = e, w((e.kind === "resolved" ? e.service_tier : e.request.service_tier) ?? null), t === "primary" && n?.kind === "resolved") ce((e) => e?.field === "config" ? null : e);
+		if (Ne.current = e, w(e.kind === "resolved" ? e.service_tier : e.request.service_tier), t === "primary" && n?.kind === "resolved") ce((e) => e?.field === "config" ? null : e);
 		else {
 			if (e?.kind === "resolved" && e.orchestrator_compaction_threshold !== void 0) {
 				let t = e.orchestrator_compaction_threshold, n = t == null ? "" : String(t);
@@ -3963,7 +3965,7 @@ function ql({ open: e, defaultCwd: t, onClose: n }) {
 								control: /* @__PURE__ */ Q(nl, {
 									form: !0,
 									tiers: _e?.backend === "chatgpt-codex-responses" ? $c(Fs(ge.data, _e.backend, _e.model).model, _e.model) : null,
-									value: C,
+									value: C ?? null,
 									onChange: je(w)
 								})
 							}) : null,
@@ -11887,7 +11889,7 @@ function Fm(e) {
 			allow_insecure_http: e.allow_insecure_http,
 			api_key_env: e.api_key_env ?? null,
 			reasoning_effort: e.reasoning_effort ?? null,
-			service_tier: e.service_tier ?? null,
+			...e.service_tier == null ? {} : { service_tier: e.service_tier },
 			extra_headers: e.extra_headers,
 			orchestrator_compaction_threshold: e.orchestrator_compaction_threshold,
 			light_model: e.light_model ?? null,
@@ -11906,7 +11908,7 @@ function Im(e, t) {
 			allow_insecure_http: e.allow_insecure_http,
 			api_key_env: e.api_key_env ?? null,
 			reasoning_effort: e.reasoning_effort ?? null,
-			service_tier: e.service_tier ?? null,
+			...e.service_tier == null ? {} : { service_tier: e.service_tier },
 			extra_headers: Pm(e.extra_headers_json),
 			orchestrator_compaction_threshold: e.orchestrator_compaction_threshold,
 			light_model: e.light_model ?? null
@@ -11949,7 +11951,7 @@ function Bm({ policy: e, projectId: t, behavior: n, selected: r, light: i }) {
 		allow_insecure_http: r.allow_insecure_http,
 		api_key_env: r.api_key_env,
 		reasoning_effort: r.reasoning_effort,
-		...r.service_tier == null ? {} : { service_tier: r.service_tier },
+		...r.service_tier === void 0 ? {} : { service_tier: r.service_tier },
 		extra_headers: r.extra_headers,
 		light_model: i
 	};
@@ -12067,7 +12069,7 @@ function Um() {
 				allow_insecure_http: n.allow_insecure_http ?? !1,
 				api_key_env: n.api_key_env ?? null,
 				reasoning_effort: n.reasoning_effort ?? null,
-				service_tier: n.service_tier ?? null,
+				...n.service_tier == null ? {} : { service_tier: n.service_tier },
 				extra_headers: n.extra_headers,
 				orchestrator_compaction_threshold: n.orchestrator_compaction_threshold ?? null
 			};
@@ -15364,17 +15366,11 @@ function Mg({ sessionId: e, metadata: t, label: n, disabled: r }) {
 			return;
 		}
 		let u = Fs(o.data, n.backend, n.model).supportedEfforts, p = d && u.includes(d) ? d : null, m = $c(Fs(o.data, n.backend, n.model).model, n.model), h = f;
-		if (h && (n.backend !== "chatgpt-codex-responses" || h !== "standard" && !m)) {
+		if (h && n.backend !== "chatgpt-codex-responses") {
 			a.error("Choose a compatible speed before switching to this model.");
 			return;
 		}
-		if (h && !el(m, h)) {
-			if (n.backend !== "chatgpt-codex-responses") {
-				a.error("Choose a compatible speed before switching to this provider.");
-				return;
-			}
-			h = "standard";
-		}
+		h && !el(m, h) && (h = "standard");
 		let g = i ? {
 			model: n.model,
 			reasoning_effort: p,

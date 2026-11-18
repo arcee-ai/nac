@@ -1,5 +1,6 @@
 import path from "node:path";
 import { createDirectSession, expect, test } from "./harness";
+import { openSessionSettings } from "./nav-focus-helpers";
 
 test.use({ orchestration: "0", codexCatalogFixture: true });
 
@@ -85,5 +86,26 @@ for (const mobile of [false, true]) {
     await page.reload();
     await expect(page.getByRole("button", { name: "Speed: Fast" })).toBeVisible();
     expect((await (await request.get(configUrl)).json()).reasoning_effort).toBe(initialReasoning);
+    await page.route(`${harness.baseUrl}/models`, async (route) => {
+      const response = await route.fetch();
+      const catalog = await response.json();
+      const provider = catalog.providers.find(
+        (entry: { id: string }) => entry.id === "chatgpt-codex-responses",
+      );
+      const model = provider.models.find((entry: { id: string }) => entry.id === "gpt-6.1-sol");
+      model.service_tiers = [];
+      await route.fulfill({ response, json: catalog });
+    });
+    await page.reload();
+    await openSessionSettings(page);
+    const settings = page.getByRole("dialog", { name: "Session settings", exact: true });
+    await expect(settings.getByText("Fast (unavailable)")).toBeVisible();
+    await settings.getByRole("button", { name: "Speed: Fast" }).click();
+    await page.getByRole("menuitemradio", { name: "Use provider default" }).click();
+    await settings.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(settings).toBeHidden();
+    await expect
+      .poll(async () => (await (await request.get(configUrl)).json()).service_tier ?? null)
+      .toBeNull();
   });
 }

@@ -200,3 +200,35 @@ it("keeps managed mounted credentials server-side while selecting another entitl
     client.clear();
   }
 });
+
+it("atomically resets Fast to Standard when the target Codex capability is unknown", async () => {
+  const update = vi.spyOn(api, "updateConfig").mockResolvedValue(undefined);
+  const { client, view } = renderPicker({
+    backend: "chatgpt-codex-responses",
+    model: "previous-model",
+    base_url: "https://chatgpt.com/backend-api",
+    api_key_env: null,
+    reasoning_effort: "high",
+    service_tier: "fast",
+  } as SessionMetadata);
+  try {
+    const button = await screen.findByRole("button", { name: "Model" });
+    await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(button);
+    fireEvent.change(screen.getByPlaceholderText("Search models…"), {
+      target: { value: "GPT-5.6 Sol" },
+    });
+    fireEvent.click(await screen.findByText("GPT-5.6 Sol"));
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledExactlyOnceWith("session", {
+        model: "gpt-5.6-sol",
+        reasoning_effort: "high",
+        service_tier: "standard",
+      }),
+    );
+    expect(await screen.findByText(/speed reset to Standard/)).toBeTruthy();
+  } finally {
+    view.unmount();
+    client.clear();
+  }
+});

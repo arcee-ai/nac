@@ -143,18 +143,11 @@ export function ModelPicker({
       pick.model,
     );
     let speed = currentSpeed;
-    if (
-      speed &&
-      (pick.backend !== "chatgpt-codex-responses" || (speed !== "standard" && !targetSpeed))
-    ) {
+    if (speed && pick.backend !== "chatgpt-codex-responses") {
       toast.error("Choose a compatible speed before switching to this model.");
       return;
     }
     if (speed && !supportsSpeed(targetSpeed, speed)) {
-      if (pick.backend !== "chatgpt-codex-responses") {
-        toast.error("Choose a compatible speed before switching to this provider.");
-        return;
-      }
       speed = "standard";
     }
     const patch = preservesRoute

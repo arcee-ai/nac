@@ -161,7 +161,7 @@ function CreateProjectForm({
   const [cwd, setCwd] = useState(defaultCwd);
   const [name, setName] = useState("");
   const [reasoning, setReasoning] = useState("");
-  const [speed, setSpeed] = useState<ServiceTier | null>(null);
+  const [speed, setSpeed] = useState<ServiceTier | null | undefined>(undefined);
   const [compaction, setCompaction] = useState("");
   const [extraHeaders, setExtraHeaders] = useState("");
   const [sandbox, setSandbox] = useState<SandboxOptions>(EMPTY_SANDBOX);
@@ -242,7 +242,7 @@ function CreateProjectForm({
       if (!next || sameModelSelection(projectedSelection.current, next)) return;
       const previous = projectedSelection.current;
       projectedSelection.current = next;
-      setSpeed((next.kind === "resolved" ? next.service_tier : next.request.service_tier) ?? null);
+      setSpeed(next.kind === "resolved" ? next.service_tier : next.request.service_tier);
       // Primary identity changes preserve the context draft; explicit presets
       // still project their complete numeric or disabled compaction policy.
       if (source === "primary" && previous?.kind === "resolved") {
@@ -672,7 +672,7 @@ function CreateProjectForm({
                             )
                           : null
                       }
-                      value={speed}
+                      value={speed ?? null}
                       onChange={edit(setSpeed)}
                     />
                   }

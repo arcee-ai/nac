@@ -171,6 +171,7 @@ pub(super) fn parse_openai_responses_response(
         served_service_tier: value
             .get("service_tier")
             .and_then(Value::as_str)
+            .filter(|tier| matches!(*tier, "default" | "priority" | "ultrafast"))
             .map(str::to_owned),
     })
 }

@@ -32,7 +32,7 @@ const PRIMARY_EFFORT_OPTIONS: SelectItem[] = [
 interface PrimaryChoice {
   pick: CatalogPick;
   effort: ReasoningEffort | "";
-  speed: ServiceTier | null;
+  speed: ServiceTier | null | undefined;
 }
 
 /**
@@ -84,7 +84,7 @@ export function PrimaryModelSection({
               baseUrl: initial.base_url,
             },
             effort: (initial.reasoning_effort ?? "") as ReasoningEffort | "",
-            speed: initial.service_tier ?? null,
+            speed: initial.service_tier,
           }
         : null,
     [initial],
@@ -109,10 +109,10 @@ export function PrimaryModelSection({
       initialChoice ??
       (managedModel.configured
         ? managedDefault
-          ? { pick: managedDefault, effort: "", speed: null }
+          ? { pick: managedDefault, effort: "", speed: undefined }
           : null
         : fallback
-          ? { pick: fallback, effort: "", speed: null }
+          ? { pick: fallback, effort: "", speed: undefined }
           : null),
     [chosen, initialChoice, fallback, managedDefault, managedModel.configured],
   );
@@ -156,7 +156,7 @@ export function PrimaryModelSection({
         allow_insecure_http: initial.allow_insecure_http ?? false,
         api_key_env: initial.api_key_env,
         reasoning_effort: effective.effort || null,
-        service_tier: effective.speed,
+        ...(effective.speed !== undefined ? { service_tier: effective.speed } : {}),
         extra_headers: initial.extra_headers,
         light_model: initial.light_model,
         orchestrator_compaction_threshold: initial.orchestrator_compaction_threshold,
@@ -174,7 +174,7 @@ export function PrimaryModelSection({
       // resolved server-side; the browser never receives credential values.
       api_key_env: provider?.connection?.api_key_env ?? null,
       reasoning_effort: effective.effort || null,
-      service_tier: effective.speed,
+      ...(effective.speed !== undefined ? { service_tier: effective.speed } : {}),
       extra_headers: null,
       light_model: undefined,
     };
@@ -226,15 +226,12 @@ export function PrimaryModelSection({
                 pick.model,
               ).supportedEfforts;
               const current = effective?.effort ?? "";
-              const oldSpeed = effective?.speed ?? null;
+              const oldSpeed = effective?.speed;
               const tiers = discoveredSpeed(
                 resolveCatalogModel(catalog.data, pick.backend, pick.model).model,
                 pick.model,
               );
-              if (
-                oldSpeed &&
-                (pick.backend !== "chatgpt-codex-responses" || (oldSpeed !== "standard" && !tiers))
-              ) {
+              if (oldSpeed && pick.backend !== "chatgpt-codex-responses") {
                 setSpeedNotice("Clear the speed preference before choosing this model.");
                 return;
               }

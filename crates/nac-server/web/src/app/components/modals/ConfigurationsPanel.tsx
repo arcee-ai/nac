@@ -421,7 +421,7 @@ export function ConfigurationsPanel({
         allow_insecure_http: initial.allow_insecure_http ?? false,
         api_key_env: initial.api_key_env,
         reasoning_effort: initial.reasoning_effort,
-        ...(initial.service_tier != null ? { service_tier: initial.service_tier } : {}),
+        ...(initial.service_tier !== undefined ? { service_tier: initial.service_tier } : {}),
         extra_headers: initial.extra_headers,
         orchestrator_compaction_threshold: initial.orchestrator_compaction_threshold,
         light_model: initial.light_model,
@@ -514,6 +514,7 @@ export function ConfigurationsPanel({
     const model = chosenModel || resolved.model || "";
     const url = savedBaseUrl.trim();
     if (!model || !url) return null;
+    const serviceTier = initial && picked === null ? initial.service_tier : resolved.service_tier;
     return {
       kind: "resolved",
       backend: savedBackend,
@@ -522,7 +523,7 @@ export function ConfigurationsPanel({
       allow_insecure_http: resolved.allow_insecure_http,
       api_key_env: resolved.api_key_env,
       reasoning_effort: resolved.reasoning_effort,
-      ...(resolved.service_tier != null ? { service_tier: resolved.service_tier } : {}),
+      ...(serviceTier !== undefined ? { service_tier: serviceTier } : {}),
       extra_headers: savedRecord?.extra_headers ?? null,
       orchestrator_compaction_threshold:
         initial && picked === null

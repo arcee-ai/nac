@@ -524,11 +524,7 @@ impl ModelClient {
             usage.cost = calculate_cost(&self.resolved_model.cost, cache_write_1h_rate, usage);
             if self.backend == BackendKind::ChatGptCodexResponses {
                 usage.speed_tier_charges_excluded = response.effective_service_tier.is_some()
-                    || response
-                        .served_service_tier
-                        .as_deref()
-                        .is_some_and(|tier| tier != "default")
-                    || self.service_tier.is_none();
+                    || response.served_service_tier.as_deref() != Some("default");
             }
         }
         response

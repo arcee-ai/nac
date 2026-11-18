@@ -45,7 +45,7 @@ export function projectChatRequest(values: {
       values.reasoning === CLEAR_EFFORT
         ? null
         : values.reasoning || selected.reasoning_effort || null,
-    ...(selected.service_tier != null ? { service_tier: selected.service_tier } : {}),
+    ...(selected.service_tier !== undefined ? { service_tier: selected.service_tier } : {}),
     // Explicit Single overrides a saved Dual default; direct preserves hidden stored data.
     light_model: !policy.orchestrationEnabled
       ? (values.savedLight ?? null)
