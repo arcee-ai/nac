@@ -280,32 +280,41 @@ async fn changed_project_defaults_do_not_bypass_current_policy_or_frozen_credent
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn legacy_reserved_task_without_selection_cannot_launch() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
-    let root = temp_root("legacy_fresh_reservation")
-        .canonicalize()
+    for git_project in [false, true] {
+        let root = temp_root("legacy_fresh_reservation")
+            .canonicalize()
+            .unwrap();
+        let home = root.join("nac-home");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(
+            home.join("config.toml"),
+            "[[permissions.rules]]\naction='*'\nresource='*'\neffect='allow'\n",
+        )
         .unwrap();
-    let home = root.join("nac-home");
-    std::fs::create_dir_all(&home).unwrap();
-    std::fs::write(
-        home.join("config.toml"),
-        "[[permissions.rules]]\naction='*'\nresource='*'\neffect='allow'\n",
-    )
-    .unwrap();
-    let _env = ScopedModelEnv::isolated(&home, Some("fixture-key"));
-    let manager = test_manager(&root);
-    let primary = catch_fixture_panic(async {
-        let prepared = reservation(&root, &manager, false, false, false).await;
-        let occurrence = prepared.receipt().occurrence_id.clone();
-        let conn = rusqlite::Connection::open(&manager.inner.store_path).unwrap();
-        conn.execute("UPDATE heartbeat_task_launches SET launch_json=json_remove(launch_json, '$.receipt.destination.model_selection', '$.receipt.request.model_selection') WHERE occurrence_id=?1", [&occurrence]).unwrap();
-        drop(conn);
-        let legacy = store::read_fresh_heartbeat_launch(&manager.inner.store_path, &occurrence).unwrap().unwrap();
-        let error = TaskLaunchApplication::new(&manager).prepare(legacy).await.unwrap_err();
-        assert!(format!("{error:#}").contains("predates explicit model selection"), "{error:#}");
-        assert!(sessions::list_sessions(&manager.inner.store_path).unwrap().is_empty());
-        assert!(store::read_fresh_heartbeat_launch(&manager.inner.store_path, &occurrence).unwrap().is_some());
-    }).await;
-    retire(manager).await;
-    if let Err(panic) = primary {
-        std::panic::resume_unwind(panic);
+        let _env = ScopedModelEnv::isolated(&home, Some("fixture-key"));
+        let manager = test_manager(&root);
+        let primary = catch_fixture_panic(async {
+            let prepared = reservation(&root, &manager, git_project, false, false).await;
+            let occurrence = prepared.receipt().occurrence_id.clone();
+            let conn = rusqlite::Connection::open(&manager.inner.store_path).unwrap();
+            conn.execute("UPDATE heartbeat_task_launches SET launch_json=json_remove(launch_json, '$.receipt.destination.model_selection', '$.receipt.request.model_selection') WHERE occurrence_id=?1", [&occurrence]).unwrap();
+            drop(conn);
+            let legacy = store::read_fresh_heartbeat_launch(&manager.inner.store_path, &occurrence).unwrap().unwrap();
+            let before = legacy.receipt().clone();
+            let worktrees = git_project.then(|| git(&root.join("repo"), &["worktree", "list", "--porcelain"]));
+            let error = TaskLaunchApplication::new(&manager).prepare(legacy).await.unwrap_err();
+            assert!(format!("{error:#}").contains("predates explicit model selection"), "{error:#}");
+            assert!(sessions::list_sessions(&manager.inner.store_path).unwrap().is_empty());
+            let retained = store::read_fresh_heartbeat_launch(&manager.inner.store_path, &occurrence).unwrap().unwrap();
+            assert_eq!(retained.receipt(), &before);
+            assert!(store::load_task_launch(&manager.inner.store_path, &before.request.request_id).unwrap().is_none());
+            if let Some(worktrees) = worktrees {
+                assert_eq!(git(&root.join("repo"), &["worktree", "list", "--porcelain"]), worktrees);
+            }
+        }).await;
+        retire(manager).await;
+        if let Err(panic) = primary {
+            std::panic::resume_unwind(panic);
+        }
     }
 }

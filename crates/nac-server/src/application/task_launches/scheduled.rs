@@ -12,6 +12,10 @@ impl FreshTaskPreparationPort for TaskLaunchApplication<'_> {
                 self.manager.managed_host().is_none(),
                 "scheduled tasks require an unmanaged Local host"
             );
+            anyhow::ensure!(
+                launch.receipt().destination.model_selection.is_some(),
+                "scheduled task predates explicit model selection; create a new schedule with a selected model"
+            );
             let admission = self.manager.inner.task_preparations.admit().await?;
             let manager = self.manager.clone();
             // Accepted preparation keeps its serving-lifetime reader even when
