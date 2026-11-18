@@ -15371,10 +15371,7 @@ var Ag = {
 	}
 }))];
 function Mg({ sessionId: e, metadata: t, label: n, disabled: r }) {
-	let i = bi(), a = tr(), o = $t(), s = Hc(), c = Qt(o.data), l = So(), u = Zn(), d = ir(e, {
-		enabled: !1,
-		retry: !1
-	}), f = r || !t || u.isPending || d.isError, p = () => {
+	let i = bi(), a = tr(), o = $t(), s = Hc(), c = Qt(o.data), l = So(), u = Zn(), d = ir(e, { enabled: !1 }), f = r || !t || u.isPending || d.isError, p = () => {
 		l.getQueryState(sr.sessionSnapshot(e))?.status === "error" && a.error("Settings were saved, but the latest session could not be loaded. Retry the refresh before making another change.");
 	}, m = t?.model ?? n, h = t?.reasoning_effort ?? "", g = t?.service_tier ?? null, _ = t ? {
 		backend: t.backend,

@@ -8,7 +8,13 @@ import { ModelPicker } from "@/app/components/inspector/ModelPicker";
 import { ToastProvider } from "@/app/providers/ToastProvider";
 import { api } from "@/app/services/api";
 import { queryKeys } from "@/app/services/queries/keys";
-import type { ManagedHostStatus, ModelCatalog, SessionMetadata } from "@/app/types/api";
+import { useSessionSnapshot } from "@/app/services/queries/session";
+import type {
+  ManagedHostStatus,
+  ModelCatalog,
+  SessionMetadata,
+  SessionSnapshotResponse,
+} from "@/app/types/api";
 
 const cost = { input: 0, output: 0, cache_read: 0, cache_write: 0 };
 const catalog = {
@@ -287,6 +293,75 @@ it("keeps controls locked when the accepted change cannot refresh the snapshot",
   } finally {
     view.unmount();
     client.clear();
+    update.mockRestore();
+  }
+});
+
+it("preserves snapshot retry behavior with the passive guard mounted", async () => {
+  const metadata = {
+    session_id: "session",
+    backend: "arcee-auth",
+    model: "trinity-large-thinking",
+    base_url: "https://api.arcee.ai/api/v1",
+    api_key_env: null,
+    reasoning_effort: "high",
+  } as SessionMetadata;
+  const snapshot = {
+    metadata,
+    messages: [],
+    message_created_at: [],
+    message_page: { start: 0, end: 0, total: 0, has_older: false },
+    response_timing: {
+      response_durations_ms: [],
+      last_response_duration_ms: null,
+      previous_response_duration_ms: null,
+    },
+    thread_events: {},
+    worksets: { items: [], error: null },
+  } as unknown as SessionSnapshotResponse;
+  const update = vi.spyOn(api, "updateConfig").mockResolvedValueOnce(undefined);
+  const fetch = vi
+    .spyOn(api, "getSession")
+    .mockRejectedValueOnce(new Error("transient"))
+    .mockResolvedValueOnce(snapshot);
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: 1, retryDelay: 0 }, mutations: { retry: false } },
+  });
+  function ActiveSnapshot() {
+    useSessionSnapshot("session", { initialData: snapshot, staleTime: Infinity });
+    return (
+      <ModelPicker
+        sessionId="session"
+        metadata={metadata}
+        label={metadata.model}
+        disabled={false}
+      />
+    );
+  }
+  const view = render(
+    <QueryClientProvider client={client}>
+      <ToastProvider>
+        <ActiveSnapshot />
+      </ToastProvider>
+    </QueryClientProvider>,
+  );
+  try {
+    const button = await screen.findByRole("button", { name: "Model" });
+    await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(button);
+    fireEvent.change(screen.getByPlaceholderText("Search models…"), {
+      target: { value: "GPT-5.6 Sol" },
+    });
+    fireEvent.click(await screen.findByText("GPT-5.6 Sol"));
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+    expect(update).toHaveBeenCalledOnce();
+    expect(client.getQueryState(queryKeys.sessionSnapshot("session"))?.status).toBe("success");
+    expect(screen.queryByRole("button", { name: "Retry settings refresh" })).toBeNull();
+  } finally {
+    view.unmount();
+    client.clear();
+    fetch.mockRestore();
     update.mockRestore();
   }
 });

@@ -114,7 +114,7 @@ export function ModelPicker({
   const updateConfig = useUpdateConfig();
   // Observe the existing snapshot without starting a separate fetch. A failed
   // refresh leaves cached metadata visible, but it is unsafe for another edit.
-  const snapshot = useSessionSnapshot(sessionId, { enabled: false, retry: false });
+  const snapshot = useSessionSnapshot(sessionId, { enabled: false });
   const controlsDisabled = disabled || !metadata || updateConfig.isPending || snapshot.isError;
   const reportRefreshFailure = () => {
     // Read the query after the mutation's awaited invalidation has settled.
