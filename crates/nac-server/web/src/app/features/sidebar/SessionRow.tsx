@@ -120,7 +120,7 @@ export function SessionRow({
           )}
           style={{ paddingLeft: 10 + depth * INDENT }}
         >
-          <span className="flex size-3 shrink-0 items-center justify-center">
+          <span className="flex size-4 shrink-0 items-center justify-center">
             <StatusDot status={status} />
           </span>
           {pinned ? (

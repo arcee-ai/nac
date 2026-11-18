@@ -112,6 +112,7 @@ function SidebarBody({ onHide }: { onHide: () => void }) {
           icon={IconName.AddChat}
           label="New session"
           shortcut={NEW_CHAT_KEYS}
+          active={pathname === routes.list()}
           onClick={() => void commands.newSession()}
         />
         <button
@@ -131,12 +132,6 @@ function SidebarBody({ onHide }: { onHide: () => void }) {
             <KeyboardShortcut keys={SEARCH_KEYS} />
           </span>
         </button>
-        <NavRow
-          icon={IconName.Home}
-          label="Home"
-          active={pathname === routes.list()}
-          onClick={() => go(routes.list())}
-        />
       </nav>
 
       <div className="shrink-0 px-2 pt-2 pb-1">

@@ -1,6 +1,4 @@
-import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
-import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 
@@ -9,108 +7,29 @@ import {
   ButtonContent,
   ButtonSize,
   ButtonVariant,
-  Icon,
   IconName,
   Input,
+  InputLeading,
   InputSize,
   Modal,
   ModalSize,
-  type SelectItem,
-  Separator,
-  StickyButton,
-  Switch,
-  SwitchSize,
-  TextArea,
 } from "@/app/atoms";
-import { SmallSelect } from "@/app/components/modals/SmallSelect";
-import { FormSection } from "@/app/components/modals/FormSection";
-import { ConfigRow, FieldLabel } from "@/app/components/modals/ConfigRow";
-import { type LaunchModelSelection } from "@/app/components/modals/ConfigurationsPanel";
-import { LightModelSection, type LightSelection } from "@/app/components/modals/LightModelSection";
-import { REASONING_OPTIONS, reasoningOptionsFor } from "@/app/components/modals/options";
-import { PathPickerModal } from "@/app/components/modals/PathPickerModal";
-import { SshConnectionBox } from "@/app/components/modals/SshConnectionBox";
-import { SessionBehaviorPicker } from "@/app/components/modals/SessionBehaviorPicker";
 import { useExitTransition } from "@/app/hooks/useExitTransition";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
-import { resolveCatalogModel } from "@/app/lib/catalog";
-import { cn } from "@/app/lib/cn";
-import {} from "@/app/lib/lastLight";
-import { withoutInheritedCredential, nullable, serializeExtraHeaders } from "@/app/lib/modelConfig";
-import { toRunError } from "@/app/lib/providerError";
+import { nullable } from "@/app/lib/modelConfig";
 import { routes } from "@/app/lib/routes";
-import { errorMessage, useToast } from "@/app/providers/ToastProvider";
-import { ModelSetupSection } from "@/app/features/setup/ModelSetupSection";
-import {
-  createProjectChat,
-  SetupFailure,
-  requiresSetupReview,
-} from "@/app/features/setup/workflow";
+import { useToast } from "@/app/providers/ToastProvider";
+import { SourceFolders, type SourceFolder } from "@/app/features/setup/SourceFolders";
+import { SetupFailure, setupSequence } from "@/app/features/setup/workflow";
 import { useSetupAction } from "@/app/features/setup/useSetupAction";
 import {
   classifySetupFailure,
   setupFailureMessage,
   setupReconciliation,
 } from "@/app/features/setup/browserAdapters";
-import {
-  useCreateModelConfig,
-  useCreateProject,
-  useCreateSession,
-  useModelCatalog,
-  useSandboxActivity,
-  useSandboxAvailability,
-  useStoreInfo,
-} from "@/app/services/queries";
-import type { SessionBehavior, SshTarget } from "@/app/types/api";
+import { useCreateProject, useStoreInfo } from "@/app/services/queries";
 
-import { savedModelSelection, sameModelSelection } from "@/app/features/setup/modelSelection";
-import { projectChatRequest, type SandboxOptions } from "@/app/features/setup/projectLaunch";
-
-type Mode = "local" | "ssh" | "sandbox";
-
-const MODES: { id: Mode; label: string; description: string }[] = [
-  {
-    id: "local",
-    label: "Local",
-    description: "Runs on this machine with access to local files.",
-  },
-  {
-    id: "ssh",
-    label: "SSH",
-    description: "Runs on a connected remote machine.",
-  },
-  {
-    id: "sandbox",
-    label: "Sandbox",
-    description: "Runs in an isolated environment with limited access.",
-  },
-];
-
-/** The configuration decides these, so "inherit" means "leave it alone". */
-const ADVANCED_REASONING: SelectItem[] = REASONING_OPTIONS.map((item) =>
-  item.id === "" ? { ...item, label: "From configuration" } : item,
-);
-
-// `.btn-medium.btn-icon-right` wins on specificity, so the inset that lines
-// the path up with the neighbouring input has to be inline too.
-const CWD_BUTTON_PADDING = { paddingInline: "8px" };
-
-const EMPTY_SANDBOX: SandboxOptions = {
-  noMount: false,
-  image: "",
-  gpu: "",
-  workdir: "",
-  shm: "",
-  mounts: "",
-};
-
-/** `field` marks which control to flag; "config" flags the whole box. */
-interface FormError {
-  field: "cwd" | "ssh" | "config";
-  message: string;
-}
-
-/** Remounted on every open so the form always starts from the configured defaults. */
+/** Remounted on every open so the form always starts empty. */
 export function CreateProjectModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { data: storeInfo } = useStoreInfo();
   const mounted = useExitTransition(open);
@@ -118,7 +37,7 @@ export function CreateProjectModal({ open, onClose }: { open: boolean; onClose: 
   return (
     <CreateProjectForm
       // The exit transition briefly retains the form after close. Keying the
-      // two phases guarantees a rapid reopen still gets fresh launch defaults.
+      // two phases guarantees a rapid reopen still starts fresh.
       key={open ? "open" : "closing"}
       open={open}
       defaultCwd={storeInfo?.root_cwd ?? ""}
@@ -128,9 +47,9 @@ export function CreateProjectModal({ open, onClose }: { open: boolean; onClose: 
 }
 
 /**
- * A project is a location plus the defaults its chats inherit, so the form asks
- * for both and then opens the first chat: a project with nothing in it has
- * nothing to show.
+ * A project is a name and the folders it works in. The model, behavior and
+ * environment of each chat are chosen when that chat starts, so creating a
+ * project hands off to the project's empty-state composer.
  */
 function CreateProjectForm({
   open,
@@ -141,707 +60,132 @@ function CreateProjectForm({
   defaultCwd: string;
   onClose: () => void;
 }) {
-  const { loadLastLight, storeLastLight } = useNativeRuntime().stores.lastLight;
-
   const navigate = useNavigate();
   const toast = useToast();
   const action = useSetupAction(open);
   const client = useQueryClient();
   const createProject = useCreateProject();
-  const createSession = useCreateSession();
-  const createModelConfig = useCreateModelConfig();
-
-  const [mode, setMode] = useState<Mode>("local");
-  const policy = useUiPolicy();
-  const [behavior, setBehavior] = useState<SessionBehavior>(
-    policy.orchestrationEnabled ? "orchestrator" : "direct",
-  );
-  const [cwd, setCwd] = useState(defaultCwd);
-  const [name, setName] = useState("");
-  const [reasoning, setReasoning] = useState("");
-  const [compaction, setCompaction] = useState("");
-  const [extraHeaders, setExtraHeaders] = useState("");
-  const [sandbox, setSandbox] = useState<SandboxOptions>(EMPTY_SANDBOX);
-  const [headersOpen, setHeadersOpen] = useState(false);
-  const [sandboxOpen, setSandboxOpen] = useState(false);
-  const [picking, setPicking] = useState(false);
-  const [selection, setSelection] = useState<LaunchModelSelection | null>(null);
-  const [light, setLight] = useState<LightSelection>({ mode: "single", light: null });
-  const [error, setError] = useState<FormError | null>(null);
-  const [reviewError, setReviewError] = useState("");
-  // The host this form has actually reached. Everything remote — the working
-  // directory above all — is meaningless until one connection has answered, so
-  // the rest of the form waits for it.
-  const [connection, setConnection] = useState<SshTarget | null>(null);
-  const compactionRef = useRef("");
-  const compactionAutoRef = useRef(true);
-  // A saved preset owns an explicit numeric or disabled compaction policy;
-  // this also prevents disabled (`null`) from being auto-filled by the model.
-  const compactionPresetRef = useRef(false);
-
-  // The override only makes sense for the model the selection settles on, so
-  // the catalog narrows it to the efforts that model accepts.
-  const catalog = useModelCatalog();
-  const chosen = selection?.kind === "save" ? selection.request : (selection ?? null);
-  const reasoningItems = reasoningOptionsFor(
-    resolveCatalogModel(catalog.data, chosen?.backend, chosen?.model).supportedEfforts,
-    reasoning,
-    ADVANCED_REASONING,
-  );
-
   const isMobile = useIsMobile();
-  const isSsh = mode === "ssh";
-  // Probed only while sandbox mode is selected, so a missing or stopped
-  // podman runtime is flagged here instead of failing the launch.
-  const sandboxAvailability = useSandboxAvailability(mode === "sandbox").data;
-  const connected = isSsh ? connection : null;
-  // A local or sandboxed session has nothing to connect to, so it is ready at once.
-  const ready = !isSsh || connected !== null;
+
+  const [name, setName] = useState("");
+  const [folders, setFolders] = useState<SourceFolder[]>([]);
+  const [error, setError] = useState<{ folders: boolean; message: string } | null>(null);
+
   const busy = action.busy;
-
-  // A sandboxed launch can spend minutes pulling the image on first run;
-  // the polled phase plus an elapsed timer is the difference between
-  // "working" and "frozen". Each attempt gets a fresh launch id, sent with
-  // the create request, so the poll only ever sees this launch's phase even
-  // when another launch is in flight.
-  const [launchKey, setLaunchKey] = useState<string | null>(null);
-  const sandboxLaunching = createSession.isPending && mode === "sandbox";
-  const sandboxActivity = useSandboxActivity(sandboxLaunching, launchKey).data;
-  const activitySince = sandboxActivity?.since_epoch_ms;
-  const [launchElapsed, setLaunchElapsed] = useState(0);
-  useEffect(() => {
-    if (!sandboxLaunching) return;
-    const timer = setInterval(() => {
-      setLaunchElapsed(
-        activitySince ? Math.max(0, Math.floor((Date.now() - activitySince) / 1000)) : 0,
-      );
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [sandboxLaunching, activitySince]);
-
-  // Any edit clears the previous attempt's error, which also re-enables submit.
-  const edit =
-    <T,>(setter: (value: T) => void) =>
-    (value: T) => {
-      setError(null);
-      setter(value);
-    };
-  const setSb = (patch: Partial<SandboxOptions>) => {
-    setError(null);
-    setSandbox((current) => ({ ...current, ...patch }));
-  };
-
-  // Stable, so the panel does not re-emit its selection on every render.
-  const projectedSelection = useRef<LaunchModelSelection | null>(null);
-  const onSelection = useCallback(
-    (next: LaunchModelSelection | null, source: "primary" | "preset") => {
-      setSelection(next);
-      if (!next || sameModelSelection(projectedSelection.current, next)) return;
-      const previous = projectedSelection.current;
-      projectedSelection.current = next;
-      // Primary identity changes preserve the context draft; explicit presets
-      // still project their complete numeric or disabled compaction policy.
-      if (source === "primary" && previous?.kind === "resolved") {
-        setError((current) => (current?.field === "config" ? null : current));
-        return;
-      }
-      if (next?.kind === "resolved" && next.orchestrator_compaction_threshold !== undefined) {
-        const threshold = next.orchestrator_compaction_threshold;
-        const value = threshold == null ? "" : String(threshold);
-        compactionPresetRef.current = true;
-        compactionAutoRef.current = false;
-        compactionRef.current = value;
-        setCompaction(value);
-      } else {
-        const leavingPreset = compactionPresetRef.current;
-        compactionPresetRef.current = false;
-        if (leavingPreset) {
-          compactionAutoRef.current = true;
-          compactionRef.current = "";
-          setCompaction("");
-        }
-      }
-      setError((current) => (current?.field === "config" ? null : current));
-    },
-    [],
-  );
-
-  const onLight = useCallback((next: LightSelection) => {
-    setLight(next);
-    setError((current) => (current?.field === "config" ? null : current));
-  }, []);
-
-  // A resolved saved setup is authoritative for its light model — including
-  // an explicitly single-model one (`null`). Sources with no opinion (catalog
-  // and file launches, `undefined`) fall back to the last light model a
-  // session launched with. The key remounts the section when the seed changes.
-  const lastLight = useMemo(() => loadLastLight(), [loadLastLight]);
-  const savedLight =
-    selection?.kind === "resolved" && selection.light_model !== undefined
-      ? selection.light_model
-      : lastLight;
-  const savedLightKey = JSON.stringify(savedLight);
-
-  // Auto-suggest 70% of the selected model's context window as the compaction
-  // threshold. A manually entered value is preserved across model changes —
-  // the suggestion only fills the field when it is empty or was itself last
-  // auto-suggested.
-  const compactionPlaceholder = useMemo(() => {
-    const resolved = resolveCatalogModel(catalog.data, chosen?.backend, chosen?.model);
-    const contextWindow = resolved.contextWindow;
-    return contextWindow ? String(Math.round(contextWindow * 0.7)) : "auto";
-  }, [catalog.data, chosen?.backend, chosen?.model]);
-  useEffect(() => {
-    if (
-      !compactionPresetRef.current &&
-      compactionPlaceholder !== "auto" &&
-      (compactionRef.current === "" || compactionAutoRef.current)
-    ) {
-      compactionAutoRef.current = true;
-      compactionRef.current = compactionPlaceholder;
-      setCompaction(compactionPlaceholder);
-    }
-  }, [compactionPlaceholder, selection]);
-
-  const onCompactionChange = (value: string) => {
-    setError(null);
-    compactionPresetRef.current = false;
-    compactionAutoRef.current = false;
-    compactionRef.current = value;
-    setCompaction(value);
-  };
-
-  /** Paths belong to whichever machine runs the project, so they do not carry over. */
-  const changeMode = (next: Mode) => {
-    if (next === mode) return;
-    setError(null);
-    setMode(next);
-    setPicking(false);
-    setConnection(null);
-    setCwd(next === "ssh" ? "" : defaultCwd);
-  };
-
-  /**
-   * The SSH box owns Connect/Disconnect; we only keep the proved target and
-   * seed the working directory from the login home it returned.
-   */
-  const onSshConnectionChange = (target: SshTarget | null, homePath?: string) => {
-    setError(null);
-    setConnection(target);
-    if (target) {
-      if (homePath) setCwd(homePath);
-    } else {
-      setCwd("");
-    }
-  };
+  const primary = folders[0] ?? null;
 
   const submit = async () => {
-    if (action.needsReview || busy) return;
-    if (isSsh && !connected) {
-      setError({
-        field: "ssh",
-        message: "Connect to the SSH host before creating a project.",
-      });
-      return;
-    }
-    if (!nullable(cwd)) {
-      setError({ field: "cwd", message: "A working folder is required." });
-      return;
-    }
-    if (!selection) {
-      setError({
-        field: "config",
-        message: "Complete the provider configuration before creating a project.",
-      });
-      return;
-    }
-    if (policy.orchestrationEnabled && light.mode === "dual" && !light.light) {
-      setError({
-        field: "config",
-        message: "Pick the light model before creating a project.",
-      });
-      return;
-    }
-
-    let headers: Record<string, string> | undefined;
+    if (action.needsReview || busy || !primary) return;
     try {
-      headers = serializeExtraHeaders(extraHeaders, undefined);
-    } catch (validationError) {
-      setError({ field: "config", message: errorMessage(toRunError(validationError)) });
-      return;
-    }
-
-    let createdProjectId: string | null = null;
-    try {
-      const result = await action.run((current) =>
-        createProjectChat({
-          current: current.current,
-          classify: classifySetupFailure,
-          reconcile: setupReconciliation(client),
-          persistsModel: selection.kind === "save",
-          model: async () => {
-            if (selection.kind === "save") {
-              const request =
-                light.mode === "dual" && light.light
-                  ? { ...selection.request, light_model: light.light }
-                  : selection.request;
-              const record = await createModelConfig.mutateAsync(request);
-              const selected = savedModelSelection(record);
-              if (current.current()) setSelection(selected);
-              return selected;
-            }
-            return selection;
+      const project = await action.run((lease) =>
+        setupSequence(
+          {
+            current: lease.current,
+            classify: classifySetupFailure,
+            reconcile: setupReconciliation(client),
           },
-          project: async (selected) => {
-            const project = await createProject.mutateAsync({
-              name: nullable(name),
-              cwd,
-              ssh_host: connected?.ssh_host ?? null,
-              ssh_port: connected?.ssh_port ?? null,
-              ssh_identity_file: connected?.ssh_identity_file ?? null,
-              default_model_config_id: selected.config_id ?? null,
-            });
-            createdProjectId = project.project_id;
-            return project;
-          },
-          chat: async (selected, project) => {
-            const activityKey = mode === "sandbox" ? crypto.randomUUID() : null;
-            if (current.current()) setLaunchKey(activityKey);
-            const body = projectChatRequest({
-              selected,
-              projectId: project.project_id,
-              policy,
-              behavior,
-              reasoning,
-              headers,
-              compaction,
-              presetCompaction: compactionPresetRef.current,
-              savedLight,
-              light,
-              execution: connected ? "ssh" : mode,
-              sandbox,
-              activityKey,
-            });
-            const snapshot = await createSession.mutateAsync(body);
-            return {
-              snapshot,
-              launchLight: body.light_model ?? null,
-              apiKeyEnv: selected.api_key_env,
-            };
-          },
-        }),
+          (step) =>
+            step("project", () =>
+              // TODO(backend): a project stores exactly one folder today. Send
+              // every folder once projects own a folder list.
+              createProject.mutateAsync({
+                name: nullable(name),
+                cwd: primary.path,
+                ssh_host: primary.ssh?.ssh_host ?? null,
+                ssh_port: primary.ssh?.ssh_port ?? null,
+                ssh_identity_file: primary.ssh?.ssh_identity_file ?? null,
+                default_model_config_id: null,
+              }),
+            ),
+        ),
       );
-      if (!result) return;
-      const { snapshot, launchLight, apiKeyEnv } = result.chat;
-      storeLastLight(launchLight && withoutInheritedCredential(launchLight, apiKeyEnv));
+      if (!project) return;
       toast.success("Project created");
-      navigate(
-        snapshot.metadata.session_id
-          ? routes.session(snapshot.metadata.session_id)
-          : routes.project(result.project.project_id),
-      );
+      navigate(routes.project(project.project_id));
       onClose();
     } catch (createError) {
-      if (
-        createdProjectId &&
-        createError instanceof SetupFailure &&
-        createError.kind !== "unknown"
-      ) {
-        toast.error(
-          `Project created, but the first chat failed: ${setupFailureMessage(createError)}`,
-        );
-        navigate(routes.project(createdProjectId));
-        onClose();
-      } else {
-        const message = setupFailureMessage(createError);
-        if (requiresSetupReview(createError)) setReviewError(message);
-        setError({
-          field:
-            createError instanceof SetupFailure &&
-            createError.phase === "project" &&
-            createError.kind === "rejected"
-              ? "cwd"
-              : "config",
-          message,
-        });
-      }
+      setError({
+        folders: createError instanceof SetupFailure && createError.kind === "rejected",
+        message: setupFailureMessage(createError),
+      });
     }
   };
 
-  const invalid = (field: FormError["field"]) => error?.field === field;
-
-  const smallSelect = (
-    items: SelectItem[],
-    value: string,
-    onValueChange: (id: string) => void,
-    disabled = false,
-  ) => (
-    <SmallSelect
-      presentation="form"
-      items={items}
-      value={value}
-      onValueChange={onValueChange}
-      disabled={disabled}
-    />
-  );
+  const size = isMobile ? ButtonSize.Large : ButtonSize.Medium;
 
   return (
     <Modal
       open={open}
       onClose={onClose}
-      title="New Project"
-      size={ModalSize.Wide}
-      flush
-      className="h-[680px] max-md:[&>header_.btn-sticky]:min-h-11 max-md:[&>header_.btn-sticky]:min-w-11 max-md:[&>header_div:has(>.btn-sticky)]:min-h-11"
+      title="Create project"
+      size={ModalSize.Medium}
       footer={
-        isMobile ? (
-          <StickyButton
-            buttonClassName="min-h-11 min-w-11 max-w-full"
-            className="min-h-11 max-w-full"
-            variant={ButtonVariant.Primary}
+        <div className="flex w-full items-center justify-end gap-2">
+          <Button
+            variant={ButtonVariant.Ghost}
+            size={size}
             content={ButtonContent.Text}
-            onClick={submit}
-            loading={busy}
-            disabled={busy || action.needsReview || Boolean(error) || !selection || !ready}
+            onClick={onClose}
           >
-            Create Project
-          </StickyButton>
-        ) : (
+            Cancel
+          </Button>
           <Button
             variant={ButtonVariant.Primary}
-            size={ButtonSize.Large}
+            size={size}
             content={ButtonContent.Text}
             onClick={submit}
             loading={busy}
-            disabled={busy || action.needsReview || Boolean(error) || !selection || !ready}
+            disabled={busy || action.needsReview || Boolean(error) || !primary}
           >
-            Create Project
+            Create project
           </Button>
-        )
+        </div>
       }
     >
-      <div className="flex flex-col gap-8 [&>*]:shrink-0">
-        <p className="text-small !leading-[22px] text-basic-secondary">
-          Choose where NAC works and the model for your first chat.
-        </p>
-        {policy.orchestrationEnabled ? (
-          <SessionBehaviorPicker value={behavior} onChange={setBehavior} disabled={busy} />
-        ) : null}
+      <div className="flex flex-col gap-6 [&>*]:shrink-0">
+        <Input
+          aria-label="Project name"
+          inputSize={InputSize.Large}
+          leading={InputLeading.Icon}
+          leadingIconName={IconName.Folder}
+          placeholder="Project name"
+          hintText="Optional. Defaults to the first folder's Git repo or folder name."
+          autoFocus
+          value={name}
+          isDisabled={busy}
+          onChange={(e) => {
+            setError(null);
+            setName(e.target.value);
+          }}
+        />
 
-        <FormSection title="Environment" description="Where NAC runs commands and accesses files.">
-          <div className="flex flex-wrap items-start gap-2">
-            {MODES.map((item) => (
-              <Button
-                key={item.id}
-                variant={
-                  mode === item.id ? ButtonVariant.SecondaryHighlighted : ButtonVariant.Secondary
-                }
-                size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
-                content={ButtonContent.Text}
-                onClick={() => changeMode(item.id)}
-                aria-pressed={mode === item.id}
-                className="flex-1 md:flex-none"
-              >
-                {item.label}
-              </Button>
-            ))}
-          </div>
-          {/* What the chosen environment means for the project, which the three
-              one-word buttons cannot say on their own. */}
-          <p className="text-small !leading-[22px] text-basic-secondary">
-            {MODES.find((item) => item.id === mode)?.description}
-          </p>
-          {mode === "sandbox" && sandboxAvailability && sandboxAvailability.status !== "ready" ? (
-            <div className="pt-1">
-              <p className="text-error-primary text-micro">
-                {sandboxAvailability.status === "missing"
-                  ? "Sandbox mode runs sessions in a podman container, and podman is not installed on this machine."
-                  : `Sandbox mode needs podman, which is not responding${sandboxAvailability.detail ? `: ${sandboxAvailability.detail}` : "."}`}
-              </p>
-              {sandboxAvailability.guidance ? (
-                <pre className="pt-1 whitespace-pre-wrap font-mono text-micro text-basic-muted">
-                  {sandboxAvailability.guidance}
-                </pre>
-              ) : null}
-            </div>
-          ) : null}
-        </FormSection>
-
-        {isSsh ? (
-          <SshConnectionBox
-            mode="launch"
-            connection={connection}
-            onConnectionChange={onSshConnectionChange}
+        <section className="flex flex-col gap-2" aria-labelledby="source-folders-heading">
+          <h3 id="source-folders-heading" className="label-small text-basic-primary">
+            Source folders
+          </h3>
+          <SourceFolders
+            folders={folders}
+            defaultCwd={defaultCwd}
+            invalid={error?.folders ?? false}
+            disabled={busy}
+            onChange={(next) => {
+              setError(null);
+              setFolders(next);
+            }}
           />
-        ) : null}
-
-        {ready ? (
-          <FormSection
-            title="Project location"
-            description={
-              isSsh
-                ? "Choose a folder on the connected SSH host. Your files stay on that host."
-                : "Choose an existing local or Git working folder on the NAC server."
-            }
-          >
-            <div className="flex flex-col md:flex-row items-start gap-4">
-              <div className="flex flex-col gap-1 flex-1 min-w-0 w-full">
-                <FieldLabel label="Working Folder" required invalid={invalid("cwd")} />
-                <Button
-                  variant={ButtonVariant.Secondary}
-                  size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
-                  content={ButtonContent.IconRight}
-                  aria-label={cwd ? `Choose Working Folder: ${cwd}` : "Choose Working Folder"}
-                  className={cn("w-full", invalid("cwd") && "input-validation")}
-                  style={CWD_BUTTON_PADDING}
-                  onClick={() => setPicking(true)}
-                >
-                  <span
-                    className={cn(
-                      "flex-1 min-w-0 truncate text-left font-normal",
-                      cwd ? "text-basic-primary" : "text-basic-muted",
-                    )}
-                  >
-                    {cwd || "/path/to/project"}
-                  </span>
-                  <Icon iconName={IconName.Folder} className="shrink-0" />
-                </Button>
-                {invalid("cwd") ? (
-                  <p role="alert" className="pt-1 text-error-primary text-small !leading-[22px]">
-                    {error?.message}
-                  </p>
-                ) : null}
-              </div>
-              <div className="flex flex-col gap-1 flex-1 min-w-0 w-full">
-                <Input
-                  label={<span className="label-small">Project name</span>}
-                  inputSize={isMobile ? InputSize.Large : InputSize.Medium}
-                  placeholder="Taken from the git remote"
-                  value={name}
-                  onChange={(e) => edit(setName)(e.target.value)}
-                  className={`${isMobile ? "w-full" : ""}`}
-                />
-              </div>
-            </div>
-          </FormSection>
-        ) : null}
-
-        {ready ? (
-          <ModelSetupSection
-            simple={!policy.orchestrationEnabled}
-            inheritSavedDefault
-            invalid={invalid("config")}
-            errorText={reviewError || (invalid("config") ? error?.message : undefined)}
-            onChange={onSelection}
-          >
-            <div className="flex flex-col gap-2">
-              {policy.orchestrationEnabled ? (
-                <LightModelSection
-                  key={savedLightKey}
-                  initial={savedLight}
-                  behavior={behavior}
-                  onChange={onLight}
-                />
-              ) : null}
-              <Separator />
-              <ConfigRow
-                presentation="form"
-                label="Reasoning Effort"
-                hint="Higher effort for deeper reasoning and lower effort for faster responses."
-                control={smallSelect(reasoningItems, reasoning, edit(setReasoning))}
-              />
-              <Separator />
-              <ConfigRow
-                presentation="form"
-                label="Context Limit"
-                hint="Context size that triggers compaction. Defaults to 70% of the model's context length."
-                control={
-                  <div className="flex items-center gap-2">
-                    <Input
-                      aria-label="Context Limit"
-                      inputSize={isMobile ? InputSize.Large : InputSize.Medium}
-                      className="w-full md:w-[120px]"
-                      inputClassName="md:text-right"
-                      placeholder={compactionPlaceholder}
-                      inputMode="numeric"
-                      value={compaction}
-                      onChange={(e) => onCompactionChange(e.target.value)}
-                    />
-                    <span className="shrink-0 text-micro text-basic-muted">tokens</span>
-                  </div>
-                }
-              />
-              {mode === "sandbox" ? (
-                <>
-                  <Separator />
-                  <ConfigRow
-                    presentation="form"
-                    label="Sandbox options"
-                    hint="The container the session runs in: image, GPUs, workdir, shared memory and mounts."
-                    control={
-                      <Switch
-                        className="max-md:before:absolute max-md:before:-inset-4"
-                        checked={sandboxOpen}
-                        onChange={setSandboxOpen}
-                        aria-label="Sandbox options"
-                      />
-                    }
-                  />
-                  {sandboxOpen ? (
-                    <>
-                      <Separator />
-                      <ConfigRow
-                        presentation="form"
-                        label="Container image"
-                        hint="Image the sandbox runs; empty uses the configured default."
-                        control={
-                          <Input
-                            aria-label="Container image"
-                            inputSize={isMobile ? InputSize.Large : InputSize.Medium}
-                            className="w-full md:w-[280px]"
-                            placeholder="python:3.13-bookworm"
-                            value={sandbox.image}
-                            onChange={(e) => setSb({ image: e.target.value })}
-                          />
-                        }
-                      />
-                      <Separator />
-                      <ConfigRow
-                        presentation="form"
-                        label="GPUs"
-                        hint="Comma-separated GPU list, e.g. all."
-                        control={
-                          <Input
-                            aria-label="GPUs"
-                            inputSize={isMobile ? InputSize.Large : InputSize.Medium}
-                            className="w-full md:w-[280px]"
-                            placeholder="all"
-                            value={sandbox.gpu}
-                            onChange={(e) => setSb({ gpu: e.target.value })}
-                          />
-                        }
-                      />
-                      <Separator />
-                      <ConfigRow
-                        presentation="form"
-                        label="Container workdir"
-                        hint="Working directory inside the container."
-                        control={
-                          <Input
-                            aria-label="Container workdir"
-                            inputSize={isMobile ? InputSize.Large : InputSize.Medium}
-                            className="w-full md:w-[280px]"
-                            placeholder="/workspace"
-                            value={sandbox.workdir}
-                            onChange={(e) => setSb({ workdir: e.target.value })}
-                          />
-                        }
-                      />
-                      <Separator />
-                      <ConfigRow
-                        presentation="form"
-                        label="Shared memory size"
-                        hint="Container /dev/shm size, e.g. 1g."
-                        control={
-                          <Input
-                            aria-label="Shared memory size"
-                            inputSize={isMobile ? InputSize.Large : InputSize.Medium}
-                            className="w-full md:w-[280px]"
-                            placeholder="0"
-                            value={sandbox.shm}
-                            onChange={(e) => setSb({ shm: e.target.value })}
-                          />
-                        }
-                      />
-                      <Separator />
-                      <ConfigRow
-                        presentation="form"
-                        label="Mounts (HOST:GUEST)"
-                        hint="Comma-separated bind mounts."
-                        control={
-                          <Input
-                            aria-label="Mounts (HOST:GUEST)"
-                            inputSize={isMobile ? InputSize.Large : InputSize.Medium}
-                            className="w-full md:w-[280px]"
-                            placeholder="/data:/data"
-                            value={sandbox.mounts}
-                            onChange={(e) => setSb({ mounts: e.target.value })}
-                          />
-                        }
-                      />
-                      <Separator />
-                      <ConfigRow
-                        presentation="form"
-                        label="Don't mount the working folder"
-                        secondary
-                        control={
-                          <Switch
-                            className="max-md:before:absolute max-md:before:-inset-4"
-                            checked={sandbox.noMount}
-                            onChange={(value) => setSb({ noMount: value })}
-                            aria-label="Don't mount the working folder"
-                            size={isMobile ? SwitchSize.Large : SwitchSize.Medium}
-                          />
-                        }
-                      />
-                    </>
-                  ) : null}
-                </>
-              ) : null}
-
-              <Separator />
-              <ConfigRow
-                presentation="form"
-                label="Custom HTTP headers"
-                hint="Turn this on only if you need to send additional request metadata."
-                control={
-                  <Switch
-                    className="max-md:before:absolute max-md:before:-inset-4"
-                    checked={headersOpen}
-                    onChange={setHeadersOpen}
-                    aria-label="Custom HTTP headers"
-                  />
-                }
-              />
-              {headersOpen ? (
-                <>
-                  <Separator />
-                  <TextArea
-                    label="Extra headers (JSON object)"
-                    hintText="Blank keeps the configuration's headers. Enter {} to send none; header values must be strings."
-                    placeholder='{"X-Title": "NAC"}'
-                    value={extraHeaders}
-                    onChange={(e) => edit(setExtraHeaders)(e.target.value)}
-                    textAreaClassName="h-[108px] resize-none"
-                  />
-                </>
-              ) : null}
-            </div>
-          </ModelSetupSection>
-        ) : null}
-
-        {sandboxLaunching ? (
-          <div className="flex items-center gap-2" role="status" aria-live="polite">
-            <span className="text-micro text-basic-primary">
-              {sandboxActivity?.phase ?? "Creating the sandbox…"}
-            </span>
-            <span className="text-micro text-basic-muted">{launchElapsed}s</span>
-          </div>
-        ) : null}
+          {folders.length > 1 ? (
+            <p className="text-micro text-basic-muted">
+              Only the first folder is saved for now. Projects with several folders need backend
+              support.
+            </p>
+          ) : null}
+          {error ? (
+            <p role="alert" className="text-error-primary text-small !leading-[22px]">
+              {error.message}
+            </p>
+          ) : null}
+        </section>
       </div>
-
-      <PathPickerModal
-        open={picking}
-        kind="directory"
-        nativeLocalDirectory={mode === "local"}
-        initialPath={cwd}
-        ssh={connected}
-        onClose={() => setPicking(false)}
-        onSelect={(path) => {
-          edit(setCwd)(path);
-          setPicking(false);
-        }}
-      />
     </Modal>
   );
 }

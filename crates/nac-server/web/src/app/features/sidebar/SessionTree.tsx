@@ -1,6 +1,7 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
+import { useManagedHost } from "@/app/features/managed/controller/useManagedHost";
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { useNow } from "@/app/hooks/useNow";
 import { useSessionTitle } from "@/app/hooks/useSessionTitle";
@@ -15,6 +16,7 @@ import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import type { ManagedSessionSummary, ProjectRecord } from "@/app/types/api";
 
 import { ProjectGroupHeader } from "./ProjectGroupHeader";
+import { ProjectsSectionHeader } from "./ProjectsSectionHeader";
 import { SessionRow } from "./SessionRow";
 import { useSessionStatuses, type SessionStatusIndex } from "./sessionStatuses";
 
@@ -142,7 +144,7 @@ function RevealRow({
       type="button"
       onClick={onReveal}
       className={cn(
-        "type-meta flex w-full items-center rounded-md pl-[30px] text-left text-basic-tertiary",
+        "type-meta flex w-full items-center rounded-md pl-[34px] text-left text-basic-tertiary",
         "hover:bg-[var(--f-wash-1)] hover:text-basic-primary",
         touch ? "min-h-11" : "h-7",
       )}
@@ -225,6 +227,9 @@ export function SessionTree({
   const stores = useNativeRuntime().stores;
   const { useOrganize, useCollapsedProjects, useExpandedParents, toggleProjectCollapsed } =
     stores.sidebarLayoutStore;
+  const projectActions = useProjectActions();
+  const managed = useManagedHost();
+  const [projectsOpen, setProjectsOpen] = useState(true);
   const { clearAttention } = stores.attentionStore;
   const organize = useOrganize();
   const collapsed = useCollapsedProjects();
@@ -248,11 +253,10 @@ export function SessionTree({
     },
   };
 
-  if (index.roots.length === 0 && projects.length === 0) {
-    return <p className="type-meta px-2.5 py-3 text-basic-muted">No sessions yet</p>;
-  }
-
   if (organize === "status") {
+    if (index.roots.length === 0) {
+      return <p className="type-meta px-2.5 py-3 text-basic-muted">No sessions yet</p>;
+    }
     const remaining = new Set(index.roots);
     return (
       <div className="flex flex-col">
@@ -290,38 +294,56 @@ export function SessionTree({
 
   return (
     <div className="flex flex-col gap-1">
-      {projects.map((project) => {
-        const roots = byProject.get(project.project_id) ?? [];
-        const expanded = !collapsed.includes(project.project_id);
-        const rolled = roots.map((entry) => statuses.rolled(entry.summary.session_id));
-        const urgent = rolled.find(needsYou) ?? rolled.find((status) => status === "working");
-        return (
-          <section
-            key={project.project_id}
-            aria-label={project.name}
-            className="flex flex-col gap-px"
-          >
-            <ProjectGroupHeader
-              project={project}
-              count={roots.length}
-              expanded={expanded}
-              status={urgent ?? "idle"}
-              touch={touch}
-              onToggle={() => toggleProjectCollapsed(project.project_id)}
-              onNavigate={onNavigate}
-            />
-            {expanded && roots.length > 0 ? (
-              <GroupRows groupId={project.project_id} roots={roots} ctx={ctx} />
-            ) : null}
-          </section>
-        );
-      })}
-      {orphans.length > 0 ? (
-        <section aria-label="Unassigned" className="flex flex-col gap-px">
-          <GroupLabel>Unassigned</GroupLabel>
-          <GroupRows groupId="unassigned" roots={orphans} ctx={ctx} orphan />
-        </section>
+      <ProjectsSectionHeader
+        expanded={projectsOpen}
+        touch={touch}
+        createLabel={managed.isManaged ? "Add repository" : "New project"}
+        onToggle={() => setProjectsOpen((open) => !open)}
+        onCreate={() => {
+          onNavigate?.();
+          if (managed.isManaged) managed.addRepository();
+          else projectActions.create();
+        }}
+      />
+      {projectsOpen && projects.length === 0 ? (
+        <p className="type-meta px-2.5 py-1 text-basic-muted">No projects yet</p>
       ) : null}
+      <div className="flex flex-col gap-3">
+        {(projectsOpen ? projects : []).map((project) => {
+          const roots = byProject.get(project.project_id) ?? [];
+          const expanded = !collapsed.includes(project.project_id);
+          const rolled = roots.map((entry) => statuses.rolled(entry.summary.session_id));
+          const urgent = rolled.find(needsYou) ?? rolled.find((status) => status === "working");
+          return (
+            <section
+              key={project.project_id}
+              aria-label={project.name}
+              className="flex flex-col gap-px"
+            >
+              <ProjectGroupHeader
+                project={project}
+                count={roots.length}
+                expanded={expanded}
+                status={urgent ?? "idle"}
+                touch={touch}
+                onToggle={() => toggleProjectCollapsed(project.project_id)}
+                onNavigate={onNavigate}
+              />
+              {expanded && roots.length > 0 ? (
+                <GroupRows groupId={project.project_id} roots={roots} ctx={ctx} />
+              ) : null}
+            </section>
+          );
+        })}
+        {orphans.length > 0 ? (
+          <section aria-label="Unassigned" className="flex flex-col gap-px">
+            <p className="type-body-chrome flex h-8 items-center pl-[34px] text-basic-tertiary">
+              Unassigned
+            </p>
+            <GroupRows groupId="unassigned" roots={orphans} ctx={ctx} orphan />
+          </section>
+        ) : null}
+      </div>
     </div>
   );
 }

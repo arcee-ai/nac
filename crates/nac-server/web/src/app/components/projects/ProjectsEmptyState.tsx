@@ -41,7 +41,7 @@ export function ProjectsEmptyState({
           <p className="type-body-chrome text-basic-secondary">
             {managed
               ? "Connect a repository, or create a project from an existing path. Sessions start from there."
-              : "Point NAC at a folder — on this machine, over SSH, or in a sandbox — and start your first session there."}
+              : "Point NAC at a folder on this machine or over SSH, then start your first session there."}
           </p>
         </div>
         {managed ? (

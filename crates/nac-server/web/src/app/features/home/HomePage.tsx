@@ -21,6 +21,7 @@ import { useProjects, useSessions } from "@/app/services/queries";
 import { HomeComposer } from "./HomeComposer";
 import { NeedsYouLine } from "./NeedsYouLine";
 import { ProjectTiles } from "./ProjectTiles";
+import { useDefaultProject } from "./useDefaultProject";
 
 function LoadingHome() {
   return (
@@ -57,7 +58,8 @@ export function HomePage() {
     if (data) trackAttention(data, null);
   }, [data, trackAttention]);
 
-  const loading = projectsQuery.isPending || sessionsQuery.isPending;
+  const seedingDefault = useDefaultProject();
+  const loading = projectsQuery.isPending || sessionsQuery.isPending || seedingDefault;
   const error = projectsQuery.error ?? sessionsQuery.error;
   const empty = !loading && !error && items.length === 0;
 
@@ -171,6 +173,11 @@ export function HomePage() {
                 projects={projects}
                 sessions={sessions}
                 headingTrailing={intervalTasks}
+                addProject={
+                  managed.isManaged
+                    ? { label: "Add repository", onClick: managed.addRepository }
+                    : { label: "New project", onClick: projectActions.create }
+                }
               />
             )}
           </main>

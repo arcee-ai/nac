@@ -45,6 +45,15 @@ vi.mock("@/app/providers/ProjectActionsProvider", () => ({
     togglePin: vi.fn(),
     rename: vi.fn(),
     remove: vi.fn(),
+    create: vi.fn(),
+  }),
+}));
+vi.mock("@/app/features/managed/controller/useManagedHost", () => ({
+  useManagedHost: () => ({
+    status: null,
+    isManaged: false,
+    openSettings: vi.fn(),
+    addRepository: vi.fn(),
   }),
 }));
 
