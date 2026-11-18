@@ -1384,7 +1384,7 @@ async fn native_transient_rate_limit_retries_without_changing_requested_tier() {
 fn openai_e2e_fixture_requires_exact_loopback_and_native_tuple() {
     let model = catalog::resolve(BackendKind::OpenAiResponses, "gpt-6.1-sol");
     let validate = |url, backend, metadata: &ModelMetadata, base, key| {
-        validate_openai_e2e_fixture(url, backend, metadata, base, key)
+        validate_openai_e2e_fixture(url, backend, metadata, base, key, &Default::default())
     };
     assert_eq!(
         validate(
@@ -1485,4 +1485,83 @@ fn openai_e2e_fixture_requires_exact_loopback_and_native_tuple() {
         "e2e-only"
     )
     .is_ok());
+}
+
+// Spawned in a separate process so fixture environment changes cannot race other tests.
+#[cfg(feature = "openai-e2e-fixture")]
+#[tokio::test]
+#[ignore = "run by openai_e2e_fixture_rejects_extra_headers_before_request"]
+async fn openai_fixture_extra_headers_child() {
+    let reject = std::env::var_os("NAC_TEST_EXTRA_HEADER").is_some();
+    let mut client = test_model_client(
+        BackendKind::OpenAiResponses,
+        "https://api.openai.com/v1".into(),
+        Default::default(),
+    );
+    client.model = "gpt-6.1-sol".into();
+    client.resolved_model = catalog::resolve(client.backend, &client.model);
+    client.api_key = "e2e-only".into();
+    if reject {
+        client
+            .extra_headers
+            .insert("x-private-token".into(), "private-secret".into());
+    }
+    let result = client
+        .send_turn(
+            vec![Message::User {
+                content: "hello".into(),
+            }],
+            vec![],
+        )
+        .await;
+    if reject {
+        let error = result.unwrap_err().to_string();
+        assert!(error.contains("does not permit extra headers"), "{error}");
+        assert!(!error.contains("private-secret"));
+    } else {
+        result.unwrap();
+    }
+}
+
+#[cfg(feature = "openai-e2e-fixture")]
+#[test]
+fn openai_e2e_fixture_rejects_extra_headers_before_request() {
+    for reject in [true, false] {
+        let server = ScriptedServer::start(vec![s5_openai_response()]);
+        let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+        command
+            .args([
+                "--exact",
+                "model::client::tests::http_contract::openai_fixture_extra_headers_child",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env(
+                "NAC_OPENAI_E2E_FIXTURE_BASE_URL",
+                format!("{}/v1", server.base_url),
+            )
+            .env_remove("NAC_TEST_EXTRA_HEADER");
+        if reject {
+            command.env("NAC_TEST_EXTRA_HEADER", "1");
+        }
+        let output = command.output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        let requests = if reject {
+            server.stop_and_finish()
+        } else {
+            server.finish()
+        };
+        assert_eq!(requests.len(), usize::from(!reject));
+        if let Some(request) = requests.first() {
+            assert_eq!(request.path, "/v1/responses");
+            assert_eq!(
+                request.headers.get("authorization").map(String::as_str),
+                Some("Bearer e2e-only")
+            );
+        }
+    }
 }

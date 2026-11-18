@@ -75,32 +75,65 @@ it("does not display an accelerated pricing note when acceleration is unavailabl
   expect(screen.queryByRole("link", { name: "OpenAI pricing" })).toBeNull();
 });
 
-it("keeps composer speed choices and pricing in one compact mobile disclosure", () => {
+it("toggles native Fast directly and offers mobile pricing separately", () => {
   vi.stubGlobal("matchMedia", () => ({
     matches: true,
     addEventListener: vi.fn(),
     removeEventListener: vi.fn(),
   }));
-  render(
+  const onChange = vi.fn();
+  const view = render(
     <MemoryRouter>
       <SpeedControl
         openAiApi
         fastContextLimit={272000}
         tiers={[priority]}
         value="standard"
-        onChange={vi.fn()}
+        onChange={onChange}
       />
     </MemoryRouter>,
   );
   expect(screen.queryByText(/Higher token cost/)).toBeNull();
-  const disclosure = screen.getByRole("button", { name: "Speed: Standard" });
+  fireEvent.click(screen.getByRole("button", { name: "Speed: Standard" }));
+  expect(onChange).toHaveBeenCalledWith("fast");
+  view.rerender(
+    <MemoryRouter>
+      <SpeedControl openAiApi tiers={[priority]} value="fast" onChange={onChange} />
+    </MemoryRouter>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Speed: Fast" }));
+  expect(onChange).toHaveBeenLastCalledWith("standard");
+  view.rerender(
+    <MemoryRouter>
+      <SpeedControl
+        openAiApi
+        fastContextLimit={272000}
+        tiers={[priority]}
+        value="standard"
+        onChange={onChange}
+      />
+    </MemoryRouter>,
+  );
+  const disclosure = screen.getByRole("button", { name: "Speed pricing and access" });
   expect(disclosure.getAttribute("aria-expanded")).toBe("false");
   fireEvent.click(disclosure);
   expect(screen.getByText(/Higher token cost/)).toBeTruthy();
   expect(screen.getByText(/fewer than 272,000 input tokens/)).toBeTruthy();
   expect(screen.getByRole("link", { name: "OpenAI pricing" })).toBeTruthy();
   expect(disclosure.getAttribute("aria-expanded")).toBe("true");
-  expect(screen.getByRole("button", { name: "Fast" })).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Fast" }));
-  expect(disclosure.getAttribute("aria-expanded")).toBe("false");
+});
+
+it("marks the selected native Ultrafast menu choice visibly", () => {
+  render(
+    <MemoryRouter>
+      <SpeedControl openAiApi tiers={[priority, ultra]} value="ultrafast" onChange={vi.fn()} />
+    </MemoryRouter>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Speed: Ultrafast" }));
+  const selected = screen.getByRole("menuitemradio", { name: "Ultrafast" });
+  expect(selected.getAttribute("aria-checked")).toBe("true");
+  expect(selected.querySelector("svg")).toBeTruthy();
+  fireEvent.click(screen.getByRole("menuitemradio", { name: "Standard" }));
+  fireEvent.click(screen.getByRole("button", { name: "Speed pricing and access" }));
+  expect(screen.getByRole("link", { name: "OpenAI pricing" })).toBeTruthy();
 });

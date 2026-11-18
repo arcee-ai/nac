@@ -83,30 +83,37 @@ test("native OpenAI speed survives settings, protocol changes and restart", asyn
     expect(size?.height).toBeGreaterThanOrEqual(44);
   }
   await initialSpeed.click();
-  await expect(initialSpeed).toHaveAttribute("aria-expanded", "true");
-  await expect(page.getByText(/Higher token cost; subject to your OpenAI project/)).toBeVisible();
-  await expect(page.getByRole("link", { name: "OpenAI pricing" })).toHaveAttribute(
-    "href",
-    "https://developers.openai.com/api/docs/pricing",
+  await expect(page.getByRole("menuitemradio", { name: "Use provider default" })).toHaveAttribute(
+    "aria-checked",
+    "true",
   );
   if (process.env.NAC_VISUAL_DIR && process.env.NAC_VISUAL_LABEL === "after") {
+    await page.waitForTimeout(350);
     await page.screenshot({
       path: path.join(
         process.env.NAC_VISUAL_DIR,
         mobile ? "after-mobile-menu.png" : "after-menu.png",
       ),
-      animations: "disabled",
     });
   }
   await page.keyboard.press("Escape");
   await expect(initialSpeed).toBeFocused();
+  const disclosure = page.getByRole("button", { name: "Speed pricing and access" });
+  await disclosure.click();
+  await expect(page.getByText(/Higher token cost; subject to your OpenAI project/)).toBeVisible();
+  await expect(page.getByRole("link", { name: "OpenAI pricing" })).toHaveAttribute(
+    "href",
+    "https://developers.openai.com/api/docs/pricing",
+  );
+  await page.keyboard.press("Escape");
+  await expect(disclosure).toBeFocused();
   const rejectSave = async (route: import("@playwright/test").Route) => {
     if (route.request().method() !== "PATCH") return route.fallback();
     await route.fulfill({ status: 409, json: { error: "Configuration changed" } });
   };
   await page.route(configUrl, rejectSave);
   await speed("Provider default").click();
-  await page.getByRole("button", { name: "Fast", exact: true }).click();
+  await page.getByRole("menuitemradio", { name: "Fast", exact: true }).click();
   await expect(page.getByText(/Speed was not changed/)).toBeVisible();
   if (process.env.NAC_VISUAL_DIR)
     await page.screenshot({
@@ -119,11 +126,11 @@ test("native OpenAI speed survives settings, protocol changes and restart", asyn
   expect((await config()).service_tier ?? null).toBeNull();
   await page.unroute(configUrl, rejectSave);
   await speed("Provider default").click();
-  await expect(page.getByRole("button", { name: "Use provider default" })).toHaveAttribute(
-    "aria-pressed",
+  await expect(page.getByRole("menuitemradio", { name: "Use provider default" })).toHaveAttribute(
+    "aria-checked",
     "true",
   );
-  await page.getByRole("button", { name: "Standard", exact: true }).click();
+  await page.getByRole("menuitemradio", { name: "Standard", exact: true }).click();
   await expect.poll(async () => (await config()).service_tier).toBe("standard");
   await page.reload();
   await expect(speed("Standard")).toBeVisible();
@@ -137,8 +144,24 @@ test("native OpenAI speed survives settings, protocol changes and restart", asyn
       animations: "disabled",
     });
   await speed("Standard").click();
-  await page.getByRole("button", { name: "Ultrafast", exact: true }).click();
+  await page.getByRole("menuitemradio", { name: "Ultrafast", exact: true }).click();
   await expect.poll(async () => (await config()).service_tier).toBe("ultrafast");
+  await expect(speed("Ultrafast")).toBeVisible();
+  await speed("Ultrafast").click();
+  const selectedUltra = page.getByRole("menuitemradio", { name: "Ultrafast" });
+  await expect(selectedUltra).toHaveAttribute("aria-checked", "true");
+  await expect(selectedUltra.locator("svg")).toBeVisible();
+  if (process.env.NAC_VISUAL_DIR) {
+    await page.waitForTimeout(350);
+    await page.screenshot({
+      path: path.join(
+        process.env.NAC_VISUAL_DIR,
+        mobile ? "after-ultra-selected-menu-mobile.png" : "after-ultra-selected-menu.png",
+      ),
+    });
+  }
+  await page.keyboard.press("Escape");
+  await expect(speed("Ultrafast")).toBeFocused();
 
   // Both protocol rows use the same model; picker order follows the catalog's
   // Responses, Chat Completions, then Codex provider ordering.
@@ -158,8 +181,51 @@ test("native OpenAI speed survives settings, protocol changes and restart", asyn
     base_url: "https://api.openai.com/v1",
     reasoning_effort: "high",
   });
+  await expect(speed("Standard")).toHaveAttribute("aria-pressed", "false");
+  if (process.env.NAC_VISUAL_DIR) {
+    await page.waitForTimeout(350);
+    await page.screenshot({
+      path: path.join(
+        process.env.NAC_VISUAL_DIR,
+        mobile ? "after-fast-only-standard-mobile.png" : "after-fast-only-standard.png",
+      ),
+    });
+  }
+  const pricing = page.getByRole("button", { name: "Speed pricing and access" });
+  await expect(pricing).toBeVisible();
+  if (mobile) {
+    const size = await pricing.boundingBox();
+    expect(size?.width).toBeGreaterThanOrEqual(44);
+    expect(size?.height).toBeGreaterThanOrEqual(44);
+  }
+  await pricing.click();
+  await expect(page.getByText(/Higher token cost; subject to your OpenAI project/)).toBeVisible();
+  if (process.env.NAC_VISUAL_DIR) {
+    await page.waitForTimeout(350);
+    await page.screenshot({
+      path: path.join(
+        process.env.NAC_VISUAL_DIR,
+        mobile ? "after-fast-info-mobile.png" : "after-fast-info.png",
+      ),
+    });
+  }
+  await page.keyboard.press("Escape");
+  await expect(pricing).toBeFocused();
   await speed("Standard").click();
-  await page.getByRole("button", { name: "Fast", exact: true }).click();
+  await expect.poll(async () => (await config()).service_tier).toBe("fast");
+  await expect(speed("Fast")).toHaveAttribute("aria-pressed", "true");
+  if (process.env.NAC_VISUAL_DIR) {
+    await page.waitForTimeout(350);
+    await page.screenshot({
+      path: path.join(
+        process.env.NAC_VISUAL_DIR,
+        mobile ? "after-fast-only-fast-mobile.png" : "after-fast-only-fast.png",
+      ),
+    });
+  }
+  await speed("Fast").click();
+  await expect.poll(async () => (await config()).service_tier).toBe("standard");
+  await speed("Standard").click();
   await expect.poll(async () => (await config()).service_tier).toBe("fast");
   await page.reload();
   await expect(speed("Fast")).toBeVisible();
@@ -329,7 +395,7 @@ test("native policy rejection remains repairable and a served receipt survives r
       animations: "disabled",
     });
   await page.getByRole("button", { name: "Speed: Fast" }).click();
-  await page.getByRole("button", { name: "Standard", exact: true }).click();
+  await page.getByRole("menuitemradio", { name: "Standard", exact: true }).click();
   await expect
     .poll(async () => (await (await request.get(configUrl)).json()).service_tier)
     .toBe("standard");
@@ -362,7 +428,7 @@ test("native policy rejection remains repairable and a served receipt survives r
   await page.reload();
   await expect(page.getByText("Requested speed: Standard; served tier: Standard")).toBeVisible();
   await page.getByRole("button", { name: "Speed: Standard" }).click();
-  await page.getByRole("button", { name: "Fast", exact: true }).click();
+  await page.getByRole("menuitemradio", { name: "Fast", exact: true }).click();
   await expect
     .poll(async () => (await (await request.get(configUrl)).json()).service_tier)
     .toBe("fast");

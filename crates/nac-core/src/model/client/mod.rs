@@ -225,6 +225,7 @@ fn validate_openai_e2e_fixture(
     metadata: &ModelMetadata,
     base_url: &str,
     api_key: &str,
+    extra_headers: &std::collections::BTreeMap<String, String>,
 ) -> Result<Option<String>> {
     let Some(raw) = configured else {
         if api_key == "e2e-only" {
@@ -246,6 +247,11 @@ fn validate_openai_e2e_fixture(
     // Reject noncanonical spellings, additional path, userinfo, query and fragment.
     if raw != format!("http://127.0.0.1:{port}/v1") {
         return Err(model_configuration_error("invalid OpenAI E2E fixture URL"));
+    }
+    if !extra_headers.is_empty() {
+        return Err(model_configuration_error(
+            "OpenAI E2E fixture does not permit extra headers",
+        ));
     }
     if api_key != "e2e-only"
         || metadata.provider != backend
@@ -509,6 +515,7 @@ impl ModelClient {
             &self.resolved_model,
             &self.base_url,
             &self.api_key,
+            &self.extra_headers,
         )
     }
 

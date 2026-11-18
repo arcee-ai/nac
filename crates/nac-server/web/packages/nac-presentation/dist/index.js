@@ -2711,56 +2711,44 @@ function al({ tiers: e, value: t, onChange: n, disabled: r, form: i = !1, openAi
 		children: [e, d]
 	}) : e;
 	if (!i && !l && !u) return null;
-	if (!i && a) {
-		let e = [
-			{
-				value: null,
-				label: "Use provider default"
-			},
-			{
-				value: "standard",
-				label: "Standard"
-			},
-			...l ? [{
-				value: "fast",
-				label: "Fast"
-			}] : [],
-			...u ? [{
-				value: "ultrafast",
-				label: "Ultrafast"
-			}] : []
-		];
-		return /* @__PURE__ */ Q(ui, {
+	let p = (e) => /* @__PURE__ */ $("div", {
+		className: "flex shrink-0 flex-col items-center",
+		children: [e, /* @__PURE__ */ Q(ui, {
 			open: s,
 			onClose: () => c(!1),
 			sticky: !0,
 			placement: oi.TopCenter,
 			size: Si.Medium,
-			focusScope: "Speed and pricing",
-			content: /* @__PURE__ */ $("div", {
-				className: "flex flex-col gap-1 p-3 leading-normal",
-				children: [e.map((e) => /* @__PURE__ */ Q(V, {
-					variant: L.Ghost,
-					size: z.Small,
-					"aria-pressed": t === e.value,
-					onClick: () => {
-						n(e.value), c(!1);
-					},
-					children: e.label
-				}, e.value ?? "default")), d]
+			focusScope: "Speed pricing and access",
+			content: /* @__PURE__ */ Q("div", {
+				className: "p-3 leading-normal",
+				children: d
 			}),
 			children: /* @__PURE__ */ Q(V, {
 				className: "max-md:min-h-11 max-md:min-w-11",
 				size: z.Small,
 				variant: L.Ghost,
-				disabled: r,
-				"aria-label": `Speed: ${il(t)}`,
+				content: B.Icon,
+				"aria-label": "Speed pricing and access",
 				"aria-expanded": s,
 				onClick: () => c(!s),
-				children: t ? il(t) : "Default"
+				children: /* @__PURE__ */ Q(R, {
+					iconName: U.Info,
+					size: 16
+				})
 			})
-		});
-	}
+		})]
+	});
+	if (!i && a && l && !u) return p(/* @__PURE__ */ Q(V, {
+		className: "max-md:min-h-11 max-md:min-w-11",
+		size: z.Small,
+		variant: L.Ghost,
+		disabled: r,
+		"aria-label": `Speed: ${il(t)}`,
+		"aria-pressed": t === "fast",
+		onClick: () => n(t === "fast" ? "standard" : "fast"),
+		children: t ? il(t) : "Default"
+	}));
 	if (!i && l && !u) return f(/* @__PURE__ */ Q(V, {
 		className: "max-md:min-h-11 max-md:min-w-11",
 		size: z.Small,
@@ -2771,7 +2759,7 @@ function al({ tiers: e, value: t, onChange: n, disabled: r, form: i = !1, openAi
 		onClick: () => n(t === "fast" ? "standard" : "fast"),
 		children: t ? il(t) : "Default"
 	}));
-	let p = [
+	let m = [
 		{
 			id: "",
 			label: "Use provider default"
@@ -2789,22 +2777,24 @@ function al({ tiers: e, value: t, onChange: n, disabled: r, form: i = !1, openAi
 			label: "Ultrafast"
 		}] : []
 	];
-	return t && !rl(e, t) && p.push({
+	t && !rl(e, t) && m.push({
 		id: t,
 		label: `${il(t)} (unavailable)`
-	}), f(/* @__PURE__ */ Q(Ss, {
+	});
+	let h = /* @__PURE__ */ Q(Ss, {
 		"aria-label": `Speed: ${il(t)}`,
 		checkedChoices: !0,
 		triggerClassName: "max-md:min-h-11 max-md:min-w-11",
 		presentation: i ? "form" : void 0,
-		items: p,
+		items: m,
 		value: t ?? "",
 		placeholder: "Provider default",
 		triggerLabel: !i && !t ? "Default" : void 0,
 		disabled: r,
 		placement: oi.TopCenter,
 		onValueChange: (e) => n(e || null)
-	}));
+	});
+	return !i && a ? p(h) : f(h);
 }
 // src/app/components/modals/SshConnectionMenu.tsx
 function ol({ title: e, subtitle: t, children: n }) {

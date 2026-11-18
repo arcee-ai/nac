@@ -1,7 +1,10 @@
 import {
   Button,
+  ButtonContent,
   ButtonSize,
   ButtonVariant,
+  Icon,
+  IconName,
   Popover,
   PopoverPlacement,
   PopoverSize,
@@ -59,53 +62,45 @@ export function SpeedControl({
       control
     );
   if (!form && !fast && !ultra) return null;
-  if (!form && openAiApi) {
-    const choices: { value: ServiceTier | null; label: string }[] = [
-      { value: null, label: "Use provider default" },
-      { value: "standard", label: "Standard" },
-      ...(fast ? [{ value: "fast" as const, label: "Fast" }] : []),
-      ...(ultra ? [{ value: "ultrafast" as const, label: "Ultrafast" }] : []),
-    ];
-    return (
+  const withDisclosure = (control: ReactNode) => (
+    <div className="flex shrink-0 flex-col items-center">
+      {control}
       <Popover
         open={noteOpen}
         onClose={() => setNoteOpen(false)}
         sticky
         placement={PopoverPlacement.TopCenter}
         size={PopoverSize.Medium}
-        focusScope="Speed and pricing"
-        content={
-          <div className="flex flex-col gap-1 p-3 leading-normal">
-            {choices.map((choice) => (
-              <Button
-                key={choice.value ?? "default"}
-                variant={ButtonVariant.Ghost}
-                size={ButtonSize.Small}
-                aria-pressed={value === choice.value}
-                onClick={() => {
-                  onChange(choice.value);
-                  setNoteOpen(false);
-                }}
-              >
-                {choice.label}
-              </Button>
-            ))}
-            {note}
-          </div>
-        }
+        focusScope="Speed pricing and access"
+        content={<div className="p-3 leading-normal">{note}</div>}
       >
         <Button
           className="max-md:min-h-11 max-md:min-w-11"
           size={ButtonSize.Small}
           variant={ButtonVariant.Ghost}
-          disabled={disabled}
-          aria-label={`Speed: ${speedLabel(value)}`}
+          content={ButtonContent.Icon}
+          aria-label="Speed pricing and access"
           aria-expanded={noteOpen}
           onClick={() => setNoteOpen(!noteOpen)}
         >
-          {value ? speedLabel(value) : "Default"}
+          <Icon iconName={IconName.Info} size={16} />
         </Button>
       </Popover>
+    </div>
+  );
+  if (!form && openAiApi && fast && !ultra) {
+    return withDisclosure(
+      <Button
+        className="max-md:min-h-11 max-md:min-w-11"
+        size={ButtonSize.Small}
+        variant={ButtonVariant.Ghost}
+        disabled={disabled}
+        aria-label={`Speed: ${speedLabel(value)}`}
+        aria-pressed={value === "fast"}
+        onClick={() => onChange(value === "fast" ? "standard" : "fast")}
+      >
+        {value ? speedLabel(value) : "Default"}
+      </Button>,
     );
   }
   if (!form && fast && !ultra) {
@@ -131,7 +126,7 @@ export function SpeedControl({
   ];
   if (value && !supportsSpeed(tiers, value))
     items.push({ id: value, label: `${speedLabel(value)} (unavailable)` });
-  return withNote(
+  const select = (
     <SmallSelect
       aria-label={`Speed: ${speedLabel(value)}`}
       checkedChoices
@@ -144,6 +139,7 @@ export function SpeedControl({
       disabled={disabled}
       placement={PopoverPlacement.TopCenter}
       onValueChange={(id) => onChange((id || null) as ServiceTier | null)}
-    />,
+    />
   );
+  return !form && openAiApi ? withDisclosure(select) : withNote(select);
 }
