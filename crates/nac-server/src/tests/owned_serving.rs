@@ -14,7 +14,6 @@ async fn owned_managed_probes_remain_responsive_while_a_write_is_blocked() {
     let manager = SessionManager::new_async(ServerOptions {
         root_cwd: root.clone(),
         store_path: Some(root.join("store.db")),
-        worker_executable: None,
         managed_host: Some(config),
     })
     .await

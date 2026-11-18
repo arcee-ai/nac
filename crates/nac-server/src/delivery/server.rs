@@ -15,7 +15,6 @@ pub(crate) fn response_compression_layer() -> CompressionLayer<impl Predicate> {
 pub struct ServerOptions {
     pub root_cwd: PathBuf,
     pub store_path: Option<PathBuf>,
-    pub worker_executable: Option<PathBuf>,
     pub managed_host: Option<nac_managed::ManagedHostConfig>,
 }
 

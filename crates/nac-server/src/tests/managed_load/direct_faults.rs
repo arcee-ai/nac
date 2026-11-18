@@ -347,7 +347,6 @@ async fn new_owned_manager(root: &Path) -> SessionManager {
     let options = ServerOptions {
         root_cwd: root.to_path_buf(),
         store_path: Some(root.join("store.db")),
-        worker_executable: None,
         managed_host: None,
     };
     nac_core::store::spawn_blocking_store_caller(move || {

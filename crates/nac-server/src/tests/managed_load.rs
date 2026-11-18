@@ -229,7 +229,6 @@ pub(super) trait LoadStoreAdapter {
             SessionManager::new_unowned_fixture(ServerOptions {
                 root_cwd: root.to_path_buf(),
                 store_path: Some(root.join("store.db")),
-                worker_executable: None,
                 managed_host: None,
             })
             .expect("direct-load session manager")

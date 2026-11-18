@@ -26,7 +26,6 @@ async fn owned(root: &Path) -> SessionManager {
     SessionManager::new_async(ServerOptions {
         root_cwd: root.to_owned(),
         store_path: Some(root.join("store.db")),
-        worker_executable: None,
         managed_host: None,
     })
     .await

@@ -449,7 +449,6 @@ async fn interleave(behavior: &str) {
     let manager = SessionManager::new_async(crate::ServerOptions {
         root_cwd: root.clone(),
         store_path: Some(path.clone()),
-        worker_executable: None,
         managed_host: None,
     })
     .await
@@ -748,7 +747,6 @@ async fn semantic_fixture_teardown_waits_for_accepted_read_after_sqlite_returns(
     let manager = SessionManager::new_async(crate::ServerOptions {
         root_cwd: root.clone(),
         store_path: Some(root.join("store.db")),
-        worker_executable: None,
         managed_host: None,
     })
     .await

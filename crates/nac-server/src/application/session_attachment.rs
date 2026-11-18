@@ -440,7 +440,7 @@ impl<'a> SessionAttachmentApplication<'a> {
                 session_id,
                 &config,
                 self.manager.inner.root_cwd.clone(),
-                Some(self.manager.inner.worker_executable.clone()),
+                None,
                 operation_lease,
                 model.clone(),
             )
@@ -451,7 +451,7 @@ impl<'a> SessionAttachmentApplication<'a> {
                 session_id,
                 &config,
                 self.manager.inner.root_cwd.clone(),
-                Some(self.manager.inner.worker_executable.clone()),
+                None,
                 model,
             )
             .await?
@@ -514,7 +514,7 @@ impl<'a> SessionAttachmentApplication<'a> {
                 session_id,
                 &config,
                 self.manager.inner.root_cwd.clone(),
-                Some(self.manager.inner.worker_executable.clone()),
+                None,
                 model,
             )
             .await?;

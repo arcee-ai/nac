@@ -319,7 +319,7 @@ struct SessionManagerInner {
     mcp_runtime: Arc<nac_core::mcp_configurations::McpRuntimeManager>,
     store_path: PathBuf,
     _store_ownership: application::persistence::StoreOwnership,
-    worker_executable: PathBuf,
+    running_executable: PathBuf,
     managed_host: Option<nac_managed::ManagedHostConfig>,
     managed_model: Option<application::managed::ManagedModelProfile>,
     managed_clones: Option<nac_managed::ManagedCloneService>,
@@ -523,7 +523,7 @@ impl SessionManager {
             build_identity::store_track(),
         );
         let (store_ownership, store_path) = application::persistence::acquire_store(&store_path)?;
-        let worker_executable = executable::worker_executable(options.worker_executable)?;
+        let running_executable = executable::running_executable()?;
 
         // This is deliberately before any managed model, credential, clone,
         // reconciliation, or listener setup. Only an exact controller-authored
@@ -582,7 +582,7 @@ impl SessionManager {
                 root_cwd,
                 store_path: store_path.clone(),
                 _store_ownership: store_ownership,
-                worker_executable,
+                running_executable,
                 managed_host: options.managed_host,
                 managed_model,
                 managed_clones,

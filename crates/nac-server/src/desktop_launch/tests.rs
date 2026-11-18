@@ -17,7 +17,6 @@ async fn future_schema_cause_survives_owned_construction() {
     let error = match SessionManager::new(crate::ServerOptions {
         root_cwd: root.clone(),
         store_path: Some(store.clone()),
-        worker_executable: None,
         managed_host: None,
     }) {
         Err(error) => error.context("private-diagnostic-canary"),
@@ -180,7 +179,6 @@ async fn fresh_store_is_identified_only_after_the_shared_listener_initializes_it
     let manager = SessionManager::new(crate::ServerOptions {
         root_cwd: root.clone(),
         store_path: Some(store.clone()),
-        worker_executable: None,
         managed_host: None,
     })
     .unwrap();

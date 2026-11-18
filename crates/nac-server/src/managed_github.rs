@@ -351,7 +351,7 @@ impl SessionManager {
             status: StatusCode::NOT_FOUND,
             message: "Managed NAC is not configured".to_string(),
         })?;
-        let executable = self.inner.worker_executable.clone();
+        let executable = self.inner.running_executable.clone();
         let status = status.clone();
         let identity = tokio::task::spawn_blocking(move || {
             configure_git_defaults(&managed, &executable, &status)

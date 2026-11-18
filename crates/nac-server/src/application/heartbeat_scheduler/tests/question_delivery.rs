@@ -116,7 +116,6 @@ async fn delivery_case(information: bool, transient: bool) {
     let manager = SessionManager::new_unowned_fixture(ServerOptions {
         root_cwd: root.clone(),
         store_path: Some(path.clone()),
-        worker_executable: None,
         managed_host: None,
     })
     .unwrap();

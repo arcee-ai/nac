@@ -53,7 +53,6 @@ async fn heartbeat_native_stop_then_delete_before_tick_retains_exact_cancellatio
         let manager = SessionManager::new_unowned_fixture(ServerOptions {
             root_cwd: root.clone(),
             store_path: Some(path.clone()),
-            worker_executable: None,
             managed_host: None,
         })
         .unwrap();

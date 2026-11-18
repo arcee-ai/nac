@@ -524,7 +524,6 @@ async fn mounted_key_discovers_every_entitled_model_only_at_its_configured_desti
     let manager = SessionManager::new_unowned_fixture(ServerOptions {
         root_cwd: root.clone(),
         store_path: Some(root.join("store.db")),
-        worker_executable: None,
         managed_host: Some(config),
     })
     .unwrap();
