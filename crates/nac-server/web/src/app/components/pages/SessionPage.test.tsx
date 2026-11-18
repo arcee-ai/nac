@@ -1,12 +1,12 @@
 /** @vitest-environment jsdom */
 
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { useEffect, useState } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import SessionPage from "@/app/components/pages/SessionPage";
-import { sessionLayoutStore, selectInsight } from "@/app/store/sessionLayoutStore";
+import { sessionLayoutStore } from "@/app/store/sessionLayoutStore";
 import type { SessionSnapshotResponse } from "@/app/types/api";
 
 const fakes = vi.hoisted(() => ({ mobile: false, dock: false, insightsMounts: 0 }));
@@ -120,50 +120,14 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/** Picks a row in the panel's own state and the shared selection, and scrolls its list. */
-function selectInDrawer() {
-  fireEvent.click(screen.getByRole("button", { name: "Pick beta" }));
-  act(() => selectInsight({ kind: "group", groupId: "group-beta", segmentKey: null }));
-  const list = screen.getByTestId("insights-list");
-  list.scrollTop = 120;
-  return list;
-}
-
-/** The same panel instance, so its own pick and its scroll are where they were. */
-function expectSamePanel(list: HTMLElement) {
-  expect(sessionLayoutStore.getState().selectedInsight).toEqual({
-    kind: "group",
-    groupId: "group-beta",
-    segmentKey: null,
-  });
-  expect(screen.getByText("picked beta")).toBeTruthy();
-  expect(screen.getByTestId("insights-list")).toBe(list);
-  expect(list.scrollTop).toBe(120);
-  expect(fakes.insightsMounts).toBe(1);
-  expect(fullscreen).not.toHaveBeenCalled();
-}
-
-describe("full-width session drawer", () => {
-  it("fills the window and goes back without remounting the panel", () => {
+describe("session drawer", () => {
+  it("offers no full-width control when floating", () => {
     mount();
-    const list = selectInDrawer();
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
-
-    fireEvent.click(screen.getByRole("button", { name: "Full width" }));
-    const exit = screen.getByRole("button", { name: "Exit full width" });
-    expect(exit.getAttribute("aria-pressed")).toBe("true");
-    expect(sessionLayoutStore.getState()).toMatchObject({ expanded: true, collapsed: false });
-    // The one drawer widens; it is not a second surface or browser fullscreen.
-    expect(screen.getAllByRole("dialog")).toHaveLength(1);
-    expectSamePanel(list);
-
-    fireEvent.click(exit);
-    expect(screen.getByRole("button", { name: "Full width" })).toBeTruthy();
-    expect(sessionLayoutStore.getState()).toMatchObject({ expanded: false, collapsed: false });
-    expectSamePanel(list);
+    expect(screen.queryByRole("button", { name: /full width/i })).toBeNull();
   });
 
-  it("expands the dock and restores the same panel beside the chat", () => {
+  it("offers no full-width control when docked beside the chat", () => {
     vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1400);
     vi.stubGlobal(
       "ResizeObserver",
@@ -177,20 +141,6 @@ describe("full-width session drawer", () => {
     mount();
     expect(screen.getByRole("button", { name: "Float drawer" })).toBeTruthy();
     expect(screen.queryByRole("dialog")).toBeNull();
-    const list = selectInDrawer();
-    fireEvent.click(screen.getByRole("button", { name: "Full width" }));
-    expect(screen.getByRole("button", { name: "Exit full width" })).toBeTruthy();
-    expectSamePanel(list);
-    fireEvent.click(screen.getByRole("button", { name: "Exit full width" }));
-    expectSamePanel(list);
-  });
-
-  it("leaves full width when the session page goes away", () => {
-    const { unmount } = mount();
-    fireEvent.click(screen.getByRole("button", { name: "Full width" }));
-    expect(sessionLayoutStore.getState().expanded).toBe(true);
-    unmount();
-    expect(sessionLayoutStore.getState().expanded).toBe(false);
-    expect(fullscreen).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: /full width/i })).toBeNull();
   });
 });

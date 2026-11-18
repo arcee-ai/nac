@@ -65,14 +65,10 @@ function GoalHeader({
   pinned,
   onTogglePinned,
   onClose,
-  expanded,
-  onToggleExpanded,
 }: {
   pinned: boolean;
   onTogglePinned?: () => void;
   onClose: () => void;
-  expanded: boolean;
-  onToggleExpanded: () => void;
 }) {
   return (
     <header className="flex h-[52px] shrink-0 items-center gap-1 border-b border-muted pr-2 pl-5">
@@ -94,16 +90,6 @@ function GoalHeader({
         size={ButtonSize.Medium}
         variant={ButtonVariant.Ghost}
         content={ButtonContent.Icon}
-        aria-label={expanded ? "Exit full width" : "Full width"}
-        aria-pressed={expanded}
-        onClick={onToggleExpanded}
-      >
-        <Icon iconName={expanded ? IconName.FullScreenExit : IconName.FullScreen} />
-      </Button>
-      <Button
-        size={ButtonSize.Medium}
-        variant={ButtonVariant.Ghost}
-        content={ButtonContent.Icon}
         aria-label="Hide panel"
         onClick={onClose}
       >
@@ -115,7 +101,7 @@ function GoalHeader({
 
 /**
  * The session's one secondary surface. Floating, it is the shared `Drawer`:
- * 560px from the right (full width on request) or a bottom sheet on a phone.
+ * 560px from the right, or a bottom sheet on a phone.
  * Docked (⌘\), it is a column laid out beside the chat column, never inside
  * it. The route's panel picks what it shows; the goal has a drawer of its own.
  */
@@ -208,13 +194,7 @@ export function SessionDrawer({
     goal ? (
       <div className="flex min-h-0 flex-1 flex-col">
         {isMobile ? null : (
-          <GoalHeader
-            pinned={pinned}
-            onTogglePinned={onTogglePinned}
-            onClose={drawer.close}
-            expanded={drawer.expanded}
-            onToggleExpanded={drawer.toggleExpanded}
-          />
+          <GoalHeader pinned={pinned} onTogglePinned={onTogglePinned} onClose={drawer.close} />
         )}
         <div className="min-h-0 flex-1 overflow-y-auto">
           <GoalPanel sessionId={sessionId} enabled={goalEnabled} />

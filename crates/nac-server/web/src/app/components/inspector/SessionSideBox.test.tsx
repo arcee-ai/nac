@@ -79,8 +79,7 @@ describe("session side box tabs", () => {
     expect(onPanelChange).toHaveBeenCalledWith("delegated");
     fireEvent.click(screen.getByRole("button", { name: "Dock drawer" }));
     expect(onTogglePinned).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole("button", { name: "Full width" }));
-    expect(sessionLayoutStore.getState().expanded).toBe(true);
+    expect(screen.queryByRole("button", { name: /full width/i })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Hide panel" }));
     expect(onClose).toHaveBeenCalledTimes(1);
   });

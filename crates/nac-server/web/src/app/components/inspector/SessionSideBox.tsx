@@ -70,7 +70,7 @@ function SideBoxProgress({ sessionId }: { sessionId: string }) {
  * The panels a session's drawer holds: Insights, Files (Changes), Subagents,
  * Terminal, Schedules, Worksets, History — whichever the session's behavior
  * has. On a wide screen it heads itself with a 52px bar: a quiet segmented
- * row to move between the panels, then dock, full width and close. On a
+ * row to move between the panels, then dock and close. On a
  * phone the drawer is a bottom sheet and each screen heads itself with the
  * way out the sheet lends it.
  */
@@ -85,16 +85,13 @@ export function SessionSideBox({
   onTogglePinned,
 }: SessionSideBoxProps) {
   const {
-    useSidePanelExpanded,
     useSelectedWorkset,
     useSelectedRevision,
-    toggleSidePanelExpanded,
     showSidePanelList,
     selectWorkset,
     selectRevision,
   } = useNativeRuntime().stores.sessionLayoutStore;
 
-  const expanded = useSidePanelExpanded();
   const isMobile = useIsMobile();
   const isTablet = useIsTablet();
   const selectedWorkset = useSelectedWorkset();
@@ -272,24 +269,6 @@ export function SessionSideBox({
             </Button>
           </Tooltip>
         ) : null}
-        {
-          <Tooltip
-            title={expanded ? "Exit full width" : "Full width"}
-            position={TooltipPosition.BottomLeft}
-            className="shrink-0"
-          >
-            <Button
-              size={ButtonSize.Medium}
-              variant={ButtonVariant.Ghost}
-              content={ButtonContent.Icon}
-              aria-label={expanded ? "Exit full width" : "Full width"}
-              aria-pressed={expanded}
-              onClick={toggleSidePanelExpanded}
-            >
-              <Icon iconName={expanded ? IconName.FullScreenExit : IconName.FullScreen} />
-            </Button>
-          </Tooltip>
-        }
         {onClose ? (
           <Tooltip title="Close (Esc)" position={TooltipPosition.BottomLeft} className="shrink-0">
             <Button

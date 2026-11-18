@@ -21,7 +21,7 @@ interface SessionSideBoxProps {
  * The panels a session's drawer holds: Insights, Files (Changes), Subagents,
  * Terminal, Schedules, Worksets, History — whichever the session's behavior
  * has. On a wide screen it heads itself with a 52px bar: a quiet segmented
- * row to move between the panels, then dock, full width and close. On a
+ * row to move between the panels, then dock and close. On a
  * phone the drawer is a bottom sheet and each screen heads itself with the
  * way out the sheet lends it.
  */
