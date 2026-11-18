@@ -11,11 +11,9 @@ import { cn } from "@/app/lib/cn";
 import { providerAccountLabel, providerOrder } from "@/app/lib/providers";
 import { routes } from "@/app/lib/routes";
 import { useModelCatalog, useReadyProviderModels } from "@/app/services/queries";
-import type { BackendKind, CatalogModel, ReasoningEffort } from "@/app/types/api";
+import type { BackendKind, CatalogModel, ModelCatalog, ReasoningEffort } from "@/app/types/api";
 
 import { Chip } from "./Chip";
-import type { ModelOverride } from "./modelChoice";
-import { catalogOverride } from "./suggestedModel";
 
 type View = "overview" | "effort" | "model";
 
@@ -78,11 +76,15 @@ function BackHeader({ label, onBack }: { label: string; onBack: () => void }) {
   );
 }
 
+type CatalogProvider = ModelCatalog["providers"][number];
+
+const providerReady = (provider: CatalogProvider) => provider.auth_status === "ready";
+
 /**
- * The composer's model chip, "GPT-6.1 Sol High": the model this session runs
- * on and its reasoning effort. Opens on an overview of both; each row leads to
- * its own list. Lists every model on a connected provider; accounts and keys
- * are added in Settings.
+ * The composer's model chip, "GPT-6.1 Sol High": the model a session runs on
+ * and its reasoning effort, on Home and in a session. Opens on an overview of
+ * both; each row leads to its own list. Lists every model on a connected
+ * provider; accounts and keys are added in Settings.
  */
 export function ModelPicker({
   fallbackLabel,
@@ -90,9 +92,11 @@ export function ModelPicker({
   value,
   effort,
   supportedEfforts,
-  inheritedLabel,
-  usingInherited,
+  inheritedLabel = null,
+  usingInherited = false,
   disabled,
+  placement = PopoverPlacement.BottomLeft,
+  usableProvider = providerReady,
   onPick,
   onEffort,
   onUseInherited,
@@ -106,12 +110,15 @@ export function ModelPicker({
   effort: string;
   supportedEfforts: readonly ReasoningEffort[];
   /** The project's own model, offered as a way back after picking another. */
-  inheritedLabel: string | null;
-  usingInherited: boolean;
+  inheritedLabel?: string | null;
+  usingInherited?: boolean;
   disabled?: boolean;
-  onPick: (override: ModelOverride) => void;
+  placement?: PopoverPlacement;
+  /** Whose models are listed: connected providers unless a host mounts its own. */
+  usableProvider?: (provider: CatalogProvider) => boolean;
+  onPick: (pick: CatalogPick) => void;
   onEffort: (effort: string) => void;
-  onUseInherited: () => void;
+  onUseInherited?: () => void;
   /** Light-model and preset options, where orchestration still offers them. */
   onAdvanced?: () => void;
 }) {
@@ -126,13 +133,13 @@ export function ModelPicker({
   const connected = useMemo(
     () =>
       (catalog.data?.providers ?? [])
-        .filter((provider) => provider.auth_status === "ready" && catalogBaseUrl(provider))
+        .filter((provider) => usableProvider(provider) && catalogBaseUrl(provider))
         .sort((left, right) => providerOrder(left.id) - providerOrder(right.id))
         .map((provider) => ({
           provider,
           models: modelsForProvider(provider, live.get(provider.id)),
         })),
-    [catalog.data, live],
+    [catalog.data, live, usableProvider],
   );
   const groups = useMemo(() => {
     const needle = filter.trim().toLowerCase();
@@ -167,8 +174,7 @@ export function ModelPicker({
     setFilter("");
   };
   const pick = (pick: CatalogPick) => {
-    if (!catalog.data) return;
-    onPick(catalogOverride(catalog.data, pick));
+    onPick(pick);
     close();
   };
   const onFilterKey = (event: KeyboardEvent<HTMLInputElement>) => {
@@ -236,7 +242,7 @@ export function ModelPicker({
       />
       <div ref={list} className="min-h-0 overflow-y-auto">
         <Menu label="Model">
-          {inheritedLabel && !filter ? (
+          {inheritedLabel && onUseInherited && !filter ? (
             <>
               <MenuItem
                 label={inheritedLabel}
@@ -315,7 +321,7 @@ export function ModelPicker({
       open={open}
       onClose={close}
       sticky
-      placement={PopoverPlacement.BottomLeft}
+      placement={placement}
       size={view === "model" ? "w-[360px]" : "w-max min-w-[200px] max-w-[280px]"}
       content={view === "effort" ? effortList : view === "model" ? modelList : overview}
     >

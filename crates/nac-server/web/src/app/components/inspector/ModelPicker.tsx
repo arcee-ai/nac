@@ -1,19 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
 
-import { ButtonSize, PopoverPlacement, Tooltip, TooltipPosition } from "@/app/atoms";
-import { CatalogModelPicker } from "@/app/components/modals/CatalogModelPicker";
-import {
-  EFFORT_LEVEL_OPTIONS,
-  reasoningOptionsFor,
-  standardEffort,
-} from "@/app/components/modals/options";
-import { SmallSelect } from "@/app/components/modals/SmallSelect";
+import { PopoverPlacement } from "@/app/atoms";
+import { standardEffort } from "@/app/components/modals/options";
+import { ModelPicker as ComposerModelChip } from "@/app/features/home/ComposerModelPickers";
 import { useManagedModelProfile } from "@/app/features/managed/controller/useManagedModelProfile";
-import { resolveCatalogModel, type CatalogPick } from "@/app/lib/catalog";
+import { catalogBaseUrl, resolveCatalogModel, type CatalogPick } from "@/app/lib/catalog";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { useToast } from "@/app/providers/ToastProvider";
-import { useModelCatalog, useReadyProviderModels, useUpdateConfig } from "@/app/services/queries";
-import type { BackendKind, ReasoningEffort, SessionMetadata } from "@/app/types/api";
+import { useModelCatalog, useUpdateConfig } from "@/app/services/queries";
+import type { BackendKind, ModelCatalog, ReasoningEffort, SessionMetadata } from "@/app/types/api";
 
 /**
  * The session's current model and reasoning, directly switchable beside the
@@ -36,33 +31,26 @@ export function ModelPicker({
   const toast = useToast();
   const catalog = useModelCatalog();
   const managedModel = useManagedModelProfile();
-  const liveByBackend = useReadyProviderModels(catalog.data);
   const updateConfig = useUpdateConfig();
   const currentModel = metadata?.model ?? label;
   const currentEffort = metadata?.reasoning_effort ?? "";
-  const currentPick: CatalogPick | null = metadata
-    ? {
-        backend: metadata.backend as BackendKind,
-        model: metadata.model,
-        baseUrl: metadata.base_url ?? "",
-      }
-    : null;
   const resolved = resolveCatalogModel(catalog.data, metadata?.backend, currentModel);
   const defaultEffort = standardEffort(resolved.supportedEfforts);
   // Shown while a session without a level is being given its standard one.
   const shownEffort = currentEffort || defaultEffort || "";
-  const effortItems = useMemo(
-    () => reasoningOptionsFor(resolved.supportedEfforts, shownEffort, EFFORT_LEVEL_OPTIONS),
-    [resolved.supportedEfforts, shownEffort],
+  const { credentialReady: managedReady, matches: managedMatches } = managedModel;
+  // A managed host's mounted model is usable before its account reads as connected.
+  const usableProvider = useCallback(
+    (provider: ModelCatalog["providers"][number]) =>
+      provider.auth_status === "ready" ||
+      (managedReady &&
+        managedMatches({
+          backend: provider.id,
+          model: "",
+          baseUrl: catalogBaseUrl(provider) ?? "",
+        })),
+    [managedReady, managedMatches],
   );
-  const noEfforts = Boolean(catalog.data) && resolved.supportedEfforts.length === 0;
-  const selectedEffort = effortItems.find((item) => item.id === shownEffort)?.label;
-  const effortLabel = noEfforts
-    ? "not available"
-    : typeof selectedEffort === "string"
-      ? selectedEffort
-      : "not set";
-  const [effortOpen, setEffortOpen] = useState(false);
 
   // A session with no level, on a model that accepts levels, runs at the
   // standard one. Applied once per session, and only while it is idle.
@@ -145,41 +133,17 @@ export function ModelPicker({
   };
 
   return (
-    <div className="flex min-w-0 items-center">
-      <CatalogModelPicker
-        catalog={catalog.data}
-        loading={catalog.isLoading}
-        failed={catalog.isError}
-        compact
-        disabled={disabled || !metadata || updateConfig.isPending}
-        liveByBackend={liveByBackend}
-        value={currentPick}
-        onSelect={(pick) => void chooseModel(pick)}
-      />
-      <Tooltip
-        title={`Effort: ${effortLabel}`}
-        description={
-          noEfforts
-            ? "This model has no reasoning levels to choose from."
-            : "How much the model reasons before it answers."
-        }
-        position={TooltipPosition.TopCenter}
-        sticky
-        disabled={effortOpen}
-      >
-        <SmallSelect
-          items={noEfforts ? [] : effortItems}
-          value={noEfforts ? "" : shownEffort}
-          placeholder={noEfforts ? "Not available" : "Effort"}
-          disabled={noEfforts || disabled || !metadata || updateConfig.isPending}
-          size={ButtonSize.Small}
-          trailingIcon={null}
-          triggerClassName="!pl-1 [--color-text-btn-secondary:var(--color-text-basic-tertiary)]"
-          placement={PopoverPlacement.TopCenter}
-          onOpenChange={setEffortOpen}
-          onValueChange={(effort) => void chooseEffort(effort)}
-        />
-      </Tooltip>
-    </div>
+    <ComposerModelChip
+      fallbackLabel={currentModel}
+      pending={!metadata}
+      value={metadata ? { backend: metadata.backend as BackendKind, model: metadata.model } : null}
+      effort={shownEffort}
+      supportedEfforts={resolved.supportedEfforts}
+      disabled={disabled || !metadata || updateConfig.isPending}
+      placement={PopoverPlacement.TopRight}
+      usableProvider={usableProvider}
+      onPick={(pick) => void chooseModel(pick)}
+      onEffort={(effort) => void chooseEffort(effort)}
+    />
   );
 }

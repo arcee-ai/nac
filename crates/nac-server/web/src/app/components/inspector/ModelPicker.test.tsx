@@ -2,6 +2,7 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { ModelPicker } from "@/app/components/inspector/ModelPicker";
@@ -101,38 +102,54 @@ afterEach(() => {
 function renderPicker(metadata: SessionMetadata, disabled = false) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const tree = (busy: boolean) => (
-    <QueryClientProvider client={client}>
-      <ToastProvider>
-        <ModelPicker
-          sessionId="session"
-          metadata={metadata}
-          label={metadata.model}
-          disabled={busy}
-        />
-      </ToastProvider>
-    </QueryClientProvider>
+    <MemoryRouter>
+      <QueryClientProvider client={client}>
+        <ToastProvider>
+          <ModelPicker
+            sessionId="session"
+            metadata={metadata}
+            label={metadata.model}
+            disabled={busy}
+          />
+        </ToastProvider>
+      </QueryClientProvider>
+    </MemoryRouter>
   );
   const view = render(tree(disabled));
   return { client, view, setBusy: (busy: boolean) => view.rerender(tree(busy)) };
 }
 
+async function openChip(name: string | RegExp) {
+  const chip = await screen.findByRole("button", { name });
+  await waitFor(() => expect((chip as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(chip);
+  return chip;
+}
+
+async function pickModel(chipName: string | RegExp, model: string) {
+  await openChip(chipName);
+  fireEvent.click(screen.getByRole("menuitem", { name: /^Model/ }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Search models" }), {
+    target: { value: model },
+  });
+  fireEvent.click(await screen.findByRole("menuitemradio", { name: new RegExp(`^${model}`) }));
+}
+
+const trinity = {
+  backend: "arcee-auth",
+  model: "trinity-large-thinking",
+  base_url: "https://api.arcee.ai/api/v1",
+  api_key_env: null,
+} as const;
+
 it("switches from an Arcee account to Codex through one catalog mutation", async () => {
   const update = vi.spyOn(api, "updateConfig").mockResolvedValue(undefined);
   const { client, view } = renderPicker({
-    backend: "arcee-auth",
-    model: "trinity-large-thinking",
-    base_url: "https://api.arcee.ai/api/v1",
-    api_key_env: null,
+    ...trinity,
     reasoning_effort: "high",
   } as SessionMetadata);
   try {
-    const modelButton = await screen.findByRole("button", { name: "Model" });
-    await waitFor(() => expect((modelButton as HTMLButtonElement).disabled).toBe(false));
-    fireEvent.click(modelButton);
-    fireEvent.change(screen.getByPlaceholderText("Search models…"), {
-      target: { value: "GPT-5.6 Sol" },
-    });
-    fireEvent.click(await screen.findByText("GPT-5.6 Sol"));
+    await pickModel("Model: Trinity, High reasoning", "GPT-5.6 Sol");
     await waitFor(() =>
       expect(update).toHaveBeenCalledExactlyOnceWith("session", {
         backend: "chatgpt-codex-responses",
@@ -180,17 +197,12 @@ it("keeps managed mounted credentials server-side while selecting another entitl
   });
   const update = vi.spyOn(api, "updateConfig").mockResolvedValue(undefined);
   const { client, view } = renderPicker({
+    ...trinity,
     backend: "arcee-api",
-    model: "trinity-large-thinking",
-    base_url: "https://api.arcee.ai/api/v1",
-    api_key_env: null,
     reasoning_effort: "high",
   } as SessionMetadata);
   try {
-    const modelButton = await screen.findByRole("button", { name: "Model" });
-    await waitFor(() => expect((modelButton as HTMLButtonElement).disabled).toBe(false));
-    fireEvent.click(modelButton);
-    fireEvent.click(await screen.findByText("Kimi"));
+    await pickModel(/^Model: Trinity/, "Kimi");
     await waitFor(() =>
       expect(update).toHaveBeenCalledExactlyOnceWith("session", {
         model: "moonshotai/kimi-k3",
@@ -214,24 +226,19 @@ it("keeps managed mounted credentials server-side while selecting another entitl
 
 it("gives a session without a level its standard one and offers only real levels", async () => {
   const update = vi.spyOn(api, "updateConfig").mockResolvedValue(undefined);
-  const { client, view } = renderPicker({
-    backend: "arcee-auth",
-    model: "trinity-large-thinking",
-    base_url: "https://api.arcee.ai/api/v1",
-    api_key_env: null,
-    reasoning_effort: null,
-  } as SessionMetadata);
+  const { client, view } = renderPicker({ ...trinity, reasoning_effort: null } as SessionMetadata);
   try {
     // The fixture model has Low and High, so its standard level is Low.
     await waitFor(() =>
       expect(update).toHaveBeenCalledExactlyOnceWith("session", { reasoning_effort: "low" }),
     );
-    const trigger = await screen.findByRole("button", { name: "Low" });
-    await waitFor(() => expect((trigger as HTMLButtonElement).disabled).toBe(false));
-    fireEvent.click(trigger);
-    expect(await screen.findByRole("button", { name: "High" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Default" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "High" }));
+    await openChip("Model: Trinity, Low reasoning");
+    fireEvent.click(screen.getByRole("menuitem", { name: /^Effort/ }));
+    expect(screen.getAllByRole("menuitemradio").map((item) => item.textContent)).toEqual([
+      "Low",
+      "High",
+    ]);
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "High" }));
     await waitFor(() =>
       expect(update).toHaveBeenLastCalledWith("session", { reasoning_effort: "high" }),
     );
@@ -244,17 +251,11 @@ it("gives a session without a level its standard one and offers only real levels
 it("waits for the run to end before giving a session its standard level", async () => {
   const update = vi.spyOn(api, "updateConfig").mockResolvedValue(undefined);
   const { client, view, setBusy } = renderPicker(
-    {
-      backend: "arcee-auth",
-      model: "trinity-large-thinking",
-      base_url: "https://api.arcee.ai/api/v1",
-      api_key_env: null,
-      reasoning_effort: null,
-    } as SessionMetadata,
+    { ...trinity, reasoning_effort: null } as SessionMetadata,
     true,
   );
   try {
-    await screen.findByRole("button", { name: "Low" });
+    await screen.findByRole("button", { name: "Model: Trinity, Low reasoning" });
     expect(update).not.toHaveBeenCalled();
     setBusy(false);
     await waitFor(() =>
@@ -269,17 +270,11 @@ it("waits for the run to end before giving a session its standard level", async 
 it("shows effort as Not available and sends none for a model that accepts none", async () => {
   const update = vi.spyOn(api, "updateConfig").mockResolvedValue(undefined);
   const { client, view } = renderPicker({
-    backend: "arcee-auth",
-    model: "trinity-large-thinking",
-    base_url: "https://api.arcee.ai/api/v1",
-    api_key_env: null,
+    ...trinity,
     reasoning_effort: "high",
   } as SessionMetadata);
   try {
-    const modelButton = await screen.findByRole("button", { name: "Model" });
-    await waitFor(() => expect((modelButton as HTMLButtonElement).disabled).toBe(false));
-    fireEvent.click(modelButton);
-    fireEvent.click(await screen.findByText("DeepSeek Flash"));
+    await pickModel("Model: Trinity, High reasoning", "DeepSeek Flash");
     await waitFor(() =>
       expect(update).toHaveBeenCalledExactlyOnceWith("session", {
         model: "deepseek-flash",
@@ -293,20 +288,68 @@ it("shows effort as Not available and sends none for a model that accepts none",
 
   update.mockClear();
   const second = renderPicker({
-    backend: "arcee-auth",
+    ...trinity,
     model: "deepseek-flash",
-    base_url: "https://api.arcee.ai/api/v1",
-    api_key_env: null,
     reasoning_effort: null,
   } as SessionMetadata);
   try {
-    const modelButton = await screen.findByRole("button", { name: "Model" });
-    await waitFor(() => expect((modelButton as HTMLButtonElement).disabled).toBe(false));
-    const effort = await screen.findByRole("button", { name: "Not available" });
-    expect((effort as HTMLButtonElement).disabled).toBe(true);
+    const chip = await openChip("Model: DeepSeek Flash, reasoning not available");
+    expect(chip.textContent).toContain("Not available");
+    const effort = screen.getByRole("menuitem", { name: /^Effort/ });
+    expect(effort.getAttribute("aria-disabled")).toBe("true");
     expect(update).not.toHaveBeenCalled();
   } finally {
     second.view.unmount();
     second.client.clear();
+  }
+});
+
+it("lists a managed host's mounted provider before its account reads as connected", async () => {
+  vi.mocked(api.getManagedStatus).mockResolvedValue({
+    model_ready: true,
+    model: {
+      backend: "arcee-api",
+      id: "trinity-large-thinking",
+      endpoint: "https://api.arcee.ai/api/v1",
+      display_name: "Managed Arcee",
+    },
+  } as ManagedHostStatus);
+  vi.mocked(api.getModelCatalog).mockResolvedValue({
+    ...catalog,
+    providers: [
+      {
+        ...catalog.providers[0],
+        id: "arcee-api",
+        auth: "api_key_env",
+        auth_status: "missing",
+        default_base_url: "https://api.arcee.ai/api/v1",
+        managed_base_url: null,
+      },
+      catalog.providers[1],
+    ],
+  } as ModelCatalog);
+  const update = vi.spyOn(api, "updateConfig").mockResolvedValue(undefined);
+  const { client, view } = renderPicker({
+    backend: "chatgpt-codex-responses",
+    model: "gpt-5.6-sol",
+    base_url: "https://chatgpt.com/backend-api",
+    api_key_env: null,
+    reasoning_effort: "high",
+  } as SessionMetadata);
+  try {
+    await pickModel("Model: GPT-5.6 Sol, High reasoning", "Trinity");
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledExactlyOnceWith(
+        "session",
+        expect.objectContaining({
+          backend: "arcee-api",
+          model: "trinity-large-thinking",
+          base_url: "https://api.arcee.ai/api/v1",
+        }),
+      ),
+    );
+  } finally {
+    view.unmount();
+    client.clear();
   }
 });

@@ -3868,10 +3868,6 @@
     padding-bottom: max(320px, calc(var(--composer-height, 0px) + 40px));
   }
 
-[data-nac-runtime]:is(.\!pl-1), [data-nac-runtime] .\!pl-1 {
-    padding-left: var(--spacing) !important;
-  }
-
 [data-nac-runtime]:is(.pl-0\.5), [data-nac-runtime] .pl-0\.5 {
     padding-left: calc(var(--spacing) * .5);
   }
@@ -4715,10 +4711,6 @@
 [data-nac-runtime]:is(.select-text), [data-nac-runtime] .select-text {
     -webkit-user-select: text;
     user-select: text;
-  }
-
-[data-nac-runtime]:is(.\[--color-text-btn-secondary\:var\(--color-text-basic-tertiary\)\]), [data-nac-runtime] .\[--color-text-btn-secondary\:var\(--color-text-basic-tertiary\)\] {
-    --color-text-btn-secondary: var(--color-text-basic-tertiary);
   }
 
 [data-nac-runtime]:is(.\[nac\:threads\]), [data-nac-runtime] .\[nac\:threads\] {

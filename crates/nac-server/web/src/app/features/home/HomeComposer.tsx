@@ -33,7 +33,7 @@ import {
   type ModelOverride,
 } from "./modelChoice";
 import { ModelOverrideModal } from "./ModelOverrideModal";
-import { useSuggestedModel } from "./suggestedModel";
+import { catalogOverride, useSuggestedModel } from "./suggestedModel";
 import { useStartSession } from "./useStartSession";
 
 const MAX_TITLE = 120;
@@ -296,7 +296,7 @@ export function HomeComposer({
               inheritedLabel={model.inherited ? modelChipLabel(null, model.inherited) : null}
               usingInherited={!override && model.inherited != null}
               disabled={busy}
-              onPick={setOverride}
+              onPick={(pick) => catalog.data && setOverride(catalogOverride(catalog.data, pick))}
               onEffort={setEffortChoice}
               onUseInherited={() => setOverride(null)}
               onAdvanced={policy.orchestrationEnabled ? () => setModelOpen(true) : undefined}
