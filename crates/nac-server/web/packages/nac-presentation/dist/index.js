@@ -15831,26 +15831,23 @@ function jg({ sessionId: e, snapshot: t, entry: n }) {
 			})]
 		})
 	});
-	if (Ae && ke) {
-		let t = ke.kind !== "managed-orchestrator";
-		return /* @__PURE__ */ Q(X, { children: [t ? /* @__PURE__ */ Z("div", {
-			className: V("pointer-events-none flex flex-col items-center [&>*]:pointer-events-auto [&>*]:w-full [&>*]:max-w-[720px]", O ? "px-2" : "px-4"),
-			children: /* @__PURE__ */ Z(Bm, {
-				sessionId: e,
-				permissions: !0,
-				questions: !1,
-				requesterLabel: `child agent “${ke.description || "Subagent"}”`,
-				includeChildren: !1,
-				parentSessionId: ke.kind === "traditional-child" ? ke.parent_session_id : void 0,
-				poll: he
-			})
-		}) : null, /* @__PURE__ */ Z(fg, {
-			parentSessionId: ke.parent_session_id,
+	if (Ae && ke) return /* @__PURE__ */ Q(X, { children: [/* @__PURE__ */ Z("div", {
+		className: V("pointer-events-none flex flex-col items-center [&>*]:pointer-events-auto [&>*]:w-full [&>*]:max-w-[720px]", O ? "px-2" : "px-4"),
+		children: /* @__PURE__ */ Z(Bm, {
 			sessionId: e,
-			description: ke.description,
-			behavior: De
-		})] });
-	}
+			permissions: !0,
+			questions: !1,
+			requesterLabel: `child agent “${ke.description || "Subagent"}”`,
+			includeChildren: !1,
+			parentSessionId: ke.parent_session_id,
+			poll: he
+		})
+	}), /* @__PURE__ */ Z(fg, {
+		parentSessionId: ke.parent_session_id,
+		sessionId: e,
+		description: ke.description,
+		behavior: De
+	})] });
 	let hn = Re && Oe && !O;
 	return /* @__PURE__ */ Q($m, {
 		compact: O,
@@ -20521,7 +20518,7 @@ function cS({ facts: e, phone: t }) {
 	}) : null;
 }
 function lS({ sessionId: e, facts: t, compact: n }) {
-	let r = t.lineage?.kind === "managed-orchestrator" ? ["Managed orchestrator", ...t.meta] : t.meta;
+	let r = t.meta;
 	return /* @__PURE__ */ Q("div", {
 		className: "flex min-w-0 flex-1 flex-col justify-center",
 		children: [/* @__PURE__ */ Q("div", {

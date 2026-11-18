@@ -20222,8 +20222,7 @@
       "SessionLineageKind": {
         "type": "string",
         "enum": [
-          "traditional-child",
-          "managed-orchestrator"
+          "traditional-child"
         ]
       },
       "SessionLineageSnapshot": {

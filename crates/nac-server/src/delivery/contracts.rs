@@ -699,7 +699,6 @@ pub struct SessionSnapshotResponse {
 #[serde(rename_all = "kebab-case")]
 pub enum SessionLineageKind {
     TraditionalChild,
-    ManagedOrchestrator,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq, utoipa::ToSchema)]

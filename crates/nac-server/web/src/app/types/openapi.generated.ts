@@ -1623,7 +1623,7 @@ export interface components {
       updated_at: string;
       version: number;
     };
-    SessionLineageKind: "traditional-child" | "managed-orchestrator";
+    SessionLineageKind: "traditional-child";
     SessionLineageSnapshot: {
       description: string;
       kind: components["schemas"]["SessionLineageKind"];
