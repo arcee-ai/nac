@@ -1,48 +1,7 @@
 use std::time::Duration;
 
-use anyhow::anyhow;
-use nac_core::{
-    run_failure::RunFailure,
-    store::{ManagedOrchestratorRecord, ManagedOrchestratorStatus},
-};
-
-pub(crate) fn managed_run_failure_status(
-    failure: Option<&RunFailure>,
-) -> ManagedOrchestratorStatus {
-    if failure.is_some_and(RunFailure::is_interrupted) {
-        ManagedOrchestratorStatus::Interrupted
-    } else {
-        ManagedOrchestratorStatus::Failed
-    }
-}
-
 use crate::ServerTraditionalChildController;
-
-pub(crate) fn load_managed_monitor_record(
-    store_path: &std::path::Path,
-    orchestrator_session_id: &str,
-    generation: u64,
-) -> anyhow::Result<Option<ManagedOrchestratorRecord>> {
-    #[cfg(feature = "managed-fault-fixture")]
-    if nac_core::managed_fault_fixture::hit(
-        nac_core::managed_fault_fixture::Boundary::MonitorRead,
-        orchestrator_session_id,
-        None,
-        Some(generation),
-    )? {
-        return Err(anyhow!(
-            "private fixture injected managed monitor read failure"
-        ));
-    }
-    let correlation = nac_core::telemetry::Correlation::session(Some(orchestrator_session_id))
-        .with_generation(generation);
-    nac_core::telemetry::emit_resource_sample(correlation.clone(), None);
-    nac_core::telemetry::observe_store(
-        nac_core::telemetry::StoreOperation::ManagedMonitorPoll,
-        correlation,
-        || nac_core::store::load_managed_orchestrator(store_path, orchestrator_session_id),
-    )
-}
+use anyhow::anyhow;
 
 impl nac_core::traditional_children::TraditionalChildController
     for ServerTraditionalChildController

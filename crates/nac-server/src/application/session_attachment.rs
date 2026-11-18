@@ -5,7 +5,6 @@ use nac_core::{
     runtime::{self, NacConfig},
     session_service::SessionService,
     sessions,
-    store::ManagedOrchestratorStatus,
 };
 
 use crate::SessionManager;
@@ -197,34 +196,11 @@ impl<'a> SessionAttachmentApplication<'a> {
                 // need to re-enter the parent's lifecycle gate.
                 Box::pin(self.manager.attach_session(&child_session_id)).await?;
             }
-            if metadata.behavior == sessions::SessionBehavior::DirectWithOrchestrator {
-                let orchestrators = match self.manager.inner._store_ownership.coordinator() {
-                    Some(owner) => {
-                        owner
-                            .list_managed_orchestrators(parent_session_id.to_owned())
-                            .await?
-                    }
-                    None => nac_core::store::list_managed_orchestrators(
-                        &self.manager.inner.store_path,
-                        parent_session_id,
-                    )?,
-                };
-                for orchestrator in orchestrators.into_iter().filter(|orchestrator| {
-                    orchestrator.status == ManagedOrchestratorStatus::Running
-                }) {
-                    self.manager.spawn_managed_orchestrator_monitor(
-                        orchestrator.orchestrator_session_id,
-                        orchestrator.generation,
-                    );
-                }
-            }
         }
-        if service.metadata().behavior != sessions::SessionBehavior::Orchestrator {
-            if let Some(session_id) = service.metadata().session_id.as_deref() {
-                self.retain_pending_wake(session_id).await?;
-            }
-            service.start_next_direct_inbox_item().await?;
+        if let Some(session_id) = service.metadata().session_id.as_deref() {
+            self.retain_pending_wake(session_id).await?;
         }
+        service.start_next_direct_inbox_item().await?;
         Ok(())
     }
 

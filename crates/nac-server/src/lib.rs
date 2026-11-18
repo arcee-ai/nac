@@ -337,8 +337,6 @@ struct SessionManagerInner {
     managed_identity: Option<nac_core::store::ManagedAcceptedIdentity>,
     pending_forward_start: bool,
     #[cfg(test)]
-    managed_monitor_peer_observed: tokio::sync::Notify,
-    #[cfg(test)]
     session_creation_before_projection:
         StdMutex<Option<Arc<application::session_creation::CreationProjectionGate>>>,
     #[cfg(test)]
@@ -590,8 +588,6 @@ impl SessionManager {
                 active_admissions: Arc::new(StdMutex::new(HashMap::new())),
                 managed_identity,
                 pending_forward_start,
-                #[cfg(test)]
-                managed_monitor_peer_observed: tokio::sync::Notify::new(),
                 #[cfg(test)]
                 session_creation_before_projection: StdMutex::new(None),
                 #[cfg(test)]
