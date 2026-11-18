@@ -1694,6 +1694,10 @@
     min-height: calc(var(--spacing) * 6);
   }
 
+[data-nac-runtime]:is(.min-h-7), [data-nac-runtime] .min-h-7 {
+    min-height: calc(var(--spacing) * 7);
+  }
+
 [data-nac-runtime]:is(.min-h-8), [data-nac-runtime] .min-h-8 {
     min-height: calc(var(--spacing) * 8);
   }
@@ -5223,6 +5227,10 @@
 [data-nac-runtime]:is(.focus\:outline-2:focus), [data-nac-runtime] .focus\:outline-2:focus {
     outline-style: var(--nac-presentation-tw-outline-style);
     outline-width: 2px;
+  }
+
+[data-nac-runtime]:is(.focus\:outline-\[var\(--color-border-focus-outline\)\]:focus), [data-nac-runtime] .focus\:outline-\[var\(--color-border-focus-outline\)\]:focus {
+    outline-color: var(--color-border-focus-outline);
   }
 
 [data-nac-runtime] .focus\:placeholder\:text-transparent:focus::placeholder {

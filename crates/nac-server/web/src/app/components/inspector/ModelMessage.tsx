@@ -216,6 +216,7 @@ const ModelMessageBody = memo(function ModelMessageBody({
           <Markdown
             key={block.key}
             streaming={active}
+            taskReferences={interactive}
             // The prose skin's paragraph margins would add to the gap between items.
             className="transcript-prose [&>:first-child]:!mt-0 [&>:last-child]:!mb-0"
           >

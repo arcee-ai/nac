@@ -4619,14 +4619,14 @@ function cs() {
 // src/app/lib/markdownChunk.ts
 var ls = null, us = !1;
 function ds() {
-	return ls ??= import("./markdown-renderer-CX9OclLk.js").then((e) => e.t).then((e) => (us = !0, e)), ls;
+	return ls ??= import("./markdown-renderer-kj7mNS-a.js").then((e) => e.t).then((e) => (us = !0, e)), ls;
 }
 function fs() {
 	return us;
 }
 // src/app/lib/markdown.tsx
 var ps = te(ds);
-function ms({ children: e, streaming: t = !1, className: n }) {
+function ms({ children: e, streaming: t = !1, className: n, taskReferences: r = !1 }) {
 	return /* @__PURE__ */ z("div", {
 		className: S("chat-response markdown markdown-content text-basic-primary w-full", t && "streaming", n),
 		children: /* @__PURE__ */ z(ee, {
@@ -4636,6 +4636,7 @@ function ms({ children: e, streaming: t = !1, className: n }) {
 			}),
 			children: /* @__PURE__ */ z(ps, {
 				streaming: t,
+				taskReferences: r,
 				children: e
 			})
 		})

@@ -49,6 +49,31 @@ fn discovery_schemas_allow_omission_and_null_without_requiring_placeholders() {
     }
 }
 
+#[test]
+fn task_reference_guidance_matches_the_supported_route_contract() {
+    let definitions = crate::tools::direct_tool_definitions(false);
+    for name in [
+        "launch_task",
+        "task_launch_status",
+        "find_tasks",
+        "read_task",
+    ] {
+        let description = &definitions
+            .iter()
+            .find(|tool| tool.function.name == name)
+            .unwrap()
+            .function
+            .description;
+        assert!(description.contains("exact returned route"));
+        assert!(description.contains("invent"));
+        assert!(description.contains("opened the UI"));
+        assert_eq!(
+            description.contains("Open control"),
+            matches!(name, "launch_task" | "task_launch_status")
+        );
+    }
+}
+
 #[tokio::test]
 async fn sparse_and_fully_nullable_searches_and_reads_are_equivalent() {
     let runtime = runtime(Vec::new());

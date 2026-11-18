@@ -2,6 +2,7 @@ interface MarkdownRendererProps {
     children: string;
     /** Fade newly painted prose while the turn is still streaming. */
     streaming?: boolean;
+    taskReferences?: boolean;
 }
 /**
  * Heavy half of the markdown support: the parser plus the syntax highlighter.
@@ -16,5 +17,5 @@ interface MarkdownRendererProps {
  * a link reference or a footnote switches all the same, as only the whole
  * document resolves those.
  */
-declare const MarkdownRenderer: import("react").MemoExoticComponent<({ children, streaming, }: MarkdownRendererProps) => import("react").JSX.Element>;
+declare const MarkdownRenderer: import("react").MemoExoticComponent<({ children, streaming, taskReferences, }: MarkdownRendererProps) => import("react").JSX.Element>;
 export default MarkdownRenderer;
