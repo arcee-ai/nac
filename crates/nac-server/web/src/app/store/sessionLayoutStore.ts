@@ -63,10 +63,11 @@ interface SessionLayoutState {
   /** The floating drawer fills the window instead of its 560px column. */
   expanded: boolean;
   /**
-   * The drawer docks as a column beside the chat instead of floating (⌘\).
-   * Docked by default; a window too narrow to dock floats it regardless.
+   * Whether the layout has room to dock the drawer as a column beside the
+   * chat, as the drawer reports it. The drawer always docks where it fits; a
+   * phone or a narrow window floats it instead.
    */
-  pinned: boolean;
+  dockable: boolean;
   /** What the open drawer holds: the route's panel, or the session goal. */
   drawerContent: DrawerContent;
   /**
@@ -134,7 +135,7 @@ export function createSessionLayoutStore(
     sidePanelAnimate: true,
     sidePanelProjectId: null,
     expanded: false,
-    pinned: true,
+    dockable: false,
     drawerContent: "panel",
     panelList: false,
     selectedThread: null,
@@ -271,15 +272,9 @@ export function createSessionLayoutStore(
     applyCollapsed(true);
   }
 
-  /** ⌘\: dock the drawer beside the chat, or float it again. Opens it when closed. */
-  function toggleDrawerPinned(): void {
-    const state = getState();
-    if (state.collapsed) {
-      setState({ pinned: true, expanded: false });
-      applyCollapsed(false);
-      return;
-    }
-    setState({ pinned: !state.pinned, expanded: false });
+  /** The drawer reports whether the layout has room to dock it. */
+  function setDrawerDockable(dockable: boolean): void {
+    if (getState().dockable !== dockable) setState({ dockable });
   }
 
   /** Swap a narrow panel between its list of rows and the row it has open. */
@@ -416,7 +411,7 @@ export function createSessionLayoutStore(
   /**
    * Only the exact child→parent round trip may restore a saved parent panel.
    * Any other move to a new session closes a floating drawer: the next chat
-   * opens quiet. A docked drawer is a layout the user chose, so it stays.
+   * opens quiet. A docked drawer is part of the layout, so it stays.
    */
   function activateSessionSelection(sessionId: string | null): void {
     const state = getState();
@@ -434,7 +429,7 @@ export function createSessionLayoutStore(
         collapsed: back.collapsed,
         drawerContent: back.drawerContent,
       });
-    } else if (arriving && !state.pinned && !state.collapsed) {
+    } else if (arriving && !state.dockable && !state.collapsed) {
       setState({ collapsed: true, expanded: false, drawerContent: "panel" });
     }
   }
@@ -517,7 +512,6 @@ export function createSessionLayoutStore(
   const useSidePanelCollapsed = () => useStore((s) => s.collapsed);
   const useSidePanelAnimate = () => useStore((s) => s.sidePanelAnimate);
   const useSidePanelExpanded = () => useStore((s) => s.expanded);
-  const useDrawerPinned = () => useStore((s) => s.pinned);
   const useDrawerContent = () => useStore((s) => s.drawerContent);
   const useSidePanelList = () => useStore((s) => s.panelList);
   const useSelectedThread = () => useStore((s) => s.selectedThread);
@@ -546,7 +540,7 @@ export function createSessionLayoutStore(
     toggleSidePanelCollapsed,
     openDrawer,
     closeDrawer,
-    toggleDrawerPinned,
+    setDrawerDockable,
     showSidePanelList,
     toggleSidePanelList,
     revealSidePanel,
@@ -571,7 +565,6 @@ export function createSessionLayoutStore(
     useSidePanelCollapsed,
     useSidePanelAnimate,
     useSidePanelExpanded,
-    useDrawerPinned,
     useDrawerContent,
     useSidePanelList,
     useSelectedThread,
@@ -600,7 +593,7 @@ export const {
   toggleSidePanelCollapsed,
   openDrawer,
   closeDrawer,
-  toggleDrawerPinned,
+  setDrawerDockable,
   showSidePanelList,
   toggleSidePanelList,
   revealSidePanel,
@@ -625,7 +618,6 @@ export const {
   useSidePanelCollapsed,
   useSidePanelAnimate,
   useSidePanelExpanded,
-  useDrawerPinned,
   useDrawerContent,
   useSidePanelList,
   useSelectedThread,

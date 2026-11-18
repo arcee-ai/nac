@@ -1,194 +1,194 @@
-import { $ as e, O as t, S as n, X as r, Y as i, Z as a, _ as o, b as ee, c as te, et as s, f as ne, g as c, h as l, m as u, n as d, nt as f, o as p, r as re, t as ie, u as ae, x as oe, y as se } from "./Toast-BXHDD0LZ.js";
-import { $ as m, $t as h, A as ce, At as le, B as g, C as ue, Ct as de, D as fe, E as pe, Et as me, F as he, Ft as _, G as ge, Gt as _e, H as ve, I as ye, It as be, J as xe, Jt as Se, L as Ce, Lt as we, M as Te, Mt as Ee, N as De, Nt as Oe, O as ke, Pt as v, Q as Ae, Qt as y, R as je, Rt as Me, S as b, St as Ne, T as Pe, Tt as Fe, U as x, Ut as Ie, V as Le, W as Re, Wt as ze, Xt as S, Y as Be, Yt as C, Zt as w, an as T, at as E, b as D, bt as Ve, ct as He, dt as O, en as k, et as Ue, ft as We, g as A, gt as Ge, h as Ke, ht as qe, in as Je, it as j, j as Ye, jt as M, k as Xe, lt as Ze, n as Qe, nn as N, nt as $e, on as et, ot as tt, pt as nt, q as P, rn as F, rt, t as it, tn as at, tt as ot, u as st, ut as ct, vt as I, wt as lt, x as ut, xt as dt, y as ft, yt as pt, z as mt, zt as ht } from "./ChatSessionActions-Dcc3GKNS.js";
-import { Fragment as L, useEffect as gt, useRef as _t, useState as R } from "react";
-import { Fragment as z, jsx as B, jsxs as V } from "react/jsx-runtime";
+import { $ as e, J as t, O as n, Q as r, S as i, X as a, Y as o, _ as s, b as ee, c as te, f as ne, g as c, h as l, m as u, n as d, o as re, r as f, t as ie, tt as p, u as ae, x as oe, y as se } from "./Toast-DLhlVenn.js";
+import { $ as m, $t as h, A as ce, At as le, B as g, C as ue, Ct as de, D as fe, E as pe, Et as me, F as he, Ft as _, G as ge, Gt as _e, H as ve, I as ye, It as be, J as xe, Jt as Se, L as Ce, Lt as we, M as Te, Mt as Ee, N as De, Nt as Oe, O as ke, Pt as v, Q as Ae, Qt as y, R as je, Rt as Me, S as b, St as Ne, T as Pe, Tt as Fe, U as x, Ut as Ie, V as Le, W as Re, Wt as ze, Xt as S, Y as Be, Yt as C, Zt as w, an as T, at as E, b as Ve, bt as He, ct as Ue, dt as We, en as D, et as Ge, ft as Ke, g as O, gt as qe, h as Je, ht as Ye, in as Xe, it as k, j as Ze, jt as A, k as Qe, lt as $e, n as et, nn as j, nt as tt, on as nt, ot as rt, pt as it, q as M, rn as N, rt as at, t as ot, tn as st, tt as ct, u as lt, ut, vt as P, wt as dt, x as ft, xt as pt, y as mt, yt as ht, z as gt, zt as _t } from "./ChatSessionActions-BkIt4jFc.js";
+import { Fragment as F, useEffect as vt, useRef as yt, useState as I } from "react";
+import { Fragment as L, jsx as R, jsxs as z } from "react/jsx-runtime";
 // src/app/components/pages/design-preview/AvatarsSection.tsx
-function vt() {
-	let [e, t] = R("Port the ArceeFM atoms");
-	return /* @__PURE__ */ B(C, {
+function bt() {
+	let [e, t] = I("Port the ArceeFM atoms");
+	return /* @__PURE__ */ R(C, {
 		title: "Avatars and editable header",
-		children: /* @__PURE__ */ V("div", {
+		children: /* @__PURE__ */ z("div", {
 			className: "p-4 flex flex-col gap-4",
-			children: [/* @__PURE__ */ V("div", {
+			children: [/* @__PURE__ */ z("div", {
 				className: "flex flex-wrap items-center gap-4",
 				children: [
-					/* @__PURE__ */ B(y, {
+					/* @__PURE__ */ R(y, {
 						name: "Aleksy",
 						size: h.Small
 					}),
-					/* @__PURE__ */ B(y, { name: "NAC Orchestrator" }),
-					/* @__PURE__ */ B(y, {
+					/* @__PURE__ */ R(y, { name: "NAC Orchestrator" }),
+					/* @__PURE__ */ R(y, {
 						name: "Opus",
 						size: h.Large
 					}),
-					/* @__PURE__ */ B(y, {
+					/* @__PURE__ */ R(y, {
 						name: "🛠",
 						glyph: !0,
 						size: h.Large
 					}),
-					/* @__PURE__ */ B(y, {
+					/* @__PURE__ */ R(y, {
 						name: "Anthropic",
 						size: h.XLarge,
 						color: "var(--color-bg-info-primary)"
 					})
 				]
-			}), /* @__PURE__ */ B(qe, {
+			}), /* @__PURE__ */ R(Ye, {
 				value: e,
 				onCommit: t,
-				size: Ge.Medium,
+				size: qe.Medium,
 				className: "max-w-[360px]"
 			})]
 		})
 	});
 }
 // src/app/components/pages/design-preview/Showcase.tsx
-function H({ id: e, title: t, description: n, children: r }) {
-	return /* @__PURE__ */ V("section", {
+function B({ id: e, title: t, description: n, children: r }) {
+	return /* @__PURE__ */ z("section", {
 		id: e,
 		"aria-labelledby": `${e}-title`,
 		className: "flex scroll-mt-20 flex-col gap-4",
-		children: [/* @__PURE__ */ V("div", {
+		children: [/* @__PURE__ */ z("div", {
 			className: "flex flex-col gap-1",
-			children: [/* @__PURE__ */ B("h2", {
+			children: [/* @__PURE__ */ R("h2", {
 				id: `${e}-title`,
 				className: "type-title text-basic-primary",
 				children: t
-			}), /* @__PURE__ */ B("p", {
+			}), /* @__PURE__ */ R("p", {
 				className: "type-body-chrome max-w-[60ch] text-basic-tertiary",
 				children: n
 			})]
-		}), /* @__PURE__ */ B("div", {
+		}), /* @__PURE__ */ R("div", {
 			className: "flex flex-col gap-4",
 			children: r
 		})]
 	});
 }
-function U({ label: e, hint: t, className: n, children: r }) {
-	return /* @__PURE__ */ V("div", {
+function V({ label: e, hint: t, className: n, children: r }) {
+	return /* @__PURE__ */ z("div", {
 		className: "flex flex-col gap-2 border-b border-muted px-4 py-4 last:border-b-0 md:flex-row md:gap-6",
-		children: [/* @__PURE__ */ V("div", {
+		children: [/* @__PURE__ */ z("div", {
 			className: "flex w-full shrink-0 flex-col gap-0.5 md:w-[168px]",
-			children: [/* @__PURE__ */ B("span", {
+			children: [/* @__PURE__ */ R("span", {
 				className: "type-label text-basic-primary",
 				children: e
-			}), t ? /* @__PURE__ */ B("span", {
+			}), t ? /* @__PURE__ */ R("span", {
 				className: "type-meta text-basic-tertiary",
 				children: t
 			}) : null]
-		}), /* @__PURE__ */ B("div", {
-			className: f("flex min-w-0 flex-1 flex-wrap items-center gap-3", n),
+		}), /* @__PURE__ */ R("div", {
+			className: p("flex min-w-0 flex-1 flex-wrap items-center gap-3", n),
 			children: r
 		})]
 	});
 }
-function W({ children: e }) {
-	return /* @__PURE__ */ B("code", {
+function H({ children: e }) {
+	return /* @__PURE__ */ R("code", {
 		className: "code-small text-basic-tertiary",
 		children: e
 	});
 }
 // src/app/components/pages/design-preview/BadgesSection.tsx
-function yt() {
-	return /* @__PURE__ */ V(z, { children: [
-		/* @__PURE__ */ V(u, {
-			variant: o.Secondary,
+function xt() {
+	return /* @__PURE__ */ z(L, { children: [
+		/* @__PURE__ */ z(u, {
+			variant: s.Secondary,
 			size: c.Small,
 			"aria-label": "Changes, 12 added, 3 removed",
-			children: [/* @__PURE__ */ B("span", {
+			children: [/* @__PURE__ */ R("span", {
 				className: "tabular text-success-primary",
 				children: "+12"
-			}), /* @__PURE__ */ B("span", {
+			}), /* @__PURE__ */ R("span", {
 				className: "tabular text-error-primary",
 				children: "−3"
 			})]
 		}),
-		/* @__PURE__ */ V(u, {
-			variant: o.Secondary,
+		/* @__PURE__ */ z(u, {
+			variant: s.Secondary,
 			size: c.Small,
 			content: l.IconLeft,
 			"aria-label": "3 agents, 1 running",
-			children: [/* @__PURE__ */ B(I, { status: "working" }), "3 agents"]
+			children: [/* @__PURE__ */ R(P, { status: "working" }), "3 agents"]
 		}),
-		/* @__PURE__ */ V(u, {
-			variant: o.Secondary,
+		/* @__PURE__ */ z(u, {
+			variant: s.Secondary,
 			size: c.Small,
 			content: l.IconLeft,
-			children: [/* @__PURE__ */ B(e, { iconName: s.Flag }), "Goal"]
+			children: [/* @__PURE__ */ R(r, { iconName: e.Flag }), "Goal"]
 		}),
-		/* @__PURE__ */ V(u, {
-			variant: o.SecondaryHighlighted,
+		/* @__PURE__ */ z(u, {
+			variant: s.SecondaryHighlighted,
 			size: c.Small,
 			content: l.IconRight,
-			children: ["Agent", /* @__PURE__ */ B(e, { iconName: s.Down })]
+			children: ["Agent", /* @__PURE__ */ R(r, { iconName: e.Down })]
 		})
 	] });
 }
-function bt() {
-	let [e, t] = R(!0), [n, r] = R(!1);
-	return /* @__PURE__ */ V(C, {
+function St() {
+	let [e, t] = I(!0), [n, r] = I(!1);
+	return /* @__PURE__ */ z(C, {
 		title: "Badges, chips and switches",
 		children: [
-			/* @__PURE__ */ V(U, {
+			/* @__PURE__ */ z(V, {
 				label: "Badges",
 				hint: "11px, sentence case, a soft wash.",
 				children: [
-					/* @__PURE__ */ B(S, {
+					/* @__PURE__ */ R(S, {
 						text: "Running",
 						color: w.Neutral
 					}),
-					/* @__PURE__ */ B(S, {
+					/* @__PURE__ */ R(S, {
 						text: "Needs approval",
 						color: w.Yellow
 					}),
-					/* @__PURE__ */ B(S, {
+					/* @__PURE__ */ R(S, {
 						text: "Failed",
 						color: w.Red
 					}),
-					/* @__PURE__ */ B(S, {
+					/* @__PURE__ */ R(S, {
 						text: "Merged",
 						color: w.Green
 					}),
-					/* @__PURE__ */ B(S, {
+					/* @__PURE__ */ R(S, {
 						text: "Docs",
 						color: w.Blue
 					}),
-					/* @__PURE__ */ B(S, {
+					/* @__PURE__ */ R(S, {
 						text: "Idle",
 						color: w.Gray
 					}),
-					/* @__PURE__ */ B(S, {
+					/* @__PURE__ */ R(S, {
 						text: "No wash",
 						color: w.Red,
 						background: !1
 					})
 				]
 			}),
-			/* @__PURE__ */ B(U, {
+			/* @__PURE__ */ R(V, {
 				label: "Chips",
 				hint: "24px pills: header pills, composer chips.",
-				children: /* @__PURE__ */ B(yt, {})
+				children: /* @__PURE__ */ R(xt, {})
 			}),
-			/* @__PURE__ */ V(U, {
+			/* @__PURE__ */ z(V, {
 				label: "Switch",
 				hint: "Ink track when on, in either theme.",
 				children: [
-					/* @__PURE__ */ B(D, {
+					/* @__PURE__ */ R(Ve, {
 						checked: e,
 						onChange: t,
 						"aria-label": "Notifications"
 					}),
-					/* @__PURE__ */ B(D, {
+					/* @__PURE__ */ R(Ve, {
 						checked: n,
 						onChange: r,
-						size: ut.Large,
+						size: ft.Large,
 						"aria-label": "Large switch"
 					}),
-					/* @__PURE__ */ B(D, {
+					/* @__PURE__ */ R(Ve, {
 						checked: !0,
 						disabled: !0,
 						"aria-label": "On, disabled"
 					}),
-					/* @__PURE__ */ B(D, {
+					/* @__PURE__ */ R(Ve, {
 						checked: !1,
 						disabled: !0,
 						"aria-label": "Off, disabled"
@@ -199,7 +199,7 @@ function bt() {
 	});
 }
 // src/app/components/pages/design-preview/TabsPreview.tsx
-var xt = [
+var Ct = [
 	{
 		label: "Default",
 		active: !1,
@@ -220,20 +220,20 @@ var xt = [
 		active: !0,
 		disabled: !0
 	}
-], St = [
+], wt = [
 	{
 		label: "Regular",
-		variant: et.Regular
+		variant: nt.Regular
 	},
 	{
 		label: "Accent",
-		variant: et.Accent
+		variant: nt.Accent
 	},
 	{
 		label: "Destructive",
-		variant: et.Destructive
+		variant: nt.Destructive
 	}
-], Ct = [
+], Tt = [
 	{
 		label: "small",
 		size: T.Small
@@ -246,20 +246,20 @@ var xt = [
 		label: "large",
 		size: T.Large
 	}
-], wt = [
+], Et = [
 	{
 		label: "Small",
-		size: Ue.Small
+		size: Ge.Small
 	},
 	{
 		label: "Medium",
-		size: Ue.Medium
+		size: Ge.Medium
 	},
 	{
 		label: "Large",
-		size: Ue.Large
+		size: Ge.Large
 	}
-], Tt = [
+], Dt = [
 	{
 		label: "Icon left",
 		content: m.IconLeft
@@ -281,155 +281,155 @@ var xt = [
 		content: m.Full
 	}
 ];
-function Et() {
-	return /* @__PURE__ */ V("div", {
+function Ot() {
+	return /* @__PURE__ */ z("div", {
 		className: "grid w-fit grid-cols-[160px_repeat(4,200px)] items-center gap-x-4 gap-y-2",
 		children: [
-			/* @__PURE__ */ B("span", {}),
-			xt.map((e) => /* @__PURE__ */ B("span", {
+			/* @__PURE__ */ R("span", {}),
+			Ct.map((e) => /* @__PURE__ */ R("span", {
 				className: "type-meta-strong text-basic-muted",
 				children: e.label
 			}, e.label)),
-			St.flatMap((t) => Ct.map((n) => /* @__PURE__ */ V(L, { children: [/* @__PURE__ */ V("span", {
+			wt.flatMap((t) => Tt.map((n) => /* @__PURE__ */ z(F, { children: [/* @__PURE__ */ z("span", {
 				className: "type-body-chrome text-basic-secondary",
 				children: [
 					t.label,
 					", ",
 					n.label
 				]
-			}), xt.map((r) => /* @__PURE__ */ V(Je, {
+			}), Ct.map((i) => /* @__PURE__ */ z(Xe, {
 				variant: t.variant,
 				size: n.size,
-				active: r.active,
-				disabled: r.disabled,
+				active: i.active,
+				disabled: i.disabled,
 				children: [
-					/* @__PURE__ */ B(e, { iconName: s.Search }),
-					/* @__PURE__ */ B("span", {
+					/* @__PURE__ */ R(r, { iconName: e.Search }),
+					/* @__PURE__ */ R("span", {
 						className: "flex-1 min-w-0 truncate text-left",
 						children: "New session"
 					}),
-					/* @__PURE__ */ B(e, { iconName: s.Edit })
+					/* @__PURE__ */ R(r, { iconName: e.Edit })
 				]
+			}, i.label))] }, `${t.label}-${n.label}`)))
+		]
+	});
+}
+function kt() {
+	return /* @__PURE__ */ z("div", {
+		className: "grid w-fit grid-cols-[160px_repeat(5,max-content)] items-center justify-items-start gap-x-6 gap-y-3",
+		children: [
+			/* @__PURE__ */ R("span", {}),
+			Dt.map((e) => /* @__PURE__ */ R("span", {
+				className: "type-meta-strong text-basic-muted",
+				children: e.label
+			}, e.label)),
+			Et.flatMap((t) => Ct.map((n) => /* @__PURE__ */ z(F, { children: [/* @__PURE__ */ z("span", {
+				className: "type-body-chrome text-basic-secondary",
+				children: [
+					t.label,
+					", ",
+					n.label.toLowerCase()
+				]
+			}), Dt.map((r) => /* @__PURE__ */ R(Ae, {
+				size: t.size,
+				content: r.content,
+				active: n.active,
+				disabled: n.disabled,
+				iconName: e.Play,
+				trailingIcon: e.Right,
+				"aria-label": r.content === m.IconOnly ? "Run" : void 0,
+				children: "Run"
 			}, r.label))] }, `${t.label}-${n.label}`)))
 		]
 	});
 }
-function Dt() {
-	return /* @__PURE__ */ V("div", {
-		className: "grid w-fit grid-cols-[160px_repeat(5,max-content)] items-center justify-items-start gap-x-6 gap-y-3",
-		children: [
-			/* @__PURE__ */ B("span", {}),
-			Tt.map((e) => /* @__PURE__ */ B("span", {
-				className: "type-meta-strong text-basic-muted",
-				children: e.label
-			}, e.label)),
-			wt.flatMap((e) => xt.map((t) => /* @__PURE__ */ V(L, { children: [/* @__PURE__ */ V("span", {
-				className: "type-body-chrome text-basic-secondary",
-				children: [
-					e.label,
-					", ",
-					t.label.toLowerCase()
-				]
-			}), Tt.map((n) => /* @__PURE__ */ B(Ae, {
-				size: e.size,
-				content: n.content,
-				active: t.active,
-				disabled: t.disabled,
-				iconName: s.Play,
-				trailingIcon: s.Right,
-				"aria-label": n.content === m.IconOnly ? "Run" : void 0,
-				children: "Run"
-			}, n.label))] }, `${e.label}-${t.label}`)))
-		]
-	});
-}
-function Ot() {
-	return /* @__PURE__ */ V(z, { children: [/* @__PURE__ */ V("div", {
+function At() {
+	return /* @__PURE__ */ z(L, { children: [/* @__PURE__ */ z("div", {
 		className: "flex flex-col gap-3",
-		children: [/* @__PURE__ */ B("span", {
+		children: [/* @__PURE__ */ R("span", {
 			className: "type-subheading text-basic-primary",
 			children: "Rows (menus, lists)"
-		}), /* @__PURE__ */ B(Et, {})]
-	}), /* @__PURE__ */ V("div", {
+		}), /* @__PURE__ */ R(Ot, {})]
+	}), /* @__PURE__ */ z("div", {
 		className: "flex flex-col gap-3",
-		children: [/* @__PURE__ */ B("span", {
+		children: [/* @__PURE__ */ R("span", {
 			className: "type-subheading text-basic-primary",
 			children: "Tabs"
-		}), /* @__PURE__ */ B(Dt, {})]
+		}), /* @__PURE__ */ R(kt, {})]
 	})] });
 }
 // src/app/components/pages/design-preview/ButtonsSection.tsx
-var kt = [
+var jt = [
 	{
 		label: "Primary",
-		variant: o.Primary
+		variant: s.Primary
 	},
 	{
 		label: "Secondary",
-		variant: o.Secondary
+		variant: s.Secondary
 	},
 	{
 		label: "Secondary highlighted",
-		variant: o.SecondaryHighlighted
+		variant: s.SecondaryHighlighted
 	},
 	{
 		label: "Secondary destructive",
-		variant: o.SecondaryDestructive
+		variant: s.SecondaryDestructive
 	},
 	{
 		label: "Secondary accent",
-		variant: o.SecondaryAccent
+		variant: s.SecondaryAccent
 	},
 	{
 		label: "Secondary accent highlighted",
-		variant: o.SecondaryAccentHighlighted
+		variant: s.SecondaryAccentHighlighted
 	},
 	{
 		label: "Ghost",
-		variant: o.Ghost
+		variant: s.Ghost
 	},
 	{
 		label: "Ghost highlighted",
-		variant: o.GhostHighlighted
+		variant: s.GhostHighlighted
 	},
 	{
 		label: "Ghost destructive",
-		variant: o.GhostDestructive
+		variant: s.GhostDestructive
 	},
 	{
 		label: "Ghost accent",
-		variant: o.GhostAccent
+		variant: s.GhostAccent
 	},
 	{
 		label: "Ghost highlighted accent",
-		variant: o.GhostHighlightedAccent
+		variant: s.GhostHighlightedAccent
 	},
 	{
 		label: "Tertiary",
-		variant: o.Tertiary
+		variant: s.Tertiary
 	},
 	{
 		label: "Tertiary destructive",
-		variant: o.TertiaryDestructive
+		variant: s.TertiaryDestructive
 	},
 	{
 		label: "Tertiary accent",
-		variant: o.TertiaryAccent
+		variant: s.TertiaryAccent
 	}
-], At = [
+], Mt = [
 	{
 		label: "Secondary",
-		variant: o.Secondary
+		variant: s.Secondary
 	},
 	{
 		label: "Ghost highlighted",
-		variant: o.GhostHighlighted
+		variant: s.GhostHighlighted
 	},
 	{
 		label: "Tertiary",
-		variant: o.Tertiary
+		variant: s.Tertiary
 	}
-], jt = [
+], Nt = [
 	{
 		label: "small",
 		size: c.Small
@@ -442,7 +442,7 @@ var kt = [
 		label: "large",
 		size: c.Large
 	}
-], Mt = [
+], Pt = [
 	{
 		label: "Icon",
 		content: l.Icon
@@ -460,50 +460,50 @@ var kt = [
 		content: l.IconRight
 	}
 ];
-function G({ variant: t, size: n = c.Medium, content: r = l.IconLeft, disabled: i = !1 }) {
-	let a = r === l.Icon;
-	return /* @__PURE__ */ V(u, {
+function U({ variant: t, size: n = c.Medium, content: i = l.IconLeft, disabled: a = !1 }) {
+	let o = i === l.Icon;
+	return /* @__PURE__ */ z(u, {
 		variant: t,
 		size: n,
-		content: r,
-		disabled: i,
-		"aria-label": a ? "Add" : void 0,
+		content: i,
+		disabled: a,
+		"aria-label": o ? "Add" : void 0,
 		children: [
-			a || r === l.IconLeft ? /* @__PURE__ */ B(e, { iconName: s.Add }) : null,
-			a ? null : "Label",
-			r === l.IconRight ? /* @__PURE__ */ B(e, { iconName: s.Right }) : null
+			o || i === l.IconLeft ? /* @__PURE__ */ R(r, { iconName: e.Add }) : null,
+			o ? null : "Label",
+			i === l.IconRight ? /* @__PURE__ */ R(r, { iconName: e.Right }) : null
 		]
 	});
 }
-function Nt() {
-	return /* @__PURE__ */ V("div", {
+function Ft() {
+	return /* @__PURE__ */ z("div", {
 		className: "grid w-fit grid-cols-[200px_repeat(4,max-content)] items-center justify-items-start gap-x-6 gap-y-3",
 		children: [
-			/* @__PURE__ */ B("span", {}),
+			/* @__PURE__ */ R("span", {}),
 			[
 				"Default",
 				"Disabled",
 				"Icon",
 				"Icon, disabled"
-			].map((e) => /* @__PURE__ */ B("span", {
+			].map((e) => /* @__PURE__ */ R("span", {
 				className: "type-meta-strong text-basic-muted",
 				children: e
 			}, e)),
-			kt.map(({ label: e, variant: t }) => /* @__PURE__ */ V(L, { children: [
-				/* @__PURE__ */ B("span", {
+			jt.map(({ label: e, variant: t }) => /* @__PURE__ */ z(F, { children: [
+				/* @__PURE__ */ R("span", {
 					className: "type-body-chrome text-basic-secondary",
 					children: e
 				}),
-				/* @__PURE__ */ B(G, { variant: t }),
-				/* @__PURE__ */ B(G, {
+				/* @__PURE__ */ R(U, { variant: t }),
+				/* @__PURE__ */ R(U, {
 					variant: t,
 					disabled: !0
 				}),
-				/* @__PURE__ */ B(G, {
+				/* @__PURE__ */ R(U, {
 					variant: t,
 					content: l.Icon
 				}),
-				/* @__PURE__ */ B(G, {
+				/* @__PURE__ */ R(U, {
 					variant: t,
 					content: l.Icon,
 					disabled: !0
@@ -512,23 +512,23 @@ function Nt() {
 		]
 	});
 }
-function Pt() {
-	return /* @__PURE__ */ V("div", {
+function It() {
+	return /* @__PURE__ */ z("div", {
 		className: "grid w-fit grid-cols-[200px_repeat(4,max-content)] items-center justify-items-start gap-x-6 gap-y-3",
 		children: [
-			/* @__PURE__ */ B("span", {}),
-			Mt.map(({ label: e }) => /* @__PURE__ */ B("span", {
+			/* @__PURE__ */ R("span", {}),
+			Pt.map(({ label: e }) => /* @__PURE__ */ R("span", {
 				className: "type-meta-strong text-basic-muted",
 				children: e
 			}, e)),
-			At.flatMap((e) => jt.map((t) => /* @__PURE__ */ V(L, { children: [/* @__PURE__ */ V("span", {
+			Mt.flatMap((e) => Nt.map((t) => /* @__PURE__ */ z(F, { children: [/* @__PURE__ */ z("span", {
 				className: "type-body-chrome text-basic-secondary",
 				children: [
 					e.label,
 					", ",
 					t.label
 				]
-			}), Mt.map(({ label: n, content: r }) => /* @__PURE__ */ B(G, {
+			}), Pt.map(({ label: n, content: r }) => /* @__PURE__ */ R(U, {
 				variant: e.variant,
 				size: t.size,
 				content: r
@@ -536,138 +536,138 @@ function Pt() {
 		]
 	});
 }
-function Ft() {
-	return /* @__PURE__ */ B(C, {
+function Lt() {
+	return /* @__PURE__ */ R(C, {
 		title: "Buttons",
-		children: /* @__PURE__ */ V("div", {
+		children: /* @__PURE__ */ z("div", {
 			className: "p-4 flex flex-col gap-8 overflow-x-auto [&>*]:shrink-0",
 			children: [
-				/* @__PURE__ */ V("div", {
+				/* @__PURE__ */ z("div", {
 					className: "flex flex-col gap-2",
-					children: [/* @__PURE__ */ B("p", {
+					children: [/* @__PURE__ */ R("p", {
 						className: "type-body-chrome text-basic-tertiary",
 						children: "Every control is a pill. Primary is ink; secondary is a surface with a hairline; ghost and tertiary carry no box until hovered. Accent variants are ink washes: there is no brand hue. Small 24, medium 32, large 40."
-					}), /* @__PURE__ */ V("div", {
+					}), /* @__PURE__ */ z("div", {
 						className: "flex flex-wrap items-center gap-3",
 						children: [
-							/* @__PURE__ */ B(u, {
-								variant: o.Primary,
+							/* @__PURE__ */ R(u, {
+								variant: s.Primary,
 								children: "Primary"
 							}),
-							/* @__PURE__ */ B(u, {
-								variant: o.Secondary,
+							/* @__PURE__ */ R(u, {
+								variant: s.Secondary,
 								children: "Secondary"
 							}),
-							/* @__PURE__ */ B(u, {
-								variant: o.Ghost,
+							/* @__PURE__ */ R(u, {
+								variant: s.Ghost,
 								children: "Ghost"
 							}),
-							/* @__PURE__ */ B(u, {
-								variant: o.Tertiary,
+							/* @__PURE__ */ R(u, {
+								variant: s.Tertiary,
 								children: "Tertiary"
 							}),
-							/* @__PURE__ */ B(u, {
-								variant: o.SecondaryDestructive,
+							/* @__PURE__ */ R(u, {
+								variant: s.SecondaryDestructive,
 								children: "Delete"
 							}),
-							/* @__PURE__ */ B(u, {
-								variant: o.GhostDestructive,
+							/* @__PURE__ */ R(u, {
+								variant: s.GhostDestructive,
 								children: "Remove"
 							}),
-							/* @__PURE__ */ B(u, {
-								variant: o.Primary,
+							/* @__PURE__ */ R(u, {
+								variant: s.Primary,
 								loading: !0,
 								children: "Loading"
 							}),
-							/* @__PURE__ */ B(u, {
-								variant: o.Secondary,
+							/* @__PURE__ */ R(u, {
+								variant: s.Secondary,
 								disabled: !0,
 								children: "Disabled"
 							}),
-							/* @__PURE__ */ V(u, {
-								variant: o.Secondary,
+							/* @__PURE__ */ z(u, {
+								variant: s.Secondary,
 								content: l.IconLeft,
-								children: [/* @__PURE__ */ B(e, { iconName: s.Add }), "New session"]
+								children: [/* @__PURE__ */ R(r, { iconName: e.Add }), "New session"]
 							})
 						]
 					})]
 				}),
-				/* @__PURE__ */ V("div", {
+				/* @__PURE__ */ z("div", {
 					className: "flex flex-col gap-3",
 					children: [
-						/* @__PURE__ */ B("span", {
+						/* @__PURE__ */ R("span", {
 							className: "type-subheading text-basic-primary",
 							children: "Variants and states"
 						}),
-						/* @__PURE__ */ B(Nt, {}),
-						/* @__PURE__ */ B(Pt, {})
+						/* @__PURE__ */ R(Ft, {}),
+						/* @__PURE__ */ R(It, {})
 					]
 				}),
-				/* @__PURE__ */ B(Ot, {})
+				/* @__PURE__ */ R(At, {})
 			]
 		})
 	});
 }
 // src/app/components/pages/design-preview/ChoicesSection.tsx
-var It = [{
+var Rt = [{
 	id: "trace",
 	name: "session-trace.txt",
 	size: "12 KB"
 }];
-function Lt(e) {
+function zt(e) {
 	return {
 		id: `${e.name}-${e.lastModified}`,
 		name: e.name,
 		size: `${Math.ceil(e.size / 1024)} KB`
 	};
 }
-function Rt() {
-	let [e, t] = R(!0), [n, r] = R("first"), [i, a] = R(It);
-	return /* @__PURE__ */ B(C, {
+function Bt() {
+	let [e, t] = I(!0), [n, r] = I("first"), [i, a] = I(Rt);
+	return /* @__PURE__ */ R(C, {
 		title: "Choices, multi-line and file input",
-		children: /* @__PURE__ */ V("div", {
+		children: /* @__PURE__ */ z("div", {
 			className: "p-4 flex flex-wrap items-start gap-6",
 			children: [
-				/* @__PURE__ */ V("div", {
+				/* @__PURE__ */ z("div", {
 					className: "flex flex-col gap-2",
-					children: [/* @__PURE__ */ B(le, {
+					children: [/* @__PURE__ */ R(le, {
 						checked: e,
 						onChange: t,
 						children: "Skip permission prompts"
-					}), /* @__PURE__ */ B(le, {
+					}), /* @__PURE__ */ R(le, {
 						checked: !1,
 						onChange: () => {},
 						disabled: !0,
 						children: "Disabled"
 					})]
 				}),
-				/* @__PURE__ */ V("div", {
+				/* @__PURE__ */ z("div", {
 					className: "flex flex-col gap-2",
-					children: [/* @__PURE__ */ B(fe, {
+					children: [/* @__PURE__ */ R(fe, {
 						name: "preview-choice",
 						checked: n === "first",
 						onChange: () => r("first"),
 						children: "Working tree"
-					}), /* @__PURE__ */ B(fe, {
+					}), /* @__PURE__ */ R(fe, {
 						name: "preview-choice",
 						checked: n === "second",
 						onChange: () => r("second"),
 						children: "Latest snapshot"
 					})]
 				}),
-				/* @__PURE__ */ B(ge, {
+				/* @__PURE__ */ R(ge, {
 					label: "System prompt",
 					rows: 3,
 					placeholder: "Extra instructions for the agent",
 					className: "w-[320px]"
 				}),
-				/* @__PURE__ */ V("div", {
+				/* @__PURE__ */ z("div", {
 					className: "flex w-[320px] flex-col gap-2",
-					children: [/* @__PURE__ */ B(He, {
+					children: [/* @__PURE__ */ R(Ue, {
 						accept: ".txt,.md,.pdf",
 						hint: "Text, Markdown or PDF.",
-						onFilesSelected: (e) => a(e.map(Lt))
-					}), /* @__PURE__ */ B(He, {
+						onFilesSelected: (e) => a(e.map(zt))
+					}), /* @__PURE__ */ R(Ue, {
 						files: i,
 						onRemove: (e) => a(i.filter((t) => t.id !== e))
 					})]
@@ -677,48 +677,48 @@ function Rt() {
 	});
 }
 // src/app/components/pages/design-preview/CodeBlockSection.tsx
-var zt = "pub enum AgentEvent {\n    RunStarted { thread_name: Option<String> },\n    AssistantMessage {\n        thread_name: Option<String>,\n        content: String,\n        usage: Option<TokenUsage>,\n    },\n    RunFinished { thread_name: Option<String> },\n}";
-function Bt() {
-	return /* @__PURE__ */ B(C, {
+var Vt = "pub enum AgentEvent {\n    RunStarted { thread_name: Option<String> },\n    AssistantMessage {\n        thread_name: Option<String>,\n        content: String,\n        usage: Option<TokenUsage>,\n    },\n    RunFinished { thread_name: Option<String> },\n}";
+function Ht() {
+	return /* @__PURE__ */ R(C, {
 		title: "Code block and chat loader",
-		children: /* @__PURE__ */ V("div", {
+		children: /* @__PURE__ */ z("div", {
 			className: "p-4 flex flex-col gap-4",
-			children: [/* @__PURE__ */ B(re, {
-				code: zt,
+			children: [/* @__PURE__ */ R(f, {
+				code: Vt,
 				language: "rust",
 				title: "events.rs",
 				lineNumbers: !0,
 				expandable: !0,
 				maxHeight: "220px"
-			}), /* @__PURE__ */ B(Se, {})]
+			}), /* @__PURE__ */ R(Se, {})]
 		})
 	});
 }
 // src/app/components/pages/design-preview/DatesSection.tsx
-function Vt() {
-	let [e, t] = R(null), [n, r] = R({
+function Ut() {
+	let [e, t] = I(null), [n, r] = I({
 		from: null,
 		to: null
 	});
-	return /* @__PURE__ */ B(C, {
+	return /* @__PURE__ */ R(C, {
 		title: "Dates",
-		children: /* @__PURE__ */ V("div", {
+		children: /* @__PURE__ */ z("div", {
 			className: "p-4 flex flex-wrap items-start gap-6",
 			children: [
-				/* @__PURE__ */ B(lt, {
+				/* @__PURE__ */ R(dt, {
 					label: "Created after",
 					value: e,
 					onChange: t,
 					className: "w-[240px]"
 				}),
-				/* @__PURE__ */ B(lt, {
+				/* @__PURE__ */ R(dt, {
 					label: "Window",
 					range: n,
 					onRangeChange: r,
 					hintText: "Two clicks pick the ends.",
 					className: "w-[280px]"
 				}),
-				/* @__PURE__ */ B(Fe, {
+				/* @__PURE__ */ R(Fe, {
 					selected: e ? /* @__PURE__ */ new Date(`${e}T00:00:00`) : void 0,
 					onSelect: (e) => t(`${e.getFullYear()}-${String(e.getMonth() + 1).padStart(2, "0")}-${String(e.getDate()).padStart(2, "0")}`),
 					className: "rounded-[8px] border border-muted bg-elevation-level-2"
@@ -728,23 +728,23 @@ function Vt() {
 	});
 }
 // src/app/components/pages/design-preview/FilesAtomsSection.tsx
-var K = [
+var W = [
 	{
-		size: O.Large,
-		badge: nt.Large,
+		size: We.Large,
+		badge: it.Large,
 		title: "Large"
 	},
 	{
-		size: O.Medium,
-		badge: nt.Medium,
+		size: We.Medium,
+		badge: it.Medium,
 		title: "Medium"
 	},
 	{
-		size: O.Small,
-		badge: nt.Small,
+		size: We.Small,
+		badge: it.Small,
 		title: "Small"
 	}
-], Ht = "src/app/components/index.tsx", Ut = "src/app/components/calendar/RecurringEventsTimeZonePicker.tsx", Wt = [
+], Wt = "src/app/components/index.tsx", Gt = "src/app/components/calendar/RecurringEventsTimeZonePicker.tsx", Kt = [
 	{
 		title: "Default",
 		additions: 279,
@@ -770,7 +770,7 @@ var K = [
 		deletions: 84
 	},
 	{ title: "Without counts" }
-], Gt = [
+], qt = [
 	{
 		title: "Both",
 		additions: 279,
@@ -784,7 +784,7 @@ var K = [
 		title: "Deletions only",
 		deletions: 1
 	}
-], Kt = [
+], Jt = [
 	{
 		path: "src/app/components/index.tsx",
 		additions: 279,
@@ -866,11 +866,11 @@ var K = [
 		deletions: 22
 	},
 	{
-		path: Ut,
+		path: Gt,
 		additions: 1204,
 		deletions: 377
 	}
-], qt = [
+], Yt = [
 	{
 		title: "Default",
 		status: null
@@ -911,37 +911,37 @@ var K = [
 		title: "Ignored",
 		status: E.Ignored
 	}
-], Jt = [
+], Xt = [
 	{
 		title: "File",
-		variant: j.File
+		variant: k.File
 	},
 	{
 		title: "File, active",
-		variant: j.File,
+		variant: k.File,
 		active: !0
 	},
 	{
 		title: "File, disabled",
-		variant: j.File,
+		variant: k.File,
 		disabled: !0
 	},
 	{
 		title: "Folder",
-		variant: j.Folder
+		variant: k.Folder
 	},
 	{
 		title: "Folder, open",
-		variant: j.Folder,
+		variant: k.Folder,
 		active: !0
 	}
-], Yt = "src/app/lib/parser.ts", q = (e, t, n, r, i = !0) => ({
+], Zt = "src/app/lib/parser.ts", G = (e, t, n, r, i = !0) => ({
 	kind: e,
 	old_lineno: t,
 	new_lineno: n,
 	content: r,
 	has_trailing_newline: i
-}), Xt = {
+}), Qt = {
 	stage: "unstaged",
 	status: "modified",
 	additions: 3,
@@ -957,10 +957,10 @@ var K = [
 		new_start: 1,
 		new_lines: 3,
 		lines: [
-			q("context", 1, 1, "import { tokenize } from \"./lexer\";"),
-			q("delete", 2, null, "import type { Token } from \"./lexer\";"),
-			q("insert", null, 2, "import { type Token, TokenKind } from \"./lexer\";"),
-			q("context", 3, 3, "")
+			G("context", 1, 1, "import { tokenize } from \"./lexer\";"),
+			G("delete", 2, null, "import type { Token } from \"./lexer\";"),
+			G("insert", null, 2, "import { type Token, TokenKind } from \"./lexer\";"),
+			G("context", 3, 3, "")
 		]
 	}, {
 		function_context: null,
@@ -969,86 +969,86 @@ var K = [
 		new_start: 24,
 		new_lines: 4,
 		lines: [
-			q("context", 24, 24, "export function parse(source: string): Token[] {"),
-			q("delete", 25, null, "  return tokenize(source);"),
-			q("insert", null, 25, "  const tokens = tokenize(source);"),
-			q("insert", null, 26, "  return tokens.filter((token) => token.kind !== TokenKind.Whitespace && token.kind !== TokenKind.Comment);"),
-			q("context", 26, 27, "}", !1)
+			G("context", 24, 24, "export function parse(source: string): Token[] {"),
+			G("delete", 25, null, "  return tokenize(source);"),
+			G("insert", null, 25, "  const tokens = tokenize(source);"),
+			G("insert", null, 26, "  return tokens.filter((token) => token.kind !== TokenKind.Whitespace && token.kind !== TokenKind.Comment);"),
+			G("context", 26, 27, "}", !1)
 		]
 	}]
-}, J = "bg-elevation-ground p-2", Zt = () => {};
-function Qt() {
-	return /* @__PURE__ */ V("div", {
+}, K = "bg-elevation-ground p-2", q = () => {};
+function $t() {
+	return /* @__PURE__ */ z("div", {
 		className: "flex flex-col gap-2",
-		children: [/* @__PURE__ */ B("span", {
+		children: [/* @__PURE__ */ R("span", {
 			className: "type-meta-strong text-basic-muted",
 			children: "File button"
-		}), /* @__PURE__ */ V("div", {
+		}), /* @__PURE__ */ z("div", {
 			className: "grid w-fit grid-cols-[auto_repeat(3,auto)] items-center gap-x-4 gap-y-2",
 			children: [
-				/* @__PURE__ */ B("span", {}),
-				K.map(({ size: e, title: t }) => /* @__PURE__ */ B("span", {
+				/* @__PURE__ */ R("span", {}),
+				W.map(({ size: e, title: t }) => /* @__PURE__ */ R("span", {
 					className: "type-meta-strong text-basic-muted",
 					children: t
 				}, e)),
-				Wt.map((e) => /* @__PURE__ */ V(L, { children: [/* @__PURE__ */ B("span", {
+				Kt.map((e) => /* @__PURE__ */ z(F, { children: [/* @__PURE__ */ R("span", {
 					className: "type-meta-strong text-basic-tertiary",
 					children: e.title
-				}), K.map(({ size: t }) => /* @__PURE__ */ B("div", {
-					className: J,
-					children: /* @__PURE__ */ B(ct, {
-						path: Ht,
+				}), W.map(({ size: t }) => /* @__PURE__ */ R("div", {
+					className: K,
+					children: /* @__PURE__ */ R(ut, {
+						path: Wt,
 						size: t,
 						active: e.active,
 						disabled: e.disabled,
 						additions: e.additions,
 						deletions: e.deletions,
-						onClick: Zt
+						onClick: q
 					})
 				}, t))] }, e.title))
 			]
 		})]
 	});
 }
-function $t() {
-	return /* @__PURE__ */ V("div", {
+function en() {
+	return /* @__PURE__ */ z("div", {
 		className: "flex flex-col gap-2",
-		children: [/* @__PURE__ */ B("span", {
+		children: [/* @__PURE__ */ R("span", {
 			className: "type-meta-strong text-basic-muted",
 			children: "A long name in 200px"
-		}), /* @__PURE__ */ B("div", {
+		}), /* @__PURE__ */ R("div", {
 			className: "flex flex-wrap items-start gap-4",
-			children: K.map(({ size: e }) => /* @__PURE__ */ B("div", {
-				className: `w-[200px] ${J}`,
-				children: /* @__PURE__ */ B(ct, {
-					path: Ut,
+			children: W.map(({ size: e }) => /* @__PURE__ */ R("div", {
+				className: `w-[200px] ${K}`,
+				children: /* @__PURE__ */ R(ut, {
+					path: Gt,
 					size: e,
 					additions: 1204,
 					deletions: 377,
-					onClick: Zt
+					onClick: q
 				})
 			}, e))
 		})]
 	});
 }
-function en() {
-	return /* @__PURE__ */ V("div", {
+function tn() {
+	return /* @__PURE__ */ z("div", {
 		className: "flex flex-col gap-2",
-		children: [/* @__PURE__ */ B("span", {
+		children: [/* @__PURE__ */ R("span", {
 			className: "type-meta-strong text-basic-muted",
 			children: "Code changes badge"
-		}), /* @__PURE__ */ V("div", {
+		}), /* @__PURE__ */ z("div", {
 			className: "grid w-fit grid-cols-[64px_repeat(3,auto)] items-center gap-x-6 gap-y-2",
 			children: [
-				/* @__PURE__ */ B("span", {}),
-				Gt.map(({ title: e }) => /* @__PURE__ */ B("span", {
+				/* @__PURE__ */ R("span", {}),
+				qt.map(({ title: e }) => /* @__PURE__ */ R("span", {
 					className: "type-meta-strong text-basic-muted",
 					children: e
 				}, e)),
-				K.map(({ badge: e, title: t }) => /* @__PURE__ */ V(L, { children: [/* @__PURE__ */ B("span", {
+				W.map(({ badge: e, title: t }) => /* @__PURE__ */ z(F, { children: [/* @__PURE__ */ R("span", {
 					className: "type-meta-strong text-basic-tertiary",
 					children: t
-				}), Gt.map((t) => /* @__PURE__ */ B(We, {
+				}), qt.map((t) => /* @__PURE__ */ R(Ke, {
 					size: e,
 					additions: t.additions,
 					deletions: t.deletions
@@ -1057,18 +1057,18 @@ function en() {
 		})]
 	});
 }
-function tn({ files: e, size: t, caption: n }) {
-	let [r, i] = R(e[1]?.path ?? null);
-	return /* @__PURE__ */ V("div", {
+function nn({ files: e, size: t, caption: n }) {
+	let [r, i] = I(e[1]?.path ?? null);
+	return /* @__PURE__ */ z("div", {
 		className: "flex w-[280px] flex-col gap-2",
 		children: [
-			/* @__PURE__ */ B("span", {
+			/* @__PURE__ */ R("span", {
 				className: "type-meta-strong text-basic-muted",
 				children: n
 			}),
-			/* @__PURE__ */ B("div", {
-				className: J,
-				children: /* @__PURE__ */ B(Ze, {
+			/* @__PURE__ */ R("div", {
+				className: K,
+				children: /* @__PURE__ */ R($e, {
 					"aria-label": "Changed files",
 					size: t,
 					files: e.map((e) => ({
@@ -1078,113 +1078,113 @@ function tn({ files: e, size: t, caption: n }) {
 					onOpen: i
 				})
 			}),
-			/* @__PURE__ */ V("span", {
+			/* @__PURE__ */ z("span", {
 				className: "type-meta-strong text-basic-tertiary",
 				children: ["Open file: ", r ?? "none"]
 			})
 		]
 	});
 }
-function nn() {
-	return /* @__PURE__ */ V("div", {
+function rn() {
+	return /* @__PURE__ */ z("div", {
 		className: "flex flex-wrap items-start gap-6",
-		children: [K.map(({ size: e, title: t }) => /* @__PURE__ */ B(tn, {
+		children: [W.map(({ size: e, title: t }) => /* @__PURE__ */ R(nn, {
 			size: e,
-			files: Kt.slice(0, 5),
+			files: Jt.slice(0, 5),
 			caption: `List, 5 files, ${t}`
-		}, e)), /* @__PURE__ */ B(tn, {
-			size: O.Small,
-			files: Kt,
+		}, e)), /* @__PURE__ */ R(nn, {
+			size: We.Small,
+			files: Jt,
 			caption: "List, 17 files, Small"
 		})]
 	});
 }
-function rn() {
-	return /* @__PURE__ */ V("div", {
+function an() {
+	return /* @__PURE__ */ z("div", {
 		className: "flex flex-col gap-2",
-		children: [/* @__PURE__ */ B("span", {
+		children: [/* @__PURE__ */ R("span", {
 			className: "type-meta-strong text-basic-muted",
 			children: "Git status labels"
-		}), /* @__PURE__ */ B("div", {
-			className: `flex w-fit gap-3 ${J}`,
-			children: Object.values(E).map((e) => /* @__PURE__ */ B(tt, { status: e }, e))
+		}), /* @__PURE__ */ R("div", {
+			className: `flex w-fit gap-3 ${K}`,
+			children: Object.values(E).map((e) => /* @__PURE__ */ R(rt, { status: e }, e))
 		})]
 	});
 }
-var an = (e) => e === j.Folder ? "components" : "index.tsx";
-function on() {
-	return /* @__PURE__ */ V("div", {
+var on = (e) => e === k.Folder ? "components" : "index.tsx";
+function sn() {
+	return /* @__PURE__ */ z("div", {
 		className: "flex flex-col gap-2",
 		children: [
-			/* @__PURE__ */ B("span", {
+			/* @__PURE__ */ R("span", {
 				className: "type-meta-strong text-basic-muted",
 				children: "File list tab button, Small"
 			}),
-			/* @__PURE__ */ V("div", {
+			/* @__PURE__ */ z("div", {
 				className: "grid w-fit grid-cols-[auto_repeat(5,160px)] items-center gap-x-3 gap-y-1",
 				children: [
-					/* @__PURE__ */ B("span", {}),
-					Jt.map(({ title: e }) => /* @__PURE__ */ B("span", {
+					/* @__PURE__ */ R("span", {}),
+					Xt.map(({ title: e }) => /* @__PURE__ */ R("span", {
 						className: "type-meta-strong text-basic-muted",
 						children: e
 					}, e)),
-					qt.map(({ title: e, status: t }) => /* @__PURE__ */ V(L, { children: [/* @__PURE__ */ B("span", {
+					Yt.map(({ title: e, status: t }) => /* @__PURE__ */ z(F, { children: [/* @__PURE__ */ R("span", {
 						className: "type-meta-strong text-basic-tertiary",
 						children: e
-					}), Jt.map((e) => /* @__PURE__ */ B("div", {
-						className: J,
-						children: /* @__PURE__ */ B($e, {
-							name: an(e.variant),
+					}), Xt.map((e) => /* @__PURE__ */ R("div", {
+						className: K,
+						children: /* @__PURE__ */ R(tt, {
+							name: on(e.variant),
 							variant: e.variant,
 							status: t,
 							active: e.active,
 							disabled: e.disabled,
-							onClick: Zt
+							onClick: q
 						})
 					}, e.title))] }, e))
 				]
 			}),
-			/* @__PURE__ */ B("span", {
+			/* @__PURE__ */ R("span", {
 				className: "type-meta-strong text-basic-muted",
 				children: "File list tab button, Large"
 			}),
-			/* @__PURE__ */ B("div", {
+			/* @__PURE__ */ R("div", {
 				className: "flex flex-wrap items-start gap-4",
-				children: Jt.filter((e) => !e.disabled).map((e) => /* @__PURE__ */ B("div", {
-					className: `w-[280px] ${J}`,
-					children: /* @__PURE__ */ B($e, {
-						name: an(e.variant),
+				children: Xt.filter((e) => !e.disabled).map((e) => /* @__PURE__ */ R("div", {
+					className: `w-[280px] ${K}`,
+					children: /* @__PURE__ */ R(tt, {
+						name: on(e.variant),
 						variant: e.variant,
-						size: rt.Large,
+						size: at.Large,
 						status: E.Changed,
 						active: e.active,
-						onClick: Zt
+						onClick: q
 					})
 				}, e.title))
 			})
 		]
 	});
 }
-var sn = (e, t) => ({
+var cn = (e, t) => ({
 	kind: e.kind === "insert" || e.kind === "delete" ? e.kind : "context",
 	number: e.kind === "delete" ? e.old_lineno : e.new_lineno ?? e.old_lineno,
 	content: e.content,
 	tokens: t,
-	trailing: e.has_trailing_newline ? null : /* @__PURE__ */ B("span", {
+	trailing: e.has_trailing_newline ? null : /* @__PURE__ */ R("span", {
 		className: "italic text-basic-muted",
 		children: " No newline at end of file"
 	})
 });
-function cn() {
-	let [e, t] = R(() => /* @__PURE__ */ new Map());
-	return gt(() => {
+function ln() {
+	let [e, t] = I(() => /* @__PURE__ */ new Map());
+	return vt(() => {
 		let e = !0;
-		return p(Yt, [Xt]).then((n) => {
+		return re(Zt, [Qt]).then((n) => {
 			e && t(n);
 		}), () => {
 			e = !1;
 		};
-	}, []), /* @__PURE__ */ B("div", {
+	}, []), /* @__PURE__ */ R("div", {
 		className: "flex flex-wrap items-start gap-6",
 		children: [{
 			title: "Code displayer, two hunks",
@@ -1192,97 +1192,97 @@ function cn() {
 		}, {
 			title: "Code displayer without tokens",
 			tokens: null
-		}].map(({ title: e, tokens: t }) => /* @__PURE__ */ V("div", {
+		}].map(({ title: e, tokens: t }) => /* @__PURE__ */ z("div", {
 			className: "flex w-[480px] flex-col gap-2",
-			children: [/* @__PURE__ */ B("span", {
+			children: [/* @__PURE__ */ R("span", {
 				className: "type-meta-strong text-basic-muted",
 				children: e
-			}), /* @__PURE__ */ B("div", {
-				className: J,
-				children: /* @__PURE__ */ B(me, {
-					"aria-label": `Changes to ${Yt}`,
-					hunks: Xt.hunks.map((e) => e.lines.map((e) => sn(e, t?.get(e))))
+			}), /* @__PURE__ */ R("div", {
+				className: K,
+				children: /* @__PURE__ */ R(me, {
+					"aria-label": `Changes to ${Zt}`,
+					hunks: Qt.hunks.map((e) => e.lines.map((e) => cn(e, t?.get(e))))
 				})
 			})]
 		}, e))
 	});
 }
-function ln() {
-	return /* @__PURE__ */ B(C, {
+function un() {
+	return /* @__PURE__ */ R(C, {
 		title: "Files",
-		children: /* @__PURE__ */ V("div", {
+		children: /* @__PURE__ */ z("div", {
 			className: "p-4 flex flex-col gap-6",
 			children: [
-				/* @__PURE__ */ B(Qt, {}),
-				/* @__PURE__ */ B($t, {}),
-				/* @__PURE__ */ B(en, {}),
-				/* @__PURE__ */ B(nn, {}),
-				/* @__PURE__ */ B(rn, {}),
-				/* @__PURE__ */ B(on, {}),
-				/* @__PURE__ */ B(cn, {})
+				/* @__PURE__ */ R($t, {}),
+				/* @__PURE__ */ R(en, {}),
+				/* @__PURE__ */ R(tn, {}),
+				/* @__PURE__ */ R(rn, {}),
+				/* @__PURE__ */ R(an, {}),
+				/* @__PURE__ */ R(sn, {}),
+				/* @__PURE__ */ R(ln, {})
 			]
 		})
 	});
 }
 // src/app/components/pages/design-preview/InputsSection.tsx
-var un = [
+var dn = [
 	{
 		id: "sonnet",
 		label: "Claude Sonnet",
-		icon: s.Brain
+		icon: e.Brain
 	},
 	{
 		id: "opus",
 		label: "Claude Opus",
-		icon: s.Brain
+		icon: e.Brain
 	},
 	{
 		id: "gpt",
 		label: "GPT",
-		icon: s.Ai
+		icon: e.Ai
 	}
 ];
-function dn({ onOpenModal: e }) {
-	let [t, n] = R("sonnet");
-	return /* @__PURE__ */ B(C, {
+function fn({ onOpenModal: t }) {
+	let [n, r] = I("sonnet");
+	return /* @__PURE__ */ R(C, {
 		title: "Inputs",
-		children: /* @__PURE__ */ V("div", {
+		children: /* @__PURE__ */ z("div", {
 			className: "flex flex-col gap-5 p-4",
 			children: [
-				/* @__PURE__ */ V("div", {
+				/* @__PURE__ */ z("div", {
 					className: "flex flex-wrap items-end gap-4",
 					children: [
-						/* @__PURE__ */ B(P, {
+						/* @__PURE__ */ R(M, {
 							label: "Working directory",
 							inputSize: Be.Medium,
 							placeholder: "/Users/me/project",
 							className: "w-full max-w-[320px]"
 						}),
-						/* @__PURE__ */ B(P, {
+						/* @__PURE__ */ R(M, {
 							label: "Search",
 							inputSize: Be.Medium,
 							leading: xe.Icon,
-							leadingIconName: s.Search,
+							leadingIconName: e.Search,
 							placeholder: "Filter sessions",
 							hintText: "Matches name and cwd",
 							className: "w-full max-w-[280px]"
 						}),
-						/* @__PURE__ */ B(Pe, {
-							items: un,
-							value: t,
-							onValueChange: n,
+						/* @__PURE__ */ R(Pe, {
+							items: dn,
+							value: n,
+							onValueChange: r,
 							placeholder: "Pick a model"
 						})
 					]
 				}),
-				/* @__PURE__ */ V("div", {
+				/* @__PURE__ */ z("div", {
 					className: "flex flex-wrap items-end gap-4",
-					children: [/* @__PURE__ */ B(P, {
+					children: [/* @__PURE__ */ R(M, {
 						label: "Project name",
 						placeholder: "nac",
 						hintText: "Large: forms and dialogs. 44px on touch screens.",
 						className: "w-full max-w-[320px]"
-					}), /* @__PURE__ */ B(P, {
+					}), /* @__PURE__ */ R(M, {
 						label: "Base URL",
 						defaultValue: "api.example",
 						validation: !0,
@@ -1290,13 +1290,13 @@ function dn({ onOpenModal: e }) {
 						className: "w-full max-w-[320px]"
 					})]
 				}),
-				/* @__PURE__ */ V("div", {
+				/* @__PURE__ */ z("div", {
 					className: "flex flex-wrap items-center gap-3",
-					children: [/* @__PURE__ */ B(u, {
-						variant: o.Secondary,
-						onClick: e,
+					children: [/* @__PURE__ */ R(u, {
+						variant: s.Secondary,
+						onClick: t,
 						children: "Open modal"
-					}), /* @__PURE__ */ B("span", {
+					}), /* @__PURE__ */ R("span", {
 						className: "type-meta text-basic-tertiary",
 						children: "A confirmation dialog: 20px corners, 52px header, pill actions."
 					})]
@@ -1306,15 +1306,15 @@ function dn({ onOpenModal: e }) {
 	});
 }
 // src/app/components/pages/design-preview/InsightItemsPreview.tsx
-var fn = "The parser drops nested tables because the lexer resets its indent stack on every blank line. Check where resetIndent is called before changing it: the list renderer relies on the same reset.", pn = "npm run typecheck", mn = JSON.stringify({
-	cmd: pn,
+var pn = "The parser drops nested tables because the lexer resets its indent stack on every blank line. Check where resetIndent is called before changing it: the list renderer relies on the same reset.", mn = "npm run typecheck", hn = JSON.stringify({
+	cmd: mn,
 	workdir: "/workspace/demo-project",
 	yield_time_ms: 1e4
-}, null, 2), hn = "> nac-web@0.0.0 typecheck\n> tsc -p packages/nac-client/tsconfig.json --noEmit && tsc -b\n\nChecked src/app/components/inspector/insights/presentation/InsightDetailColumn.tsx without errors.", gn = `${hn}\nChecked 412 files in 6.1 s.\nFound 0 errors.`, _n = "Pause after the staging deploy and wait for my review before touching production.", vn = "resetIndent\\(", yn = JSON.stringify({
-	pattern: vn,
+}, null, 2), gn = "> nac-web@0.0.0 typecheck\n> tsc -p packages/nac-client/tsconfig.json --noEmit && tsc -b\n\nChecked src/app/components/inspector/insights/presentation/InsightDetailColumn.tsx without errors.", _n = `${gn}\nChecked 412 files in 6.1 s.\nFound 0 errors.`, vn = "Pause after the staging deploy and wait for my review before touching production.", yn = "resetIndent\\(", bn = JSON.stringify({
+	pattern: yn,
 	path: "src/app/lib",
 	output_mode: "content"
-}, null, 2), bn = "src/app/lib/lexer.ts:42\nsrc/app/lib/lexer.ts:118\nsrc/app/lib/parser/table.ts:7", xn = `${bn}\nsrc/app/lib/parser/list.ts:63\nsrc/app/lib/parser/list.ts:91`, Sn = [
+}, null, 2), xn = "src/app/lib/lexer.ts:42\nsrc/app/lib/lexer.ts:118\nsrc/app/lib/parser/table.ts:7", Sn = `${xn}\nsrc/app/lib/parser/list.ts:63\nsrc/app/lib/parser/list.ts:91`, Cn = [
 	"resetIndent",
 	"clearIndentStack",
 	"popIndent",
@@ -1325,16 +1325,16 @@ var fn = "The parser drops nested tables because the lexer resets its indent sta
 	"tableRowIndent",
 	"listItemIndent",
 	"nestedTableDepth"
-], Y = `${Sn.join("|").slice(0, 110)}…`, Cn = JSON.stringify({
-	pattern: Sn.join("|"),
+], J = `${Cn.join("|").slice(0, 110)}…`, wn = JSON.stringify({
+	pattern: Cn.join("|"),
 	path: "src/app/lib",
 	regex: !0
-}, null, 2), wn = "The file changed on disk after it was read, so the edit was not applied. Read src/app/lib/lexer.ts again and repeat the edit against its current content; the old text no longer matches line 42.", Tn = `${wn.slice(0, 160).trimEnd()}...`, En = 1200;
-function Dn() {
-	let [e, t] = R(x.Default);
-	return gt(() => {
+}, null, 2), Tn = "The file changed on disk after it was read, so the edit was not applied. Read src/app/lib/lexer.ts again and repeat the edit against its current content; the old text no longer matches line 42.", En = `${Tn.slice(0, 160).trimEnd()}...`, Dn = 1200;
+function On() {
+	let [e, t] = I(x.Default);
+	return vt(() => {
 		if (e !== x.Loading) return;
-		let n = window.setTimeout(() => t(x.Expanded), En);
+		let n = window.setTimeout(() => t(x.Expanded), Dn);
 		return () => window.clearTimeout(n);
 	}, [e]), {
 		state: e,
@@ -1342,9 +1342,9 @@ function Dn() {
 		hide: () => t(x.Default)
 	};
 }
-function X({ title: e, shortContent: t, fullContent: n }) {
-	let r = Dn();
-	return /* @__PURE__ */ B(ve, {
+function Y({ title: e, shortContent: t, fullContent: n }) {
+	let r = On();
+	return /* @__PURE__ */ R(ve, {
 		title: e,
 		state: r.state,
 		shortContent: t,
@@ -1353,189 +1353,189 @@ function X({ title: e, shortContent: t, fullContent: n }) {
 		onHide: r.hide
 	});
 }
-function On() {
-	let e = Dn(), t = e.state === x.Expanded;
-	return /* @__PURE__ */ V("div", {
+function kn() {
+	let t = On(), n = t.state === x.Expanded;
+	return /* @__PURE__ */ z("div", {
 		className: "flex flex-col gap-2",
-		children: [/* @__PURE__ */ B("span", {
+		children: [/* @__PURE__ */ R("span", {
 			className: "type-meta-strong text-basic-muted",
 			children: "Error, the message cut by its preview"
-		}), /* @__PURE__ */ B("div", {
+		}), /* @__PURE__ */ R("div", {
 			className: "w-[542px] max-w-full bg-elevation-ground",
-			children: /* @__PURE__ */ B(mt, {
+			children: /* @__PURE__ */ R(gt, {
 				id: "preview-cut-error",
-				icon: s.Edit,
+				icon: e.Edit,
 				title: "Edit lexer.ts",
 				state: g.Error,
-				errorMessage: t ? wn : Tn,
-				errorAction: /* @__PURE__ */ B(Re, {
-					expanded: t,
-					loading: e.state === x.Loading,
-					onClick: t ? e.hide : e.showFull
+				errorMessage: n ? Tn : En,
+				errorAction: /* @__PURE__ */ R(Re, {
+					expanded: n,
+					loading: t.state === x.Loading,
+					onClick: n ? t.hide : t.showFull
 				})
 			})
 		})]
 	});
 }
-var Z = () => {}, kn = [
+var X = () => {}, An = [
 	{
 		label: "Default, with Show full",
 		title: "Input",
-		shortContent: Y,
-		onShowFull: Z
+		shortContent: J,
+		onShowFull: X
 	},
 	{
 		label: "Default, without Show full",
 		title: "Input",
-		shortContent: Y
+		shortContent: J
 	},
 	{
 		label: "Default, without a preview",
 		title: "Input",
 		shortContent: "",
-		onShowFull: Z
+		onShowFull: X
 	},
 	{
 		label: "Default, the load failed (Show full retries)",
 		title: "Input",
-		shortContent: Y,
-		onShowFull: Z,
+		shortContent: J,
+		onShowFull: X,
 		error: "Could not load the full input."
 	},
 	{
 		label: "Loading",
 		title: "Input",
 		state: x.Loading,
-		shortContent: Y,
-		onShowFull: Z
+		shortContent: J,
+		onShowFull: X
 	},
 	{
 		label: "Expanded",
 		title: "Input",
 		state: x.Expanded,
-		shortContent: Y,
-		fullContent: Cn,
-		onHide: Z
+		shortContent: J,
+		fullContent: wn,
+		onHide: X
 	},
 	{
 		label: "Expanded, cut by the server",
 		title: "Input",
 		state: x.Expanded,
-		shortContent: Y,
-		fullContent: Cn,
-		onHide: Z,
+		shortContent: J,
+		fullContent: wn,
+		onHide: X,
 		note: "The server cut this input at its size limit."
 	},
 	{
 		label: "Without heading",
 		title: "Input",
 		showHeading: !1,
-		shortContent: Y,
-		onShowFull: Z
+		shortContent: J,
+		onShowFull: X
 	}
 ];
-function An() {
-	return /* @__PURE__ */ V("div", {
+function jn() {
+	return /* @__PURE__ */ z("div", {
 		className: "flex flex-col gap-2",
-		children: [/* @__PURE__ */ B("span", {
+		children: [/* @__PURE__ */ R("span", {
 			className: "type-meta-strong text-basic-muted",
 			children: "Code displayer"
-		}), /* @__PURE__ */ V("div", {
+		}), /* @__PURE__ */ z("div", {
 			className: "grid grid-cols-3 items-start gap-4",
-			children: [kn.map(({ label: e, ...t }) => /* @__PURE__ */ V("div", {
+			children: [An.map(({ label: e, ...t }) => /* @__PURE__ */ z("div", {
 				className: "flex min-w-0 flex-col gap-2",
-				children: [/* @__PURE__ */ B("span", {
+				children: [/* @__PURE__ */ R("span", {
 					className: "type-meta-strong text-basic-tertiary",
 					children: e
-				}), /* @__PURE__ */ B("div", {
+				}), /* @__PURE__ */ R("div", {
 					className: "bg-elevation-ground p-4",
-					children: /* @__PURE__ */ B(ve, { ...t })
+					children: /* @__PURE__ */ R(ve, { ...t })
 				})]
-			}, e)), /* @__PURE__ */ V("div", {
+			}, e)), /* @__PURE__ */ z("div", {
 				className: "flex min-w-0 flex-col gap-2",
-				children: [/* @__PURE__ */ B("span", {
+				children: [/* @__PURE__ */ R("span", {
 					className: "type-meta-strong text-basic-tertiary",
 					children: "Interactive"
-				}), /* @__PURE__ */ B("div", {
+				}), /* @__PURE__ */ R("div", {
 					className: "bg-elevation-ground p-4",
-					children: /* @__PURE__ */ B(X, {
+					children: /* @__PURE__ */ R(Y, {
 						title: "Input",
-						shortContent: Y,
-						fullContent: Cn
+						shortContent: J,
+						fullContent: wn
 					})
 				})]
 			})]
 		})]
 	});
 }
-var jn = [
+var Mn = [
 	{
 		type: "Reasoning",
-		icon: s.Brain,
+		icon: e.Brain,
 		title: "Thoughts, 2.3 s",
 		loadingTitle: "Thinking",
-		copyText: fn,
+		copyText: pn,
 		errorMessage: "The model stopped before it finished reasoning.",
-		body: (e) => e === g.Default ? /* @__PURE__ */ B("p", { children: fn }) : null
+		body: (e) => e === g.Default ? /* @__PURE__ */ R("p", { children: pn }) : null
 	},
 	{
 		type: "Run Command (Error keeps the input)",
-		icon: s.Terminal,
+		icon: e.Terminal,
 		title: "Run command",
 		loadingTitle: "Running command",
-		copyText: pn,
+		copyText: mn,
 		errorMessage: "Command exited with code 2.",
 		body: (e) => {
 			if (e === g.Loading) return null;
-			let t = /* @__PURE__ */ B(X, {
+			let t = /* @__PURE__ */ R(Y, {
 				title: "Input",
-				shortContent: pn,
-				fullContent: mn
+				shortContent: mn,
+				fullContent: hn
 			});
-			return e === g.Error ? t : /* @__PURE__ */ V(z, { children: [t, /* @__PURE__ */ B(X, {
+			return e === g.Error ? t : /* @__PURE__ */ z(L, { children: [t, /* @__PURE__ */ R(Y, {
 				title: "Output",
-				shortContent: hn,
-				fullContent: gn
+				shortContent: gn,
+				fullContent: _n
 			})] });
 		}
 	},
 	{
 		type: "Steer Session (Loading and Error keep the link)",
-		icon: s.AddChat,
+		icon: e.AddChat,
 		title: "Steer session",
 		loadingTitle: "Steer session",
-		copyText: _n,
+		copyText: vn,
 		errorMessage: "The session is no longer running.",
-		body: (e) => e === g.Default ? /* @__PURE__ */ V(z, { children: [/* @__PURE__ */ B("p", { children: _n }), /* @__PURE__ */ B(Le, {
+		body: (e) => e === g.Default ? /* @__PURE__ */ z(L, { children: [/* @__PURE__ */ R("p", { children: vn }), /* @__PURE__ */ R(Le, {
 			label: "Calendar rollout",
 			href: "#/design"
-		})] }) : /* @__PURE__ */ B(Le, {
+		})] }) : /* @__PURE__ */ R(Le, {
 			label: "Calendar rollout",
 			onClick: () => {}
 		})
 	},
 	{
 		type: "Search File",
-		icon: s.SearchFile,
+		icon: e.SearchFile,
 		title: "Search files",
 		loadingTitle: "Search files",
-		copyText: vn,
+		copyText: yn,
 		errorMessage: "The pattern is not a valid regular expression.",
 		body: (e) => {
 			if (e === g.Loading) return null;
-			let t = /* @__PURE__ */ B(X, {
+			let t = /* @__PURE__ */ R(Y, {
 				title: "Input",
-				shortContent: vn,
-				fullContent: yn
+				shortContent: yn,
+				fullContent: bn
 			});
-			return e === g.Error ? t : /* @__PURE__ */ V(z, { children: [t, /* @__PURE__ */ B(X, {
+			return e === g.Error ? t : /* @__PURE__ */ z(L, { children: [t, /* @__PURE__ */ R(Y, {
 				title: "Output",
-				shortContent: bn,
-				fullContent: xn
+				shortContent: xn,
+				fullContent: Sn
 			})] });
 		}
 	}
-], Mn = [
+], Nn = [
 	{
 		state: g.Default,
 		title: "Default"
@@ -1549,15 +1549,15 @@ var jn = [
 		title: "Error"
 	}
 ];
-function Nn() {
-	return /* @__PURE__ */ V("div", {
+function Pn() {
+	return /* @__PURE__ */ z("div", {
 		className: "flex flex-col gap-2",
-		children: [/* @__PURE__ */ B("span", {
+		children: [/* @__PURE__ */ R("span", {
 			className: "type-meta-strong text-basic-muted",
 			children: "Stacked, the first one active"
-		}), /* @__PURE__ */ B("div", {
+		}), /* @__PURE__ */ R("div", {
 			className: "flex w-[542px] max-w-full flex-col bg-elevation-ground",
-			children: jn.map((e, t) => /* @__PURE__ */ B(mt, {
+			children: Mn.map((e, t) => /* @__PURE__ */ R(gt, {
 				id: `preview-stacked-${e.icon}`,
 				icon: e.icon,
 				title: e.title,
@@ -1568,24 +1568,24 @@ function Nn() {
 		})]
 	});
 }
-function Pn() {
-	return /* @__PURE__ */ V("div", {
+function Fn() {
+	return /* @__PURE__ */ z("div", {
 		className: "flex flex-col gap-6",
 		children: [
-			/* @__PURE__ */ B(An, {}),
-			/* @__PURE__ */ B(Nn, {}),
-			/* @__PURE__ */ B(On, {}),
-			/* @__PURE__ */ V("div", {
+			/* @__PURE__ */ R(jn, {}),
+			/* @__PURE__ */ R(Pn, {}),
+			/* @__PURE__ */ R(kn, {}),
+			/* @__PURE__ */ z("div", {
 				className: "grid grid-cols-3 items-start gap-x-4 gap-y-2",
-				children: [Mn.map(({ state: e, title: t }) => /* @__PURE__ */ B("span", {
+				children: [Nn.map(({ state: e, title: t }) => /* @__PURE__ */ R("span", {
 					className: "type-meta-strong text-basic-muted",
 					children: t
-				}, e)), jn.flatMap((e) => [!1, !0].map((t) => /* @__PURE__ */ V(L, { children: [/* @__PURE__ */ B("span", {
+				}, e)), Mn.flatMap((e) => [!1, !0].map((t) => /* @__PURE__ */ z(F, { children: [/* @__PURE__ */ R("span", {
 					className: "col-span-3 pt-2 type-meta-strong text-basic-tertiary",
 					children: t ? `${e.type}, active` : e.type
-				}), Mn.map(({ state: n }) => /* @__PURE__ */ B("div", {
+				}), Nn.map(({ state: n }) => /* @__PURE__ */ R("div", {
 					className: "min-w-0 bg-elevation-ground",
-					children: /* @__PURE__ */ B(mt, {
+					children: /* @__PURE__ */ R(gt, {
 						id: `preview-${e.icon}-${n}-${t}`,
 						icon: e.icon,
 						title: n === g.Loading ? e.loadingTitle : e.title,
@@ -1601,23 +1601,23 @@ function Pn() {
 	});
 }
 // src/app/components/pages/design-preview/InsightsAtomsSection.tsx
-var Fn = [
+var In = [
 	{
 		type: "Thread",
-		icon: s.Chat,
+		icon: e.Chat,
 		label: "impl/calendar",
 		meta: "Thread, 3"
 	},
 	{
 		type: "Thoughts",
-		icon: s.Brain,
+		icon: e.Brain,
 		label: "Thoughts",
 		meta: "13.8 s",
 		runningLabel: "Thinking…"
 	},
 	{
 		type: "Define Workset",
-		icon: s.Checklist,
+		icon: e.Checklist,
 		label: "calendar-sync",
 		meta: "Workset",
 		failedLabel: "Define Workset",
@@ -1625,14 +1625,14 @@ var Fn = [
 	},
 	{
 		type: "Delete Workset",
-		icon: s.Trash,
+		icon: e.Trash,
 		label: "Deleted: impl/calendar",
 		failedLabel: "Delete thread",
 		runningLabel: "Deleting…"
 	},
 	{
 		type: "Read File",
-		icon: s.ReadFile,
+		icon: e.ReadFile,
 		label: "index.tsx",
 		meta: "Read",
 		failedLabel: "Read File",
@@ -1640,7 +1640,7 @@ var Fn = [
 	},
 	{
 		type: "Write File",
-		icon: s.FileUpload,
+		icon: e.FileUpload,
 		label: "index.tsx",
 		meta: "Write",
 		failedLabel: "Create File",
@@ -1648,7 +1648,7 @@ var Fn = [
 	},
 	{
 		type: "Edit File",
-		icon: s.Edit,
+		icon: e.Edit,
 		label: "index.tsx",
 		meta: "Edit",
 		failedLabel: "Edit File",
@@ -1656,63 +1656,63 @@ var Fn = [
 	},
 	{
 		type: "Glob",
-		icon: s.SearchFiles,
+		icon: e.SearchFiles,
 		label: "Find files",
 		meta: "Glob",
 		runningLabel: "Find files…"
 	},
 	{
 		type: "Grep",
-		icon: s.SearchFile,
+		icon: e.SearchFile,
 		label: "Search files",
 		meta: "Grep",
 		runningLabel: "Search files…"
 	},
 	{
 		type: "Run Terminal",
-		icon: s.Terminal,
+		icon: e.Terminal,
 		label: "Run command",
 		meta: "Exec",
 		runningLabel: "Running command…"
 	},
 	{
 		type: "Use Terminal",
-		icon: s.WriteCommand,
+		icon: e.WriteCommand,
 		label: "Write command",
 		meta: "Write",
 		runningLabel: "Write command…"
 	},
 	{
 		type: "Read Output Command",
-		icon: s.ScreenView,
+		icon: e.ScreenView,
 		label: "Read Output Command",
 		meta: "Read",
 		runningLabel: "Read Output Command…"
 	},
 	{
 		type: "Create goal",
-		icon: s.Flag,
+		icon: e.Flag,
 		label: "Create goal",
 		meta: "Create",
 		runningLabel: "Creating goal…"
 	},
 	{
 		type: "Read goal",
-		icon: s.Goal,
+		icon: e.Goal,
 		label: "Get goal",
 		meta: "Read",
 		runningLabel: "Get goal…"
 	},
 	{
 		type: "Update goal",
-		icon: s.Checklist,
+		icon: e.Checklist,
 		label: "Update goal",
 		meta: "Edit",
 		runningLabel: "Updating goal…"
 	},
 	{
 		type: "Spawn Session - Agent",
-		icon: s.Plane,
+		icon: e.Plane,
 		label: "Calendar sync agent",
 		meta: "Spawn",
 		failedLabel: "Spawn Agent",
@@ -1720,7 +1720,7 @@ var Fn = [
 	},
 	{
 		type: "Spawn Session - Orchestrator",
-		icon: s.Orchestrator,
+		icon: e.Orchestrator,
 		label: "Calendar rollout",
 		meta: "Spawn",
 		failedLabel: "Spawn Orchestrator",
@@ -1728,7 +1728,7 @@ var Fn = [
 	},
 	{
 		type: "Check session status",
-		icon: s.Info,
+		icon: e.Info,
 		label: "Calendar sync agent",
 		meta: "Check",
 		failedLabel: "Check session status",
@@ -1736,7 +1736,7 @@ var Fn = [
 	},
 	{
 		type: "Steer Session",
-		icon: s.AddChat,
+		icon: e.AddChat,
 		label: "Calendar rollout",
 		meta: "Steer",
 		failedLabel: "Steer session",
@@ -1744,7 +1744,7 @@ var Fn = [
 	},
 	{
 		type: "Session Read",
-		icon: s.Eye,
+		icon: e.Eye,
 		label: "Calendar rollout",
 		meta: "Read",
 		failedLabel: "Read session",
@@ -1752,7 +1752,7 @@ var Fn = [
 	},
 	{
 		type: "Session Wait",
-		icon: s.Timelaps,
+		icon: e.Timelaps,
 		label: "Calendar rollout",
 		meta: "Wait",
 		failedLabel: "Wait for session",
@@ -1760,7 +1760,7 @@ var Fn = [
 	},
 	{
 		type: "Cancel session",
-		icon: s.Trash,
+		icon: e.Trash,
 		label: "Calendar sync agent",
 		meta: "Delete",
 		failedLabel: "Delete session",
@@ -1768,7 +1768,7 @@ var Fn = [
 	},
 	{
 		type: "ToolsSegment",
-		icon: s.Right,
+		icon: e.Right,
 		label: "Total activity: 13.3s",
 		meta: "12",
 		runningLabel: "Working…",
@@ -1776,103 +1776,103 @@ var Fn = [
 	},
 	{
 		type: "Web search",
-		icon: s.Search,
+		icon: e.Search,
 		label: "tokio select timeout",
 		meta: "Search",
 		runningLabel: "Searching the web…"
 	},
 	{
 		type: "Web fetch",
-		icon: s.Globe,
+		icon: e.Globe,
 		label: "docs.rs",
 		meta: "Fetch",
 		runningLabel: "Fetching docs.rs…"
 	},
 	{
 		type: "Other tool",
-		icon: s.Code,
+		icon: e.Code,
 		label: "MCP · list_issues",
 		meta: "Tool",
 		runningLabel: "Running list_issues…"
 	}
-], In = [
+], Ln = [
 	{
-		status: N.Ready,
+		status: j.Ready,
 		title: "Ready"
 	},
 	{
-		status: N.Pending,
+		status: j.Pending,
 		title: "Pending"
 	},
 	{
-		status: N.Running,
+		status: j.Running,
 		title: "Running"
 	},
 	{
-		status: N.Failed,
+		status: j.Failed,
 		title: "Failed or canceled"
 	}
-], Ln = [
+], Rn = [
 	"Thread",
 	"Read File",
 	"ToolsSegment"
-], Q = [
+], Z = [
 	{
 		key: "thoughts",
-		icon: s.Brain,
+		icon: e.Brain,
 		label: "Thoughts",
 		meta: "13.8 s"
 	},
 	{
 		key: "read",
-		icon: s.ReadFile,
+		icon: e.ReadFile,
 		label: "index.tsx",
 		meta: "Read"
 	},
 	{
 		key: "write",
-		icon: s.FileUpload,
+		icon: e.FileUpload,
 		label: "index.tsx",
 		meta: "Write"
 	}
-], Rn = [
+], zn = [
 	"impl/calendar",
 	"impl/recurring-events",
 	"review/calendar",
 	"docs/calendar"
-], zn = "flex w-[268px] flex-col gap-1 bg-elevation-ground p-2", Bn = "flex w-[380px] flex-col gap-1 bg-elevation-ground p-2";
-function Vn(e, t) {
-	return t === N.Running ? e.runningLabel ?? e.label : t === N.Failed ? e.failedLabel ?? e.label : e.label;
-}
+], Bn = "flex w-[268px] flex-col gap-1 bg-elevation-ground p-2", Vn = "flex w-[380px] flex-col gap-1 bg-elevation-ground p-2";
 function Hn(e, t) {
-	return (t === N.Running || t === N.Failed) && e.type !== "Thread" ? void 0 : e.meta;
+	return t === j.Running ? e.runningLabel ?? e.label : t === j.Failed ? e.failedLabel ?? e.label : e.label;
 }
-function Un() {
-	let e = [...Fn.map((e) => ({
+function Un(e, t) {
+	return (t === j.Running || t === j.Failed) && e.type !== "Thread" ? void 0 : e.meta;
+}
+function Wn() {
+	let e = [...In.map((e) => ({
 		sample: e,
 		active: !1
-	})), ...Fn.filter((e) => Ln.includes(e.type)).map((e) => ({
+	})), ...In.filter((e) => Rn.includes(e.type)).map((e) => ({
 		sample: e,
 		active: !0
 	}))];
-	return /* @__PURE__ */ V("div", {
+	return /* @__PURE__ */ z("div", {
 		className: "grid grid-cols-[136px_repeat(4,minmax(0,1fr))] items-center gap-x-3 gap-y-1",
 		children: [
-			/* @__PURE__ */ B("span", {
+			/* @__PURE__ */ R("span", {
 				className: "type-meta-strong text-basic-muted",
 				children: "Type"
 			}),
-			In.map(({ status: e, title: t }) => /* @__PURE__ */ B("span", {
+			Ln.map(({ status: e, title: t }) => /* @__PURE__ */ R("span", {
 				className: "px-2 type-meta-strong text-basic-muted",
 				children: t
 			}, e)),
-			e.map(({ sample: e, active: t }) => /* @__PURE__ */ V(L, { children: [/* @__PURE__ */ B("span", {
+			e.map(({ sample: e, active: t }) => /* @__PURE__ */ z(F, { children: [/* @__PURE__ */ R("span", {
 				className: "truncate type-meta-strong text-basic-tertiary",
 				children: t ? `${e.type}, active` : e.type
-			}), In.map(({ status: n }) => /* @__PURE__ */ B(k, {
+			}), Ln.map(({ status: n }) => /* @__PURE__ */ R(D, {
 				icon: e.icon,
-				label: Vn(e, n),
-				meta: Hn(e, n),
+				label: Hn(e, n),
+				meta: Un(e, n),
 				status: n,
 				selected: t || void 0,
 				expanded: e.group ? t : void 0
@@ -1880,205 +1880,205 @@ function Un() {
 		]
 	});
 }
-function Wn() {
-	let [e, t] = R(!0), [n, r] = R("thoughts"), i = n === "group" || Q.some(({ key: e }) => e === n);
-	return /* @__PURE__ */ V("div", {
-		className: zn,
+function Gn() {
+	let [t, n] = I(!0), [r, i] = I("thoughts"), a = r === "group" || Z.some(({ key: e }) => e === r);
+	return /* @__PURE__ */ z("div", {
+		className: Bn,
 		children: [
-			/* @__PURE__ */ B(k, {
-				icon: s.Right,
+			/* @__PURE__ */ R(D, {
+				icon: e.Right,
 				label: "Total activity: 13.3s",
-				meta: String(Q.length),
-				expanded: e,
-				selected: i,
+				meta: String(Z.length),
+				expanded: t,
+				selected: a,
 				onClick: () => {
-					t((e) => !e), r("group");
+					n((e) => !e), i("group");
 				}
 			}),
-			e ? /* @__PURE__ */ B(F, { children: Q.map((e) => /* @__PURE__ */ B(k, {
+			t ? /* @__PURE__ */ R(N, { children: Z.map((e) => /* @__PURE__ */ R(D, {
 				icon: e.icon,
 				label: e.label,
 				meta: e.meta,
-				selected: n === e.key,
-				onClick: () => r(e.key)
+				selected: r === e.key,
+				onClick: () => i(e.key)
 			}, e.key)) }) : null,
-			/* @__PURE__ */ B(k, {
-				icon: s.Eye,
+			/* @__PURE__ */ R(D, {
+				icon: e.Eye,
 				label: "Calendar rollout",
 				meta: "Read",
 				onClick: () => {}
 			}),
-			/* @__PURE__ */ B(k, {
-				icon: s.Right,
+			/* @__PURE__ */ R(D, {
+				icon: e.Right,
 				label: "Total activity: 4.1s",
 				meta: "5",
 				expanded: !1
 			}),
-			/* @__PURE__ */ B(k, {
-				icon: s.Orchestrator,
+			/* @__PURE__ */ R(D, {
+				icon: e.Orchestrator,
 				label: "Calendar rollout",
 				meta: "Spawn",
 				onClick: () => {}
 			}),
-			/* @__PURE__ */ B(k, {
-				icon: s.Brain,
+			/* @__PURE__ */ R(D, {
+				icon: e.Brain,
 				label: "Thoughts",
 				meta: "2.1 s",
-				selected: n === "last",
-				onClick: () => r("last")
+				selected: r === "last",
+				onClick: () => i("last")
 			})
 		]
 	});
 }
-function Gn() {
-	let [e, t] = R(Rn[0]), n = (n) => /* @__PURE__ */ B(k, {
-		icon: s.Chat,
-		label: n,
+function Kn() {
+	let [t, n] = I(zn[0]), r = (r) => /* @__PURE__ */ R(D, {
+		icon: e.Chat,
+		label: r,
 		meta: "Thread, 3",
-		selected: e === n,
-		onClick: () => t(n)
-	}, n);
-	return /* @__PURE__ */ V("div", {
-		className: zn,
+		selected: t === r,
+		onClick: () => n(r)
+	}, r);
+	return /* @__PURE__ */ z("div", {
+		className: Bn,
 		children: [
-			/* @__PURE__ */ B(k, {
-				icon: s.Brain,
+			/* @__PURE__ */ R(D, {
+				icon: e.Brain,
 				label: "Thoughts",
 				meta: "13.8 s"
 			}),
-			/* @__PURE__ */ B(F, { children: Rn.map(n) }),
-			/* @__PURE__ */ B(k, {
-				icon: s.Right,
+			/* @__PURE__ */ R(N, { children: zn.map(r) }),
+			/* @__PURE__ */ R(D, {
+				icon: e.Right,
 				label: "Total activity: 13.3s",
 				meta: "12",
 				expanded: !1
 			}),
-			/* @__PURE__ */ B(F, { children: n("impl/time-zones") }),
-			/* @__PURE__ */ B(k, {
-				icon: s.Brain,
+			/* @__PURE__ */ R(N, { children: r("impl/time-zones") }),
+			/* @__PURE__ */ R(D, {
+				icon: e.Brain,
 				label: "Thoughts",
 				meta: "2.1 s"
 			})
 		]
 	});
 }
-function Kn() {
-	return /* @__PURE__ */ V("div", {
-		className: zn,
+function qn() {
+	return /* @__PURE__ */ z("div", {
+		className: Bn,
 		children: [
-			/* @__PURE__ */ B(k, {
-				icon: s.Chat,
+			/* @__PURE__ */ R(D, {
+				icon: e.Chat,
 				label: "impl/calendar-sync-recurring-events-and-time-zones",
 				meta: "Thread, 12"
 			}),
-			/* @__PURE__ */ B(k, {
-				icon: s.Orchestrator,
+			/* @__PURE__ */ R(D, {
+				icon: e.Orchestrator,
 				label: "Roll the recurring-events fix out to every calendar provider",
 				meta: "Spawn"
 			}),
-			/* @__PURE__ */ B(k, {
-				icon: s.Plane,
+			/* @__PURE__ */ R(D, {
+				icon: e.Plane,
 				label: "Investigate why the nightly export drops recurring events",
 				meta: "Spawn",
-				status: N.Pending,
+				status: j.Pending,
 				selected: !0
 			})
 		]
 	});
 }
-function qn() {
-	let [e, t] = R(!0), [n, r] = R("review/calendar"), i = at.Large;
-	return /* @__PURE__ */ V("div", {
-		className: Bn,
+function Jn() {
+	let [t, n] = I(!0), [r, i] = I("review/calendar"), a = st.Large;
+	return /* @__PURE__ */ z("div", {
+		className: Vn,
 		children: [
-			/* @__PURE__ */ B(k, {
-				size: i,
-				icon: s.Brain,
+			/* @__PURE__ */ R(D, {
+				size: a,
+				icon: e.Brain,
 				label: "Thoughts",
 				meta: "13.8 s"
 			}),
-			/* @__PURE__ */ V(F, {
+			/* @__PURE__ */ z(N, {
 				className: "py-2",
 				children: [
-					/* @__PURE__ */ B(k, {
-						size: i,
-						icon: s.Chat,
+					/* @__PURE__ */ R(D, {
+						size: a,
+						icon: e.Chat,
 						label: "impl/calendar",
 						meta: "Thread, 3",
-						status: N.Running
+						status: j.Running
 					}),
-					/* @__PURE__ */ B(k, {
-						size: i,
-						icon: s.Chat,
+					/* @__PURE__ */ R(D, {
+						size: a,
+						icon: e.Chat,
 						label: "impl/recurring-events",
 						meta: "Thread, 2",
-						status: N.Failed
+						status: j.Failed
 					}),
-					/* @__PURE__ */ B(k, {
-						size: i,
-						icon: s.Chat,
+					/* @__PURE__ */ R(D, {
+						size: a,
+						icon: e.Chat,
 						label: "docs/calendar",
 						meta: "Thread, 1",
-						status: N.Pending
+						status: j.Pending
 					}),
-					/* @__PURE__ */ B(k, {
-						size: i,
-						icon: s.Chat,
+					/* @__PURE__ */ R(D, {
+						size: a,
+						icon: e.Chat,
 						label: "review/calendar",
 						meta: "Thread, 3",
-						selected: n === "review/calendar",
-						onClick: () => r("review/calendar")
+						selected: r === "review/calendar",
+						onClick: () => i("review/calendar")
 					})
 				]
 			}),
-			/* @__PURE__ */ B(k, {
-				size: i,
-				icon: s.Right,
+			/* @__PURE__ */ R(D, {
+				size: a,
+				icon: e.Right,
 				label: "Worked for 13.3s",
-				meta: String(Q.length),
-				expanded: e,
-				onClick: () => t((e) => !e)
+				meta: String(Z.length),
+				expanded: t,
+				onClick: () => n((e) => !e)
 			}),
-			e ? /* @__PURE__ */ B(F, { children: Q.map((e) => /* @__PURE__ */ B(k, {
-				size: i,
+			t ? /* @__PURE__ */ R(N, { children: Z.map((e) => /* @__PURE__ */ R(D, {
+				size: a,
 				icon: e.icon,
 				label: e.label,
 				meta: e.meta,
-				selected: n === e.key,
-				onClick: () => r(e.key)
+				selected: r === e.key,
+				onClick: () => i(e.key)
 			}, e.key)) }) : null
 		]
 	});
 }
-function Jn() {
-	return /* @__PURE__ */ B(C, {
+function Yn() {
+	return /* @__PURE__ */ R(C, {
 		title: "Insights",
-		children: /* @__PURE__ */ V("div", {
+		children: /* @__PURE__ */ z("div", {
 			className: "p-4 flex flex-col gap-6",
 			children: [
-				/* @__PURE__ */ B(Un, {}),
-				/* @__PURE__ */ V("div", {
+				/* @__PURE__ */ R(Wn, {}),
+				/* @__PURE__ */ z("div", {
 					className: "flex flex-wrap items-start gap-6",
 					children: [
-						/* @__PURE__ */ B(Wn, {}),
-						/* @__PURE__ */ B(Gn, {}),
-						/* @__PURE__ */ B(Kn, {}),
-						/* @__PURE__ */ B(qn, {})
+						/* @__PURE__ */ R(Gn, {}),
+						/* @__PURE__ */ R(Kn, {}),
+						/* @__PURE__ */ R(qn, {}),
+						/* @__PURE__ */ R(Jn, {})
 					]
 				}),
-				/* @__PURE__ */ B(Pn, {})
+				/* @__PURE__ */ R(Fn, {})
 			]
 		})
 	});
 }
 // src/app/components/pages/design-preview/ModelLoaderSection.tsx
-var Yn = [{
+var Xn = [{
 	variant: _e.Default,
 	label: "Default"
 }, {
 	variant: _e.Accent,
 	label: "Accent"
-}], Xn = [
+}], Zn = [
 	{
 		size: ze.Small,
 		label: "Small 16px"
@@ -2091,29 +2091,29 @@ var Yn = [{
 		size: ze.Large,
 		label: "Large 24px"
 	}
-], Zn = [
+], Qn = [
 	1,
 	2,
 	3
 ];
-function Qn() {
-	return /* @__PURE__ */ B(C, {
+function $n() {
+	return /* @__PURE__ */ R(C, {
 		title: "Model loader",
 		bodyClassName: "overflow-x-auto",
-		children: /* @__PURE__ */ V("div", {
+		children: /* @__PURE__ */ z("div", {
 			className: "p-4 grid w-fit grid-cols-[160px_repeat(4,72px)] items-center gap-x-4 gap-y-3",
 			children: [
-				/* @__PURE__ */ B("span", {}),
-				/* @__PURE__ */ B("span", {
+				/* @__PURE__ */ R("span", {}),
+				/* @__PURE__ */ R("span", {
 					className: "type-meta-strong text-basic-muted",
 					children: "Animated"
 				}),
-				Zn.map((e) => /* @__PURE__ */ V("span", {
+				Qn.map((e) => /* @__PURE__ */ z("span", {
 					className: "type-meta-strong text-basic-muted",
 					children: ["Frame ", e]
 				}, e)),
-				Yn.flatMap(({ variant: e, label: t }) => Xn.map(({ size: n, label: r }) => /* @__PURE__ */ V(L, { children: [
-					/* @__PURE__ */ V("span", {
+				Xn.flatMap(({ variant: e, label: t }) => Zn.map(({ size: n, label: r }) => /* @__PURE__ */ z(F, { children: [
+					/* @__PURE__ */ z("span", {
 						className: "type-body-chrome text-basic-secondary",
 						children: [
 							t,
@@ -2121,11 +2121,11 @@ function Qn() {
 							r
 						]
 					}),
-					/* @__PURE__ */ B(Ie, {
+					/* @__PURE__ */ R(Ie, {
 						size: n,
 						variant: e
 					}),
-					Zn.map((t) => /* @__PURE__ */ B(Ie, {
+					Qn.map((t) => /* @__PURE__ */ R(Ie, {
 						size: n,
 						variant: e,
 						frame: t
@@ -2136,36 +2136,36 @@ function Qn() {
 	});
 }
 // src/app/components/pages/design-preview/NoticesSection.tsx
-function $n() {
-	return /* @__PURE__ */ B(C, {
+function er() {
+	return /* @__PURE__ */ R(C, {
 		title: "Notices",
-		children: /* @__PURE__ */ V("div", {
+		children: /* @__PURE__ */ z("div", {
 			className: "p-4 flex flex-col gap-4",
-			children: [/* @__PURE__ */ V("div", {
+			children: [/* @__PURE__ */ z("div", {
 				className: "flex flex-wrap gap-3",
 				children: [
-					/* @__PURE__ */ B(De, {
+					/* @__PURE__ */ R(De, {
 						variant: he.Info,
 						title: "Read-only snapshot",
 						className: "w-full max-w-[280px]",
 						children: "Pick the working tree to edit files again."
 					}),
-					/* @__PURE__ */ B(De, {
+					/* @__PURE__ */ R(De, {
 						variant: he.Error,
 						title: "Run failed",
 						className: "w-full max-w-[280px]",
 						children: "The provider rejected the request."
 					}),
-					/* @__PURE__ */ B(De, {
+					/* @__PURE__ */ R(De, {
 						variant: he.Success,
 						title: "Branch switched",
 						className: "w-full max-w-[280px]"
 					})
 				]
-			}), /* @__PURE__ */ V("div", {
+			}), /* @__PURE__ */ z("div", {
 				className: "flex w-full max-w-[398px] flex-col gap-2",
 				children: [
-					/* @__PURE__ */ B(v, {
+					/* @__PURE__ */ R(v, {
 						variant: _.Danger,
 						title: "Needs your answer",
 						action: {
@@ -2174,7 +2174,7 @@ function $n() {
 						},
 						children: "One line that says what happened and what to do next."
 					}),
-					/* @__PURE__ */ B(v, {
+					/* @__PURE__ */ R(v, {
 						variant: _.Error,
 						title: "Provider rejected the request",
 						action: {
@@ -2183,7 +2183,7 @@ function $n() {
 						},
 						children: "One line that says what happened and what to do next."
 					}),
-					/* @__PURE__ */ B(v, {
+					/* @__PURE__ */ R(v, {
 						variant: _.Success,
 						title: "Branch merged",
 						action: {
@@ -2192,7 +2192,7 @@ function $n() {
 						},
 						children: "One line that says what happened and what to do next."
 					}),
-					/* @__PURE__ */ B(v, {
+					/* @__PURE__ */ R(v, {
 						variant: _.Info,
 						title: "Snapshot restored",
 						action: {
@@ -2207,37 +2207,37 @@ function $n() {
 	});
 }
 // src/app/components/pages/design-preview/NumericInputsSection.tsx
-function er() {
-	let [e, t] = R(4), [n, r] = R(.7), [i, a] = R(["local"]), [o, ee] = R(1);
-	return /* @__PURE__ */ B(C, {
+function tr() {
+	let [e, t] = I(4), [n, r] = I(.7), [i, a] = I(["local"]), [o, s] = I(1);
+	return /* @__PURE__ */ R(C, {
 		title: "Numeric inputs, tags and pagination",
-		children: /* @__PURE__ */ V("div", {
+		children: /* @__PURE__ */ z("div", {
 			className: "p-4 flex flex-col gap-6",
 			children: [
-				/* @__PURE__ */ V("div", {
+				/* @__PURE__ */ z("div", {
 					className: "flex flex-wrap items-center gap-8",
-					children: [/* @__PURE__ */ B(Te, {
+					children: [/* @__PURE__ */ R(Te, {
 						value: e,
 						onChange: t,
 						min: 1,
 						max: 16,
 						"aria-label": "Parallel threads"
-					}), /* @__PURE__ */ V("div", {
+					}), /* @__PURE__ */ z("div", {
 						className: "flex items-center gap-4 w-[320px]",
-						children: [/* @__PURE__ */ B(pe, {
+						children: [/* @__PURE__ */ R(pe, {
 							min: 0,
 							max: 2,
 							step: .1,
 							value: n,
 							onChange: r,
 							label: "Temperature"
-						}), /* @__PURE__ */ B("span", {
+						}), /* @__PURE__ */ R("span", {
 							className: "code code-small text-basic-muted w-8 shrink-0",
 							children: n.toFixed(1)
 						})]
 					})]
 				}),
-				/* @__PURE__ */ B(ft, {
+				/* @__PURE__ */ R(mt, {
 					tags: [
 						"local",
 						"docker",
@@ -2247,12 +2247,12 @@ function er() {
 					selected: i,
 					onChange: a
 				}),
-				/* @__PURE__ */ B(Ye, {
+				/* @__PURE__ */ R(Ze, {
 					page: o,
 					pageSize: 10,
 					totalItems: 84,
 					itemLabel: "sessions",
-					onPageChange: ee,
+					onPageChange: s,
 					className: "border-t border-muted"
 				})
 			]
@@ -2260,20 +2260,20 @@ function er() {
 	});
 }
 // src/app/components/pages/design-preview/OverlaysSection.tsx
-var tr = [
+var nr = [
 	{
-		icon: s.Edit,
+		icon: e.Edit,
 		label: "Rename"
 	},
 	{
-		icon: s.FileCopy,
+		icon: e.FileCopy,
 		label: "Copy link"
 	},
 	{
-		icon: s.Pin,
+		icon: e.Pin,
 		label: "Pin to top"
 	}
-], nr = [
+], rr = [
 	{
 		variant: d.Success,
 		content: "Session settings saved"
@@ -2287,9 +2287,9 @@ var tr = [
 		content: "Could not update pin"
 	}
 ];
-function rr() {
-	let [e, t] = R([]), n = _t(0), r = _t(/* @__PURE__ */ new Set());
-	gt(() => {
+function ir() {
+	let [e, t] = I([]), n = yt(0), r = yt(/* @__PURE__ */ new Set());
+	vt(() => {
 		let e = r.current;
 		return () => e.forEach(clearTimeout);
 	}, []);
@@ -2307,7 +2307,7 @@ function rr() {
 	return {
 		toasts: e,
 		show: () => {
-			let e = nr[n.current % nr.length], r = n.current++;
+			let e = rr[n.current % rr.length], r = n.current++;
 			t((t) => [...t, {
 				id: r,
 				...e,
@@ -2317,125 +2317,125 @@ function rr() {
 		dismiss: a
 	};
 }
-function ir() {
-	let [r, a] = R(!1), [te, d] = R(!1), [f, p] = R(!1), { toasts: re, show: ae, dismiss: m } = rr();
-	return /* @__PURE__ */ V(C, {
+function ar() {
+	let [a, o] = I(!1), [te, d] = I(!1), [re, f] = I(!1), { toasts: p, show: ae, dismiss: m } = ir();
+	return /* @__PURE__ */ z(C, {
 		title: "Overlays",
 		children: [
-			/* @__PURE__ */ V(U, {
+			/* @__PURE__ */ z(V, {
 				label: "Popover",
 				hint: "Overlay surface, 14px corner, 32px rows. A sheet on phones.",
 				children: [
-					/* @__PURE__ */ B(ee, {
-						open: r,
-						onClose: () => a(!1),
-						placement: i.BottomRight,
+					/* @__PURE__ */ R(ee, {
+						open: a,
+						onClose: () => o(!1),
+						placement: t.BottomRight,
 						size: oe.Small,
 						sticky: !0,
-						content: tr.map((t) => /* @__PURE__ */ V(Je, {
+						content: nr.map((e) => /* @__PURE__ */ z(Xe, {
 							size: T.Medium,
-							onClick: () => a(!1),
-							children: [/* @__PURE__ */ B(e, { iconName: t.icon }), /* @__PURE__ */ B("span", {
+							onClick: () => o(!1),
+							children: [/* @__PURE__ */ R(r, { iconName: e.icon }), /* @__PURE__ */ R("span", {
 								className: "min-w-0 flex-1 truncate text-left",
-								children: t.label
+								children: e.label
 							})]
-						}, t.label)),
-						children: /* @__PURE__ */ V(u, {
-							variant: o.Secondary,
+						}, e.label)),
+						children: /* @__PURE__ */ z(u, {
+							variant: s.Secondary,
 							content: l.IconRight,
-							"aria-expanded": r,
-							onClick: () => a((e) => !e),
-							children: ["Open popover", /* @__PURE__ */ B(e, { iconName: s.Down })]
+							"aria-expanded": a,
+							onClick: () => o((e) => !e),
+							children: ["Open popover", /* @__PURE__ */ R(r, { iconName: e.Down })]
 						})
 					}),
-					/* @__PURE__ */ B(ne, { value: "nac" }),
-					/* @__PURE__ */ B(t, { keys: ["cmd", "k"] })
+					/* @__PURE__ */ R(ne, { value: "nac" }),
+					/* @__PURE__ */ R(n, { keys: ["cmd", "k"] })
 				]
 			}),
-			/* @__PURE__ */ V(U, {
+			/* @__PURE__ */ z(V, {
 				label: "Tooltip",
 				hint: "An inverse ink chip, 12px, with its shortcut.",
-				children: [/* @__PURE__ */ B(se, {
+				children: [/* @__PURE__ */ R(se, {
 					title: "New session",
 					keyboardShortcuts: ["cmd", "n"],
-					position: i.BottomCenter,
-					children: /* @__PURE__ */ B(u, {
-						variant: o.Ghost,
+					position: t.BottomCenter,
+					children: /* @__PURE__ */ R(u, {
+						variant: s.Ghost,
 						content: l.Icon,
 						"aria-label": "New session",
-						children: /* @__PURE__ */ B(e, { iconName: s.Add })
+						children: /* @__PURE__ */ R(r, { iconName: e.Add })
 					})
-				}), /* @__PURE__ */ B(se, {
+				}), /* @__PURE__ */ R(se, {
 					title: "Pin session",
 					description: "Keeps it at the top of its project.",
-					position: i.BottomCenter,
+					position: t.BottomCenter,
 					sticky: !0,
 					showTooltipOnMobile: !0,
-					children: /* @__PURE__ */ B(u, {
-						variant: o.Ghost,
+					children: /* @__PURE__ */ R(u, {
+						variant: s.Ghost,
 						content: l.Icon,
 						"aria-label": "Pin",
-						children: /* @__PURE__ */ B(e, { iconName: s.Pin })
+						children: /* @__PURE__ */ R(r, { iconName: e.Pin })
 					})
 				})]
 			}),
-			/* @__PURE__ */ B(U, {
+			/* @__PURE__ */ R(V, {
 				label: "Toast",
 				hint: "A small pill at the bottom centre; errors read in red.",
-				children: /* @__PURE__ */ B(u, {
-					variant: o.Secondary,
+				children: /* @__PURE__ */ R(u, {
+					variant: s.Secondary,
 					onClick: ae,
 					children: "Show a toast"
 				})
 			}),
-			/* @__PURE__ */ V(U, {
+			/* @__PURE__ */ z(V, {
 				label: "Drawer and sheet",
 				hint: "Right drawer on desktop, bottom sheet on phones.",
-				children: [/* @__PURE__ */ B(u, {
-					variant: o.Secondary,
+				children: [/* @__PURE__ */ R(u, {
+					variant: s.Secondary,
 					onClick: () => d(!0),
 					children: "Open drawer"
-				}), /* @__PURE__ */ B(u, {
-					variant: o.Secondary,
-					onClick: () => p(!0),
+				}), /* @__PURE__ */ R(u, {
+					variant: s.Secondary,
+					onClick: () => f(!0),
 					children: "Open bottom sheet"
 				})]
 			}),
-			/* @__PURE__ */ B(de, {
+			/* @__PURE__ */ R(de, {
 				open: te,
 				onClose: () => d(!1),
 				title: "Changes",
-				headerActions: /* @__PURE__ */ B(u, {
-					variant: o.Ghost,
+				headerActions: /* @__PURE__ */ R(u, {
+					variant: s.Ghost,
 					size: c.Small,
 					children: "All changes"
 				}),
-				children: /* @__PURE__ */ V("div", {
+				children: /* @__PURE__ */ z("div", {
 					className: "type-body-chrome flex flex-col gap-3 p-4 text-basic-secondary",
-					children: [/* @__PURE__ */ B("p", { children: "Drawers carry everything that is not the conversation: changes, subagents, terminal, goal, schedules and insights. They open from the header pills." }), /* @__PURE__ */ B("p", {
+					children: [/* @__PURE__ */ R("p", { children: "Drawers carry everything that is not the conversation: changes, subagents, terminal, goal, schedules and insights. They open from the header pills." }), /* @__PURE__ */ R("p", {
 						className: "text-basic-tertiary",
 						children: "Escape or the close button returns focus here."
 					})]
 				})
 			}),
-			/* @__PURE__ */ B(n, {
-				open: f,
-				onClose: () => p(!1),
-				children: /* @__PURE__ */ B("div", {
+			/* @__PURE__ */ R(i, {
+				open: re,
+				onClose: () => f(!1),
+				children: /* @__PURE__ */ R("div", {
 					className: "flex flex-col px-2",
-					children: tr.map((t) => /* @__PURE__ */ V(Je, {
+					children: nr.map((e) => /* @__PURE__ */ z(Xe, {
 						size: T.Large,
-						onClick: () => p(!1),
-						children: [/* @__PURE__ */ B(e, { iconName: t.icon }), /* @__PURE__ */ B("span", {
+						onClick: () => f(!1),
+						children: [/* @__PURE__ */ R(r, { iconName: e.icon }), /* @__PURE__ */ R("span", {
 							className: "min-w-0 flex-1 truncate text-left",
-							children: t.label
+							children: e.label
 						})]
-					}, t.label))
+					}, e.label))
 				})
 			}),
-			re.length > 0 ? /* @__PURE__ */ B("div", {
+			p.length > 0 ? /* @__PURE__ */ R("div", {
 				className: "pointer-events-none fixed inset-x-0 bottom-[calc(20px+env(safe-area-inset-bottom))] z-[1100] mx-auto flex w-[min(480px,calc(100%-2rem))] flex-col items-center gap-2",
-				children: re.map((e) => /* @__PURE__ */ B(ie, {
+				children: p.map((e) => /* @__PURE__ */ R(ie, {
 					variant: e.variant,
 					content: e.content,
 					dismissing: e.dismissing,
@@ -2446,7 +2446,7 @@ function ir() {
 	});
 }
 // src/app/components/pages/design-preview/PaletteSection.tsx
-var ar = [
+var or = [
 	{
 		label: "Surfaces",
 		note: "Warm paper; elevation is a step of lightness plus a hairline.",
@@ -2546,124 +2546,124 @@ var ar = [
 		]
 	}
 ];
-function or({ swatch: e }) {
-	return /* @__PURE__ */ V("div", {
+function sr({ swatch: e }) {
+	return /* @__PURE__ */ z("div", {
 		className: "flex min-w-0 flex-col gap-1",
 		children: [
-			/* @__PURE__ */ B("span", {
+			/* @__PURE__ */ R("span", {
 				"aria-hidden": !0,
-				className: f("h-10 w-full rounded-md", e.line ? "border-2" : "shadow-[inset_0_0_0_1px_var(--f-line)]"),
+				className: p("h-10 w-full rounded-md", e.line ? "border-2" : "shadow-[inset_0_0_0_1px_var(--f-line)]"),
 				style: e.line ? {
 					borderColor: `var(${e.token})`,
 					background: "var(--f-surface)"
 				} : { background: `var(${e.token})` }
 			}),
-			/* @__PURE__ */ B("span", {
+			/* @__PURE__ */ R("span", {
 				className: "type-meta-strong mt-0.5 truncate text-[var(--f-ink)]",
 				children: e.name
 			}),
-			/* @__PURE__ */ B("code", {
+			/* @__PURE__ */ R("code", {
 				className: "truncate font-mono text-2xs text-[var(--f-ink-3)]",
 				children: e.token
 			})
 		]
 	});
 }
-function sr({ mode: e }) {
-	return /* @__PURE__ */ V("div", {
-		className: f(e, "flex min-w-0 flex-1 flex-col gap-5 rounded-card border border-[var(--f-line)] bg-[var(--f-ground)] p-4 text-[var(--f-ink)]"),
-		children: [/* @__PURE__ */ V("div", {
+function cr({ mode: e }) {
+	return /* @__PURE__ */ z("div", {
+		className: p(e, "flex min-w-0 flex-1 flex-col gap-5 rounded-card border border-[var(--f-line)] bg-[var(--f-ground)] p-4 text-[var(--f-ink)]"),
+		children: [/* @__PURE__ */ z("div", {
 			className: "flex items-baseline justify-between gap-2",
-			children: [/* @__PURE__ */ B("span", {
+			children: [/* @__PURE__ */ R("span", {
 				className: "type-strong",
 				children: e === "light" ? "Light" : "Dark"
-			}), /* @__PURE__ */ B("span", {
+			}), /* @__PURE__ */ R("span", {
 				className: "type-meta text-[var(--f-ink-3)]",
 				children: e === "light" ? "Ink on warm paper" : "Designed, not inverted"
 			})]
-		}), ar.map((e) => /* @__PURE__ */ V("div", {
+		}), or.map((e) => /* @__PURE__ */ z("div", {
 			className: "flex flex-col gap-2",
-			children: [/* @__PURE__ */ B("span", {
+			children: [/* @__PURE__ */ R("span", {
 				className: "type-meta-strong text-[var(--f-ink-3)]",
 				children: e.label
-			}), /* @__PURE__ */ B("div", {
+			}), /* @__PURE__ */ R("div", {
 				className: "grid grid-cols-[repeat(auto-fill,minmax(68px,1fr))] gap-x-2.5 gap-y-3",
-				children: e.swatches.map((e) => /* @__PURE__ */ B(or, { swatch: e }, e.token))
+				children: e.swatches.map((e) => /* @__PURE__ */ R(sr, { swatch: e }, e.token))
 			})]
 		}, e.label))]
 	});
 }
-function cr() {
-	return /* @__PURE__ */ B(C, {
+function lr() {
+	return /* @__PURE__ */ R(C, {
 		title: "Palette",
-		children: /* @__PURE__ */ V("div", {
+		children: /* @__PURE__ */ z("div", {
 			className: "flex flex-col gap-4 p-4",
-			children: [/* @__PURE__ */ B("ul", {
+			children: [/* @__PURE__ */ R("ul", {
 				className: "type-body-chrome flex flex-col gap-1 text-basic-secondary",
-				children: ar.map((e) => /* @__PURE__ */ V("li", { children: [
-					/* @__PURE__ */ V("span", {
+				children: or.map((e) => /* @__PURE__ */ z("li", { children: [
+					/* @__PURE__ */ z("span", {
 						className: "text-basic-primary",
 						children: [e.label, "."]
 					}),
 					" ",
 					e.note
 				] }, e.label))
-			}), /* @__PURE__ */ V("div", {
+			}), /* @__PURE__ */ z("div", {
 				className: "flex flex-col gap-4 lg:flex-row",
-				children: [/* @__PURE__ */ B(sr, { mode: "light" }), /* @__PURE__ */ B(sr, { mode: "dark" })]
+				children: [/* @__PURE__ */ R(cr, { mode: "light" }), /* @__PURE__ */ R(cr, { mode: "dark" })]
 			})]
 		})
 	});
 }
 // src/app/components/pages/design-preview/QualificationSection.tsx
-function lr() {
-	return /* @__PURE__ */ B(C, {
+function ur() {
+	return /* @__PURE__ */ R(C, {
 		title: "Selected presentation journeys",
-		children: /* @__PURE__ */ V("div", {
+		children: /* @__PURE__ */ z("div", {
 			className: "type-body-chrome flex min-w-0 flex-col gap-3 p-4 text-basic-secondary",
 			children: [
-				/* @__PURE__ */ B("p", { children: "Use these production patterns together: readable reasoning and answers, calm navigation, one new-session flow from Home, a settings page with grouped sections, managed readiness and drawers with a clear way back. Keep a 4px spacing rhythm and 44px phone controls." }),
-				/* @__PURE__ */ B("p", { children: "Samples document the treatment. Qualify complete journeys in the built standalone app and the exact packed presentation, including two independent views alongside host controls. Check light and dark, long and error content, keyboard focus, reduced motion and real 200% browser zoom." }),
-				/* @__PURE__ */ B("p", { children: "Native inputs, the instance-owned overlay stack and specialized code, math, diff and terminal views retain their existing owners. A sample or passing fixture does not record human design acceptance or signed hosted qualification." })
+				/* @__PURE__ */ R("p", { children: "Use these production patterns together: readable reasoning and answers, calm navigation, one new-session flow from Home, a settings page with grouped sections, managed readiness and drawers with a clear way back. Keep a 4px spacing rhythm and 44px phone controls." }),
+				/* @__PURE__ */ R("p", { children: "Samples document the treatment. Qualify complete journeys in the built standalone app and the exact packed presentation, including two independent views alongside host controls. Check light and dark, long and error content, keyboard focus, reduced motion and real 200% browser zoom." }),
+				/* @__PURE__ */ R("p", { children: "Native inputs, the instance-owned overlay stack and specialized code, math, diff and terminal views retain their existing owners. A sample or passing fixture does not record human design acceptance or signed hosted qualification." })
 			]
 		})
 	});
 }
 // src/app/components/pages/design-preview/ReasoningSection.tsx
-var ur = "The build spends most of its time preparing images. I’ll check the cache key before changing the build steps.\n\nA stable key should include the lockfile and image directory so unchanged inputs can reuse the cache.";
-function dr() {
-	let [e, t] = R(!0);
-	return /* @__PURE__ */ B(C, {
+var dr = "The build spends most of its time preparing images. I’ll check the cache key before changing the build steps.\n\nA stable key should include the lockfile and image directory so unchanged inputs can reuse the cache.";
+function fr() {
+	let [e, t] = I(!0);
+	return /* @__PURE__ */ R(C, {
 		title: "Conversation: reasoning and answer",
-		children: /* @__PURE__ */ V("div", {
+		children: /* @__PURE__ */ z("div", {
 			className: "p-4 flex min-w-0 flex-col gap-4",
 			children: [
-				/* @__PURE__ */ B("p", {
+				/* @__PURE__ */ R("p", {
 					className: "type-body-chrome text-basic-secondary",
 					children: "Reasoning: 14px / 22px, secondary text, 12px paragraphs, 16px inset, 1px tertiary rule, no filled surface. Header and copy targets: 44px. Answer: existing 14px / 24px primary prose. Live opens; settled starts closed. A reader’s toggle, focus or selection wins on settlement. Activity remains a link to Insights; this is its reasoning detail, without a second heading."
 				}),
-				/* @__PURE__ */ B(u, {
-					variant: o.Secondary,
+				/* @__PURE__ */ R(u, {
+					variant: s.Secondary,
 					onClick: () => t(!e),
 					children: e ? "Settle reasoning" : "Resume reasoning"
 				}),
-				/* @__PURE__ */ B(Qe, {
+				/* @__PURE__ */ R(et, {
 					segment: {
 						kind: "reasoning",
 						key: "preview",
-						text: ur,
+						text: dr,
 						streaming: e,
 						durationMs: e ? null : 2300
 					},
 					active: !1
 				}),
-				/* @__PURE__ */ B(st, { children: "Use a stable image cache key to avoid rebuilding unchanged images." })
+				/* @__PURE__ */ R(lt, { children: "Use a stable image cache key to avoid rebuilding unchanged images." })
 			]
 		})
 	});
 }
 // src/app/components/pages/design-preview/samples.ts
-var fr = [
+var pr = [
 	"9f2c1ab4",
 	"3de77c01",
 	"b81004ff",
@@ -2672,23 +2672,23 @@ var fr = [
 	"e4419d27"
 ];
 // src/app/components/pages/design-preview/SessionAvatarsSection.tsx
-function pr() {
-	return /* @__PURE__ */ B(C, {
+function mr() {
+	return /* @__PURE__ */ R(C, {
 		title: "Session avatars",
-		children: /* @__PURE__ */ V("div", {
+		children: /* @__PURE__ */ z("div", {
 			className: "p-4 flex flex-wrap items-center gap-4",
-			children: [fr.map((e) => /* @__PURE__ */ V("div", {
+			children: [pr.map((e) => /* @__PURE__ */ z("div", {
 				className: "flex items-center gap-2",
-				children: [/* @__PURE__ */ B(ce, {
+				children: [/* @__PURE__ */ R(ce, {
 					id: e,
 					size: 40
-				}), /* @__PURE__ */ B("span", {
+				}), /* @__PURE__ */ R("span", {
 					className: "code code-small text-basic-muted",
 					children: e
 				})]
-			}, e)), /* @__PURE__ */ V("div", {
+			}, e)), /* @__PURE__ */ z("div", {
 				className: "flex items-center gap-2",
-				children: [/* @__PURE__ */ B(Oe, {}), /* @__PURE__ */ B("span", {
+				children: [/* @__PURE__ */ R(Oe, {}), /* @__PURE__ */ R("span", {
 					className: "code code-small text-basic-muted",
 					children: "unassigned"
 				})]
@@ -2697,11 +2697,11 @@ function pr() {
 	});
 }
 // src/app/components/pages/design-preview/SessionIdentitySection.tsx
-var mr = [
+var hr = [
 	Me.Small,
 	Me.Medium,
 	Me.Large
-], hr = [
+], gr = [
 	{
 		label: "Default",
 		className: "text-fill-btn-secondary"
@@ -2718,7 +2718,7 @@ var mr = [
 		label: "Disabled",
 		className: "text-fill-btn-secondary-disabled"
 	}
-], gr = [
+], _r = [
 	{
 		label: "Default",
 		sample: {}
@@ -2738,7 +2738,7 @@ var mr = [
 			running: !0
 		}
 	}
-], _r = [
+], vr = [
 	{
 		label: "Direct agent",
 		sample: { behavior: "direct" }
@@ -2779,22 +2779,22 @@ var mr = [
 			disabled: !0
 		}
 	}
-], vr = () => {};
-function yr() {
-	return /* @__PURE__ */ V("div", {
+], yr = () => {};
+function br() {
+	return /* @__PURE__ */ z("div", {
 		className: "grid w-fit grid-cols-[200px_repeat(12,32px)] items-center gap-y-3",
 		children: [
-			/* @__PURE__ */ B("span", {}),
-			hr.map((e) => /* @__PURE__ */ B("span", {
+			/* @__PURE__ */ R("span", {}),
+			gr.map((e) => /* @__PURE__ */ R("span", {
 				className: "col-span-3 type-meta-strong text-basic-muted",
 				children: e.label
 			}, e.label)),
-			ht.map((e) => /* @__PURE__ */ V(L, { children: [/* @__PURE__ */ B("span", {
+			_t.map((e) => /* @__PURE__ */ z(F, { children: [/* @__PURE__ */ R("span", {
 				className: "type-body-chrome truncate text-basic-secondary",
 				children: e.label
-			}), hr.flatMap((t) => mr.map((n) => /* @__PURE__ */ B("span", {
-				className: f("flex items-center justify-center", t.className),
-				children: /* @__PURE__ */ B(we, {
+			}), gr.flatMap((t) => hr.map((n) => /* @__PURE__ */ R("span", {
+				className: p("flex items-center justify-center", t.className),
+				children: /* @__PURE__ */ R(we, {
 					behavior: e.id,
 					size: n
 				})
@@ -2802,29 +2802,29 @@ function yr() {
 		]
 	});
 }
-function br({ isMobile: e }) {
-	let t = /* @__PURE__ */ B(it, {
+function xr({ isMobile: e }) {
+	let t = /* @__PURE__ */ R(ot, {
 		title: "Chat session 1",
 		isMobile: e,
-		onPin: vr,
-		onRename: vr,
-		onDelete: vr
+		onPin: yr,
+		onRename: yr,
+		onDelete: yr
 	});
-	return /* @__PURE__ */ V("div", {
-		className: f("grid w-fit items-center gap-x-4 gap-y-2", e ? "grid-cols-[120px_repeat(4,240px)]" : "grid-cols-[120px_repeat(4,200px)]"),
+	return /* @__PURE__ */ z("div", {
+		className: p("grid w-fit items-center gap-x-4 gap-y-2", e ? "grid-cols-[120px_repeat(4,240px)]" : "grid-cols-[120px_repeat(4,200px)]"),
 		children: [
-			/* @__PURE__ */ B("span", {
+			/* @__PURE__ */ R("span", {
 				className: "type-meta-strong text-basic-muted",
 				children: e ? "Mobile" : "Desktop"
 			}),
-			gr.map((e) => /* @__PURE__ */ B("span", {
+			_r.map((e) => /* @__PURE__ */ R("span", {
 				className: "type-meta-strong text-basic-muted",
 				children: e.label
 			}, e.label)),
-			_r.map((n) => /* @__PURE__ */ V(L, { children: [/* @__PURE__ */ B("span", {
+			vr.map((n) => /* @__PURE__ */ z(F, { children: [/* @__PURE__ */ R("span", {
 				className: "type-body-chrome text-basic-secondary",
 				children: n.label
-			}), gr.map((r) => /* @__PURE__ */ B(be, {
+			}), _r.map((r) => /* @__PURE__ */ R(be, {
 				title: "Chat session 1",
 				showBehaviorIcon: !0,
 				isMobile: e,
@@ -2835,81 +2835,81 @@ function br({ isMobile: e }) {
 		]
 	});
 }
-function xr() {
-	return /* @__PURE__ */ B(C, {
+function Sr() {
+	return /* @__PURE__ */ R(C, {
 		title: "Project navigation",
 		bodyClassName: "overflow-x-auto",
-		children: /* @__PURE__ */ V("div", {
+		children: /* @__PURE__ */ z("div", {
 			className: "p-4 flex flex-col gap-6 overflow-x-auto [&>*]:shrink-0",
 			children: [
-				/* @__PURE__ */ B(yr, {}),
-				/* @__PURE__ */ V("div", {
+				/* @__PURE__ */ R(br, {}),
+				/* @__PURE__ */ z("div", {
 					className: "flex items-start gap-2",
 					children: [
-						/* @__PURE__ */ B(M, {
+						/* @__PURE__ */ R(A, {
 							title: "Fix the parser",
 							behavior: "direct",
 							showBehaviorIcon: !0,
 							active: !0
 						}),
-						/* @__PURE__ */ B(M, {
+						/* @__PURE__ */ R(A, {
 							title: "Rewrite the store layer",
 							behavior: "direct-with-orchestrator",
 							showBehaviorIcon: !0
 						}),
-						/* @__PURE__ */ B(M, {
+						/* @__PURE__ */ R(A, {
 							title: "Investigating",
 							behavior: "orchestrator",
 							showBehaviorIcon: !0,
 							running: !0
 						}),
-						/* @__PURE__ */ B(M, {
+						/* @__PURE__ */ R(A, {
 							title: "Without NAC",
 							behavior: "direct"
 						}),
-						/* @__PURE__ */ B(M, {
+						/* @__PURE__ */ R(A, {
 							title: "Fork: Fix the parser",
 							forkedFromTitle: "Fix the parser"
 						}),
-						/* @__PURE__ */ B(M, {
+						/* @__PURE__ */ R(A, {
 							title: "Fork running",
 							forkedFromTitle: "Fix the parser",
 							running: !0
 						})
 					]
 				}),
-				/* @__PURE__ */ B(br, { isMobile: !1 }),
-				/* @__PURE__ */ B(br, { isMobile: !0 }),
-				/* @__PURE__ */ V("div", {
+				/* @__PURE__ */ R(xr, { isMobile: !1 }),
+				/* @__PURE__ */ R(xr, { isMobile: !0 }),
+				/* @__PURE__ */ z("div", {
 					className: "flex flex-col gap-2 max-w-[320px]",
-					children: [/* @__PURE__ */ B(ot, {
+					children: [/* @__PURE__ */ R(ct, {
 						sessionId: "14231vsd7897-aaaa",
 						title: "Fork: Session title"
-					}), /* @__PURE__ */ B(ot, {
+					}), /* @__PURE__ */ R(ct, {
 						sessionId: "14231vsd7897-aaaa",
 						title: "Fork: Session title",
 						deleted: !0
 					})]
 				}),
-				/* @__PURE__ */ V("div", {
+				/* @__PURE__ */ z("div", {
 					className: "flex flex-col gap-1 max-w-[320px]",
 					children: [
-						/* @__PURE__ */ B(ke, {
-							entityId: fr[3],
+						/* @__PURE__ */ R(ke, {
+							entityId: pr[3],
 							name: "arcee-ai/nac",
 							trailing: "4",
 							active: !0
 						}),
-						/* @__PURE__ */ B(ke, {
-							entityId: fr[4],
+						/* @__PURE__ */ R(ke, {
+							entityId: pr[4],
 							name: "arcee-ai/telos",
 							trailing: "1",
 							running: !0
 						}),
-						/* @__PURE__ */ B(ke, {
-							entityId: fr[5],
+						/* @__PURE__ */ R(ke, {
+							entityId: pr[5],
 							name: "Unassigned session",
-							variant: Xe.Orphan
+							variant: Qe.Orphan
 						})
 					]
 				})
@@ -2918,7 +2918,7 @@ function xr() {
 	});
 }
 // src/app/components/pages/design-preview/ShapeSection.tsx
-var Sr = [
+var Cr = [
 	{
 		name: "rounded-xs",
 		px: 4,
@@ -2959,7 +2959,7 @@ var Sr = [
 		px: 9999,
 		use: "controls, chips"
 	}
-], Cr = {
+], wr = {
 	"rounded-xs": "rounded-xs",
 	"rounded-sm": "rounded-sm",
 	"rounded-md": "rounded-md",
@@ -2968,7 +2968,7 @@ var Sr = [
 	"rounded-sheet": "rounded-sheet",
 	"rounded-composer": "rounded-composer",
 	"rounded-pill": "rounded-pill"
-}, wr = [
+}, Tr = [
 	{
 		name: "Ground",
 		className: "bg-elevation-ground border border-tertiary",
@@ -2989,7 +2989,7 @@ var Sr = [
 		className: "bg-elevation-level-2 shadow-2xl",
 		token: "shadow-2xl"
 	}
-], Tr = [
+], Er = [
 	{
 		name: "--dur-fast",
 		value: "120ms",
@@ -3006,28 +3006,28 @@ var Sr = [
 		use: "drawers, sheets"
 	}
 ];
-function Er() {
-	let [e, t] = R(!1);
-	return /* @__PURE__ */ V(C, {
+function Dr() {
+	let [e, t] = I(!1);
+	return /* @__PURE__ */ z(C, {
 		title: "Shape, elevation and motion",
 		children: [
-			/* @__PURE__ */ B(U, {
+			/* @__PURE__ */ R(V, {
 				label: "Radius",
 				hint: "One scale. Controls are pills; boxes step up.",
-				children: /* @__PURE__ */ B("div", {
+				children: /* @__PURE__ */ R("div", {
 					className: "grid w-full grid-cols-[repeat(auto-fill,minmax(104px,1fr))] gap-x-4 gap-y-5",
-					children: Sr.map((e) => /* @__PURE__ */ V("div", {
+					children: Cr.map((e) => /* @__PURE__ */ z("div", {
 						className: "flex min-w-0 flex-col gap-1.5",
 						children: [
-							/* @__PURE__ */ B("span", {
+							/* @__PURE__ */ R("span", {
 								"aria-hidden": !0,
-								className: f("h-12 w-full border border-secondary bg-elevation-sublevel-variant-A", Cr[e.name])
+								className: p("h-12 w-full border border-secondary bg-elevation-sublevel-variant-A", wr[e.name])
 							}),
-							/* @__PURE__ */ B("code", {
+							/* @__PURE__ */ R("code", {
 								className: "truncate font-mono text-2xs text-basic-secondary",
 								children: e.name
 							}),
-							/* @__PURE__ */ V("span", {
+							/* @__PURE__ */ z("span", {
 								className: "type-meta text-basic-muted",
 								children: [
 									e.px === 9999 ? "full" : `${e.px}px`,
@@ -3039,31 +3039,31 @@ function Er() {
 					}, e.name))
 				})
 			}),
-			/* @__PURE__ */ B(U, {
+			/* @__PURE__ */ R(V, {
 				label: "Elevation",
 				hint: "Hairlines at rest; shadows only on floating layers.",
-				children: /* @__PURE__ */ B("div", {
+				children: /* @__PURE__ */ R("div", {
 					className: "flex flex-wrap gap-4 rounded-card bg-elevation-ground p-4",
-					children: wr.map((e) => /* @__PURE__ */ V("div", {
-						className: f("flex h-20 w-[132px] flex-col justify-end rounded-card p-3", e.className),
-						children: [/* @__PURE__ */ B("span", {
+					children: Tr.map((e) => /* @__PURE__ */ z("div", {
+						className: p("flex h-20 w-[132px] flex-col justify-end rounded-card p-3", e.className),
+						children: [/* @__PURE__ */ R("span", {
 							className: "type-label text-basic-primary",
 							children: e.name
-						}), /* @__PURE__ */ B(W, { children: e.token })]
+						}), /* @__PURE__ */ R(H, { children: e.token })]
 					}, e.name))
 				})
 			}),
-			/* @__PURE__ */ B(U, {
+			/* @__PURE__ */ R(V, {
 				label: "Motion",
 				hint: "Quick ease-out, never bouncy; reduced motion turns it off.",
-				children: /* @__PURE__ */ V("div", {
+				children: /* @__PURE__ */ z("div", {
 					className: "flex w-full flex-col gap-3",
 					children: [
-						/* @__PURE__ */ B("div", {
+						/* @__PURE__ */ R("div", {
 							className: "flex flex-wrap gap-4",
-							children: Tr.map((e) => /* @__PURE__ */ V("div", {
+							children: Er.map((e) => /* @__PURE__ */ z("div", {
 								className: "flex flex-col",
-								children: [/* @__PURE__ */ B(W, { children: e.name }), /* @__PURE__ */ V("span", {
+								children: [/* @__PURE__ */ R(H, { children: e.name }), /* @__PURE__ */ z("span", {
 									className: "type-meta text-basic-tertiary",
 									children: [
 										e.value,
@@ -3073,16 +3073,16 @@ function Er() {
 								})]
 							}, e.name))
 						}),
-						/* @__PURE__ */ B("div", {
+						/* @__PURE__ */ R("div", {
 							className: "relative h-10 w-full max-w-[420px] rounded-pill bg-elevation-sublevel-variant-A",
-							children: /* @__PURE__ */ B("span", {
+							children: /* @__PURE__ */ R("span", {
 								"aria-hidden": !0,
 								className: "absolute top-1 size-8 rounded-pill bg-btn-primary transition-[left] duration-200 ease-[var(--ease-drawer)] motion-reduce:transition-none",
 								style: { left: e ? "calc(100% - 36px)" : "4px" }
 							})
 						}),
-						/* @__PURE__ */ B("div", { children: /* @__PURE__ */ B(u, {
-							variant: o.Secondary,
+						/* @__PURE__ */ R("div", { children: /* @__PURE__ */ R(u, {
+							variant: s.Secondary,
 							onClick: () => t((e) => !e),
 							children: "Play drawer easing"
 						}) })
@@ -3093,34 +3093,34 @@ function Er() {
 	});
 }
 // src/app/components/pages/design-preview/StatusSection.tsx
-var Dr = Ve([
+var Or = He([
 	"done",
 	"working",
 	"needs-answer",
 	"idle"
 ]);
-function Or() {
-	return /* @__PURE__ */ V(C, {
+function kr() {
+	return /* @__PURE__ */ z(C, {
 		title: "Status",
 		children: [
-			/* @__PURE__ */ B(U, {
+			/* @__PURE__ */ R(V, {
 				label: "Ladder",
 				hint: "Most urgent first; a row shows only its top rung.",
-				children: /* @__PURE__ */ B("ol", {
+				children: /* @__PURE__ */ R("ol", {
 					className: "flex w-full flex-col gap-2",
-					children: pt.map((e, t) => /* @__PURE__ */ V("li", {
+					children: ht.map((e, t) => /* @__PURE__ */ z("li", {
 						className: "flex items-center gap-3",
 						children: [
-							/* @__PURE__ */ B("span", {
+							/* @__PURE__ */ R("span", {
 								className: "type-meta tabular w-4 text-right text-basic-muted",
 								children: t + 1
 							}),
-							/* @__PURE__ */ B(I, {
+							/* @__PURE__ */ R(P, {
 								status: e,
 								size: "md",
 								labelled: !0
 							}),
-							dt(e) ? /* @__PURE__ */ B("span", {
+							pt(e) ? /* @__PURE__ */ R("span", {
 								className: "type-tag rounded-pill bg-danger-primary px-2 py-0.5 text-danger-primary",
 								children: "Needs you"
 							}) : null
@@ -3128,25 +3128,25 @@ function Or() {
 					}, e))
 				})
 			}),
-			/* @__PURE__ */ V(U, {
+			/* @__PURE__ */ z(V, {
 				label: "Roll-up",
 				hint: "A parent shows its most urgent child.",
 				children: [
-					/* @__PURE__ */ B("span", {
+					/* @__PURE__ */ R("span", {
 						className: "type-body-chrome text-basic-secondary",
 						children: "done, working, needs an answer, idle"
 					}),
-					/* @__PURE__ */ B("span", {
+					/* @__PURE__ */ R("span", {
 						"aria-hidden": !0,
 						className: "text-basic-muted",
 						children: "→"
 					}),
-					/* @__PURE__ */ B(I, {
-						status: Dr,
+					/* @__PURE__ */ R(P, {
+						status: Or,
 						size: "md",
 						labelled: !0
 					}),
-					/* @__PURE__ */ V("code", {
+					/* @__PURE__ */ z("code", {
 						className: "code-small text-basic-muted",
 						children: ["sessionStatus(…) = ", Ne({
 							running: !0,
@@ -3155,57 +3155,57 @@ function Or() {
 					})
 				]
 			}),
-			/* @__PURE__ */ B(U, {
+			/* @__PURE__ */ R(V, {
 				label: "Working",
 				hint: "The only agent-working animation.",
-				children: /* @__PURE__ */ V("div", {
+				children: /* @__PURE__ */ z("div", {
 					className: "flex items-center gap-2",
 					children: [
-						/* @__PURE__ */ B(I, { status: "working" }),
-						/* @__PURE__ */ B("span", {
+						/* @__PURE__ */ R(P, { status: "working" }),
+						/* @__PURE__ */ R("span", {
 							className: "type-body-chrome focus-shimmer",
 							children: "Running tests…"
 						}),
-						/* @__PURE__ */ B("span", {
+						/* @__PURE__ */ R("span", {
 							className: "type-meta tabular text-basic-muted",
 							children: "1m 12s"
 						})
 					]
 				})
 			}),
-			/* @__PURE__ */ V(U, {
+			/* @__PURE__ */ z(V, {
 				label: "Loaders",
 				hint: "Plain and quiet, for everything that is not the agent.",
 				children: [
-					/* @__PURE__ */ B(r, {
+					/* @__PURE__ */ R(o, {
 						size: a.Small,
 						"aria-label": "Loading"
 					}),
-					/* @__PURE__ */ B(je, { size: a.Medium }),
-					/* @__PURE__ */ B(Ee, {
+					/* @__PURE__ */ R(je, { size: a.Medium }),
+					/* @__PURE__ */ R(Ee, {
 						rows: 3,
 						className: "w-[200px]"
 					}),
-					/* @__PURE__ */ B("div", {
+					/* @__PURE__ */ R("div", {
 						className: "w-[200px] overflow-hidden rounded-pill bg-elevation-sublevel-variant-A",
-						children: /* @__PURE__ */ B(Ce, { active: !0 })
+						children: /* @__PURE__ */ R(Ce, { active: !0 })
 					})
 				]
 			})
 		]
 	});
 }
-var $ = {
+var Q = {
 	onOpen: () => {},
 	sessionHref: "#/design"
-}, kr = [
+}, Ar = [
 	{
 		label: "Ready · direct agent",
 		card: {
 			title: "Child session title",
 			status: b.Ready,
 			behavior: "direct",
-			...$
+			...Q
 		}
 	},
 	{
@@ -3214,7 +3214,7 @@ var $ = {
 			title: "Child session title",
 			status: b.Ready,
 			behavior: "direct-with-orchestrator",
-			...$
+			...Q
 		}
 	},
 	{
@@ -3223,7 +3223,7 @@ var $ = {
 			title: "Child session title",
 			status: b.Ready,
 			lineage: "managed-orchestrator",
-			...$
+			...Q
 		}
 	},
 	{
@@ -3232,7 +3232,7 @@ var $ = {
 			title: "Child session title",
 			status: b.Running,
 			behavior: "direct",
-			...$
+			...Q
 		}
 	},
 	{
@@ -3242,7 +3242,7 @@ var $ = {
 			status: b.Failed,
 			statusLabel: "Failed",
 			behavior: "direct",
-			...$
+			...Q
 		}
 	},
 	{
@@ -3252,7 +3252,7 @@ var $ = {
 			status: b.Failed,
 			statusLabel: "Cancelled",
 			behavior: "direct",
-			...$
+			...Q
 		}
 	},
 	{
@@ -3260,7 +3260,7 @@ var $ = {
 		card: {
 			title: "Child session title",
 			status: b.NotFound,
-			...$
+			...Q
 		}
 	},
 	{
@@ -3271,55 +3271,55 @@ var $ = {
 			behavior: "direct"
 		}
 	}
-], Ar = [{
+], jr = [{
 	label: "NAC on",
 	showBehaviorIcon: !0
 }, {
 	label: "NAC off",
 	showBehaviorIcon: !1
-}], jr = "Investigate the flaky parser tests in the store layer";
-function Mr() {
-	return /* @__PURE__ */ B(C, {
+}], Mr = "Investigate the flaky parser tests in the store layer";
+function Nr() {
+	return /* @__PURE__ */ R(C, {
 		title: "Subagent transcript card",
 		bodyClassName: "overflow-x-auto",
-		children: /* @__PURE__ */ V("div", {
+		children: /* @__PURE__ */ z("div", {
 			className: "p-4 flex flex-col gap-6 overflow-x-auto [&>*]:shrink-0",
-			children: [/* @__PURE__ */ V("div", {
+			children: [/* @__PURE__ */ z("div", {
 				className: "grid w-fit grid-cols-[200px_repeat(2,320px)] items-center gap-x-4 gap-y-3",
 				children: [
-					/* @__PURE__ */ B("span", {}),
-					Ar.map((e) => /* @__PURE__ */ B("span", {
+					/* @__PURE__ */ R("span", {}),
+					jr.map((e) => /* @__PURE__ */ R("span", {
 						className: "type-meta-strong text-basic-muted",
 						children: e.label
 					}, e.label)),
-					kr.map((e) => /* @__PURE__ */ V(L, { children: [/* @__PURE__ */ B("span", {
+					Ar.map((e) => /* @__PURE__ */ z(F, { children: [/* @__PURE__ */ R("span", {
 						className: "type-body-chrome text-basic-secondary",
 						children: e.label
-					}), Ar.map((t) => /* @__PURE__ */ B(ue, {
+					}), jr.map((t) => /* @__PURE__ */ R(ue, {
 						showBehaviorIcon: t.showBehaviorIcon,
 						...e.card
 					}, t.label))] }, e.label))
 				]
-			}), /* @__PURE__ */ V("div", {
+			}), /* @__PURE__ */ z("div", {
 				className: "flex flex-col gap-2",
-				children: [/* @__PURE__ */ B("span", {
+				children: [/* @__PURE__ */ R("span", {
 					className: "type-meta-strong text-basic-muted",
 					children: "Narrow container · 240px"
-				}), /* @__PURE__ */ V("div", {
+				}), /* @__PURE__ */ z("div", {
 					className: "flex w-[240px] flex-col gap-3",
-					children: [/* @__PURE__ */ B(ue, {
-						title: jr,
+					children: [/* @__PURE__ */ R(ue, {
+						title: Mr,
 						status: b.Ready,
 						behavior: "direct",
 						showBehaviorIcon: !0,
-						...$
-					}), /* @__PURE__ */ B(ue, {
-						title: jr,
+						...Q
+					}), /* @__PURE__ */ R(ue, {
+						title: Mr,
 						status: b.Failed,
 						statusLabel: "Cancelled",
 						behavior: "direct",
 						showBehaviorIcon: !0,
-						...$
+						...Q
 					})]
 				})]
 			})]
@@ -3327,7 +3327,7 @@ function Mr() {
 	});
 }
 // src/app/components/pages/design-preview/ToolsBadgeSection.tsx
-var Nr = [
+var Pr = [
 	{
 		caption: "Done",
 		label: "Total activity: 12.3s",
@@ -3346,12 +3346,12 @@ var Nr = [
 		inProgress: !0,
 		disabled: !0
 	}
-], Pr = [
+], Fr = [
 	{ label: "Thinking…" },
 	{ label: "Searching the web…" },
 	{
 		label: "Fetching arcee.ai…",
-		leadingIcon: s.Globe
+		leadingIcon: e.Globe
 	},
 	{ label: "Reading index.tsx…" },
 	{ label: "Creating index.tsx…" },
@@ -3373,59 +3373,59 @@ var Nr = [
 	{ label: "Deleting session…" },
 	{ label: "Defining workset…" },
 	{ label: "Deleting thread…" }
-], Fr = () => {};
+], $ = () => {};
 function Ir() {
-	return /* @__PURE__ */ B(C, {
+	return /* @__PURE__ */ R(C, {
 		title: "Tools and reasoning badge",
 		bodyClassName: "overflow-x-auto",
-		children: /* @__PURE__ */ V("div", {
+		children: /* @__PURE__ */ z("div", {
 			className: "p-4 grid w-fit grid-cols-[160px_repeat(2,auto)] items-center justify-items-start gap-x-10 gap-y-3",
 			children: [
-				/* @__PURE__ */ B("span", {}),
-				/* @__PURE__ */ B("span", {
+				/* @__PURE__ */ R("span", {}),
+				/* @__PURE__ */ R("span", {
 					className: "type-meta-strong text-basic-muted",
 					children: "Default"
 				}),
-				/* @__PURE__ */ B("span", {
+				/* @__PURE__ */ R("span", {
 					className: "type-meta-strong text-basic-muted",
 					children: "Selected"
 				}),
-				Nr.map(({ caption: e, label: t, inProgress: n, disabled: r }) => /* @__PURE__ */ V(L, { children: [
-					/* @__PURE__ */ B("span", {
+				Pr.map(({ caption: e, label: t, inProgress: n, disabled: r }) => /* @__PURE__ */ z(F, { children: [
+					/* @__PURE__ */ R("span", {
 						className: "type-body-chrome text-basic-secondary",
 						children: e
 					}),
-					/* @__PURE__ */ B(A, {
+					/* @__PURE__ */ R(O, {
 						label: t,
 						inProgress: n,
 						disabled: r,
-						onClick: Fr
+						onClick: $
 					}),
-					/* @__PURE__ */ B(A, {
+					/* @__PURE__ */ R(O, {
 						label: t,
 						inProgress: n,
 						disabled: r,
 						selected: !0,
-						onClick: Fr
+						onClick: $
 					})
 				] }, e)),
-				Pr.map(({ label: e, leadingIcon: t }, n) => /* @__PURE__ */ V(L, { children: [
-					/* @__PURE__ */ B("span", {
+				Fr.map(({ label: e, leadingIcon: t }, n) => /* @__PURE__ */ z(F, { children: [
+					/* @__PURE__ */ R("span", {
 						className: "type-body-chrome text-basic-secondary",
 						children: n === 0 ? "In progress" : null
 					}),
-					/* @__PURE__ */ B(A, {
+					/* @__PURE__ */ R(O, {
 						label: e,
 						inProgress: !0,
 						leadingIcon: t,
-						onClick: Fr
+						onClick: $
 					}),
-					/* @__PURE__ */ B(A, {
+					/* @__PURE__ */ R(O, {
 						label: e,
 						inProgress: !0,
 						leadingIcon: t,
 						selected: !0,
-						onClick: Fr
+						onClick: $
 					})
 				] }, e))
 			]
@@ -3491,31 +3491,31 @@ var Lr = [
 	}
 ];
 function Rr() {
-	return /* @__PURE__ */ B(C, {
+	return /* @__PURE__ */ R(C, {
 		title: "Typography",
-		children: /* @__PURE__ */ V("div", {
+		children: /* @__PURE__ */ z("div", {
 			className: "flex flex-col",
-			children: [Lr.map((e) => /* @__PURE__ */ V("div", {
+			children: [Lr.map((e) => /* @__PURE__ */ z("div", {
 				className: "flex flex-col gap-1 border-b border-muted px-4 py-3 md:flex-row md:items-baseline md:gap-6",
-				children: [/* @__PURE__ */ V("div", {
+				children: [/* @__PURE__ */ z("div", {
 					className: "flex w-full shrink-0 flex-col md:w-[200px]",
-					children: [/* @__PURE__ */ B(W, { children: e.name }), /* @__PURE__ */ B("span", {
+					children: [/* @__PURE__ */ R(H, { children: e.name }), /* @__PURE__ */ R("span", {
 						className: "type-meta text-basic-muted",
 						children: e.spec
 					})]
-				}), /* @__PURE__ */ B("div", {
+				}), /* @__PURE__ */ R("div", {
 					className: `${e.name} min-w-0 truncate text-basic-primary`,
 					children: e.sample
 				})]
-			}, e.name)), /* @__PURE__ */ V("div", {
+			}, e.name)), /* @__PURE__ */ z("div", {
 				className: "flex flex-col gap-1 px-4 py-3 md:flex-row md:items-baseline md:gap-6",
-				children: [/* @__PURE__ */ V("div", {
+				children: [/* @__PURE__ */ z("div", {
 					className: "flex w-full shrink-0 flex-col md:w-[200px]",
-					children: [/* @__PURE__ */ B(W, { children: "code-medium" }), /* @__PURE__ */ B("span", {
+					children: [/* @__PURE__ */ R(H, { children: "code-medium" }), /* @__PURE__ */ R("span", {
 						className: "type-meta text-basic-muted",
 						children: "IBM Plex Mono 12.5"
 					})]
-				}), /* @__PURE__ */ B("code", {
+				}), /* @__PURE__ */ R("code", {
 					className: "code code-medium text-basic-secondary",
 					children: "cargo test -p nac-core"
 				})]
@@ -3568,30 +3568,30 @@ var zr = [
 	}
 ];
 function Vr() {
-	let e = Ke(), t = e?.setTheme;
+	let e = Je(), t = e?.setTheme;
 	if (!t) return null;
 	let n = e?.theme ?? "system";
-	return /* @__PURE__ */ B("div", {
+	return /* @__PURE__ */ R("div", {
 		role: "radiogroup",
 		"aria-label": "Preview theme",
 		className: "inline-flex items-center gap-0.5 rounded-pill bg-elevation-sublevel-variant-B p-0.5",
-		children: Br.map((e) => /* @__PURE__ */ B("button", {
+		children: Br.map((e) => /* @__PURE__ */ R("button", {
 			type: "button",
 			role: "radio",
 			"aria-checked": n === e.id,
 			onClick: () => t(e.id),
-			className: f("type-label h-7 rounded-pill px-3 transition-colors duration-150 ease-out motion-reduce:transition-none", "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-border-focus-outline)]", n === e.id ? "bg-elevation-level-1 text-basic-primary shadow-md" : "text-basic-tertiary hover:text-basic-primary"),
+			className: p("type-label h-7 rounded-pill px-3 transition-colors duration-150 ease-out motion-reduce:transition-none", "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-border-focus-outline)]", n === e.id ? "bg-elevation-level-1 text-basic-primary shadow-md" : "text-basic-tertiary hover:text-basic-primary"),
 			children: e.label
 		}, e.id))
 	});
 }
 function Hr({ className: e }) {
-	return /* @__PURE__ */ B("nav", {
+	return /* @__PURE__ */ R("nav", {
 		"aria-label": "Showcase contents",
 		className: e,
-		children: /* @__PURE__ */ B("ul", {
+		children: /* @__PURE__ */ R("ul", {
 			className: "flex flex-col gap-0.5",
-			children: zr.map((e) => /* @__PURE__ */ B("li", { children: /* @__PURE__ */ B("button", {
+			children: zr.map((e) => /* @__PURE__ */ R("li", { children: /* @__PURE__ */ R("button", {
 				type: "button",
 				className: "type-body-chrome flex h-8 w-full items-center rounded-md px-2.5 text-left text-basic-tertiary transition-colors duration-150 ease-out hover:bg-elevation-sublevel-variant-B hover:text-basic-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-border-focus-outline)]",
 				onClick: () => document.getElementById(e.id)?.scrollIntoView({
@@ -3604,100 +3604,100 @@ function Hr({ className: e }) {
 	});
 }
 function Ur() {
-	return /* @__PURE__ */ V("div", {
+	return /* @__PURE__ */ z("div", {
 		className: "h-full overflow-y-auto bg-elevation-ground text-basic-primary",
-		children: [/* @__PURE__ */ V("header", {
+		children: [/* @__PURE__ */ z("header", {
 			className: "sticky top-0 z-20 flex h-[52px] items-center gap-3 border-b border-muted bg-elevation-ground/90 px-5 backdrop-blur-md",
 			children: [
-				/* @__PURE__ */ B(ye, { height: 16 }),
-				/* @__PURE__ */ B("span", {
+				/* @__PURE__ */ R(ye, { height: 16 }),
+				/* @__PURE__ */ R("span", {
 					className: "type-strong min-w-0 truncate text-basic-tertiary",
 					children: "design system"
 				}),
-				/* @__PURE__ */ B("div", { className: "flex-1" }),
-				/* @__PURE__ */ B(Vr, {})
+				/* @__PURE__ */ R("div", { className: "flex-1" }),
+				/* @__PURE__ */ R(Vr, {})
 			]
-		}), /* @__PURE__ */ V("div", {
+		}), /* @__PURE__ */ z("div", {
 			className: "mx-auto flex w-full max-w-[1240px] gap-10 px-4 py-8 md:px-8 md:py-12",
-			children: [/* @__PURE__ */ B(Hr, { className: "sticky top-[84px] hidden h-fit w-[184px] shrink-0 xl:block" }), /* @__PURE__ */ V("main", {
+			children: [/* @__PURE__ */ R(Hr, { className: "sticky top-[84px] hidden h-fit w-[184px] shrink-0 xl:block" }), /* @__PURE__ */ z("main", {
 				className: "flex min-w-0 flex-1 flex-col gap-14",
 				children: [
-					/* @__PURE__ */ V("div", {
+					/* @__PURE__ */ z("div", {
 						className: "flex flex-col gap-3",
-						children: [/* @__PURE__ */ B("h1", {
+						children: [/* @__PURE__ */ R("h1", {
 							className: "type-display text-basic-primary",
 							children: "Focus"
-						}), /* @__PURE__ */ B("p", {
+						}), /* @__PURE__ */ R("p", {
 							className: "type-body max-w-[62ch] text-basic-secondary",
 							children: "Quiet, airy, confident. Warm-neutral paper with ink on it; colour only when it means something. Hairlines at rest, soft shadows on floating layers, pills for every control, and one status ladder everywhere."
 						})]
 					}),
-					/* @__PURE__ */ V(H, {
+					/* @__PURE__ */ z(B, {
 						id: "foundations",
 						title: "Foundations",
 						description: "The palette in both themes, the one type scale, the radius scale, elevation and motion.",
 						children: [
-							/* @__PURE__ */ B(cr, {}),
-							/* @__PURE__ */ B(Rr, {}),
-							/* @__PURE__ */ B(Er, {})
+							/* @__PURE__ */ R(lr, {}),
+							/* @__PURE__ */ R(Rr, {}),
+							/* @__PURE__ */ R(Dr, {})
 						]
 					}),
-					/* @__PURE__ */ V(H, {
+					/* @__PURE__ */ z(B, {
 						id: "controls",
 						title: "Controls",
 						description: "Buttons, fields, choices and chips. Hover, press and keyboard focus are live.",
 						children: [
-							/* @__PURE__ */ B(Ft, {}),
-							/* @__PURE__ */ B(Wr, {}),
-							/* @__PURE__ */ B(Rt, {}),
-							/* @__PURE__ */ B(bt, {}),
-							/* @__PURE__ */ B(er, {}),
-							/* @__PURE__ */ B(Vt, {})
+							/* @__PURE__ */ R(Lt, {}),
+							/* @__PURE__ */ R(Wr, {}),
+							/* @__PURE__ */ R(Bt, {}),
+							/* @__PURE__ */ R(St, {}),
+							/* @__PURE__ */ R(tr, {}),
+							/* @__PURE__ */ R(Ut, {})
 						]
 					}),
-					/* @__PURE__ */ V(H, {
+					/* @__PURE__ */ z(B, {
 						id: "feedback",
 						title: "Status and feedback",
 						description: "Needs approval, needs an answer, failed, working, waiting, done, idle — and the notices that explain them.",
 						children: [
-							/* @__PURE__ */ B(Or, {}),
-							/* @__PURE__ */ B($n, {}),
-							/* @__PURE__ */ B(Qn, {})
+							/* @__PURE__ */ R(kr, {}),
+							/* @__PURE__ */ R(er, {}),
+							/* @__PURE__ */ R($n, {})
 						]
 					}),
-					/* @__PURE__ */ B(H, {
+					/* @__PURE__ */ R(B, {
 						id: "overlays",
 						title: "Floating layers",
 						description: "Popovers, tooltips, toasts, drawers and sheets share one layer stack: Escape closes the top one and focus returns where it came from.",
-						children: /* @__PURE__ */ B(ir, {})
+						children: /* @__PURE__ */ R(ar, {})
 					}),
-					/* @__PURE__ */ V(H, {
+					/* @__PURE__ */ z(B, {
 						id: "conversation",
 						title: "Conversation",
 						description: "A centred 15px column: plain-prose answers, folded reasoning and tools, subagent cards.",
 						children: [
-							/* @__PURE__ */ B(dr, {}),
-							/* @__PURE__ */ B(lr, {}),
-							/* @__PURE__ */ B(Ir, {}),
-							/* @__PURE__ */ B(Mr, {}),
-							/* @__PURE__ */ B(Bt, {})
+							/* @__PURE__ */ R(fr, {}),
+							/* @__PURE__ */ R(ur, {}),
+							/* @__PURE__ */ R(Ir, {}),
+							/* @__PURE__ */ R(Nr, {}),
+							/* @__PURE__ */ R(Ht, {})
 						]
 					}),
-					/* @__PURE__ */ V(H, {
+					/* @__PURE__ */ z(B, {
 						id: "navigation",
 						title: "Sessions and navigation",
 						description: "Session rows, tabs, avatars and identity in the sidebar and the header.",
 						children: [
-							/* @__PURE__ */ B(xr, {}),
-							/* @__PURE__ */ B(pr, {}),
-							/* @__PURE__ */ B(vt, {})
+							/* @__PURE__ */ R(Sr, {}),
+							/* @__PURE__ */ R(mr, {}),
+							/* @__PURE__ */ R(bt, {})
 						]
 					}),
-					/* @__PURE__ */ V(H, {
+					/* @__PURE__ */ z(B, {
 						id: "workspace",
 						title: "Workspace",
 						description: "Files, diffs and insights inside the drawers.",
-						children: [/* @__PURE__ */ B(ln, {}), /* @__PURE__ */ B(Jn, {})]
+						children: [/* @__PURE__ */ R(un, {}), /* @__PURE__ */ R(Yn, {})]
 					})
 				]
 			})]
@@ -3705,22 +3705,22 @@ function Ur() {
 	});
 }
 function Wr() {
-	let [e, t] = R(!1);
-	return /* @__PURE__ */ V(z, { children: [/* @__PURE__ */ B(dn, { onOpenModal: () => t(!0) }), /* @__PURE__ */ V(te, {
+	let [e, t] = I(!1);
+	return /* @__PURE__ */ z(L, { children: [/* @__PURE__ */ R(fn, { onOpenModal: () => t(!0) }), /* @__PURE__ */ z(te, {
 		open: e,
 		onClose: () => t(!1),
 		title: "Delete session",
 		size: ae.Small,
-		footer: /* @__PURE__ */ V(z, { children: [/* @__PURE__ */ B(u, {
-			variant: o.Secondary,
+		footer: /* @__PURE__ */ z(L, { children: [/* @__PURE__ */ R(u, {
+			variant: s.Secondary,
 			onClick: () => t(!1),
 			children: "Cancel"
-		}), /* @__PURE__ */ B(u, {
-			variant: o.SecondaryDestructive,
+		}), /* @__PURE__ */ R(u, {
+			variant: s.SecondaryDestructive,
 			onClick: () => t(!1),
 			children: "Delete"
 		})] }),
-		children: [/* @__PURE__ */ B("p", { children: "“Fix the flaky parser test” and its transcript, subagents and schedules will be deleted. This cannot be undone." }), /* @__PURE__ */ B("p", {
+		children: [/* @__PURE__ */ R("p", { children: "“Fix the flaky parser test” and its transcript, subagents and schedules will be deleted. This cannot be undone." }), /* @__PURE__ */ R("p", {
 			className: "type-meta mt-2 text-basic-tertiary",
 			children: "The shared modal shell: overlay click, Escape and a Tab focus trap all come from the atom."
 		})]

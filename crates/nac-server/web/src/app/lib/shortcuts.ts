@@ -85,7 +85,6 @@ export const SHORTCUT_SHEET_KEYS = [MOD, "/"];
 /** Show or hide the session sidebar. */
 export const TOGGLE_SIDEBAR_KEYS = [MOD, "b"];
 /** Pin the open drawer as a side column, or float it again. */
-export const DOCK_DRAWER_KEYS = [MOD, "\\"];
 /** Opens the session that has waited longest for you (Inbox › Needs you). */
 export const NEXT_NEEDS_YOU_KEYS = [MOD, "shift", "e"];
 
@@ -146,7 +145,6 @@ export const SHORTCUTS: readonly ShortcutEntry[] = [
     group: "Navigation",
     spelled: true,
   },
-  { id: "dock", keys: DOCK_DRAWER_KEYS, label: "Dock or float the drawer", group: "Session" },
   { id: "approve", keys: ["enter"], label: "Approve the request", group: "Attention card" },
   { id: "deny", keys: ["d"], label: "Deny the request", group: "Attention card" },
   {

@@ -2831,34 +2831,33 @@ var { release: Pr, SORT_ITEMS: Fr, RANGE_ITEMS: Ir, sessionFiltersStore: Lr, set
 	selectThread: () => bi,
 	selectWorkset: () => wi,
 	sessionLayoutStore: () => si,
+	setDrawerDockable: () => gi,
 	setSidePanelAnimate: () => Ai,
 	showSidePanelList: () => _i,
-	toggleDrawerPinned: () => gi,
 	toggleFolder: () => Oi,
 	toggleInsightGroup: () => Si,
 	toggleSidePanelCollapsed: () => pi,
 	toggleSidePanelExpanded: () => ui,
 	toggleSidePanelList: () => vi,
 	unbindSidePanelProject: () => li,
-	useDrawerContent: () => Hi,
-	useDrawerPinned: () => Vi,
-	useExpandedInsightGroups: () => Ji,
-	useFileListing: () => ta,
-	useInsightFocusNonce: () => qi,
-	useInsightsFilter: () => Yi,
+	useDrawerContent: () => Vi,
+	useExpandedInsightGroups: () => qi,
+	useFileListing: () => ea,
+	useInsightFocusNonce: () => Ki,
+	useInsightsFilter: () => Ji,
 	useInsightsReturn: () => Li,
-	useSelectedFile: () => $i,
-	useSelectedInsight: () => Ki,
-	useSelectedRevision: () => Qi,
-	useSelectedSubagent: () => Zi,
-	useSelectedThread: () => Wi,
-	useSelectedThreadEpisode: () => Gi,
-	useSelectedWorkset: () => Xi,
+	useSelectedFile: () => Qi,
+	useSelectedInsight: () => Gi,
+	useSelectedRevision: () => Zi,
+	useSelectedSubagent: () => Xi,
+	useSelectedThread: () => Ui,
+	useSelectedThreadEpisode: () => Wi,
+	useSelectedWorkset: () => Yi,
 	useSidePanelAnimate: () => zi,
 	useSidePanelCollapsed: () => Ri,
 	useSidePanelExpanded: () => Bi,
-	useSidePanelList: () => Ui,
-	useToggledFolders: () => ea
+	useSidePanelList: () => Hi,
+	useToggledFolders: () => $i
 });
 function ai(e, { rememberPerProject: t = !1 } = {}) {
 	let n = K({
@@ -2871,7 +2870,7 @@ function ai(e, { rememberPerProject: t = !1 } = {}) {
 		sidePanelAnimate: !0,
 		sidePanelProjectId: null,
 		expanded: !1,
-		pinned: !0,
+		dockable: !1,
 		drawerContent: "panel",
 		panelList: !1,
 		selectedThread: null,
@@ -2957,15 +2956,8 @@ function ai(e, { rememberPerProject: t = !1 } = {}) {
 	function b() {
 		a().expanded && o({ expanded: !1 }), f(!0);
 	}
-	function x() {
-		let e = a();
-		e.collapsed ? (o({
-			pinned: !0,
-			expanded: !1
-		}), f(!1)) : o({
-			pinned: !e.pinned,
-			expanded: !1
-		});
+	function x(e) {
+		a().dockable !== e && o({ dockable: e });
 	}
 	function S(e) {
 		a().panelList !== e && o({ panelList: e });
@@ -3062,7 +3054,7 @@ function ai(e, { rememberPerProject: t = !1 } = {}) {
 			expanded: n.expanded,
 			collapsed: n.collapsed,
 			drawerContent: n.drawerContent
-		}) : r && !t.pinned && !t.collapsed && o({
+		}) : r && !t.dockable && !t.collapsed && o({
 			collapsed: !0,
 			expanded: !1,
 			drawerContent: "panel"
@@ -3121,7 +3113,7 @@ function ai(e, { rememberPerProject: t = !1 } = {}) {
 		toggleSidePanelCollapsed: v,
 		openDrawer: y,
 		closeDrawer: b,
-		toggleDrawerPinned: x,
+		setDrawerDockable: x,
 		showSidePanelList: S,
 		toggleSidePanelList: C,
 		revealSidePanel: w,
@@ -3146,7 +3138,6 @@ function ai(e, { rememberPerProject: t = !1 } = {}) {
 		useSidePanelCollapsed: () => s((e) => e.collapsed),
 		useSidePanelAnimate: () => s((e) => e.sidePanelAnimate),
 		useSidePanelExpanded: () => s((e) => e.expanded),
-		useDrawerPinned: () => s((e) => e.pinned),
 		useDrawerContent: () => s((e) => e.drawerContent),
 		useSidePanelList: () => s((e) => e.panelList),
 		useSelectedThread: () => s((e) => e.selectedThread),
@@ -3163,19 +3154,19 @@ function ai(e, { rememberPerProject: t = !1 } = {}) {
 		useFileListing: () => s((e) => e.fileListing)
 	};
 }
-var { release: oi, sessionLayoutStore: si, bindSidePanelProject: ci, unbindSidePanelProject: li, toggleSidePanelExpanded: ui, leaveFocusedSidePanel: di, openSidePanelList: fi, toggleSidePanelCollapsed: pi, openDrawer: mi, closeDrawer: hi, toggleDrawerPinned: gi, showSidePanelList: _i, toggleSidePanelList: vi, revealSidePanel: yi, selectThread: bi, selectInsight: xi, toggleInsightGroup: Si, selectInsightsFilter: Ci, selectWorkset: wi, selectSubagent: Ti, selectRevision: Ei, selectFile: Di, toggleFolder: Oi, selectFileListing: ki, setSidePanelAnimate: Ai, resetSessionSelection: ji, activateSessionSelection: Mi, rememberInsightsReturn: Ni, restoreInsightsReturn: Pi, rememberInsightListPosition: Fi, rememberSubagentPage: Ii, useInsightsReturn: Li, useSidePanelCollapsed: Ri, useSidePanelAnimate: zi, useSidePanelExpanded: Bi, useDrawerPinned: Vi, useDrawerContent: Hi, useSidePanelList: Ui, useSelectedThread: Wi, useSelectedThreadEpisode: Gi, useSelectedInsight: Ki, useInsightFocusNonce: qi, useExpandedInsightGroups: Ji, useInsightsFilter: Yi, useSelectedWorkset: Xi, useSelectedSubagent: Zi, useSelectedRevision: Qi, useSelectedFile: $i, useToggledFolders: ea, useFileListing: ta } = ai(q), na = /* @__PURE__ */ e({
-	createSessionNavigationStore: () => ra,
-	markSessionViewed: () => la,
-	pruneSessionNavigation: () => ua,
-	release: () => ia,
-	restoreSessionNavigation: () => aa,
-	serializeSessionNavigation: () => oa,
-	sessionNavigationStore: () => sa,
-	toggleSessionNavigationPin: () => ca,
-	useSessionNavigationPins: () => da,
-	useSessionViewedAt: () => fa
+var { release: oi, sessionLayoutStore: si, bindSidePanelProject: ci, unbindSidePanelProject: li, toggleSidePanelExpanded: ui, leaveFocusedSidePanel: di, openSidePanelList: fi, toggleSidePanelCollapsed: pi, openDrawer: mi, closeDrawer: hi, setDrawerDockable: gi, showSidePanelList: _i, toggleSidePanelList: vi, revealSidePanel: yi, selectThread: bi, selectInsight: xi, toggleInsightGroup: Si, selectInsightsFilter: Ci, selectWorkset: wi, selectSubagent: Ti, selectRevision: Ei, selectFile: Di, toggleFolder: Oi, selectFileListing: ki, setSidePanelAnimate: Ai, resetSessionSelection: ji, activateSessionSelection: Mi, rememberInsightsReturn: Ni, restoreInsightsReturn: Pi, rememberInsightListPosition: Fi, rememberSubagentPage: Ii, useInsightsReturn: Li, useSidePanelCollapsed: Ri, useSidePanelAnimate: zi, useSidePanelExpanded: Bi, useDrawerContent: Vi, useSidePanelList: Hi, useSelectedThread: Ui, useSelectedThreadEpisode: Wi, useSelectedInsight: Gi, useInsightFocusNonce: Ki, useExpandedInsightGroups: qi, useInsightsFilter: Ji, useSelectedWorkset: Yi, useSelectedSubagent: Xi, useSelectedRevision: Zi, useSelectedFile: Qi, useToggledFolders: $i, useFileListing: ea } = ai(q), ta = /* @__PURE__ */ e({
+	createSessionNavigationStore: () => na,
+	markSessionViewed: () => ca,
+	pruneSessionNavigation: () => la,
+	release: () => ra,
+	restoreSessionNavigation: () => ia,
+	serializeSessionNavigation: () => aa,
+	sessionNavigationStore: () => oa,
+	toggleSessionNavigationPin: () => sa,
+	useSessionNavigationPins: () => ua,
+	useSessionViewedAt: () => da
 });
-function ra(e) {
+function na(e) {
 	let t = "nac.sessionNavigation", n = () => ({
 		pinned: /* @__PURE__ */ new Set(),
 		lastViewedAt: {}
@@ -3253,42 +3244,42 @@ function ra(e) {
 		useSessionViewedAt: (e) => p((t) => t.lastViewedAt[e])
 	};
 }
-var { release: ia, restoreSessionNavigation: aa, serializeSessionNavigation: oa, sessionNavigationStore: sa, toggleSessionNavigationPin: ca, markSessionViewed: la, pruneSessionNavigation: ua, useSessionNavigationPins: da, useSessionViewedAt: fa } = ra(q), pa = /* @__PURE__ */ e({
-	createSidebarLayoutStore: () => Sa,
-	release: () => Ca,
-	revealGroup: () => Ba,
-	setColumnOpen: () => Oa,
-	setOrganize: () => Ma,
-	setOverlayOpen: () => Aa,
-	setSidebarOffset: () => Ea,
-	setView: () => Pa,
-	storeOpen: () => Ta,
-	storedOpen: () => wa,
-	toggleParentExpanded: () => Ra,
-	toggleProjectCollapsed: () => Ia,
-	useCollapsedProjects: () => La,
-	useColumnOpen: () => ka,
-	useExpandedParents: () => za,
-	useOrganize: () => Na,
-	useOverlayOpen: () => ja,
-	useRevealedGroups: () => Va,
-	useSidebarOffset: () => Da,
-	useView: () => Fa
-}), ma = "nac.sidebar.open", ha = "nac.sidebar.organize", ga = "nac.sidebar.view", _a = "nac.sidebar.collapsed-projects";
-function va(e, t) {
+var { release: ra, restoreSessionNavigation: ia, serializeSessionNavigation: aa, sessionNavigationStore: oa, toggleSessionNavigationPin: sa, markSessionViewed: ca, pruneSessionNavigation: la, useSessionNavigationPins: ua, useSessionViewedAt: da } = na(q), fa = /* @__PURE__ */ e({
+	createSidebarLayoutStore: () => xa,
+	release: () => Sa,
+	revealGroup: () => za,
+	setColumnOpen: () => Da,
+	setOrganize: () => ja,
+	setOverlayOpen: () => ka,
+	setSidebarOffset: () => Ta,
+	setView: () => Na,
+	storeOpen: () => wa,
+	storedOpen: () => Ca,
+	toggleParentExpanded: () => La,
+	toggleProjectCollapsed: () => Fa,
+	useCollapsedProjects: () => Ia,
+	useColumnOpen: () => Oa,
+	useExpandedParents: () => Ra,
+	useOrganize: () => Ma,
+	useOverlayOpen: () => Aa,
+	useRevealedGroups: () => Ba,
+	useSidebarOffset: () => Ea,
+	useView: () => Pa
+}), pa = "nac.sidebar.open", ma = "nac.sidebar.organize", ha = "nac.sidebar.view", ga = "nac.sidebar.collapsed-projects";
+function _a(e, t) {
 	try {
 		return e?.getItem(t) ?? null;
 	} catch {
 		return null;
 	}
 }
-function ya(e, t, n) {
+function va(e, t, n) {
 	try {
 		e?.setItem(t, n);
 	} catch {}
 }
-function ba(e) {
-	let t = va(e, _a);
+function ya(e) {
+	let t = _a(e, ga);
 	if (!t) return [];
 	try {
 		let e = JSON.parse(t);
@@ -3297,17 +3288,17 @@ function ba(e) {
 		return [];
 	}
 }
-function xa(e, t) {
+function ba(e, t) {
 	return e.includes(t) ? e.filter((e) => e !== t) : [...e, t];
 }
-function Sa(e) {
-	let t = va(e, ma), n = va(e, ga), r = {
+function xa(e) {
+	let t = _a(e, pa), n = _a(e, ha), r = {
 		offset: 0,
 		columnOpen: t === "1" || t !== "0" && null,
 		overlayOpen: !1,
 		organize: "project",
 		view: n === "inbox" ? "inbox" : "sessions",
-		collapsedProjects: ba(e),
+		collapsedProjects: ya(e),
 		expandedParents: [],
 		revealedGroups: []
 	}, { getState: i, setState: a, useStore: o } = K(r, "sidebar-layout");
@@ -3318,7 +3309,7 @@ function Sa(e) {
 		return o((e) => e.offset);
 	}
 	function l(t) {
-		a({ columnOpen: t }), ya(e, ma, t ? "1" : "0");
+		a({ columnOpen: t }), va(e, pa, t ? "1" : "0");
 	}
 	let u = () => o((e) => e.columnOpen), d = () => i().columnOpen, f = (e) => l(e);
 	function p(e) {
@@ -3326,20 +3317,20 @@ function Sa(e) {
 	}
 	let m = () => o((e) => e.overlayOpen);
 	function h(t) {
-		a({ organize: t }), ya(e, ha, t);
+		a({ organize: t }), va(e, ma, t);
 	}
 	let g = () => o((e) => e.organize);
 	function _(t) {
-		a({ view: t }), ya(e, ga, t);
+		a({ view: t }), va(e, ha, t);
 	}
 	let v = () => o((e) => e.view);
 	function y(t) {
-		let n = xa(i().collapsedProjects, t);
-		a({ collapsedProjects: n }), ya(e, _a, JSON.stringify(n));
+		let n = ba(i().collapsedProjects, t);
+		a({ collapsedProjects: n }), va(e, ga, JSON.stringify(n));
 	}
 	let b = () => o((e) => e.collapsedProjects);
 	function x(e) {
-		a({ expandedParents: xa(i().expandedParents, e) });
+		a({ expandedParents: ba(i().expandedParents, e) });
 	}
 	let S = () => o((e) => e.expandedParents);
 	function C(e) {
@@ -3371,16 +3362,16 @@ function Sa(e) {
 		useRevealedGroups: () => o((e) => e.revealedGroups)
 	};
 }
-var { release: Ca, storedOpen: wa, storeOpen: Ta, setSidebarOffset: Ea, useSidebarOffset: Da, setColumnOpen: Oa, useColumnOpen: ka, setOverlayOpen: Aa, useOverlayOpen: ja, setOrganize: Ma, useOrganize: Na, setView: Pa, useView: Fa, toggleProjectCollapsed: Ia, useCollapsedProjects: La, toggleParentExpanded: Ra, useExpandedParents: za, revealGroup: Ba, useRevealedGroups: Va } = Sa(q), Ha = /* @__PURE__ */ e({
-	createSshConnectionStore: () => Ua,
-	markSshConnected: () => Ka,
-	markSshDisconnected: () => qa,
-	release: () => Wa,
-	sshTargetFromSummary: () => Ya,
-	sshTargetKey: () => Ga,
-	useSshConnectionStatus: () => Ja
+var { release: Sa, storedOpen: Ca, storeOpen: wa, setSidebarOffset: Ta, useSidebarOffset: Ea, setColumnOpen: Da, useColumnOpen: Oa, setOverlayOpen: ka, useOverlayOpen: Aa, setOrganize: ja, useOrganize: Ma, setView: Na, useView: Pa, toggleProjectCollapsed: Fa, useCollapsedProjects: Ia, toggleParentExpanded: La, useExpandedParents: Ra, revealGroup: za, useRevealedGroups: Ba } = xa(q), Va = /* @__PURE__ */ e({
+	createSshConnectionStore: () => Ha,
+	markSshConnected: () => Ga,
+	markSshDisconnected: () => Ka,
+	release: () => Ua,
+	sshTargetFromSummary: () => Ja,
+	sshTargetKey: () => Wa,
+	useSshConnectionStatus: () => qa
 });
-function Ua(e) {
+function Ha(e) {
 	function t(e) {
 		return [
 			e.ssh_host.trim(),
@@ -3424,10 +3415,10 @@ function Ua(e) {
 		sshTargetFromSummary: s
 	};
 }
-var { release: Wa, sshTargetKey: Ga, markSshConnected: Ka, markSshDisconnected: qa, useSshConnectionStatus: Ja, sshTargetFromSummary: Ya } = Ua(q), Xa = "nac.inbox.read.v1", Za = 500;
-function Qa(e, t) {
+var { release: Ua, sshTargetKey: Wa, markSshConnected: Ga, markSshDisconnected: Ka, useSshConnectionStatus: qa, sshTargetFromSummary: Ja } = Ha(q), Ya = "nac.inbox.read.v1", Xa = 500;
+function Za(e, t) {
 	try {
-		let t = e?.getItem(Xa);
+		let t = e?.getItem(Ya);
 		if (t) {
 			let e = JSON.parse(t);
 			if (typeof e.since == "number" && e.runs && typeof e.runs == "object") return {
@@ -3440,21 +3431,21 @@ function Qa(e, t) {
 		since: t,
 		runs: {}
 	};
-	return $a(e, n), n;
+	return Qa(e, n), n;
 }
-function $a(e, t) {
+function Qa(e, t) {
 	try {
-		e?.setItem(Xa, JSON.stringify(t));
+		e?.setItem(Ya, JSON.stringify(t));
 	} catch {}
 }
-function eo(e, t = Date.now()) {
-	let n = K(Qa(e, t), "inbox-read"), r = /* @__PURE__ */ new Map(), i = !1, a = (t) => {
+function $a(e, t = Date.now()) {
+	let n = K(Za(e, t), "inbox-read"), r = /* @__PURE__ */ new Map(), i = !1, a = (t) => {
 		if (i) return;
-		let r = Object.entries(t), a = r.length > Za ? Object.fromEntries(r.slice(-500)) : t, o = {
+		let r = Object.entries(t), a = r.length > Xa ? Object.fromEntries(r.slice(-500)) : t, o = {
 			...n.getState(),
 			runs: a
 		};
-		n.setState(o), $a(e, o);
+		n.setState(o), Qa(e, o);
 	};
 	return {
 		firstSeen: r,
@@ -3479,13 +3470,13 @@ function eo(e, t = Date.now()) {
 		}
 	};
 }
-var to = eo(q), no = {
+var eo = $a(q), to = {
 	text: "",
 	projectId: null
 };
-function ro() {
+function no() {
 	let e = K({
-		...no,
+		...to,
 		revision: 0
 	}, "home-draft"), t = !1;
 	return {
@@ -3501,21 +3492,21 @@ function ro() {
 		},
 		acknowledge(n) {
 			!t && e.getState().revision === n && e.setState({
-				...no,
+				...to,
 				revision: n + 1
 			});
 		},
 		release() {
 			t = !0, e.setState({
-				...no,
+				...to,
 				revision: e.getState().revision + 1
 			});
 		}
 	};
 }
-var io = ro();
+var ro = no();
 // src/app/features/command-palette/commandSurfaceStore.ts
-function ao() {
+function io() {
 	let e = K({
 		surface: null,
 		sidebarAvailable: !1
@@ -3545,20 +3536,20 @@ function ao() {
 		}
 	};
 }
-var oo = ao(), so = "nac.transcriptDensity";
-function co(e) {
+var ao = io(), oo = "nac.transcriptDensity";
+function so(e) {
 	try {
-		return e?.getItem(so) === "detailed" ? "detailed" : "compact";
+		return e?.getItem(oo) === "detailed" ? "detailed" : "compact";
 	} catch {
 		return "compact";
 	}
 }
-function lo(e) {
-	let t = K({ density: co(e) }, "transcriptDensity"), n = !1, r = (r) => {
+function co(e) {
+	let t = K({ density: so(e) }, "transcriptDensity"), n = !1, r = (r) => {
 		if (!n) {
 			t.setState({ density: r });
 			try {
-				e?.setItem(so, r);
+				e?.setItem(oo, r);
 			} catch {}
 		}
 	};
@@ -3571,14 +3562,14 @@ function lo(e) {
 		}
 	};
 }
-var uo = lo(q);
+var lo = co(q);
 // src/app/runtime/presentationStores.ts
-function fo(e, t, n, r) {
+function uo(e, t, n, r) {
 	return {
-		inboxReadStore: eo(e),
-		homeDraftStore: ro(),
-		commandSurfaceStore: ao(),
-		transcriptDensityStore: lo(e),
+		inboxReadStore: $a(e),
+		homeDraftStore: no(),
+		commandSurfaceStore: io(),
+		transcriptDensityStore: co(e),
 		promptDraftStore: jt(t, n, r),
 		dockWidth: ke(e),
 		panelWidth: Re(e),
@@ -3590,16 +3581,16 @@ function fo(e, t, n, r) {
 		runtimeStore: kn(e),
 		sessionFiltersStore: Nr(e),
 		sessionLayoutStore: ai(e),
-		sessionNavigationStore: ra(e),
-		sidebarLayoutStore: Sa(e),
-		sshConnectionStore: Ua(e)
+		sessionNavigationStore: na(e),
+		sidebarLayoutStore: xa(e),
+		sshConnectionStore: Ha(e)
 	};
 }
-var po = {
-	inboxReadStore: to,
-	homeDraftStore: io,
-	commandSurfaceStore: oo,
-	transcriptDensityStore: uo,
+var fo = {
+	inboxReadStore: eo,
+	homeDraftStore: ro,
+	commandSurfaceStore: ao,
+	transcriptDensityStore: lo,
 	promptDraftStore: wt,
 	dockWidth: De,
 	panelWidth: Ne,
@@ -3611,16 +3602,16 @@ var po = {
 	runtimeStore: On,
 	sessionFiltersStore: Mr,
 	sessionLayoutStore: ii,
-	sessionNavigationStore: na,
-	sidebarLayoutStore: pa,
-	sshConnectionStore: Ha
+	sessionNavigationStore: ta,
+	sidebarLayoutStore: fa,
+	sshConnectionStore: Va
 };
-function mo(e) {
+function po(e) {
 	e.runtimeStore.resetRuntime(null);
 	for (let t of Object.values(e)) t.release();
 }
 // src/app/runtime/requestLifetime.ts
-function ho(e, t) {
+function mo(e, t) {
 	return e.throwIfAborted(), new Promise((n, r) => {
 		let i = () => r(e.reason);
 		e.addEventListener("abort", i, { once: !0 }), Promise.resolve().then(() => (e.throwIfAborted(), t())).then((t) => {
@@ -3630,7 +3621,7 @@ function ho(e, t) {
 		});
 	});
 }
-function go(e) {
+function ho(e) {
 	if (e instanceof y) return e;
 	if (e instanceof Error && e.name === "ApiError" && "status" in e && typeof e.status == "number" && "method" in e && typeof e.method == "string" && "path" in e && typeof e.path == "string" && "requestId" in e && typeof e.requestId == "string") {
 		let t = new y(e.status, e.method, e.path, "", e.requestId);
@@ -3638,7 +3629,7 @@ function go(e) {
 	}
 	return e;
 }
-var _o = class extends D {
+var go = class extends D {
 	source;
 	lifetime;
 	constructor(e, t) {
@@ -3659,7 +3650,7 @@ var _o = class extends D {
 		return this.source.newRequestId();
 	}
 	streamContext() {
-		return ho(this.lifetime, () => this.source.streamContext());
+		return mo(this.lifetime, () => this.source.streamContext());
 	}
 	async admit(e, t, n = {}) {
 		let r = n.signal ? AbortSignal.any([this.lifetime, n.signal]) : this.lifetime, i = n.requestId ?? this.source.newRequestId();
@@ -3669,7 +3660,7 @@ var _o = class extends D {
 			reason: "aborted"
 		};
 		try {
-			return await ho(r, () => this.source.admit(e, t, {
+			return await mo(r, () => this.source.admit(e, t, {
 				...n,
 				requestId: i,
 				signal: r
@@ -3680,19 +3671,19 @@ var _o = class extends D {
 				requestId: i,
 				error: e
 			};
-			throw go(e);
+			throw ho(e);
 		}
 	}
 	request(e, t, n = {}) {
 		let r = n.signal ? AbortSignal.any([this.lifetime, n.signal]) : this.lifetime;
-		return ho(r, () => this.source.request(e, t, {
+		return mo(r, () => this.source.request(e, t, {
 			...n,
 			signal: r
 		})).catch((e) => {
-			throw go(e);
+			throw ho(e);
 		});
 	}
-}, vo = class {
+}, _o = class {
 	limit;
 	requireAcknowledgement;
 	entries = /* @__PURE__ */ new Map();
@@ -3758,14 +3749,14 @@ var _o = class extends D {
 			t.listeners.clear();
 		}
 	}
-}, yo = /* @__PURE__ */ new WeakMap();
-function bo(e) {
+}, vo = /* @__PURE__ */ new WeakMap();
+function yo(e) {
 	if (e.terminalInputRecovery) return e.terminalInputRecovery;
-	let t = yo.get(e);
-	return t || (t = new vo(), yo.set(e, t)), t;
+	let t = vo.get(e);
+	return t || (t = new _o(), vo.set(e, t)), t;
 }
 // src/app/features/setup/localFolder.ts
-function xo(e, t) {
+function bo(e, t) {
 	if (e) return { async chooseDirectory(n, r) {
 		let i = new AbortController(), a = () => i.abort();
 		(r.aborted || t.aborted) && a(), r.addEventListener("abort", a, { once: !0 }), t.addEventListener("abort", a, { once: !0 });
@@ -3778,10 +3769,10 @@ function xo(e, t) {
 		}
 	} };
 }
-function So(e, t, n, r) {
+function xo(e, t, n, r) {
 	return t && n === "directory" && !r ? e : void 0;
 }
-function Co(e, t, n) {
+function So(e, t, n) {
 	let r = new AbortController();
 	return {
 		cancel: () => r.abort(),
@@ -3793,8 +3784,8 @@ function Co(e, t, n) {
 	};
 }
 // src/app/runtime/nativeRuntime.ts
-var wo = /* @__PURE__ */ new WeakMap(), To = 0, Eo = class {
-	id = ++To;
+var Co = /* @__PURE__ */ new WeakMap(), wo = 0, To = class {
+	id = ++wo;
 	scope;
 	client;
 	assets;
@@ -3812,7 +3803,7 @@ var wo = /* @__PURE__ */ new WeakMap(), To = 0, Eo = class {
 	eventSource;
 	constructor(e) {
 		if (e.scope.endpoint !== e.client.transport.endpoint) throw Error("Runtime scope must name the supplied client's endpoint.");
-		if (this.terminalInputRecovery = new vo(128, e.requireTerminalAcknowledgement ?? !1), this.queryClient = new h({ defaultOptions: {
+		if (this.terminalInputRecovery = new _o(128, e.requireTerminalAcknowledgement ?? !1), this.queryClient = new h({ defaultOptions: {
 			queries: {
 				queryKeyHashFn: (e) => g([this.id, ...e]),
 				staleTime: 3e4,
@@ -3821,8 +3812,8 @@ var wo = /* @__PURE__ */ new WeakMap(), To = 0, Eo = class {
 				refetchOnWindowFocus: !1
 			},
 			mutations: { retry: !1 }
-		} }), this.assets = e.assets ? Object.freeze({ ...e.assets }) : void 0, this.nativeDirectory = xo(e.nativeDirectory, this.controller.signal), this.stores = fo(e.storage, e.scope, e.draftStorage, e.draftPersistenceBinding), this.scope = Object.freeze({ ...e.scope }), this.client = new A(new _o(e.client.transport, this.controller.signal)), e.standaloneServingIncarnation !== void 0 && (this.scope.profile !== "standalone" || e.standaloneServingIncarnation !== this.scope.incarnation)) throw Error("Product serving binding must match the standalone runtime scope.");
-		this.api = ue(this.client, e.standaloneServingIncarnation), this.productNavigation = new _(this.api.resolveProductDestination, this.isClosed, this.api.getProductContext), this.eventSource = e.eventSource, wo.set(this.queryClient, this);
+		} }), this.assets = e.assets ? Object.freeze({ ...e.assets }) : void 0, this.nativeDirectory = bo(e.nativeDirectory, this.controller.signal), this.stores = uo(e.storage, e.scope, e.draftStorage, e.draftPersistenceBinding), this.scope = Object.freeze({ ...e.scope }), this.client = new A(new go(e.client.transport, this.controller.signal)), e.standaloneServingIncarnation !== void 0 && (this.scope.profile !== "standalone" || e.standaloneServingIncarnation !== this.scope.incarnation)) throw Error("Product serving binding must match the standalone runtime scope.");
+		this.api = ue(this.client, e.standaloneServingIncarnation), this.productNavigation = new _(this.api.resolveProductDestination, this.isClosed, this.api.getProductContext), this.eventSource = e.eventSource, Co.set(this.queryClient, this);
 	}
 	isClosed = () => this.controller.signal.aborted;
 	subscribe = (e) => (this.listeners.add(e), () => {
@@ -3857,26 +3848,26 @@ var wo = /* @__PURE__ */ new WeakMap(), To = 0, Eo = class {
 		if (!this.isClosed()) {
 			this.controller.abort(new DOMException("Native runtime was closed.", "AbortError")), this.terminalInputRecovery.close(), this.productNavigation.close();
 			for (let e of this.disposers) e();
-			this.disposers.clear(), this.queryClient.cancelQueries(), this.queryClient.clear(), mo(this.stores);
+			this.disposers.clear(), this.queryClient.cancelQueries(), this.queryClient.clear(), po(this.stores);
 			for (let e of this.listeners) e();
 		}
 	}
 };
-function Do(e) {
-	return new Eo(e);
+function Eo(e) {
+	return new To(e);
 }
-var Oo = {
+var Do = {
 	api: de,
 	client: M,
-	stores: po,
+	stores: fo,
 	events: (e, t) => Ee(e, t)
 };
-function ko(e) {
-	return wo.get(e) ?? Oo;
+function Oo(e) {
+	return Co.get(e) ?? Do;
 }
 // src/app/runtime/RuntimeContext.ts
-var Ao = u(null);
-function jo() {
-	return f(Ao) ?? Oo;
+var ko = u(null);
+function Ao() {
+	return f(ko) ?? Do;
 }
-export { _e as A, x as B, Dn as C, q as D, Le as E, ae as F, L as I, R as L, pe as M, fe as N, he as O, oe as P, te as R, Cn as S, Be as T, Sr as _, ko as a, Tn as b, bo as c, Dr as d, Er as f, br as g, Or as h, Do as i, ve as j, ge as k, oo as l, Ar as m, jo as n, So as o, wr as p, Eo as r, Co as s, Ao as t, yr as u, _r as v, Ie as w, wn as x, En as y, y as z };
+export { _e as A, x as B, Dn as C, q as D, Le as E, ae as F, L as I, R as L, pe as M, fe as N, he as O, oe as P, te as R, Cn as S, Be as T, Sr as _, Oo as a, Tn as b, yo as c, Dr as d, Er as f, br as g, Or as h, Eo as i, ve as j, ge as k, ao as l, Ar as m, Ao as n, xo as o, wr as p, To as r, So as s, ko as t, yr as u, _r as v, Ie as w, wn as x, En as y, y as z };

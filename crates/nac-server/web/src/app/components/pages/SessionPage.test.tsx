@@ -105,7 +105,6 @@ beforeEach(() => {
   sessionLayoutStore.setState({
     collapsed: false,
     expanded: false,
-    pinned: false,
     drawerContent: "panel",
     activeSessionId: null,
     sidePanelProjectId: null,
@@ -121,13 +120,13 @@ afterEach(() => {
 });
 
 describe("session drawer", () => {
-  it("offers no full-width control when floating", () => {
+  it("floats where there is no room to dock, with no float or full-width control", () => {
     mount();
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
-    expect(screen.queryByRole("button", { name: /full width/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^(Dock|Float) drawer$|full width/i })).toBeNull();
   });
 
-  it("offers no full-width control when docked beside the chat", () => {
+  it("docks beside the chat wherever there is room, with no float or full-width control", () => {
     vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1400);
     vi.stubGlobal(
       "ResizeObserver",
@@ -137,10 +136,9 @@ describe("session drawer", () => {
       },
     );
     fakes.dock = true;
-    sessionLayoutStore.setState({ pinned: true });
     mount();
-    expect(screen.getByRole("button", { name: "Float drawer" })).toBeTruthy();
+    expect(screen.getByRole("complementary")).toBeTruthy();
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(screen.queryByRole("button", { name: /full width/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^(Dock|Float) drawer$|full width/i })).toBeNull();
   });
 });

@@ -44,10 +44,6 @@ interface SessionSideBoxProps {
   onPanelChange: (panel: SessionPanel) => void;
   /** The drawer's way out. Omitted, the header has no Close (a bare test mount). */
   onClose?: () => void;
-  /** Whether the drawer is docked beside the chat rather than floating. */
-  pinned?: boolean;
-  /** Dock or float the drawer (⌘\); omitted where docking has no room. */
-  onTogglePinned?: () => void;
 }
 
 /**
@@ -70,7 +66,7 @@ function SideBoxProgress({ sessionId }: { sessionId: string }) {
  * The panels a session's drawer holds: Insights, Files (Changes), Subagents,
  * Terminal, Schedules, Worksets, History — whichever the session's behavior
  * has. On a wide screen it heads itself with a 52px bar: a quiet segmented
- * row to move between the panels, then dock and close. On a
+ * row to move between the panels, then close. On a
  * phone the drawer is a bottom sheet and each screen heads itself with the
  * way out the sheet lends it.
  */
@@ -81,8 +77,6 @@ export function SessionSideBox({
   panel,
   onPanelChange,
   onClose,
-  pinned = false,
-  onTogglePinned,
 }: SessionSideBoxProps) {
   const {
     useSelectedWorkset,
@@ -251,24 +245,6 @@ export function SessionSideBox({
             })}
           </div>
         </div>
-        {onTogglePinned ? (
-          <Tooltip
-            title={pinned ? "Float the drawer (⌘\\)" : "Dock beside the conversation (⌘\\)"}
-            position={TooltipPosition.BottomLeft}
-            className="shrink-0"
-          >
-            <Button
-              size={ButtonSize.Medium}
-              variant={pinned ? ButtonVariant.GhostHighlighted : ButtonVariant.Ghost}
-              content={ButtonContent.Icon}
-              aria-label={pinned ? "Float drawer" : "Dock drawer"}
-              aria-pressed={pinned}
-              onClick={onTogglePinned}
-            >
-              <Icon iconName={IconName.ShowSidePanel} />
-            </Button>
-          </Tooltip>
-        ) : null}
         {onClose ? (
           <Tooltip title="Close (Esc)" position={TooltipPosition.BottomLeft} className="shrink-0">
             <Button

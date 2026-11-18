@@ -93,7 +93,6 @@ function facts(overrides: Partial<SessionFacts> = {}): SessionFacts {
 function drawer(open: string | null = null): SessionDrawerControls {
   return {
     open: open != null,
-    pinned: false,
     expanded: false,
     content: open === "goal" ? "goal" : "panel",
     panel: "insights",
@@ -102,7 +101,6 @@ function drawer(open: string | null = null): SessionDrawerControls {
     openPanel: vi.fn(),
     show: vi.fn(),
     close: vi.fn(),
-    togglePinned: vi.fn(),
     toggleExpanded: vi.fn(),
   };
 }
