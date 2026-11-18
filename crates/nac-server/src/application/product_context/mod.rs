@@ -85,21 +85,15 @@ impl ProductContextApplication {
                 .map_err(|_| anyhow!("product context is unavailable"))?;
             let backend = execution_backend(summary.sandboxed, summary.ssh.is_some());
             let direct = summary.behavior != sessions::SessionBehavior::Orchestrator;
-            for (feature, label, supported) in [(
-                ProductFeatureKind::TraditionalSubagents,
-                "Traditional subagents",
-                direct && !lineage,
-            )] {
-                features.push(ProductFeature {
-                    feature,
-                    label: label.into(),
-                    availability: if supported {
-                        ProductAvailability::Available
-                    } else {
-                        ProductAvailability::Unavailable
-                    },
-                });
-            }
+            features.push(ProductFeature {
+                feature: ProductFeatureKind::TraditionalSubagents,
+                label: "Traditional subagents".into(),
+                availability: if direct && !lineage {
+                    ProductAvailability::Available
+                } else {
+                    ProductAvailability::Unavailable
+                },
+            });
             let cached = self
                 .manager
                 .inner

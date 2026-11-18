@@ -131,7 +131,7 @@ impl<'a> SessionConfigurationApplication<'a> {
             .await?;
 
         let current = sessions::load_session_config(&self.manager.inner.store_path, session_id)?;
-        let mut prospective = current.clone();
+        let mut prospective = current;
         apply_patch(&mut prospective, request)?;
         let (backend, reasoning_effort, extra_headers) = parse_prospective_model_config(
             &mut prospective,
