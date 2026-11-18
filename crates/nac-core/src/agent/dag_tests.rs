@@ -1,4 +1,8 @@
 use super::*;
+use crate::agent::preview::{
+    key_arg_preview, preview_tool_args, redact_presentation_arguments,
+    subagent_presentation_arguments,
+};
 use crate::tools::test_runtime;
 use crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS;
 use crate::types::{FunctionCall, ToolCall};
@@ -450,7 +454,6 @@ fn test_partition_skills_error_without_registry() {
         .contains("no skills are available"));
 }
 
-/// Partition should succeed when a thread call has an empty skills array.
 #[test]
 fn test_partition_empty_skills_succeeds() {
     let runtime = test_runtime();
@@ -470,4 +473,172 @@ fn test_partition_empty_skills_succeeds() {
     assert!(thread_dispatches[0].params.scheduled_skills.is_empty());
     assert!(other_calls.is_empty());
     assert!(parse_errors.is_empty());
+}
+
+#[tokio::test]
+async fn subagent_preview_provider_failure_and_delay_only_suppress_preview() {
+    struct Provider {
+        pending: bool,
+        active: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        peak: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    }
+    impl nac_contracts::CommandEnvironmentProvider for Provider {
+        fn snapshot(&self) -> nac_contracts::CommandEnvironmentFuture<'_> {
+            panic!("presentation must not fetch a command environment")
+        }
+        fn redaction_snapshot(&self) -> anyhow::Result<nac_contracts::CommandEnvironmentSnapshot> {
+            if self.pending {
+                use std::sync::atomic::Ordering;
+                let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
+                self.peak.fetch_max(active, Ordering::SeqCst);
+                std::thread::sleep(std::time::Duration::from_millis(500));
+                self.active.fetch_sub(1, Ordering::SeqCst);
+            }
+            Err(anyhow::anyhow!("unavailable"))
+        }
+        fn worker_environment(&self) -> nac_contracts::WorkerEnvironment {
+            Default::default()
+        }
+    }
+    let active = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let peak = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let provider = |pending| {
+        std::sync::Arc::new(Provider {
+            pending,
+            active: active.clone(),
+            peak: peak.clone(),
+        })
+    };
+    let mut runtime = test_runtime();
+    runtime.command_environment = Some(provider(false));
+    assert!(
+        subagent_presentation_arguments(&runtime, r#"{"description":"secret"}"#)
+            .await
+            .is_none()
+    );
+    runtime.command_environment = Some(provider(true));
+    let started = std::time::Instant::now();
+    assert!(
+        subagent_presentation_arguments(&runtime, r#"{"description":"secret"}"#)
+            .await
+            .is_none()
+    );
+    assert!(started.elapsed() < std::time::Duration::from_secs(2));
+    let attempts =
+        (0..20).map(|_| subagent_presentation_arguments(&runtime, r#"{"description":"secret"}"#));
+    assert!(futures_util::future::join_all(attempts)
+        .await
+        .into_iter()
+        .all(|result| result.is_none()));
+    let peak = peak.load(std::sync::atomic::Ordering::SeqCst);
+    assert!((1..=4).contains(&peak));
+}
+
+#[test]
+fn subagent_summary_survives_a_long_argument_before_the_description() {
+    let raw = format!(
+        r#"{{"prompt":"{}","description":"Review store"}}"#,
+        "x".repeat(12_000)
+    );
+    let truncated = tool_args_detail(&raw);
+    assert!(key_arg_preview("subagent", Some(&truncated), "").is_empty());
+    let safe =
+        redact_presentation_arguments(&raw, &nac_contracts::CommandEnvironmentSnapshot::empty())
+            .unwrap();
+    let summary = key_arg_preview("subagent", Some(&safe), &safe);
+    assert_eq!(summary, "Review store");
+    assert!(tool_args_detail(&safe).len() < safe.len());
+}
+
+#[test]
+fn subagent_presentation_redacts_exact_values_before_preview_truncation() {
+    let exact = "opaque-value-with-quote-\"-and-backslash-\\-123456";
+    let mut snapshot = nac_contracts::CommandEnvironmentSnapshot::empty();
+    snapshot.extend_redactions([exact.to_string()]);
+    let description = format!("{}{}", "x".repeat(110), exact);
+    let raw =
+        json!({"description": description, "prompt": "Bearer sk-abcdefghijk-secret"}).to_string();
+    let safe = redact_presentation_arguments(&raw, &snapshot).unwrap();
+    assert!(!safe.contains(exact));
+    let event = AgentEvent::ToolCallStarted {
+        thread_name: None,
+        call_id: "call".into(),
+        name: "subagent".into(),
+        args_preview: preview_tool_args("subagent", &safe),
+        key_arg_preview: None,
+        args_detail: Some(tool_args_detail(&safe)),
+        delegation_intent: None,
+        delegation_summary_verified: false,
+    };
+    let event = crate::events::sanitize_external_agent_event(event).unwrap();
+    let serialized = serde_json::to_string(&event).unwrap();
+    assert!(!serialized.contains("opaque-value"));
+    assert!(!serialized.contains("sk-abcdefghijk-secret"));
+    let generic = json!({"description": "Bearer sk-abcdefghijk-secret"}).to_string();
+    let safe_generic = redact_presentation_arguments(&generic, &snapshot).unwrap();
+    let event = AgentEvent::ToolCallStarted {
+        thread_name: None,
+        call_id: "generic".into(),
+        name: "subagent".into(),
+        args_preview: preview_tool_args("subagent", &safe_generic),
+        key_arg_preview: None,
+        args_detail: Some(tool_args_detail(&safe_generic)),
+        delegation_intent: None,
+        delegation_summary_verified: false,
+    };
+    let encoded =
+        serde_json::to_string(&crate::events::sanitize_external_agent_event(event).unwrap())
+            .unwrap();
+    assert!(!encoded.contains("sk-abcdefghijk-secret"));
+    assert!(redact_presentation_arguments("{invalid", &snapshot).is_none());
+}
+
+#[tokio::test]
+async fn captured_managed_exa_is_redacted_without_web_capability() {
+    const MARKER: &str = "NAC_TEST_MANAGED_PREVIEW_CHILD";
+    const SECRET: &str = "opaque-managed-exa-secret";
+    if std::env::var_os(MARKER).is_none() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "agent::dag::tests::captured_managed_exa_is_redacted_without_web_capability",
+                "--nocapture",
+            ])
+            .env(MARKER, "1")
+            .env("EXA_API_KEY", SECRET)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "child failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(!String::from_utf8_lossy(&output.stdout).contains(SECRET));
+        return;
+    }
+    struct ManagedProvider;
+    impl nac_contracts::CommandEnvironmentProvider for ManagedProvider {
+        fn snapshot(&self) -> nac_contracts::CommandEnvironmentFuture<'_> {
+            panic!("presentation must not fetch a command environment")
+        }
+        fn redaction_snapshot(&self) -> anyhow::Result<nac_contracts::CommandEnvironmentSnapshot> {
+            Ok(nac_contracts::CommandEnvironmentSnapshot::empty())
+        }
+        fn worker_environment(&self) -> nac_contracts::WorkerEnvironment {
+            Default::default()
+        }
+    }
+    crate::managed_native_credentials::capture_managed_native_credentials_from_environment()
+        .unwrap();
+    assert!(std::env::var_os("EXA_API_KEY").is_none());
+    let mut runtime = test_runtime();
+    runtime.command_environment = Some(std::sync::Arc::new(ManagedProvider));
+    assert!(runtime.web_credential.is_none());
+    let raw = json!({"description": format!("Review {SECRET}"), "prompt": SECRET}).to_string();
+    let safe = subagent_presentation_arguments(&runtime, &raw)
+        .await
+        .unwrap();
+    assert!(!safe.contains(SECRET));
+    let summary = key_arg_preview("subagent", Some(&safe), &safe);
+    assert!(!summary.contains(SECRET));
 }

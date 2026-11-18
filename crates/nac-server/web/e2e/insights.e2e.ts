@@ -233,7 +233,7 @@ test("opens a launched session in the parent Subagents panel", async ({
   await expect(page.getByText("parent saw the card")).toBeVisible();
   await page
     .locator("[data-turn]")
-    .getByRole("button", { name: `Open ${title} in Subagents`, exact: true })
+    .getByRole("button", { name: "Open Subagent in Subagents", exact: true })
     .click();
   await expect(page).toHaveURL(new RegExp(`/session/${parentId}/delegated$`));
   await expect(page.getByRole("tab", { name: "Subagents" })).toHaveAttribute(

@@ -128,8 +128,8 @@ test("continues a subagent without repeating its label and explains a mismatch t
   });
   await page.goto(`${harness.baseUrl}/#/session/${parentId}/insights`);
   await expect(page.getByText("parent continued the same subagent")).toBeVisible();
-  await expect(page.getByText("Subagent · Start requested", { exact: true })).toBeVisible();
-  await expect(page.getByText("Subagent · Continue requested", { exact: true })).toBeVisible();
+  await expect(page.getByText(/Subagent · Start · Outcome unavailable/)).toBeVisible();
+  await expect(page.getByText(/Subagent · Continue · Outcome unavailable/)).toBeVisible();
   const invocationResults = page.getByText("Invocation result", { exact: true });
   await invocationResults.nth(0).click();
   await expect(invocationResults.nth(0).locator("..")).toContainText("first child pass finished");
@@ -139,9 +139,7 @@ test("continues a subagent without repeating its label and explains a mismatch t
   await invocationResults.nth(0).locator("..").getByText("Show retained result").click();
   await invocationResults.nth(1).click();
   await expect(invocationResults.nth(1).locator("..")).toContainText("second child pass finished");
-  await expect(page.getByRole("button", { name: "Open Audit the store in Subagents" })).toHaveCount(
-    2,
-  );
+  await expect(page.getByRole("button", { name: "Open Subagent in Subagents" })).toHaveCount(2);
   await page.screenshot({ path: testInfo.outputPath("parent-continuation.png"), fullPage: true });
 
   // A different label for the same child is refused before any child turn,
@@ -181,7 +179,12 @@ test("continues a subagent without repeating its label and explains a mismatch t
 
   await page.reload();
   await expect(page.getByText("parent read the label guidance")).toBeVisible();
-  await expect(page.getByText("Subagent · Continue · Failed", { exact: true })).toBeVisible();
+  const mismatchTurn = page
+    .locator("[data-turn]")
+    .filter({ hasText: "parent read the label guidance" });
+  await expect(mismatchTurn.getByText(/Subagent · Continue · Outcome unavailable/)).toBeVisible();
+  await mismatchTurn.getByText("Invocation result", { exact: true }).click();
+  await expect(mismatchTurn.getByText(/traditional child description is immutable/)).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("parent-mismatch.png"), fullPage: true });
   await page.goto(`${harness.baseUrl}/#/session/${childId}/insights`);
   await expect(page.getByText("second child pass finished")).toBeVisible();
@@ -288,7 +291,7 @@ test("groups adjacent continuations for one child in both transcript densities",
   try {
     await secondGate.accepted;
     const liveTurn = page.locator("[data-turn]").last();
-    const control = liveTurn.getByRole("button", { name: `Open ${label} in Subagents` });
+    const control = liveTurn.getByRole("button", { name: "Open Subagent in Subagents" });
     await expect(control).toBeVisible();
     await control.focus();
     secondGate.release();
@@ -310,7 +313,7 @@ test("groups adjacent continuations for one child in both transcript densities",
     await page.reload();
     const turn = page.locator("[data-turn]").filter({ hasText: "grouped parent answer" });
     await expect(turn).toBeVisible();
-    const target = turn.getByRole("button", { name: `Open ${label} in Subagents` });
+    const target = turn.getByRole("button", { name: "Open Subagent in Subagents" });
     await expect(target).toHaveCount(1);
     const results = turn.getByText("Invocation result", { exact: true });
     await expect(results).toHaveCount(2);
@@ -353,7 +356,7 @@ test("groups adjacent continuations for one child in both transcript densities",
   await page.goto(`${harness.baseUrl}/#/session/${parentId}/insights`);
   await page.reload();
   const mobileTurn = page.locator("[data-turn]").filter({ hasText: "grouped parent answer" });
-  const mobileTarget = mobileTurn.getByRole("button", { name: `Open ${label} in Subagents` });
+  const mobileTarget = mobileTurn.getByRole("button", { name: "Open Subagent in Subagents" });
   await expect(mobileTarget).toHaveCount(1);
   await mobileTarget.scrollIntoViewIfNeeded();
   await mobileTarget.focus();

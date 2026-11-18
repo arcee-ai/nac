@@ -190,6 +190,51 @@ pub(crate) async fn canonicalize_authorization_resources(
     Ok(canonical)
 }
 
+// The old hard rule denied checkout and protected-word arguments regardless
+// of position. Newly admitted forms cannot safely inherit unprojected state
+// from an earlier segment in the same shell (for example `cd` or `source`).
+pub(super) fn newly_permitted_git_segment(tokens: &[String]) -> bool {
+    let effective = effective_command_tokens(tokens);
+    if !effective
+        .first()
+        .and_then(|command| command.rsplit('/').next())
+        .is_some_and(|command| command.eq_ignore_ascii_case("git"))
+    {
+        return false;
+    }
+    if effective
+        .iter()
+        .skip(1)
+        .any(|arg| matches!(arg.as_str(), "clean" | "reset" | "restore" | "checkout"))
+    {
+        return true;
+    }
+    let Some(subcommand) = git_subcommand_index(effective, 0) else {
+        return false;
+    };
+    let mut index = 1;
+    while index < subcommand {
+        if effective[index] == "-C" {
+            index += 2;
+            continue;
+        }
+        if effective[index] == "-c" || effective[index].starts_with("-c") {
+            return true;
+        }
+        index += 1;
+    }
+    false
+}
+
+// Wrapper flags can change cwd, executable lookup, or argv[0] before the
+// inserted environment scrub. Their semantics are not independently bound.
+fn git_wrapper_has_options(tokens: &[String]) -> bool {
+    let effective = effective_command_tokens(tokens);
+    tokens[..tokens.len() - effective.len()]
+        .iter()
+        .any(|arg| arg.starts_with('-'))
+}
+
 pub(crate) fn shell_resources(
     command: &str,
     cwd: &Path,
@@ -200,7 +245,7 @@ pub(crate) fn shell_resources(
 
     match parse_shell(command) {
         ParsedShell::Supported(segments) => {
-            for tokens in segments {
+            for (segment_index, tokens) in segments.into_iter().enumerate() {
                 let canonical = canonical_command(&tokens);
                 let display = tokens.join(" ");
                 let mut resource = PermissionResource::new("execute", canonical)
@@ -208,6 +253,14 @@ pub(crate) fn shell_resources(
                     .with_save_resource(command_grant_candidate(&tokens));
                 if let Some(reason) = hard_shell_denial(&tokens, &cwd, backend) {
                     resource = resource.with_hard_denial(reason);
+                } else if newly_permitted_git_segment(&tokens) && git_wrapper_has_options(&tokens) {
+                    resource = resource.with_hard_denial(
+                        "Git operation with wrapper options is unsupported because its directory or executable lookup cannot be independently bound",
+                    );
+                } else if segment_index > 0 && newly_permitted_git_segment(&tokens) {
+                    resource = resource.with_hard_denial(
+                        "Git operation after an earlier shell segment is unsupported because its directory and environment cannot be independently bound",
+                    );
                 }
                 resources.push(resource);
                 if is_broad_command(&tokens) {

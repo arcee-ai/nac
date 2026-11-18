@@ -4336,37 +4336,40 @@ var wo = ({ checked: e, onChange: t, disabled: n = !1, children: r, className: i
 jo.Variant = ko, jo.Orientation = Ao;
 // src/app/atoms/subagent-transcript-card/index.tsx
 var Mo = /* @__PURE__ */ function(e) {
-	return e.Ready = "ready", e.Running = "running", e.Failed = "failed", e.NotFound = "not-found", e;
+	return e.Ready = "ready", e.Pending = "pending", e.Running = "running", e.Failed = "failed", e.NotFound = "not-found", e;
 }({}), No = {
 	ready: "bg-[var(--f-green)]",
+	pending: "bg-[var(--f-ink-5)]",
 	running: "bg-[var(--f-ink)] status-dot-pulse",
 	failed: "bg-[var(--f-red)]",
 	"not-found": "bg-[var(--f-ink-5)] opacity-60"
 }, Po = {
 	ready: "Ready",
+	pending: "Pending",
 	running: "Working…",
 	failed: "Failed",
 	"not-found": "No session found"
 }, Fo = {
 	ready: null,
+	pending: "pending",
 	running: "running",
 	failed: "failed",
 	"not-found": null
-}, Io = C("pointer-events-auto relative z-10 inline-flex h-7 shrink-0 items-center gap-0.5 rounded-pill pl-2.5 pr-1.5 type-meta-strong", "text-basic-secondary transition-colors duration-150 ease-out hover:bg-[var(--f-wash-2)] hover:text-basic-primary max-md:min-h-11", "outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus-outline)]"), Lo = ({ title: e, status: t, statusLabel: n, error: r, behavior: i, lineage: a, showBehaviorIcon: o, onOpen: s, sessionHref: c, onSessionLinkClick: l, className: u }) => {
-	let d = I(), f = t === "not-found", p = !f && s != null, m = f ? null : c || null, h = f ? void 0 : n, g = t === "failed" && r?.trim() || null, v = t === "failed" && h ? h.toLowerCase() : Fo[t], y = t === "ready" && o ? rt(i, a) : null, b = [
+}, Io = C("pointer-events-auto relative z-10 inline-flex h-7 shrink-0 items-center gap-0.5 rounded-pill pl-2.5 pr-1.5 type-meta-strong", "text-basic-secondary transition-colors duration-150 ease-out hover:bg-[var(--f-wash-2)] hover:text-basic-primary max-md:min-h-11", "outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus-outline)]"), Lo = ({ title: e, status: t, statusLabel: n, invocationLabel: r, currentSessionStatus: i, error: a, behavior: o, lineage: s, showBehaviorIcon: c, onOpen: l, sessionHref: u, onSessionLinkClick: d, className: f }) => {
+	let p = I(), m = t === "not-found", h = !m && l != null, g = m ? null : u || null, v = m ? void 0 : n, y = t === "failed" && a?.trim() || null, b = t === "failed" && v ? v.toLowerCase() : Fo[t], x = t === "ready" && c ? rt(o, s) : null, S = [
 		`Open ${e} in Subagents`,
-		y,
-		v
-	].filter(Boolean).join(", "), x = [y, h ?? Po[t]].filter(Boolean).join(" · ");
+		x,
+		b
+	].filter(Boolean).join(", "), w = [x, v ?? Po[t]].filter(Boolean).join(" · ");
 	return /* @__PURE__ */ B("div", {
-		title: f ? void 0 : e,
-		className: C("relative isolate flex w-[440px] max-w-full min-w-0 items-center gap-3 rounded-card border border-tertiary px-3.5 py-2.5", "bg-elevation-level-1 transition-colors duration-150 ease-out", p && "hover:border-secondary", "has-[>button:focus-visible]:ring-2 has-[>button:focus-visible]:ring-[var(--color-border-focus-outline)]", u),
+		title: m ? void 0 : e,
+		className: C("relative isolate flex w-[440px] max-w-full min-w-0 items-center gap-3 rounded-card border border-tertiary px-3.5 py-2.5", "bg-elevation-level-1 transition-colors duration-150 ease-out", h && "hover:border-secondary", "has-[>button:focus-visible]:ring-2 has-[>button:focus-visible]:ring-[var(--color-border-focus-outline)]", f),
 		children: [
-			p ? /* @__PURE__ */ z("button", {
+			h ? /* @__PURE__ */ z("button", {
 				type: "button",
-				"aria-label": b,
-				"aria-describedby": g ? d : void 0,
-				onClick: s,
+				"aria-label": S,
+				"aria-describedby": y ? p : void 0,
+				onClick: l,
 				className: "absolute inset-0 rounded-[inherit] outline-none hover:bg-[var(--f-wash-1)] active:bg-[var(--f-wash-2)]"
 			}) : null,
 			/* @__PURE__ */ z("span", {
@@ -4375,25 +4378,33 @@ var Mo = /* @__PURE__ */ function(e) {
 				children: /* @__PURE__ */ z("span", { className: C("block size-2 rounded-pill", No[t]) })
 			}),
 			/* @__PURE__ */ B("div", {
-				className: C("relative flex min-w-0 flex-1 flex-col", p && "pointer-events-none"),
+				className: C("relative flex min-w-0 flex-1 flex-col", h && "pointer-events-none"),
 				children: [/* @__PURE__ */ z("span", {
-					className: C("truncate type-label", f ? "text-basic-muted" : "text-basic-primary"),
-					children: f ? "Not found" : e
+					className: C("truncate type-label", m ? "text-basic-muted" : "text-basic-primary"),
+					children: m ? "Not found" : e
 				}), /* @__PURE__ */ B("span", {
-					title: g ?? void 0,
-					className: C("truncate type-meta", t === "failed" ? "text-error-primary" : "text-basic-tertiary"),
-					children: [/* @__PURE__ */ z("span", { children: x }), g ? /* @__PURE__ */ B(se, { children: [/* @__PURE__ */ z("span", {
-						"aria-hidden": !0,
-						children: " · "
-					}), /* @__PURE__ */ z("span", {
-						id: d,
-						children: g
-					})] }) : null]
+					title: y ?? void 0,
+					className: C("min-w-0 break-words type-meta", t === "failed" ? "text-error-primary" : "text-basic-tertiary"),
+					children: [
+						r ? /* @__PURE__ */ B("span", { children: [
+							r,
+							" · ",
+							i ? "Current: " : ""
+						] }) : null,
+						/* @__PURE__ */ z("span", { children: w }),
+						y ? /* @__PURE__ */ B(se, { children: [/* @__PURE__ */ z("span", {
+							"aria-hidden": !0,
+							children: " · "
+						}), /* @__PURE__ */ z("span", {
+							id: p,
+							children: y
+						})] }) : null
+					]
 				})]
 			}),
-			m ? /* @__PURE__ */ B("a", {
-				href: m,
-				onClick: l,
+			g ? /* @__PURE__ */ B("a", {
+				href: g,
+				onClick: d,
 				"aria-label": `Go to session ${e}`,
 				className: Io,
 				children: [/* @__PURE__ */ z("span", { children: "Go to session" }), /* @__PURE__ */ z(_, {
@@ -4619,14 +4630,14 @@ function cs() {
 // src/app/lib/markdownChunk.ts
 var ls = null, us = !1;
 function ds() {
-	return ls ??= import("./markdown-renderer-B_t2BbJw.js").then((e) => e.t).then((e) => (us = !0, e)), ls;
+	return ls ??= import("./markdown-renderer-DPCkqi7m.js").then((e) => e.t).then((e) => (us = !0, e)), ls;
 }
 function fs() {
 	return us;
 }
 // src/app/lib/markdown.tsx
 var ps = te(ds);
-function ms({ children: e, streaming: t = !1, className: n }) {
+function ms({ children: e, streaming: t = !1, className: n, taskReferences: r = !1 }) {
 	return /* @__PURE__ */ z("div", {
 		className: C("chat-response markdown markdown-content text-basic-primary w-full", t && "streaming", n),
 		children: /* @__PURE__ */ z(ee, {
@@ -4636,6 +4647,7 @@ function ms({ children: e, streaming: t = !1, className: n }) {
 			}),
 			children: /* @__PURE__ */ z(ps, {
 				streaming: t,
+				taskReferences: r,
 				children: e
 			})
 		})

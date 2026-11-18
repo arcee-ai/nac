@@ -773,6 +773,7 @@ export function buildTranscript(
               turnCancelled: assistantTurnCancelled(messages, index, RUN_CANCELLED_MARKER),
               occurrence: snapshot?.tool_call_occurrences?.[index],
               ambiguousResult: repeatedInBatch || ambiguousResults.has(call.id),
+              unboundEvents: name === "subagent" || name === "orchestrator_launch",
             }),
           });
         } else {

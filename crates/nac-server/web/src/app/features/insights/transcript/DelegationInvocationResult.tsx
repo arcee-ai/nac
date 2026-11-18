@@ -56,7 +56,7 @@ function InvocationOutput({ output, truncated }: { output: string; truncated: bo
       {outcome ? (
         <div className="flex flex-col gap-2 whitespace-pre-wrap break-words type-body-chrome">
           <p>
-            Generation {outcome.generation} · {outcome.status}
+            Response reports Generation {outcome.generation} · {outcome.status}
           </p>
           {outcome.fields.map(([label, value]) => (
             <p key={label}>
@@ -67,7 +67,7 @@ function InvocationOutput({ output, truncated }: { output: string; truncated: bo
           {outcome.fields.length === 0 ? (
             <p>
               {outcome.status === "Running"
-                ? "Work is running in the background. Completion will be delivered automatically."
+                ? "The response reports background work; completion may be delivered separately."
                 : "No result details were retained."}
             </p>
           ) : null}
@@ -120,7 +120,7 @@ export function DelegationInvocationResult({
   const { data, refetch, isError, isPending, isFetching } = useToolCallContent(
     sessionId,
     { id: tool.callId, blockKey, occurrence: tool.occurrence },
-    open,
+    open && !!tool.occurrence && !tool.resultAmbiguous,
     awaitingResult,
   );
   const wasAwaiting = useRef(awaitingResult);
@@ -128,7 +128,7 @@ export function DelegationInvocationResult({
   useEffect(() => {
     if (wasAwaiting.current && !awaitingResult && open) checkAfterSettlement.current = true;
     wasAwaiting.current = awaitingResult;
-    if (!open) {
+    if (!open || !tool.occurrence || tool.resultAmbiguous) {
       checkAfterSettlement.current = false;
       return;
     }
@@ -136,7 +136,17 @@ export function DelegationInvocationResult({
     checkAfterSettlement.current = false;
     // Do not retry redaction or transport failures without the reader's request.
     if (!isError && data?.output === null) void refetch();
-  }, [awaitingResult, open, isFetching, isPending, isError, data?.output, refetch]);
+  }, [
+    awaitingResult,
+    open,
+    isFetching,
+    isPending,
+    isError,
+    data?.output,
+    refetch,
+    tool.resultAmbiguous,
+    tool.occurrence,
+  ]);
   return (
     <details
       className="min-w-0 type-meta text-basic-secondary"
@@ -147,7 +157,11 @@ export function DelegationInvocationResult({
       </summary>
       {open ? (
         <div className="mt-2 min-w-0">
-          {isError ? (
+          {tool.resultAmbiguous ? (
+            <p>Invocation result unavailable because this call is ambiguous.</p>
+          ) : !tool.occurrence ? (
+            <p>Invocation result unavailable without a retained occurrence.</p>
+          ) : isError ? (
             <p role="alert">
               Could not load this invocation result.{" "}
               <button type="button" className="underline" onClick={() => void refetch()}>

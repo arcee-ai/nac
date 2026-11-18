@@ -134,6 +134,26 @@ async fn rendered_selection_policy_is_bound_to_launch_and_survives_exited_archiv
     manager.remove_all().await.unwrap();
 }
 
+async fn wait_for_archival(manager: &TerminalManager, id: &str) {
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            manager.user_terminal_status(id).await.unwrap();
+            if manager
+                .completed_sessions
+                .lock()
+                .await
+                .iter()
+                .any(|(name, _)| name == id)
+            {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("terminal output should settle and archive");
+}
+
 #[tokio::test]
 async fn rendered_selection_stale_pruned_restart_wrong_owner_and_non_user_sources_are_opaque() {
     let mut manager = TerminalManager::for_direct();
@@ -151,8 +171,11 @@ async fn rendered_selection_stale_pruned_restart_wrong_owner_and_non_user_source
         assert_eq!(result, Err(TerminalSelectionError::Unavailable));
     }
     manager.terminate_user_terminal(&id).await.unwrap();
+    wait_for_archival(&manager, &id).await;
     let replacement = launch(&manager, &["replacement-secret"]).await;
-    manager.terminate_user_terminal(&replacement).await.unwrap(); // Existing bounded history prunes the old policy.
+    manager.terminate_user_terminal(&replacement).await.unwrap();
+    // Archival after collector EOF applies the existing bounded history limit.
+    wait_for_archival(&manager, &replacement).await;
     assert_eq!(
         manager.preview_user_selection(&id, "secret").await,
         Err(TerminalSelectionError::Unavailable)

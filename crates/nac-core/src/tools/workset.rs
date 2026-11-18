@@ -159,18 +159,24 @@ pub async fn execute_define(args: Value, runtime: &ToolRuntime) -> ToolResult {
             is_error: false,
             execution_duration_ms: None,
             execution_duration_excludes_authorization: false,
+            delegation_outcome: None,
+            delegation_summary: None,
         },
         Ok(Err(error)) => ToolResult {
             content: (format!("Error saving workset '{id}': {error}")).into(),
             is_error: true,
             execution_duration_ms: None,
             execution_duration_excludes_authorization: false,
+            delegation_outcome: None,
+            delegation_summary: None,
         },
         Err(join_error) => ToolResult {
             content: (format!("Internal error saving workset '{id}': {join_error}")).into(),
             is_error: true,
             execution_duration_ms: None,
             execution_duration_excludes_authorization: false,
+            delegation_outcome: None,
+            delegation_summary: None,
         },
     };
     result.executed_since(started)
@@ -200,24 +206,32 @@ pub async fn execute_read(args: Value, runtime: &ToolRuntime) -> ToolResult {
             is_error: false,
             execution_duration_ms: None,
             execution_duration_excludes_authorization: false,
+            delegation_outcome: None,
+            delegation_summary: None,
         },
         Ok(Ok(None)) => ToolResult {
             content: (format!("Workset '{id}' does not exist in this session.")).into(),
             is_error: true,
             execution_duration_ms: None,
             execution_duration_excludes_authorization: false,
+            delegation_outcome: None,
+            delegation_summary: None,
         },
         Ok(Err(error)) => ToolResult {
             content: (format!("Error reading workset '{id}': {error}")).into(),
             is_error: true,
             execution_duration_ms: None,
             execution_duration_excludes_authorization: false,
+            delegation_outcome: None,
+            delegation_summary: None,
         },
         Err(join_error) => ToolResult {
             content: (format!("Internal error reading workset '{id}': {join_error}")).into(),
             is_error: true,
             execution_duration_ms: None,
             execution_duration_excludes_authorization: false,
+            delegation_outcome: None,
+            delegation_summary: None,
         },
     };
     result.executed_since(started)
@@ -242,18 +256,24 @@ pub async fn execute_list(_args: Value, runtime: &ToolRuntime) -> ToolResult {
             is_error: false,
             execution_duration_ms: None,
             execution_duration_excludes_authorization: false,
+            delegation_outcome: None,
+            delegation_summary: None,
         },
         Ok(Err(error)) => ToolResult {
             content: (format!("Error listing worksets: {error}")).into(),
             is_error: true,
             execution_duration_ms: None,
             execution_duration_excludes_authorization: false,
+            delegation_outcome: None,
+            delegation_summary: None,
         },
         Err(join_error) => ToolResult {
             content: (format!("Internal error listing worksets: {join_error}")).into(),
             is_error: true,
             execution_duration_ms: None,
             execution_duration_excludes_authorization: false,
+            delegation_outcome: None,
+            delegation_summary: None,
         },
     };
     result.executed_since(started)
@@ -276,6 +296,8 @@ fn require_session(runtime: &ToolRuntime) -> Result<&str, ToolResult> {
         is_error: true,
         execution_duration_ms: None,
         execution_duration_excludes_authorization: false,
+        delegation_outcome: None,
+        delegation_summary: None,
     })
 }
 
@@ -288,6 +310,8 @@ fn optional_string(args: &Value, key: &str) -> Result<Option<String>, ToolResult
             is_error: true,
             execution_duration_ms: None,
             execution_duration_excludes_authorization: false,
+            delegation_outcome: None,
+            delegation_summary: None,
         }),
     }
 }
@@ -299,6 +323,8 @@ fn parse_items(value: Option<&Value>) -> Result<Vec<WorksetItemDefinition>, Tool
             is_error: true,
             execution_duration_ms: None,
             execution_duration_excludes_authorization: false,
+            delegation_outcome: None,
+            delegation_summary: None,
         });
     };
     let Some(items) = value.as_array() else {
@@ -307,6 +333,8 @@ fn parse_items(value: Option<&Value>) -> Result<Vec<WorksetItemDefinition>, Tool
             is_error: true,
             execution_duration_ms: None,
             execution_duration_excludes_authorization: false,
+            delegation_outcome: None,
+            delegation_summary: None,
         });
     };
 
@@ -343,6 +371,8 @@ fn require_item_str(value: &Value, key: &str) -> Result<String, ToolResult> {
             is_error: true,
             execution_duration_ms: None,
             execution_duration_excludes_authorization: false,
+            delegation_outcome: None,
+            delegation_summary: None,
         })
 }
 
@@ -353,6 +383,8 @@ fn require_string_array(value: &Value, key: &str) -> Result<Vec<String>, ToolRes
             is_error: true,
             execution_duration_ms: None,
             execution_duration_excludes_authorization: false,
+            delegation_outcome: None,
+            delegation_summary: None,
         });
     };
     let Some(items) = value.as_array() else {
@@ -361,6 +393,8 @@ fn require_string_array(value: &Value, key: &str) -> Result<Vec<String>, ToolRes
             is_error: true,
             execution_duration_ms: None,
             execution_duration_excludes_authorization: false,
+            delegation_outcome: None,
+            delegation_summary: None,
         });
     };
     let mut parsed = Vec::with_capacity(items.len());
@@ -371,6 +405,8 @@ fn require_string_array(value: &Value, key: &str) -> Result<Vec<String>, ToolRes
                 is_error: true,
                 execution_duration_ms: None,
                 execution_duration_excludes_authorization: false,
+                delegation_outcome: None,
+                delegation_summary: None,
             });
         };
         parsed.push(value.to_string());

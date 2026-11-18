@@ -546,6 +546,48 @@ describe.each<SessionBehavior>(["direct", "direct-with-orchestrator"])(
       expect(JSON.stringify(settled)).not.toContain("RAW_SECRET_RESULT");
     });
 
+    it("does not attach unbound lifecycle facts to a live or durable subagent invocation", () => {
+      const call = genericToolCall("subagent", "child-call", '{"prompt":"RAW_SECRET"}');
+      const base = directSnapshot(
+        [
+          { role: "user", content: "delegate" },
+          { role: "assistant", content: null, tool_calls: [call] },
+        ],
+        behavior,
+      );
+      base.active_run = { run_id: "run-child", prompt_preview: "delegate", started_at_epoch_ms: 1 };
+      const start = primaryStart("child-call", "subagent", "Review store");
+      const finish = {
+        ...primaryFinish("child-call", "subagent"),
+        delegation_outcome: "background_continued",
+        delegation_summary: "Review store",
+        content_preview: "Instructions sent to subagent",
+      } as AgentEvent;
+      expect(toolDetails(buildTranscript(base, {}, {}, [start]))[0]).toMatchObject({
+        label: "Subagent request outcome unavailable",
+        summary: null,
+      });
+      const settled = toolDetails(buildTranscript(base, {}, {}, [start, finish]));
+      expect(settled).toHaveLength(1);
+      expect(settled[0]).toMatchObject({
+        label: "Subagent request outcome unavailable",
+        summary: null,
+      });
+      expect(settled[0]).not.toHaveProperty("delegationOutcome");
+      const reloaded = directSnapshot(
+        [
+          ...base.messages,
+          { role: "tool", tool_call_id: "child-call", content: "RAW_SECRET_RESULT" },
+        ],
+        behavior,
+      );
+      reloaded.primary_tool_events = [start, finish];
+      const retained = toolDetails(buildTranscript(reloaded, {}));
+      expect(retained[0]).toMatchObject({ status: "unknown", summary: null });
+      expect(retained[0]).not.toHaveProperty("delegationOutcome");
+      expect(JSON.stringify(retained)).not.toContain("RAW_SECRET");
+    });
+
     it("uses a bounded image fallback and does not render base64 payloads", () => {
       const call = genericToolCall("mcp__vision__inspect", "call-image", "malformed secret");
       const turns = buildTranscript(

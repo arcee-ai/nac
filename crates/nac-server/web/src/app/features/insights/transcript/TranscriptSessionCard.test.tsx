@@ -58,7 +58,14 @@ function entry(
     },
   });
   if (childId) presentation.spawnedSessionId = childId;
+  presentation.occurrence = "log:parent:store:1:digest:2";
   presentation.statusLabel = status === "pending" ? "Awaiting approval" : "Failed";
+  if (name === "subagent" && status === "pending")
+    presentation.label = "Subagent awaiting approval";
+  if (name === "subagent" && status === "ready") {
+    presentation.status = "success";
+    presentation.label = "Subagent request finished";
+  }
   return {
     kind: "session",
     id: "launch",
@@ -146,11 +153,11 @@ it("shares a target only after the parent owns the child", async () => {
   expect(screen.queryByRole("button", { name: /Open .* in Subagents/ })).toBeNull();
   resolveChildren([child]);
   await waitFor(() =>
-    expect(screen.getAllByRole("button", { name: "Open Known child in Subagents" })).toHaveLength(
-      1,
-    ),
+    expect(
+      screen.getAllByRole("button", { name: "Open Audit persistence in Subagents" }),
+    ).toHaveLength(1),
   );
-  expect(screen.getByText("Subagent · Start · Failed")).toBeTruthy();
+  expect(screen.getByText("Subagent request failed")).toBeTruthy();
 });
 
 it.each(["missing", "failed"])(
@@ -186,11 +193,14 @@ it.each(["subagent", "orchestrator_launch"] as const)(
   async (name) => {
     const launch = entry(name);
     mount(launch);
-    const diagnostic = screen.getByText(launch.presentation.resultPreview!, {
-      exact: true,
-    });
-    expect(diagnostic.textContent).toBe(launch.presentation.resultPreview);
-    expect([...diagnostic.textContent!].length).toBeLessThanOrEqual(180);
+    if (name === "subagent") {
+      expect(launch.presentation.resultPreview).toBeNull();
+      expect(screen.getByText("Subagent request failed")).toBeTruthy();
+    } else {
+      const diagnostic = screen.getByText(launch.presentation.resultPreview!, { exact: true });
+      expect(diagnostic.textContent).toBe(launch.presentation.resultPreview);
+      expect([...diagnostic.textContent!].length).toBeLessThanOrEqual(180);
+    }
     expect(document.body.textContent).not.toMatch(/RAW_SECRET|RAW_RESULT_BODY/);
     expect(screen.queryByRole("link")).toBeNull();
     expect(screen.queryByRole("button")).toBeNull();
@@ -204,7 +214,7 @@ it("keeps the failure status readable when no preview was retained", () => {
   const launch = entry();
   launch.presentation.resultPreview = null;
   mount(launch, { interactive: false });
-  expect(screen.getByText("Subagent · Start · Failed", { exact: true })).toBeTruthy();
+  expect(screen.getByText("Subagent request failed", { exact: true })).toBeTruthy();
   expect(screen.queryByRole("link")).toBeNull();
   expect(screen.queryByRole("button")).toBeNull();
 });
@@ -215,10 +225,12 @@ it.each(["pending", "failed"] as const)(
     mount(entry("subagent", status, "child"), { children: [child] });
     expect(
       screen.getByText(
-        status === "pending" ? "Subagent · Start · Awaiting approval" : "Subagent · Start · Failed",
+        status === "pending" ? "Subagent awaiting approval" : "Subagent request failed",
       ),
     ).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Open Known child in Subagents" })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Open Audit persistence in Subagents" }),
+    ).toBeTruthy();
   },
 );
 
@@ -229,9 +241,50 @@ it("keeps a successful continuation on the child's live status", () => {
   expect(listChildren).not.toHaveBeenCalled();
 });
 
+it("refreshes a cached completed child while an unbound invocation may still settle", async () => {
+  const invocation = entry("subagent", "ready", "child");
+  invocation.presentation.status = "unknown";
+  invocation.presentation.statusLabel = "Outcome unavailable";
+  invocation.presentation.inventoryMayChange = true;
+  listChildren.mockResolvedValue([{ ...child, status: "running", generation: 2 }]);
+  mount(invocation, { children: [child] });
+  await waitFor(() => expect(listChildren).toHaveBeenCalled());
+  await waitFor(() => expect(screen.getByText(/Current: Working/)).toBeTruthy());
+  expect(screen.getByText(/Outcome unavailable/)).toBeTruthy();
+});
+
+it("refreshes cached inventory for an active ambiguous delegation without enabling result lookup", async () => {
+  const invocation = entry("subagent", "ready", "child");
+  const ambiguous = presentToolCall({
+    call: { id: "duplicate", type: "function", function: { name: "subagent", arguments: "{}" } },
+    hasResult: false,
+    resultText: null,
+    resultHasImage: false,
+    active: true,
+    turnCancelled: false,
+    ambiguousResult: true,
+    unboundEvents: true,
+  });
+  invocation.presentation = { ...ambiguous, spawnedSessionId: "child" };
+  expect(ambiguous.resultMayBePending).toBe(false);
+  expect(ambiguous.inventoryMayChange).toBe(true);
+  const getContent = vi.spyOn(api, "getToolCallContent");
+  listChildren.mockResolvedValue([{ ...child, status: "running", generation: 2 }]);
+  mount(invocation, { children: [child] });
+  await waitFor(() => expect(listChildren).toHaveBeenCalled());
+  await waitFor(() => expect(screen.getByText(/Current: Working/)).toBeTruthy());
+  expect(screen.getByText(/Outcome unavailable/)).toBeTruthy();
+  fireEvent.click(screen.getByText("Invocation result"));
+  expect(
+    await screen.findByText("Invocation result unavailable because this call is ambiguous."),
+  ).toBeTruthy();
+  expect(getContent).not.toHaveBeenCalled();
+  getContent.mockRestore();
+});
+
 it("offers a panel target without navigating away from the parent", () => {
   mount(entry("subagent", "ready", "child"), { children: [child] });
-  fireEvent.click(screen.getByRole("button", { name: "Open Known child in Subagents" }));
+  fireEvent.click(screen.getByRole("button", { name: "Open Audit persistence in Subagents" }));
   expect(screen.getByRole("status", { name: "Route" }).textContent).toBe(
     "/session/parent/insights",
   );
@@ -257,10 +310,17 @@ it("retains the original invocation result when the child advances or disappears
   await waitFor(() => expect(screen.getByText(/first result/)).toBeTruthy());
   client.setQueryData(queryKeys.traditionalChildren("parent"), []);
   await waitFor(() =>
-    expect(screen.queryByRole("button", { name: "Open Known child in Subagents" })).toBeNull(),
+    expect(
+      screen.queryByRole("button", { name: "Open Audit persistence in Subagents" }),
+    ).toBeNull(),
   );
   expect(screen.getByText(/first result/)).toBeTruthy();
-  expect(getContent).toHaveBeenCalledWith("parent", "launch", expect.any(AbortSignal));
+  expect(getContent).toHaveBeenCalledWith(
+    "parent",
+    "launch",
+    expect.any(AbortSignal),
+    "log:parent:store:1:digest:2",
+  );
   getContent.mockRestore();
 });
 
@@ -327,7 +387,7 @@ it("keeps polling when a settled launch's child has not appeared in the first li
     () =>
       expect(
         screen.getByRole("button", {
-          name: "Open New orchestrator in Subagents",
+          name: "Open Audit persistence in Subagents",
         }),
       ).toBeTruthy(),
     { timeout: 2500 },
@@ -342,4 +402,130 @@ it("stops polling after a delegation list fetch fails", async () => {
   await new Promise((resolve) => setTimeout(resolve, 1200));
   expect(listOrchestrators).toHaveBeenCalledTimes(1);
   expect(screen.queryByText("Not found")).toBeNull();
+});
+
+it("never displays a raw inventory description in a traditional child target", () => {
+  mount(entry("subagent", "ready", "child"), {
+    children: [{ ...child, description: "RAW_MANAGED_EXACT_SECRET" }],
+  });
+  expect(document.body.textContent).not.toContain("RAW_MANAGED_EXACT_SECRET");
+  expect(screen.getByRole("button", { name: "Open Audit persistence in Subagents" })).toBeTruthy();
+});
+
+it("keeps a trusted historical outcome separate from the current child status", () => {
+  const invocation = entry("subagent", "ready", "child");
+  invocation.presentation.label = "Instructions sent to subagent";
+  invocation.presentation.delegationOutcome = "background_continued";
+  mount(invocation, { children: [{ ...child, status: "running" }] });
+  expect(screen.getByText("Instructions sent to subagent · Current: Working…")).toBeTruthy();
+});
+
+it.each([
+  ["pending", "Subagent awaiting approval", "Awaiting approval"],
+  ["failed", "Subagent request failed", "Failed"],
+] as const)("shows the %s request status once", (status, invocationLabel, statusLabel) => {
+  const invocation = entry("subagent", status, "child");
+  invocation.presentation.label = invocationLabel;
+  invocation.presentation.statusLabel = statusLabel;
+  mount(invocation, { children: [child] });
+  expect(screen.getByText(invocationLabel, { exact: true })).toBeTruthy();
+  expect(screen.queryByText(statusLabel, { exact: true })).toBeNull();
+  expect(document.body.textContent).not.toContain(`${invocationLabel} ·`);
+  expect(screen.queryByText(/Current:/)).toBeNull();
+});
+
+it("does not repeat a generic rejection as its diagnostic", () => {
+  const invocation = entry("subagent", "failed");
+  invocation.presentation.label = "Subagent request failed";
+  invocation.presentation.resultPreview = "Subagent request failed";
+  mount(invocation);
+  expect(screen.getAllByText("Subagent request failed", { exact: true })).toHaveLength(1);
+});
+
+it("distinguishes a confirmed child failure from a rejected request", () => {
+  const invocation = entry("subagent", "failed");
+  invocation.presentation.label = "Subagent failed";
+  invocation.presentation.delegationOutcome = "failed";
+  mount(invocation);
+  expect(screen.getByText("Subagent failed", { exact: true })).toBeTruthy();
+  expect(screen.queryByText("Subagent request failed")).toBeNull();
+});
+
+it("retains a distinct rejection diagnostic", () => {
+  const invocation = entry("subagent", "failed");
+  invocation.presentation.label = "Subagent request failed";
+  invocation.presentation.resultPreview = "Permission denied";
+  mount(invocation);
+  expect(screen.getByText("Permission denied")).toBeTruthy();
+});
+
+it("keeps a successful continuation on the child's live status", () => {
+  mount(entry("subagent", "ready", "child"), { children: [child] });
+  expect(screen.queryByText("Failed")).toBeNull();
+  expect(screen.queryByRole("note")).toBeNull();
+  expect(listChildren).not.toHaveBeenCalled();
+});
+
+it("does not imply work before a pending invocation starts", () => {
+  const invocation = entry("subagent", "running");
+  invocation.presentation.status = "pending";
+  invocation.presentation.statusLabel = "Pending";
+  invocation.presentation.label = "Subagent pending";
+  mount(invocation);
+  expect(screen.getByText("Subagent pending", { exact: true })).toBeTruthy();
+  expect(screen.queryByText("Pending", { exact: true })).toBeNull();
+  expect(screen.queryByText("Working…")).toBeNull();
+});
+
+it("does not imply child work from an unvalidated legacy start", () => {
+  const invocation = entry("subagent", "running");
+  invocation.presentation.status = "running";
+  invocation.presentation.statusLabel = "Running";
+  invocation.presentation.label = "Subagent request in progress";
+  mount(invocation);
+  expect(screen.getByText("Subagent request in progress")).toBeTruthy();
+  expect(screen.queryByText("Working…")).toBeNull();
+});
+
+it.each(["ready", "failed", "pending"] as const)(
+  "does not render a raw child description from inventory in %s state",
+  (status) => {
+    const invocation = entry("subagent", status, "child");
+    invocation.presentation.label = "Subagent request finished";
+    mount(invocation, { children: [{ ...child, description: "RAW_MANAGED_EXACT_SECRET" }] });
+    expect(document.body.textContent).not.toContain("RAW_MANAGED_EXACT_SECRET");
+    expect(
+      screen.getByRole("button", { name: "Open Audit persistence in Subagents" }),
+    ).toBeTruthy();
+  },
+);
+
+it("keeps the generic title when a legacy invocation has no sanitized summary", () => {
+  const invocation = entry("subagent", "ready", "child");
+  invocation.title = "Subagent";
+  invocation.presentation.summary = null;
+  mount(invocation, { children: [{ ...child, description: "RAW_MANAGED_EXACT_SECRET" }] });
+  expect(document.body.textContent).not.toContain("RAW_MANAGED_EXACT_SECRET");
+  expect(screen.getByRole("button", { name: "Open Subagent in Subagents" })).toBeTruthy();
+});
+
+it("keeps a continuation without a verified description generic", () => {
+  const invocation = entry("subagent", "ready", "child");
+  invocation.title = "Subagent";
+  invocation.presentation.summary = null;
+  invocation.presentation.delegationIntent = "background_continuation";
+  mount(invocation, { children: [{ ...child, description: "RAW_MANAGED_EXACT_SECRET" }] });
+  expect(document.body.textContent).not.toContain("RAW_MANAGED_EXACT_SECRET");
+  expect(screen.getByRole("button", { name: "Open Subagent in Subagents" })).toBeTruthy();
+});
+
+it("keeps the historical invocation separate from the child's newer status", () => {
+  const invocation = entry("subagent", "ready", "child");
+  invocation.presentation.label = "Instructions sent to subagent";
+  invocation.presentation.resultPreview = "Instructions sent to subagent";
+  mount(invocation, { children: [{ ...child, status: "running", generation: 2 }] });
+  expect(screen.getByText("Instructions sent to subagent · Current: Working…")).toBeTruthy();
+  fireEvent.click(screen.getByText("Invocation details"));
+  expect(screen.getByText("Instructions sent to subagent", { selector: "pre" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Open Audit persistence in Subagents" })).toBeTruthy();
 });

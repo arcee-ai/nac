@@ -1,6 +1,7 @@
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import {
   Suspense,
+  createContext,
   isValidElement,
   memo,
   use,
@@ -27,6 +28,8 @@ import type { RunError } from "@/app/lib/providerError";
 import { routes, sessionIdFromPath } from "@/app/lib/routes";
 import { classifyMarkdownHref, markdownUrlTransform } from "@/app/lib/workspaceLink";
 import { useToast } from "@/app/providers/ToastProvider";
+import { MarkdownTaskReference } from "@/app/features/task-launches/MarkdownTaskReference";
+import { taskReferenceId } from "@/app/features/task-launches/taskReference";
 
 import { queryKeys } from "@/app/services/queries";
 
@@ -123,7 +126,10 @@ interface MarkdownRendererProps {
   children: string;
   /** Fade newly painted prose while the turn is still streaming. */
   streaming?: boolean;
+  taskReferences?: boolean;
 }
+
+const TaskReferencesContext = createContext(false);
 
 /**
  * Chat links that point at workspace files. On a local session, ask nac-web to
@@ -132,6 +138,7 @@ interface MarkdownRendererProps {
  * hash route, and land on the homescreen.
  */
 function MarkdownLink({ href, children, ...props }: ComponentPropsWithoutRef<"a">) {
+  const taskReferences = use(TaskReferencesContext);
   const { selectRevision, selectFileListing, selectFile, revealSidePanel } =
     useNativeRuntime().stores.sessionLayoutStore;
 
@@ -151,6 +158,14 @@ function MarkdownLink({ href, children, ...props }: ComponentPropsWithoutRef<"a"
     snapshot?.metadata.workspace_host_path,
     snapshot?.metadata.cwd,
   ]);
+
+  const taskId = taskReferenceId(href);
+  if (taskId && taskReferences)
+    return (
+      <MarkdownTaskReference key={taskId} id={taskId}>
+        {children}
+      </MarkdownTaskReference>
+    );
 
   const openInFilesPanel = (path: string) => {
     if (!sessionId) return;
@@ -370,22 +385,25 @@ function mayDefine(source: string): boolean {
 const MarkdownRenderer = memo(function MarkdownRenderer({
   children,
   streaming = false,
+  taskReferences = false,
 }: MarkdownRendererProps) {
   perfRender("Markdown");
   const [streamed, setStreamed] = useState(streaming);
   if (streaming && !streamed) setStreamed(true);
   const blocks = streaming || (streamed && !mayDefine(children));
   return (
-    <PerfProfiler id="markdown">
-      {blocks ? (
-        splitMarkdownBlocks(children).map((source, index) => (
-          // Blocks are append-only, so their position is their identity.
-          <StreamedBlock key={index} source={source} />
-        ))
-      ) : (
-        <Parsed source={children} streaming={false} />
-      )}
-    </PerfProfiler>
+    <TaskReferencesContext value={taskReferences}>
+      <PerfProfiler id="markdown">
+        {blocks ? (
+          splitMarkdownBlocks(children).map((source, index) => (
+            // Blocks are append-only, so their position is their identity.
+            <StreamedBlock key={index} source={source} />
+          ))
+        ) : (
+          <Parsed source={children} streaming={false} />
+        )}
+      </PerfProfiler>
+    </TaskReferencesContext>
   );
 });
 

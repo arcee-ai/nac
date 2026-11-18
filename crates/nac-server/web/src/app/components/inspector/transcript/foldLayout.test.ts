@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { InsightSegment, ModelTurnItem } from "@/app/features/insights/model/types";
 
 import { formatWorkDuration, layoutModelTurn, settledFoldLabel, workSentence } from "./foldLayout";
-import { liveStepLabel } from "./stepLabels";
+import { liveStepLabel, liveTurnLabel, stepLabel } from "./stepLabels";
 
 function tool(
   key: string,
@@ -140,6 +140,26 @@ describe("work fold layout", () => {
 });
 
 describe("live status line", () => {
+  it("uses validated intent for a partitioned subagent session", () => {
+    const segment = tool("child", "subagent", "spawn-agent", "Review store", "running");
+    if (segment.kind !== "tool" || !segment.presentation) throw new Error("expected tool");
+    const session: ModelTurnItem = {
+      kind: "session",
+      id: "child",
+      action: "spawn-agent",
+      rowKey: null,
+      title: "Review store",
+      status: "running",
+      presentation: segment.presentation,
+    };
+    session.presentation.label = "Subagent request in progress";
+    expect(liveTurnLabel([session])).toBe("Subagent request in progress");
+    session.presentation.label = "Starting subagent…";
+    expect(liveTurnLabel([session])).toBe("Starting subagent…");
+    session.status = "pending";
+    expect(liveTurnLabel([session])).toBe("Waiting for approval…");
+  });
+
   it("names the running step, the approval it waits on, or thinking between steps", () => {
     expect(liveStepLabel(tool("a", "exec_command", "run-command", "npm test", "running"))).toBe(
       "Running npm test…",
@@ -149,5 +169,24 @@ describe("live status line", () => {
     );
     expect(liveStepLabel(read("a", "src/a.ts"))).toBe("Thinking…");
     expect(liveStepLabel(undefined)).toBe("Thinking…");
+  });
+});
+
+describe("subagent work rows", () => {
+  it("uses the invocation's evidence-aware label and keeps the task summary", () => {
+    const segment = tool("child", "subagent", "spawn-agent", "Review store");
+    if (segment.kind !== "tool" || !segment.presentation) throw new Error("expected tool");
+    segment.presentation.label = "Instructions sent to subagent";
+    expect(stepLabel(segment)).toMatchObject({
+      verb: "Instructions sent to subagent",
+      argument: "Review store",
+    });
+    expect(workSentence([segment])).toBe("Made 1 subagent request");
+    segment.presentation.label = "Subagent started";
+    segment.presentation.delegationOutcome = "background_started";
+    expect(workSentence([segment])).toBe("Started 1 subagent");
+    segment.presentation.label = "Subagent request failed";
+    segment.presentation.status = "error";
+    expect(stepLabel(segment)).toMatchObject({ verb: "Subagent request failed", status: "failed" });
   });
 });

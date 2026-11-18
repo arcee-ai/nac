@@ -72,6 +72,9 @@ pub struct ToolResult {
     /// authorization span and supersedes the deadline's unadjusted wall clock
     /// only for finished-event duration. The result body remains unchanged.
     pub(crate) execution_duration_excludes_authorization: bool,
+    pub(crate) delegation_outcome: Option<crate::events::DelegationOutcome>,
+    /// Existing sanitized call summary, retained for the finish-event projection.
+    pub(crate) delegation_summary: Option<String>,
 }
 
 impl ToolResult {
@@ -81,6 +84,8 @@ impl ToolResult {
             is_error,
             execution_duration_ms: None,
             execution_duration_excludes_authorization: false,
+            delegation_outcome: None,
+            delegation_summary: None,
         }
     }
 
@@ -446,6 +451,8 @@ pub fn require_str(args: &Value, key: &str) -> Result<String, ToolResult> {
             is_error: true,
             execution_duration_ms: None,
             execution_duration_excludes_authorization: false,
+            delegation_outcome: None,
+            delegation_summary: None,
         })
 }
 
@@ -460,6 +467,8 @@ pub fn require_string_array(args: &Value, key: &str) -> Result<Vec<String>, Tool
             is_error: true,
             execution_duration_ms: None,
             execution_duration_excludes_authorization: false,
+            delegation_outcome: None,
+            delegation_summary: None,
         });
     };
 
@@ -471,6 +480,8 @@ pub fn require_string_array(args: &Value, key: &str) -> Result<Vec<String>, Tool
                 is_error: true,
                 execution_duration_ms: None,
                 execution_duration_excludes_authorization: false,
+                delegation_outcome: None,
+                delegation_summary: None,
             });
         };
         out.push(value.to_string());
@@ -525,6 +536,8 @@ pub async fn execute_tool_with_context(
                 is_error: true,
                 execution_duration_ms: None,
                 execution_duration_excludes_authorization: false,
+                delegation_outcome: None,
+                delegation_summary: None,
             };
         };
         return mcp_adapter::invoke(
@@ -564,6 +577,8 @@ pub async fn execute_tool_with_context(
             is_error: true,
             execution_duration_ms: None,
             execution_duration_excludes_authorization: false,
+            delegation_outcome: None,
+            delegation_summary: None,
         },
     }
 }

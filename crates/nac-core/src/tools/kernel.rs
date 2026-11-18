@@ -115,6 +115,8 @@ impl PermissionResource {
 pub struct ToolCallContext {
     pub call_id: Option<String>,
     pub thread_name: Option<String>,
+    /// Already-sanitized start-event summary, never raw model arguments.
+    pub(crate) presentation_key_arg: Option<String>,
     pub(crate) cancellation: Option<super::RunCancellation>,
     pub(crate) execution_timing: Option<Arc<Mutex<InvocationTiming>>>,
 }
@@ -269,6 +271,11 @@ pub trait NativeTool: Send + Sync + 'static {
 
     fn decode(&self, input: Value) -> Result<Self::Input, ToolResult>;
 
+    /// Only the native traditional-child owner may certify a sanitized summary.
+    fn certifies_delegation_summary(&self) -> bool {
+        false
+    }
+
     fn permission_resources(
         &self,
         input: &Self::Input,
@@ -308,6 +315,7 @@ impl ToolDescriptor {
 }
 
 trait PreparedInvocation: Send {
+    fn certifies_delegation_summary(&self) -> bool;
     fn permission_resources(&self) -> &[PermissionResource];
 
     fn timeout(&self) -> ToolTimeout;
@@ -371,6 +379,10 @@ struct PreparedNative<T: NativeTool> {
 }
 
 impl<T: NativeTool> PreparedInvocation for PreparedNative<T> {
+    fn certifies_delegation_summary(&self) -> bool {
+        self.tool.certifies_delegation_summary()
+    }
+
     fn permission_resources(&self) -> &[PermissionResource] {
         &self.resources
     }
@@ -451,6 +463,7 @@ impl PreparedToolCall {
         let call_context = ToolCallContext {
             call_id: context.call_id.clone(),
             thread_name: context.thread_name.clone(),
+            presentation_key_arg: context.presentation_key_arg.clone(),
             cancellation: Some(cancellation.clone()),
             execution_timing: context.execution_timing.clone(),
         };
@@ -466,7 +479,7 @@ impl PreparedToolCall {
                 let execution_elapsed = started.elapsed();
                 cancellation.cancel();
                 let cleanup_started = Instant::now();
-                match timeout.disposition {
+                let summary = match timeout.disposition {
                     ToolTimeoutDisposition::Settle => {
                         let settled = invocation.await;
                         if !settled.is_error
@@ -475,18 +488,21 @@ impl PreparedToolCall {
                         {
                             return settled;
                         }
+                        settled.delegation_summary
                     }
-                    ToolTimeoutDisposition::Bounded => drop(invocation),
+                    ToolTimeoutDisposition::Bounded => { drop(invocation); None }
                     ToolTimeoutDisposition::Delegated => unreachable!(),
-                }
-                timeout_result(name, timeout, execution_elapsed, cleanup_started.elapsed(), true)
+                };
+                let mut result = timeout_result(name, timeout, execution_elapsed, cleanup_started.elapsed(), true);
+                result.delegation_summary = summary;
+                result
             }
             result = &mut invocation => result,
             () = &mut deadline => {
                 let execution_elapsed = started.elapsed();
                 cancellation.cancel();
                 let cleanup_started = Instant::now();
-                match timeout.disposition {
+                let summary = match timeout.disposition {
                     ToolTimeoutDisposition::Settle => {
                         let settled = invocation.await;
                         if !settled.is_error
@@ -496,11 +512,14 @@ impl PreparedToolCall {
                         {
                             return settled;
                         }
+                        settled.delegation_summary
                     }
-                    ToolTimeoutDisposition::Bounded => drop(invocation),
+                    ToolTimeoutDisposition::Bounded => { drop(invocation); None }
                     ToolTimeoutDisposition::Delegated => unreachable!(),
-                }
-                timeout_result(name, timeout, execution_elapsed, cleanup_started.elapsed(), false)
+                };
+                let mut result = timeout_result(name, timeout, execution_elapsed, cleanup_started.elapsed(), false);
+                result.delegation_summary = summary;
+                result
             }
         }
     }
@@ -891,6 +910,34 @@ impl ToolSnapshot {
     ) -> ToolResult {
         match self.prepare(name, input, services) {
             Ok(mut prepared) => {
+                let verified_summary = (name == "subagent"
+                    && prepared.invocation.certifies_delegation_summary())
+                .then(|| context.presentation_key_arg.clone())
+                .flatten();
+                let mut result = async {
+                // This certifies only the already-redacted task summary. It is
+                // emitted after native decode and does not imply authorization.
+                if let (true, true, Some(call_id), Some(summary)) = (
+                    name == "subagent",
+                    prepared.invocation.certifies_delegation_summary(),
+                    context.call_id.as_ref(),
+                    context.presentation_key_arg.as_ref(),
+                ) {
+                    services
+                        .runtime
+                        .event_sink
+                        .emit_async(crate::events::AgentEvent::ToolCallStarted {
+                            thread_name: context.thread_name.clone(),
+                            call_id: call_id.clone(),
+                            name: name.to_string(),
+                            args_preview: String::new(),
+                            key_arg_preview: Some(summary.clone()),
+                            args_detail: None,
+                            delegation_intent: None,
+                            delegation_summary_verified: true,
+                        })
+                        .await;
+                }
                 let _admission = prepared.descriptor().admission;
                 if let Some(reason) = prepared
                     .permission_resources()
@@ -1040,6 +1087,11 @@ impl ToolSnapshot {
                         .saturating_sub(timing.authorization)
                         .as_millis() as u64
                 });
+                result
+                }.await;
+                if result.delegation_summary.is_none() {
+                    result.delegation_summary = verified_summary;
+                }
                 result
             }
             Err(error) => error,

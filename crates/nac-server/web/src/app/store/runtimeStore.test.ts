@@ -143,6 +143,79 @@ describe("canonical refresh classification", () => {
     expect(getRuntimeState().primaryToolEvents).toEqual([]);
   });
 
+  it("does not pair host-scoped worker finishes with primary calls sharing an ID", () => {
+    resetRuntime("session-a");
+    const start = {
+      type: "tool_call_started",
+      thread_name: null,
+      call_id: "shared",
+      name: "subagent",
+      args_preview: "",
+      key_arg_preview: "Review store",
+      delegation_summary_verified: true,
+    } as const;
+    applyEnvelope(envelope({ type: "agent", event: start }));
+    applyEnvelope(
+      envelope({
+        type: "agent",
+        event: {
+          type: "tool_call_finished",
+          thread_name: "host-worker",
+          call_id: "shared",
+          name: "subagent",
+          content_preview: "",
+          is_error: true,
+          completion_status: "timed_out",
+        },
+      }),
+    );
+    expect(getRuntimeState().primaryToolEvents).toEqual([start]);
+  });
+
+  it("coalesces repeated validated subagent progress without adding activity entries", () => {
+    resetRuntime("session-a");
+    const start = {
+      type: "tool_call_started",
+      thread_name: null,
+      call_id: "child-call",
+      name: "subagent",
+      args_preview: "safe",
+      key_arg_preview: "Review store",
+    } as const;
+    const progress = {
+      ...start,
+      args_preview: "",
+      key_arg_preview: "Review store",
+      delegation_intent: "background_launch",
+    } as const;
+    applyEnvelope(envelope({ type: "agent", event: start }));
+    const activityCount = getRuntimeState().events.length;
+    const verified = { ...start, delegation_summary_verified: true } as const;
+    applyEnvelope(envelope({ type: "agent", event: verified }));
+    expect(getRuntimeState().events).toHaveLength(activityCount);
+    expect(getRuntimeState().primaryToolEvents).toEqual([verified]);
+    applyEnvelope(envelope({ type: "agent", event: progress }));
+    applyEnvelope(envelope({ type: "agent", event: progress }));
+    expect(getRuntimeState().events).toHaveLength(activityCount);
+    expect(getRuntimeState().primaryToolEvents).toEqual([progress]);
+    applyEnvelope(
+      envelope({
+        type: "agent",
+        event: {
+          type: "tool_call_finished",
+          thread_name: null,
+          call_id: "child-call",
+          name: "subagent",
+          content_preview: "Subagent started in background",
+          is_error: false,
+          delegation_outcome: "background_started",
+          execution_duration_ms: 123,
+        },
+      }),
+    );
+    expect(getRuntimeState().primaryToolEvents).toHaveLength(2);
+  });
+
   it("surfaces bounded MCP observations in the event and worker log views", () => {
     resetRuntime("session-a");
     applyEnvelope(

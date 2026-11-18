@@ -18,6 +18,11 @@ pub(super) fn hard_shell_denial_inner(
         return Some(if name == "indirect stateful shell assignment" {
             "indirect stateful shell assignments are blocked because they can mutate dynamic-loader hooks without disclosing the target variable"
                 .to_string()
+        } else if name == "GIT_CONFIG" || name.starts_with("GIT_CONFIG_") {
+            "Git environment configuration is blocked because it can execute hidden commands"
+                .to_string()
+        } else if name.starts_with("GIT_") {
+            format!("Git environment override '{name}' is blocked because it can redirect repository resources")
         } else if matches!(name, "RSYNC_RSH" | "RSYNC_CONNECT_PROG") {
             "rsync executable environment hooks are blocked because they can conceal commands"
                 .to_string()
@@ -144,21 +149,55 @@ pub(super) fn hard_shell_denial_inner(
         return Some("filesystem formatting commands are blocked".to_string());
     }
     if command == "git" {
-        if git_alias_override(tokens) {
+        let Some(subcommand_index) = git_subcommand_index(tokens, 0) else {
+            return Some(
+                "Git global options or subcommand are unsupported or ambiguous".to_string(),
+            );
+        };
+        if git_unsafe_config_override(tokens, subcommand_index) {
             return Some(
                 "Git command-scoped configuration is blocked because it can execute hidden commands"
                     .to_string(),
             );
         }
-        let destructive = tokens
-            .iter()
-            .skip(1)
-            .any(|token| matches!(token.as_str(), "clean" | "reset" | "restore"));
-        let checkout = tokens.iter().skip(1).any(|token| token == "checkout");
-        if destructive || checkout {
+        let operation = tokens[subcommand_index].as_str();
+        if operation == "add" && git_add_operands(tokens, 0, subcommand_index).is_none() {
+            return Some(
+                "Git add options or pathspecs are unsupported for safe resource binding"
+                    .to_string(),
+            );
+        }
+        let args = &tokens[subcommand_index + 1..];
+        // An unknown operation can be a repository-defined alias. Preserve the
+        // prior hard boundary when its arguments contain a protected verb; the
+        // alias expansion cannot be classified from these tokens alone.
+        let simple_branch_creation = operation == "branch"
+            && args.len() == 1
+            && !args[0].is_empty()
+            && !args[0].starts_with('-');
+        if !git_known_operation(operation)
+            && !simple_branch_creation
+            && args
+                .iter()
+                .any(|arg| matches!(arg.as_str(), "clean" | "reset" | "restore" | "checkout"))
+        {
+            return Some("Git operation has unsupported or ambiguous nested arguments".to_string());
+        }
+        let simple_branch = operation == "checkout"
+            && args.len() == 2
+            && args[0] == "-b"
+            && !args[1].is_empty()
+            && !args[1].starts_with('-');
+        if simple_branch && git_checkout_has_alternate_target(tokens, subcommand_index) {
+            return Some("Git checkout branch creation with alternate repository or worktree options is unsupported".to_string());
+        }
+        if matches!(operation, "clean" | "reset" | "restore")
+            || operation == "checkout" && !simple_branch
+        {
             return Some("destructive Git workspace rewrites are blocked".to_string());
         }
     }
+
     if command == "rm" && removes_protected_root(tokens, cwd, backend) {
         return Some(
             "recursive deletion of the workspace or filesystem root is blocked".to_string(),
@@ -178,29 +217,76 @@ pub(super) fn hard_shell_denial_inner(
     None
 }
 
-pub(super) fn git_alias_override(tokens: &[String]) -> bool {
-    let Some(command_index) = tokens.iter().position(|token| {
-        token
-            .rsplit('/')
-            .next()
-            .is_some_and(|command| command.eq_ignore_ascii_case("git"))
-    }) else {
-        return false;
-    };
-    let subcommand_index = git_subcommand_index(tokens, command_index).unwrap_or(tokens.len());
-    let mut index = command_index + 1;
+fn git_checkout_has_alternate_target(tokens: &[String], subcommand_index: usize) -> bool {
+    let mut index = 1;
+    while index < subcommand_index {
+        let option = tokens[index].as_str();
+        if option == "-C" {
+            index += 2;
+            continue;
+        }
+        if matches!(
+            option,
+            "--git-dir" | "--work-tree" | "--namespace" | "--super-prefix" | "--bare"
+        ) || [
+            "--git-dir=",
+            "--work-tree=",
+            "--namespace=",
+            "--super-prefix=",
+        ]
+        .iter()
+        .any(|prefix| option.starts_with(prefix))
+        {
+            return true;
+        }
+        index += 1;
+    }
+    false
+}
+
+// These operations have no nested Git command grammar. Other operations may
+// contain aliases or commands such as `bisect reset` and `submodule foreach`.
+fn git_known_operation(operation: &str) -> bool {
+    matches!(
+        operation,
+        "add"
+            | "checkout"
+            | "clean"
+            | "diff"
+            | "grep"
+            | "log"
+            | "reset"
+            | "restore"
+            | "show"
+            | "status"
+            | "--version"
+    )
+}
+
+// Only this exact presentation setting on status is known not to invoke code
+// or alter repository state. Other overrides remain subject to the hard denial.
+pub(super) fn git_unsafe_config_override(tokens: &[String], subcommand_index: usize) -> bool {
+    let mut index = 1;
     while index < subcommand_index {
         let token = &tokens[index];
-        let configured = if token == "-c" || token == "--config-env" {
+        if token == "--config-env" || token.starts_with("--config-env=") {
+            return true;
+        }
+        let configured = if token == "-c" {
             index += 1;
             tokens.get(index).map(String::as_str)
-        } else if let Some(configured) = token.strip_prefix("-c") {
-            (!configured.is_empty()).then_some(configured)
         } else {
-            token.strip_prefix("--config-env=")
+            token.strip_prefix("-c").filter(|value| !value.is_empty())
         };
-        if configured.is_some() {
-            return true;
+        if let Some(configured) = configured {
+            if tokens[subcommand_index] != "status" || configured != "core.quotepath=false" {
+                return true;
+            }
+        } else if matches!(
+            token.as_str(),
+            "-C" | "--git-dir" | "--work-tree" | "--namespace" | "--super-prefix"
+        ) {
+            index += 1;
         }
         index += 1;
     }
@@ -624,14 +710,33 @@ pub(super) fn executable_environment_hook(tokens: &[String]) -> Option<&str> {
         "DYLD_INSERT_LIBRARIES",
         "DYLD_LIBRARY_PATH",
         "DYLD_FRAMEWORK_PATH",
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_INDEX_FILE",
+        "GIT_COMMON_DIR",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_NAMESPACE",
+        "GIT_CEILING_DIRECTORIES",
+        "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+        "GIT_CONFIG",
+        "GIT_CONFIG_COUNT",
+        "GIT_CONFIG_PARAMETERS",
+        "GIT_CONFIG_GLOBAL",
+        "GIT_CONFIG_SYSTEM",
     ];
+    let protected = |name: &str| {
+        HOOKS.contains(&name)
+            || name.starts_with("GIT_CONFIG_KEY_")
+            || name.starts_with("GIT_CONFIG_VALUE_")
+    };
 
     let mut leading = 0;
     while let Some(name) = tokens
         .get(leading)
         .and_then(|token| shell_environment_assignment_name(token))
     {
-        if HOOKS.contains(&name) {
+        if protected(name) {
             return Some(name);
         }
         leading += 1;
@@ -643,7 +748,7 @@ pub(super) fn executable_environment_hook(tokens: &[String]) -> Option<&str> {
     if let Some(name) = tokens[leading..command_index]
         .iter()
         .filter_map(|token| environment_assignment_name(token))
-        .find(|name| HOOKS.contains(name))
+        .find(|name| protected(name))
     {
         return Some(name);
     }
@@ -675,7 +780,7 @@ pub(super) fn executable_environment_hook(tokens: &[String]) -> Option<&str> {
                     .filter(|target| !target.is_empty())
             };
             if let Some(target) = target {
-                return HOOKS.contains(&target).then_some(target);
+                return protected(target).then_some(target);
             }
             if option == "--" || !option.starts_with('-') {
                 break;
@@ -713,7 +818,7 @@ pub(super) fn executable_environment_hook(tokens: &[String]) -> Option<&str> {
         return effective[1..]
             .iter()
             .filter_map(|operand| shell_environment_assignment_name(operand))
-            .find(|name| HOOKS.contains(name));
+            .find(|name| protected(name));
     }
     if command == "read" {
         let mut index = 1;
@@ -735,7 +840,7 @@ pub(super) fn executable_environment_hook(tokens: &[String]) -> Option<&str> {
         }
         return effective[index..]
             .iter()
-            .find(|name| HOOKS.contains(&name.as_str()))
+            .find(|name| protected(name.as_str()))
             .map(String::as_str);
     }
 
@@ -768,5 +873,5 @@ pub(super) fn executable_environment_hook(tokens: &[String]) -> Option<&str> {
             shell_environment_assignment_name(token)
                 .or_else(|| valid_environment_name(token).then_some(token.as_str()))
         })
-        .find(|name| HOOKS.contains(name))
+        .find(|name| protected(name))
 }

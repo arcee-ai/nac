@@ -525,6 +525,8 @@ fn exec_command_result_preview_uses_structured_previews() {
         is_error: false,
         execution_duration_ms: None,
         execution_duration_excludes_authorization: false,
+        delegation_outcome: None,
+        delegation_summary: None,
     };
 
     assert_eq!(preview_tool_result("exec_command", &result), "line two...");
@@ -555,6 +557,19 @@ fn key_argument_preview_is_family_aware_and_fail_closed() {
     ] {
         assert_eq!(key_arg_preview(name, Some(args), args), expected);
     }
+
+    // A continuation's child ID is an identity, not its task description.
+    let continuation =
+        r#"{"description":null,"child_session_id":"child-opaque-id","prompt":"SECRET"}"#;
+    assert_eq!(
+        key_arg_preview("subagent", Some(continuation), continuation),
+        ""
+    );
+    let empty_description = r#"{"description":"","child_session_id":"child-opaque-id"}"#;
+    assert_eq!(
+        key_arg_preview("subagent", Some(empty_description), empty_description),
+        ""
+    );
 
     assert_eq!(
         key_arg_preview(
@@ -626,6 +641,8 @@ fn exec_command_result_preview_includes_nonzero_exit() {
         is_error: false,
         execution_duration_ms: None,
         execution_duration_excludes_authorization: false,
+        delegation_outcome: None,
+        delegation_summary: None,
     };
 
     assert_eq!(
@@ -689,6 +706,8 @@ fn exec_command_finished_event_carries_structured_outcome() {
         is_error: false,
         execution_duration_ms: None,
         execution_duration_excludes_authorization: false,
+        delegation_outcome: None,
+        delegation_summary: None,
     };
     let event = AgentEvent::tool_call_finished(
         Some("worker".to_string()),
@@ -762,6 +781,8 @@ fn finished_pty_result_preview_keeps_terminal_output() {
         is_error: false,
         execution_duration_ms: None,
         execution_duration_excludes_authorization: false,
+        delegation_outcome: None,
+        delegation_summary: None,
     };
 
     assert_eq!(preview_tool_result("exec_command", &result), "line two");
@@ -787,6 +808,8 @@ fn exec_command_finished_events_distinguish_terminal_statuses() {
             is_error: serialized == "spawn_error",
             execution_duration_ms: None,
             execution_duration_excludes_authorization: false,
+            delegation_outcome: None,
+            delegation_summary: None,
         };
         let event = AgentEvent::tool_call_finished(
             Some("worker".to_string()),
@@ -1139,6 +1162,8 @@ async fn image_limit_error_is_the_only_finished_event_for_the_result() {
                 is_error: false,
                 execution_duration_ms: Some(42),
                 execution_duration_excludes_authorization: true,
+                delegation_outcome: None,
+                delegation_summary: None,
             },
         )],
         &EventSink::channel(events_tx),
@@ -1265,6 +1290,8 @@ fn json_tool_error(id: &str, name: &str, body: serde_json::Value) -> (String, St
             is_error: true,
             execution_duration_ms: None,
             execution_duration_excludes_authorization: false,
+            delegation_outcome: None,
+            delegation_summary: None,
         },
     )
 }

@@ -12,6 +12,9 @@ export interface ToolPresentation {
     resultPreview: string | null;
     status: ToolPresentationStatus;
     statusLabel: string;
+    /** Native-owned historical invocation outcome, absent for legacy events. */
+    delegationOutcome?: NonNullable<ToolFinished["delegation_outcome"]>;
+    delegationIntent?: NonNullable<ToolStarted["delegation_intent"]>;
     /**
      * Execution time from the call's finish event. Absent when the call never
      * ran, or when no finish event reports one.
@@ -29,6 +32,10 @@ export interface ToolPresentation {
     delegationContinuation?: boolean;
     /** A live turn can still commit its result with the rest of its tool batch. */
     resultMayBePending?: boolean;
+    /** This invocation cannot be distinguished from another call in its batch. */
+    resultAmbiguous?: boolean;
+    /** A live delegation turn may change parent inventory, without binding its events. */
+    inventoryMayChange?: boolean;
     /** Native launch identity hint; consumers validate it against passive session inventory. */
     launchedTask?: {
         sessionId: string;
@@ -62,7 +69,7 @@ export declare function assistantTurnCancelled(messages: SessionSnapshotResponse
  * can replace the overlay without changing semantic identity.
  */
 export declare function indexToolEvents(events: AgentEvent[]): Map<string, ToolEventPair>;
-export declare function presentToolCall({ call, events, hasResult, resultText, resultHasImage, active, awaitingApproval, turnCancelled, occurrence, ambiguousResult, }: {
+export declare function presentToolCall({ call, events, hasResult, resultText, resultHasImage, active, awaitingApproval, turnCancelled, occurrence, ambiguousResult, unboundEvents, }: {
     call: ToolCall;
     events?: ToolEventPair;
     hasResult: boolean;
@@ -75,5 +82,7 @@ export declare function presentToolCall({ call, events, hasResult, resultText, r
     turnCancelled: boolean;
     occurrence?: string | null;
     ambiguousResult?: boolean;
+    /** Event IDs cannot be bound to this transcript invocation. */
+    unboundEvents?: boolean;
 }): ToolPresentation;
 export {};

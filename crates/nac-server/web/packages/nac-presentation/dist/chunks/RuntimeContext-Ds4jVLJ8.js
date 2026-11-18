@@ -2294,12 +2294,12 @@ function kn(e) {
 	}
 	function N(e, t) {
 		switch (t.type) {
-			case "tool_call_started": return s({ activity: `Tool: ${t.name}` }), A(t.thread_name, t), t.thread_name || P(t), b({
+			case "tool_call_started": return t.delegation_intent || t.delegation_summary_verified ? (t.thread_name || P(t), "none") : (s({ activity: `Tool: ${t.name}` }), A(t.thread_name, t), t.thread_name || P(t), b({
 				seq: e,
 				kind: "tool",
 				text: `▶ ${t.name}(${t.args_preview})`,
 				isError: !1
-			}), "none";
+			}), "none");
 			case "thread_log": return A(t.name, t), "none";
 			case "mcp_server_skipped": return A(t.thread_name, t), "none";
 			case "mcp_notification": {

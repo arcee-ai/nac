@@ -49,6 +49,8 @@ pub(crate) fn partition_tool_calls(
                             is_error: true,
                             execution_duration_ms: None,
                             execution_duration_excludes_authorization: false,
+                            delegation_outcome: None,
+                            delegation_summary: None,
                         },
                     ));
                     continue;
@@ -93,6 +95,8 @@ pub(crate) async fn collect_parse_errors(
                 args_preview: preview_tool_args("thread", &args_str),
                 key_arg_preview: None,
                 args_detail: Some(tool_args_detail(&args_str)),
+                delegation_intent: None,
+                delegation_summary_verified: false,
             })
             .await;
         event_sink
@@ -134,19 +138,56 @@ pub(crate) async fn spawn_non_thread_into(
     for (index, tool_call_id, tool_name, args_str) in other_calls {
         let runtime = runtime.clone();
         let client = client.clone();
-        event_sink
-            .emit_async(AgentEvent::ToolCallStarted {
-                thread_name: thread_name.clone(),
-                call_id: tool_call_id.clone(),
-                name: tool_name.clone(),
-                args_preview: preview_tool_args(&tool_name, &args_str),
-                key_arg_preview: None,
-                args_detail: Some(tool_args_detail(&args_str)),
-            })
-            .await;
+        let presentation_args = if tool_name == "subagent" {
+            subagent_presentation_arguments(&runtime, &args_str).await
+        } else {
+            Some(args_str.clone())
+        };
+        let raw_started = AgentEvent::ToolCallStarted {
+            thread_name: thread_name.clone(),
+            call_id: tool_call_id.clone(),
+            name: tool_name.clone(),
+            args_preview: presentation_args
+                .as_deref()
+                .map(|args| preview_tool_args(&tool_name, args))
+                .unwrap_or_default(),
+            key_arg_preview: if tool_name == "subagent" {
+                presentation_args
+                    .as_deref()
+                    .map(|args| key_arg_preview(&tool_name, Some(args), args))
+                    .filter(|summary| !summary.is_empty())
+            } else {
+                None
+            },
+            args_detail: presentation_args.as_deref().map(tool_args_detail),
+            delegation_intent: None,
+            delegation_summary_verified: false,
+        };
+        let (started, presentation_key_arg) = if tool_name == "subagent" {
+            // EventSink sanitizes each publication, and a bus sink sanitizes it
+            // again. Capture that same idempotent, bounded event's summary.
+            let sanitized = crate::events::sanitize_external_agent_event(raw_started);
+            let stable = sanitized
+                .clone()
+                .and_then(crate::events::sanitize_external_agent_event);
+            let key = match stable {
+                Some(AgentEvent::ToolCallStarted {
+                    key_arg_preview, ..
+                }) => key_arg_preview,
+                _ => None,
+            };
+            (sanitized, key)
+        } else {
+            // Preserve the preexisting EventSink path for all other tools.
+            (Some(raw_started), None)
+        };
+        if let Some(started) = started {
+            event_sink.emit_async(started).await;
+        }
         let call_context = tools::kernel::ToolCallContext {
             call_id: Some(tool_call_id.clone()),
             thread_name: thread_name.clone(),
+            presentation_key_arg,
             ..Default::default()
         };
 
@@ -167,6 +208,8 @@ pub(crate) async fn spawn_non_thread_into(
                             is_error: true,
                             execution_duration_ms: None,
                             execution_duration_excludes_authorization: false,
+                            delegation_outcome: None,
+                            delegation_summary: None,
                         },
                     );
                 }
@@ -404,6 +447,8 @@ async fn spawn_and_collect_non_thread(
                         is_error: true,
                         execution_duration_ms: None,
                         execution_duration_excludes_authorization: false,
+                        delegation_outcome: None,
+                        delegation_summary: None,
                     },
                 ));
             }
@@ -477,6 +522,8 @@ async fn execute_with_dag_error(
             is_error: true,
             execution_duration_ms: None,
             execution_duration_excludes_authorization: false,
+            delegation_outcome: None,
+            delegation_summary: None,
         };
         event_sink
             .emit_async(AgentEvent::ToolCallStarted {
@@ -486,6 +533,8 @@ async fn execute_with_dag_error(
                 args_preview: preview_tool_args("thread", &dispatch.args_str),
                 key_arg_preview: None,
                 args_detail: Some(tool_args_detail(&dispatch.args_str)),
+                delegation_intent: None,
+                delegation_summary_verified: false,
             })
             .await;
         event_sink

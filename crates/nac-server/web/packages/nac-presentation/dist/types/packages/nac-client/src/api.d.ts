@@ -353,7 +353,7 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         name: string;
     }[]>;
     listModelConfigs: (signal?: AbortSignal) => Promise<{
-        configurations: import("./openapi.generated.js").components["schemas"] /** Ask nac-web to open a local workspace path with the OS default handler. */["ModelConfigurationRecord"][];
+        configurations: import("./openapi.generated.js").components["schemas"]["ModelConfigurationRecord"][];
     }>;
     createModelConfig: (payload: CreateModelConfigurationRequest) => Promise<{
         allow_insecure_http: boolean;

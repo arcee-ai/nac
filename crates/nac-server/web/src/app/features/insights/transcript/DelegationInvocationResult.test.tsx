@@ -44,6 +44,7 @@ it.each([
     });
     const tool: ToolPresentation = {
       callId: "call",
+      occurrence: "log:parent:store:1:digest:2",
       name: "subagent",
       label: "Subagent",
       summary: null,
@@ -58,14 +59,14 @@ it.each([
     );
     fireEvent.click(screen.getByText("Invocation result"));
     await screen.findByText(
-      `Generation 2 · ${status === "completed" ? "Completed" : status === "failed" ? "Failed" : "Running"}`,
+      `Response reports Generation 2 · ${status === "completed" ? "Completed" : status === "failed" ? "Failed" : "Running"}`,
     );
     for (const value of Object.values(fields))
       expect(screen.getByText(value, { exact: false })).toBeTruthy();
     if (status === "running")
       expect(
         screen.getByText(
-          "Work is running in the background. Completion will be delivered automatically.",
+          "The response reports background work; completion may be delivered separately.",
         ),
       ).toBeTruthy();
     expect(screen.queryByText(/child_session_id|orchestrator_session_id/)).toBeNull();
@@ -86,6 +87,7 @@ it("keeps unrecognized structured output behind an explicit disclosure", async (
   });
   const tool: ToolPresentation = {
     callId: "call",
+    occurrence: "log:parent:store:1:digest:2",
     name: "subagent",
     label: "Subagent",
     summary: null,
@@ -122,6 +124,7 @@ it("checks once more when the owning batch settles before the next poll", async 
     .mockResolvedValue({ ...pending, output: "settled result" });
   const tool: ToolPresentation = {
     callId: "call",
+    occurrence: "log:parent:store:1:digest:2",
     name: "subagent",
     label: "Subagent",
     summary: null,
@@ -138,7 +141,9 @@ it("checks once more when the owning batch settles before the next poll", async 
   fireEvent.click(screen.getByText("Invocation result"));
   await waitFor(() =>
     expect(
-      client.getQueryData(queryKeys.toolCallContent("parent", "call", "tool-1-call")),
+      client.getQueryData(
+        queryKeys.toolCallContent("parent", "call", "tool-1-call", "log:parent:store:1:digest:2"),
+      ),
     ).toBeDefined(),
   );
   view.rerender(
@@ -166,6 +171,7 @@ it("reports an absent result once an interrupted run is settled", async () => {
   });
   const tool: ToolPresentation = {
     callId: "call",
+    occurrence: "log:parent:store:1:digest:2",
     name: "subagent",
     label: "Subagent",
     summary: null,
@@ -200,6 +206,7 @@ it("refreshes after an in-flight pre-settlement read returns empty", async () =>
     .mockResolvedValue({ ...pending, output: "settled result" });
   const tool: ToolPresentation = {
     callId: "call",
+    occurrence: "log:parent:store:1:digest:2",
     name: "subagent",
     label: "Subagent",
     summary: null,
@@ -236,6 +243,7 @@ it("does not automatically retry a failed read after settlement", async () => {
   const request = vi.spyOn(api, "getToolCallContent").mockReturnValueOnce(first.promise);
   const tool: ToolPresentation = {
     callId: "call",
+    occurrence: "log:parent:store:1:digest:2",
     name: "subagent",
     label: "Subagent",
     summary: null,
@@ -263,5 +271,85 @@ it("does not automatically retry a failed read after settlement", async () => {
   first.reject(new Error("redaction unavailable"));
   await screen.findByRole("alert");
   expect(request).toHaveBeenCalledOnce();
+  client.clear();
+});
+
+it("never performs ID-only lookup for a pending or stale delegation", async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const request = vi.spyOn(api, "getToolCallContent");
+  const tool: ToolPresentation = {
+    callId: "reused",
+    name: "subagent",
+    label: "Subagent",
+    summary: null,
+    resultPreview: null,
+    status: "unknown",
+    statusLabel: "Outcome unavailable",
+    resultMayBePending: true,
+  };
+  const view = render(
+    <QueryClientProvider client={client}>
+      <DelegationInvocationResult sessionId="parent" blockKey="new" tool={tool} />
+    </QueryClientProvider>,
+  );
+  fireEvent.click(screen.getByText("Invocation result"));
+  await screen.findByText("Invocation result unavailable without a retained occurrence.");
+  expect(request).not.toHaveBeenCalled();
+  view.rerender(
+    <QueryClientProvider client={client}>
+      <DelegationInvocationResult
+        sessionId="parent"
+        blockKey="new"
+        tool={{ ...tool, resultMayBePending: false }}
+      />
+    </QueryClientProvider>,
+  );
+  expect(
+    screen.getByText("Invocation result unavailable without a retained occurrence."),
+  ).toBeTruthy();
+  expect(request).not.toHaveBeenCalled();
+  client.clear();
+});
+
+it("hides a cached result if its occurrence binding disappears", async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const request = vi.spyOn(api, "getToolCallContent").mockResolvedValue({
+    call_id: "reused",
+    arguments: "{}",
+    arguments_truncated: false,
+    output: "original result",
+    output_truncated: false,
+  });
+  const tool: ToolPresentation = {
+    callId: "reused",
+    occurrence: "log:parent:store:1:digest:2",
+    name: "subagent",
+    label: "Subagent",
+    summary: null,
+    resultPreview: null,
+    status: "unknown",
+    statusLabel: "Outcome unavailable",
+  };
+  const view = render(
+    <QueryClientProvider client={client}>
+      <DelegationInvocationResult sessionId="parent" blockKey="old" tool={tool} />
+    </QueryClientProvider>,
+  );
+  fireEvent.click(screen.getByText("Invocation result"));
+  await screen.findByText("original result");
+  view.rerender(
+    <QueryClientProvider client={client}>
+      <DelegationInvocationResult
+        sessionId="parent"
+        blockKey="old"
+        tool={{ ...tool, occurrence: undefined }}
+      />
+    </QueryClientProvider>,
+  );
+  expect(screen.queryByText("original result")).toBeNull();
+  expect(
+    screen.getByText("Invocation result unavailable without a retained occurrence."),
+  ).toBeTruthy();
+  expect(request).toHaveBeenCalledTimes(1);
   client.clear();
 });

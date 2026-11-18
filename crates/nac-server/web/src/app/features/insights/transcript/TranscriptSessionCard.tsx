@@ -1,8 +1,9 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { ChevronRight } from "lucide-react";
-import { memo, useContext } from "react";
+import { memo, useContext, useState } from "react";
 
 import { SubagentCardStatus } from "@/app/atoms";
+import { ToolCallDetail } from "@/app/components/inspector/ToolCallDetail";
 import { cardStatus, type CardStatus } from "@/app/features/delegation/presentation/cardStatus";
 import type { InsightSessionEntry } from "@/app/features/insights/model/types";
 import { useTranscriptSessionId } from "@/app/features/insights/transcript/transcriptTurns";
@@ -44,7 +45,10 @@ function useLaunchedRecords(entry: InsightSessionEntry, parentId: string | null)
   const known = client.getQueryState<LaunchedRecord[]>(
     agent ? queryKeys.traditionalChildren(parent) : queryKeys.managedOrchestrators(parent),
   );
-  const unsettled = entry.status === "running" || entry.status === "pending";
+  const unsettled =
+    entry.status === "running" ||
+    entry.status === "pending" ||
+    entry.presentation.inventoryMayChange === true;
   const spawnedId = entry.presentation.spawnedSessionId;
   const record = launchedRecord(known?.data, spawnedId);
   const live =
@@ -99,8 +103,20 @@ export function TranscriptSessionGroup({
 
 /** A call that waits for approval or did not go through, as Insights shows it. */
 function callStatus(entry: InsightSessionEntry): CardStatus | null {
-  const label = entry.presentation.statusLabel;
-  if (entry.status === "pending") return { status: SubagentCardStatus.Running, label };
+  const label =
+    entry.action === "spawn-agent" ? entry.presentation.label : entry.presentation.statusLabel;
+  if (
+    entry.action === "spawn-agent" &&
+    entry.presentation.status === "running" &&
+    !entry.presentation.delegationIntent
+  )
+    return { status: SubagentCardStatus.Pending, label };
+  if (entry.presentation.status === "pending" || entry.status === "pending")
+    return {
+      status:
+        entry.action === "spawn-agent" ? SubagentCardStatus.Pending : SubagentCardStatus.Running,
+      label,
+    };
   if (entry.status === "failed") return { status: SubagentCardStatus.Failed, label };
   return null;
 }
@@ -124,14 +140,15 @@ function cardState(
   if (record) {
     return {
       ...(own ?? cardStatus(record.status)),
-      title: record.description.trim() || entry.title,
+      // Inventory proves ownership, but its raw description is not a sanitized preview.
+      title: entry.title,
       sessionId: recordId(record),
     };
   }
   const { title } = entry;
+  if (own) return { ...own, title, sessionId: null };
   if (entry.status === "running")
     return { status: SubagentCardStatus.Running, title, sessionId: null };
-  if (own) return { ...own, title, sessionId: null };
   if (records === undefined || failed) {
     return { status: SubagentCardStatus.Ready, title, sessionId: null };
   }
@@ -151,9 +168,11 @@ export const TranscriptSessionCard = memo(function TranscriptSessionCard({
   interactive: boolean;
   showTarget?: boolean;
 }) {
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const parentId = useTranscriptSessionId();
   const { records, failed } = useLaunchedRecords(entry, parentId);
   const state = cardState(entry, records, failed);
+  const requestStatus = callStatus(entry);
   const { openSubagent } = useInsightsNavigation();
   const navigation = useContext(InsightsNavigationContext);
   const canNavigate =
@@ -175,11 +194,13 @@ export const TranscriptSessionCard = memo(function TranscriptSessionCard({
         ? "Continue"
         : "Start";
   const status =
-    entry.presentation.status === "unknown"
-      ? `${action} · ${entry.presentation.statusLabel}`
-      : entry.status === "ready"
-        ? `${action} requested`
-        : `${action} · ${entry.presentation.statusLabel}`;
+    entry.action === "spawn-agent" && entry.presentation.status !== "unknown"
+      ? entry.presentation.label
+      : entry.presentation.status === "unknown"
+        ? `${action} · ${entry.presentation.statusLabel}`
+        : entry.status === "ready"
+          ? `${action} requested`
+          : `${action} · ${entry.presentation.statusLabel}`;
   return (
     <div className="min-w-0 py-1">
       <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1 type-meta text-basic-secondary">
@@ -197,13 +218,31 @@ export const TranscriptSessionCard = memo(function TranscriptSessionCard({
           <span className="min-w-0 break-words font-medium text-basic-primary">{state.title}</span>
         )}
         <span>
-          {entry.action === "spawn-agent" ? "Subagent" : "Managed orchestrator"} · {status}
+          {entry.action === "spawn-agent" && entry.presentation.status !== "unknown"
+            ? status
+            : `${entry.action === "spawn-agent" ? "Subagent" : "Managed orchestrator"} · ${status}`}
+          {entry.action === "spawn-agent" && state.sessionId && !requestStatus
+            ? ` · Current: ${state.label ?? (state.status === SubagentCardStatus.Running ? "Working…" : "Ready")}`
+            : null}
         </span>
         {availability ? <span>{availability}</span> : null}
-        {entry.status === "failed" && entry.presentation.resultPreview ? (
+        {entry.status === "failed" &&
+        entry.presentation.resultPreview &&
+        entry.presentation.resultPreview !== status ? (
           <span>{entry.presentation.resultPreview}</span>
         ) : null}
       </div>
+      {entry.action === "spawn-agent" ? (
+        <details className="mt-1 text-basic-tertiary">
+          <summary
+            className="cursor-pointer type-meta"
+            onClick={() => setDetailsOpen((open) => !open)}
+          >
+            Invocation details
+          </summary>
+          {detailsOpen ? <ToolCallDetail tool={entry.presentation} /> : null}
+        </details>
+      ) : null}
       {parentId ? (
         <DelegationInvocationResult
           sessionId={parentId}
