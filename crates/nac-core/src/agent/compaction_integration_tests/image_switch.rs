@@ -97,14 +97,8 @@ fn next_operation_refreshes_codex_capability_and_read_definition() {
         .join("store.db");
     crate::store::initialize(&store_path).unwrap();
     crate::store::insert_test_session(&store_path, "session");
-    let mut agent = compaction_test_agent_with_mode(
-        client,
-        store_path,
-        Some("session"),
-        None,
-        EventSink::none(),
-        AgentMode::Direct,
-    );
+    let mut agent =
+        compaction_test_agent(client, store_path, Some("session"), None, EventSink::none());
     agent.enable_automatic_compaction();
     let before_threshold = agent.compaction.as_ref().unwrap().threshold_for_test();
     assert!(!agent.client.supports_image_tool_results());
@@ -194,14 +188,8 @@ async fn switched_codex_model_replays_image_in_normal_run_and_compaction() {
     let switched = crate::sessions::load_session_config(&store_path, "session").unwrap();
     assert_eq!(switched.model, "gpt-6.1-sol");
     let client = ModelClient::new_for_codex_test_server(server.base_url.clone(), &switched.model);
-    let mut agent = compaction_test_agent_with_mode(
-        client,
-        store_path,
-        Some("session"),
-        None,
-        EventSink::none(),
-        AgentMode::Direct,
-    );
+    let mut agent =
+        compaction_test_agent(client, store_path, Some("session"), None, EventSink::none());
     agent.restore_messages(history);
     agent.set_current_run_id(Some(uuid::Uuid::new_v4().to_string()));
     assert_eq!(agent.send("continue").await.unwrap(), "normal");

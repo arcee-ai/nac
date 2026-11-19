@@ -1,23 +1,23 @@
 use super::*;
 
 #[tokio::test]
-async fn worker_send_stays_direct_when_provider_context_total_is_invalid() {
+async fn sessionless_send_continues_when_provider_context_total_is_invalid() {
     use crate::model::test_http::{ScriptedResponse, ScriptedServer};
 
     let server = ScriptedServer::start(vec![ScriptedResponse::json(
         "200 OK",
-        scripted_responses_text("worker answer", 100, 0, 5, 1),
+        scripted_responses_text("answer", 100, 0, 5, 1),
     )]);
-    let mut worker = Agent::with_config(
+    let mut agent = Agent::with_config(
         ModelClient::new_for_test_server(server.base_url.clone()),
         AgentConfig {
             command_output_limits: crate::terminal::CommandOutputLimits::default(),
-            mode: AgentMode::Worker,
+            mode: AgentMode::Direct,
             store_path: PathBuf::from("unused.db"),
             session_id: None,
             orchestrator_compaction_threshold: Some(1),
             initial_messages: Vec::new(),
-            thread_name: Some("worker".to_string()),
+            thread_name: None,
             dispatch_id: None,
             event_sink: EventSink::none(),
             workspace_cwd: PathBuf::from("."),
@@ -35,7 +35,7 @@ async fn worker_send_stays_direct_when_provider_context_total_is_invalid() {
     )
     .unwrap();
 
-    assert_eq!(worker.send("hello").await.unwrap(), "worker answer");
+    assert_eq!(agent.send("hello").await.unwrap(), "answer");
     let requests = server.finish();
     assert_eq!(requests.len(), 1);
     assert!(
@@ -43,7 +43,7 @@ async fn worker_send_stays_direct_when_provider_context_total_is_invalid() {
             .as_array()
             .is_some_and(|tools| !tools.is_empty())
     );
-    assert_eq!(worker.last_usage.unwrap().orchestrator_context_tokens, 0);
+    assert_eq!(agent.last_usage.unwrap().orchestrator_context_tokens, 0);
 }
 
 #[tokio::test]
@@ -68,13 +68,12 @@ async fn direct_primary_uses_the_direct_compaction_prompt() {
             scripted_responses_text("ordinary answer", 20, 0, 3, 23),
         ),
     ]);
-    let mut agent = compaction_test_agent_with_mode(
+    let mut agent = compaction_test_agent(
         ModelClient::new_for_test_server(server.base_url.clone()),
         store_path.clone(),
         Some("session"),
         Some(1),
         EventSink::none(),
-        AgentMode::Direct,
     );
     agent.set_current_run_id(Some("run".to_string()));
     agent.messages = compactable_messages().into();
