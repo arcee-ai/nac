@@ -60,8 +60,7 @@ pub struct ToolResult {
     pub content: ToolContent,
     pub is_error: bool,
     /// Wall-clock time of the call's work, set by the execution kernel once an
-    /// authorized call has run, or by a thread or workset control tool once
-    /// its authorized work has started. Every exit before that leaves it empty.
+    /// authorized call has run. Every exit before that leaves it empty.
     pub(crate) execution_duration_ms: Option<u64>,
     /// Kernel-owned provenance: this measurement excludes an internal
     /// authorization span and supersedes the deadline's unadjusted wall clock
@@ -277,7 +276,7 @@ fn native_tool_registry(
 
 #[expect(
     clippy::expect_used,
-    reason = "the static first-party tool registry and worker capability list are collision-checked"
+    reason = "the static first-party tool registry is collision-checked"
 )]
 pub fn coding_tool_definitions(image_read: bool) -> Vec<ToolDefinition> {
     native_tool_registry(image_read)

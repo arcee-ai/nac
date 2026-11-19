@@ -25,8 +25,7 @@ use super::{ToolResult, ToolRuntime};
 
 /// Scheduling admission declared by a tool implementation.
 ///
-/// Existing orchestrator workers retain their established scheduler. Direct
-/// sessions use this metadata when their execution loop is introduced.
+/// Direct sessions use this metadata to order tool execution.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ToolAdmission {
     Parallel,

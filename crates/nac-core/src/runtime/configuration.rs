@@ -77,8 +77,7 @@ impl NacConfig {
     }
 
     /// Load runtime settings for a command whose model tuple and orchestrator
-    /// compaction threshold come from a persisted session snapshot or whose
-    /// model tuple comes from managed-worker transport.
+    /// compaction threshold come from a persisted session snapshot.
     ///
     /// The complete TOML document must still be syntactically valid and all
     /// non-model runtime sections remain strictly typed. The `model` key is
@@ -87,7 +86,7 @@ impl NacConfig {
     /// snapshot-authoritative command. MCP, workspace metadata, and other
     /// independent config consumers continue loading their own sections from
     /// the same file. The `compaction` key is also omitted so resumed sessions
-    /// and managed workers never inherit an ambient orchestrator threshold.
+    /// never inherit an ambient compaction threshold.
     pub fn load_without_model_from_cwd(cwd: &Path) -> Result<Self> {
         let paths = PathContext::new(cwd);
         let Some(path) = paths.nac_config_path() else {

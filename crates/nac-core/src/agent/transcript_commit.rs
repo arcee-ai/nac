@@ -19,7 +19,7 @@ impl Agent {
 
     /// Append `messages` to the transcript log at absolute positions
     /// `start_idx..` via `spawn_blocking` (steering-claim precedent). A no-op
-    /// for agents without a transcript log (workers, picker sessions).
+    /// for agents without a transcript log (such as picker sessions).
     pub(super) async fn log_transcript_batch(
         &mut self,
         start_idx: u64,

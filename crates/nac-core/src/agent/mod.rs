@@ -139,9 +139,7 @@ pub struct Agent {
     mcp_observation: Option<McpObservation>,
     mcp_mounts: Arc<crate::mcp::SessionMcpMounts>,
     current_run_id: Option<String>,
-    /// Top-level transcript log sink (DB-direct transcript workset, see
-    /// store/transcript.rs). Present for persistent primary agents with a
-    /// session id.
+    /// Transcript log sink for persistent sessions; see store/transcript.rs.
     transcript_log: Option<TranscriptLogSink>,
     /// Exclusive upper bound of transcript log rows this process has
     /// committed or adopted (restore/refresh). Durable rows at or beyond
@@ -180,7 +178,7 @@ pub struct Agent {
     partial_stream: StdMutex<ModelStreamDelta>,
 }
 
-/// Path-backed writer and identity needed to append to the orchestrator
+/// Path-backed writer and identity needed to append to the session
 /// transcript log. The writer is shared into `spawn_blocking` closures per
 /// operation.
 struct TranscriptLogSink {
@@ -396,7 +394,7 @@ impl Agent {
     }
 
     /// Host composition binds this port to one serving owner and exact session.
-    /// Worker/child capability sets stay unchanged.
+    /// Child capability limits stay unchanged.
     pub fn bind_product_context(
         &mut self,
         port: Arc<dyn crate::product_context::ProductContextPort>,
@@ -766,8 +764,8 @@ impl Agent {
             let response = match turn {
                 Ok(response) => response,
                 Err(error) => {
-                    // Preserve accumulated usage (including summary and worker
-                    // costs from prior rounds) so it survives the error return.
+                    // Preserve accumulated usage from prior rounds and summaries
+                    // so it survives the error return.
                     self.last_usage = Some(accumulated_usage.clone());
                     // The provider's own words about the call it refused: the
                     // one error class worth showing rather than reducing to
@@ -1130,7 +1128,7 @@ impl Agent {
     }
 
     /// Shared handle to the transcript log writer, present only for
-    /// orchestrator agents with a session id. The session service reads the
+    /// persistent agents with a session id. The session service reads the
     /// log through the same writer for store-backed transcript reads (step
     /// 3), so reads and appends stay serialized without retaining a connection.
     pub fn transcript_log_writer(&self) -> Option<Arc<crate::store::TranscriptLogWriter>> {
