@@ -1,6 +1,5 @@
 //! Transcript log commit points, direct inbox delivery, snapshot/log restore,
-//! and crash/cancellation normalization. Legacy engine gates remain covered
-//! until those engines are removed.
+//! and crash/cancellation normalization.
 use super::*;
 
 fn test_store_path(label: &str) -> PathBuf {
@@ -162,69 +161,25 @@ fn tool_call_assistant(call_ids: &[&str]) -> Message {
 }
 
 #[test]
-fn transcript_log_gate_is_orchestrator_with_session_only() {
-    // The construction-time gate: workers (separate `__worker` processes)
-    // must never log, and neither must session-less (picker) orchestrators.
-    let worker = transcript_test_agent(
-        ModelClient::new_for_test(),
-        test_store_path("gate_worker"),
-        Some("session"),
-        AgentMode::Worker,
-    );
-    assert!(worker.transcript_log.is_none());
-
+fn transcript_log_requires_a_persistent_session() {
     let picker = transcript_test_agent(
         ModelClient::new_for_test(),
         test_store_path("gate_picker"),
         None,
-        AgentMode::Orchestrator,
+        AgentMode::Direct,
     );
     assert!(picker.transcript_log.is_none());
 
-    let store_path = test_store_path("gate_orchestrator");
+    let store_path = test_store_path("gate_direct");
     crate::store::initialize(&store_path).unwrap();
-    let orchestrator = transcript_test_agent(
+    crate::store::insert_test_session(&store_path, "session");
+    let agent = transcript_test_agent(
         ModelClient::new_for_test(),
         store_path.clone(),
         Some("session"),
-        AgentMode::Orchestrator,
+        AgentMode::Direct,
     );
-    let sink = orchestrator
-        .transcript_log
-        .as_ref()
-        .expect("orchestrator with a session id must have a transcript log");
-    assert_eq!(sink.session_id, "session");
-
-    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
-}
-
-#[tokio::test]
-async fn worker_send_never_writes_transcript_log_rows() {
-    use crate::model::test_http::{ScriptedResponse, ScriptedServer};
-
-    let store_path = test_store_path("worker_send");
-    crate::store::initialize(&store_path).unwrap();
-    crate::store::insert_test_session(&store_path, "session");
-    let server = ScriptedServer::start(vec![ScriptedResponse::json(
-        "200 OK",
-        scripted_text_response("worker answer"),
-    )]);
-    let mut worker = transcript_test_agent(
-        ModelClient::new_for_test_server(server.base_url.clone()),
-        store_path.clone(),
-        Some("session"),
-        AgentMode::Worker,
-    );
-    worker.set_current_run_id(Some("dispatch".to_string()));
-
-    assert_eq!(worker.send("hello").await.unwrap(), "worker answer");
-    server.finish();
-    assert!(worker.messages.len() > 1);
-    assert!(
-        read_log(&store_path, "session").is_empty(),
-        "worker runs must not write `__orchestrator__` transcript rows"
-    );
-
+    assert_eq!(agent.transcript_log.as_ref().unwrap().session_id, "session");
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
 
@@ -1709,16 +1664,15 @@ async fn cancellation_adopts_result_after_aborting_failed_atomic_steering_commit
     let store_path = test_store_path("steering_abort_failure_adoption");
     crate::store::initialize(&store_path).unwrap();
     crate::store::insert_test_session(&store_path, "session");
-    let queued = crate::store::queue_thread_steering(
+    let queued = crate::store::create_session_inbox_item(
         &store_path,
         "session",
-        crate::store::ORCHESTRATOR_STEERING_TARGET,
-        "dispatch",
+        crate::store::InboxDelivery::Steer,
         "steer while cancelling",
+        Some("run"),
+        None,
     )
     .unwrap();
-    let claimed = crate::store::claim_thread_steering(&store_path, "session", "dispatch").unwrap();
-    assert_eq!(claimed.len(), 1);
 
     let trigger = rusqlite::Connection::open(&store_path).unwrap();
     trigger
@@ -1740,16 +1694,13 @@ async fn cancellation_adopts_result_after_aborting_failed_atomic_steering_commit
     let blocker = rusqlite::Connection::open(&store_path).unwrap();
     blocker.execute_batch("BEGIN IMMEDIATE").unwrap();
     let from_idx = agent.messages.len();
-    let staged = vec![user_message("steer while cancelling")];
-    let ids = vec![queued.id];
-    let mut commit =
-        Box::pin(agent.commit_staged_steering(from_idx, &ids, &staged, "session", "dispatch"));
+    let mut commit = Box::pin(agent.append_pending_direct_inbox());
     tokio::select! {
         result = &mut commit => panic!("blocked steering commit completed early: {result:?}"),
         _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {}
     }
     drop(commit);
-    assert!(agent.prompt_commit_pending);
+    assert_eq!(agent.direct_inbox_append_start, Some(from_idx as u64));
     assert_eq!(agent.messages.len(), from_idx);
 
     blocker.execute_batch("ROLLBACK").unwrap();
@@ -1757,7 +1708,7 @@ async fn cancellation_adopts_result_after_aborting_failed_atomic_steering_commit
         .append_cancellation_marker_preserving_tools()
         .await
         .unwrap();
-    assert!(!agent.prompt_commit_pending);
+    assert!(agent.direct_inbox_append_start.is_none());
     assert!(agent.messages.iter().all(|message| {
         !matches!(message, Message::User { content } if content == "steer while cancelling")
     }));
@@ -1766,8 +1717,8 @@ async fn cancellation_adopts_result_after_aborting_failed_atomic_steering_commit
         Some(Message::Assistant { content: Some(content), .. })
             if content == crate::agent::RUN_CANCELLED_MARKER
     ));
-    let records = crate::store::list_thread_steering(&store_path, "session").unwrap();
-    assert_eq!(records[0].status, "claimed");
+    let record = crate::store::load_session_inbox_item(&store_path, "session", queued.id).unwrap();
+    assert_eq!(record.status, crate::store::InboxStatus::Pending);
     let log = read_log(&store_path, "session");
     assert_eq!(log.last().unwrap().0 as usize, agent.messages.len() - 1);
 
