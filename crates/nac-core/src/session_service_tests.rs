@@ -420,12 +420,13 @@ fn has_sandbox_reflects_the_agent_execution_backend() {
     let _ = std::fs::remove_dir_all(local_store.parent().unwrap());
 
     let store_path = test_store_path("has_sandbox_sandboxed");
+    crate::store::initialize(&store_path).unwrap();
     let client = ModelClient::new_for_test();
     let agent = Agent::with_config(
         client.clone(),
         AgentConfig {
             command_output_limits: crate::terminal::CommandOutputLimits::default(),
-            mode: AgentMode::Orchestrator,
+            mode: AgentMode::Direct,
             store_path: store_path.clone(),
             session_id: Some("has-sandbox-sandboxed".to_string()),
             orchestrator_compaction_threshold: None,
@@ -570,6 +571,7 @@ async fn sandbox_container_destruction_preserves_worktree_until_durable_delete()
     }
     unsafe { std::env::set_var("PATH", std::env::join_paths(paths).unwrap()) };
 
+    crate::store::initialize(&store_path).unwrap();
     let client = ModelClient::new_for_test();
     let sandbox_spec = crate::sandbox::SandboxSpec {
         worktree: Some(worktree.clone()),
@@ -579,7 +581,7 @@ async fn sandbox_container_destruction_preserves_worktree_until_durable_delete()
         client.clone(),
         AgentConfig {
             command_output_limits: crate::terminal::CommandOutputLimits::default(),
-            mode: AgentMode::Orchestrator,
+            mode: AgentMode::Direct,
             store_path: store_path.clone(),
             session_id: Some("destroy-preserves-worktree".to_string()),
             orchestrator_compaction_threshold: None,
