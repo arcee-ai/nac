@@ -23,8 +23,6 @@ export interface StepLabel {
 
 const VERBS: Record<ActionKind, { done: string; live: string }> = {
   reasoning: { done: "Thought", live: "Thinking" },
-  thread: { done: "Ran thread", live: "Running thread" },
-  "delete-thread": { done: "Deleted thread", live: "Deleting thread" },
   "read-file": { done: "Read", live: "Reading" },
   "write-file": { done: "Created", live: "Creating" },
   "edit-file": { done: "Edited", live: "Editing" },
@@ -115,7 +113,6 @@ export function liveTurnLabel(items: readonly ModelTurnItem[]): string {
     if (last.status !== "running") return "Thinking…";
     return last.action === "spawn-agent" ? last.presentation.label : `${VERBS[last.action].live}…`;
   }
-  if ("block" in last && last.block.kind === "wave") return "Running threads…";
   return "Writing…";
 }
 

@@ -87,10 +87,7 @@ export function InsightsView({ sessionId, snapshot }: InsightsViewProps) {
   const selection = useSelectedInsight();
   const focusNonce = useInsightFocusNonce();
   const expanded = useExpandedInsightGroups();
-  const picked = useMemo(
-    () => resolveStoredInsight(selection, { name: null, episode: null }, timeline, () => false),
-    [selection, timeline],
-  );
+  const picked = useMemo(() => resolveStoredInsight(selection, timeline), [selection, timeline]);
   const shown = useMemo(
     () => picked ?? newestShownInsight(sections, timeline),
     [picked, sections, timeline],
@@ -143,7 +140,6 @@ export function InsightsView({ sessionId, snapshot }: InsightsViewProps) {
       };
     };
     const entryAction = (entry: InsightEntry) => {
-      if (entry.kind === "thread") return null;
       if (entry.kind === "session") {
         const session = resolveSession(entry.rowKey);
         return session ? () => openSubagent(session.rowKey) : null;
@@ -232,7 +228,6 @@ export function InsightsView({ sessionId, snapshot }: InsightsViewProps) {
   );
 
   if (!snapshot) return <PanelLoading listTitle="Insights" />;
-  // A thread the chat pointed Insights at still opens with no turns.
   if (!shown && !hasOlder && model.turns.length === 0) {
     return (
       <PanelEmptyState

@@ -33,8 +33,6 @@ import {
   useSessionSnapshot,
 } from "@/app/services/queries";
 
-function ignoreThread(): void {}
-
 /** Text of the newest user bubble, or null when the chat opens with the model. */
 function lastUserText(turns: TranscriptTurn[]): string | null {
   for (let index = turns.length - 1; index >= 0; index -= 1) {
@@ -338,9 +336,7 @@ export function SubagentPreview({
                     model={model}
                     active={running && lastIsThisRun}
                     isLast={false}
-                    selectedThreadEpisode={null}
                     selectedGroupId={null}
-                    onSelectThread={ignoreThread}
                     readOnly
                     interactive={false}
                   />
@@ -374,8 +370,6 @@ export function SubagentPreview({
                   model={model}
                   active
                   isLast={false}
-                  selectedThreadEpisode={null}
-                  onSelectThread={ignoreThread}
                   readOnly
                   interactive={false}
                 />

@@ -70,7 +70,7 @@ function shownRowKey(
   controller: InsightsRowController,
 ): string | null {
   let key: string | null = null;
-  // Match the DOM's last shown row, including an episode-less thread pick.
+  // Match the DOM's last shown row.
   for (const section of sections) {
     for (const entry of section.entries) {
       if (controller.entryShown(entry)) key = JSON.stringify(["entry", entry.kind, entry.id]);

@@ -15,7 +15,6 @@ import {
   TooltipPosition,
 } from "@/app/atoms";
 import { SnapshotBadge, type FilesPanelLink } from "@/app/components/inspector/SnapshotBadge";
-import { ThreadWave, type SelectThread } from "@/app/components/inspector/ThreadWave";
 import { LiveStatusLine } from "@/app/components/inspector/transcript/LiveStatusLine";
 import { liveTurnLabel } from "@/app/components/inspector/transcript/stepLabels";
 import { WorkFoldView } from "@/app/components/inspector/transcript/WorkFold";
@@ -71,7 +70,7 @@ interface ModelMessageProps {
   active: boolean;
   /**
    * What the run is doing right now, of which only the compaction status is
-   * shown: the turn's own steps already name tools and threads. Only the
+   * shown: the turn's own steps already name tools. Only the
    * active turn is given it, so the finished ones are not re-rendered every
    * time the line changes.
    */
@@ -80,11 +79,8 @@ interface ModelMessageProps {
   runStartedAt?: number | null;
   /** Stretches the last bubble so stick-to-bottom lands below the fold. */
   isLast?: boolean;
-  /** Episode key of the thread card the panels are pointing at, if any. */
-  selectedThreadEpisode: string | null;
   /** Id of the group the panels are pointing at, if any. */
   selectedGroupId?: string | null;
-  onSelectThread: SelectThread;
   /**
    * Snapshot index of the user prompt this model turn answers. Regenerate and
    * revert address that prompt — same endpoints as the user bubble above.
@@ -138,9 +134,7 @@ const ModelMessageBody = memo(function ModelMessageBody({
   activity,
   runStartedAt = null,
   isLast = false,
-  selectedThreadEpisode,
   selectedGroupId = null,
-  onSelectThread,
   userMessageIndex,
   userText = "",
   onRefresh = null,
@@ -215,16 +209,6 @@ const ModelMessageBody = memo(function ModelMessageBody({
           );
         }
         const { block } = entry;
-        if (block.kind === "wave") {
-          return (
-            <ThreadWave
-              key={block.key}
-              rows={block.rows}
-              selected={selectedThreadEpisode}
-              onSelect={interactive ? onSelectThread : undefined}
-            />
-          );
-        }
         if (block.text.trim() === RUN_CANCELLED_MARKER) return null;
         return (
           <Markdown
@@ -378,8 +362,7 @@ const ModelMessageBody = memo(function ModelMessageBody({
 
 /**
  * Everything the model did for one prompt, in the order it happened: the work
- * folded behind one line, the sessions it launched, the waves of threads it
- * ran and the answer it gave.
+ * folded behind one line, the sessions it launched, and the answer it gave.
  */
 export const ModelMessage = memo(function ModelMessage(props: ModelMessageProps) {
   const previous = usePreviousTurn(props.turn);

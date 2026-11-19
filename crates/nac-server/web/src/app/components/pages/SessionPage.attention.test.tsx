@@ -163,7 +163,7 @@ it.each([
       expect(f.acknowledgements).toEqual([]);
       act(() => {
         f.runtime.stores.sessionLayoutStore.sessionLayoutStore.setState({
-          selectedThread: "picked",
+          selectedInsight: { kind: "group", groupId: "picked", segmentKey: null },
         });
       });
       await act(async () => f.resolveSummary());
@@ -176,9 +176,9 @@ it.each([
     expect(track).not.toHaveBeenCalled();
     expect(f.sessions().map((entry) => entry.heartbeat_results?.[0].seen)).toEqual([true, false]);
     if (late)
-      expect(f.runtime.stores.sessionLayoutStore.sessionLayoutStore.getState().selectedThread).toBe(
-        "picked",
-      );
+      expect(
+        f.runtime.stores.sessionLayoutStore.sessionLayoutStore.getState().selectedInsight,
+      ).toEqual({ kind: "group", groupId: "picked", segmentKey: null });
   },
 );
 

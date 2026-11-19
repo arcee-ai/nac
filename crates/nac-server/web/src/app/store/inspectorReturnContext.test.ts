@@ -36,15 +36,14 @@ describe("inspector return context", () => {
     layout.activateSessionSelection("parent");
     layout.revealSidePanel(true);
     layout.selectSubagent("parent", "child:two");
-    layout.selectThread("worker", "episode-2");
-    layout.selectInsight({ kind: "thread" });
-    layout.rememberInsightsReturn(
-      "parent",
-      { kind: "thread" },
-      { name: "worker", episode: "episode-2" },
-    );
+    layout.selectInsight({ kind: "group", groupId: "parent-action", segmentKey: null });
+    layout.rememberInsightsReturn("parent", {
+      kind: "group",
+      groupId: "parent-action",
+      segmentKey: null,
+    });
     layout.rememberInsightListPosition("parent", 248, {
-      key: "thread:worker:episode-2",
+      key: "parent-action",
       offset: 52,
     });
     layout.toggleSidePanelExpanded();
@@ -63,9 +62,7 @@ describe("inspector return context", () => {
     expect(layout.sessionLayoutStore.getState()).toMatchObject({
       collapsed: false,
       expanded: true,
-      selectedInsight: { kind: "thread" },
-      selectedThread: "worker",
-      selectedThreadEpisode: "episode-2",
+      selectedInsight: { kind: "group", groupId: "parent-action", segmentKey: null },
     });
     expect(layout.sessionLayoutStore.getState().selectedSubagents.get("parent")).toBe("child:two");
     expect(layout.restoreInsightsReturn("parent")).toBe(true);

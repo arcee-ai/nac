@@ -31,7 +31,6 @@ import { UserMessage } from "@/app/components/inspector/UserMessage";
 import { useTranscriptModelContext } from "@/app/components/inspector/transcript/TranscriptModelContext";
 import { DelegatedCompletionCard } from "@/app/features/delegation/presentation/DelegatedCompletionCard";
 import { GoalContinuationCard } from "@/app/features/goals/presentation/GoalContinuationCard";
-import { useInsightsNavigation } from "@/app/features/insights/useInsightsNavigation";
 import { useAuthErrorSuppressed } from "@/app/hooks/useAuthErrorSuppressed";
 import { useErrorNotice, type ErrorNotice } from "@/app/hooks/useErrorNotice";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
@@ -135,14 +134,8 @@ export function Transcript({
     pushLocalEvent,
   } = useNativeRuntime().stores.runtimeStore;
 
-  const {
-    useSelectedThreadEpisode,
-    useSelectedInsight,
-    useSelectedRevision,
-    useSelectedFile,
-    selectRevision,
-    selectFile,
-  } = useNativeRuntime().stores.sessionLayoutStore;
+  const { useSelectedInsight, useSelectedRevision, useSelectedFile, selectRevision, selectFile } =
+    useNativeRuntime().stores.sessionLayoutStore;
 
   const stopping = useCancelArmed(sessionId);
   const activity = useActivity();
@@ -151,8 +144,6 @@ export function Transcript({
   const liveFailure = useRunFailure();
   const modelRetryAttempt = useModelRetryAttempt();
   const selectedInsight = useSelectedInsight();
-  const threadEpisode = useSelectedThreadEpisode();
-  const selectedThreadEpisode = selectedInsight?.kind === "thread" ? threadEpisode : null;
   const selectedGroupId = selectedInsight?.kind === "group" ? selectedInsight.groupId : null;
   const selectedFile = useSelectedFile();
   const selectedRevision = useSelectedRevision();
@@ -381,7 +372,6 @@ export function Transcript({
     return opens;
   }, [baseTurns]);
 
-  const { openThread } = useInsightsNavigation();
   // Opening a snapshot points the panel at that run's revision rather than at
   // the working tree: the run is what the badge describes, and the tree has
   // usually moved on — or been committed — since.
@@ -622,9 +612,7 @@ export function Transcript({
                   isLast={lastIsThisRun}
                   activity={running && lastIsThisRun ? activity : undefined}
                   runStartedAt={running && lastIsThisRun ? runStartedAt : null}
-                  selectedThreadEpisode={panel === "insights" ? selectedThreadEpisode : null}
                   selectedGroupId={panel === "insights" ? selectedGroupId : null}
-                  onSelectThread={openThread}
                   userMessageIndex={
                     precedingUser?.pending ? undefined : precedingUser?.messageIndex
                   }

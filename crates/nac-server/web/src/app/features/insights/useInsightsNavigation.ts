@@ -22,8 +22,6 @@ export interface InsightsOpenOptions {
 export interface InsightsNavigation {
   /** Insights with the group selected; `segmentKey` points its detail at one segment. */
   openGroup(groupId: string, segmentKey?: string, options?: InsightsOpenOptions): void;
-  /** Insights on the thread's detail; `episodeKey` is the dispatch whose card asked. */
-  openThread(name: string, episodeKey?: string, options?: InsightsOpenOptions): void;
   /** Subagents with that row open; the newest row stands in until the list has it. */
   openSubagent(rowKey: DelegatedRowKey): void;
   returnToInsights(options?: InsightsOpenOptions): void;
@@ -67,7 +65,6 @@ export function useInsightsNavigation(): InsightsNavigation {
     sessionLayoutStore,
     selectInsightsFilter,
     selectInsight,
-    selectThread,
     selectSubagent,
     selectRevision,
     selectFileListing,
@@ -98,12 +95,6 @@ export function useInsightsNavigation(): InsightsNavigation {
           revealInList("tools");
           pick({ kind: "group", groupId, segmentKey: segmentKey ?? null }, options);
         }),
-      openThread: (name, episodeKey, options) =>
-        open("insights", () => {
-          revealInList("threads");
-          selectThread(name, episodeKey ?? null);
-          pick({ kind: "thread" }, options);
-        }),
       openSubagent: (rowKey) => open("delegated", () => selectSubagent(sessionId, rowKey)),
       returnToInsights: (options) => {
         if (!panels.includes("insights")) return;
@@ -131,7 +122,6 @@ export function useInsightsNavigation(): InsightsNavigation {
     sessionLayoutStore,
     selectInsightsFilter,
     selectInsight,
-    selectThread,
     selectSubagent,
     selectRevision,
     selectFileListing,

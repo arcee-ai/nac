@@ -3,8 +3,6 @@ import type { ActionKind, ActionStatus } from "@/app/features/insights/model/typ
 
 const ROW_ICONS: Record<ActionKind, IconName> = {
   reasoning: IconName.Brain,
-  thread: IconName.Chat,
-  "delete-thread": IconName.Trash,
   "read-file": IconName.ReadFile,
   "write-file": IconName.FileUpload,
   "edit-file": IconName.Edit,

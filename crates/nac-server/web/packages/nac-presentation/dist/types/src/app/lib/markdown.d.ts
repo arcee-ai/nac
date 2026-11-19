@@ -5,6 +5,6 @@ interface MarkdownProps {
     className?: string;
     taskReferences?: boolean;
 }
-/** Markdown block used by transcript messages and thread episodes. */
+/** Markdown block used by transcript messages. */
 export declare function Markdown({ children, streaming, className, taskReferences, }: MarkdownProps): import("react").JSX.Element;
 export {};

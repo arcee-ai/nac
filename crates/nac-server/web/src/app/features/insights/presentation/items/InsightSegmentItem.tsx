@@ -29,7 +29,6 @@ import {
 } from "@/app/features/insights/presentation/items/SearchItems";
 import { sessionContent } from "@/app/features/insights/presentation/items/SessionItems";
 import { useErrorLine } from "@/app/features/insights/presentation/items/useErrorLine";
-import { deleteThreadContent } from "@/app/features/insights/presentation/items/ThreadItems";
 
 const TRAILING_ELLIPSIS = /…$/u;
 
@@ -62,8 +61,6 @@ function toolContent(segment: ToolSegment, context: ItemContext): ItemContent {
     case "session-wait":
     case "session-cancel":
       return sessionContent(segment, context);
-    case "delete-thread":
-      return deleteThreadContent(segment);
     default:
       return otherContent(segment, context);
   }

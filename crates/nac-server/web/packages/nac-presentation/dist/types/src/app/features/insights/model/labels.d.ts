@@ -25,5 +25,5 @@ export declare function groupLiveLabel(group: InsightGroup): string | null;
 export declare function entryMeta(entry: InsightEntry): string | null;
 /** A group's child row. Running and failed rows drop the meta and show the type. */
 export declare function segmentRow(segment: InsightSegment): InsightRow;
-/** A top-level row. Thread rows keep their name and meta in every state. */
+/** A top-level row for a group or delegated session. */
 export declare function entryRow(entry: InsightEntry): InsightRow;

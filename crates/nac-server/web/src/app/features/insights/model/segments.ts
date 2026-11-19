@@ -124,7 +124,7 @@ function partition(blocks: readonly TranscriptBlock[], anchor: string): ModelTur
     open = [];
   };
   for (const block of blocks) {
-    if (block.kind === "text" || block.kind === "wave") {
+    if (block.kind === "text") {
       close();
       items.push({ kind: "block", block });
       continue;
@@ -148,7 +148,7 @@ const partitions = new WeakMap<ModelTurn, { anchor: string; items: readonly Mode
 
 /**
  * One model turn as groups of consecutive reasoning and tool blocks,
- * the sessions it launched, and the text and wave blocks between them, in
+ * the sessions it launched, and the text blocks between them, in
  * transcript order. `previous` is the turn before it in the same `turns`.
  *
  * Group ids are `<anchor>:<first segment key>` and session ids

@@ -15,8 +15,7 @@ import {
   presentToolCall,
   type ToolPresentation,
 } from "@/app/lib/toolPresentation";
-import type { ThreadLogLine } from "@/app/lib/threadLog";
-import type { AgentEvent, DispatchWeight, SessionSnapshotResponse } from "@/app/types/api";
+import type { AgentEvent, SessionSnapshotResponse } from "@/app/types/api";
 
 /** Exact assistant marker written after any partial response on cancellation. */
 export const RUN_CANCELLED_MARKER = "[run cancelled by user]";
@@ -29,28 +28,6 @@ function stripRunFailureMarker(content: string): string {
   const suffix = `\n\n${RUN_FAILED_PARTIAL_MARKER}`;
   return trimmed.endsWith(suffix) ? trimmed.slice(0, -suffix.length).trimEnd() : trimmed;
 }
-export type ThreadState = "running" | "pending" | "done" | "cancelled" | "error";
-
-export interface TranscriptThread {
-  /**
-   * Identifies the dispatch behind the card rather than the thread behind it.
-   * One name can be dispatched again — each dispatch is an episode of its own,
-   * with its own log and its own result — so keying by name would tie every
-   * card of that name together.
-   */
-  key: string;
-  name: string;
-  /** What the orchestrator asked the thread to do. */
-  action: string;
-  /** Weight class the dispatch was classified into, if any. */
-  weight: DispatchWeight | null;
-  /** What the thread reported once it was done, or its action before then. */
-  summary: string;
-  /** Commands the thread has issued, oldest first, for the tail on its card. */
-  log: ThreadLogLine[];
-  state: ThreadState;
-}
-
 export type TranscriptBlock =
   | {
       kind: "thoughts";
@@ -62,9 +39,7 @@ export type TranscriptBlock =
     }
   | { kind: "text"; key: string; text: string }
   | { kind: "tool"; key: string; name: string; pending: boolean }
-  | { kind: "tool-detail"; key: string; presentation: ToolPresentation }
-  /** One assistant dispatch batch, split into topological DAG rows. */
-  | { kind: "wave"; key: string; rows: TranscriptThread[][] };
+  | { kind: "tool-detail"; key: string; presentation: ToolPresentation };
 
 export interface UserTurn {
   kind: "user";

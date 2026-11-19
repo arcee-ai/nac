@@ -17,8 +17,6 @@ export interface InsightsOpenOptions {
 export interface InsightsNavigation {
     /** Insights with the group selected; `segmentKey` points its detail at one segment. */
     openGroup(groupId: string, segmentKey?: string, options?: InsightsOpenOptions): void;
-    /** Insights on the thread's detail; `episodeKey` is the dispatch whose card asked. */
-    openThread(name: string, episodeKey?: string, options?: InsightsOpenOptions): void;
     /** Subagents with that row open; the newest row stands in until the list has it. */
     openSubagent(rowKey: DelegatedRowKey): void;
     returnToInsights(options?: InsightsOpenOptions): void;

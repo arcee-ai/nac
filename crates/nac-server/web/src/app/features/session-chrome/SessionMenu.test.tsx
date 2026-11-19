@@ -136,7 +136,7 @@ describe("session panel entries", () => {
     const busy = facts({
       additions: 12,
       deletions: 3,
-      agents: { count: 2, running: 1, panel: "delegated", noun: "agent" },
+      agents: { count: 2, running: 1, panel: "delegated" },
       goal: goal("paused"),
       schedules: 1,
     });
@@ -184,7 +184,7 @@ describe("live rule", () => {
     expect(
       sessionLiveFacts(
         facts({
-          agents: { count: 3, running: 2, panel: "delegated", noun: "agent" },
+          agents: { count: 3, running: 2, panel: "delegated" },
           goal: goal("active"),
           schedules: 1,
           schedulesActive: true,
@@ -201,7 +201,7 @@ describe("session menu", () => {
     expect(quiet.getAttribute("aria-describedby")).toBeNull();
     cleanup();
 
-    renderMenu(facts({ agents: { count: 1, running: 1, panel: "delegated", noun: "agent" } }));
+    renderMenu(facts({ agents: { count: 1, running: 1, panel: "delegated" } }));
     const live = screen.getByRole("button", { name: "Session menu" });
     expect(live.getAttribute("aria-describedby")).toBeTruthy();
     expect(live.querySelector(".status-dot-pulse")).not.toBeNull();
@@ -213,7 +213,7 @@ describe("session menu", () => {
       facts({
         additions: 12,
         deletions: 3,
-        agents: { count: 2, running: 1, panel: "delegated", noun: "agent" },
+        agents: { count: 2, running: 1, panel: "delegated" },
         goal: goal("paused"),
         schedules: 2,
       }),

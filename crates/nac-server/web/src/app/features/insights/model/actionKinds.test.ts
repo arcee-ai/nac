@@ -10,8 +10,6 @@ import type { ActionKind } from "@/app/features/insights/model/types";
 
 describe("action kinds", () => {
   it.each<[string, ActionKind]>([
-    ["thread", "thread"],
-    ["thread_delete", "delete-thread"],
     ["read", "read-file"],
     ["write", "write-file"],
     ["edit", "edit-file"],

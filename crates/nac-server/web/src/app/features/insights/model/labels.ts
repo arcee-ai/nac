@@ -4,7 +4,7 @@ import {
   formatListDuration,
   segmentDurationMs,
 } from "@/app/features/insights/model/durations";
-import { entryStatus, segmentStatus } from "@/app/features/insights/model/status";
+import { segmentStatus } from "@/app/features/insights/model/status";
 import type {
   ActionKind,
   ActionStatus,
@@ -26,13 +26,6 @@ interface ActionCopy {
 
 const ACTION_COPY: Record<ActionKind, ActionCopy> = {
   reasoning: { type: "Thoughts", running: "Thinking…", live: "Thinking…", meta: null },
-  thread: { type: "Thread", running: "Running thread…", live: "Running thread…", meta: "Thread" },
-  "delete-thread": {
-    type: "Delete thread",
-    running: "Deleting…",
-    live: "Deleting thread…",
-    meta: null,
-  },
   "read-file": { type: "Read File", running: "Reading File…", live: "Reading file…", meta: "Read" },
   "write-file": {
     type: "Create File",
@@ -214,7 +207,6 @@ export function segmentTypeLabel(segment: InsightSegment): string {
 export function segmentTitle(segment: InsightSegment): string {
   if (segment.kind === "tool") {
     const summary = segment.presentation?.summary;
-    if (segment.action === "delete-thread" && summary) return `Deleted: ${summary}`;
     const argument = toolArgument(segment.action, summary);
     if (argument) return argument;
   }
@@ -265,7 +257,6 @@ export function groupLiveLabel(group: InsightGroup): string | null {
 
 /** Ready row meta of an entry; a group counts its steps. */
 export function entryMeta(entry: InsightEntry): string | null {
-  if (entry.kind === "thread") return `Thread, ${entry.episodes}`;
   if (entry.kind === "session") return actionMeta(entry.action);
   return String(entry.group.segments.length);
 }
@@ -295,16 +286,8 @@ export function segmentRow(segment: InsightSegment): InsightRow {
   });
 }
 
-/** A top-level row. Thread rows keep their name and meta in every state. */
+/** A top-level row for a group or delegated session. */
 export function entryRow(entry: InsightEntry): InsightRow {
-  if (entry.kind === "thread") {
-    return {
-      action: "thread",
-      label: entry.thread.name,
-      meta: entryMeta(entry),
-      status: entryStatus(entry),
-    };
-  }
   if (entry.kind === "session") {
     return stateRow(entry.action, entry.status, {
       ready: entry.title,

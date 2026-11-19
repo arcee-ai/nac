@@ -1,31 +1,10 @@
 import { type DelegatedCompletion } from "../features/delegation/completion";
 import { type ToolPresentation } from "./toolPresentation";
-import type { ThreadLogLine } from "./threadLog";
-import type { AgentEvent, DispatchWeight, SessionSnapshotResponse } from "../types/api";
+import type { AgentEvent, SessionSnapshotResponse } from "../types/api";
 /** Exact assistant marker written after any partial response on cancellation. */
 export declare const RUN_CANCELLED_MARKER = "[run cancelled by user]";
 /** Stored sentinel identifying an assistant response abandoned by run failure. */
 export declare const RUN_FAILED_PARTIAL_MARKER = "[run failed after this partial assistant response]";
-export type ThreadState = "running" | "pending" | "done" | "cancelled" | "error";
-export interface TranscriptThread {
-    /**
-     * Identifies the dispatch behind the card rather than the thread behind it.
-     * One name can be dispatched again — each dispatch is an episode of its own,
-     * with its own log and its own result — so keying by name would tie every
-     * card of that name together.
-     */
-    key: string;
-    name: string;
-    /** What the orchestrator asked the thread to do. */
-    action: string;
-    /** Weight class the dispatch was classified into, if any. */
-    weight: DispatchWeight | null;
-    /** What the thread reported once it was done, or its action before then. */
-    summary: string;
-    /** Commands the thread has issued, oldest first, for the tail on its card. */
-    log: ThreadLogLine[];
-    state: ThreadState;
-}
 export type TranscriptBlock = {
     kind: "thoughts";
     key: string;
@@ -46,12 +25,6 @@ export type TranscriptBlock = {
     kind: "tool-detail";
     key: string;
     presentation: ToolPresentation;
-}
-/** One assistant dispatch batch, split into topological DAG rows. */
- | {
-    kind: "wave";
-    key: string;
-    rows: TranscriptThread[][];
 };
 export interface UserTurn {
     kind: "user";

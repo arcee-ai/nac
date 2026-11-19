@@ -16,7 +16,6 @@ export interface RowView {
 
 export interface RowSources {
   resolveSession: SessionResolver;
-  /** `episode_count` of each thread the snapshot retains, by name. */
 }
 
 function rowView(row: InsightRow): RowView {
@@ -40,9 +39,6 @@ export function segmentRowView(segment: InsightSegment, sources: RowSources): Ro
 
 export function entryRowView(entry: InsightEntry, sources: RowSources): RowView {
   const row = entryRow(entry);
-  if (entry.kind === "thread") {
-    return rowView({ ...row, meta: `Thread, ${entry.episodes}` });
-  }
   if (entry.kind === "session") {
     return rowView(withSessionTitle(row, sources.resolveSession(entry.rowKey)?.title));
   }

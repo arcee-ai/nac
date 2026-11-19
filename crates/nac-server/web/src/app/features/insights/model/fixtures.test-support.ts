@@ -3,7 +3,6 @@ import type {
   DelegatedCompletionTurn,
   ModelTurn,
   TranscriptBlock,
-  TranscriptThread,
   UserTurn,
 } from "@/app/lib/transcript";
 import type { Message, SessionBehavior, SessionSnapshotResponse, ToolCall } from "@/app/types/api";
@@ -107,27 +106,6 @@ export function toolDetail(
 
 export function compactTool(key: string, name: string, pending = false): TranscriptBlock {
   return { kind: "tool", key, name, pending };
-}
-
-export function thread(
-  name: string,
-  key: string,
-  overrides: Partial<TranscriptThread> = {},
-): TranscriptThread {
-  return {
-    key,
-    name,
-    action: `Work on ${name}`,
-    weight: null,
-    summary: `Work on ${name}`,
-    log: [],
-    state: "done",
-    ...overrides,
-  };
-}
-
-export function wave(key: string, rows: TranscriptThread[][]): TranscriptBlock {
-  return { kind: "wave", key, rows };
 }
 
 export function userTurn(

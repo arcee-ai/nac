@@ -53,8 +53,7 @@ export function sessionLiveFacts(facts: SessionFacts): string[] {
   const live: string[] = [];
   const agents = facts.agents;
   if (agents && agents.running > 0) {
-    const noun = agents.noun === "agent" ? "subagent" : "thread";
-    live.push(`${agents.running} ${noun}${agents.running === 1 ? "" : "s"} running`);
+    live.push(`${agents.running} subagent${agents.running === 1 ? "" : "s"} running`);
   }
   if (facts.goal?.status === "active") live.push(`Goal ${goalStatusLabel("active")}`);
   if (facts.schedulesActive) live.push("Schedules active");

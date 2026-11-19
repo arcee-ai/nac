@@ -8,12 +8,10 @@ import {
   snapshot,
   text,
   thoughts,
-  thread,
   toolCall,
   toolDetail,
   toolResult,
   userTurn,
-  wave,
 } from "@/app/features/insights/model/fixtures.test-support";
 import {
   insightAnchor,
@@ -77,7 +75,7 @@ describe("partitionModelTurn", () => {
       thoughts("thoughts-0"),
       toolDetail("read", { summary: "src/app/index.tsx" }),
       text("text-0"),
-      compactTool("thread_delete-3-0", "thread_delete"),
+      compactTool("read-3-0", "read"),
       thoughts("thoughts-1", { text: "  " }),
       toolDetail("edit"),
     ]);
@@ -85,19 +83,19 @@ describe("partitionModelTurn", () => {
     expect(shape(list)).toEqual([
       "group:thoughts-0,tool-call-read",
       "block:text-0",
-      "group:thread_delete-3-0,tool-call-edit",
+      "group:read-3-0,tool-call-edit",
     ]);
     expect(list.map((item) => (item.kind === "block" ? item.block.key : item.id))).toEqual([
       "user-0:thoughts-0",
       "text-0",
-      "user-0:thread_delete-3-0",
+      "user-0:read-3-0",
     ]);
   });
 
-  it("emits waves and launched sessions as items of their own", () => {
+  it("emits prose and launched sessions as items of their own", () => {
     const list = items([
       thoughts("thoughts-0"),
-      wave("wave-2", [[thread("impl/calendar", "impl/calendar@2:call-a")]]),
+      text("text-2"),
       thoughts("thoughts-1"),
       toolDetail("subagent", {
         summary: "Fix the flaky test",
@@ -110,7 +108,7 @@ describe("partitionModelTurn", () => {
 
     expect(shape(list)).toEqual([
       "group:thoughts-0",
-      "block:wave-2",
+      "block:text-2",
       "group:thoughts-1",
       "session:user-0:tool-call-subagent",
       "group:tool-call-read",
@@ -184,20 +182,14 @@ describe("partitionModelTurn", () => {
   });
 
   it("turns compact orchestrator tool blocks into segments without a presentation", () => {
-    const [running] = groups([
-      thoughts("thoughts-0"),
-      compactTool("thread_delete-1-0", "thread_delete", true),
-    ]);
-    const [settled] = groups([
-      thoughts("thoughts-0"),
-      compactTool("thread_delete-1-0", "thread_delete"),
-    ]);
+    const [running] = groups([thoughts("thoughts-0"), compactTool("read-1-0", "read", true)]);
+    const [settled] = groups([thoughts("thoughts-0"), compactTool("read-1-0", "read")]);
 
     expect(running.group.segments[1]).toEqual({
       kind: "tool",
-      key: "thread_delete-1-0",
-      name: "thread_delete",
-      action: "delete-thread",
+      key: "read-1-0",
+      name: "read",
+      action: "read-file",
       presentation: null,
       pending: true,
     });

@@ -5,7 +5,6 @@ import type {
   InsightEntry,
   InsightGroupEntry,
   InsightSegment,
-  InsightThreadEntry,
   InsightTurnSection,
 } from "@/app/features/insights/model/types";
 import { formatInsightDate } from "@/app/features/insights/presentation/insightTime";
@@ -25,26 +24,6 @@ export interface InsightsRowController {
   /** Null when the row has nowhere to go. */
   entryAction(entry: InsightEntry): (() => void) | null;
   segmentAction(entry: InsightGroupEntry, segment: InsightSegment): (() => void) | null;
-}
-
-type EntryRun =
-  | { kind: "wave"; entries: InsightThreadEntry[] }
-  | { kind: "entry"; entry: InsightEntry };
-
-/** Consecutive rows of one wave share a guide line. */
-function entryRuns(entries: readonly InsightEntry[]): EntryRun[] {
-  const runs: EntryRun[] = [];
-  for (const entry of entries) {
-    const last = runs.at(-1);
-    if (entry.kind !== "thread") {
-      runs.push({ kind: "entry", entry });
-    } else if (last?.kind === "wave" && last.entries[0].waveKey === entry.waveKey) {
-      last.entries.push(entry);
-    } else {
-      runs.push({ kind: "wave", entries: [entry] });
-    }
-  }
-  return runs;
 }
 
 function EntryRows({
@@ -107,7 +86,7 @@ export const InsightsTurnSection = memo(function InsightsTurnSection({
   /** Heading for a section with neither a time nor a prompt of its own. */
   fallbackPrompt: string;
   controller: InsightsRowController;
-  /** Large on a phone, whose waves also take more room above and below. */
+  /** Large on a phone. */
   size: ActionListButtonSize;
 }) {
   // A turn is headed by when it was sent; only a section with no time to show
@@ -126,17 +105,9 @@ export const InsightsTurnSection = memo(function InsightsTurnSection({
         {heading}
       </h3>
       <div className="flex flex-col gap-0.5 py-1 [&>*]:shrink-0">
-        {entryRuns(section.entries).map((run) =>
-          run.kind === "wave" ? (
-            <ActionListSegment key={`wave:${run.entries[0].id}`} className={cn(large && "py-2")}>
-              {run.entries.map((entry) => (
-                <EntryRows key={entry.id} entry={entry} controller={controller} size={size} />
-              ))}
-            </ActionListSegment>
-          ) : (
-            <EntryRows key={run.entry.id} entry={run.entry} controller={controller} size={size} />
-          ),
-        )}
+        {section.entries.map((entry) => (
+          <EntryRows key={entry.id} entry={entry} controller={controller} size={size} />
+        ))}
       </div>
     </div>
   );

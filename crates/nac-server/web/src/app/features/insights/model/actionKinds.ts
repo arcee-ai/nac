@@ -5,8 +5,6 @@ import type {
 } from "@/app/features/insights/model/types";
 
 const TOOL_ACTIONS = new Map<string, ActionKind>([
-  ["thread", "thread"],
-  ["thread_delete", "delete-thread"],
   ["read", "read-file"],
   ["write", "write-file"],
   ["edit", "edit-file"],

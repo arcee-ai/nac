@@ -4,6 +4,7 @@ import {
   collectToolResults,
   indexToolEvents,
   presentToolCall,
+  toolCallFailed,
   type ToolPresentationStatus,
 } from "@/app/lib/toolPresentation";
 import type { AgentEvent, ToolCall } from "@/app/types/api";
@@ -681,4 +682,29 @@ describe("tool durations and spawned sessions", () => {
       expect(JSON.stringify(presentation)).not.toContain("other generation");
     },
   );
+});
+
+describe("tool completion failure classification", () => {
+  it.each(["error", "timed_out", "cancelled"] as const)(
+    "marks %s completion as failed",
+    (completion_status) => {
+      expect(
+        toolCallFailed({ is_error: false, content_preview: completion_status, completion_status }),
+      ).toBe(true);
+    },
+  );
+  it.each(["timed_out", "cancelled", "spawn_error"] as const)(
+    "marks %s command as failed",
+    (command_status) => {
+      expect(toolCallFailed({ is_error: false, content_preview: "", command_status })).toBe(true);
+    },
+  );
+  it("preserves legacy timeout fallback and ordinary completed results", () => {
+    expect(
+      toolCallFailed({ is_error: false, content_preview: "Command timed out after 1000ms" }),
+    ).toBe(true);
+    expect(
+      toolCallFailed({ is_error: false, content_preview: "exit 7", command_status: "completed" }),
+    ).toBe(false);
+  });
 });
