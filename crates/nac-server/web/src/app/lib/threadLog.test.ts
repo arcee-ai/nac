@@ -1,11 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  mergeThreadLog,
-  persistedThreadLog,
-  threadLogLine,
-  toolCallFailed,
-} from "@/app/lib/threadLog";
+import { mergeThreadLog, persistedThreadLog, threadLogLine } from "@/app/lib/threadLog";
+import { toolCallFailed } from "@/app/lib/toolPresentation";
 import type { AgentEvent } from "@/app/types/api";
 
 function callEvent(callId: string): AgentEvent {

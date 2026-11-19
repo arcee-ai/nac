@@ -5,7 +5,7 @@
 
 import { createStore, standalonePreferenceStorage } from "@/app/lib/store";
 import { addTokenUsage, isActiveRun, maxBillableUsage, tokenUsageHasSpend } from "@/app/lib/format";
-import { toolCallFailed } from "@/app/lib/threadLog";
+import { toolCallFailed } from "@/app/lib/toolPresentation";
 import type { StreamStatus } from "@/app/services/eventStream";
 import type {
   ActiveRunSnapshot,

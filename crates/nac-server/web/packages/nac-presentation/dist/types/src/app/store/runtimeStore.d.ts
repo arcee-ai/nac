@@ -200,16 +200,12 @@ export declare function createRuntimeStore(_storage?: Pick<Storage, "getItem" | 
         type: "orchestrator_compaction_started";
     } | {
         compaction_id: string;
-        reason: import("../types/openapi.generated").components["schemas"] /**
-         * Wall-clock start of the current run, kept after Stop so the composer
-         * clock can keep showing elapsed instead of falling back to a previous
-         * response's duration (or `--:--`).
-         */["CompactionReason"];
+        reason: import("../types/openapi.generated").components["schemas"]["CompactionReason"];
         type: "orchestrator_compaction_completed";
     } | {
         cause: import("../types/openapi.generated").components["schemas"]["CompactionSkipReason"];
         compaction_id: string;
-        reason: import("../types/openapi.generated").components["schemas"] /** Frozen elapsed ms from the last run, used once live `startedAt` is gone. */["CompactionReason"];
+        reason: import("../types/openapi.generated").components["schemas"]["CompactionReason"];
         type: "orchestrator_compaction_skipped";
     } | {
         compaction_id: string;
@@ -368,16 +364,12 @@ export declare const release: () => void, runtimeStore: import("../lib/store").S
     type: "orchestrator_compaction_started";
 } | {
     compaction_id: string;
-    reason: import("../types/openapi.generated").components["schemas"] /**
-     * Wall-clock start of the current run, kept after Stop so the composer
-     * clock can keep showing elapsed instead of falling back to a previous
-     * response's duration (or `--:--`).
-     */["CompactionReason"];
+    reason: import("../types/openapi.generated").components["schemas"]["CompactionReason"];
     type: "orchestrator_compaction_completed";
 } | {
     cause: import("../types/openapi.generated").components["schemas"]["CompactionSkipReason"];
     compaction_id: string;
-    reason: import("../types/openapi.generated").components["schemas"] /** Frozen elapsed ms from the last run, used once live `startedAt` is gone. */["CompactionReason"];
+    reason: import("../types/openapi.generated").components["schemas"]["CompactionReason"];
     type: "orchestrator_compaction_skipped";
 } | {
     compaction_id: string;

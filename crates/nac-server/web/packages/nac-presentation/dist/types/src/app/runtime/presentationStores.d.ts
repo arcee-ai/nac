@@ -1,6 +1,5 @@
 import * as dockWidth from "../hooks/useDockWidth";
 import * as panelWidth from "../hooks/usePanelListWidth";
-import * as threadLogHeight from "../hooks/useThreadLogHeight";
 import * as attentionStore from "../store/attentionStore";
 import * as chatTabsStore from "../store/chatTabsStore";
 import * as promptDraftStore from "../store/promptDraftStore";
@@ -24,7 +23,6 @@ export interface PresentationStores {
     transcriptDensityStore: ReturnType<typeof createTranscriptDensityStore>;
     dockWidth: ReturnType<typeof dockWidth.createDockWidth>;
     panelWidth: ReturnType<typeof panelWidth.createPanelWidth>;
-    threadLogHeight: ReturnType<typeof threadLogHeight.createThreadLogHeight>;
     attentionStore: ReturnType<typeof attentionStore.createAttentionStore>;
     chatTabsStore: ReturnType<typeof chatTabsStore.createChatTabsStore>;
     promptDraftStore: ReturnType<typeof promptDraftStore.createPromptDraftStore>;
@@ -78,7 +76,6 @@ export declare const standalonePresentationStores: {
     promptDraftStore: typeof promptDraftStore;
     dockWidth: typeof dockWidth;
     panelWidth: typeof panelWidth;
-    threadLogHeight: typeof threadLogHeight;
     attentionStore: typeof attentionStore;
     chatTabsStore: typeof chatTabsStore;
     composerStore: typeof composerStore;

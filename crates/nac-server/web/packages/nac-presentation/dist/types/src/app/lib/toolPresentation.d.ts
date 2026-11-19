@@ -1,4 +1,11 @@
 import type { AgentEvent, SessionSnapshotResponse, ToolCall } from "../types/api";
+/** Whether a finished tool call should read as a failure. */
+export declare function toolCallFailed(event: {
+    is_error: boolean;
+    content_preview: string;
+    completion_status?: "success" | "error" | "timed_out" | "cancelled" | null;
+    command_status?: "completed" | "timed_out" | "cancelled" | "spawn_error" | null;
+}): boolean;
 export type ToolPresentationStatus = "pending" | "running" | "awaiting-approval" | "success" | "error" | "timed-out" | "cancelled" | "interrupted" | "unknown";
 export interface ToolPresentation {
     callId: string;

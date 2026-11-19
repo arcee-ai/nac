@@ -2,6 +2,25 @@ import { isJsonObject, type JsonObject, type JsonValue } from "@/app/lib/json";
 import { isNumber, isString } from "@/app/lib/primitive";
 import type { AgentEvent, Message, SessionSnapshotResponse, ToolCall } from "@/app/types/api";
 
+/** Opening of the legacy preview a command killed by its own timeout returned. */
+const TIMED_OUT_PREVIEW = "Command timed out after";
+
+/** Whether a finished tool call should read as a failure. */
+export function toolCallFailed(event: {
+  is_error: boolean;
+  content_preview: string;
+  completion_status?: "success" | "error" | "timed_out" | "cancelled" | null;
+  command_status?: "completed" | "timed_out" | "cancelled" | "spawn_error" | null;
+}): boolean {
+  if (event.completion_status != null) {
+    return event.completion_status !== "success";
+  }
+  if (event.command_status != null) {
+    return event.is_error || event.command_status !== "completed";
+  }
+  return event.is_error || event.content_preview.startsWith(TIMED_OUT_PREVIEW);
+}
+
 export type ToolPresentationStatus =
   | "pending"
   | "running"

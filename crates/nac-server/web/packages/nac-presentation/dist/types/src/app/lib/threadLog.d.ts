@@ -19,13 +19,6 @@ export interface ThreadLogLine {
     body: string;
     isError: boolean;
 }
-/** Whether a finished tool call should read as a failure. */
-export declare function toolCallFailed(event: {
-    is_error: boolean;
-    content_preview: string;
-    completion_status?: "success" | "error" | "timed_out" | "cancelled" | null;
-    command_status?: "completed" | "timed_out" | "cancelled" | "spawn_error" | null;
-}): boolean;
 /**
  * How one of a thread's events reads in a log, or null for an event that says
  * nothing about what the thread is doing.
