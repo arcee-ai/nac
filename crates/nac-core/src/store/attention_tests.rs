@@ -489,7 +489,6 @@ fn census_keeps_question_and_project_placement_on_one_snapshot() {
             ssh_host: None,
             ssh_port: None,
             ssh_identity_file: None,
-            default_model_config_id: None,
         },
     )
     .unwrap();

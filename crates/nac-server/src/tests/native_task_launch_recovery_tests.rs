@@ -40,7 +40,6 @@ async fn fixture_context(
             ssh_host: None,
             ssh_port: None,
             ssh_identity_file: None,
-            default_model_config_id: Some("task-config".into()),
         })
         .await
         .unwrap();

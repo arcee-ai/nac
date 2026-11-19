@@ -29,18 +29,11 @@ fn model_configuration(next: bool) -> model_configurations::NewModelConfiguratio
 }
 
 fn select(manager: &SessionManager, project: &str, next: bool) {
-    manager
-        .projects()
-        .update(
-            project,
-            application::projects::UpdateProject {
-                name: application::Field::Unchanged,
-                description: application::Field::Unchanged,
-                default_model_config_id: application::Field::Set(
-                    if next { "next-config" } else { "task-config" }.into(),
-                ),
-                pinned: application::Field::Unchanged,
-            },
+    rusqlite::Connection::open(&manager.inner.store_path)
+        .unwrap()
+        .execute(
+            "UPDATE projects SET default_model_config_id=?1 WHERE project_id=?2",
+            rusqlite::params![if next { "next-config" } else { "task-config" }, project],
         )
         .unwrap();
 }
@@ -71,7 +64,6 @@ async fn reservation(
                 ssh_host: None,
                 ssh_port: None,
                 ssh_identity_file: None,
-                default_model_config_id: Some("task-config".into()),
             })
             .await
             .unwrap()

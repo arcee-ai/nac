@@ -15,7 +15,6 @@ pub(crate) fn fixture() -> (PathBuf, TaskLaunchRequest, TaskLaunchSource) {
             ssh_host: None,
             ssh_port: None,
             ssh_identity_file: None,
-            default_model_config_id: None,
         },
     )
     .unwrap();

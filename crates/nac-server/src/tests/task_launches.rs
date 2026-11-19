@@ -60,7 +60,6 @@ pub(super) async fn fixture(root: &std::path::Path, manager: &SessionManager) ->
             ssh_host: None,
             ssh_port: None,
             ssh_identity_file: None,
-            default_model_config_id: Some("task-config".into()),
         })
         .await
         .unwrap();
@@ -616,7 +615,6 @@ async fn cross_project_backend_origin_launches_in_local_destination(sandbox: boo
             ssh_host: (!sandbox).then(|| "fixture.invalid".into()),
             ssh_port: None,
             ssh_identity_file: None,
-            default_model_config_id: None,
         },
     )
     .unwrap();

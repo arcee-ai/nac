@@ -159,9 +159,7 @@ impl From<ProjectStoreError> for ApiError {
             ProjectStoreError::DuplicateLocation | ProjectStoreError::Conflict(_) => {
                 StatusCode::CONFLICT
             }
-            ProjectStoreError::NotFound(_) | ProjectStoreError::ModelConfigurationNotFound(_) => {
-                StatusCode::NOT_FOUND
-            }
+            ProjectStoreError::NotFound(_) => StatusCode::NOT_FOUND,
             ProjectStoreError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };
         Self {

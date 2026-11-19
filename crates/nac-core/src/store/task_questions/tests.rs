@@ -472,7 +472,6 @@ fn deleting_project_cancels_question_binding_while_preserving_session_identity()
             ssh_host: None,
             ssh_port: None,
             ssh_identity_file: None,
-            default_model_config_id: None,
         },
     )
     .unwrap();
@@ -567,7 +566,6 @@ fn exact_read_rejects_reassignment_after_scope_snapshot_without_disclosing_new_o
             ssh_host: None,
             ssh_port: None,
             ssh_identity_file: None,
-            default_model_config_id: None,
         },
     )
     .unwrap();

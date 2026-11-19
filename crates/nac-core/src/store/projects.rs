@@ -11,7 +11,6 @@ const MAX_DESCRIPTION_LEN: usize = 2_000;
 pub struct ProjectPatch {
     pub name: Option<String>,
     pub description: Option<Option<String>>,
-    pub default_model_config_id: Option<Option<String>>,
     pub pinned: Option<bool>,
 }
 
@@ -25,7 +24,6 @@ pub enum ProjectStoreError {
     InvalidInput(String),
     DuplicateLocation,
     NotFound(String),
-    ModelConfigurationNotFound(String),
     Conflict(String),
     Store(anyhow::Error),
 }
@@ -36,9 +34,6 @@ impl std::fmt::Display for ProjectStoreError {
             Self::InvalidInput(message) | Self::Conflict(message) => formatter.write_str(message),
             Self::DuplicateLocation => formatter.write_str("a project already uses this location"),
             Self::NotFound(id) => write!(formatter, "project '{id}' was not found"),
-            Self::ModelConfigurationNotFound(id) => {
-                write!(formatter, "model configuration '{id}' was not found")
-            }
             Self::Store(error) => write!(formatter, "{error}"),
         }
     }
@@ -61,7 +56,7 @@ impl From<rusqlite::Error> for ProjectStoreError {
 type ProjectResult<T> = std::result::Result<T, ProjectStoreError>;
 
 const PROJECT_COLUMNS: &str = "project_id, name, description, cwd, ssh_host, ssh_port,
-     ssh_identity_file, default_model_config_id, created_at, updated_at,
+     ssh_identity_file, created_at, updated_at,
      pinned, sort_order, presentation_version";
 
 /// Pinned projects lead the list; inside a pin group the explicit order wins and
@@ -162,8 +157,6 @@ fn validated_project(project: NewProject) -> ProjectResult<ProjectRecord> {
             "ssh_port and ssh_identity_file require ssh_host".to_string(),
         ));
     }
-    let default_model_config_id =
-        normalize_optional_nonblank(project.default_model_config_id, "default_model_config_id")?;
     let name = match project.name {
         Some(name) => normalize_name(&name)?,
         None => generated_name(&project.cwd, ssh_host.as_deref()),
@@ -177,7 +170,6 @@ fn validated_project(project: NewProject) -> ProjectResult<ProjectRecord> {
         ssh_host,
         ssh_port: project.ssh_port,
         ssh_identity_file,
-        default_model_config_id,
         created_at: now.clone(),
         updated_at: now,
         pinned: false,
@@ -196,12 +188,11 @@ fn row_to_project_at(row: &rusqlite::Row<'_>, offset: usize) -> rusqlite::Result
         ssh_host: row.get(offset + 4)?,
         ssh_port: row.get(offset + 5)?,
         ssh_identity_file: row.get(offset + 6)?,
-        default_model_config_id: row.get(offset + 7)?,
-        created_at: row.get(offset + 8)?,
-        updated_at: row.get(offset + 9)?,
-        pinned: row.get::<_, i64>(offset + 10)? != 0,
-        sort_order: row.get(offset + 11)?,
-        presentation_version: row.get(offset + 12)?,
+        created_at: row.get(offset + 7)?,
+        updated_at: row.get(offset + 8)?,
+        pinned: row.get::<_, i64>(offset + 9)? != 0,
+        sort_order: row.get(offset + 10)?,
+        presentation_version: row.get(offset + 11)?,
     })
 }
 
@@ -222,26 +213,6 @@ fn map_insert_error(error: rusqlite::Error) -> ProjectStoreError {
     } else {
         ProjectStoreError::Store(error.into())
     }
-}
-
-fn ensure_model_configuration(
-    conn: &rusqlite::Connection,
-    config_id: Option<&str>,
-) -> ProjectResult<()> {
-    let Some(config_id) = config_id else {
-        return Ok(());
-    };
-    let exists: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM model_configurations WHERE config_id = ?1)",
-        params![config_id],
-        |row| row.get(0),
-    )?;
-    if !exists {
-        return Err(ProjectStoreError::ModelConfigurationNotFound(
-            config_id.to_string(),
-        ));
-    }
-    Ok(())
 }
 
 pub(super) fn load_project_with_connection(
@@ -293,14 +264,12 @@ pub fn insert_project(path: &Path, project: NewProject) -> ProjectResult<Project
     let mut record = validated_project(project)?;
     let mut conn = open_runtime_connection(path)?;
     let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-    ensure_model_configuration(&tx, record.default_model_config_id.as_deref())?;
     record.sort_order = next_sort_order(&tx, false, None)?;
     tx.execute(
         "INSERT INTO projects
          (project_id, name, description, cwd, ssh_host, ssh_port, ssh_identity_file,
-          default_model_config_id, created_at, updated_at, pinned, sort_order,
-          presentation_version)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 0, ?11, 0)",
+          created_at, updated_at, pinned, sort_order, presentation_version)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 0, ?10, 0)",
         params![
             record.project_id,
             record.name,
@@ -309,7 +278,6 @@ pub fn insert_project(path: &Path, project: NewProject) -> ProjectResult<Project
             record.ssh_host,
             record.ssh_port,
             record.ssh_identity_file,
-            record.default_model_config_id,
             record.created_at,
             record.updated_at,
             record.sort_order,
@@ -364,14 +332,6 @@ pub fn update_project(
         Some(description) => normalize_description(description)?,
         None => existing.description,
     };
-    let default_model_config_id = match patch.default_model_config_id {
-        Some(config_id) => {
-            let config_id = normalize_optional_nonblank(config_id, "default_model_config_id")?;
-            ensure_model_configuration(&tx, config_id.as_deref())?;
-            config_id
-        }
-        None => existing.default_model_config_id,
-    };
     // Re-pinning moves the project to the end of the target group and bumps the
     // presentation version so a concurrent reorder holding the old version is
     // rejected instead of silently reinstating the previous placement.
@@ -395,14 +355,13 @@ pub fn update_project(
     let updated_at = now_utc();
     tx.execute(
         "UPDATE projects
-         SET name = ?2, description = ?3, default_model_config_id = ?4, updated_at = ?5,
-             pinned = ?6, sort_order = ?7, presentation_version = ?8
+         SET name = ?2, description = ?3, updated_at = ?4,
+             pinned = ?5, sort_order = ?6, presentation_version = ?7
          WHERE project_id = ?1",
         params![
             project_id,
             name,
             description,
-            default_model_config_id,
             updated_at,
             i64::from(pinned),
             sort_order,
@@ -687,7 +646,6 @@ mod tests {
             ssh_host: None,
             ssh_port: None,
             ssh_identity_file: None,
-            default_model_config_id: None,
         }
     }
 
@@ -745,11 +703,14 @@ mod tests {
         initialize(&path).unwrap();
         insert_model_configuration(&path, "config-a", model_configuration("Project default"))
             .unwrap();
-        let mut project = new_project("project-a", "/work/alpha");
-        project.default_model_config_id = Some("config-a".to_string());
-        insert_project(&path, project).unwrap();
+        insert_project(&path, new_project("project-a", "/work/alpha")).unwrap();
 
         let conn = open_runtime_connection(&path).unwrap();
+        conn.execute(
+            "UPDATE projects SET default_model_config_id='config-a' WHERE project_id='project-a'",
+            [],
+        )
+        .unwrap();
         conn.execute("UPDATE model_configurations SET extra_headers_json='not-json' WHERE config_id='config-a'", []).unwrap();
         drop(conn);
         let context = load_project_launch_context(&path, "project-a").unwrap();
@@ -770,15 +731,13 @@ mod tests {
             "project-a"
         );
 
-        update_project(
-            &path,
-            "project-a",
-            ProjectPatch {
-                default_model_config_id: Some(None),
-                ..ProjectPatch::default()
-            },
-        )
-        .unwrap();
+        open_runtime_connection(&path)
+            .unwrap()
+            .execute(
+                "UPDATE projects SET default_model_config_id=NULL WHERE project_id='project-a'",
+                [],
+            )
+            .unwrap();
         assert!(delete_model_configuration(&path, "config-a").unwrap());
         assert_eq!(
             load_project_launch_context(&path, "project-a")

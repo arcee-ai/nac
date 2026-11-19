@@ -185,7 +185,6 @@ async fn retained_command(label: &str) -> (CreateSessionWithSnapshot, PathBuf, S
             ssh_host: None,
             ssh_port: None,
             ssh_identity_file: None,
-            default_model_config_id: None,
         },
     )
     .unwrap();
@@ -318,7 +317,6 @@ async fn native_command(label: &str) -> (CreateSessionWithSnapshot, PathBuf, Str
             ssh_host: None,
             ssh_port: None,
             ssh_identity_file: None,
-            default_model_config_id: None,
         },
     )
     .unwrap();

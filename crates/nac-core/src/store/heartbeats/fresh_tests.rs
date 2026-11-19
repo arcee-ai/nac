@@ -24,7 +24,6 @@ impl Fixture {
                 ssh_host: None,
                 ssh_port: None,
                 ssh_identity_file: None,
-                default_model_config_id: None,
             },
         )
         .unwrap();
@@ -289,7 +288,6 @@ fn initial_publication_run_and_outcome_survive_later_human_run_task_and_history_
             ssh_host: None,
             ssh_port: None,
             ssh_identity_file: None,
-            default_model_config_id: None,
         },
     )
     .unwrap();
@@ -751,15 +749,9 @@ fn selected_model_ignores_project_defaults_and_keeps_configuration_headers_priva
         },
     )
     .unwrap();
-    update_project(
-        &f.path,
-        "project",
-        ProjectPatch {
-            default_model_config_id: Some(Some("fixture-config".into())),
-            ..ProjectPatch::default()
-        },
-    )
-    .unwrap();
+    open_runtime_connection(&f.path).unwrap().execute(
+        "UPDATE projects SET default_model_config_id='fixture-config' WHERE project_id='project'", []
+    ).unwrap();
     let destination = f.binding.fresh_task.clone().unwrap();
     f.binding =
         fresh_heartbeat_binding(&f.path, &destination, None, f.root.to_str().unwrap()).unwrap();

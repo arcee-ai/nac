@@ -17,15 +17,13 @@ fn configuration(model: &str) -> NewModelConfiguration {
 }
 
 fn select(f: &Fixture, id: Option<&str>) {
-    update_project(
-        &f.path,
-        "project",
-        ProjectPatch {
-            default_model_config_id: Some(id.map(str::to_owned)),
-            ..ProjectPatch::default()
-        },
-    )
-    .unwrap();
+    open_runtime_connection(&f.path)
+        .unwrap()
+        .execute(
+            "UPDATE projects SET default_model_config_id=?1 WHERE project_id='project'",
+            [id],
+        )
+        .unwrap();
 }
 
 fn configured() -> Fixture {

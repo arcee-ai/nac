@@ -126,7 +126,6 @@ async fn observe_fresh(boundary: Boundary, git: bool) -> Result<()> {
             ssh_host: None,
             ssh_port: None,
             ssh_identity_file: None,
-            default_model_config_id: Some("fresh-model".into()),
         })
         .await?;
     let setup_path = path.clone();

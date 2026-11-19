@@ -18,13 +18,11 @@ pub(crate) struct CreateProject {
     pub(crate) ssh_host: Option<String>,
     pub(crate) ssh_port: Option<u16>,
     pub(crate) ssh_identity_file: Option<String>,
-    pub(crate) default_model_config_id: Option<String>,
 }
 
 pub(crate) struct UpdateProject {
     pub(crate) name: Field<String>,
     pub(crate) description: Field<String>,
-    pub(crate) default_model_config_id: Field<String>,
     pub(crate) pinned: Field<bool>,
 }
 
@@ -192,7 +190,6 @@ impl<'a> ProjectApplication<'a> {
                 ssh_host,
                 ssh_port,
                 ssh_identity_file,
-                default_model_config_id: command.default_model_config_id,
             },
         )?)
     }
@@ -210,7 +207,6 @@ impl<'a> ProjectApplication<'a> {
             projects::ProjectPatch {
                 name,
                 description: optional_patch(command.description),
-                default_model_config_id: optional_patch(command.default_model_config_id),
                 pinned,
             },
         )?)

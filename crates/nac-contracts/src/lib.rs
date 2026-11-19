@@ -201,9 +201,6 @@ pub struct ProjectRecord {
     pub ssh_host: Option<String>,
     pub ssh_port: Option<u16>,
     pub ssh_identity_file: Option<String>,
-    #[serde(skip_serializing)]
-    #[cfg_attr(feature = "openapi", schema(ignore))]
-    pub default_model_config_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
     pub pinned: bool,
@@ -221,7 +218,6 @@ pub struct NewProject {
     pub ssh_host: Option<String>,
     pub ssh_port: Option<u16>,
     pub ssh_identity_file: Option<String>,
-    pub default_model_config_id: Option<String>,
 }
 
 /// Immutable command environment plus the exact secret values that must be

@@ -141,7 +141,6 @@ pub(crate) async fn create_handler(
         ssh_host: request.ssh_host,
         ssh_port: request.ssh_port,
         ssh_identity_file: request.ssh_identity_file,
-        default_model_config_id: None,
     };
     Ok((
         StatusCode::CREATED,
@@ -176,7 +175,6 @@ pub(crate) async fn update_handler(
         application::projects::UpdateProject {
             name: project_field(request.name),
             description: project_field(request.description),
-            default_model_config_id: application::Field::Unchanged,
             pinned: project_field(request.pinned),
         },
     )?))

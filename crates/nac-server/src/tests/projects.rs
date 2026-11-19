@@ -301,7 +301,6 @@ async fn project_session_uses_explicit_model_and_filters_membership() {
             ssh_host: None,
             ssh_port: None,
             ssh_identity_file: None,
-            default_model_config_id: None,
         })
         .await
         .unwrap();
@@ -420,7 +419,6 @@ async fn project_sibling_requires_its_own_model_and_http_opt_in() {
             ssh_host: None,
             ssh_port: None,
             ssh_identity_file: None,
-            default_model_config_id: None,
         })
         .await
         .unwrap();
@@ -493,7 +491,6 @@ async fn concurrent_direct_first_chat_admission_is_unique() {
             ssh_host: None,
             ssh_port: None,
             ssh_identity_file: None,
-            default_model_config_id: None,
         })
         .await
         .unwrap();

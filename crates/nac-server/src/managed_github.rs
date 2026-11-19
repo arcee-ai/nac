@@ -546,10 +546,7 @@ fn map_clone_start_error(error: anyhow::Error) -> ApiError {
             nac_core::projects::ProjectStoreError::InvalidInput(_) => StatusCode::BAD_REQUEST,
             nac_core::projects::ProjectStoreError::DuplicateLocation
             | nac_core::projects::ProjectStoreError::Conflict(_) => StatusCode::CONFLICT,
-            nac_core::projects::ProjectStoreError::NotFound(_)
-            | nac_core::projects::ProjectStoreError::ModelConfigurationNotFound(_) => {
-                StatusCode::NOT_FOUND
-            }
+            nac_core::projects::ProjectStoreError::NotFound(_) => StatusCode::NOT_FOUND,
             nac_core::projects::ProjectStoreError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };
         return ApiError { status, message };

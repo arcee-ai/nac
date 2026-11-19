@@ -867,7 +867,6 @@ async fn deleting_project_skips_descendants_already_removed_by_parent_cascade() 
             ssh_host: None,
             ssh_port: None,
             ssh_identity_file: None,
-            default_model_config_id: None,
         })
         .await
         .unwrap();
