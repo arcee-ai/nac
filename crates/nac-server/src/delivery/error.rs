@@ -6,7 +6,6 @@ use axum::{
 };
 use nac_core::{
     model::ModelConfigurationError,
-    model_configurations::ModelConfigurationStoreError,
     permissions::PermissionApprovalModeUpdateError,
     projects::ProjectStoreError,
     runtime,
@@ -128,22 +127,6 @@ impl From<sessions::SessionConfigUpdateError> for ApiError {
             sessions::SessionConfigUpdateError::NotFound(_) => StatusCode::NOT_FOUND,
             sessions::SessionConfigUpdateError::Conflict(_) => StatusCode::CONFLICT,
             sessions::SessionConfigUpdateError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
-        };
-        Self {
-            status,
-            message: error.to_string(),
-        }
-    }
-}
-
-impl From<ModelConfigurationStoreError> for ApiError {
-    fn from(error: ModelConfigurationStoreError) -> Self {
-        let status = match &error {
-            ModelConfigurationStoreError::InvalidInput(_) => StatusCode::BAD_REQUEST,
-            ModelConfigurationStoreError::DuplicateName(_)
-            | ModelConfigurationStoreError::InUse(_) => StatusCode::CONFLICT,
-            ModelConfigurationStoreError::NotFound(_) => StatusCode::NOT_FOUND,
-            ModelConfigurationStoreError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };
         Self {
             status,
