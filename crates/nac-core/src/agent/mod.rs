@@ -129,7 +129,6 @@ pub struct AgentConfig {
     /// Local cwd for nac config/store paths; differs from workspace_cwd for SSH.
     pub config_cwd: PathBuf,
     pub working_directory: String,
-    pub worker_executable: Option<PathBuf>,
     pub sandbox: Option<SandboxSession>,
     /// How to reach the host of a remote session; mutually exclusive with sandbox.
     pub ssh: Option<SshConnection>,
@@ -431,7 +430,7 @@ impl Agent {
                 ))),
                 run_admission,
                 event_sink: config.event_sink.clone(),
-                worker_executable: config.worker_executable,
+                worker_executable: None,
                 backend,
                 mcp: config.mcp.clone(),
                 mcp_tools: Arc::new(HashMap::new()),
@@ -606,7 +605,6 @@ impl Agent {
                 workspace_cwd: workspace_cwd.clone(),
                 config_cwd: workspace_cwd,
                 working_directory,
-                worker_executable: None,
                 sandbox: None,
                 ssh: None,
                 mcp: None,

@@ -83,7 +83,6 @@ fn fixture_with_policy(
             workspace_cwd: directory.clone(),
             config_cwd: directory.clone(),
             working_directory: directory.display().to_string(),
-            worker_executable: None,
             sandbox: None,
             ssh: None,
             mcp: None,

@@ -63,7 +63,6 @@ fn compaction_test_agent_with_mode(
             workspace_cwd: PathBuf::from("."),
             config_cwd: PathBuf::from("."),
             working_directory: ".".to_string(),
-            worker_executable: None,
             sandbox: None,
             ssh: None,
             mcp: None,

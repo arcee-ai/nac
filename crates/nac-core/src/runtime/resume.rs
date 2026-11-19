@@ -458,7 +458,6 @@ pub(super) async fn build_resume_config_from_snapshot(
         workspace_cwd,
         config_cwd,
         working_directory: working_directory.clone(),
-        worker_executable: None,
         sandbox,
         ssh,
         mcp,

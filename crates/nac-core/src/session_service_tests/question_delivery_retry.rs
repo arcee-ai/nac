@@ -304,7 +304,6 @@ async fn heartbeat_question_delivery_typed_answer_failure_uses_real_goal_retry_t
             workspace_cwd: root.clone(),
             config_cwd: root.clone(),
             working_directory: root.to_string_lossy().into_owned(),
-            worker_executable: None,
             sandbox: None,
             ssh: None,
             mcp: None,

@@ -378,7 +378,6 @@ async fn sessionless_and_worker_manual_compaction_is_unavailable_without_events(
             workspace_cwd: PathBuf::from("."),
             config_cwd: PathBuf::from("."),
             working_directory: ".".to_string(),
-            worker_executable: None,
             sandbox: None,
             ssh: None,
             mcp: None,

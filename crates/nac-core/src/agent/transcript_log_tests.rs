@@ -37,7 +37,6 @@ pub(super) fn transcript_test_agent(
             workspace_cwd: PathBuf::from("."),
             config_cwd: PathBuf::from("."),
             working_directory: ".".to_string(),
-            worker_executable: None,
             sandbox: None,
             ssh: None,
             mcp: None,

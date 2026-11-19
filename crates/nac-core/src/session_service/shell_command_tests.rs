@@ -59,7 +59,6 @@ fn test_direct_active_service_at(
             workspace_cwd: cwd.clone(),
             config_cwd: cwd.clone(),
             working_directory: cwd.to_string_lossy().into(),
-            worker_executable: None,
             sandbox: None,
             ssh: None,
             mcp: None,

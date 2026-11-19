@@ -24,7 +24,6 @@ fn agent(mode: AgentMode, preload: bool) -> Agent {
             workspace_cwd: root.clone(),
             config_cwd: root,
             working_directory: ".".into(),
-            worker_executable: None,
             sandbox: None,
             ssh: None,
             mcp: None,

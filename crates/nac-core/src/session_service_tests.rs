@@ -275,7 +275,6 @@ pub(super) fn build_test_agent(
             workspace_cwd: PathBuf::from("/repo"),
             config_cwd: PathBuf::from("/repo"),
             working_directory: "/repo".to_string(),
-            worker_executable: None,
             sandbox: None,
             ssh: None,
             mcp: None,
@@ -437,7 +436,6 @@ fn has_sandbox_reflects_the_agent_execution_backend() {
             workspace_cwd: PathBuf::from("/repo"),
             config_cwd: PathBuf::from("/repo"),
             working_directory: "/repo".to_string(),
-            worker_executable: None,
             sandbox: Some(crate::sandbox::SandboxSession::new_for_test(
                 crate::sandbox::SandboxSpec {
                     backend: crate::sandbox::SandboxBackendType::Podman,
@@ -592,7 +590,6 @@ async fn sandbox_container_destruction_preserves_worktree_until_durable_delete()
             workspace_cwd: worktree.path.clone(),
             config_cwd: repo_root.clone(),
             working_directory: worktree.path.display().to_string(),
-            worker_executable: None,
             sandbox: Some(crate::sandbox::SandboxSession::new_for_test(sandbox_spec)),
             ssh: None,
             mcp: None,

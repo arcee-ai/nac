@@ -23,7 +23,6 @@ async fn worker_send_stays_direct_when_provider_context_total_is_invalid() {
             workspace_cwd: PathBuf::from("."),
             config_cwd: PathBuf::from("."),
             working_directory: ".".to_string(),
-            worker_executable: None,
             sandbox: None,
             ssh: None,
             mcp: None,
