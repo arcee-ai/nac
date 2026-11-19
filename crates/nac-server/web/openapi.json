@@ -12759,7 +12759,8 @@
             "format": "int32",
             "minimum": 0
           }
-        }
+        },
+        "additionalProperties": false
       },
       "CreateProviderConnectionRequest": {
         "type": "object",
@@ -22538,7 +22539,8 @@
             "$ref": "#/components/schemas/RequestField_bool_bool",
             "description": "Toggling this moves the project to the end of the target pin group and\nbumps `presentation_version`."
           }
-        }
+        },
+        "additionalProperties": false
       },
       "UpdateSessionPresentationRequest": {
         "type": "object",

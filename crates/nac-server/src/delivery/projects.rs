@@ -16,6 +16,7 @@ pub struct ProjectList {
 }
 
 #[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
 pub struct CreateProjectRequest {
     pub name: Option<String>,
     pub description: Option<String>,
@@ -27,20 +28,15 @@ pub struct CreateProjectRequest {
     pub ssh_port: Option<u16>,
     #[serde(default)]
     pub ssh_identity_file: Option<String>,
-    #[serde(default)]
-    #[schema(ignore)]
-    pub default_model_config_id: RequestField<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
 pub struct UpdateProjectRequest {
     #[serde(default)]
     pub name: RequestField<String>,
     #[serde(default)]
     pub description: RequestField<String>,
-    #[serde(default)]
-    #[schema(ignore)]
-    pub default_model_config_id: RequestField<String>,
     /// Toggling this moves the project to the end of the target pin group and
     /// bumps `presentation_version`.
     #[serde(default)]
@@ -127,13 +123,6 @@ pub(crate) async fn create_handler(
     payload: Result<Json<CreateProjectRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<ProjectRecord>), ApiError> {
     let Json(request) = payload.map_err(ApiError::from)?;
-    if !matches!(request.default_model_config_id, RequestField::Omitted) {
-        return Err(ApiError::new(
-            StatusCode::BAD_REQUEST,
-            "Project model defaults are no longer supported; choose a model for each session"
-                .to_string(),
-        ));
-    }
     let command = application::projects::CreateProject {
         name: request.name,
         description: request.description,
@@ -163,13 +152,6 @@ pub(crate) async fn update_handler(
     payload: Result<Json<UpdateProjectRequest>, JsonRejection>,
 ) -> Result<Json<ProjectRecord>, ApiError> {
     let Json(request) = payload.map_err(ApiError::from)?;
-    if !matches!(request.default_model_config_id, RequestField::Omitted) {
-        return Err(ApiError::new(
-            StatusCode::BAD_REQUEST,
-            "Project model defaults are no longer supported; choose a model for each session"
-                .to_string(),
-        ));
-    }
     Ok(Json(manager.projects().update(
         &project_id,
         application::projects::UpdateProject {
