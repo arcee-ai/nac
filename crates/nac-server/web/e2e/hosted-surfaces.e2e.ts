@@ -228,13 +228,20 @@ for (const mobile of [false, true]) {
         { token: "REFRESH_DIRTY" },
         { kind: "text", text: "dirty refresh done", stream: "request" },
       );
-      expect(
-        (
-          await request.post(`${harness.baseUrl}/sessions/${id}/runs`, {
-            data: { prompt: "REFRESH_DIRTY" },
-          })
-        ).ok(),
-      ).toBe(true);
+      // The preceding workspace operation may still hold the local admission
+      // gate. Retry only its explicit pre-admission rejection, never an
+      // accepted or uncertain submission.
+      await expect.poll(async () => {
+        const response = await request.post(`${harness.baseUrl}/sessions/${id}/runs`, {
+          data: { prompt: "REFRESH_DIRTY" },
+        });
+        if (response.status() === 409) {
+          expect(await response.json()).toEqual({ error: "session is busy with a local operation" });
+          return false;
+        }
+        expect(response.status()).toBe(202);
+        return true;
+      }, { timeout: 15_000 }).toBe(true);
       await waitForRunIdle(request, harness, id);
       await openFileList(page, mobile);
       await expect(page.getByRole("button", { name: "Commit", exact: true })).toBeEnabled();
