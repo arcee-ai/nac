@@ -517,42 +517,34 @@ fn transcript_append_steer_and_inbox_ack_loss_replay_delivery_once() {
             .version,
         version
     );
-    let queued = queue_thread_steering(
+    let second = create_session_inbox_item(
         &path,
         "session",
-        ORCHESTRATOR_STEERING_TARGET,
-        "run",
-        "thread steer",
+        InboxDelivery::Steer,
+        "second steer",
+        Some("run"),
+        None,
     )
     .unwrap();
-    claim_thread_steering(&path, "session", "run").unwrap();
     *writer.append_fault.lock().unwrap() = Some((AppendFault::UncertainCommit, 1));
-    writer
-        .append_claimed_thread_steering(
-            "session",
-            "run",
-            &[queued.id],
-            2,
-            &[message("thread steer")],
-        )
+    let committed = writer
+        .append_pending_inbox_steers("session", "run", 2)
         .unwrap();
-    writer
-        .append_claimed_thread_steering(
-            "session",
-            "run",
-            &[queued.id],
-            2,
-            &[message("thread steer")],
-        )
+    assert_eq!(committed[0].id, second.id);
+    let replay = writer
+        .append_pending_inbox_steers("session", "run", 2)
         .unwrap();
+    assert_eq!(replay[0].id, second.id);
     assert_eq!(writer.read_from("session", 0).unwrap().len(), 3);
     assert_eq!(
         crate::sessions::list_sessions(&path).unwrap()[0].visible_message_count,
         3
     );
     assert_eq!(
-        list_thread_steering(&path, "session").unwrap()[0].status,
-        "delivered"
+        load_session_inbox_item(&path, "session", second.id)
+            .unwrap()
+            .status,
+        InboxStatus::Delivered
     );
     assert_eq!(
         load_run_recovery(&path, "session")

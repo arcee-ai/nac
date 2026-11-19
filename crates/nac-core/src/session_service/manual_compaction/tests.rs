@@ -743,12 +743,13 @@ async fn manual_compaction_success_preserves_snapshot_and_emits_context_before_r
         serde_json::to_vec(&agent.messages).unwrap()
     };
     let usage_before = parts.service.agent.lock().await.last_usage.clone();
-    let steering = crate::store::queue_thread_steering(
+    let queued_input = crate::store::create_session_inbox_item(
         &store_path,
         "success-session",
-        crate::store::ORCHESTRATOR_STEERING_TARGET,
-        "stale-dispatch",
+        crate::store::InboxDelivery::Queue,
         "leave this untouched",
+        None,
+        None,
     )
     .unwrap();
     let mut events = parts.service.subscribe_events();
@@ -835,8 +836,8 @@ async fn manual_compaction_success_preserves_snapshot_and_emits_context_before_r
     assert_eq!(agent.last_usage, usage_before);
     drop(agent);
     assert_eq!(
-        crate::store::list_thread_steering(&store_path, "success-session").unwrap(),
-        vec![steering]
+        crate::store::list_session_inbox(&store_path, "success-session").unwrap(),
+        vec![queued_input]
     );
     assert_eq!(
         crate::store::orchestrator_compaction::load_orchestrator_compaction_checkpoints(

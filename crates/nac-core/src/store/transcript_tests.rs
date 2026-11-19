@@ -293,50 +293,6 @@ fn transcript_log_append_batch_assigns_contiguous_indices_and_is_empty_noop() {
 }
 
 #[test]
-fn steering_acknowledgement_and_transcript_append_are_atomic() {
-    let path = temp_store_path("steering_atomic");
-    initialize(&path).unwrap();
-    crate::store::insert_test_session(&path, "session");
-    let steer = queue_thread_steering(
-        &path,
-        "session",
-        ORCHESTRATOR_STEERING_TARGET,
-        "dispatch",
-        "keep going",
-    )
-    .unwrap();
-    assert_eq!(
-        claim_thread_steering(&path, "session", "dispatch")
-            .unwrap()
-            .len(),
-        1
-    );
-    let writer = TranscriptLogWriter::new(&path).unwrap();
-    let messages = [Message::User {
-        content: "keep going".to_string(),
-    }];
-
-    writer
-        .append_claimed_thread_steering("session", "dispatch", &[steer.id], 1, &messages)
-        .unwrap_err();
-    assert!(writer.read_from("session", 0).unwrap().is_empty());
-    assert_eq!(
-        list_thread_steering(&path, "session").unwrap()[0].status,
-        "claimed"
-    );
-
-    writer
-        .append_claimed_thread_steering("session", "dispatch", &[steer.id], 0, &messages)
-        .unwrap();
-    assert_eq!(writer.read_from("session", 0).unwrap().len(), 1);
-    assert_eq!(
-        list_thread_steering(&path, "session").unwrap()[0].status,
-        "delivered"
-    );
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
-}
-
-#[test]
 fn inbox_delivery_and_transcript_commit_are_atomic_for_steers_and_prompts() {
     let path = temp_store_path("inbox_atomic");
     initialize(&path).unwrap();
