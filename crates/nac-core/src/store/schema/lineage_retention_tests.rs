@@ -56,7 +56,10 @@ const SELECTION: &str = r#"CREATE TABLE IF NOT EXISTS selection_questions (
 
 fn rows(conn: &Connection, table: &str) -> Vec<Vec<rusqlite::types::Value>> {
     let mut query = conn
-        .prepare(&format!("SELECT * FROM {table} ORDER BY rowid"))
+        .prepare(&format!(
+            "SELECT {} FROM {table} ORDER BY rowid",
+            surviving_test_columns(conn, table)
+        ))
         .unwrap();
     let width = query.column_count();
     query
@@ -107,7 +110,7 @@ fn ada41_42_and_mixed43_keep_origins_nulls_questions_receipts_and_atomicity() {
     for (version, selection) in [(41, false), (42, true), (43, false), (43, true)] {
         let root = std::env::temp_dir().join(format!("nac-lineage-{}", uuid::Uuid::new_v4()));
         let path = root.join("store.db");
-        initialize(&path).unwrap();
+        initialize_synthetic_predecessor(&path).unwrap();
         for id in ["parent", "explicit", "cleared", "old-producer"] {
             insert_test_session(&path, id);
         }

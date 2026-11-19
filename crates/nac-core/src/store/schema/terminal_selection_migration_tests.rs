@@ -4,7 +4,7 @@ fn terminal_selection_migration_34_rolls_back_before_commit_and_restarts() {
     let path = std::env::temp_dir()
         .join(format!("nac-selection-migration-{}", uuid::Uuid::new_v4()))
         .join("store.db");
-    initialize(&path).unwrap();
+    initialize_synthetic_predecessor(&path).unwrap();
     crate::store::insert_test_session(&path, "session");
     let legacy = crate::store::create_session_inbox_item(
         &path,

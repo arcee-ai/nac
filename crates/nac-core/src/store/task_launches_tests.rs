@@ -1,10 +1,20 @@
 use super::*;
 
 pub(crate) fn fixture() -> (PathBuf, TaskLaunchRequest, TaskLaunchSource) {
+    fixture_with_historical_schema(false)
+}
+
+fn fixture_with_historical_schema(
+    historical: bool,
+) -> (PathBuf, TaskLaunchRequest, TaskLaunchSource) {
     let path = std::env::temp_dir()
         .join(format!("nac-task-launch-{}", uuid::Uuid::new_v4()))
         .join("store.db");
-    initialize(&path).unwrap();
+    if historical {
+        schema::initialize_synthetic_predecessor(&path).unwrap();
+    } else {
+        initialize(&path).unwrap();
+    }
     insert_project(
         &path,
         NewProject {
@@ -132,7 +142,7 @@ fn cancellation_is_durable_and_late_preparation_cannot_reopen_it() {
 #[test]
 fn migrates_previous_store_without_touching_existing_session_identity() {
     for previous_version in [34, 37] {
-        let (path, _, _) = fixture();
+        let (path, _, _) = fixture_with_historical_schema(true);
         insert_test_session(&path, "legacy");
         let waiter = crate::sessions::ChildInputWaitLease::new(&path).unwrap();
         let input = create_traditional_child_inbox_item(
@@ -200,7 +210,10 @@ fn restart_reconciliation_preserves_pin_and_retained_ownership_without_admitting
 
 fn retained_migration_rows(conn: &Connection, table: &str) -> Vec<Vec<rusqlite::types::Value>> {
     let mut statement = conn
-        .prepare(&format!("SELECT * FROM {table} ORDER BY rowid"))
+        .prepare(&format!(
+            "SELECT {} FROM {table} ORDER BY rowid",
+            schema::surviving_test_columns(conn, table)
+        ))
         .unwrap();
     let columns = statement.column_count();
     statement
@@ -214,7 +227,7 @@ fn retained_migration_rows(conn: &Connection, table: &str) -> Vec<Vec<rusqlite::
 
 #[test]
 fn v38_evidence_and_delegated_input_survive_retained_launch_migration() {
-    let (path, request, source) = fixture();
+    let (path, request, source) = fixture_with_historical_schema(true);
     for session in ["parent", "child"] {
         insert_test_session(&path, session);
     }
@@ -290,9 +303,7 @@ fn v38_evidence_and_delegated_input_survive_retained_launch_migration() {
         "session_run_outcomes",
         "session_goal_outcomes",
         "traditional_children",
-        "managed_orchestrators",
         "traditional_child_terminal_receipts",
-        "managed_orchestrator_terminal_receipts",
         "session_inbox",
         "sqlite_sequence",
     ];

@@ -986,24 +986,7 @@ coordinated_command! {
 pub fn delete_session(path: &Path, session_id: &str) -> Result<bool> {
     let mut conn = crate::store::open_connection(path)?;
     let tx = conn.transaction()?;
-    // Delete non-cascading child tables before their parents. Session-owned
-    // auxiliary rows are intentionally left to their session foreign keys.
-    tx.execute(
-        "DELETE FROM episodes WHERE session_id = ?1",
-        params![session_id],
-    )?;
-    tx.execute(
-        "DELETE FROM workset_items WHERE session_id = ?1",
-        params![session_id],
-    )?;
-    tx.execute(
-        "DELETE FROM threads WHERE session_id = ?1",
-        params![session_id],
-    )?;
-    tx.execute(
-        "DELETE FROM worksets WHERE session_id = ?1",
-        params![session_id],
-    )?;
+    // Session-owned auxiliary rows are removed by their session foreign keys.
     let deleted = tx.execute(
         "DELETE FROM sessions WHERE session_id = ?1",
         params![session_id],

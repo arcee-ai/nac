@@ -1,22 +1,13 @@
 use super::*;
 
 #[tokio::test]
-async fn direct_config_patch_preserves_inert_legacy_light_bytes_and_rejects_selector() {
+async fn direct_config_patch_updates_selected_model_and_rejects_light_selector() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
-    let root = temp_root("inert_light_preserved");
+    let root = temp_root("selected_model_only");
     let nac_home = root.join("nac-home");
     let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
     seed_editable_session(&root, "session");
     let store = root.join("store.db");
-    let raw = "malformed legacy light bytes";
-    let conn = rusqlite::Connection::open(&store).unwrap();
-    conn.execute(
-        "UPDATE sessions SET light_model_json=?1 WHERE session_id='session'",
-        [raw],
-    )
-    .unwrap();
-    drop(conn);
-    assert!(sessions::load_session(&store, "session").is_ok());
     let manager = test_manager(&root);
     manager
         .update_session_config(
@@ -29,14 +20,20 @@ async fn direct_config_patch_preserves_inert_legacy_light_bytes_and_rejects_sele
         .await
         .unwrap();
     let conn = rusqlite::Connection::open(&store).unwrap();
-    let retained: String = conn
+    let light_columns: i64 = conn
         .query_row(
-            "SELECT light_model_json FROM sessions WHERE session_id='session'",
+            "SELECT count(*) FROM pragma_table_info('sessions') WHERE name='light_model_json'",
             [],
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(retained, raw);
+    assert_eq!(light_columns, 0);
+    assert_eq!(
+        sessions::load_session_config(&store, "session")
+            .unwrap()
+            .model,
+        "replacement-model"
+    );
     drop(conn);
     let error = manager
         .update_session_config(

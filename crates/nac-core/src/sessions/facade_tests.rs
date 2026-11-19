@@ -214,7 +214,7 @@ fn behavior_round_trips_lists_and_cannot_change_during_state_save() {
     );
     let conn = rusqlite::Connection::open(&store_path).unwrap();
     conn.execute(
-        "UPDATE sessions SET light_model_json = '{broken' WHERE session_id = 'direct'",
+        "UPDATE sessions SET extra_headers_json = '{broken' WHERE session_id = 'direct'",
         [],
     )
     .unwrap();
@@ -327,37 +327,28 @@ fn project_link_is_atomic_authoritative_and_session_owned() {
 }
 
 #[test]
-fn direct_sessions_preserve_but_do_not_load_or_rewrite_inert_light_data() {
+fn direct_session_model_updates_without_retired_light_column() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
-    let store_path = temp_store_path("inert_light_model");
-    let snapshot = test_snapshot(
-        "light",
-        "2026-01-01 00:00:00.000000000",
-        "2026-01-01 00:00:00.000000000",
-    );
+    let store_path = temp_store_path("selected_model_only");
+    let snapshot = test_snapshot("selected", "created", "updated");
     create_session(&store_path, &snapshot).unwrap();
-    let legacy = "{broken";
-    let conn = rusqlite::Connection::open(&store_path).unwrap();
-    conn.execute(
-        "UPDATE sessions SET light_model_json=?1 WHERE session_id='light'",
-        [legacy],
-    )
-    .unwrap();
-    drop(conn);
-    assert!(load_session(&store_path, "light").is_ok());
-    let mut config = load_session_config(&store_path, "light").unwrap();
+    let mut config = load_session_config(&store_path, "selected").unwrap();
     assert!(config.diagnostics.is_empty());
     config.model = "replacement-model".into();
     assert_eq!(update_raw_session_config(&store_path, &config).unwrap(), 1);
     let conn = rusqlite::Connection::open(&store_path).unwrap();
-    let retained: String = conn
+    let light_columns: i64 = conn
         .query_row(
-            "SELECT light_model_json FROM sessions WHERE session_id='light'",
+            "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name='light_model_json'",
             [],
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(retained, legacy);
+    assert_eq!(light_columns, 0);
+    assert_eq!(
+        load_session_config(&store_path, "selected").unwrap().model,
+        "replacement-model"
+    );
     drop(conn);
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }

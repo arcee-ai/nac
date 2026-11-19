@@ -8,10 +8,17 @@ impl Drop for TestStoreDir {
     }
 }
 fn setup() -> (TestStoreDir, PathBuf) {
+    setup_with_historical_schema(false)
+}
+fn setup_with_historical_schema(historical: bool) -> (TestStoreDir, PathBuf) {
     let directory = std::env::temp_dir().join(format!("nac-append-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&directory).unwrap();
     let path = directory.join("store.db");
-    initialize(&path).unwrap();
+    if historical {
+        initialize_synthetic_predecessor(&path).unwrap();
+    } else {
+        initialize(&path).unwrap();
+    }
     insert_test_session(&path, "session");
     (TestStoreDir(directory), path)
 }
@@ -402,7 +409,7 @@ fn transcript_append_generation_change_rejects_even_the_same_run_id() {
 
 #[test]
 fn transcript_append_v29_upgrade_preserves_legacy_payload_and_recovery() {
-    let (_dir, path) = setup();
+    let (_dir, path) = setup_with_historical_schema(true);
     let writer = TranscriptLogWriter::new(&path).unwrap();
     writer
         .append_run_prompt("session", 0, &message("legacy prompt"), "legacy-run")

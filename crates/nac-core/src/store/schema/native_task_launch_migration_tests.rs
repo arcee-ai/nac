@@ -8,7 +8,7 @@ fn schema_42_upgrades_actual_41_atomically_and_retains_launch_inventory() {
             uuid::Uuid::new_v4()
         ))
         .join("store.db");
-    initialize(&path).unwrap();
+    initialize_synthetic_predecessor(&path).unwrap();
     insert_test_session(&path, "source");
     let conn = open_runtime_connection(&path).unwrap();
     conn.execute("INSERT INTO task_followups(caller_session_id,request_id,target_session_id,request_json,resolved_delivery,inbox_item_id,created_at) VALUES('source','followup','target','{}','queue',123,'now')",[]).unwrap();
@@ -60,7 +60,6 @@ fn schema_42_upgrades_actual_41_atomically_and_retains_launch_inventory() {
         .is_err());
     conn.execute("DELETE FROM sessions WHERE session_id='source'", [])
         .unwrap();
-    conn.pragma_update(None, "user_version", 41).unwrap();
     drop(conn);
     initialize(&path).unwrap();
     let conn = open_runtime_connection(&path).unwrap();

@@ -2,10 +2,17 @@ use super::*;
 use crate::types::Message;
 use std::sync::Arc;
 fn fixture() -> PathBuf {
+    fixture_with_historical_schema(false)
+}
+fn fixture_with_historical_schema(historical: bool) -> PathBuf {
     let path = std::env::temp_dir()
         .join(format!("nac-selection-admission-{}", uuid::Uuid::new_v4()))
         .join("store.db");
-    initialize(&path).unwrap();
+    if historical {
+        initialize_synthetic_predecessor(&path).unwrap();
+    } else {
+        initialize(&path).unwrap();
+    }
     insert_test_session(&path, "session");
     insert_test_session(&path, "other");
     path
@@ -179,7 +186,7 @@ fn identified_selection_commit_faults_reconcile_exact_identity_and_fifo() {
 }
 #[test]
 fn identified_selection_migration_from_32_preserves_legacy_records_and_reopens() {
-    let path = fixture();
+    let path = fixture_with_historical_schema(true);
     let pending = create_session_inbox_item(
         &path,
         "session",

@@ -27,7 +27,10 @@ const RETAINED: &[&str] = &[
 
 fn rows(conn: &Connection, table: &str) -> Vec<Vec<rusqlite::types::Value>> {
     let mut query = conn
-        .prepare(&format!("SELECT * FROM {table} ORDER BY 1"))
+        .prepare(&format!(
+            "SELECT {} FROM {table} ORDER BY 1",
+            surviving_test_columns(conn, table)
+        ))
         .unwrap();
     let width = query.column_count();
     query
@@ -55,7 +58,7 @@ fn path() -> PathBuf {
 /// Reconstruct every post-version addition, not a version stamp on current DDL.
 /// Unchanged c226 schema47 tables + exact48348 migration are the frozen suppliers.
 fn historical(path: &Path, version: i64) {
-    initialize(path).unwrap();
+    initialize_synthetic_predecessor(path).unwrap();
     for id in ["caller", "target"] {
         insert_test_session(path, id);
     }

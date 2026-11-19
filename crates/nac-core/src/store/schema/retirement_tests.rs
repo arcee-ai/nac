@@ -147,14 +147,14 @@ fn purge_is_transactional_and_preserves_independent_fork_provenance() {
 fn purge_uses_real_schema_cascades_and_keeps_direct_session_and_fork() {
     let root = std::env::temp_dir().join(format!("nac-retirement-schema-{}", uuid::Uuid::new_v4()));
     let path = root.join("store.db");
-    initialize(&path).unwrap();
+    initialize_synthetic_predecessor(&path).unwrap();
     for id in ["hybrid", "child", "direct", "fork"] {
         insert_test_session(&path, id);
     }
     let mut conn = open_runtime_connection(&path).unwrap();
     conn.execute_batch(
-            "DROP TRIGGER session_direct_only_insert;
-             DROP TRIGGER session_direct_only_update;
+            "DROP TRIGGER IF EXISTS session_direct_only_insert;
+             DROP TRIGGER IF EXISTS session_direct_only_update;
              UPDATE sessions SET behavior='direct';
              UPDATE sessions SET behavior='direct-with-orchestrator' WHERE session_id='hybrid';
              INSERT INTO traditional_children(child_session_id,parent_session_id,root_session_id,profile,description,nesting_depth,status,generation,created_at,updated_at)
@@ -208,12 +208,12 @@ fn real_schema_cleanup_authority_is_retained_on_refusal() {
     let root =
         std::env::temp_dir().join(format!("nac-retirement-cleanup-{}", uuid::Uuid::new_v4()));
     let path = root.join("store.db");
-    initialize(&path).unwrap();
+    initialize_synthetic_predecessor(&path).unwrap();
     insert_test_session(&path, "retired");
     let conn = open_runtime_connection(&path).unwrap();
     conn.execute_batch(
-        "DROP TRIGGER session_direct_only_insert;
-             DROP TRIGGER session_direct_only_update;
+        "DROP TRIGGER IF EXISTS session_direct_only_insert;
+             DROP TRIGGER IF EXISTS session_direct_only_update;
              UPDATE sessions SET behavior='orchestrator' WHERE session_id='retired';
              INSERT INTO terminal_remote_cleanups(session_id,pidfile,created_at)
              VALUES('retired','/remote/owned-pid','now');",
@@ -343,15 +343,7 @@ fn previous_schema_upgrade_rolls_back_and_retries_as_one_transaction() {
             .unwrap(),
             "orchestrator wording remains"
         );
-        assert_eq!(
-            conn.query_row::<String, _, _>(
-                "SELECT light_model_json FROM sessions WHERE session_id='direct'",
-                [],
-                |row| row.get(0)
-            )
-            .unwrap(),
-            "malformed legacy light bytes"
-        );
+        assert!(!column_exists(&conn, "sessions", "light_model_json").unwrap());
         assert_eq!(
             conn.query_row::<i64, _, _>(
                 "SELECT count(*) FROM traditional_children WHERE child_session_id='direct-child'",
@@ -587,7 +579,7 @@ async fn serving_coordinator_upgrades_under_its_existing_process_lease() {
     assert_eq!(
         conn.pragma_query_value::<i64, _>(None, "user_version", |row| row.get(0))
             .unwrap(),
-        53
+        STORE_SCHEMA_VERSION
     );
     assert_eq!(
         conn.query_row::<i64, _, _>("SELECT count(*) FROM sessions", [], |row| row.get(0))
@@ -644,7 +636,7 @@ fn competing_upgrades_serialize_and_purge_once() {
     assert_eq!(
         conn.pragma_query_value::<i64, _>(None, "user_version", |row| row.get(0))
             .unwrap(),
-        53
+        STORE_SCHEMA_VERSION
     );
     assert_eq!(
         conn.query_row::<i64, _, _>("SELECT count(*) FROM sessions", [], |row| row.get(0))
@@ -705,5 +697,196 @@ fn pending_podman_creation_refuses_upgrade_and_preserves_record() {
     std::fs::rename(&record, &staging).unwrap();
     std::fs::remove_dir_all(staging).unwrap();
     initialize(&path).unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn v53_retirement_preserves_live_direct_data_and_edited_connections() {
+    let root = std::env::temp_dir().join(format!("nac-v54-retirement-{}", uuid::Uuid::new_v4()));
+    let path = root.join("store.db");
+    std::fs::create_dir_all(&root).unwrap();
+    let conn = Connection::open(&path).unwrap();
+    conn.execute_batch(include_str!("fixtures/v53.sql"))
+        .unwrap();
+    conn.execute("INSERT INTO sessions(session_id,behavior,cwd,store_path,model,base_url,messages_json,created_at,updated_at) VALUES ('direct','direct','/tmp/project','/tmp/store.db','test-model','https://example.invalid','[]','now','now')", []).unwrap();
+    conn.execute_batch(
+        "INSERT INTO model_configurations(config_id,name,backend,model,base_url,allow_insecure_http,api_key_env,created_at,updated_at)
+         VALUES('edited','edited','openai-responses','old','https://old.invalid',0,'OLD_KEY','before','before'),
+               ('deleted','deleted','openai-responses','old','https://old.invalid',0,'DELETED_KEY','before','before');
+         INSERT INTO provider_connections(connection_id,backend,base_url,allow_insecure_http,api_key_env,created_at,updated_at)
+         VALUES('edited','openai-responses','https://new.invalid',0,'NEW_KEY','before','after');
+         INSERT INTO session_inbox(session_id,delivery,status,content,created_at,updated_at,version)
+         VALUES('direct','queue','pending','keep me','now','now',2);
+         INSERT INTO thread_events(id,session_id,thread_name,event_json,created_at)
+         VALUES(77,'direct','__orchestrator__','{}','now');",
+    ).unwrap();
+    drop(conn);
+    let reached_commit = std::cell::Cell::new(false);
+    assert!(initialize_with_hooks(
+        &path,
+        || {},
+        || {},
+        || {
+            reached_commit.set(true);
+            Err(anyhow!("before commit"))
+        }
+    )
+    .is_err());
+    assert!(
+        reached_commit.get(),
+        "migration must reach the injected rollback point"
+    );
+    let conn = Connection::open(&path).unwrap();
+    assert_eq!(
+        conn.pragma_query_value::<i64, _>(None, "user_version", |r| r.get(0))
+            .unwrap(),
+        53
+    );
+    assert!(column_exists(&conn, "sessions", "light_model_json").unwrap());
+    assert!(column_exists(&conn, "projects", "default_model_config_id").unwrap());
+    assert_eq!(
+        conn.query_row::<i64, _, _>("SELECT count(*) FROM model_configurations", [], |r| r
+            .get(0))
+            .unwrap(),
+        2
+    );
+    drop(conn);
+    initialize(&path).unwrap();
+    initialize(&path).unwrap();
+    let conn = open_runtime_connection(&path).unwrap();
+    for table in [
+        "managed_orchestrator_terminal_receipts",
+        "managed_orchestrators",
+        "worker_dispatches",
+        "episodes",
+        "threads",
+        "workset_items",
+        "worksets",
+        "thread_steering",
+        "model_configurations",
+    ] {
+        assert_eq!(
+            conn.query_row::<i64, _, _>(
+                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?1",
+                [table],
+                |r| r.get(0)
+            )
+            .unwrap(),
+            0,
+            "{table}"
+        );
+    }
+    assert!(!column_exists(&conn, "sessions", "light_model_json").unwrap());
+    assert!(!column_exists(&conn, "projects", "default_model_config_id").unwrap());
+    assert_eq!(
+        conn.query_row::<(String, String), _, _>(
+            "SELECT base_url, api_key_env FROM provider_connections WHERE connection_id='edited'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?))
+        )
+        .unwrap(),
+        ("https://new.invalid".into(), "NEW_KEY".into())
+    );
+    assert_eq!(
+        conn.query_row::<i64, _, _>("SELECT count(*) FROM provider_connections", [], |r| r
+            .get(0))
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        conn.query_row::<String, _, _>(
+            "SELECT content FROM session_inbox WHERE session_id='direct'",
+            [],
+            |r| r.get(0)
+        )
+        .unwrap(),
+        "keep me"
+    );
+    assert_eq!(
+        conn.query_row::<i64, _, _>(
+            "SELECT id FROM thread_events WHERE session_id='direct'",
+            [],
+            |r| r.get(0)
+        )
+        .unwrap(),
+        77
+    );
+    assert_eq!(
+        conn.query_row::<i64, _, _>("SELECT count(*) FROM pragma_foreign_key_check", [], |r| r
+            .get(0))
+            .unwrap(),
+        0
+    );
+    drop(conn);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn competing_v53_upgrades_serialize_and_preserve_the_connection() {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    let root = std::env::temp_dir().join(format!("nac-v54-concurrent-{}", uuid::Uuid::new_v4()));
+    let path = root.join("store.db");
+    std::fs::create_dir_all(&root).unwrap();
+    let conn = Connection::open(&path).unwrap();
+    conn.execute_batch(include_str!("fixtures/v53-fresh.sql"))
+        .unwrap();
+    conn.execute("INSERT INTO provider_connections VALUES('route','openai-responses','https://example.invalid',0,'KEY','before','after')", []).unwrap();
+    drop(conn);
+    let (locked_tx, locked_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let first_path = path.clone();
+    let first = std::thread::spawn(move || {
+        initialize_with_hooks(
+            &first_path,
+            || {},
+            || {
+                locked_tx.send(()).unwrap();
+                release_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+            },
+            || Ok(()),
+        )
+    });
+    locked_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    let (preflight_tx, preflight_rx) = mpsc::channel();
+    let second_path = path.clone();
+    let second = std::thread::spawn(move || {
+        initialize_with_hooks(
+            &second_path,
+            || {
+                preflight_tx.send(()).unwrap();
+            },
+            || {},
+            || Ok(()),
+        )
+    });
+    preflight_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    release_tx.send(()).unwrap();
+    first.join().unwrap().unwrap();
+    second.join().unwrap().unwrap();
+    let conn = Connection::open(&path).unwrap();
+    assert_eq!(
+        conn.pragma_query_value::<i64, _>(None, "user_version", |r| r.get(0))
+            .unwrap(),
+        STORE_SCHEMA_VERSION
+    );
+    assert_eq!(
+        conn.query_row::<String, _, _>(
+            "SELECT api_key_env FROM provider_connections WHERE connection_id='route'",
+            [],
+            |r| r.get(0)
+        )
+        .unwrap(),
+        "KEY"
+    );
+    assert!(!table_exists(&conn, "model_configurations").unwrap());
+    assert_eq!(
+        conn.query_row::<i64, _, _>("SELECT count(*) FROM pragma_foreign_key_check", [], |r| r
+            .get(0))
+            .unwrap(),
+        0
+    );
+    drop(conn);
     std::fs::remove_dir_all(root).unwrap();
 }

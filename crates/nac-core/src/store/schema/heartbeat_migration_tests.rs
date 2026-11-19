@@ -77,7 +77,7 @@ fn schema_44_heartbeats_upgrade_actual_43_atomically_and_preserve_all_supplier_r
     let root =
         std::env::temp_dir().join(format!("nac-heartbeat-migration-{}", uuid::Uuid::new_v4()));
     let path = root.join("store.db");
-    initialize(&path).unwrap();
+    initialize_synthetic_predecessor(&path).unwrap();
     for id in ["caller", "target"] {
         insert_test_session(&path, id);
     }

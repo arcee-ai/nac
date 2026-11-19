@@ -147,12 +147,14 @@ pub use transcript::*;
 pub use transcript_append::{TranscriptAppendError, TranscriptAppendReceipt};
 pub use workspace_revisions::*;
 
+#[cfg(test)]
+pub(crate) use schema::{
+    initialize_synthetic_predecessor, track_connection_opens, tracked_connection_opens,
+};
 pub(crate) use schema::{
     open_connection, open_initialized_read_connection, open_probe_read_connection,
     open_runtime_connection, StoreConnection,
 };
-#[cfg(test)]
-pub(crate) use schema::{track_connection_opens, tracked_connection_opens};
 pub(crate) use thread_events::load_all_thread_events_with_connection;
 pub(crate) use time::now_utc;
 
@@ -161,9 +163,9 @@ pub(crate) fn insert_test_session(path: &Path, session_id: &str) {
     let conn = open_runtime_connection(path).unwrap();
     conn.execute(
         "INSERT INTO sessions
-             (session_id, cwd, store_path, model, base_url, messages_json,
+             (session_id, behavior, cwd, store_path, model, base_url, messages_json,
               created_at, updated_at)
-         VALUES (?1, '/tmp/project', '/tmp/store.db', 'test-model',
+         VALUES (?1, 'direct', '/tmp/project', '/tmp/store.db', 'test-model',
                  'https://example.invalid', '[]', ?2, ?2)",
         params![session_id, now_utc()],
     )

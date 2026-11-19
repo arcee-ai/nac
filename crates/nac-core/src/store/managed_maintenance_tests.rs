@@ -123,7 +123,7 @@ fn downgrade_to_schema_24_without_managed_control(path: &Path) {
 #[test]
 fn schema_24_fixture_migrates_without_losing_existing_rows() {
     let path = path("migration");
-    initialize(&path).unwrap();
+    schema::initialize_synthetic_predecessor(&path).unwrap();
     insert_test_session(&path, "existing");
     downgrade_to_schema_24_without_managed_control(&path);
 
@@ -149,14 +149,8 @@ fn blockers_leave_admission_open_and_retry_can_prepare() {
     insert_test_session(&path, "root");
     let conn = Connection::open(&path).unwrap();
     conn.execute(
-        "INSERT INTO threads (name, session_id, created_at, updated_at)
-         VALUES ('main', 'root', 'created', 'created')",
-        [],
-    )
-    .unwrap();
-    conn.execute(
         "INSERT INTO thread_events (id, session_id, thread_name, event_json, created_at)
-         VALUES (1, 'root', 'main', '{}', 'created')",
+         VALUES (1, 'root', '__orchestrator__', '{}', 'created')",
         [],
     )
     .unwrap();
@@ -1191,7 +1185,7 @@ fn explicit_unbound_adoption_records_a_and_b_atomically_and_replays_after_restar
 #[test]
 fn explicit_unbound_adoption_bootstraps_schema_24_and_preserves_data_across_restart() {
     let path = path("unbound-schema-24");
-    initialize(&path).unwrap();
+    schema::initialize_synthetic_predecessor(&path).unwrap();
     insert_test_session(&path, "retained-schema-24");
     downgrade_to_schema_24_without_managed_control(&path);
     let mut previous = binding("operation-schema-24-a", 'a');
@@ -1257,7 +1251,7 @@ fn explicit_unbound_adoption_bootstraps_schema_24_and_preserves_data_across_rest
 fn schema_24_unbound_adoption_rejects_partial_control_schema_and_history() {
     for case in ["partial-ledger", "operation-history", "older-schema"] {
         let path = path(&format!("unbound-schema-24-{case}"));
-        initialize(&path).unwrap();
+        schema::initialize_synthetic_predecessor(&path).unwrap();
         insert_test_session(&path, "retained-schema-24-conflict");
         downgrade_to_schema_24_without_managed_control(&path);
         let conn = Connection::open(&path).unwrap();

@@ -721,9 +721,12 @@ async fn provider_connection_is_model_independent_and_keeps_secret_private() {
     assert!(!body.to_string().contains("private-fake-api-key"));
     let conn = rusqlite::Connection::open(root.join("store.db")).unwrap();
     assert_eq!(
-        conn.query_row::<i64, _, _>("SELECT count(*) FROM model_configurations", [], |row| row
-            .get(0))
-            .unwrap(),
+        conn.query_row::<i64, _, _>(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='model_configurations'",
+            [],
+            |row| row.get(0)
+        )
+        .unwrap(),
         0
     );
     drop(conn);

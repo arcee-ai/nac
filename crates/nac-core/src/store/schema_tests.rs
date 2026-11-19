@@ -182,22 +182,25 @@ fn assert_current_schema(conn: &Connection) {
     ] {
         assert!(session_columns.iter().any(|column| column == expected));
     }
-    assert_eq!(
-        table_columns(conn, "thread_steering"),
-        [
-            "id",
-            "session_id",
-            "thread_name",
-            "dispatch_id",
-            "instruction",
-            "status",
-            "created_at",
-            "claimed_at",
-            "delivered_at",
-            "expired_at",
-            "review_intent"
-        ]
-    );
+    for retired in [
+        "thread_steering",
+        "threads",
+        "episodes",
+        "worksets",
+        "workset_items",
+        "worker_dispatches",
+        "managed_orchestrators",
+        "managed_orchestrator_terminal_receipts",
+        "model_configurations",
+    ] {
+        assert!(
+            table_columns(conn, retired).is_empty(),
+            "retired table {retired}"
+        );
+    }
+    assert!(!session_columns
+        .iter()
+        .any(|column| column == "light_model_json"));
     assert_eq!(
         table_columns(conn, "thread_events"),
         [
@@ -282,37 +285,9 @@ fn assert_current_schema(conn: &Connection) {
         ]
     );
     assert_eq!(
-        table_columns(conn, "managed_orchestrators"),
-        [
-            "orchestrator_session_id",
-            "parent_session_id",
-            "root_session_id",
-            "description",
-            "status",
-            "generation",
-            "run_id",
-            "execution_mode",
-            "report",
-            "failure",
-            "completion_inbox_id",
-            "completion_suppressed",
-            "created_at",
-            "updated_at",
-            "version",
-        ]
+        table_columns(conn, "traditional_child_terminal_receipts"),
+        ["child_session_id", "generation", "run_id", "record_json"]
     );
-    for (table, session_id) in [
-        ("traditional_child_terminal_receipts", "child_session_id"),
-        (
-            "managed_orchestrator_terminal_receipts",
-            "orchestrator_session_id",
-        ),
-    ] {
-        assert_eq!(
-            table_columns(conn, table),
-            [session_id, "generation", "run_id", "record_json"]
-        );
-    }
     assert_eq!(
         table_columns(conn, "managed_host_maintenance"),
         [
@@ -352,14 +327,12 @@ fn assert_current_schema(conn: &Connection) {
         ["session_id", "pidfile", "created_at"]
     );
     for table in [
-        "thread_steering",
         "thread_events",
         "session_inbox",
         "session_goals",
         "session_goal_outcomes",
         "session_run_outcomes",
         "traditional_children",
-        "managed_orchestrators",
     ] {
         assert_session_cascade(conn, table);
     }
@@ -440,7 +413,6 @@ fn assert_current_schema(conn: &Connection) {
             "ssh_host",
             "ssh_port",
             "ssh_identity_file",
-            "default_model_config_id",
             "created_at",
             "updated_at",
             "pinned",
@@ -472,21 +444,7 @@ fn assert_current_schema(conn: &Connection) {
         )
         .unwrap();
     assert_eq!(project_delete, "RESTRICT");
-    let config_delete: String = conn
-        .query_row(
-            "SELECT on_delete
-             FROM pragma_foreign_key_list('projects')
-             WHERE \"table\" = 'model_configurations'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(config_delete, "RESTRICT");
-    for index in [
-        "idx_projects_location",
-        "idx_projects_default_model_config",
-        "idx_session_projects_project",
-    ] {
+    for index in ["idx_projects_location", "idx_session_projects_project"] {
         let exists: bool = conn
             .query_row(
                 "SELECT EXISTS(
@@ -510,7 +468,7 @@ fn assert_current_schema(conn: &Connection) {
 #[test]
 fn v16_store_purges_pre_behavior_sessions_and_establishes_downgrade_barrier() {
     let path = temp_store_path("v16_behavior");
-    initialize(&path).unwrap();
+    initialize_synthetic_predecessor(&path).unwrap();
     let legacy = Connection::open(&path).unwrap();
     insert_legacy_session(&legacy, "legacy-session");
     legacy
@@ -538,7 +496,7 @@ fn v16_store_purges_pre_behavior_sessions_and_establishes_downgrade_barrier() {
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
     assert_eq!(version, STORE_SCHEMA_VERSION);
-    assert_eq!(STORE_SCHEMA_VERSION, 53);
+    assert_eq!(STORE_SCHEMA_VERSION, 54);
     drop(migrated);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
@@ -546,7 +504,7 @@ fn v16_store_purges_pre_behavior_sessions_and_establishes_downgrade_barrier() {
 #[test]
 fn v27_store_adds_typed_run_failure_and_goal_retry_metadata() {
     let path = temp_store_path("v27_goal_retry");
-    initialize(&path).unwrap();
+    initialize_synthetic_predecessor(&path).unwrap();
     let legacy = Connection::open(&path).unwrap();
     legacy
         .execute_batch(
@@ -588,7 +546,7 @@ fn v27_store_adds_typed_run_failure_and_goal_retry_metadata() {
 #[test]
 fn v25_managed_store_adds_the_complete_permission_mode_schema() {
     let path = temp_store_path("v25_managed_permission_composition");
-    initialize(&path).unwrap();
+    initialize_synthetic_predecessor(&path).unwrap();
     let predecessor = Connection::open(&path).unwrap();
     insert_legacy_session(&predecessor, "managed-v25-session");
     predecessor
@@ -629,7 +587,7 @@ fn v25_managed_store_adds_the_complete_permission_mode_schema() {
 #[test]
 fn v26_permission_store_adds_the_complete_managed_maintenance_schema() {
     let path = temp_store_path("v26_permission_managed_composition");
-    initialize(&path).unwrap();
+    initialize_synthetic_predecessor(&path).unwrap();
     let predecessor = Connection::open(&path).unwrap();
     predecessor
         .execute_batch(
@@ -667,7 +625,7 @@ fn v26_permission_store_adds_the_complete_managed_maintenance_schema() {
 #[test]
 fn v17_store_adds_the_durable_session_inbox() {
     let path = temp_store_path("v17_inbox");
-    initialize(&path).unwrap();
+    initialize_synthetic_predecessor(&path).unwrap();
     let legacy = Connection::open(&path).unwrap();
     legacy
         .execute_batch("DROP TABLE session_inbox; PRAGMA user_version = 17;")
@@ -714,7 +672,7 @@ fn v17_store_adds_the_durable_session_inbox() {
 #[test]
 fn v18_store_adds_revision_bound_permission_grants() {
     let path = temp_store_path("v18_permission_grants");
-    initialize(&path).unwrap();
+    initialize_synthetic_predecessor(&path).unwrap();
     let legacy = Connection::open(&path).unwrap();
     legacy
         .execute_batch("DROP TABLE permission_grants; PRAGMA user_version = 18;")
@@ -747,7 +705,7 @@ fn v18_store_adds_revision_bound_permission_grants() {
 #[test]
 fn v19_store_adds_durable_session_goals() {
     let path = temp_store_path("v19_session_goals");
-    initialize(&path).unwrap();
+    initialize_synthetic_predecessor(&path).unwrap();
     let legacy = Connection::open(&path).unwrap();
     legacy
         .execute_batch("DROP TABLE session_goals; PRAGMA user_version = 19;")
@@ -791,7 +749,7 @@ fn v19_store_adds_durable_session_goals() {
 #[test]
 fn v20_store_adds_durable_traditional_children() {
     let path = temp_store_path("v20_traditional_children");
-    initialize(&path).unwrap();
+    initialize_synthetic_predecessor(&path).unwrap();
     let legacy = Connection::open(&path).unwrap();
     legacy
         .execute_batch("DROP TABLE traditional_children; PRAGMA user_version = 20;")
@@ -834,9 +792,9 @@ fn v20_store_adds_durable_traditional_children() {
 }
 
 #[test]
-fn v21_store_adds_durable_managed_orchestrators() {
+fn v21_store_retires_managed_orchestrator_storage() {
     let path = temp_store_path("v21_managed_orchestrators");
-    initialize(&path).unwrap();
+    initialize_synthetic_predecessor(&path).unwrap();
     let legacy = Connection::open(&path).unwrap();
     legacy
         .execute_batch("DROP TABLE managed_orchestrators; PRAGMA user_version = 21;")
@@ -845,26 +803,7 @@ fn v21_store_adds_durable_managed_orchestrators() {
 
     initialize(&path).unwrap();
     let migrated = Connection::open(&path).unwrap();
-    assert_eq!(
-        table_columns(&migrated, "managed_orchestrators"),
-        [
-            "orchestrator_session_id",
-            "parent_session_id",
-            "root_session_id",
-            "description",
-            "status",
-            "generation",
-            "run_id",
-            "execution_mode",
-            "report",
-            "failure",
-            "completion_inbox_id",
-            "completion_suppressed",
-            "created_at",
-            "updated_at",
-            "version",
-        ]
-    );
+    assert!(table_columns(&migrated, "managed_orchestrators").is_empty());
     assert_eq!(
         migrated
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
@@ -877,7 +816,7 @@ fn v21_store_adds_durable_managed_orchestrators() {
 #[test]
 fn v22_store_adds_relationship_completion_obligations() {
     let path = temp_store_path("v22_relationship_obligations");
-    initialize(&path).unwrap();
+    initialize_synthetic_predecessor(&path).unwrap();
     let legacy = Connection::open(&path).unwrap();
     legacy
         .execute_batch(
@@ -893,8 +832,7 @@ fn v22_store_adds_relationship_completion_obligations() {
     let migrated = Connection::open(&path).unwrap();
     assert!(table_columns(&migrated, "traditional_children")
         .contains(&"completion_suppressed".to_string()));
-    assert!(table_columns(&migrated, "managed_orchestrators")
-        .contains(&"completion_suppressed".to_string()));
+    assert!(table_columns(&migrated, "managed_orchestrators").is_empty());
     assert!(table_columns(&migrated, "session_run_recovery")
         .contains(&"terminal_disposition".to_string()));
     assert_eq!(
@@ -936,13 +874,7 @@ fn main_v0_store_retires_pre_behavior_sessions() {
         .unwrap();
     assert_eq!(version, STORE_SCHEMA_VERSION);
     assert_current_schema(&migrated);
-    let remaining: i64 = migrated
-        .query_row("SELECT COUNT(*) FROM episodes", [], |row| row.get(0))
-        .unwrap();
-    assert_eq!(
-        remaining, 0,
-        "pre-behavior sessions are retired with their episodes"
-    );
+    assert!(table_columns(&migrated, "episodes").is_empty());
     drop(migrated);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
@@ -950,7 +882,7 @@ fn main_v0_store_retires_pre_behavior_sessions() {
 #[test]
 fn v14_store_adds_projects_without_classifying_existing_sessions() {
     let path = temp_store_path("v14_projects");
-    initialize(&path).unwrap();
+    initialize_synthetic_predecessor(&path).unwrap();
     let legacy = Connection::open(&path).unwrap();
     insert_legacy_session(&legacy, "legacy-session");
     legacy
@@ -1082,7 +1014,7 @@ fn v1_to_current_retires_owned_and_orphan_rows_preserving_sequences() {
     let migrated = open_runtime_connection(&path).unwrap();
     assert_current_schema(&migrated);
 
-    for table in ["sessions", "thread_steering", "thread_events"] {
+    for table in ["sessions", "thread_events"] {
         let count: i64 = migrated
             .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
                 row.get(0)
@@ -1090,13 +1022,6 @@ fn v1_to_current_retires_owned_and_orphan_rows_preserving_sequences() {
             .unwrap();
         assert_eq!(count, 0, "retired and orphan rows remain in {table}");
     }
-    let steering_sequence: i64 = migrated
-        .query_row(
-            "SELECT seq FROM sqlite_sequence WHERE name='thread_steering'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
     let event_sequence: i64 = migrated
         .query_row(
             "SELECT seq FROM sqlite_sequence WHERE name='thread_events'",
@@ -1104,7 +1029,6 @@ fn v1_to_current_retires_owned_and_orphan_rows_preserving_sequences() {
             |row| row.get(0),
         )
         .unwrap();
-    assert!(steering_sequence >= 13);
     assert!(event_sequence >= 25);
     drop(migrated);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
@@ -1200,7 +1124,7 @@ fn pre_behavior_transcript_rows_are_retired_after_thread_events_rebuild() {
 #[test]
 fn v2_to_v4_adds_threshold_and_empty_checkpoint_storage() {
     let path = temp_store_path("v2");
-    initialize(&path).unwrap();
+    initialize_synthetic_predecessor(&path).unwrap();
     let conn = open_runtime_connection(&path).unwrap();
     insert_legacy_session(&conn, "owned");
     conn.execute(
@@ -1280,7 +1204,7 @@ fn v2_to_v4_adds_threshold_and_empty_checkpoint_storage() {
 #[test]
 fn v3_to_v4_backfills_materialized_session_summaries() {
     let path = temp_store_path("v3_blob_summary");
-    initialize(&path).unwrap();
+    initialize_synthetic_predecessor(&path).unwrap();
     let conn = open_runtime_connection(&path).unwrap();
     let messages = serde_json::to_string(&vec![
         crate::types::Message::System {
@@ -1463,7 +1387,7 @@ fn checkpoint_table_enforces_completed_row_constraints() {
 }
 
 fn prepare_populated_v23_store(path: &Path) {
-    initialize(path).unwrap();
+    initialize_synthetic_predecessor(path).unwrap();
     let connection = open_runtime_connection(path).unwrap();
     insert_legacy_session(&connection, "preserved-session");
     connection

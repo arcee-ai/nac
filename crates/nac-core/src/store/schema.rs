@@ -94,6 +94,7 @@ use connection::{connect, connect_existing, connect_probe_read_only, connect_rea
 pub(crate) use connection::{track_connection_opens, tracked_connection_opens};
 use wal_preflight::read_schema_version_header;
 
+// 54 removes retired worker storage and saved model presets.
 // 53 retires legacy ownership trees under exclusive, cleanup-safe authority.
 // 51 records internal completion provenance on parent inbox rows.
 // 50 extends the occurrence source format for calendar cadence.
@@ -140,7 +141,7 @@ use wal_preflight::read_schema_version_header;
 // early whenever the stored version already equals this one. (12 carries the
 // same schema as 11, which added episodes.status; 10 added the
 // ssh_configurations table; 9 the per-session ssh port and key columns.)
-const STORE_SCHEMA_VERSION: i64 = 53;
+const STORE_SCHEMA_VERSION: i64 = 54;
 const HTTP_OPT_IN_COLUMN: &str = "INTEGER NOT NULL DEFAULT 0 CHECK (allow_insecure_http IN (0, 1))";
 pub const MINIMUM_MIGRATABLE_SCHEMA_VERSION: i64 = 0;
 
@@ -545,7 +546,7 @@ fn open_connection_with_hooks(
             migrate_thread_events(&transaction)?;
             transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
-        2..=52 => {}
+        2..=53 => {}
         unsupported => {
             if unsupported > STORE_SCHEMA_VERSION {
                 return Err(StoreFutureSchemaError::new(unsupported).into());
@@ -821,11 +822,78 @@ fn open_connection_with_hooks(
          WHEN NEW.behavior <> 'direct' BEGIN SELECT RAISE(ABORT, 'retired session behavior'); END;",
     )?;
     verify_auxiliary_foreign_keys(&transaction)?;
+    retire_worker_storage(&transaction)?;
 
     before_commit()?;
     transaction.pragma_update(None, "user_version", STORE_SCHEMA_VERSION)?;
     transaction.commit()?;
     Ok(conn)
+}
+
+// All removals happen inside the existing migration transaction, after
+// ownership and resource retirement. The primary transcript/event ledger and
+// provider connections are deliberately retained.
+fn retire_worker_storage(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "DROP TRIGGER IF EXISTS session_direct_only_insert;
+         CREATE TRIGGER session_direct_only_insert BEFORE INSERT ON sessions
+         WHEN NEW.behavior <> 'direct' BEGIN SELECT RAISE(ABORT, 'retired session behavior'); END;
+         DROP TABLE IF EXISTS managed_orchestrator_terminal_receipts;
+         DROP TABLE IF EXISTS managed_orchestrators;
+         DROP TABLE IF EXISTS worker_dispatches;
+         DROP TABLE IF EXISTS episodes;
+         DROP TABLE IF EXISTS threads;
+         DROP TABLE IF EXISTS workset_items;
+         DROP TABLE IF EXISTS worksets;
+         DROP TABLE IF EXISTS thread_steering;
+         DROP INDEX IF EXISTS idx_projects_default_model_config;
+         ALTER TABLE projects DROP COLUMN default_model_config_id;
+         DROP TABLE IF EXISTS model_configurations;
+         ALTER TABLE sessions DROP COLUMN light_model_json;",
+    )?;
+    if conn
+        .prepare("PRAGMA foreign_key_check")?
+        .query([])?
+        .next()?
+        .is_some()
+    {
+        return Err(anyhow!(
+            "foreign key check failed after retiring worker storage"
+        ));
+    }
+    Ok(())
+}
+
+// Historical tests seed durable records through current store APIs before they
+// reconstruct an older catalog. Start with the real v53 catalog so that those
+// synthetic predecessors still contain their historical worker tables. The
+// temporary version marker permits the seeding APIs; each fixture then sets
+// its intended predecessor version before invoking the migration under test.
+#[cfg(test)]
+pub(crate) fn initialize_synthetic_predecessor(path: &Path) -> Result<()> {
+    std::fs::create_dir_all(path.parent().expect("test database has parent"))?;
+    let conn = Connection::open(path)?;
+    conn.execute_batch(include_str!("schema/fixtures/v53-fresh.sql"))?;
+    conn.pragma_update(None, "user_version", STORE_SCHEMA_VERSION)?;
+    Ok(())
+}
+
+#[cfg(test)]
+pub(super) fn surviving_test_columns(conn: &Connection, table: &str) -> String {
+    let mut statement = conn
+        .prepare(&format!("PRAGMA table_info({table})"))
+        .unwrap();
+    statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .unwrap()
+        .map(|name| name.unwrap())
+        .filter(|name| {
+            !(table == "sessions" && name == "light_model_json")
+                && !(table == "projects" && name == "default_model_config_id")
+        })
+        .map(|name| format!("\"{}\"", name.replace('"', "\"\"")))
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 fn create_worker_dispatches_table(conn: &Connection) -> Result<()> {
