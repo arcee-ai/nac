@@ -91,8 +91,6 @@ interface SessionLayoutState {
   /** Insights groups whose child rows are open, by group id. */
   expandedInsightGroups: ReadonlySet<string>;
   insightsFilter: InsightsFilter;
-  /** Workset the chat last pointed the Worksets panel at. */
-  selectedWorkset: string | null;
   /** Open Subagents row per parent, kept so returning from a transcript reopens it. */
   selectedSubagents: ReadonlyMap<string, string>;
   /** Revision the panels are looking at, or null for the live working tree. */
@@ -140,7 +138,6 @@ export function createSessionLayoutStore(
     insightFocusNonce: 0,
     expandedInsightGroups: new Set(),
     insightsFilter: "all",
-    selectedWorkset: null,
     selectedSubagents: new Map(),
     selectedRevision: null,
     selectedFile: null,
@@ -436,11 +433,6 @@ export function createSessionLayoutStore(
     }
   }
 
-  function selectWorkset(selectedWorkset: string | null): void {
-    setState({ selectedWorkset });
-    if (selectedWorkset) showSidePanelList(false);
-  }
-
   function selectSubagent(parentSessionId: string, key: string): void {
     if (getState().selectedSubagents.get(parentSessionId) === key) return;
     setState((state) => ({
@@ -477,7 +469,7 @@ export function createSessionLayoutStore(
 
   /**
    * Wipe the session-scoped pointers that belong to the inspector we just left.
-   * Threads, Insights entries, worksets, revisions, files and folders belong
+   * Threads, Insights entries, revisions, files and folders belong
    * to one session, so carrying them into another would point the panels at
    * something that is not theirs. A leftover selectedThread in particular was
    * injected into the next session's thread list as a ghost row that vanished
@@ -488,7 +480,6 @@ export function createSessionLayoutStore(
       const prev = getState();
       console.debug("[nac:threads] resetSessionSelection", {
         selectedThread: prev.selectedThread,
-        selectedWorkset: prev.selectedWorkset,
       });
     }
     setState({
@@ -499,7 +490,6 @@ export function createSessionLayoutStore(
       insightFocusNonce: 0,
       expandedInsightGroups: new Set(),
       insightsFilter: "all",
-      selectedWorkset: null,
       selectedRevision: null,
       selectedFile: null,
       toggledFolders: new Set(),
@@ -523,7 +513,6 @@ export function createSessionLayoutStore(
   const useInsightFocusNonce = () => useStore((s) => s.insightFocusNonce);
   const useExpandedInsightGroups = () => useStore((s) => s.expandedInsightGroups);
   const useInsightsFilter = () => useStore((s) => s.insightsFilter);
-  const useSelectedWorkset = () => useStore((s) => s.selectedWorkset);
   const useSelectedSubagent = (parentSessionId: string) =>
     useStore((s) => s.selectedSubagents.get(parentSessionId) ?? null);
   const useSelectedRevision = () => useStore((s) => s.selectedRevision);
@@ -551,7 +540,6 @@ export function createSessionLayoutStore(
     selectInsight,
     toggleInsightGroup,
     selectInsightsFilter,
-    selectWorkset,
     selectSubagent,
     selectRevision,
     selectFile,
@@ -577,7 +565,6 @@ export function createSessionLayoutStore(
     useInsightFocusNonce,
     useExpandedInsightGroups,
     useInsightsFilter,
-    useSelectedWorkset,
     useSelectedSubagent,
     useSelectedRevision,
     useSelectedFile,
@@ -605,7 +592,6 @@ export const {
   selectInsight,
   toggleInsightGroup,
   selectInsightsFilter,
-  selectWorkset,
   selectSubagent,
   selectRevision,
   selectFile,
@@ -631,7 +617,6 @@ export const {
   useInsightFocusNonce,
   useExpandedInsightGroups,
   useInsightsFilter,
-  useSelectedWorkset,
   useSelectedSubagent,
   useSelectedRevision,
   useSelectedFile,

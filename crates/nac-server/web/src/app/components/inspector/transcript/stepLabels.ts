@@ -24,7 +24,6 @@ export interface StepLabel {
 const VERBS: Record<ActionKind, { done: string; live: string }> = {
   reasoning: { done: "Thought", live: "Thinking" },
   thread: { done: "Ran thread", live: "Running thread" },
-  "define-workset": { done: "Defined workset", live: "Defining workset" },
   "delete-thread": { done: "Deleted thread", live: "Deleting thread" },
   "read-file": { done: "Read", live: "Reading" },
   "write-file": { done: "Created", live: "Creating" },
@@ -65,7 +64,6 @@ function host(value: string): string {
 }
 
 function argumentOf(segment: InsightSegment, action: ActionKind): string | null {
-  if (segment.kind === "workset") return segment.worksetId || null;
   if (segment.kind !== "tool") return null;
   if (action === "other") return segment.presentation?.label ?? segment.name;
   const summary = segment.presentation?.summary?.replace(/\s+/g, " ").trim();

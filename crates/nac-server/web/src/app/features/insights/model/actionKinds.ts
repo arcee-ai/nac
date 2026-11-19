@@ -6,7 +6,6 @@ import type {
 
 const TOOL_ACTIONS = new Map<string, ActionKind>([
   ["thread", "thread"],
-  ["workset_define", "define-workset"],
   ["thread_delete", "delete-thread"],
   ["read", "read-file"],
   ["write", "write-file"],
@@ -43,6 +42,5 @@ export function isSpawnAction(kind: ActionKind): kind is SpawnActionKind {
 
 export function segmentAction(segment: InsightSegment): ActionKind {
   if (segment.kind === "reasoning") return "reasoning";
-  if (segment.kind === "workset") return "define-workset";
   return segment.action;
 }

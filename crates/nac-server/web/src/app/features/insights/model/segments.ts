@@ -72,13 +72,6 @@ function toSegment(block: TranscriptBlock): InsightSegment | null {
         durationMs: block.durationMs,
         streaming: block.streaming,
       };
-    case "workset":
-      return {
-        kind: "workset",
-        key: block.key,
-        worksetId: block.worksetId,
-        pending: block.pending,
-      };
     case "tool":
       return {
         kind: "tool",
@@ -154,7 +147,7 @@ function partition(blocks: readonly TranscriptBlock[], anchor: string): ModelTur
 const partitions = new WeakMap<ModelTurn, { anchor: string; items: readonly ModelTurnItem[] }>();
 
 /**
- * One model turn as groups of consecutive reasoning, tool and workset blocks,
+ * One model turn as groups of consecutive reasoning and tool blocks,
  * the sessions it launched, and the text and wave blocks between them, in
  * transcript order. `previous` is the turn before it in the same `turns`.
  *

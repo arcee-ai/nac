@@ -11,7 +11,6 @@ import type { ActionKind } from "@/app/features/insights/model/types";
 describe("action kinds", () => {
   it.each<[string, ActionKind]>([
     ["thread", "thread"],
-    ["workset_define", "define-workset"],
     ["thread_delete", "delete-thread"],
     ["read", "read-file"],
     ["write", "write-file"],
@@ -60,9 +59,6 @@ describe("action kinds", () => {
         streaming: false,
       }),
     ).toBe("reasoning");
-    expect(
-      segmentAction({ kind: "workset", key: "workset_define-1-0", worksetId: "w", pending: false }),
-    ).toBe("define-workset");
     expect(
       segmentAction({
         kind: "tool",

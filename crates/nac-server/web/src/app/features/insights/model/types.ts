@@ -5,7 +5,6 @@ import type { TranscriptBlock, TranscriptThread } from "@/app/lib/transcript";
 export type ActionKind =
   | "reasoning"
   | "thread"
-  | "define-workset"
   | "delete-thread"
   | "read-file"
   | "write-file"
@@ -52,8 +51,7 @@ export type InsightSegment =
       presentation: ToolPresentation | null;
       /** The call has no outcome yet. */
       pending: boolean;
-    }
-  | { kind: "workset"; key: string; worksetId: string; pending: boolean };
+    };
 
 export interface InsightGroup {
   id: string;
@@ -123,7 +121,7 @@ export interface InsightTurnSection {
   entries: readonly InsightEntry[];
 }
 
-export type InsightsFilter = "all" | "tools" | "threads" | "sessions" | "worksets";
+export type InsightsFilter = "all" | "tools" | "threads" | "sessions";
 
 export interface InsightsFilterOption {
   value: InsightsFilter;

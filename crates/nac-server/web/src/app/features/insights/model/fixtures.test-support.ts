@@ -109,10 +109,6 @@ export function compactTool(key: string, name: string, pending = false): Transcr
   return { kind: "tool", key, name, pending };
 }
 
-export function workset(key: string, worksetId: string, pending = false): TranscriptBlock {
-  return { kind: "workset", key, worksetId, pending };
-}
-
 export function thread(
   name: string,
   key: string,

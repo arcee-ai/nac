@@ -151,15 +151,13 @@ describe("displayPromptFromMessageText", () => {
     }
   });
 
-  it("still collapses legacy /plan and /run command messages", () => {
+  it("preserves literal messages resembling retired commands", () => {
     const expandedPlan =
       "# /plan: Workset Planning\n\nUser instruction:\nsplit this into reviewable units\n\nCreate exactly one durable high-level workset with `workset_define`.";
     const expandedRun =
       "# /run: Workset Execution\n\nWorkset id:\nauth-refresh\n\nExecute an existing workset.";
-    expect(displayPromptFromMessageText(expandedPlan)).toBe(
-      "/plan split this into reviewable units",
-    );
-    expect(displayPromptFromMessageText(expandedRun)).toBe("/run auth-refresh");
+    expect(displayPromptFromMessageText(expandedPlan)).toBe(expandedPlan);
+    expect(displayPromptFromMessageText(expandedRun)).toBe(expandedRun);
   });
 
   it("hides durable goal continuation control text", () => {

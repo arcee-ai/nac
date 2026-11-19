@@ -61,7 +61,6 @@ export type TranscriptBlock =
       streaming: boolean;
     }
   | { kind: "text"; key: string; text: string }
-  | { kind: "workset"; key: string; worksetId: string; pending: boolean }
   | { kind: "tool"; key: string; name: string; pending: boolean }
   | { kind: "tool-detail"; key: string; presentation: ToolPresentation }
   /** One assistant dispatch batch, split into topological DAG rows. */

@@ -145,15 +145,7 @@ function j(e) {
 	if (o) return `[goal: ${o.objective}]`;
 	if (x(a)) return "[durable goal continuation]";
 	let s = p(a);
-	if (s) return `[${s.kind === "coding-agent" ? "traditional child" : "managed orchestrator"} ${s.status}: ${s.description}]`;
-	let c = a.split("\n", 1)[0] ?? "", l = /^# \/(plan|run)\s*:/.exec(c);
-	if (!l) return t;
-	let u = l[1], d = u === "run" ? "Workset id:\n" : "User instruction:\n", f = a.indexOf(d);
-	if (f === -1) return t;
-	let m = f + d.length, h = a.indexOf("\n\n", m);
-	if (h === -1) return t;
-	let g = a.slice(m, h).trim();
-	return g ? `/${u} ${g}` : t;
+	return s ? `[${s.kind === "coding-agent" ? "traditional child" : "managed orchestrator"} ${s.status}: ${s.description}]` : t;
 }
 function M(e) {
 	return e == null || !Number.isFinite(e) ? "" : `${(Math.round(e / 10) / 100).toFixed(2)}s`;

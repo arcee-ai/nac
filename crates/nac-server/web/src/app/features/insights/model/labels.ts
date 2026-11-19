@@ -27,12 +27,6 @@ interface ActionCopy {
 const ACTION_COPY: Record<ActionKind, ActionCopy> = {
   reasoning: { type: "Thoughts", running: "Thinking…", live: "Thinking…", meta: null },
   thread: { type: "Thread", running: "Running thread…", live: "Running thread…", meta: "Thread" },
-  "define-workset": {
-    type: "Define Workset",
-    running: "Defining Workset…",
-    live: "Defining workset…",
-    meta: "Workset",
-  },
   "delete-thread": {
     type: "Delete thread",
     running: "Deleting…",
@@ -218,7 +212,6 @@ export function segmentTypeLabel(segment: InsightSegment): string {
 
 /** Ready row label: the call's argument when it is known, else the type label. */
 export function segmentTitle(segment: InsightSegment): string {
-  if (segment.kind === "workset" && segment.worksetId) return `Worksets_${segment.worksetId}`;
   if (segment.kind === "tool") {
     const summary = segment.presentation?.summary;
     if (segment.action === "delete-thread" && summary) return `Deleted: ${summary}`;
@@ -247,13 +240,7 @@ export function inProgressLabel(segment: InsightSegment): string {
 
 /** The first two distinct type labels, e.g. "Thoughts, Read File and more". */
 export function groupSummaryLabel(group: InsightGroup): string {
-  const labels = [
-    ...new Set(
-      group.segments.map((segment) =>
-        segment.kind === "workset" ? "Workset" : segmentTypeLabel(segment),
-      ),
-    ),
-  ];
+  const labels = [...new Set(group.segments.map(segmentTypeLabel))];
   const shown = labels.slice(0, 2).join(", ");
   return labels.length > 2 ? `${shown} and more` : shown;
 }

@@ -10,7 +10,6 @@ import {
   toolDetail,
   userTurn,
   wave,
-  workset,
 } from "@/app/features/insights/model/fixtures.test-support";
 import {
   buildInsightTimeline,
@@ -28,7 +27,6 @@ const ORCHESTRATOR_TURNS: TranscriptTurn[] = [
   userTurn(0, "Plan the calendar\n  feature", "2026-10-24T09:00:00Z"),
   modelTurn(1, [
     thoughts("thoughts-0"),
-    workset("workset_define-1-0", "calendar"),
     wave("wave-1", [
       [thread("impl/calendar", "impl/calendar@1:call-a"), thread("impl/api", "impl/api@1:call-b")],
       [thread("review", "review@1:call-c")],
@@ -149,7 +147,6 @@ describe("insight timeline helpers", () => {
     const before = JSON.stringify(sections);
 
     const tools = filterInsightTimeline(sections, "tools");
-    const worksets = filterInsightTimeline(sections, "worksets");
 
     expect(ids(tools)).toEqual([["user-2:thoughts-0"], ["user-0:thoughts-0"]]);
     expect(
@@ -157,7 +154,6 @@ describe("insight timeline helpers", () => {
         entry.kind === "group" ? entry.group.segments.map((segment) => segment.kind) : [],
       ),
     ).toEqual(["reasoning"]);
-    expect(ids(worksets)).toEqual([["user-0:thoughts-0"]]);
     expect(ids(filterInsightTimeline(sections, "threads"))).toEqual([
       ["impl/calendar@3:call-d"],
       ["impl/calendar@1:call-a", "impl/api@1:call-b", "review@1:call-c"],
@@ -167,10 +163,10 @@ describe("insight timeline helpers", () => {
     expect(filterInsightTimeline(sections, "all")).not.toBe(sections);
     expect(JSON.stringify(sections)).toBe(before);
 
-    const selected = worksets[0].entries[0];
+    const selected = tools[1].entries[0];
     const full = findInsightEntry(sections, selected.id);
     expect(full).toBe(sections[1].entries[0]);
-    expect(full?.kind === "group" ? full.group.segments.length : 0).toBe(2);
+    expect(full?.kind === "group" ? full.group.segments.length : 0).toBe(1);
     expect(tools[0].entries[0]).toBe(sections[0].entries[0]);
   });
 

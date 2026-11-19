@@ -1,7 +1,7 @@
 import type { ToolPresentation } from "../../../lib/toolPresentation";
 import type { TranscriptBlock, TranscriptThread } from "../../../lib/transcript";
 /** What an Insights row stands for; picks its icon, labels and meta. */
-export type ActionKind = "reasoning" | "thread" | "define-workset" | "delete-thread" | "read-file" | "write-file" | "edit-file" | "glob" | "grep" | "run-command" | "write-command" | "read-command-output" | "web-search" | "web-fetch" | "create-goal" | "get-goal" | "update-goal" | "spawn-agent" | "spawn-orchestrator" | "session-status" | "session-steer" | "session-read" | "session-wait" | "session-cancel" | "other";
+export type ActionKind = "reasoning" | "thread" | "delete-thread" | "read-file" | "write-file" | "edit-file" | "glob" | "grep" | "run-command" | "write-command" | "read-command-output" | "web-search" | "web-fetch" | "create-goal" | "get-goal" | "update-goal" | "spawn-agent" | "spawn-orchestrator" | "session-status" | "session-steer" | "session-read" | "session-wait" | "session-cancel" | "other";
 export type SpawnActionKind = Extract<ActionKind, "spawn-agent" | "spawn-orchestrator">;
 export type ActionStatus = "ready" | "pending" | "running" | "failed";
 export type InsightSegment = {
@@ -20,11 +20,6 @@ export type InsightSegment = {
     /** Null for the compact tool blocks of orchestrator sessions. */
     presentation: ToolPresentation | null;
     /** The call has no outcome yet. */
-    pending: boolean;
-} | {
-    kind: "workset";
-    key: string;
-    worksetId: string;
     pending: boolean;
 };
 export interface InsightGroup {
@@ -87,7 +82,7 @@ export interface InsightTurnSection {
     /** Chronological. */
     entries: readonly InsightEntry[];
 }
-export type InsightsFilter = "all" | "tools" | "threads" | "sessions" | "worksets";
+export type InsightsFilter = "all" | "tools" | "threads" | "sessions";
 export interface InsightsFilterOption {
     value: InsightsFilter;
     label: string;

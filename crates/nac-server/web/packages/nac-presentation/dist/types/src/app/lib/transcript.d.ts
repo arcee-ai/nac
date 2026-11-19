@@ -38,11 +38,6 @@ export type TranscriptBlock = {
     key: string;
     text: string;
 } | {
-    kind: "workset";
-    key: string;
-    worksetId: string;
-    pending: boolean;
-} | {
     kind: "tool";
     key: string;
     name: string;

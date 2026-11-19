@@ -316,64 +316,6 @@ describe("transcript topology badge navigation", () => {
     expect(refresh).toHaveBeenCalledWith(0);
   });
 
-  it("folds the workset into one line and selects the thread episode", () => {
-    const onSelectThread = vi.fn();
-    const turn: ModelTurn = {
-      kind: "model",
-      key: "model-1",
-      durationMs: 25,
-      messageIndex: 1,
-      blocks: [
-        {
-          kind: "workset",
-          key: "workset-1",
-          worksetId: "release",
-          pending: false,
-        },
-        {
-          kind: "wave",
-          key: "wave-1",
-          rows: [
-            [
-              {
-                key: "api:0",
-                name: "api",
-                action: "Verify the API",
-                weight: "light",
-                summary: "API verified",
-                log: [],
-                state: "done",
-              },
-            ],
-          ],
-        },
-      ],
-    };
-
-    render(
-      <ModelMessage
-        turn={turn}
-        model="gpt-5.6-sol"
-        active={false}
-        selectedThreadEpisode={null}
-        onSelectThread={onSelectThread}
-      />,
-    );
-
-    const fold = screen.getByRole("button", {
-      name: "Worked for <1s · Defined 1 workset",
-    });
-    expect(fold.getAttribute("aria-expanded")).toBe("false");
-    fireEvent.click(fold);
-    expect(fold.getAttribute("aria-expanded")).toBe("true");
-    expect(screen.getByText("Defined workset")).toBeTruthy();
-
-    fireEvent.click(screen.getByRole("button", { name: /api/i }));
-    expect(onSelectThread).toHaveBeenCalledWith("api", "api:0", {
-      focusDetail: true,
-    });
-  });
-
   it("keeps parent-owned transcripts free of mutation affordances", () => {
     const turn: ModelTurn = {
       kind: "model",

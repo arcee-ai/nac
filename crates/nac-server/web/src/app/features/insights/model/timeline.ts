@@ -23,7 +23,6 @@ const FILTER_LABELS: Record<InsightsFilter, string> = {
   tools: "Tools & reasoning",
   threads: "Threads",
   sessions: "Sessions",
-  worksets: "Worksets",
 };
 
 const FILTER_OPTIONS: readonly InsightsFilterOption[] = (["all", "tools", "sessions"] as const).map(
@@ -31,8 +30,7 @@ const FILTER_OPTIONS: readonly InsightsFilterOption[] = (["all", "tools", "sessi
 );
 
 const GROUP_FILTERS: Partial<Record<InsightsFilter, (segment: InsightSegment) => boolean>> = {
-  tools: (segment) => segment.kind !== "workset",
-  worksets: (segment) => segment.kind === "workset",
+  tools: () => true,
 };
 
 function singleLine(text: string): string {
@@ -169,11 +167,6 @@ export function insightFilterEmptyCopy(filter: InsightsFilter): InsightsEmptyCop
       return {
         title: "No threads yet.",
         body: "They appear here as the orchestrator assigns work.",
-      };
-    case "worksets":
-      return {
-        title: "No worksets yet.",
-        body: "They appear here as the orchestrator defines them.",
       };
     case "sessions":
       return { title: "No sessions yet.", body: `They appear here as ${actor} delegates work.` };

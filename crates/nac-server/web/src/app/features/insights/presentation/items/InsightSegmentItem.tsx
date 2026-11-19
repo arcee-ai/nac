@@ -29,10 +29,7 @@ import {
 } from "@/app/features/insights/presentation/items/SearchItems";
 import { sessionContent } from "@/app/features/insights/presentation/items/SessionItems";
 import { useErrorLine } from "@/app/features/insights/presentation/items/useErrorLine";
-import {
-  deleteThreadContent,
-  worksetContent,
-} from "@/app/features/insights/presentation/items/WorksetItems";
+import { deleteThreadContent } from "@/app/features/insights/presentation/items/ThreadItems";
 
 const TRAILING_ELLIPSIS = /…$/u;
 
@@ -76,7 +73,6 @@ function segmentContent(
   segment: Exclude<InsightSegment, { kind: "reasoning" }>,
   context: ItemContext,
 ): ItemContent {
-  if (segment.kind === "workset") return worksetContent(segment);
   return toolContent(segment, context);
 }
 

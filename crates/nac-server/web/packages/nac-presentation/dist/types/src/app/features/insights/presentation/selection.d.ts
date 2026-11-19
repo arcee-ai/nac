@@ -14,7 +14,7 @@ export interface StoredThread {
     name: string | null;
     episode: string | null;
 }
-/** Session rows and workset-only groups navigate to another panel instead. */
+/** Session rows navigate to another panel instead. */
 export declare function opensInPlace(entry: InsightEntry): boolean;
 /** The pick stored in the layout store, while it still names something on the page. */
 export declare function resolveStoredInsight(selection: InsightSelection | null, _thread: StoredThread, timeline: readonly InsightTurnSection[], _ownsThread: (name: string) => boolean): ShownInsight | null;

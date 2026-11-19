@@ -135,7 +135,6 @@ type Phrase =
   | "orchestrator"
   | "thread"
   | "check"
-  | "workset"
   | "goal"
   | "tool";
 
@@ -157,7 +156,6 @@ const PHRASE_OF: Partial<Record<ActionKind, Phrase>> = {
   "session-wait": "check",
   "session-steer": "check",
   "session-cancel": "check",
-  "define-workset": "workset",
   "delete-thread": "thread",
   "create-goal": "goal",
   "get-goal": "goal",
@@ -177,7 +175,6 @@ const ORDER: readonly Phrase[] = [
   "orchestrator",
   "thread",
   "check",
-  "workset",
   "goal",
   "tool",
 ];
@@ -202,7 +199,6 @@ const PHRASES: Record<Phrase, (count: number) => string> = {
   orchestrator: (n) => `requested ${plural(n, "orchestrator")}`,
   thread: (n) => `ran ${plural(n, "thread")}`,
   check: (n) => `checked on subagents${times(n)}`,
-  workset: (n) => `defined ${plural(n, "workset")}`,
   goal: () => "updated the goal",
   tool: (n) => `used ${plural(n, "tool")}`,
 };

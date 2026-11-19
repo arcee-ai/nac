@@ -17,11 +17,11 @@ export interface StoredThread {
   episode: string | null;
 }
 
-/** Session rows and workset-only groups navigate to another panel instead. */
+/** Session rows navigate to another panel instead. */
 export function opensInPlace(entry: InsightEntry): boolean {
   if (entry.kind === "thread") return false;
   if (entry.kind === "session") return false;
-  return entry.group.segments.some((segment) => segment.kind !== "workset");
+  return true;
 }
 
 /** The pick stored in the layout store, while it still names something on the page. */
@@ -101,7 +101,6 @@ export function segmentSelected(
   segment: InsightSegment,
   shown: ShownInsight | null,
 ): boolean | undefined {
-  if (segment.kind === "workset") return undefined;
   return shown?.kind === "group" && shown.entry.id === entry.id && shown.segmentKey === segment.key;
 }
 

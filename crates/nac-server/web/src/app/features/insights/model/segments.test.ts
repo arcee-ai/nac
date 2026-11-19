@@ -14,7 +14,6 @@ import {
   toolResult,
   userTurn,
   wave,
-  workset,
 } from "@/app/features/insights/model/fixtures.test-support";
 import {
   insightAnchor,
@@ -73,13 +72,12 @@ function groupIds(turns: TranscriptTurn[]): string[] {
 }
 
 describe("partitionModelTurn", () => {
-  it("groups consecutive reasoning, tool and workset blocks and closes a group at text", () => {
+  it("groups consecutive reasoning and tool blocks and closes a group at text", () => {
     const list = items([
       thoughts("thoughts-0"),
       toolDetail("read", { summary: "src/app/index.tsx" }),
       text("text-0"),
       compactTool("thread_delete-3-0", "thread_delete"),
-      workset("workset_define-3-1", "polylang"),
       thoughts("thoughts-1", { text: "  " }),
       toolDetail("edit"),
     ]);
@@ -87,7 +85,7 @@ describe("partitionModelTurn", () => {
     expect(shape(list)).toEqual([
       "group:thoughts-0,tool-call-read",
       "block:text-0",
-      "group:thread_delete-3-0,workset_define-3-1,tool-call-edit",
+      "group:thread_delete-3-0,tool-call-edit",
     ]);
     expect(list.map((item) => (item.kind === "block" ? item.block.key : item.id))).toEqual([
       "user-0:thoughts-0",
@@ -169,7 +167,6 @@ describe("partitionModelTurn", () => {
     expect(
       groups([thoughts("thoughts-0", { streaming: true }), toolDetail("read")])[0].group.status,
     ).toBe("running");
-    expect(groups([workset("workset_define-1-0", "w", true)])[0].group.status).toBe("running");
     expect(combineStatuses([])).toBe("ready");
   });
 

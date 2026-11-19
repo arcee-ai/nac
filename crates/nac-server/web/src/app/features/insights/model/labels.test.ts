@@ -8,7 +8,6 @@ import {
   toolDetail,
   userTurn,
   wave,
-  workset,
 } from "@/app/features/insights/model/fixtures.test-support";
 import {
   actionMeta,
@@ -54,7 +53,6 @@ describe("insight labels", () => {
   it.each<[ActionKind, string, string, string | null]>([
     ["reasoning", "Thoughts", "Thinking…", null],
     ["thread", "Thread", "Running thread…", "Thread"],
-    ["define-workset", "Define Workset", "Defining Workset…", "Workset"],
     ["delete-thread", "Delete thread", "Deleting…", null],
     ["read-file", "Read File", "Reading File…", "Read"],
     ["write-file", "Create File", "Creating File…", "Write"],
@@ -109,12 +107,6 @@ describe("insight labels", () => {
     expect(segmentTitle(tool("read"))).toBe("Read File");
     expect(segmentTitle(tool("mcp__linear__read", { label: "MCP · Read" }))).toBe("MCP · Read");
     expect(segmentTitle(group([thoughts("thoughts-0")]).segments[0])).toBe("Thoughts");
-    expect(segmentTitle(group([workset("workset_define-1-0", "polylang")]).segments[0])).toBe(
-      "Worksets_polylang",
-    );
-    expect(segmentTitle(group([workset("workset_define-1-0", "")]).segments[0])).toBe(
-      "Define Workset",
-    );
     expect(
       segmentTitle(group([compactTool("thread_delete-1-0", "thread_delete")]).segments[0]),
     ).toBe("Delete thread");
@@ -158,9 +150,9 @@ describe("insight labels", () => {
     ).toBe("Thoughts, Read File and more");
     expect(
       groupSummaryLabel(
-        group([thoughts("thoughts-0"), thoughts("thoughts-1"), workset("workset_define-1-0", "w")]),
+        group([thoughts("thoughts-0"), thoughts("thoughts-1"), toolDetail("read")]),
       ),
-    ).toBe("Thoughts, Workset");
+    ).toBe("Thoughts, Read File");
     expect(
       groupSummaryLabel(group([toolDetail("read"), toolDetail("read", { callId: "call-read-2" })])),
     ).toBe("Read File");

@@ -8,7 +8,6 @@ import type { ToolCallRef } from "@/app/services/queries/toolCalls";
 
 export type ReasoningSegment = Extract<InsightSegment, { kind: "reasoning" }>;
 export type ToolSegment = Extract<InsightSegment, { kind: "tool" }>;
-export type WorksetSegment = Extract<InsightSegment, { kind: "workset" }>;
 
 export interface ItemContext {
   sessionId: string;
