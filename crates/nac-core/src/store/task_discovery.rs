@@ -11,9 +11,8 @@ const PROMPT_EXCERPT_CHARS: usize = 240;
 /// Characters of each current or retained goal objective a snapshot returns.
 pub const GOAL_OBJECTIVE_CHARS: usize = 1_000;
 
-const INDEPENDENT_TASK: &str = "s.behavior IN ('direct', 'direct-with-orchestrator')
-     AND NOT EXISTS (SELECT 1 FROM traditional_children c WHERE c.child_session_id = s.session_id)
-     AND NOT EXISTS (SELECT 1 FROM managed_orchestrators m WHERE m.orchestrator_session_id = s.session_id)";
+const INDEPENDENT_TASK: &str = "s.behavior = 'direct'
+     AND NOT EXISTS (SELECT 1 FROM traditional_children c WHERE c.child_session_id = s.session_id)";
 
 #[derive(Debug, Clone, Copy, serde::Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -107,7 +106,6 @@ pub struct DirectTaskSnapshot {
 #[serde(rename_all = "snake_case")]
 pub enum NonTaskSession {
     TraditionalChild,
-    ManagedOrchestrator,
     Orchestrator,
 }
 
@@ -365,9 +363,7 @@ pub fn load_direct_task(path: &Path, session_id: &str) -> Result<TaskLookup> {
     let (title, prompt) = redacted_text(title, prompt);
     let relationship: Option<String> = tx
         .query_row(
-            "SELECT 'child' FROM traditional_children WHERE child_session_id = ?1
-             UNION ALL
-             SELECT 'managed' FROM managed_orchestrators WHERE orchestrator_session_id = ?1",
+            "SELECT 'child' FROM traditional_children WHERE child_session_id = ?1",
             params![session_id],
             |row| row.get(0),
         )
@@ -376,12 +372,8 @@ pub fn load_direct_task(path: &Path, session_id: &str) -> Result<TaskLookup> {
         (Some("child"), _) => {
             return Ok(TaskLookup::NotIndependentTask(NonTaskSession::TraditionalChild))
         }
-        (Some(_), _) => {
-            return Ok(TaskLookup::NotIndependentTask(
-                NonTaskSession::ManagedOrchestrator,
-            ))
-        }
-        (None, "direct" | "direct-with-orchestrator") => {}
+        (Some(_), _) => return Err(anyhow!("unsupported session relationship")),
+        (None, "direct") => {}
         (None, _) => return Ok(TaskLookup::NotIndependentTask(NonTaskSession::Orchestrator)),
     }
     let pending_inbox_items: i64 = tx.query_row(
