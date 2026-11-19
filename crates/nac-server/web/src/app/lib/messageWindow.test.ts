@@ -279,9 +279,6 @@ describe("bounded transcript projection", () => {
 
   it("retains model and thread identities across a partial-turn prepend", () => {
     const current = snapshot([threadAssistant("worker", "call-new"), assistant("final")], 50, 52);
-    // SAFETY: test fixture — the projection only reads name and
-    // episode_count from a thread summary; the remaining fields are omitted.
-    current.threads = [{ name: "worker", episode_count: 2 }] as SessionSnapshotResponse["threads"];
     current.thread_events = { worker: [toolStarted("event-new")] };
     const before = buildTranscript(current, {});
 
@@ -292,7 +289,6 @@ describe("bounded transcript projection", () => {
     );
     expect(merged).not.toBeNull();
     if (!merged) return;
-    merged.threads = current.threads;
     const after = buildTranscript(merged, {});
 
     expect(before[0]?.key).toBe("model-51");

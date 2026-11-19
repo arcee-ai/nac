@@ -113,14 +113,7 @@ export function InsightsView({ sessionId, snapshot }: InsightsViewProps) {
     }
   }, [focusNonce, picked, filter, sections, selectInsightsFilter, toggleInsightGroup]);
 
-  const threads = snapshot?.threads;
-  const sources = useMemo<RowSources>(
-    () => ({
-      resolveSession,
-      episodeCounts: new Map((threads ?? []).map((thread) => [thread.name, thread.episode_count])),
-    }),
-    [resolveSession, threads],
-  );
+  const sources = useMemo<RowSources>(() => ({ resolveSession }), [resolveSession]);
 
   const openSubagent = useCallback(
     (rowKey: DelegatedRowKey) => {

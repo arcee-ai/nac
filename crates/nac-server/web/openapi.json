@@ -19786,9 +19786,7 @@
           "messages",
           "response_timing",
           "sessions",
-          "threads",
           "thread_event_boundary",
-          "worksets",
           "workspace"
         ],
         "properties": {
@@ -19891,20 +19889,11 @@
               "type": "string"
             }
           },
-          "threads": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ThreadSnapshot"
-            }
-          },
           "transcript_recovery_warning": {
             "type": [
               "string",
               "null"
             ]
-          },
-          "worksets": {
-            "$ref": "#/components/schemas/WorksetsSnapshot"
           },
           "workspace": {
             "$ref": "#/components/schemas/WorkspaceSnapshot"
@@ -21898,41 +21887,6 @@
           }
         }
       },
-      "ThreadSnapshot": {
-        "type": "object",
-        "required": [
-          "name",
-          "session_id",
-          "created_at",
-          "updated_at",
-          "episode_count",
-          "latest_action"
-        ],
-        "properties": {
-          "created_at": {
-            "type": "string"
-          },
-          "episode_count": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "latest_action": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "name": {
-            "type": "string"
-          },
-          "session_id": {
-            "type": "string"
-          },
-          "updated_at": {
-            "type": "string"
-          }
-        }
-      },
       "TokenCostMicros": {
         "type": "object",
         "description": "Per-response cost in micro-USD (1e-6 USD), stored as u64 so `TokenUsage`\nstays `Eq`. All-zero = unknown pricing (pi's zero-cost fallback). `total`\nis the saturating sum of the four buckets, stored so consumers read it\ndirectly. Missing fields deserialize as zero so partial records stay\nloadable.",
@@ -22759,123 +22713,6 @@
           },
           "terminal_id": {
             "type": "string"
-          }
-        }
-      },
-      "WorksetItemSnapshot": {
-        "type": "object",
-        "required": [
-          "position",
-          "title",
-          "scope",
-          "description",
-          "role",
-          "depends_on",
-          "acceptance",
-          "updated_at"
-        ],
-        "properties": {
-          "acceptance": {
-            "type": "string"
-          },
-          "depends_on": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "description": {
-            "type": "string"
-          },
-          "notes": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "position": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "role": {
-            "type": "string"
-          },
-          "scope": {
-            "type": "string"
-          },
-          "title": {
-            "type": "string"
-          },
-          "updated_at": {
-            "type": "string"
-          }
-        }
-      },
-      "WorksetSnapshot": {
-        "type": "object",
-        "required": [
-          "id",
-          "session_id",
-          "goal",
-          "status",
-          "summary",
-          "created_at",
-          "updated_at",
-          "items"
-        ],
-        "properties": {
-          "created_at": {
-            "type": "string"
-          },
-          "goal": {
-            "type": "string"
-          },
-          "id": {
-            "type": "string"
-          },
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/WorksetItemSnapshot"
-            }
-          },
-          "session_id": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          },
-          "summary": {
-            "type": "string"
-          },
-          "updated_at": {
-            "type": "string"
-          },
-          "verification_recipe": {
-            "type": [
-              "string",
-              "null"
-            ]
-          }
-        }
-      },
-      "WorksetsSnapshot": {
-        "type": "object",
-        "required": [
-          "items"
-        ],
-        "properties": {
-          "error": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/WorksetSnapshot"
-            }
           }
         }
       },

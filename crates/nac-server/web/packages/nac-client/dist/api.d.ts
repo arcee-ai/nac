@@ -578,9 +578,7 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         thread_event_boundary: import("./openapi.generated.js").components["schemas"]["SessionEventBoundary"];
         thread_event_diagnostics?: import("./openapi.generated.js").components["schemas"]["ThreadEventDecodeDiagnostic"][];
         thread_events?: Record<string, import("./openapi.generated.js").components["schemas"]["AgentEvent"][]>;
-        threads: import("./openapi.generated.js").components["schemas"]["ThreadSnapshot"][];
         transcript_recovery_warning?: string | null;
-        worksets: import("./openapi.generated.js").components["schemas"]["WorksetsSnapshot"];
         workspace: import("./openapi.generated.js").components["schemas"]["WorkspaceSnapshot"];
     } & {
         lineage?: import("./openapi.generated.js").components["schemas"]["SessionLineageSnapshot"] | null;
@@ -604,9 +602,7 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         thread_event_boundary: import("./openapi.generated.js").components["schemas"]["SessionEventBoundary"];
         thread_event_diagnostics?: import("./openapi.generated.js").components["schemas"]["ThreadEventDecodeDiagnostic"][];
         thread_events?: Record<string, import("./openapi.generated.js").components["schemas"]["AgentEvent"][]>;
-        threads: import("./openapi.generated.js").components["schemas"]["ThreadSnapshot"][];
         transcript_recovery_warning?: string | null;
-        worksets: import("./openapi.generated.js").components["schemas"]["WorksetsSnapshot"];
         workspace: import("./openapi.generated.js").components["schemas"]["WorkspaceSnapshot"];
     } & {
         lineage?: import("./openapi.generated.js").components["schemas"]["SessionLineageSnapshot"] | null;

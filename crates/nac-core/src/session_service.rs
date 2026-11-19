@@ -27,9 +27,7 @@ use crate::sessions::{self, SessionSnapshot};
 use crate::skills::SkillRegistry;
 use crate::store::RunInboxPrompt;
 use crate::types::Message;
-use crate::view::{
-    self, SessionSummarySnapshot, ThreadSnapshot, WorksetsSnapshot, WorkspaceSnapshot,
-};
+use crate::view::{self, SessionSummarySnapshot, WorkspaceSnapshot};
 use crate::workspace::GitTarget;
 
 mod admission;
@@ -263,7 +261,6 @@ pub struct SessionFrontendSnapshot {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub shell_commands: Vec<ShellCommandSnapshot>,
     pub sessions: Vec<SessionSummarySnapshot>,
-    pub threads: Vec<ThreadSnapshot>,
     #[serde(default)]
     pub thread_events: HashMap<String, Vec<AgentEvent>>,
     /// Sanitized, bounded lifecycle events for top-level direct tool calls.
@@ -277,7 +274,6 @@ pub struct SessionFrontendSnapshot {
     /// Conversation forks created from a model turn in this session.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub forks: Vec<crate::store::SessionForkLink>,
-    pub worksets: WorksetsSnapshot,
     pub workspace: WorkspaceSnapshot,
 }
 
@@ -389,11 +385,9 @@ struct DecodedThreadEvents {
 
 struct FrontendSnapshotBlockingLoad {
     sessions: Vec<SessionSummarySnapshot>,
-    threads: Vec<ThreadSnapshot>,
     thread_events: DecodedThreadEvents,
     thread_event_boundary: SessionEventBoundary,
     forks: Vec<crate::store::SessionForkLink>,
-    worksets: WorksetsSnapshot,
     run_failure: Option<crate::run_failure::RunFailure>,
     workspace: WorkspaceSnapshot,
 }

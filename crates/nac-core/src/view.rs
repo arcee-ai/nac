@@ -84,53 +84,6 @@ pub struct SessionSummarySnapshot {
     pub forked_from: Option<store::SessionForkOrigin>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct ThreadSnapshot {
-    pub name: String,
-    pub session_id: String,
-    pub created_at: String,
-    pub updated_at: String,
-    pub episode_count: i64,
-    #[cfg_attr(feature = "openapi", schema(required))]
-    pub latest_action: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct WorksetItemSnapshot {
-    pub position: i64,
-    pub title: String,
-    pub scope: String,
-    pub description: String,
-    pub role: String,
-    pub depends_on: Vec<String>,
-    pub acceptance: String,
-    pub notes: Option<String>,
-    pub updated_at: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct WorksetSnapshot {
-    pub id: String,
-    pub session_id: String,
-    pub goal: String,
-    pub status: String,
-    pub summary: String,
-    pub verification_recipe: Option<String>,
-    pub created_at: String,
-    pub updated_at: String,
-    pub items: Vec<WorksetItemSnapshot>,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct WorksetsSnapshot {
-    pub items: Vec<WorksetSnapshot>,
-    pub error: Option<String>,
-}
-
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct GitStatusCounts {
@@ -221,51 +174,6 @@ impl From<sessions::SessionSummary> for SessionSummarySnapshot {
             total_cost_micros: summary.total_cost_micros,
             run_count: summary.run_count,
             forked_from: summary.forked_from,
-        }
-    }
-}
-
-impl From<store::ThreadRecord> for ThreadSnapshot {
-    fn from(thread: store::ThreadRecord) -> Self {
-        Self {
-            name: thread.name,
-            session_id: thread.session_id,
-            created_at: thread.created_at,
-            updated_at: thread.updated_at,
-            episode_count: thread.episode_count,
-            latest_action: thread.latest_action,
-        }
-    }
-}
-
-impl From<store::WorksetItemRecord> for WorksetItemSnapshot {
-    fn from(item: store::WorksetItemRecord) -> Self {
-        Self {
-            position: item.position,
-            title: item.title,
-            scope: item.scope,
-            description: item.description,
-            role: item.role,
-            depends_on: item.depends_on,
-            acceptance: item.acceptance,
-            notes: item.notes,
-            updated_at: item.updated_at,
-        }
-    }
-}
-
-impl From<store::WorksetRecord> for WorksetSnapshot {
-    fn from(workset: store::WorksetRecord) -> Self {
-        Self {
-            id: workset.id,
-            session_id: workset.session_id,
-            goal: workset.goal,
-            status: workset.status,
-            summary: workset.summary,
-            verification_recipe: workset.verification_recipe,
-            created_at: workset.created_at,
-            updated_at: workset.updated_at,
-            items: workset.items.into_iter().map(Into::into).collect(),
         }
     }
 }

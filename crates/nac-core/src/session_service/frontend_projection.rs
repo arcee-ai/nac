@@ -69,11 +69,9 @@ impl SessionService {
         };
         let StoredFrontendProjection {
             sessions,
-            threads,
             thread_events,
             thread_event_boundary,
             run_failure,
-            worksets,
             forks,
         } = projection;
         let thread_event_boundary = thread_event_boundary.ok_or_else(|| {
@@ -81,12 +79,10 @@ impl SessionService {
         })?;
         Ok(FrontendSnapshotBlockingLoad {
             sessions,
-            threads,
             thread_events,
             thread_event_boundary,
             forks,
             run_failure,
-            worksets,
             workspace,
         })
     }
@@ -244,13 +240,11 @@ impl SessionService {
             active_compaction: self.active_compaction(),
             shell_commands,
             sessions: blocking.sessions,
-            threads: blocking.threads,
             thread_events: blocking.thread_events.events,
             primary_tool_events: blocking.thread_events.primary_tool_events,
             thread_event_boundary: blocking.thread_event_boundary,
             thread_event_diagnostics: blocking.thread_events.diagnostics,
             forks: blocking.forks,
-            worksets: blocking.worksets,
             workspace: blocking.workspace,
         };
         Ok(SessionFrontendSnapshotLoad {
@@ -266,11 +260,9 @@ impl SessionService {
 
 struct StoredFrontendProjection {
     sessions: Vec<SessionSummarySnapshot>,
-    threads: Vec<ThreadSnapshot>,
     thread_events: DecodedThreadEvents,
     thread_event_boundary: Option<SessionEventBoundary>,
     forks: Vec<crate::store::SessionForkLink>,
-    worksets: WorksetsSnapshot,
     run_failure: Option<crate::run_failure::RunFailure>,
 }
 
@@ -285,12 +277,7 @@ fn read_stored_projection(
     } else {
         Vec::new()
     };
-    let threads = Vec::new();
     let (thread_event_boundary, thread_events) = load_events()?;
-    let worksets = WorksetsSnapshot {
-        items: Vec::new(),
-        error: None,
-    };
     let forks = session_id
         .map(|session_id| crate::store::list_session_forks_with_connection(conn, session_id))
         .transpose()?
@@ -313,11 +300,9 @@ fn read_stored_projection(
 
     Ok(StoredFrontendProjection {
         sessions,
-        threads,
         thread_events,
         thread_event_boundary,
         run_failure,
-        worksets,
         forks,
     })
 }

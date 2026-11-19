@@ -19,9 +19,7 @@ function snapshot(messages: Message[], active = false): SessionSnapshotResponse 
     message_created_at: messages.map(() => null),
     message_page: { start: 0, end: messages.length, total: messages.length, has_older: false },
     response_timing: { response_durations_ms: [] },
-    threads: [],
     thread_events: {},
-    worksets: { items: [] },
     active_run: active
       ? {
           status: "running",

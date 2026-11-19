@@ -263,48 +263,12 @@ pub fn retry_busy_correlated<T>(
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ThreadRecord {
-    pub name: String,
-    pub session_id: String,
-    pub created_at: String,
-    pub updated_at: String,
-    pub episode_count: i64,
-    pub latest_action: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ThreadEventRecord {
     pub id: i64,
     pub thread_name: String,
     pub session_id: String,
     pub event_json: String,
     pub created_at: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WorksetItemRecord {
-    pub position: i64,
-    pub title: String,
-    pub scope: String,
-    pub description: String,
-    pub role: String,
-    pub depends_on: Vec<String>,
-    pub acceptance: String,
-    pub notes: Option<String>,
-    pub updated_at: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WorksetRecord {
-    pub id: String,
-    pub session_id: String,
-    pub goal: String,
-    pub status: String,
-    pub summary: String,
-    pub verification_recipe: Option<String>,
-    pub created_at: String,
-    pub updated_at: String,
-    pub items: Vec<WorksetItemRecord>,
 }
 
 #[cfg(test)]

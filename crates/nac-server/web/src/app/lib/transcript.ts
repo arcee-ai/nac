@@ -5,7 +5,7 @@
 // it dispatched. Thread tool calls from one assistant message form one package;
 // in-batch `threads` deps split that package into stacked DAG rows.
 
-import { displayPromptFromMessageText, invokedSkillNames, parseStoreTime } from "@/app/lib/format";
+import { displayPromptFromMessageText, invokedSkillNames } from "@/app/lib/format";
 import {
   parseDelegatedCompletion,
   type DelegatedCompletion,
@@ -30,7 +30,6 @@ import type {
   DispatchWeight,
   SessionSnapshotResponse,
   ToolCall,
-  WorksetSnapshot,
 } from "@/app/types/api";
 
 /** Exact assistant marker written after any partial response on cancellation. */
@@ -202,33 +201,8 @@ interface BuildContext {
    * returns, so a workset can be saved long before `results` sees the call.
    */
   liveFinishedToolCalls: Record<string, true>;
-  worksets: WorksetSnapshot[];
   /** Latest dispatch of this name exists only because the user stopped. */
   cancelledNames: Set<string>;
-}
-
-/**
- * `workset_define` is pending until its tool result is in the transcript, a
- * live finish event lands, or the saved workset is at least as new as this
- * assistant message. Existence of an older workset with the same id is not
- * enough — the orchestrator often re-defines the plan in the same batch as
- * the next wave of threads.
- */
-function worksetDefinePending(
-  callId: string,
-  worksetId: string,
-  results: Map<string, ToolResultRecord>,
-  messageCreatedAt: string | null,
-  ctx: BuildContext,
-): boolean {
-  if (results.has(callId) || ctx.liveFinishedToolCalls[callId]) return false;
-  if (!worksetId || !messageCreatedAt) return true;
-  const workset = ctx.worksets.find((item) => item.id === worksetId);
-  if (!workset) return true;
-  const saved = parseStoreTime(workset.updated_at);
-  const called = parseStoreTime(messageCreatedAt);
-  if (!Number.isFinite(saved) || !Number.isFinite(called)) return true;
-  return saved < called;
 }
 
 /**
@@ -622,21 +596,11 @@ export function buildTranscript(
   });
 
   const windowDispatchCounts = countThreadDispatches(messages);
-  const persistedDispatchCounts = new Map(
-    (snapshot?.threads ?? []).map((thread) => [thread.name, thread.episode_count]),
-  );
-  const dispatchCounts: Record<string, number> = {};
+  const dispatchCounts = windowDispatchCounts;
   const dispatchesSeen: Record<string, number> = {};
-  for (const [name, visibleCount] of Object.entries(windowDispatchCounts)) {
-    const persistedCount = persistedDispatchCounts.get(name) ?? 0;
-    const totalCount = Math.max(visibleCount, persistedCount);
-    dispatchCounts[name] = totalCount;
-    dispatchesSeen[name] = Math.max(0, totalCount - visibleCount);
-  }
   const ctx: BuildContext = {
     liveThreads,
     liveFinishedToolCalls,
-    worksets: snapshot?.worksets?.items ?? [],
     threadEpisodes: threadEpisodes(snapshot?.thread_events ?? {}),
     dispatchCounts,
     cancelledNames: cancelledThreadNames(messages),
@@ -751,7 +715,7 @@ export function buildTranscript(
           kind: "workset",
           key,
           worksetId,
-          pending: worksetDefinePending(call.id, worksetId, results, createdAt[index] ?? null, ctx),
+          pending: !results.has(call.id) && !ctx.liveFinishedToolCalls[call.id],
         });
       } else if (!SILENT_TOOLS.has(name)) {
         const repeatedInBatch =

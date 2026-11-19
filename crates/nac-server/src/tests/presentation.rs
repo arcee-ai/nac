@@ -390,6 +390,8 @@ async fn snapshot_projection_preserves_defaults_and_all_non_session_fields() {
         serde_json::from_slice(&response_body(true_response).await).unwrap();
     assert_eq!(included, default);
     assert_eq!(default["sessions"].as_array().unwrap().len(), 2);
+    assert!(default.get("threads").is_none());
+    assert!(default.get("worksets").is_none());
 
     let false_response = get_response(
         app,

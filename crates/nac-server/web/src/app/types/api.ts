@@ -76,14 +76,6 @@ export type ResponseTimingSnapshot = ApiSchema<"ResponseTimingSnapshot">;
 
 export type SessionMetadata = ApiSchema<"SessionMetadata">;
 
-export type ThreadSnapshot = ApiSchema<"ThreadSnapshot">;
-
-export type WorksetItemSnapshot = ApiSchema<"WorksetItemSnapshot">;
-
-export type WorksetSnapshot = ApiSchema<"WorksetSnapshot">;
-
-export type WorksetsSnapshot = ApiSchema<"WorksetsSnapshot">;
-
 export type ChangedFileStat = ApiSchema<"ChangedFileStat">;
 
 export type WorkspaceSnapshot = ApiSchema<"WorkspaceSnapshot">;

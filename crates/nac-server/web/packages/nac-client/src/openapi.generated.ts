@@ -1224,9 +1224,7 @@ export interface components {
       thread_event_boundary: components["schemas"]["SessionEventBoundary"];
       thread_event_diagnostics?: components["schemas"]["ThreadEventDecodeDiagnostic"][];
       thread_events?: Record<string, components["schemas"]["AgentEvent"][]>;
-      threads: components["schemas"]["ThreadSnapshot"][];
       transcript_recovery_warning?: string | null;
-      worksets: components["schemas"]["WorksetsSnapshot"];
       workspace: components["schemas"]["WorkspaceSnapshot"];
     };
     SessionGoalRecord: {
@@ -1515,14 +1513,6 @@ export interface components {
       id: number;
       thread_name: string;
     };
-    ThreadSnapshot: {
-      created_at: string;
-      episode_count: number;
-      latest_action: string | null;
-      name: string;
-      session_id: string;
-      updated_at: string;
-    };
     TokenCostMicros: {
       cache_read?: number;
       cache_write?: number;
@@ -1688,29 +1678,6 @@ export interface components {
       rows: number;
       terminal_id: string;
     };
-    WorksetItemSnapshot: {
-      acceptance: string;
-      depends_on: string[];
-      description: string;
-      notes?: string | null;
-      position: number;
-      role: string;
-      scope: string;
-      title: string;
-      updated_at: string;
-    };
-    WorksetSnapshot: {
-      created_at: string;
-      goal: string;
-      id: string;
-      items: components["schemas"]["WorksetItemSnapshot"][];
-      session_id: string;
-      status: string;
-      summary: string;
-      updated_at: string;
-      verification_recipe?: string | null;
-    };
-    WorksetsSnapshot: { error?: string | null; items: components["schemas"]["WorksetSnapshot"][] };
     WorkspaceDiffHunk: {
       function_context: string | null;
       lines: components["schemas"]["WorkspaceDiffLine"][];

@@ -13,7 +13,6 @@ import type {
   Message,
   SessionBehavior,
   SessionSnapshotResponse,
-  ThreadSnapshot,
   ToolCall,
 } from "@/app/types/api";
 
@@ -92,17 +91,6 @@ function imageToolResult(callId: string): Message {
   };
 }
 
-function threadSnapshot(name: string, episodeCount: number): ThreadSnapshot {
-  return {
-    name,
-    session_id: "session-test",
-    created_at: "t-0",
-    updated_at: "t-0",
-    episode_count: episodeCount,
-    latest_action: null,
-  };
-}
-
 function snapshot(messages: Message[]): SessionSnapshotResponse {
   return {
     metadata: {
@@ -129,10 +117,8 @@ function snapshot(messages: Message[]): SessionSnapshotResponse {
       response_durations_ms: [],
     },
     sessions: [],
-    threads: [],
     thread_events: {},
     thread_event_boundary: { epoch_id: "epoch-test", sequence_id: 0 },
-    worksets: { items: [], error: null },
     workspace: {
       host_root: null,
       workspace_display: "nac-test",
@@ -245,7 +231,6 @@ describe("re-dispatched thread cards", () => {
       toolResult("call-1"),
       threadCall("worker", "call-2"),
     ]);
-    value.threads = [threadSnapshot("worker", 1)];
     value.thread_events = {
       worker: [threadStarted("worker"), threadFinished("worker")],
     };
@@ -295,7 +280,6 @@ describe("re-dispatched thread cards", () => {
         { name: "dependent", callId: "call-3", threads: ["source"] },
       ]),
     ]);
-    value.threads = [threadSnapshot("source", 1)];
     value.thread_events = {
       source: [threadStarted("source"), threadFinished("source")],
     };
