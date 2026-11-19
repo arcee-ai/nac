@@ -71,7 +71,7 @@ class QualificationTests(unittest.TestCase):
         # Official inventory: actions/runner-images@9f64e04519c5a6918e21eeae02c3aba8ecbc960a.
         expected = json.loads(Path(__file__).with_name('ci-toolchain.json').read_text())
         common = {key: expected[key] for key in ('developer_directory', 'xcode', 'sdk', 'swift')}
-        for current_image in ('20261102.0473.1', '20261112.0504.1'):
+        for current_image in ('20261102.0473.1', '20261112.0504.1', '20261117.0516.1'):
             current = {**common, 'image': current_image, 'os_version': '26.7.2', 'os_build': '25G332'}
             with self.subTest(image=current_image):
                 self.assertTrue(qualify_toolchain(current, expected))

@@ -94,6 +94,11 @@ Xcode/SDK/OS envelope. Both exact inventory identities are now listed as
 candidates; the newer image passed the baseline described above. New image
 identities still fail, and ordinary Rust/Node versions remain explicitly pinned
 by setup actions regardless of the runner's defaults.
+Run `44600798094` observed image `20261117.0516.1` and stopped at the drift
+guard. Its [official inventory](https://github.com/actions/runner-images/blob/6ae22b7fe1e9897ad8220e69f154a603cbd4b0ab/images/macos/macos-26-arm64-Readme.md)
+matches the observed macOS 26.7.2 / 25G332, Xcode 26.6 / 17F113 and SDK 26.5
+envelope. It is an explicit candidate; GUI acceptance requires a successful
+run on that image, and the exact Swift compiler check remains in force.
 Run `41180549503`, merge `0692a14f` / PR head `1a92e0d4`, then observed a
 third exact image, `20261021.0445.8`, and correctly failed before app launch.
 Its official inventory at runner-images commit
