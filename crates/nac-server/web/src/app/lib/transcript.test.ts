@@ -298,9 +298,7 @@ describe("direct primary tool transcript", () => {
       }),
     ]);
 
-    const awaitingApproval = toolDetails(
-      buildTranscript(base, [start], new Set(["call-primary"])),
-    );
+    const awaitingApproval = toolDetails(buildTranscript(base, [start], new Set(["call-primary"])));
     expect(awaitingApproval).toEqual([
       expect.objectContaining({
         callId: "call-primary",

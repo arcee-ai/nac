@@ -94,7 +94,9 @@ describe("insight labels", () => {
     expect(
       segmentTitle(tool("web_fetch", { summary: "https://user:SECRET@internal.example:8443/x" })),
     ).toBe("internal.example:8443");
-    expect(segmentTitle(tool("orchestrator_wait", { summary: "session-7" }))).toBe("orchestrator_wait");
+    expect(segmentTitle(tool("orchestrator_wait", { summary: "session-7" }))).toBe(
+      "orchestrator_wait",
+    );
     expect(segmentTitle(tool("create_goal", { summary: "Ship the revamp" }))).toBe("Create goal");
     expect(segmentTitle(tool("read"))).toBe("Read File");
     expect(segmentTitle(tool("mcp__linear__read", { label: "MCP · Read" }))).toBe("MCP · Read");

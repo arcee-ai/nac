@@ -199,9 +199,7 @@ const INTERRUPTED_MARKER = "Tool execution was interrupted; no result was record
 const NAME_LIMIT = 160;
 const PREVIEW_LIMIT = 180;
 /** Launch tools name their session with the same field in arguments and results. */
-const SPAWNED_SESSION_FIELDS = new Map([
-  ["subagent", "child_session_id"],
-]);
+const SPAWNED_SESSION_FIELDS = new Map([["subagent", "child_session_id"]]);
 const SESSION_ID = /^[^\s\p{Cc}]+$/u;
 
 function bounded(value: string | null | undefined, limit: number): string {

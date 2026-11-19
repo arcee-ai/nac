@@ -119,7 +119,6 @@ describe("partitionModelTurn", () => {
       title: "Fix the flaky test",
       status: "running",
     });
-
   });
 
   it("emits no group for prose alone", () => {

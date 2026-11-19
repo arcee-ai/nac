@@ -89,8 +89,7 @@ export function SubagentPreview({
   ]);
   const older = useLoadOlderMessages(sessionId);
   const data = snapshot.data;
-  const direct =
-    data?.metadata.behavior === "direct";
+  const direct = data?.metadata.behavior === "direct";
   const { data: permissions } = useSessionPermissions(sessionId, direct);
   const pendingPermissionCallIds = useMemo(
     () =>

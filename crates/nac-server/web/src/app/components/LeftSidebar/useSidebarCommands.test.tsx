@@ -61,16 +61,13 @@ beforeEach(() => {
   state.projects = [{ id: "project" }];
 });
 
-it.each(["direct"] as const)(
-  "opens a new chat in the %s session's project",
-  (behavior) => {
-    state.sessions = [legacy(behavior)];
-    const { result } = renderHook(useSidebarCommands, { wrapper });
-    act(() => result.current.newSession());
-    expect(state.newChat).toHaveBeenCalledExactlyOnceWith("project");
-    expect(state.create).not.toHaveBeenCalled();
-  },
-);
+it.each(["direct"] as const)("opens a new chat in the %s session's project", (behavior) => {
+  state.sessions = [legacy(behavior)];
+  const { result } = renderHook(useSidebarCommands, { wrapper });
+  act(() => result.current.newSession());
+  expect(state.newChat).toHaveBeenCalledExactlyOnceWith("project");
+  expect(state.create).not.toHaveBeenCalled();
+});
 
 it("waits for canonical route identity before choosing a creation destination", () => {
   const { result, rerender } = renderHook(useSidebarCommands, { wrapper });

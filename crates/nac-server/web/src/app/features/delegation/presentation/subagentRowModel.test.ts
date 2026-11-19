@@ -20,9 +20,9 @@ describe("subagent row model", () => {
         detail: "\nAll checks passed.\nSecond line",
       }),
     ).toBe("Done · All checks passed.");
-    expect(
-      subagentStateLine({ status: "running", background: true, detail: "x" }),
-    ).toBe("Working · background");
+    expect(subagentStateLine({ status: "running", background: true, detail: "x" })).toBe(
+      "Working · background",
+    );
   });
 
   it("formats how long ago a record changed", () => {

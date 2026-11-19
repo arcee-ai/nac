@@ -622,23 +622,20 @@ describe("tool durations and spawned sessions", () => {
     }
   });
 
-  it.each(["subagent"])(
-    "does not attach unbound %s events without an occurrence token",
-    (name) => {
-      const presentation = presentToolCall({
-        call: call(name),
-        events: { finished: finished(name, { content_preview: "other generation" }) },
-        hasResult: true,
-        resultText: '{"status":"failed"}',
-        resultHasImage: false,
-        active: false,
-        turnCancelled: false,
-        unboundEvents: true,
-      });
-      expect(presentation).toMatchObject({ status: "unknown", summary: null, resultPreview: null });
-      expect(JSON.stringify(presentation)).not.toContain("other generation");
-    },
-  );
+  it.each(["subagent"])("does not attach unbound %s events without an occurrence token", (name) => {
+    const presentation = presentToolCall({
+      call: call(name),
+      events: { finished: finished(name, { content_preview: "other generation" }) },
+      hasResult: true,
+      resultText: '{"status":"failed"}',
+      resultHasImage: false,
+      active: false,
+      turnCancelled: false,
+      unboundEvents: true,
+    });
+    expect(presentation).toMatchObject({ status: "unknown", summary: null, resultPreview: null });
+    expect(JSON.stringify(presentation)).not.toContain("other generation");
+  });
 });
 
 describe("tool completion failure classification", () => {
