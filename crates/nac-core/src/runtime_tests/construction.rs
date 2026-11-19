@@ -192,10 +192,6 @@ async fn direct_behavior_builds_and_resumes_a_persistent_direct_primary() {
         .map(|definition| definition.function.name.as_str())
         .collect::<Vec<_>>();
     assert_eq!(tool_names, crate::tools::DIRECT_TOOL_NAMES);
-    assert!(
-        !created.agent.has_light_client_for_test(),
-        "direct sessions install only the primary model"
-    );
     assert!(matches!(
         created.agent.messages.first(),
         Some(Message::System { content })
@@ -229,11 +225,6 @@ async fn direct_behavior_builds_and_resumes_a_persistent_direct_primary() {
             .collect::<Vec<_>>(),
         crate::tools::DIRECT_TOOL_NAMES
     );
-    assert!(
-        !resumed.agent.has_light_client_for_test(),
-        "resuming a direct session must not invent ALL-36 semantics"
-    );
-
     let _ = std::fs::remove_dir_all(root);
     restore_env("NAC_HOME", original_nac_home);
     restore_env("OPENAI_API_KEY", original_api_key);

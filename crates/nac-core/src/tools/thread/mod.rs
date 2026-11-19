@@ -3,7 +3,7 @@ use std::time::Instant;
 use serde_json::Value;
 
 use crate::events::AgentEvent;
-use crate::model::{DispatchWeight, ModelClient};
+use crate::model::ModelClient;
 use crate::skills::SkillRegistry;
 use crate::store;
 use crate::tools::{require_str, require_string_array, ToolResult, ToolRuntime};
@@ -19,31 +19,7 @@ use worker::{run_worker, WorkerInvocation, WorkerRun};
 pub const DEFAULT_THREAD_TIMEOUT_SECS: u64 = 60 * 60;
 pub const MIN_THREAD_TIMEOUT_SECS: u64 = 30 * 60;
 
-/// Describe the light model for the dispatch schema and the orchestrator
-/// prompt: its identity, effort, and catalog cost rates when known.
-pub(crate) fn describe_light_model(client: &ModelClient) -> String {
-    let mut traits = Vec::new();
-    if let Some(effort) = client.reasoning_effort() {
-        traits.push(format!("effort: {}", effort.as_str()));
-    }
-    let cost = client.cost_rates();
-    if cost.input > 0.0 || cost.output > 0.0 {
-        traits.push(format!(
-            "~${}/${} per 1M tokens in/out",
-            cost.input, cost.output
-        ));
-    }
-    if traits.is_empty() {
-        client.model.clone()
-    } else {
-        format!("{} ({})", client.model, traits.join(", "))
-    }
-}
-
-pub fn dispatch_definition(
-    skills: Option<&SkillRegistry>,
-    light: Option<&ModelClient>,
-) -> ToolDefinition {
+pub fn dispatch_definition(skills: Option<&SkillRegistry>) -> ToolDefinition {
     use serde_json::json;
 
     let mut parameters = json!({
@@ -60,18 +36,6 @@ pub fn dispatch_definition(
         },
         "required": ["name", "action"]
     });
-
-    if let Some(light) = light {
-        parameters["properties"]["weight"] = json!({
-            "type": "string",
-            "enum": ["light", "heavy"],
-            "description": format!(
-                "Weight class for this dispatch. light runs the configured light model — {} — for mechanical or well-scoped work; heavy runs your own model for work needing real reasoning or broad context.",
-                describe_light_model(light)
-            )
-        });
-        parameters["required"] = json!(["name", "action", "weight"]);
-    }
 
     if let Some(registry) = skills {
         let catalog = registry.catalog_entries();
@@ -154,8 +118,6 @@ pub struct ParsedDispatchParams {
     pub scheduled_skills: Vec<String>,
     pub session_id: String,
     pub timeout_secs: u64,
-    /// Weight class when a light model is configured; `None` otherwise.
-    pub weight: Option<DispatchWeight>,
 }
 
 /// Parse tool args into [`ParsedDispatchParams`].  Pure — no side effects.
@@ -169,23 +131,6 @@ pub fn parse_dispatch_args(
     let scheduled_skills = resolve_scheduled_skills(args, runtime.skills.as_deref())?;
     let session_id = require_session(runtime)?.to_string();
     let timeout_secs = resolve_thread_timeout_secs(args, runtime.thread_timeout_secs);
-    let weight = if runtime.light_client.is_some() {
-        Some(
-            require_str(args, "weight")?
-                .parse::<DispatchWeight>()
-                .map_err(|error| ToolResult {
-                    content: (format!("Error: {error}")).into(),
-                    is_error: true,
-                    execution_duration_ms: None,
-                    execution_duration_excludes_authorization: false,
-                    delegation_outcome: None,
-                    delegation_summary: None,
-                })?,
-        )
-    } else {
-        None
-    };
-
     Ok(ParsedDispatchParams {
         thread_name,
         dispatch_id: uuid::Uuid::new_v4().to_string(),
@@ -194,30 +139,7 @@ pub fn parse_dispatch_args(
         scheduled_skills,
         session_id,
         timeout_secs,
-        weight,
     })
-}
-
-/// Select the model client a dispatch runs with. A weight is only parsed
-/// when a light model is configured, so `light` routes to it and everything
-/// else runs the orchestrator's own model.
-#[expect(
-    clippy::expect_used,
-    reason = "dispatch parsing accepts light weight only when a light client is configured"
-)]
-pub(crate) fn select_dispatch_client(
-    params: &ParsedDispatchParams,
-    runtime: &ToolRuntime,
-    orchestrator_client: &ModelClient,
-) -> ModelClient {
-    match params.weight {
-        Some(DispatchWeight::Light) => runtime
-            .light_client
-            .as_deref()
-            .expect("a parsed weight requires a light-model client")
-            .clone(),
-        Some(DispatchWeight::Heavy) | None => orchestrator_client.clone(),
-    }
 }
 
 /// Execute a dispatch from already-parsed params.  Emits `ThreadStarted`,
@@ -237,7 +159,6 @@ pub async fn execute_parsed_dispatch(
         scheduled_skills,
         session_id,
         timeout_secs,
-        weight: _,
     } = params;
     let Some(cancellation) = runtime.active_threads.start(&thread_name, &dispatch_id) else {
         close_thread_dispatch_async(runtime, &session_id, &thread_name, &dispatch_id).await;
@@ -670,7 +591,7 @@ pub async fn execute_dispatch(
         Ok(p) => p,
         Err(e) => return e,
     };
-    let client = select_dispatch_client(&params, runtime, client);
+    let client = client.clone();
     let thread_name = params.thread_name.clone();
     let dispatch_id = params.dispatch_id.clone();
     if !mark_thread_active(runtime, &thread_name, &dispatch_id) {
@@ -1105,24 +1026,14 @@ mod tests {
         rt
     }
 
-    fn test_client(model: &str, effort: crate::model::ReasoningEffort) -> ModelClient {
-        ModelClient::new_for_test_settings(
-            crate::model::BackendKind::OpenAiResponses,
-            model,
-            effort,
-        )
-    }
-
     #[test]
     fn dispatch_definition_skills_schema_depends_on_registry() {
-        assert!(
-            dispatch_definition(None, None).function.parameters["properties"]
-                .get("skills")
-                .is_none()
-        );
+        assert!(dispatch_definition(None).function.parameters["properties"]
+            .get("skills")
+            .is_none());
 
         let registry = test_registry();
-        let definition = dispatch_definition(Some(&registry), None);
+        let definition = dispatch_definition(Some(&registry));
         let skills = &definition.function.parameters["properties"]["skills"];
         assert_eq!(skills["items"]["enum"], json!(["lint", "review"]));
         assert_eq!(skills["uniqueItems"], true);
@@ -1130,71 +1041,6 @@ mod tests {
         assert!(description.contains("Compact catalog"));
         assert!(description.contains("- lint: Run linting workflows."));
         assert!(description.contains("- review: Review code quality. (compatibility: Rust)"));
-    }
-
-    #[test]
-    fn dispatch_definition_requires_weight_only_with_a_light_model() {
-        let light = test_client("gpt-5-mini", crate::model::ReasoningEffort::Low);
-
-        let single = dispatch_definition(None, None);
-        assert!(single.function.parameters["properties"]
-            .get("weight")
-            .is_none());
-        assert_eq!(
-            single.function.parameters["required"],
-            json!(["name", "action"])
-        );
-
-        let dual = dispatch_definition(None, Some(&light));
-        let weight = &dual.function.parameters["properties"]["weight"];
-        assert_eq!(weight["enum"], json!(["light", "heavy"]));
-        assert!(weight["description"]
-            .as_str()
-            .unwrap()
-            .contains("gpt-5-mini"));
-        assert_eq!(
-            dual.function.parameters["required"],
-            json!(["name", "action", "weight"])
-        );
-    }
-
-    #[test]
-    fn dispatch_weight_parses_and_selects_the_matching_client() {
-        let light = test_client("gpt-5-mini", crate::model::ReasoningEffort::Low);
-        let orchestrator = test_client("gpt-5.5", crate::model::ReasoningEffort::High);
-        let mut runtime = test_runtime();
-        runtime.session_id = Some("session".to_string());
-        let args = json!({ "name": "worker", "action": "run tests" });
-
-        // Single-model: no weight is parsed even if one is supplied.
-        let params = parse_dispatch_args(&args, &runtime).unwrap();
-        assert_eq!(params.weight, None);
-        assert_eq!(
-            select_dispatch_client(&params, &runtime, &orchestrator).model,
-            "gpt-5.5"
-        );
-
-        runtime.light_client = Some(Arc::new(light));
-        let missing = parse_dispatch_args(&args, &runtime).unwrap_err();
-        assert!(missing.is_error);
-        let invalid = parse_dispatch_args(
-            &json!({ "name": "worker", "action": "run tests", "weight": "medium" }),
-            &runtime,
-        )
-        .unwrap_err();
-        assert!(invalid.content.contains("light, heavy"));
-
-        for (weight, expected_model) in [("light", "gpt-5-mini"), ("heavy", "gpt-5.5")] {
-            let params = parse_dispatch_args(
-                &json!({ "name": "worker", "action": "run tests", "weight": weight }),
-                &runtime,
-            )
-            .unwrap();
-            assert_eq!(
-                select_dispatch_client(&params, &runtime, &orchestrator).model,
-                expected_model
-            );
-        }
     }
 
     #[test]
@@ -1290,7 +1136,6 @@ mod tests {
             scheduled_skills: Vec::new(),
             session_id: "test-session".to_string(),
             timeout_secs: 30,
-            weight: None,
         };
         assert!(mark_thread_active(&runtime, "worker", "dispatch"));
 

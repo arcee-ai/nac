@@ -283,7 +283,6 @@ pub(super) fn build_test_agent(
             extra_tool_defs: Vec::new(),
             agents_md_message: None,
             thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
-            light_client: None,
             permission_rules: Vec::new(),
         },
     )
@@ -458,7 +457,6 @@ fn has_sandbox_reflects_the_agent_execution_backend() {
             extra_tool_defs: Vec::new(),
             agents_md_message: None,
             thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
-            light_client: None,
             permission_rules: Vec::new(),
         },
     )
@@ -602,7 +600,6 @@ async fn sandbox_container_destruction_preserves_worktree_until_durable_delete()
             extra_tool_defs: Vec::new(),
             agents_md_message: None,
             thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
-            light_client: None,
             permission_rules: Vec::new(),
         },
     )

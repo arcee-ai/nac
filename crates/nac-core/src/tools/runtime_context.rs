@@ -29,8 +29,6 @@ pub struct ToolRuntime {
     /// API costs are included in the session totals.  `orchestrator_context_tokens` is
     /// intentionally NOT accumulated here — it stays orchestrator-only.
     pub worker_usage: Arc<Mutex<crate::model::TokenUsage>>,
-    /// Light worker model client; `None` keeps single-model dispatch.
-    pub light_client: Option<Arc<crate::model::ModelClient>>,
     /// Exact construction-time capability set exposed to this agent. `None`
     /// is reserved for native/test callers that intentionally invoke the
     /// global operation boundary without a model-visible snapshot.

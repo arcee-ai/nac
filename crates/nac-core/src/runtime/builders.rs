@@ -233,7 +233,6 @@ async fn prepare_run_config_inner(
                 extra_tool_defs,
                 agents_md_message,
                 thread_timeout_secs: worker_thread_timeout_secs(config),
-                light_client: None,
                 permission_rules: config.permissions.rules.clone(),
             },
         )?;
@@ -373,7 +372,6 @@ async fn prepare_run_config_inner(
                 extra_tool_defs,
                 agents_md_message,
                 thread_timeout_secs: worker_thread_timeout_secs(config),
-                light_client: None,
                 permission_rules: config.permissions.rules.clone(),
             },
         )?;
@@ -562,7 +560,6 @@ async fn build_retired_managed_worker_config(
             extra_tool_defs,
             agents_md_message,
             thread_timeout_secs: worker_thread_timeout_secs(config),
-            light_client: None,
             permission_rules: config.permissions.rules.clone(),
         },
     )?;

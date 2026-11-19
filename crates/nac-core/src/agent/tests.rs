@@ -182,7 +182,6 @@ fn test_agent(root: &std::path::Path, base_url: &str, mode: AgentMode) -> Agent 
             extra_tool_defs: Vec::new(),
             agents_md_message: None,
             thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
-            light_client: None,
             permission_rules: Vec::new(),
         },
     )
@@ -287,7 +286,6 @@ fn direct_topologies_expose_exact_capability_boundaries() {
                 extra_tool_defs: Vec::new(),
                 agents_md_message: None,
                 thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
-                light_client: None,
                 permission_rules: Vec::new(),
             },
         )
@@ -450,7 +448,6 @@ fn delegated_worker_native_search_is_credential_gated_and_model_safe() {
             extra_tool_defs: Vec::new(),
             agents_md_message: None,
             thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
-            light_client: None,
             permission_rules: Vec::new(),
         },
     )
@@ -527,7 +524,6 @@ fn restore_messages_refreshes_leading_system_prompt() {
             extra_tool_defs: Vec::new(),
             agents_md_message: None,
             thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
-            light_client: None,
             permission_rules: Vec::new(),
         },
     )
@@ -912,7 +908,6 @@ fn worker_cannot_self_activate_skills_and_orchestrator_can_schedule_them() {
                 extra_tool_defs: Vec::new(),
                 agents_md_message: None,
                 thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
-                light_client: None,
                 permission_rules: Vec::new(),
             },
         )
@@ -1020,7 +1015,6 @@ async fn multi_row_steering_ack_failure_rolls_back_messages_and_retries_once() {
             extra_tool_defs: Vec::new(),
             agents_md_message: None,
             thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
-            light_client: None,
             permission_rules: Vec::new(),
         },
     )
@@ -1140,7 +1134,6 @@ async fn orchestrator_claims_steering_as_an_exact_user_message() {
             extra_tool_defs: Vec::new(),
             agents_md_message: None,
             thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
-            light_client: None,
             permission_rules: Vec::new(),
         },
     )
@@ -1282,7 +1275,6 @@ async fn cancelled_image_call_still_emits_one_typed_finished_event() {
             extra_tool_defs: Vec::new(),
             agents_md_message: None,
             thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
-            light_client: None,
             permission_rules: Vec::new(),
         },
     )

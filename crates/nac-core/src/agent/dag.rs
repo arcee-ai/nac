@@ -364,7 +364,7 @@ pub(crate) async fn execute_with_dag(
 
             // Spawn execute_parsed_dispatch.
             let runtime = runtime.clone();
-            let client = thread::select_dispatch_client(&dispatch.params, &runtime, &client);
+            let client = client.clone();
             let params = dispatch.params.clone();
             let id = dispatch.tool_call_id.clone();
             let original_index = dispatch.original_index;

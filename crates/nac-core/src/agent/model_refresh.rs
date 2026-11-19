@@ -6,9 +6,6 @@ impl Agent {
     pub(super) fn refresh_model_at_operation_boundary(&mut self) {
         let previous = self.client.supports_image_tool_results();
         self.client.refresh_codex_metadata_at_boundary();
-        if let Some(light) = &mut self.tool_runtime.light_client {
-            Arc::make_mut(light).refresh_codex_metadata_at_boundary();
-        }
         if let Some(compaction) = &mut self.compaction {
             compaction.refresh_automatic_threshold(self.client.automatic_compaction_threshold());
         }

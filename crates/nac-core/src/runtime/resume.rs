@@ -477,7 +477,6 @@ pub(super) async fn build_resume_config_from_snapshot(
         extra_tool_defs,
         agents_md_message,
         thread_timeout_secs: worker_thread_timeout_secs(config),
-        light_client: None,
         permission_rules: config.permissions.rules.clone(),
     };
     let agent_client = client.clone();

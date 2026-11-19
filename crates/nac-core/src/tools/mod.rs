@@ -341,13 +341,10 @@ pub(crate) fn direct_tool_admission(name: &str) -> Option<kernel::ToolAdmission>
         .admission(name)
 }
 
-pub fn orchestrator_tool_definitions(
-    skills: Option<&SkillRegistry>,
-    light: Option<&crate::model::ModelClient>,
-) -> Vec<ToolDefinition> {
+pub fn orchestrator_tool_definitions(skills: Option<&SkillRegistry>) -> Vec<ToolDefinition> {
     vec![
         guide::definition(),
-        thread::dispatch_definition(skills, light),
+        thread::dispatch_definition(skills),
         thread::threads_definition(),
         thread::thread_read_definition(),
         thread::thread_delete_definition(),
@@ -534,7 +531,6 @@ pub(crate) fn test_runtime() -> ToolRuntime {
         terminal_manager: TerminalManager::new(),
         thread_timeout_secs: thread::DEFAULT_THREAD_TIMEOUT_SECS,
         worker_usage: Arc::new(Mutex::new(crate::model::TokenUsage::default())),
-        light_client: None,
         allowed_tools: None,
         permission_broker: None,
         permission_reviewer: None,

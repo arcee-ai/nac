@@ -312,7 +312,6 @@ async fn heartbeat_question_delivery_typed_answer_failure_uses_real_goal_retry_t
             extra_tool_defs: vec![],
             agents_md_message: None,
             thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
-            light_client: None,
             permission_rules: vec![PermissionRule::new("*", "*", PermissionEffect::Allow)],
         },
     )

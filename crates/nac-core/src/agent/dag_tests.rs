@@ -31,7 +31,6 @@ fn make_dispatch(index: usize, name: &str, source_threads: &[&str]) -> ParsedThr
             scheduled_skills: Vec::new(),
             session_id: "test-session".to_string(),
             timeout_secs: DEFAULT_THREAD_TIMEOUT_SECS,
-            weight: None,
         },
     }
 }

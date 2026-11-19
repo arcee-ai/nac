@@ -156,7 +156,6 @@ async fn host_completion_protocol_replay_faults_and_no_premature_success() {
                 // Allow process startup under workspace-test contention. This
                 // fixture tests completion boundaries, not startup latency.
                 timeout_secs: 5,
-                weight: None,
             },
             &runtime,
             &client,

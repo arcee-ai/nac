@@ -57,12 +57,10 @@ use compaction::{CompactionPolicy, CompactionState, PreparedProviderView};
 use failed_tool_round::failed_tool_round;
 pub(crate) use preview::key_arg_preview;
 use preview::*;
-use prompt_rendering::{
-    light_model_prompt_guidance, render_orchestrator_system_prompt, render_worker_system_prompt,
-};
 pub(crate) use prompt_rendering::{
     render_direct_system_prompt, render_general_child_system_prompt,
 };
+use prompt_rendering::{render_orchestrator_system_prompt, render_worker_system_prompt};
 use tool_exec::{execute_tools_parallel, finalize_tool_results};
 pub(crate) use transcript_messages::TranscriptMessages;
 pub(crate) use transcript_state::truncate_incomplete_tool_turn;
@@ -142,8 +140,6 @@ pub struct AgentConfig {
     pub agents_md_message: Option<String>,
     pub thread_timeout_secs: u64,
     pub command_output_limits: crate::terminal::CommandOutputLimits,
-    /// Light worker model client; `None` keeps single-model dispatch.
-    pub light_client: Option<Arc<ModelClient>>,
     pub permission_rules: Vec<crate::permissions::PermissionRule>,
 }
 
@@ -286,10 +282,7 @@ impl Agent {
             }
             AgentMode::Orchestrator => (
                 render_orchestrator_system_prompt(&cwd, thread_timeout_secs),
-                tools::orchestrator_tool_definitions(
-                    config.skills.as_deref(),
-                    config.light_client.as_deref(),
-                ),
+                tools::orchestrator_tool_definitions(config.skills.as_deref()),
             ),
             AgentMode::Direct => match traditional_child.as_ref() {
                 Some(child) => (
@@ -317,11 +310,6 @@ impl Agent {
             // Traditional children retain explicit skill expansion. Keep the
             // bundled router usable without adding primary self-help routing.
             tool_defs.push(tools::guide::definition());
-        }
-        if config.mode == AgentMode::Orchestrator {
-            if let Some(light) = config.light_client.as_deref() {
-                system_prompt.push_str(&light_model_prompt_guidance(light));
-            }
         }
         if config.ssh.is_some() || config.sandbox.is_some() {
             tool_defs.retain(|definition| {
@@ -453,7 +441,6 @@ impl Agent {
                 command_cancellation: crate::tools::RunCancellation::default(),
                 thread_timeout_secs: config.thread_timeout_secs,
                 worker_usage: Arc::new(Mutex::new(TokenUsage::default())),
-                light_client: config.light_client,
                 allowed_tools: Some(allowed_tools),
                 permission_broker: None,
                 permission_reviewer: None,
@@ -628,7 +615,6 @@ impl Agent {
                 extra_tool_defs: Vec::new(),
                 agents_md_message: None,
                 thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
-                light_client: None,
                 permission_rules: Vec::new(),
             },
         )
@@ -1237,11 +1223,6 @@ impl Agent {
     #[cfg(test)]
     pub(crate) fn mcp_for_test(&self) -> Option<&Arc<crate::mcp::McpRegistry>> {
         self.tool_runtime.mcp.as_ref()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn has_light_client_for_test(&self) -> bool {
-        self.tool_runtime.light_client.is_some()
     }
 
     #[cfg(test)]

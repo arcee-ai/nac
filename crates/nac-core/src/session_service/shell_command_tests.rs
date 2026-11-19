@@ -67,7 +67,6 @@ fn test_direct_active_service_at(
             extra_tool_defs: Vec::new(),
             agents_md_message: None,
             thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
-            light_client: None,
             permission_rules: if label == "deny" {
                 vec![crate::permissions::PermissionRule::new(
                     "*",
