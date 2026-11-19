@@ -15,10 +15,7 @@ pub(super) use planning::{
     CompactionPolicy, CompactionState, PreparedProviderView, HISTORICAL_CONTEXT_PREFIX,
 };
 #[cfg(test)]
-pub(super) use planning::{
-    DIRECT_PROMPT_POLICY_VERSION, NAC_COMPACTION_PROMPT, NAC_DIRECT_COMPACTION_PROMPT,
-    PROMPT_POLICY_VERSION,
-};
+pub(super) use planning::{DIRECT_PROMPT_POLICY_VERSION, NAC_DIRECT_COMPACTION_PROMPT};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompactionResult {

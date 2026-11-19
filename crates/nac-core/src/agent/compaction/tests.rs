@@ -32,7 +32,7 @@ fn temp_store_path(label: &str) -> PathBuf {
 }
 
 fn state(path: PathBuf, threshold: Option<u64>) -> CompactionState {
-    state_with_policy(path, threshold, CompactionPolicy::Orchestrator)
+    state_with_policy(path, threshold, CompactionPolicy::Direct)
 }
 
 fn state_with_policy(

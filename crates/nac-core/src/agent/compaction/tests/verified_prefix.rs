@@ -33,7 +33,7 @@ fn restored(
             tail_start_message_index: boundary,
             source_prefix_sha256: source,
             system_policy_sha256: policy,
-            prompt_policy_version: PROMPT_POLICY_VERSION,
+            prompt_policy_version: DIRECT_PROMPT_POLICY_VERSION,
             old_context_estimate: 500,
             summary_prompt_tokens: None,
             summary_completion_tokens: None,

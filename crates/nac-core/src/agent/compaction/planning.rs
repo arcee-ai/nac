@@ -17,13 +17,8 @@ use crate::store::orchestrator_compaction::{
 };
 use crate::types::{Message, ToolDefinition};
 
-#[cfg(test)]
-pub(in crate::agent) const PROMPT_POLICY_VERSION: u32 = 2;
 pub(in crate::agent) const DIRECT_PROMPT_POLICY_VERSION: u32 = 1;
 
-#[cfg(test)]
-pub(in crate::agent) const NAC_COMPACTION_PROMPT: &str =
-    include_str!("../prompts/nac_compaction.md");
 pub(in crate::agent) const NAC_DIRECT_COMPACTION_PROMPT: &str =
     include_str!("../prompts/nac_direct_compaction.md");
 
@@ -32,34 +27,24 @@ pub(in crate::agent) const HISTORICAL_CONTEXT_PREFIX: &str =
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::agent) enum CompactionPolicy {
-    #[cfg(test)]
-    Orchestrator,
     Direct,
 }
 
 impl CompactionPolicy {
     const fn prompt(self) -> &'static str {
         match self {
-            #[cfg(test)]
-            Self::Orchestrator => NAC_COMPACTION_PROMPT,
             Self::Direct => NAC_DIRECT_COMPACTION_PROMPT,
         }
     }
 
     const fn version(self) -> u32 {
         match self {
-            #[cfg(test)]
-            Self::Orchestrator => PROMPT_POLICY_VERSION,
             Self::Direct => DIRECT_PROMPT_POLICY_VERSION,
         }
     }
 
     const fn digest_domain(self) -> &'static [u8] {
         match self {
-            // Preserve existing orchestrator checkpoints byte-for-byte while
-            // separating direct checkpoints fail-closed.
-            #[cfg(test)]
-            Self::Orchestrator => b"nac-orchestrator-compaction-system-policy-v2\0",
             Self::Direct => b"nac-direct-compaction-system-policy-v1\0",
         }
     }
@@ -686,7 +671,7 @@ pub(super) fn checkpoint_boundary_is_valid(messages: &[Message], boundary: usize
 
 #[cfg(test)]
 pub(crate) fn checkpoint_digests(messages: &[Message], boundary: usize) -> ([u8; 32], [u8; 32]) {
-    checkpoint_digests_for_policy(messages, boundary, CompactionPolicy::Orchestrator)
+    checkpoint_digests_for_policy(messages, boundary, CompactionPolicy::Direct)
 }
 
 #[cfg(test)]

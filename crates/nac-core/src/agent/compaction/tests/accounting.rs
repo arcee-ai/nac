@@ -55,10 +55,10 @@ fn large_persistent_system_is_not_counted_as_reclaimed_summary_source() {
 
     // non_source_tokens = (system_content_chars + compaction_prompt_chars) / 4
     //   system content = "policy" * 14_000 = 84_000 chars
-    //   compaction prompt = 2_817 chars
-    //   non_source_tokens = (84_000 + 2_817) / 4 = 21_704
-    let non_source_tokens: u64 = ((84_000 + NAC_COMPACTION_PROMPT.len()) / 4) as u64;
-    assert_eq!(non_source_tokens, 21_704);
+    //   compaction prompt = 2_704 chars
+    //   non_source_tokens = (84_000 + 2_704) / 4 = 21_676
+    let non_source_tokens: u64 = ((84_000 + NAC_DIRECT_COMPACTION_PROMPT.len()) / 4) as u64;
+    assert_eq!(non_source_tokens, 21_676);
 
     let projected = state(PathBuf::from("unused"), Some(1)).projected_context_estimate(
         &messages,
@@ -73,6 +73,6 @@ fn large_persistent_system_is_not_counted_as_reclaimed_summary_source() {
     let bare_projection = 300_000_u64.saturating_sub(180_000).saturating_add(500);
     assert!(projected > bare_projection);
 
-    // Exact: 300_000 - (180_000 - 21_704) + 500 = 300_000 - 158_296 + 500 = 142_204
-    assert_eq!(projected, 142_204);
+    // Exact: 300_000 - (180_000 - 21_676) + 500 = 300_000 - 158_324 + 500 = 142_176
+    assert_eq!(projected, 142_176);
 }
