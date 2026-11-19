@@ -153,11 +153,6 @@ var ve = 5e3, v = {
 		e,
 		"children"
 	],
-	managedOrchestrators: (e) => [
-		"session",
-		e,
-		"orchestrators"
-	],
 	workspaceDiff: (e, t, n, r, i) => [
 		"session",
 		e,

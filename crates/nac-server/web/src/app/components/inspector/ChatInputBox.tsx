@@ -371,7 +371,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
 
   // Prompts already sent, newest first, in the short form the bubbles show —
   // a `/plan` or `/run` message goes back to the instruction it was written as
-  // rather than to the wrapper the orchestrator reads.
+  // rather than to the wrapper the agent reads.
   const sentPrompts = useMemo(() => {
     const prompts: string[] = [];
     for (const message of snapshot?.messages ?? []) {
