@@ -90,37 +90,6 @@ correlation |command| crate::telemetry::Correlation::session(Some(&command.sessi
 port public;
 }
 
-coordinated_command! {
-/// Queues steering a person typed on a human-facing route. It becomes
-/// review intent when it reaches the model, never before.
-pub fn queue_person_thread_steering(
-    path: &Path,
-    session_id: &str,
-    thread_name: &str,
-    dispatch_id: &str,
-    instruction: &str,
-) -> Result<ThreadSteeringRecord> {
-    let conn = open_runtime_connection(path)?;
-    queue_thread_steering_with_connection(
-        &conn,
-        session_id,
-        thread_name,
-        dispatch_id,
-        instruction,
-        InputOrigin::Person,
-    )
-}
-command QueuePersonThreadSteeringCommand {
-    session_id: String = session_id.to_owned(),
-    thread_name: String = thread_name.to_owned(),
-    dispatch_id: String = dispatch_id.to_owned(),
-    instruction: String = instruction.to_owned(),
-}
-call |command| (&command.session_id, &command.thread_name, &command.dispatch_id, &command.instruction)
-correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
-port public;
-}
-
 pub(super) fn queue_thread_steering_with_connection(
     connection: &rusqlite::Connection,
     session_id: &str,

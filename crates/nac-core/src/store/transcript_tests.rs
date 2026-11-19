@@ -498,40 +498,6 @@ fn person_input_becomes_review_intent_only_as_it_reaches_the_model() {
     assert_eq!(delivered[0].id, steer.id);
     assert_eq!(intent(), messages(&["/fix tests", "do not push"]));
 
-    // So does a person's steering through the orchestrator queue.
-    let steering = queue_person_thread_steering(
-        &path,
-        "session",
-        ORCHESTRATOR_STEERING_TARGET,
-        "run-a",
-        "keep it short",
-    )
-    .unwrap();
-    queue_thread_steering(
-        &path,
-        "session",
-        ORCHESTRATOR_STEERING_TARGET,
-        "run-a",
-        "child report",
-    )
-    .unwrap();
-    let claimed = claim_thread_steering(&path, "session", "run-a").unwrap();
-    assert_eq!(claimed.len(), 2);
-    assert_eq!(claimed[0].id, steering.id);
-    writer
-        .append_claimed_thread_steering(
-            "session",
-            "run-a",
-            &claimed.iter().map(|record| record.id).collect::<Vec<_>>(),
-            4,
-            &[user("keep it short"), user("child report")],
-        )
-        .unwrap();
-    assert_eq!(
-        intent(),
-        messages(&["/fix tests", "do not push", "keep it short"])
-    );
-
     // A queued item counts once it starts a run; until then, and if it is
     // cancelled, it changes nothing. A new run does not lift what came
     // before.
@@ -556,15 +522,12 @@ fn person_input_becomes_review_intent_only_as_it_reaches_the_model() {
         "now update the docs",
     )
     .unwrap();
-    assert_eq!(
-        intent(),
-        messages(&["/fix tests", "do not push", "keep it short"])
-    );
+    assert_eq!(intent(), messages(&["/fix tests", "do not push"]));
     settle_runs();
     writer
         .append_inbox_run_prompt(
             "session",
-            6,
+            4,
             &user("now update the docs"),
             "run-b",
             queued.id,
@@ -572,12 +535,7 @@ fn person_input_becomes_review_intent_only_as_it_reaches_the_model() {
         .unwrap();
     assert_eq!(
         intent(),
-        messages(&[
-            "/fix tests",
-            "do not push",
-            "keep it short",
-            "now update the docs"
-        ])
+        messages(&["/fix tests", "do not push", "now update the docs"])
     );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
