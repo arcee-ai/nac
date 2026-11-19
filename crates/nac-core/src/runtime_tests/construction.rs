@@ -9,6 +9,14 @@ fn new_session_model_does_not_inherit_global_model_defaults() {
     assert!(selected.extra_headers.is_empty());
 }
 
+#[test]
+fn session_picker_uses_direct_behavior() {
+    let picker = RuntimeSession::Picker {
+        store_path: temp_store_path("picker_behavior"),
+    };
+    assert_eq!(picker.behavior(), sessions::SessionBehavior::Direct);
+}
+
 #[tokio::test]
 async fn retired_behavior_is_rejected_before_runtime_or_store_preparation() {
     let store_path = temp_store_path("retired_behavior_rejected");

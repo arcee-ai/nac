@@ -253,7 +253,7 @@ impl RuntimeSession {
     pub fn behavior(&self) -> sessions::SessionBehavior {
         match self {
             Self::Active { snapshot, .. } => snapshot.behavior,
-            Self::Picker { .. } => sessions::SessionBehavior::Orchestrator,
+            Self::Picker { .. } => sessions::SessionBehavior::Direct,
         }
     }
 }
