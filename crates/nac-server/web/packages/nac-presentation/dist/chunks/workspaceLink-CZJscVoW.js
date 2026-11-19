@@ -7057,7 +7057,6 @@ function WT(e) {
 	switch (e) {
 		case "cancel_active_run": return "Stop run";
 		case "cancel_traditional_child": return "Cancel coding agent";
-		case "cancel_managed_orchestrator": return "Cancel NAC orchestrator";
 		case "terminate_terminal": return "Stop terminal";
 		case "cancel_clone_operation": return "Cancel clone";
 		case "wait": return "Wait";
@@ -7084,7 +7083,6 @@ var qT = /* @__PURE__ */ new Set([
 	"active_run",
 	"compaction",
 	"traditional_child",
-	"managed_orchestrator",
 	"terminal_process",
 	"clone_operation",
 	"workspace_mutation",
@@ -7098,14 +7096,12 @@ var qT = /* @__PURE__ */ new Set([
 	"wait",
 	"cancel_active_run",
 	"cancel_traditional_child",
-	"cancel_managed_orchestrator",
 	"terminate_terminal",
 	"cancel_clone_operation"
 ]), XT = {
 	active_run: ["An active run must finish before maintenance can start"],
 	compaction: ["An active compaction must finish before maintenance can start"],
 	traditional_child: ["An active child session must finish before maintenance can start"],
-	managed_orchestrator: ["An active orchestrator must finish before maintenance can start"],
 	terminal_process: ["An active terminal process must finish before maintenance can start"],
 	clone_operation: ["An active repository clone must finish before maintenance can start"],
 	workspace_mutation: ["An active workspace mutation must finish before maintenance can start"],
@@ -7179,7 +7175,6 @@ function sE(e) {
 		"session_id",
 		"run_id",
 		"child_session_id",
-		"orchestrator_session_id",
 		"terminal_id",
 		"clone_operation_id"
 	], n = $T(e, t, []);
@@ -7193,7 +7188,6 @@ function lE(e, t, n) {
 	switch (t) {
 		case "cancel_active_run": return e === "active_run" && cE(n, ["session_id", "run_id"]);
 		case "cancel_traditional_child": return e === "traditional_child" && cE(n, ["session_id", "child_session_id"]);
-		case "cancel_managed_orchestrator": return e === "managed_orchestrator" && cE(n, ["session_id", "orchestrator_session_id"]);
 		case "terminate_terminal": return e === "terminal_process" && cE(n, ["session_id", "terminal_id"]);
 		case "cancel_clone_operation": return e === "clone_operation" && cE(n, ["clone_operation_id"]);
 		case "wait": return !1;

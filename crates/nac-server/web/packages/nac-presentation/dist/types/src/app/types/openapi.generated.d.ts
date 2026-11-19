@@ -877,7 +877,7 @@ export interface components {
             provider: components["schemas"]["ManagedAuthProvider"];
             signed_in: boolean;
         };
-        ManagedBlockerKind: "active_run" | "compaction" | "traditional_child" | "managed_orchestrator" | "terminal_process" | "clone_operation" | "workspace_mutation" | "operation_lease" | "resource_lease" | "maintenance_operation";
+        ManagedBlockerKind: "active_run" | "compaction" | "traditional_child" | "terminal_process" | "clone_operation" | "workspace_mutation" | "operation_lease" | "resource_lease" | "maintenance_operation";
         ManagedCloneOperation: {
             branch: string;
             created_at_unix_ms: number;

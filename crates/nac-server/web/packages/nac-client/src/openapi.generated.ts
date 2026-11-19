@@ -467,7 +467,6 @@ export interface components {
       | "active_run"
       | "compaction"
       | "traditional_child"
-      | "managed_orchestrator"
       | "terminal_process"
       | "clone_operation"
       | "workspace_mutation"

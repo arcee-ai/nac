@@ -100,7 +100,6 @@ pub enum ManagedBlockerKind {
     ActiveRun,
     Compaction,
     TraditionalChild,
-    ManagedOrchestrator,
     TerminalProcess,
     CloneOperation,
     WorkspaceMutation,

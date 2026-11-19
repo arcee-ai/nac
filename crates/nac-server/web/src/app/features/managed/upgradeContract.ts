@@ -26,7 +26,6 @@ const blockerKinds = new Set<ManagedUpgradeBlockerKind>([
   "active_run",
   "compaction",
   "traditional_child",
-  "managed_orchestrator",
   "terminal_process",
   "clone_operation",
   "workspace_mutation",
@@ -41,7 +40,6 @@ const blockerActions = new Set<ManagedUpgradeBlockerAction>([
   "wait",
   "cancel_active_run",
   "cancel_traditional_child",
-  "cancel_managed_orchestrator",
   "terminate_terminal",
   "cancel_clone_operation",
 ]);
@@ -49,7 +47,6 @@ const blockerMessages: Record<ManagedUpgradeBlockerKind, readonly string[]> = {
   active_run: ["An active run must finish before maintenance can start"],
   compaction: ["An active compaction must finish before maintenance can start"],
   traditional_child: ["An active child session must finish before maintenance can start"],
-  managed_orchestrator: ["An active orchestrator must finish before maintenance can start"],
   terminal_process: ["An active terminal process must finish before maintenance can start"],
   clone_operation: ["An active repository clone must finish before maintenance can start"],
   workspace_mutation: ["An active workspace mutation must finish before maintenance can start"],
@@ -153,7 +150,6 @@ function parseTarget(value: unknown): ManagedUpgradeBlockerTarget {
     "session_id",
     "run_id",
     "child_session_id",
-    "orchestrator_session_id",
     "terminal_id",
     "clone_operation_id",
   ] as const;
@@ -187,11 +183,6 @@ function validActionTarget(
     case "cancel_traditional_child":
       return (
         kind === "traditional_child" && exactTarget(target, ["session_id", "child_session_id"])
-      );
-    case "cancel_managed_orchestrator":
-      return (
-        kind === "managed_orchestrator" &&
-        exactTarget(target, ["session_id", "orchestrator_session_id"])
       );
     case "terminate_terminal":
       return kind === "terminal_process" && exactTarget(target, ["session_id", "terminal_id"]);
