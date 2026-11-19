@@ -498,7 +498,6 @@ pub struct PermissionStateResponse {
 pub enum InboxItemOrigin {
     Input,
     TraditionalChild,
-    ManagedOrchestrator,
 }
 
 impl From<Option<&nac_core::store::InternalCompletionOrigin>> for InboxItemOrigin {
@@ -507,9 +506,6 @@ impl From<Option<&nac_core::store::InternalCompletionOrigin>> for InboxItemOrigi
             None => Self::Input,
             Some(nac_core::store::InternalCompletionSource::TraditionalChild) => {
                 Self::TraditionalChild
-            }
-            Some(nac_core::store::InternalCompletionSource::ManagedOrchestrator) => {
-                Self::ManagedOrchestrator
             }
         }
     }

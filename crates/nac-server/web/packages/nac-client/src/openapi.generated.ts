@@ -412,7 +412,7 @@ export interface components {
       | "interrupted"
       | "unknown";
     InboxDelivery: "steer" | "queue";
-    InboxItemOrigin: "input" | "traditional_child" | "managed_orchestrator";
+    InboxItemOrigin: "input" | "traditional_child";
     InboxItemResponse: {
       cancelled_at?: string | null;
       client_id?: string | null;

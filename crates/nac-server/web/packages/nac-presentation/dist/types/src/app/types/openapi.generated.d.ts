@@ -822,7 +822,7 @@ export interface components {
         });
         HeartbeatState: "active" | "paused" | "suspended" | "stopped" | "finished" | "deleted";
         InboxDelivery: "steer" | "queue";
-        InboxItemOrigin: "input" | "traditional_child" | "managed_orchestrator";
+        InboxItemOrigin: "input" | "traditional_child";
         InboxItemResponse: {
             cancelled_at?: string | null;
             client_id?: string | null;

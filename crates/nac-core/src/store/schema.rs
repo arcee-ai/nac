@@ -834,8 +834,22 @@ fn open_connection_with_hooks(
 // ownership and resource retirement. The primary transcript/event ledger and
 // provider connections are deliberately retained.
 fn retire_worker_storage(conn: &Connection) -> Result<()> {
+    let retired_inbox: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM session_inbox WHERE completion_source = 'managed_orchestrator')",
+        [],
+        |row| row.get(0),
+    )?;
+    if retired_inbox {
+        return Err(anyhow!(
+            "retired managed completion remains in a surviving inbox"
+        ));
+    }
     conn.execute_batch(
-        "DROP TRIGGER IF EXISTS session_direct_only_insert;
+        "CREATE TRIGGER session_direct_inbox_origin_insert BEFORE INSERT ON session_inbox
+         WHEN NEW.completion_source = 'managed_orchestrator' BEGIN SELECT RAISE(ABORT, 'retired inbox origin'); END;
+         CREATE TRIGGER session_direct_inbox_origin_update BEFORE UPDATE OF completion_source ON session_inbox
+         WHEN NEW.completion_source = 'managed_orchestrator' BEGIN SELECT RAISE(ABORT, 'retired inbox origin'); END;
+         DROP TRIGGER IF EXISTS session_direct_only_insert;
          CREATE TRIGGER session_direct_only_insert BEFORE INSERT ON sessions
          WHEN NEW.behavior <> 'direct' BEGIN SELECT RAISE(ABORT, 'retired session behavior'); END;
          DROP TABLE IF EXISTS managed_orchestrator_terminal_receipts;

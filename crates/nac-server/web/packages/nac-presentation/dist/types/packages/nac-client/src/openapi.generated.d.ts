@@ -447,7 +447,7 @@ export interface components {
         };
         HeartbeatOutcome: "unchanged" | "meaningful" | "finished" | "needs_human_action" | "failed" | "interrupted" | "unknown";
         InboxDelivery: "steer" | "queue";
-        InboxItemOrigin: "input" | "traditional_child" | "managed_orchestrator";
+        InboxItemOrigin: "input" | "traditional_child";
         InboxItemResponse: {
             cancelled_at?: string | null;
             client_id?: string | null;

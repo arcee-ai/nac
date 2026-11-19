@@ -877,13 +877,13 @@ describe("direct inbox and goal journeys", () => {
     const human = { ...inbox("queue"), id: 8, prompt: "human follow-up" };
     // Identical text never makes a person's item internal, or vice versa.
     const childResult = { ...inbox(), id: 9, origin: "traditional_child" as const };
-    const orchestratorResult = {
+    const secondChildResult = {
       ...inbox("queue"),
       id: 10,
       prompt: "human follow-up",
-      origin: "managed_orchestrator" as const,
+      origin: "traditional_child" as const,
     };
-    composer({ behavior: "direct", inboxItems: [childResult, human, orchestratorResult] });
+    composer({ behavior: "direct", inboxItems: [childResult, human, secondChildResult] });
     const note = () => screen.getByRole("status", { name: "Pending subagent results" });
 
     const pending = screen.getByLabelText("Pending messages");

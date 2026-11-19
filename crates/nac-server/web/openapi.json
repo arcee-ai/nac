@@ -14972,8 +14972,7 @@
         "description": "Who admitted an inbox item. `input` is anything a person, MCP client or\nNAC automation submitted; the other values are owned delegated results,\nrecorded durably when their generation settled. Only `input` items accept\nthe public update and cancel operations.",
         "enum": [
           "input",
-          "traditional_child",
-          "managed_orchestrator"
+          "traditional_child"
         ]
       },
       "InboxItemResponse": {

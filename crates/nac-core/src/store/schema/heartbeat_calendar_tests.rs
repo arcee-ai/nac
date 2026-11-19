@@ -162,7 +162,7 @@ fn catalog(conn: &Connection) -> TableRows {
 }
 
 fn unaffected_catalog(conn: &Connection) -> TableRows {
-    rows(conn, "SELECT type,name,tbl_name,sql FROM sqlite_master WHERE tbl_name NOT IN ('heartbeat_occurrences','sessions','projects','managed_orchestrator_terminal_receipts','managed_orchestrators','worker_dispatches','episodes','threads','workset_items','worksets','thread_steering','model_configurations') ORDER BY type,name")
+    rows(conn, "SELECT type,name,tbl_name,sql FROM sqlite_master WHERE tbl_name NOT IN ('heartbeat_occurrences','sessions','projects','managed_orchestrator_terminal_receipts','managed_orchestrators','worker_dispatches','episodes','threads','workset_items','worksets','thread_steering','model_configurations') AND name NOT IN ('session_direct_inbox_origin_insert','session_direct_inbox_origin_update') ORDER BY type,name")
 }
 
 fn occurrence_indices(conn: &Connection) -> Vec<(String, String)> {

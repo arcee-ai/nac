@@ -701,6 +701,42 @@ fn pending_podman_creation_refuses_upgrade_and_preserves_record() {
 }
 
 #[test]
+fn v53_retirement_rejects_orphaned_managed_inbox_origin_atomically() {
+    let root = std::env::temp_dir().join(format!("nac-v54-orphan-inbox-{}", uuid::Uuid::new_v4()));
+    let path = root.join("store.db");
+    std::fs::create_dir_all(&root).unwrap();
+    let conn = Connection::open(&path).unwrap();
+    conn.execute_batch(include_str!("fixtures/v53.sql"))
+        .unwrap();
+    conn.execute("INSERT INTO sessions(session_id,behavior,cwd,store_path,model,base_url,messages_json,created_at,updated_at) VALUES ('direct','direct','/tmp/project','/tmp/store.db','test-model','https://example.invalid','[]','now','now')", []).unwrap();
+    conn.execute("INSERT INTO session_inbox(session_id,delivery,status,content,created_at,updated_at,version,completion_source,completion_session_id,completion_generation) VALUES('direct','queue','pending','preserve','now','now',0,'managed_orchestrator','missing',1)", []).unwrap();
+    drop(conn);
+    let error = initialize(&path).unwrap_err().to_string();
+    assert!(
+        error.contains("retired managed completion remains in a surviving inbox"),
+        "{error}"
+    );
+    let conn = Connection::open(&path).unwrap();
+    assert_eq!(
+        conn.pragma_query_value::<i64, _>(None, "user_version", |r| r.get(0))
+            .unwrap(),
+        53
+    );
+    assert_eq!(
+        conn.query_row::<String, _, _>(
+            "SELECT content FROM session_inbox WHERE session_id='direct'",
+            [],
+            |r| r.get(0)
+        )
+        .unwrap(),
+        "preserve"
+    );
+    assert!(column_exists(&conn, "sessions", "light_model_json").unwrap());
+    drop(conn);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn v53_retirement_preserves_live_direct_data_and_edited_connections() {
     let root = std::env::temp_dir().join(format!("nac-v54-retirement-{}", uuid::Uuid::new_v4()));
     let path = root.join("store.db");
@@ -802,6 +838,8 @@ fn v53_retirement_preserves_live_direct_data_and_edited_connections() {
         .unwrap(),
         "keep me"
     );
+    assert!(conn.execute("INSERT INTO session_inbox(session_id,delivery,status,content,created_at,updated_at,version,completion_source,completion_session_id,completion_generation) VALUES('direct','queue','pending','invalid','now','now',0,'managed_orchestrator','missing',1)", []).is_err());
+    assert!(conn.execute("UPDATE session_inbox SET completion_source='managed_orchestrator', completion_session_id='missing', completion_generation=1 WHERE session_id='direct'", []).is_err());
     assert_eq!(
         conn.query_row::<i64, _, _>(
             "SELECT id FROM thread_events WHERE session_id='direct'",
