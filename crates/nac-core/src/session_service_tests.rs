@@ -214,7 +214,7 @@ pub(super) fn test_agent(
         client,
         store_path,
         session_id,
-        AgentMode::Orchestrator,
+        AgentMode::Direct,
         None,
         None,
     )
@@ -230,7 +230,7 @@ pub(super) fn test_agent_with_compaction_threshold(
         client,
         store_path,
         session_id,
-        AgentMode::Orchestrator,
+        AgentMode::Direct,
         orchestrator_compaction_threshold,
         None,
     )
@@ -246,7 +246,7 @@ pub(super) fn test_agent_with_skills(
         client,
         store_path,
         session_id,
-        AgentMode::Orchestrator,
+        AgentMode::Direct,
         None,
         skills,
     )
