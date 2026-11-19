@@ -424,7 +424,7 @@ mod tests;
 
 /// Create a `ToolRuntime` suitable for unit tests.  Uses the current
 /// directory as the workspace, an empty store path, a dummy session id,
-/// and no MCP / skills / worker executable.
+/// and no MCP or skills.
 #[cfg(any(test, feature = "test-support"))]
 pub(crate) fn test_runtime() -> ToolRuntime {
     let workspace_cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
@@ -445,7 +445,7 @@ pub(crate) fn test_runtime() -> ToolRuntime {
         mcp: None,
         mcp_tools: Arc::new(HashMap::new()),
         skills: None,
-        terminal_manager: TerminalManager::new(),
+        terminal_manager: TerminalManager::for_direct(),
         allowed_tools: None,
         permission_broker: None,
         permission_reviewer: None,
