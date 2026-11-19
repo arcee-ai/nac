@@ -105,7 +105,7 @@ impl Agent {
         self.fallback_tool_defs.clone_from(&self.base_tool_defs);
         self.mcp_observation = registry
             .as_ref()
-            .map(|mcp| mcp.register_event_sink(self.event_sink.clone(), None));
+            .map(|mcp| mcp.register_event_sink(self.event_sink.clone()));
         self.mcp_mounts
             .install(request.revision, registry, state, message.clone());
         if let Some(message) = message {

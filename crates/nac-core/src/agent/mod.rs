@@ -121,7 +121,7 @@ pub struct AgentConfig {
     pub permission_rules: Vec<crate::permissions::PermissionRule>,
 }
 
-type McpObservation = Arc<dyn Fn(EventSink, Option<String>) + Send + Sync>;
+type McpObservation = Arc<dyn Fn(EventSink) + Send + Sync>;
 
 pub struct Agent {
     client: ModelClient,
@@ -276,7 +276,7 @@ impl Agent {
         let mcp_observation = config
             .mcp
             .as_ref()
-            .map(|mcp| mcp.register_event_sink(config.event_sink.clone(), None));
+            .map(|mcp| mcp.register_event_sink(config.event_sink.clone()));
         let mcp_mounts = Arc::new(crate::mcp::SessionMcpMounts::new(config.mcp.clone()));
         let workspace_lease_identity =
             crate::workspace::workspace_lease_identity(config.ssh.as_ref(), &config.workspace_cwd);
@@ -1080,7 +1080,7 @@ impl Agent {
     pub fn set_event_sink(&mut self, sink: EventSink) {
         self.event_sink = sink.clone();
         if let Some(observation) = self.mcp_observation.as_ref() {
-            observation(sink.clone(), None);
+            observation(sink.clone());
         }
         self.tool_runtime.set_event_sink(sink);
     }

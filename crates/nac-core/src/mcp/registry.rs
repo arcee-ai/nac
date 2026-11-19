@@ -730,10 +730,9 @@ impl McpRegistry {
     pub(crate) fn register_event_sink(
         &self,
         sink: crate::events::EventSink,
-        thread_name: Option<String>,
-    ) -> Arc<dyn Fn(crate::events::EventSink, Option<String>) + Send + Sync> {
-        let target = self.sync.register_target(sink, thread_name);
-        Arc::new(move |sink, thread_name| target.update(sink, thread_name))
+    ) -> Arc<dyn Fn(crate::events::EventSink) + Send + Sync> {
+        let target = self.sync.register_target(sink);
+        Arc::new(move |sink| target.update(sink))
     }
 
     pub(crate) fn tool_definition(&self, name: &str) -> Option<ToolDefinition> {
