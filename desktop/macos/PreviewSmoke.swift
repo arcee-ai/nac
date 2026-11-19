@@ -345,8 +345,8 @@ final class PreviewSmoke {
         return false;
         """)
         _ = try await js("const f=document.querySelector('input[aria-label=\"Search models\"]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(f,'gpt-5.6-sol'); f.dispatchEvent(new Event('input',{bubbles:true})); return true;")
-        try await waitJS("fixture OpenAI model", "return [...document.querySelectorAll('[aria-label=\"Model results\"] button[data-row]')].some(b => b.parentElement?.textContent.includes('OpenAI') && b.textContent.toLowerCase().includes('gpt-5.6'));")
-        _ = try await js("[...document.querySelectorAll('[aria-label=\"Model results\"] button[data-row]')].find(b => b.parentElement?.textContent.includes('OpenAI') && b.textContent.toLowerCase().includes('gpt-5.6')).click(); return true;")
+        try await waitJS("fixture OpenAI model", "return [...document.querySelectorAll('[aria-label=\"Model results\"] button[data-row]')].some(b => b.parentElement?.textContent.includes('OpenAI Responses') && b.textContent.toLowerCase().includes('gpt-5.6'));")
+        _ = try await js("[...document.querySelectorAll('[aria-label=\"Model results\"] button[data-row]')].find(b => b.parentElement?.textContent.includes('OpenAI Responses') && b.textContent.toLowerCase().includes('gpt-5.6')).click(); return true;")
         try await waitJS("available session model", "return [...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Use this model' && !b.disabled);")
         _ = try await js("[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Use this model' && !b.disabled).click(); return true;")
         _ = try await js("""

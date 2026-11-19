@@ -35,7 +35,7 @@ final class NativeCommandSmoke {
         try await wait("fixture OpenAI model") {
             try await self.js("""
             const b=[...document.querySelectorAll('[aria-label="Model results"] button[data-row]')]
-                .find(b=>b.parentElement?.textContent.includes('OpenAI') && b.textContent.toLowerCase().includes('gpt-5.6'));
+                .find(b=>b.parentElement?.textContent.includes('OpenAI Responses') && b.textContent.toLowerCase().includes('gpt-5.6'));
             if (!b) return false; b.click(); return true;
             """) as? Bool == true
         }

@@ -194,7 +194,7 @@ final class StartupSmoke {
         _ = try await js("document.querySelector('[role=dialog] button[aria-expanded]').click(); return true;")
         try await waitJS("model search", "return !!document.querySelector('input[aria-label=\"Search models\"]');")
         try await fill("input[aria-label='Search models']", "gpt-5.6-sol")
-        let selected = "[...document.querySelectorAll('[aria-label=\"Model results\"] button[data-row]')].find(b => b.parentElement?.textContent.includes('OpenAI') && b.textContent.toLowerCase().includes('gpt-5.6'))"
+        let selected = "[...document.querySelectorAll('[aria-label=\"Model results\"] button[data-row]')].find(b => b.parentElement?.textContent.includes('OpenAI Responses') && b.textContent.toLowerCase().includes('gpt-5.6'))"
         try await waitJS("fixture OpenAI model", "return !!(\(selected));")
         _ = try await js("\(selected).click(); return true;")
     }

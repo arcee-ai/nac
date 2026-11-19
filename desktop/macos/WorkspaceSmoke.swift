@@ -175,8 +175,8 @@ final class WorkspaceSmoke {
         return false;
         """)
         try await fill("input[aria-label='Search models']", "gpt-5.6-sol")
-        try await waitJS("fixture OpenAI model", "return [...document.querySelectorAll('[aria-label=\"Model results\"] button[data-row]')].some(b => b.parentElement?.textContent.includes('OpenAI') && b.textContent.toLowerCase().includes('gpt-5.6')); ")
-        _ = try await js("[...document.querySelectorAll('[aria-label=\"Model results\"] button[data-row]')].find(b => b.parentElement?.textContent.includes('OpenAI') && b.textContent.toLowerCase().includes('gpt-5.6')).click(); return true;")
+        try await waitJS("fixture OpenAI model", "return [...document.querySelectorAll('[aria-label=\"Model results\"] button[data-row]')].some(b => b.parentElement?.textContent.includes('OpenAI Responses') && b.textContent.toLowerCase().includes('gpt-5.6')); ")
+        _ = try await js("[...document.querySelectorAll('[aria-label=\"Model results\"] button[data-row]')].find(b => b.parentElement?.textContent.includes('OpenAI Responses') && b.textContent.toLowerCase().includes('gpt-5.6')).click(); return true;")
         try await waitJS("available session model", "return [...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Use this model' && !b.disabled);")
         try await button("Use this model")
         try await fill("#home-composer", prompt)

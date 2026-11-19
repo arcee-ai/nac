@@ -90,7 +90,7 @@ final class ExternalAuthSmoke {
             """) as? Bool == true
         }
         try await wait("fixture OpenAI model") {
-            try await self.js("const b=[...document.querySelectorAll('[aria-label=\"Model results\"] button[data-row]')].find(b=>b.parentElement?.textContent.includes('OpenAI')&&b.textContent.toLowerCase().includes('gpt-5.6'));if(!b)return false;b.click();return true") as? Bool == true
+            try await self.js("const b=[...document.querySelectorAll('[aria-label=\"Model results\"] button[data-row]')].find(b=>b.parentElement?.textContent.includes('OpenAI Responses')&&b.textContent.toLowerCase().includes('gpt-5.6'));if(!b)return false;b.click();return true") as? Bool == true
         }
         try await wait("available session model") {
             try await self.js("const b=[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Use this model'&&!b.disabled);if(!b)return false;b.click();return true") as? Bool == true
