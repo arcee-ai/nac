@@ -511,7 +511,7 @@ pub fn load_session(path: &Path, session_id: &str) -> Result<SessionSnapshot> {
                     s.created_at, s.updated_at, s.host_id, s.api_key_env,
                     s.extra_headers_json, s.token_usages_json, s.config_version,
                     s.orchestrator_compaction_threshold, s.ssh_port,
-                    s.ssh_identity_file, s.light_model_json, sp.project_id, s.behavior, s.automatic_compaction
+                    s.ssh_identity_file, sp.project_id, s.behavior, s.automatic_compaction
              FROM sessions s
              LEFT JOIN session_projects sp ON sp.session_id = s.session_id
              WHERE s.session_id = ?1",
@@ -959,7 +959,7 @@ pub fn load_last_session(path: &Path) -> Result<SessionSnapshot> {
                     s.created_at, s.updated_at, s.host_id, s.api_key_env,
                     s.extra_headers_json, s.token_usages_json, s.config_version,
                     s.orchestrator_compaction_threshold, s.ssh_port,
-                    s.ssh_identity_file, s.light_model_json, sp.project_id, s.behavior, s.automatic_compaction
+                    s.ssh_identity_file, sp.project_id, s.behavior, s.automatic_compaction
              FROM sessions s
              LEFT JOIN session_projects sp ON sp.session_id = s.session_id
              ORDER BY s.updated_at DESC, s.created_at DESC
@@ -1043,9 +1043,9 @@ fn map_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow> {
         orchestrator_compaction_threshold: row.get(19)?,
         ssh_port: row.get(20)?,
         ssh_identity_file: row.get(21)?,
-        project_id: row.get(23)?,
-        behavior: row.get(24)?,
-        automatic_compaction: row.get(25)?,
+        project_id: row.get(22)?,
+        behavior: row.get(23)?,
+        automatic_compaction: row.get(24)?,
     })
 }
 
@@ -1556,8 +1556,6 @@ pub(crate) fn insert_or_replace_session(
         &snapshot.token_usages,
         snapshot.unattributed_token_usage.as_ref(),
     )?;
-    let light_model_json: Option<String> = None;
-
     // The legacy `store_path` column is kept physically (NOT NULL in existing
     // stores) but is informational only: it records the store that was
     // actually opened for this write and is never read back.
@@ -1569,10 +1567,10 @@ pub(crate) fn insert_or_replace_session(
              response_durations_ms_json, created_at, updated_at, host_id, api_key_env,
              extra_headers_json, token_usages_json, config_version,
              orchestrator_compaction_threshold, ssh_port, ssh_identity_file,
-             light_model_json, behavior, automatic_compaction
+             behavior, automatic_compaction
          ) VALUES (
              ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
-             ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28
+             ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27
          )
          ON CONFLICT(session_id) DO UPDATE SET
              cwd = excluded.cwd,
@@ -1617,7 +1615,6 @@ pub(crate) fn insert_or_replace_session(
             snapshot.orchestrator_compaction_threshold,
             stored_ssh_port(snapshot.ssh.as_ref()),
             stored_ssh_identity_file(snapshot.ssh.as_ref()),
-            light_model_json,
             snapshot.behavior.as_str(),
             snapshot.automatic_compaction,
         ],
