@@ -19858,12 +19858,6 @@
               }
             ]
           },
-          "active_threads": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
           "forks": {
             "type": "array",
             "items": {

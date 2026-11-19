@@ -566,7 +566,6 @@ export declare function createNacApi(nacClient: NacClient, options?: {
     getSession: (id: string, options?: SessionSnapshotOptions) => Promise<{
         active_compaction?: import("./openapi.generated.js").components["schemas"]["ActiveCompactionSnapshot"] | null;
         active_run?: import("./openapi.generated.js").components["schemas"]["ActiveRunSnapshot"] | null;
-        active_threads?: string[];
         forks?: import("./openapi.generated.js").components["schemas"]["SessionForkLink"][];
         message_created_at?: (string | null)[];
         messages: import("./openapi.generated.js").components["schemas"]["Message"][];
@@ -594,7 +593,6 @@ export declare function createNacApi(nacClient: NacClient, options?: {
     createSession: (payload: CreateSessionRequest) => Promise<{
         active_compaction?: import("./openapi.generated.js").components["schemas"]["ActiveCompactionSnapshot"] | null;
         active_run?: import("./openapi.generated.js").components["schemas"]["ActiveRunSnapshot"] | null;
-        active_threads?: string[];
         forks?: import("./openapi.generated.js").components["schemas"]["SessionForkLink"][];
         message_created_at?: (string | null)[];
         messages: import("./openapi.generated.js").components["schemas"]["Message"][];

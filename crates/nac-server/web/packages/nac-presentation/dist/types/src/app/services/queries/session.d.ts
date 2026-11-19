@@ -359,7 +359,6 @@ export declare function useSessionSummary(id: string | null): import("@tanstack/
 export declare function useSessionSnapshot(id: string | null, options?: Partial<UseQueryOptions<SessionSnapshotResponse>>): import("@tanstack/react-query").UseQueryResult<NoInfer<{
     active_compaction?: import("../../types/openapi.generated").components["schemas"]["ActiveCompactionSnapshot"] | null;
     active_run?: import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"] | null;
-    active_threads?: string[];
     forks?: import("../../types/openapi.generated").components["schemas"]["SessionForkLink"][];
     message_created_at?: (string | null)[];
     messages: import("../../types/openapi.generated").components["schemas"]["Message"][];
@@ -402,7 +401,6 @@ export declare function useSessionConfig(id: string | null): import("@tanstack/r
 export declare function useCreateSession(): import("@tanstack/react-query").UseMutationResult<{
     active_compaction?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["ActiveCompactionSnapshot"] | null;
     active_run?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["ActiveRunSnapshot"] | null;
-    active_threads?: string[];
     forks?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionForkLink"][];
     message_created_at?: (string | null)[];
     messages: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["Message"][];

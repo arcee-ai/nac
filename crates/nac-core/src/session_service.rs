@@ -264,8 +264,6 @@ pub struct SessionFrontendSnapshot {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub shell_commands: Vec<ShellCommandSnapshot>,
     pub sessions: Vec<SessionSummarySnapshot>,
-    #[serde(default)]
-    pub active_threads: Vec<String>,
     pub threads: Vec<ThreadSnapshot>,
     pub thread_episodes: HashMap<String, Vec<EpisodeSnapshot>>,
     #[serde(default)]

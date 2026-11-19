@@ -184,7 +184,6 @@ impl SessionService {
         let blocking_task = crate::store::spawn_blocking_store_caller(move || {
             blocking_service.load_frontend_snapshot_blocking(options)
         });
-        let active_threads = self.active_thread_names();
         let blocking = blocking_task
             .await
             .map_err(|error| anyhow::anyhow!("frontend snapshot load task failed: {error}"))??;
@@ -247,7 +246,6 @@ impl SessionService {
             active_compaction: self.active_compaction(),
             shell_commands,
             sessions: blocking.sessions,
-            active_threads,
             threads: blocking.threads,
             thread_episodes: blocking.thread_episodes,
             thread_events: blocking.thread_events.events,

@@ -625,12 +625,11 @@ export function buildTranscript(
   const persistedDispatchCounts = new Map(
     (snapshot?.threads ?? []).map((thread) => [thread.name, thread.episode_count]),
   );
-  const activeNames = new Set(snapshot?.active_threads ?? []);
   const dispatchCounts: Record<string, number> = {};
   const dispatchesSeen: Record<string, number> = {};
   for (const [name, visibleCount] of Object.entries(windowDispatchCounts)) {
     const persistedCount = persistedDispatchCounts.get(name) ?? 0;
-    const totalCount = Math.max(visibleCount, persistedCount + (activeNames.has(name) ? 1 : 0));
+    const totalCount = Math.max(visibleCount, persistedCount);
     dispatchCounts[name] = totalCount;
     dispatchesSeen[name] = Math.max(0, totalCount - visibleCount);
   }

@@ -1294,7 +1294,6 @@ export interface components {
         SessionFrontendSnapshot: {
             active_compaction?: components["schemas"]["ActiveCompactionSnapshot"] | null;
             active_run?: components["schemas"]["ActiveRunSnapshot"] | null;
-            active_threads?: string[];
             forks?: components["schemas"]["SessionForkLink"][];
             message_created_at?: (string | null)[];
             messages: components["schemas"]["Message"][];

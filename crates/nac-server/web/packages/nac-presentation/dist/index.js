@@ -17989,27 +17989,27 @@ function nb(e, t, n = {}, r = [], i = /* @__PURE__ */ new Set()) {
 	a.forEach((e, t) => {
 		e.role === "user" && (d = t);
 	});
-	let f = Gy(a), p = new Map((e?.threads ?? []).map((e) => [e.name, e.episode_count])), m = new Set(e?.active_threads ?? []), h = {}, g = {};
+	let f = Gy(a), p = new Map((e?.threads ?? []).map((e) => [e.name, e.episode_count])), m = {}, h = {};
 	for (let [e, t] of Object.entries(f)) {
-		let n = p.get(e) ?? 0, r = Math.max(t, n + +!!m.has(e));
-		h[e] = r, g[e] = Math.max(0, r - t);
+		let n = p.get(e) ?? 0, r = Math.max(t, n);
+		m[e] = r, h[e] = Math.max(0, r - t);
 	}
-	let _ = {
+	let g = {
 		liveThreads: t,
 		liveFinishedToolCalls: n,
 		worksets: e?.worksets?.items ?? [],
 		threadEpisodes: Wy(e?.thread_events ?? {}),
-		dispatchCounts: h,
+		dispatchCounts: m,
 		cancelledNames: Zy(a)
-	}, v = [], y = /* @__PURE__ */ new Set(), b = null, x = /* @__PURE__ */ new Map();
+	}, _ = [], v = /* @__PURE__ */ new Set(), y = null, b = /* @__PURE__ */ new Map();
 	a.forEach((t, n) => {
 		let r = c + n;
 		if (t.role === "system" || t.role === "tool") return;
 		if (t.role === "user") {
-			b = null;
+			y = null;
 			let e = ir(t.content);
 			if (e) {
-				v.push({
+				_.push({
 					kind: "delegated-completion",
 					key: `delegated-completion-${r}`,
 					completion: e,
@@ -18020,18 +18020,18 @@ function nb(e, t, n = {}, r = [], i = /* @__PURE__ */ new Set()) {
 			}
 			let i = nr(t.content);
 			if (i) {
-				v.push({
+				_.push({
 					kind: "goal-continuation",
 					key: `goal-continuation-${r}`,
 					goalId: i.goalId,
 					objective: i.objective,
-					first: c === 0 && !y.has(i.goalId),
+					first: c === 0 && !v.has(i.goalId),
 					messageIndex: r,
 					createdAt: s[n] ?? null
-				}), y.add(i.goalId);
+				}), v.add(i.goalId);
 				return;
 			}
-			v.push({
+			_.push({
 				kind: "user",
 				key: `user-${r}`,
 				text: fr(t.content),
@@ -18041,15 +18041,15 @@ function nb(e, t, n = {}, r = [], i = /* @__PURE__ */ new Set()) {
 			});
 			return;
 		}
-		b || (b = {
+		y || (y = {
 			kind: "model",
 			key: `model-${r}`,
 			blocks: [],
 			durationMs: null,
 			messageIndex: r
-		}, v.push(b)), b.key = `model-${r}`, b.messageIndex = r;
-		let o = b.blocks;
-		t.tool_calls?.length || x.set(b, (x.get(b) ?? 0) + 1);
+		}, _.push(y)), y.key = `model-${r}`, y.messageIndex = r;
+		let o = y.blocks;
+		t.tool_calls?.length || b.set(y, (b.get(y) ?? 0) + 1);
 		let f = ly(t.reasoning_text ?? "").trim();
 		f && o.push({
 			kind: "thoughts",
@@ -18064,29 +18064,29 @@ function nb(e, t, n = {}, r = [], i = /* @__PURE__ */ new Set()) {
 			key: `text-${eb(o, "text")}`,
 			text: p
 		});
-		let m = dy(a, n), h = [], S = fy(a, n);
+		let m = dy(a, n), x = [], S = fy(a, n);
 		if ((t.tool_calls ?? []).forEach((c, f) => {
-			let p = c.function?.name ?? "tool", g = `${p}-${r}-${f}`;
-			if (p === "thread") h.push(c);
+			let p = c.function?.name ?? "tool", h = `${p}-${r}-${f}`;
+			if (p === "thread") x.push(c);
 			else if (p === "workset_define") {
 				let e = Vy(By(c).id);
 				o.push({
 					kind: "workset",
-					key: g,
+					key: h,
 					worksetId: e,
-					pending: Hy(c.id, e, m, s[n] ?? null, _)
+					pending: Hy(c.id, e, m, s[n] ?? null, g)
 				});
 			} else if (!Ry.has(p)) {
-				let s = (t.tool_calls ?? []).filter((e) => e.id === c.id).length > 1, h = s ? void 0 : m.get(c.id);
+				let s = (t.tool_calls ?? []).filter((e) => e.id === c.id).length > 1, g = s ? void 0 : m.get(c.id);
 				l ? o.push({
 					kind: "tool-detail",
 					key: `tool-${r}-${c.id}${s ? `-${f}` : ""}`,
 					presentation: Ny({
 						call: c,
 						events: u.get(c.id),
-						hasResult: h != null,
-						resultText: h?.text ?? null,
-						resultHasImage: h?.hasImage ?? !1,
+						hasResult: g != null,
+						resultText: g?.text ?? null,
+						resultHasImage: g?.hasImage ?? !1,
 						active: !!e?.active_run && n > d,
 						awaitingApproval: i.has(c.id),
 						turnCancelled: py(a, n, Py),
@@ -18096,25 +18096,25 @@ function nb(e, t, n = {}, r = [], i = /* @__PURE__ */ new Set()) {
 					})
 				}) : o.push({
 					kind: "tool",
-					key: g,
+					key: h,
 					name: p,
-					pending: h == null
+					pending: g == null
 				});
 			}
-		}), h.length) {
-			let e = new Set(h.map(Ky)), t = /* @__PURE__ */ new Set();
-			for (let e of h) {
+		}), x.length) {
+			let e = new Set(x.map(Ky)), t = /* @__PURE__ */ new Set();
+			for (let e of x) {
 				let n = Ky(e);
-				if (m.has(e.id) || _.liveThreads[n]?.status === "finished") {
+				if (m.has(e.id) || g.liveThreads[n]?.status === "finished") {
 					t.add(n);
 					continue;
 				}
-				let r = _.threadEpisodes[n] ?? [], i = r[r.length - 1];
-				_.liveThreads[n]?.status !== "running" && i?.some((e) => e.type === "thread_finished") && t.add(n);
+				let r = g.threadEpisodes[n] ?? [], i = r[r.length - 1];
+				g.liveThreads[n]?.status !== "running" && i?.some((e) => e.type === "thread_finished") && t.add(n);
 			}
-			let n = Yy(h).map((n) => n.map((n) => {
-				let i = Ky(n), a = g[i] ?? 0;
-				return g[i] = a + 1, Qy(n, a, `${i}@${r}:${n.id}`, _, m, e, t);
+			let n = Yy(x).map((n) => n.map((n) => {
+				let i = Ky(n), a = h[i] ?? 0;
+				return h[i] = a + 1, Qy(n, a, `${i}@${r}:${n.id}`, g, m, e, t);
 			}));
 			o.push({
 				kind: "wave",
@@ -18123,18 +18123,18 @@ function nb(e, t, n = {}, r = [], i = /* @__PURE__ */ new Set()) {
 			});
 		}
 	});
-	let S = o.length - 1, C = !!e?.active_run && v[v.length - 1]?.kind === "model";
-	for (let e = v.length - 1; e >= 0; --e) {
-		let t = v[e];
+	let x = o.length - 1, S = !!e?.active_run && _[_.length - 1]?.kind === "model";
+	for (let e = _.length - 1; e >= 0; --e) {
+		let t = _[e];
 		if (t.kind !== "model") continue;
-		if (C) {
-			C = !1;
+		if (S) {
+			S = !1;
 			continue;
 		}
-		let n = x.get(t) ?? 0;
-		n && (t.durationMs = o[S] ?? null, S -= n);
+		let n = b.get(t) ?? 0;
+		n && (t.durationMs = o[x] ?? null, x -= n);
 	}
-	return v;
+	return _;
 }
 // src/app/features/insights/model/segments.ts
 var rb = "insights-leading", ib = /* @__PURE__ */ new Set([

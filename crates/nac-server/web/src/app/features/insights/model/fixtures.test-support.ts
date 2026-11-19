@@ -31,7 +31,6 @@ export function snapshot(messages: Message[], behavior?: SessionBehavior): Sessi
       response_durations_ms: [],
     },
     sessions: [],
-    active_threads: [],
     threads: [],
     thread_episodes: {},
     thread_events: {},
