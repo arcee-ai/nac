@@ -473,11 +473,7 @@ impl SessionService {
     /// (log-first: those messages are in neither store).
     pub(super) async fn normalize_failed_run_transcript(&self) {
         let mut agent = self.agent.lock().await;
-        let result = if self.metadata.behavior == sessions::SessionBehavior::Orchestrator {
-            agent.normalize_dangling_tail().await
-        } else {
-            agent.normalize_failed_tail_preserving_partial().await
-        };
+        let result = agent.normalize_failed_tail_preserving_partial().await;
         if let Err(error) = result {
             eprintln!("nac: failed to normalize transcript after run failure: {error:#}");
         }
