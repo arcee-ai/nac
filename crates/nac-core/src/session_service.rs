@@ -28,8 +28,8 @@ use crate::skills::SkillRegistry;
 use crate::store::RunInboxPrompt;
 use crate::types::Message;
 use crate::view::{
-    self, EpisodeSnapshot, SessionSummarySnapshot, ThreadSnapshot, WorksetSnapshot,
-    WorksetSummarySnapshot, WorksetsSnapshot, WorkspaceSnapshot,
+    self, EpisodeSnapshot, SessionSummarySnapshot, ThreadSnapshot, WorksetsSnapshot,
+    WorkspaceSnapshot,
 };
 use crate::workspace::GitTarget;
 

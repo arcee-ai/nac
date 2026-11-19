@@ -5,28 +5,6 @@ impl SessionService {
         view::list_sessions(&self.metadata.store_path)
     }
 
-    pub fn list_threads(&self) -> Result<Vec<ThreadSnapshot>> {
-        view::list_threads(
-            &self.metadata.store_path,
-            self.metadata.session_id.as_deref(),
-        )
-    }
-
-    pub fn thread_episodes(&self, thread_name: &str) -> Result<Vec<EpisodeSnapshot>> {
-        view::load_thread_episodes(
-            &self.metadata.store_path,
-            self.metadata.session_id.as_deref(),
-            thread_name,
-        )
-    }
-
-    pub fn all_thread_episodes(&self) -> Result<HashMap<String, Vec<EpisodeSnapshot>>> {
-        view::load_all_thread_episodes(
-            &self.metadata.store_path,
-            self.metadata.session_id.as_deref(),
-        )
-    }
-
     fn load_all_thread_events_with_connection(
         &self,
         conn: &rusqlite::Connection,
@@ -238,28 +216,6 @@ impl SessionService {
             thread_event_boundary,
             diagnostics,
         })
-    }
-
-    pub fn list_worksets(&self) -> Result<Vec<WorksetSummarySnapshot>> {
-        view::list_worksets(
-            &self.metadata.store_path,
-            self.metadata.session_id.as_deref(),
-        )
-    }
-
-    pub fn read_workset(&self, workset_id: &str) -> Result<Option<WorksetSnapshot>> {
-        view::read_workset(
-            &self.metadata.store_path,
-            self.metadata.session_id.as_deref(),
-            workset_id,
-        )
-    }
-
-    pub fn worksets_snapshot(&self) -> WorksetsSnapshot {
-        view::worksets_snapshot(
-            &self.metadata.store_path,
-            self.metadata.session_id.as_deref(),
-        )
     }
 
     pub fn workspace_snapshot(&self) -> WorkspaceSnapshot {
