@@ -266,7 +266,7 @@ fn destination(
     let steps = if target == ProductDestination::SessionSubagents
         && availability != ProductAvailability::Available
     {
-        "This session does not expose Subagents. Use its supported Insights, Files or Worksets panels."
+        "This session does not expose Subagents. Use its supported Insights or Files panels."
     } else {
         steps
     };

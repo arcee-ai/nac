@@ -106,7 +106,6 @@ pub struct DirectTaskSnapshot {
 #[serde(rename_all = "snake_case")]
 pub enum NonTaskSession {
     TraditionalChild,
-    Orchestrator,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -368,13 +367,13 @@ pub fn load_direct_task(path: &Path, session_id: &str) -> Result<TaskLookup> {
             |row| row.get(0),
         )
         .optional()?;
-    match (relationship.as_deref(), behavior.as_str()) {
-        (Some("child"), _) => {
-            return Ok(TaskLookup::NotIndependentTask(NonTaskSession::TraditionalChild))
-        }
-        (Some(_), _) => return Err(anyhow!("unsupported session relationship")),
-        (None, "direct") => {}
-        (None, _) => return Ok(TaskLookup::NotIndependentTask(NonTaskSession::Orchestrator)),
+    if behavior != "direct" {
+        return Err(anyhow!("unsupported stored session behavior '{behavior}'"));
+    }
+    match relationship.as_deref() {
+        Some("child") => return Ok(TaskLookup::NotIndependentTask(NonTaskSession::TraditionalChild)),
+        Some(_) => return Err(anyhow!("unsupported session relationship")),
+        None => {}
     }
     let pending_inbox_items: i64 = tx.query_row(
         "SELECT COUNT(*) FROM session_inbox WHERE session_id = ?1 AND status = 'pending'",

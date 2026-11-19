@@ -151,6 +151,54 @@ fn search_is_project_scoped_excludes_children_and_reports_missing_projects() {
 }
 
 #[test]
+fn retired_behavior_in_corrupt_current_store_is_rejected_before_mutation() {
+    let path = test_path("retired-behavior");
+    initialize(&path).unwrap();
+    project(&path, "p1", "/tmp/project");
+    task(
+        &path,
+        "p1",
+        "parent",
+        "parent",
+        "prompt",
+        "2026-01-01T00:00:01Z",
+    );
+    task(
+        &path,
+        "p1",
+        "child",
+        "child",
+        "prompt",
+        "2026-01-01T00:00:02Z",
+    );
+    let conn = open_runtime_connection(&path).unwrap();
+    conn.execute_batch("DROP TRIGGER session_direct_only_update; UPDATE sessions SET behavior='direct-with-orchestrator' WHERE session_id='parent';").unwrap();
+    drop(conn);
+    assert!(load_direct_task(&path, "parent").is_err());
+    assert!(create_session_goal(&path, "parent", "goal", None, None).is_err());
+    assert!(create_traditional_child_relationship(
+        &path,
+        "parent",
+        "child",
+        GENERAL_CHILD_PROFILE,
+        "child"
+    )
+    .is_err());
+    let conn = open_runtime_connection(&path).unwrap();
+    let goals: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM session_goals WHERE session_id='parent'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(goals, 0);
+    assert!(load_traditional_child(&path, "child").unwrap().is_none());
+    drop(conn);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
 fn pages_are_bounded_and_cursor_resumes_without_duplicates() {
     let path = test_path("pages");
     initialize(&path).unwrap();

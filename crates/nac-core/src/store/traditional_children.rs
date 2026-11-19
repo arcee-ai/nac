@@ -291,7 +291,7 @@ fn create_traditional_child_relationship_with_connection(
         )
         .optional()?
         .ok_or_else(|| anyhow!("parent session '{parent_session_id}' was not found"))?;
-    if parent_behavior == "orchestrator" {
+    if parent_behavior != "direct" {
         return Err(anyhow!(
             "traditional children are available only to direct parent sessions"
         ));

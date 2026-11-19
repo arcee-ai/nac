@@ -280,10 +280,6 @@ fn remains_available_during_maintenance(method: &axum::http::Method, path: &str)
         || ((method == axum::http::Method::POST)
             && (matches!(parts.as_slice(), ["sessions", _, "cancel-active-run"])
                 || matches!(parts.as_slice(), ["sessions", _, "children", _, "cancel"])
-                || matches!(
-                    parts.as_slice(),
-                    ["sessions", _, "orchestrators", _, "cancel"]
-                )
                 || matches!(parts.as_slice(), ["sessions", _, "runs", _, "cancel"])
                 || matches!(parts.as_slice(), ["sessions", _, "permissions", _])))
         || ((method == axum::http::Method::DELETE)
@@ -302,7 +298,6 @@ fn maintenance_allowlist_keeps_only_completion_and_recovery_mutations_available(
         (Method::GET, "/mcp_library/servers/slack/oauth/callback"),
         (Method::POST, "/sessions/s/cancel-active-run"),
         (Method::POST, "/sessions/s/children/c/cancel"),
-        (Method::POST, "/sessions/s/orchestrators/o/cancel"),
         (Method::POST, "/sessions/s/runs/r/cancel"),
         (Method::DELETE, "/auth/arcee/login/l"),
         (Method::DELETE, "/managed/github/login/l"),
@@ -339,6 +334,7 @@ fn maintenance_allowlist_keeps_only_completion_and_recovery_mutations_available(
         (Method::DELETE, "/projects/project"),
         (Method::DELETE, "/credentials/key"),
         (Method::POST, "/unrelated/cancel"),
+        (Method::POST, "/sessions/s/orchestrators/o/cancel"),
         (Method::POST, "/sessions/s/user-terminals"),
         (Method::POST, "/sessions/s/user-terminals/t/input"),
         (Method::GET, "/sessions/s/user-terminals/t/input"),
