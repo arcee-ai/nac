@@ -1,6 +1,6 @@
-//! Step-2 tests for the DB-direct transcript workset: the in-loop dual-write
-//! (four commit points), the orchestrator-only construction gate, the
-//! blob ++ log restore merge, and crash/cancel log normalization.
+//! Transcript log commit points, direct inbox delivery, snapshot/log restore,
+//! and crash/cancellation normalization. Legacy engine gates remain covered
+//! until those engines are removed.
 use super::*;
 
 fn test_store_path(label: &str) -> PathBuf {
@@ -50,17 +50,16 @@ pub(super) fn transcript_test_agent(
     .expect("agent config must be valid")
 }
 
-fn orchestrator_agent(store_path: PathBuf, session_id: &str, server_url: Option<String>) -> Agent {
+fn direct_transcript_agent(
+    store_path: PathBuf,
+    session_id: &str,
+    server_url: Option<String>,
+) -> Agent {
     let client = match server_url {
         Some(url) => ModelClient::new_for_test_server(url),
         None => ModelClient::new_for_test(),
     };
-    let mut agent = transcript_test_agent(
-        client,
-        store_path,
-        Some(session_id),
-        AgentMode::Orchestrator,
-    );
+    let mut agent = transcript_test_agent(client, store_path, Some(session_id), AgentMode::Direct);
     agent.set_current_run_id(Some("run".to_string()));
     agent
 }
@@ -247,7 +246,7 @@ async fn send_logs_prompt_assistant_and_tool_batch_at_absolute_indices() {
         ScriptedResponse::json("200 OK", scripted_text_response("done")),
     ]);
     let mut agent =
-        orchestrator_agent(store_path.clone(), "session", Some(server.base_url.clone()));
+        direct_transcript_agent(store_path.clone(), "session", Some(server.base_url.clone()));
     store_snapshot_messages(&store_path, &agent.messages);
     // The agent starts with exactly one (system) message, so the prompt lands
     // at absolute idx 1.
@@ -296,12 +295,13 @@ async fn steering_delivery_is_logged_after_the_ack() {
     let store_path = test_store_path("steering_commit");
     crate::store::initialize(&store_path).unwrap();
     crate::store::insert_test_session(&store_path, "session");
-    let queued = crate::store::queue_thread_steering(
+    let queued = crate::store::create_session_inbox_item(
         &store_path,
         "session",
-        crate::store::ORCHESTRATOR_STEERING_TARGET,
-        "run",
+        crate::store::InboxDelivery::Steer,
         "steer now",
+        Some("run"),
+        None,
     )
     .unwrap();
     let server = ScriptedServer::start(vec![ScriptedResponse::json(
@@ -309,17 +309,15 @@ async fn steering_delivery_is_logged_after_the_ack() {
         scripted_text_response("steered answer"),
     )]);
     let mut agent =
-        orchestrator_agent(store_path.clone(), "session", Some(server.base_url.clone()));
+        direct_transcript_agent(store_path.clone(), "session", Some(server.base_url.clone()));
     store_snapshot_messages(&store_path, &agent.messages);
 
     assert_eq!(agent.send("current").await.unwrap(), "steered answer");
     server.finish();
 
     // The ack is durable and the staged message is in the transcript...
-    let records = crate::store::list_thread_steering(&store_path, "session").unwrap();
-    assert_eq!(records.len(), 1);
-    assert_eq!(records[0].status, "delivered");
-    assert_eq!(records[0].id, queued.id);
+    let record = crate::store::load_session_inbox_item(&store_path, "session", queued.id).unwrap();
+    assert_eq!(record.status, crate::store::InboxStatus::Delivered);
     assert!(agent
         .messages
         .iter()
@@ -372,7 +370,7 @@ async fn restore_merges_log_tail_over_the_snapshot_blob() {
             ],
         )
         .unwrap();
-    let mut agent = orchestrator_agent(store_path.clone(), "session", None);
+    let mut agent = direct_transcript_agent(store_path.clone(), "session", None);
 
     agent
         .restore_messages_merging_log_tail(blob, None)
@@ -419,13 +417,13 @@ async fn restore_with_no_log_tail_matches_the_plain_blob_path() {
         plain_assistant("answer"),
     ];
     store_snapshot_messages(&store_path, &blob);
-    let mut merging = orchestrator_agent(store_path.clone(), "session", None);
+    let mut merging = direct_transcript_agent(store_path.clone(), "session", None);
     merging
         .restore_messages_merging_log_tail(blob.clone(), None)
         .await
         .unwrap();
 
-    let mut plain = orchestrator_agent(store_path.clone(), "session", None);
+    let mut plain = direct_transcript_agent(store_path.clone(), "session", None);
     plain.restore_messages(blob);
 
     assert_eq!(
@@ -466,7 +464,7 @@ async fn restore_trims_a_dangling_tool_turn_from_the_transcript_and_log() {
             ],
         )
         .unwrap();
-    let mut agent = orchestrator_agent(store_path.clone(), "session", None);
+    let mut agent = direct_transcript_agent(store_path.clone(), "session", None);
 
     agent
         .restore_messages_merging_log_tail(blob, None)
@@ -509,7 +507,7 @@ async fn restore_recovers_a_non_contiguous_log_tail() {
         .unwrap();
     }
 
-    let mut agent = orchestrator_agent(store_path.clone(), "session", None);
+    let mut agent = direct_transcript_agent(store_path.clone(), "session", None);
     let repaired = agent
         .restore_messages_merging_log_tail(blob, None)
         .await
@@ -572,7 +570,7 @@ async fn gap_recovery_normalizes_a_dangling_turn_in_the_snapshot() {
     )
     .unwrap();
 
-    let mut agent = orchestrator_agent(store_path.clone(), "session", None);
+    let mut agent = direct_transcript_agent(store_path.clone(), "session", None);
     let repaired = agent
         .restore_messages_merging_log_tail(blob, None)
         .await
@@ -640,7 +638,7 @@ async fn restore_heals_a_partial_gap_recovery_that_left_the_blob_long() {
 
     let held_lease =
         crate::sessions::SessionOperationLease::try_acquire(&store_path, "session").unwrap();
-    let mut agent = orchestrator_agent(store_path.clone(), "session", None);
+    let mut agent = direct_transcript_agent(store_path.clone(), "session", None);
     let error = agent
         .restore_messages_merging_log_tail(blob.clone(), None)
         .await
@@ -719,7 +717,7 @@ async fn restore_reloads_the_snapshot_after_automatically_acquiring_the_lease() 
         )
         .unwrap();
 
-    let mut agent = orchestrator_agent(store_path.clone(), "session", None);
+    let mut agent = direct_transcript_agent(store_path.clone(), "session", None);
     let refreshed_blob = agent
         .restore_messages_merging_log_tail(stale_blob, None)
         .await
@@ -747,7 +745,7 @@ async fn cancellation_trims_the_dangling_turn_and_logs_the_marker() {
     crate::store::initialize(&store_path).unwrap();
     crate::store::insert_test_session(&store_path, "session");
 
-    let mut agent = orchestrator_agent(store_path.clone(), "session", None);
+    let mut agent = direct_transcript_agent(store_path.clone(), "session", None);
     // Seed a realistic mid-run state in both the vec and the log: a dangling
     // assistant tool call (call-2 has no result).
     let seeded = vec![
@@ -782,7 +780,7 @@ async fn cancellation_trims_the_dangling_turn_and_logs_the_marker() {
     );
 
     // No dangling turn: the marker simply appends.
-    let mut clean = orchestrator_agent(store_path.clone(), "session", None);
+    let mut clean = direct_transcript_agent(store_path.clone(), "session", None);
     clean.messages = vec![
         Message::System {
             content: "system".to_string(),
@@ -1133,7 +1131,7 @@ async fn cancellation_deletes_log_stragglers_from_an_aborted_append() {
     // append and the vec push). The cancellation marker would reuse that
     // idx, leaving duplicate-idx rows for the restore merge — unless the
     // cancel path deletes the straggler first.
-    let mut agent = orchestrator_agent(store_path.clone(), "session", None);
+    let mut agent = direct_transcript_agent(store_path.clone(), "session", None);
     agent.messages = vec![
         Message::System {
             content: "system".to_string(),
@@ -1250,7 +1248,7 @@ async fn normalize_dangling_tail_trims_a_straggler_row_the_vec_never_saw() {
     // normalization must trim it — not mistake it for a peer's committed
     // row and adopt the unmatched assistant tool-call turn, which the next
     // provider call would reject.
-    let mut agent = orchestrator_agent(store_path.clone(), "session", None);
+    let mut agent = direct_transcript_agent(store_path.clone(), "session", None);
     agent.messages = vec![
         Message::System {
             content: "system".to_string(),
@@ -1299,7 +1297,7 @@ async fn normalize_dangling_tail_trims_the_vec_and_log_without_a_marker() {
     // The post-failure state the run-failure path normalizes: the assistant
     // tool-call message is in the vec AND the log; its tool results are in
     // neither (the tool-batch log append failed atomically).
-    let mut agent = orchestrator_agent(store_path.clone(), "session", None);
+    let mut agent = direct_transcript_agent(store_path.clone(), "session", None);
     let seeded = vec![
         Message::System {
             content: "system".to_string(),
@@ -1326,7 +1324,7 @@ async fn normalize_dangling_tail_trims_the_vec_and_log_without_a_marker() {
 
     // A clean transcript is untouched: no trim, and the unconditional tail
     // delete is a no-op when the vec and the log agree.
-    let mut clean = orchestrator_agent(store_path.clone(), "session", None);
+    let mut clean = direct_transcript_agent(store_path.clone(), "session", None);
     clean.messages = vec![
         Message::System {
             content: "system".to_string(),
@@ -1363,7 +1361,7 @@ async fn normalize_dangling_tail_preserves_rows_committed_by_a_peer() {
     ];
     store_snapshot_messages(&store_path, &blob);
 
-    let mut agent = orchestrator_agent(store_path.clone(), "session", None);
+    let mut agent = direct_transcript_agent(store_path.clone(), "session", None);
     agent
         .restore_messages_merging_log_tail(blob, None)
         .await
@@ -1429,7 +1427,7 @@ async fn cancellation_marker_preserves_rows_committed_by_a_peer() {
     ];
     store_snapshot_messages(&store_path, &blob);
 
-    let mut agent = orchestrator_agent(store_path.clone(), "session", None);
+    let mut agent = direct_transcript_agent(store_path.clone(), "session", None);
     agent
         .restore_messages_merging_log_tail(blob, None)
         .await
@@ -1483,7 +1481,7 @@ async fn refresh_transcript_under_lease_adopts_peer_appends() {
     ];
     store_snapshot_messages(&store_path, &blob);
 
-    let mut agent = orchestrator_agent(store_path.clone(), "session", None);
+    let mut agent = direct_transcript_agent(store_path.clone(), "session", None);
     agent
         .restore_messages_merging_log_tail(blob, None)
         .await
@@ -1545,7 +1543,7 @@ async fn refresh_transcript_under_lease_normalizes_a_crashed_peers_dangling_turn
     ];
     store_snapshot_messages(&store_path, &blob);
 
-    let mut agent = orchestrator_agent(store_path.clone(), "session", None);
+    let mut agent = direct_transcript_agent(store_path.clone(), "session", None);
     agent
         .restore_messages_merging_log_tail(blob, None)
         .await
@@ -1595,7 +1593,7 @@ fn refresh_transcript_under_lease_rejects_a_foreign_lease() {
     crate::store::insert_test_session(&store_path, "session");
     crate::store::insert_test_session(&store_path, "other");
 
-    let mut agent = orchestrator_agent(store_path.clone(), "session", None);
+    let mut agent = direct_transcript_agent(store_path.clone(), "session", None);
     let foreign_lease =
         crate::sessions::SessionOperationLease::try_acquire(&store_path, "other").unwrap();
     assert!(
@@ -1615,12 +1613,13 @@ async fn steering_log_failure_leaves_claim_retryable_without_acknowledgement() {
     let store_path = test_store_path("steering_log_failure");
     crate::store::initialize(&store_path).unwrap();
     crate::store::insert_test_session(&store_path, "session");
-    let queued = crate::store::queue_thread_steering(
+    let queued = crate::store::create_session_inbox_item(
         &store_path,
         "session",
-        crate::store::ORCHESTRATOR_STEERING_TARGET,
-        "run",
+        crate::store::InboxDelivery::Steer,
         "steer now",
+        Some("run"),
+        None,
     )
     .unwrap();
     // Inject the log failure at the atomic steering transcript/ack commit: the
@@ -1643,7 +1642,7 @@ async fn steering_log_failure_leaves_claim_retryable_without_acknowledgement() {
         scripted_text_response("after failure"),
     )]);
     let mut agent =
-        orchestrator_agent(store_path.clone(), "session", Some(server.base_url.clone()));
+        direct_transcript_agent(store_path.clone(), "session", Some(server.base_url.clone()));
     store_snapshot_messages(&store_path, &agent.messages);
 
     let error = agent.send("current").await.unwrap_err();
@@ -1661,12 +1660,10 @@ async fn steering_log_failure_leaves_claim_retryable_without_acknowledgement() {
     assert_eq!(log[0].0, 1);
     assert!(matches!(log[0].1, Message::User { ref content } if content == "current"));
 
-    // The acknowledgement rolled back with the transcript append. The record
-    // stays claimed by this dispatch and is retryable at the next boundary.
-    let records = crate::store::list_thread_steering(&store_path, "session").unwrap();
-    assert_eq!(records.len(), 1);
-    assert_eq!(records[0].id, queued.id);
-    assert_eq!(records[0].status, "claimed");
+    // The acknowledgement rolls back with the transcript append, leaving the
+    // direct inbox item pending and retryable at the next boundary.
+    let record = crate::store::load_session_inbox_item(&store_path, "session", queued.id).unwrap();
+    assert_eq!(record.status, crate::store::InboxStatus::Pending);
 
     // The next run appends contiguously from the checkpoint — no gap.
     connection
@@ -1692,7 +1689,7 @@ async fn steering_log_failure_leaves_claim_retryable_without_acknowledgement() {
 
     // The restore merge reads the log cleanly (the pre-fix gap failed it
     // loudly and bricked re-attach).
-    let mut restored = orchestrator_agent(store_path.clone(), "session", None);
+    let mut restored = direct_transcript_agent(store_path.clone(), "session", None);
     restored
         .restore_messages_merging_log_tail(
             vec![Message::System {
@@ -1734,7 +1731,7 @@ async fn cancellation_adopts_result_after_aborting_failed_atomic_steering_commit
              END;",
         )
         .unwrap();
-    let mut agent = orchestrator_agent(store_path.clone(), "session", None);
+    let mut agent = direct_transcript_agent(store_path.clone(), "session", None);
     store_snapshot_messages(&store_path, &agent.messages);
     agent
         .push_and_log_for_test(user_message("current"))
@@ -1785,13 +1782,14 @@ async fn send_emits_transcript_appended_at_each_commit_point_live_only() {
     crate::store::initialize(&store_path).unwrap();
     crate::store::insert_test_session(&store_path, "session");
     // Queue steering so the run covers all four commit points: prompt,
-    // steering (stage→ack→append), assistant, and the tool-result batch.
-    crate::store::queue_thread_steering(
+    // steering (atomic inbox delivery), assistant, and the tool-result batch.
+    crate::store::create_session_inbox_item(
         &store_path,
         "session",
-        crate::store::ORCHESTRATOR_STEERING_TARGET,
-        "run",
+        crate::store::InboxDelivery::Steer,
         "steer now",
+        Some("run"),
+        None,
     )
     .unwrap();
     let server = ScriptedServer::start(vec![
@@ -1802,7 +1800,7 @@ async fn send_emits_transcript_appended_at_each_commit_point_live_only() {
         ScriptedResponse::json("200 OK", scripted_text_response("done")),
     ]);
     let mut agent =
-        orchestrator_agent(store_path.clone(), "session", Some(server.base_url.clone()));
+        direct_transcript_agent(store_path.clone(), "session", Some(server.base_url.clone()));
     store_snapshot_messages(&store_path, &agent.messages);
     let bus = crate::events::SessionEventBus::with_thread_event_store(
         Some("session".to_string()),
@@ -1866,7 +1864,7 @@ async fn successful_turn_stamps_assistant_origin_on_transcript_and_log() {
         .to_string(),
     )]);
     let mut agent =
-        orchestrator_agent(store_path.clone(), "session", Some(server.base_url.clone()));
+        direct_transcript_agent(store_path.clone(), "session", Some(server.base_url.clone()));
     store_snapshot_messages(&store_path, &agent.messages);
 
     assert_eq!(agent.send("current").await.unwrap(), "stamped answer");
@@ -1926,7 +1924,7 @@ async fn errored_turns_never_enter_the_transcript() {
         serde_json::json!({"error": {"message": "bad request"}}).to_string(),
     )]);
     let mut agent =
-        orchestrator_agent(store_path.clone(), "session", Some(server.base_url.clone()));
+        direct_transcript_agent(store_path.clone(), "session", Some(server.base_url.clone()));
     store_snapshot_messages(&store_path, &agent.messages);
 
     let error = agent
