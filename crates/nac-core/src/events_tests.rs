@@ -1089,13 +1089,7 @@ fn concurrent_emitters_linearize_persistence_replay_and_broadcast() {
                 barrier.wait();
                 for index in 0..EVENTS_PER_THREAD {
                     let content = format!("{thread}:{index}");
-                    let envelope = bus
-                        .emit_agent(AgentEvent::AssistantMessage {
-                            thread_name: Some("worker".to_string()),
-                            content: content.clone(),
-                            usage: None,
-                        })
-                        .unwrap();
+                    let envelope = bus.emit_agent(test_primary_tool_started(&content)).unwrap();
                     emitted
                         .lock()
                         .unwrap()
@@ -1127,14 +1121,14 @@ fn concurrent_emitters_linearize_persistence_replay_and_broadcast() {
         .cloned()
         .collect::<std::collections::HashMap<_, _>>();
     let records = crate::store::load_all_thread_events(&path, "session-order", total).unwrap();
-    let persisted_ids = records["worker"]
+    let persisted_ids = records[PRIMARY_TOOL_EVENT_TARGET]
         .iter()
         .map(|record| {
             let event: AgentEvent = serde_json::from_str(&record.event_json).unwrap();
-            let AgentEvent::AssistantMessage { content, .. } = event else {
-                panic!("expected assistant event");
+            let AgentEvent::ToolCallStarted { call_id, .. } = event else {
+                panic!("expected tool event");
             };
-            sequence_by_content[&content]
+            sequence_by_content[&call_id]
         })
         .collect::<Vec<_>>();
     assert_eq!(persisted_ids, broadcast_ids);
@@ -1154,11 +1148,7 @@ fn failed_thread_event_append_does_not_publish_or_advance_boundary() {
     let mut receiver = bus.subscribe();
 
     let failed = bus
-        .emit_agent(AgentEvent::AssistantMessage {
-            thread_name: Some("worker".to_string()),
-            content: "not persisted".to_string(),
-            usage: None,
-        })
+        .emit_agent(test_primary_tool_started("not persisted"))
         .unwrap();
     assert_eq!(failed.sequence_id, 1);
     assert!(receiver.try_recv().is_err());
@@ -1173,11 +1163,7 @@ fn failed_thread_event_append_does_not_publish_or_advance_boundary() {
 
     crate::store::insert_test_session(&path, "session-writer-failure");
     let published = bus
-        .emit_agent(AgentEvent::AssistantMessage {
-            thread_name: Some("worker".to_string()),
-            content: "persisted".to_string(),
-            usage: None,
-        })
+        .emit_agent(test_primary_tool_started("persisted"))
         .unwrap();
     assert_eq!(published.sequence_id, 2);
     assert_eq!(receiver.try_recv().unwrap(), published);
@@ -1198,9 +1184,13 @@ fn failed_thread_event_append_does_not_publish_or_advance_boundary() {
         })
         .unwrap();
     assert_eq!(boundary.sequence_id, 2);
-    assert_eq!(records["worker"].len(), 1);
-    assert!(records["worker"][0].event_json.contains("persisted"));
-    assert!(!records["worker"][0].event_json.contains("not persisted"));
+    assert_eq!(records[PRIMARY_TOOL_EVENT_TARGET].len(), 1);
+    assert!(records[PRIMARY_TOOL_EVENT_TARGET][0]
+        .event_json
+        .contains("persisted"));
+    assert!(!records[PRIMARY_TOOL_EVENT_TARGET][0]
+        .event_json
+        .contains("not persisted"));
 
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
