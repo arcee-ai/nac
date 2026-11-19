@@ -507,7 +507,7 @@ impl PreparedToolCall {
                         let settled = invocation.await;
                         if !settled.is_error
                             || result_reports_committed(&settled)
-                            || (matches!(name, "subagent_cancel" | "orchestrator_cancel")
+                            || (name == "subagent_cancel"
                                 && result_reports_cancelled(&settled))
                         {
                             return settled;

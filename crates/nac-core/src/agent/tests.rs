@@ -399,11 +399,6 @@ fn key_argument_preview_is_family_aware_and_fail_closed() {
         ("grep", r#"{"pattern":"AgentEvent"}"#, "AgentEvent"),
         ("web_search", r#"{"query":"NAC docs"}"#, "NAC docs"),
         (
-            "orchestrator_launch",
-            r#"{"description":"Audit storage","prompt":"SECRET_PROMPT"}"#,
-            "Audit storage",
-        ),
-        (
             "subagent",
             r#"{"description":"Review tests","prompt":"SECRET_PROMPT"}"#,
             "Review tests",

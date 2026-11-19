@@ -368,11 +368,7 @@ impl AgentEvent {
                     return None;
                 }
                 let content = result.content.as_text()?;
-                if name == "thread" && content.contains(" timed out after ") {
-                    Some(ToolCompletionStatus::TimedOut)
-                } else if (name == "thread" && content.to_ascii_lowercase().contains("cancelled"))
-                    || durable_result_reports_cancelled(&name, content)
-                {
+                if durable_result_reports_cancelled(&name, content) {
                     Some(ToolCompletionStatus::Cancelled)
                 } else {
                     None
@@ -463,10 +459,7 @@ fn trusted_deadline_metadata(name: &str, value: &serde_json::Value) -> Option<se
 }
 
 fn durable_result_reports_cancelled(name: &str, content: &str) -> bool {
-    if !matches!(
-        name,
-        "subagent" | "subagent_cancel" | "orchestrator_launch" | "orchestrator_cancel"
-    ) {
+    if !matches!(name, "subagent" | "subagent_cancel") {
         return false;
     }
     serde_json::from_str::<serde_json::Value>(content)
@@ -1359,10 +1352,6 @@ fn safe_tool_arguments(name: &str, detail: Option<&str>, preview: &str) -> Strin
                     }
                 }
                 "read_command_output" => "read_command_output",
-                "thread" => "dispatch",
-                "threads" => "list_threads",
-                "thread_read" => "read_thread",
-                "thread_delete" => "delete_thread",
                 _ => "invoke",
             }
             .to_string(),
@@ -1404,15 +1393,6 @@ fn safe_tool_arguments(name: &str, detail: Option<&str>, preview: &str) -> Strin
             copy_safe_u64(object, &mut safe, "offset");
             copy_safe_u64(object, &mut safe, "limit");
         }
-        "thread" => {
-            copy_safe_string(object, &mut safe, "name");
-            copy_array_length(object, &mut safe, "threads", "source_count");
-            copy_safe_u64(object, &mut safe, "source_count");
-            copy_array_length(object, &mut safe, "skills", "skill_count");
-            copy_safe_u64(object, &mut safe, "skill_count");
-            copy_safe_u64(object, &mut safe, "timeout");
-        }
-        "thread_read" | "thread_delete" => copy_safe_string(object, &mut safe, "name"),
         _ => {}
     }
     serde_json::Value::Object(safe).to_string()
@@ -1510,23 +1490,6 @@ fn copy_edit_lengths(
         "new_text_chars".to_string(),
         serde_json::Value::from(new_chars),
     );
-}
-
-fn copy_array_length(
-    source: Option<&serde_json::Map<String, serde_json::Value>>,
-    target: &mut serde_json::Map<String, serde_json::Value>,
-    source_key: &str,
-    target_key: &str,
-) {
-    if let Some(value) = source
-        .and_then(|source| source.get(source_key))
-        .and_then(serde_json::Value::as_array)
-    {
-        target.insert(
-            target_key.to_string(),
-            serde_json::Value::from(value.len() as u64),
-        );
-    }
 }
 
 fn recent_events_from_state(

@@ -44,19 +44,6 @@ pub(super) fn preview_tool_args(name: &str, args_str: &str) -> String {
                 return preview(command, 120);
             }
         }
-        "thread" => {
-            if let Some(value) = parsed.as_ref() {
-                let thread_name = value
-                    .get("name")
-                    .and_then(|item| item.as_str())
-                    .unwrap_or("?");
-                let action = value
-                    .get("action")
-                    .and_then(|item| item.as_str())
-                    .unwrap_or("dispatch");
-                return preview(&format!("{thread_name}: {action}"), 120);
-            }
-        }
         _ => {}
     }
 
@@ -171,46 +158,6 @@ pub(crate) fn key_arg_preview(
             .map(|value| truncate_string(&value, 120))
             .unwrap_or_default(),
         "subagent_status" | "subagent_cancel" => get_str("child_session_id")
-            .map(|value| truncate_string(&value, 120))
-            .unwrap_or_default(),
-        "orchestrator_launch" => get_str("description")
-            .or_else(|| get_str("orchestrator_session_id"))
-            .map(|value| truncate_string(&value, 120))
-            .unwrap_or_default(),
-        "orchestrator_status"
-        | "orchestrator_read"
-        | "orchestrator_wait"
-        | "orchestrator_cancel"
-        | "orchestrator_steer" => get_str("orchestrator_session_id")
-            .map(|value| truncate_string(&value, 120))
-            .unwrap_or_default(),
-        "thread" => {
-            let name = get_str("name").unwrap_or_default();
-            let action = get_str("action").unwrap_or_default();
-            if !name.is_empty() && !action.is_empty() {
-                truncate_string(&format!("{name}: {action}"), 120)
-            } else if !name.is_empty() {
-                truncate_string(&name, 120)
-            } else {
-                String::new()
-            }
-        }
-        "thread_read" | "thread_delete" => get_str("name")
-            .map(|value| truncate_string(&value, 120))
-            .unwrap_or_default(),
-        "threads" | "workset_list" => "list".to_string(),
-        "workset_define" => {
-            let id = get_str("id").unwrap_or_default();
-            let goal = get_str("goal").unwrap_or_default();
-            if !id.is_empty() && !goal.is_empty() {
-                truncate_string(&format!("{id}: {goal}"), 120)
-            } else if !id.is_empty() {
-                truncate_string(&id, 120)
-            } else {
-                String::new()
-            }
-        }
-        "workset_read" => get_str("id")
             .map(|value| truncate_string(&value, 120))
             .unwrap_or_default(),
         _ if tool_name.starts_with("mcp__") => {

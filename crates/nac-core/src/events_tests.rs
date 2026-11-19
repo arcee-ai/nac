@@ -85,6 +85,21 @@ fn successful_tool_output_cannot_spoof_completion_status() {
 }
 
 #[test]
+fn unknown_tool_error_text_cannot_declare_a_deadline_outcome() {
+    for content in ["worker timed out after a report", "worker was cancelled"] {
+        let result = crate::tools::ToolResult::text(content, true);
+        let event = AgentEvent::tool_call_finished(None, "call".into(), "thread".into(), &result);
+        assert!(matches!(
+            event,
+            AgentEvent::ToolCallFinished {
+                completion_status: Some(ToolCompletionStatus::Error),
+                ..
+            }
+        ));
+    }
+}
+
+#[test]
 fn kernel_deadline_shape_populates_typed_telemetry() {
     let result = crate::tools::ToolResult::text(
         serde_json::json!({
@@ -164,12 +179,7 @@ fn finished_duration_prefers_the_deadline_envelope_over_the_measured_field() {
 
 #[test]
 fn durable_cancelled_records_have_typed_cancelled_completion() {
-    for name in [
-        "subagent",
-        "subagent_cancel",
-        "orchestrator_launch",
-        "orchestrator_cancel",
-    ] {
+    for name in ["subagent", "subagent_cancel"] {
         let result = crate::tools::ToolResult::text(r#"{"status":"cancelled"}"#, true);
         let event =
             AgentEvent::tool_call_finished(None, format!("call-{name}"), name.to_string(), &result);
