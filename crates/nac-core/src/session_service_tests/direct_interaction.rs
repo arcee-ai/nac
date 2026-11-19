@@ -1355,43 +1355,6 @@ async fn steering_requires_an_active_run_and_active_target_thread() {
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
 
-#[tokio::test]
-async fn orchestrator_steering_requires_an_active_run_and_expires_at_run_end() {
-    let (parts, store_path) =
-        test_active_service("orchestrator_steering", "session-orchestrator-steering");
-    let service = parts.service;
-    let no_run = service
-        .queue_orchestrator_steering("change direction", crate::store::InputOrigin::Automation)
-        .unwrap_err();
-    assert!(no_run.to_string().contains("no active run"));
-
-    let active = service.try_begin_run(None, "initial direction").unwrap();
-    let queued = service
-        .queue_orchestrator_steering("change direction", crate::store::InputOrigin::Automation)
-        .unwrap();
-    assert_eq!(
-        queued.thread_name,
-        crate::store::ORCHESTRATOR_STEERING_TARGET
-    );
-    assert_eq!(queued.status, "queued");
-    assert_eq!(queued.dispatch_id, active.run_id.as_str());
-
-    assert!(
-        service
-            .finish_run_once(
-                &active.run_id,
-                RunOutcome::Completed("done".to_string(), None)
-            )
-            .await
-    );
-    let steering =
-        crate::store::list_thread_steering(&store_path, "session-orchestrator-steering").unwrap();
-    assert_eq!(steering.len(), 1);
-    assert_eq!(steering[0].status, "expired");
-
-    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
-}
-
 fn steering_record(
     id: i64,
     thread_name: &str,

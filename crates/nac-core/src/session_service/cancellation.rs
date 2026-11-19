@@ -130,9 +130,6 @@ impl SessionService {
             }
         }
 
-        self.expire_orchestrator_steering(&cancelling_run.snapshot.run_id)
-            .await;
-
         // A cancellation marker is itself a visible response. If the run task
         // was cancelled before capturing its baseline, record the count before
         // appending that marker so partial cancellation usage still lands on it.

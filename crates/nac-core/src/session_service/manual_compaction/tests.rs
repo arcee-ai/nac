@@ -1,6 +1,7 @@
 use super::super::tests::{
-    compaction_response, test_active_service, test_agent, test_agent_with_compaction_threshold,
-    test_compaction_service, test_picker_service, test_store_path,
+    build_test_agent, compaction_response, test_active_service, test_agent,
+    test_agent_with_compaction_threshold, test_compaction_service, test_picker_service,
+    test_store_path,
 };
 use super::*;
 use crate::events::CompactionSkipReason;
@@ -469,7 +470,14 @@ async fn assert_two_service_admissions_refresh_external_checkpoint(
 
     // Construct B before A commits so its in-memory Agent has no checkpoint.
     let snapshot_b = sessions::load_session(&store_path, &session_id).unwrap();
-    let mut agent_b = test_agent(client.clone(), store_path.clone(), Some(session_id.clone()));
+    let mut agent_b = build_test_agent(
+        client.clone(),
+        store_path.clone(),
+        Some(session_id.clone()),
+        crate::agent::AgentMode::Direct,
+        None,
+        None,
+    );
     agent_b.messages = snapshot_b.messages.clone().into();
     let parts_b = SessionService::from_session_run_config(SessionRunConfig {
         agent: agent_b,
@@ -885,10 +893,8 @@ async fn manual_compaction_failure_and_cancellation_emit_terminal_and_clear_oper
     use crate::model::test_http::{ScriptedResponse, ScriptedServer};
     use std::sync::mpsc as std_mpsc;
 
-    let failed_server = ScriptedServer::start(vec![ScriptedResponse::json(
-        "500 Internal Server Error",
-        "{}",
-    )]);
+    let failed_server =
+        ScriptedServer::start(vec![ScriptedResponse::json("400 Bad Request", "{}")]);
     let (failed_parts, failed_store) = test_compaction_service(
         "compaction_failure",
         "failure-session",

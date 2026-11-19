@@ -583,22 +583,14 @@ impl SessionService {
                         None,
                     );
                 }
-                let mut expired =
-                    crate::store::expire_session_steering(&self.metadata.store_path, session_id)
-                        .map_err(|error| SessionSubmitError::Coordination {
-                            message: SessionCoordinationError::store(format!(
-                                "failed to recover stale steering: {error:#}"
-                            )),
-                        })?;
-                expired.extend(
-                    self.active_threads
-                        .close_all(&self.metadata.store_path, session_id)
-                        .map_err(|error| SessionSubmitError::Coordination {
-                            message: SessionCoordinationError::store(format!(
-                                "failed to clear stale worker targets: {error:#}"
-                            )),
-                        })?,
-                );
+                let expired = self
+                    .active_threads
+                    .close_all(&self.metadata.store_path, session_id)
+                    .map_err(|error| SessionSubmitError::Coordination {
+                        message: SessionCoordinationError::store(format!(
+                            "failed to clear stale worker targets: {error:#}"
+                        )),
+                    })?;
                 self.emit_steering_expired(expired);
             }
         }

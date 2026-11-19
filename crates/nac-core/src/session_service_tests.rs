@@ -252,7 +252,7 @@ pub(super) fn test_agent_with_skills(
     )
 }
 
-fn build_test_agent(
+pub(super) fn build_test_agent(
     client: ModelClient,
     store_path: PathBuf,
     session_id: Option<String>,
@@ -761,10 +761,13 @@ pub(super) fn test_compaction_service(
     client: ModelClient,
 ) -> (SessionServiceParts, PathBuf) {
     let store_path = test_store_path(label);
-    let mut agent = test_agent(
+    let mut agent = build_test_agent(
         client.clone(),
         store_path.clone(),
         Some(session_id.to_string()),
+        AgentMode::Direct,
+        None,
+        None,
     );
     agent.messages = compaction_messages().into();
     agent.last_usage = Some(crate::model::TokenUsage {

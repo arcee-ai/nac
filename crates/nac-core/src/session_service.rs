@@ -931,46 +931,6 @@ impl SessionService {
         Ok(record)
     }
 
-    pub fn queue_orchestrator_steering(
-        &self,
-        instruction: &str,
-        origin: crate::store::InputOrigin,
-    ) -> Result<crate::store::ThreadSteeringRecord> {
-        let session_id = self
-            .metadata
-            .session_id
-            .as_deref()
-            .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
-        let active_operation = self.lock_active_operation();
-        let dispatch_id = match active_operation.as_ref() {
-            Some(ActiveSessionOperation::Run(run)) if !run.finishing => {
-                run.snapshot.run_id.as_str()
-            }
-            Some(ActiveSessionOperation::Run(_)) => {
-                return Err(anyhow::anyhow!("session active run is finishing"));
-            }
-            _ => return Err(anyhow::anyhow!("session has no active run")),
-        };
-        let queue = match origin {
-            crate::store::InputOrigin::Person => crate::store::queue_person_thread_steering,
-            crate::store::InputOrigin::Automation => crate::store::queue_thread_steering,
-        };
-        let record = queue(
-            &self.metadata.store_path,
-            session_id,
-            crate::store::ORCHESTRATOR_STEERING_TARGET,
-            dispatch_id,
-            instruction,
-        )?;
-        drop(active_operation);
-        self.event_bus
-            .emit_agent(AgentEvent::OrchestratorSteeringQueued {
-                steering_id: record.id,
-                instruction_preview: record.instruction.chars().take(160).collect(),
-            });
-        Ok(record)
-    }
-
     pub fn prepare_user_input(&self, input: &str) -> PreparedUserInput {
         commands::prepare_user_input_with_mcp(
             input,

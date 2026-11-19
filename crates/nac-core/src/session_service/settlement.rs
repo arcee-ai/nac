@@ -43,7 +43,6 @@ impl SessionService {
         let Some(finishing_run) = finishing.ok().flatten() else {
             return false;
         };
-        self.expire_orchestrator_steering(run_id).await;
         let (completed_duration_ms, completed_usage) = match &outcome {
             RunOutcome::Completed(_, usage) => (Some(finishing_run.duration_ms), usage.clone()),
             RunOutcome::Failed(_, usage) => (None, usage.clone()),
@@ -479,24 +478,6 @@ impl SessionService {
         }
     }
 
-    pub(super) async fn expire_orchestrator_steering(&self, run_id: &SessionRunId) {
-        if crate::store::coordinator::owner_for(&self.metadata.store_path)
-            .is_ok_and(|owner| owner.is_none())
-        {
-            self.expire_orchestrator_steering_sync(run_id);
-            return;
-        }
-        let service = self.clone();
-        let run_id = run_id.clone();
-        if let Err(error) = crate::store::spawn_blocking_store_caller(move || {
-            service.expire_orchestrator_steering_sync(&run_id);
-        })
-        .await
-        {
-            eprintln!("nac: steering expiry caller failed: {error:#}");
-        }
-    }
-
     pub(super) async fn emit_steering_expired_async(
         &self,
         records: Vec<crate::store::ThreadSteeringRecord>,
@@ -508,22 +489,6 @@ impl SessionService {
         .await
         {
             eprintln!("nac: steering expiry publication failed: {error:#}");
-        }
-    }
-
-    fn expire_orchestrator_steering_sync(&self, run_id: &SessionRunId) {
-        let Some(session_id) = self.metadata.session_id.as_deref() else {
-            return;
-        };
-        match crate::store::expire_thread_steering(
-            &self.metadata.store_path,
-            session_id,
-            run_id.as_str(),
-        ) {
-            Ok(records) => self.emit_steering_expired(records),
-            Err(error) => {
-                eprintln!("nac: failed to expire orchestrator steering: {error:#}");
-            }
         }
     }
 

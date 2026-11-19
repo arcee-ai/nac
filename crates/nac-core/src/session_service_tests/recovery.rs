@@ -1226,26 +1226,6 @@ async fn request_cancel_persists_marker_and_emits_terminal_event() {
     });
     let mut events = parts.service.subscribe_events();
     let active = parts.service.try_begin_run(None, "cancel prompt").unwrap();
-    assert!(parts
-        .service
-        .active_threads
-        .mark("worker", "worker-dispatch"));
-    crate::store::queue_thread_steering(
-        &store_path,
-        &session_id,
-        "worker",
-        "worker-dispatch",
-        "worker direction",
-    )
-    .unwrap();
-    crate::store::queue_thread_steering(
-        &store_path,
-        &session_id,
-        crate::store::ORCHESTRATOR_STEERING_TARGET,
-        active.run_id.as_str(),
-        "orchestrator direction",
-    )
-    .unwrap();
     {
         let mut agent = parts.service.agent.lock().await;
         agent
@@ -1280,22 +1260,6 @@ async fn request_cancel_persists_marker_and_emits_terminal_event() {
         appended.event,
         SessionEvent::TranscriptAppended { transcript_len: 2 }
     );
-    let steering_events = [
-        events.recv().await.unwrap().event,
-        events.recv().await.unwrap().event,
-    ];
-    assert!(steering_events.iter().any(|event| matches!(
-        event,
-        SessionEvent::Agent {
-            event: AgentEvent::OrchestratorSteeringExpired { .. }
-        }
-    )));
-    assert!(steering_events.iter().any(|event| matches!(
-        event,
-        SessionEvent::Agent {
-            event: AgentEvent::ThreadSteeringExpired { .. }
-        }
-    )));
     // The cancellation marker is a transcript commit point: the live
     // signal fires before the snapshot save (the cancel path runs outside
     // send(), so it carries no run context).
