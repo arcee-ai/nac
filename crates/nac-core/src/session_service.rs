@@ -28,8 +28,7 @@ use crate::skills::SkillRegistry;
 use crate::store::RunInboxPrompt;
 use crate::types::Message;
 use crate::view::{
-    self, EpisodeSnapshot, SessionSummarySnapshot, ThreadSnapshot, WorksetsSnapshot,
-    WorkspaceSnapshot,
+    self, SessionSummarySnapshot, ThreadSnapshot, WorksetsSnapshot, WorkspaceSnapshot,
 };
 use crate::workspace::GitTarget;
 
@@ -265,7 +264,6 @@ pub struct SessionFrontendSnapshot {
     pub shell_commands: Vec<ShellCommandSnapshot>,
     pub sessions: Vec<SessionSummarySnapshot>,
     pub threads: Vec<ThreadSnapshot>,
-    pub thread_episodes: HashMap<String, Vec<EpisodeSnapshot>>,
     #[serde(default)]
     pub thread_events: HashMap<String, Vec<AgentEvent>>,
     /// Sanitized, bounded lifecycle events for top-level direct tool calls.
@@ -392,7 +390,6 @@ struct DecodedThreadEvents {
 struct FrontendSnapshotBlockingLoad {
     sessions: Vec<SessionSummarySnapshot>,
     threads: Vec<ThreadSnapshot>,
-    thread_episodes: HashMap<String, Vec<EpisodeSnapshot>>,
     thread_events: DecodedThreadEvents,
     thread_event_boundary: SessionEventBoundary,
     forks: Vec<crate::store::SessionForkLink>,

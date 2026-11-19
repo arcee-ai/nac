@@ -78,11 +78,6 @@ export type SessionMetadata = ApiSchema<"SessionMetadata">;
 
 export type ThreadSnapshot = ApiSchema<"ThreadSnapshot">;
 
-/** How a dispatch ended; only `ok` is retained context for later dispatches. */
-export type EpisodeStatus = ApiSchema<"EpisodeStatus">;
-
-export type EpisodeSnapshot = ApiSchema<"EpisodeSnapshot">;
-
 export type WorksetItemSnapshot = ApiSchema<"WorksetItemSnapshot">;
 
 export type WorksetSnapshot = ApiSchema<"WorksetSnapshot">;

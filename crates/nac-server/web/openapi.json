@@ -13125,53 +13125,6 @@
           }
         ]
       },
-      "EpisodeSnapshot": {
-        "type": "object",
-        "required": [
-          "id",
-          "thread_name",
-          "session_id",
-          "action",
-          "content",
-          "status",
-          "created_at"
-        ],
-        "properties": {
-          "action": {
-            "type": "string"
-          },
-          "content": {
-            "type": "string"
-          },
-          "created_at": {
-            "type": "string"
-          },
-          "id": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "session_id": {
-            "type": "string"
-          },
-          "status": {
-            "$ref": "#/components/schemas/EpisodeStatus",
-            "description": "`ok` for a retained handoff, otherwise how the dispatch died. Snapshots\nwritten before dispatch outcomes were recorded only held handoffs."
-          },
-          "thread_name": {
-            "type": "string"
-          }
-        }
-      },
-      "EpisodeStatus": {
-        "type": "string",
-        "description": "How a dispatch ended.\n\nOnly [`EpisodeStatus::Ok`] episodes are retained context: they are the ones\na later dispatch reads back and the ones `thread_read` renders. The failure\nkinds exist so the panel can still show what a thread was asked to do and\nhow it died, which is otherwise lost the moment the worker is killed.",
-        "enum": [
-          "ok",
-          "error",
-          "timed_out",
-          "cancelled"
-        ]
-      },
       "ExecutionFrameResponse": {
         "type": "object",
         "required": [
@@ -19832,7 +19785,6 @@
           "response_timing",
           "sessions",
           "threads",
-          "thread_episodes",
           "thread_event_boundary",
           "worksets",
           "workspace"
@@ -19914,18 +19866,6 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/ShellCommandSnapshot"
-            }
-          },
-          "thread_episodes": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "array",
-              "items": {
-                "$ref": "#/components/schemas/EpisodeSnapshot"
-              }
-            },
-            "propertyNames": {
-              "type": "string"
             }
           },
           "thread_event_boundary": {

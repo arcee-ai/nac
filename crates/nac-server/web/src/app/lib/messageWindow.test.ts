@@ -90,7 +90,6 @@ function snapshot(
     },
     response_timing: { response_durations_ms: durations },
     thread_events: {},
-    thread_episodes: {},
   } as SessionSnapshotResponse;
 }
 

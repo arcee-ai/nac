@@ -107,7 +107,6 @@ function snapshot(messages: Message[], total = messages.length): SessionSnapshot
     message_page: messagePage,
     response_timing: timing,
     thread_events: {},
-    thread_episodes: {},
   } as SessionSnapshotResponse;
 }
 

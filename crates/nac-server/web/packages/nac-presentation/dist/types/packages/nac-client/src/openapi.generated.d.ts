@@ -355,16 +355,6 @@ export interface components {
             error: string;
             state: "failed";
         };
-        EpisodeSnapshot: {
-            action: string;
-            content: string;
-            created_at: string;
-            id: number;
-            session_id: string;
-            status: components["schemas"]["EpisodeStatus"];
-            thread_name: string;
-        };
-        EpisodeStatus: "ok" | "error" | "timed_out" | "cancelled";
         ExecutionFrameResponse: {
             bytes: number[];
             caught_up: boolean;
@@ -1303,7 +1293,6 @@ export interface components {
             run_failure?: components["schemas"]["RunFailure"] | null;
             sessions: components["schemas"]["SessionSummarySnapshot"][];
             shell_commands?: components["schemas"]["ShellCommandSnapshot"][];
-            thread_episodes: Record<string, components["schemas"]["EpisodeSnapshot"][]>;
             thread_event_boundary: components["schemas"]["SessionEventBoundary"];
             thread_event_diagnostics?: components["schemas"]["ThreadEventDecodeDiagnostic"][];
             thread_events?: Record<string, components["schemas"]["AgentEvent"][]>;

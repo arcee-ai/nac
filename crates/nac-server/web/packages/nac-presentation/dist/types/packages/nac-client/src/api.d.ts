@@ -575,7 +575,6 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         run_failure?: import("./openapi.generated.js").components["schemas"]["RunFailure"] | null;
         sessions: import("./openapi.generated.js").components["schemas"]["SessionSummarySnapshot"][];
         shell_commands?: import("./openapi.generated.js").components["schemas"]["ShellCommandSnapshot"][];
-        thread_episodes: Record<string, import("./openapi.generated.js").components["schemas"]["EpisodeSnapshot"][]>;
         thread_event_boundary: import("./openapi.generated.js").components["schemas"]["SessionEventBoundary"];
         thread_event_diagnostics?: import("./openapi.generated.js").components["schemas"]["ThreadEventDecodeDiagnostic"][];
         thread_events?: Record<string, import("./openapi.generated.js").components["schemas"]["AgentEvent"][]>;
@@ -602,7 +601,6 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         run_failure?: import("./openapi.generated.js").components["schemas"]["RunFailure"] | null;
         sessions: import("./openapi.generated.js").components["schemas"]["SessionSummarySnapshot"][];
         shell_commands?: import("./openapi.generated.js").components["schemas"]["ShellCommandSnapshot"][];
-        thread_episodes: Record<string, import("./openapi.generated.js").components["schemas"]["EpisodeSnapshot"][]>;
         thread_event_boundary: import("./openapi.generated.js").components["schemas"]["SessionEventBoundary"];
         thread_event_diagnostics?: import("./openapi.generated.js").components["schemas"]["ThreadEventDecodeDiagnostic"][];
         thread_events?: Record<string, import("./openapi.generated.js").components["schemas"]["AgentEvent"][]>;

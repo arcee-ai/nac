@@ -70,7 +70,6 @@ impl SessionService {
         let StoredFrontendProjection {
             sessions,
             threads,
-            thread_episodes,
             thread_events,
             thread_event_boundary,
             run_failure,
@@ -83,7 +82,6 @@ impl SessionService {
         Ok(FrontendSnapshotBlockingLoad {
             sessions,
             threads,
-            thread_episodes,
             thread_events,
             thread_event_boundary,
             forks,
@@ -247,7 +245,6 @@ impl SessionService {
             shell_commands,
             sessions: blocking.sessions,
             threads: blocking.threads,
-            thread_episodes: blocking.thread_episodes,
             thread_events: blocking.thread_events.events,
             primary_tool_events: blocking.thread_events.primary_tool_events,
             thread_event_boundary: blocking.thread_event_boundary,
@@ -270,7 +267,6 @@ impl SessionService {
 struct StoredFrontendProjection {
     sessions: Vec<SessionSummarySnapshot>,
     threads: Vec<ThreadSnapshot>,
-    thread_episodes: HashMap<String, Vec<EpisodeSnapshot>>,
     thread_events: DecodedThreadEvents,
     thread_event_boundary: Option<SessionEventBoundary>,
     forks: Vec<crate::store::SessionForkLink>,
@@ -290,7 +286,6 @@ fn read_stored_projection(
         Vec::new()
     };
     let threads = Vec::new();
-    let thread_episodes = HashMap::new();
     let (thread_event_boundary, thread_events) = load_events()?;
     let worksets = WorksetsSnapshot {
         items: Vec::new(),
@@ -319,7 +314,6 @@ fn read_stored_projection(
     Ok(StoredFrontendProjection {
         sessions,
         threads,
-        thread_episodes,
         thread_events,
         thread_event_boundary,
         run_failure,

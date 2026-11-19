@@ -368,7 +368,6 @@ export declare function useSessionSnapshot(id: string | null, options?: Partial<
     run_failure?: import("../../types/openapi.generated").components["schemas"]["RunFailure"] | null;
     sessions: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"][];
     shell_commands?: import("../../types/openapi.generated").components["schemas"]["ShellCommandSnapshot"][];
-    thread_episodes: Record<string, import("../../types/openapi.generated").components["schemas"]["EpisodeSnapshot"][]>;
     thread_event_boundary: import("../../types/openapi.generated").components["schemas"]["SessionEventBoundary"];
     thread_event_diagnostics?: import("../../types/openapi.generated").components["schemas"]["ThreadEventDecodeDiagnostic"][];
     thread_events?: Record<string, import("../../types/openapi.generated").components["schemas"]["AgentEvent"][]>;
@@ -410,7 +409,6 @@ export declare function useCreateSession(): import("@tanstack/react-query").UseM
     run_failure?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["RunFailure"] | null;
     sessions: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionSummarySnapshot"][];
     shell_commands?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["ShellCommandSnapshot"][];
-    thread_episodes: Record<string, import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["EpisodeSnapshot"][]>;
     thread_event_boundary: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionEventBoundary"];
     thread_event_diagnostics?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["ThreadEventDecodeDiagnostic"][];
     thread_events?: Record<string, import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["AgentEvent"][]>;
