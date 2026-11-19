@@ -31,7 +31,7 @@ for (const mobile of [false, true]) {
       .locator('[aria-label="Model results"] button[data-row]')
       .filter({ hasText: /gpt-5\.6/i })
       .locator("..")
-      .filter({ hasText: "OpenAI" })
+      .filter({ hasText: "OpenAI Responses" })
       .locator("button[data-row]")
       .first()
       .click();

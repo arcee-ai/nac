@@ -37,7 +37,7 @@ for (const mobile of [false, true]) {
       .filter({ hasText: /gpt-5\.6/i });
     const openai = row
       .locator("..")
-      .filter({ hasText: "OpenAI" })
+      .filter({ hasText: "OpenAI Responses" })
       .locator("button[data-row]")
       .first();
     await openai.click();
