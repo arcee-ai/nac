@@ -10,7 +10,7 @@ fn runtime() -> RuntimeMetadata {
         "revision-test",
         crate::store::schema_version(),
         Some("host-sensitive-identity"),
-        Some("four-orchestrator"),
+        Some("four-direct"),
     )
 }
 
