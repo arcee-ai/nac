@@ -111,8 +111,7 @@ describe("partitionModelTurn", () => {
       "block:text-2",
       "group:thoughts-1",
       "session:user-0:tool-call-subagent",
-      "group:tool-call-read",
-      "session:user-0:tool-call-orchestrator_launch",
+      "group:tool-call-read,tool-call-orchestrator_launch",
     ]);
     expect(list[3]).toMatchObject({
       action: "spawn-agent",
@@ -120,12 +119,7 @@ describe("partitionModelTurn", () => {
       title: "Fix the flaky test",
       status: "running",
     });
-    expect(list[5]).toMatchObject({
-      action: "spawn-orchestrator",
-      rowKey: null,
-      title: "Spawn Orchestrator",
-      status: "failed",
-    });
+
   });
 
   it("emits no group for prose alone", () => {

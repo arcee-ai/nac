@@ -13,8 +13,7 @@ export interface StepLabel {
 export declare function stepLabel(segment: InsightSegment): StepLabel;
 /**
  * What the live status line says about a running turn, read off whatever it
- * produced last: its newest step, a subagent it is starting, threads it
- * dispatched, or the prose it is writing.
+ * produced last: its newest step, a subagent it is starting, or the prose it is writing.
  */
 export declare function liveTurnLabel(items: readonly ModelTurnItem[]): string;
 /**

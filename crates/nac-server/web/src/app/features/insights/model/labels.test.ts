@@ -64,11 +64,7 @@ describe("insight labels", () => {
     ["get-goal", "Get goal", "Get goal…", "Read"],
     ["update-goal", "Update goal", "Updating goal…", "Edit"],
     ["spawn-agent", "Subagent", "Subagent request in progress…", "Spawn"],
-    ["spawn-orchestrator", "Spawn Orchestrator", "Spawn Orchestrator…", "Spawn"],
     ["session-status", "Check session status", "Checking session status…", "Check"],
-    ["session-steer", "Steer session", "Steer session…", "Steer"],
-    ["session-read", "Read session", "Reading session…", "Read"],
-    ["session-wait", "Wait for session", "Wait for session…", "Wait"],
     ["session-cancel", "Cancel session", "Cancelling session…", "Cancel"],
     ["other", "Tool", "Running tool…", "Tool"],
   ])("labels %s rows like the canonical table", (kind, type, running, meta) => {
@@ -98,7 +94,7 @@ describe("insight labels", () => {
     expect(
       segmentTitle(tool("web_fetch", { summary: "https://user:SECRET@internal.example:8443/x" })),
     ).toBe("internal.example:8443");
-    expect(segmentTitle(tool("orchestrator_wait", { summary: "session-7" }))).toBe("session-7");
+    expect(segmentTitle(tool("orchestrator_wait", { summary: "session-7" }))).toBe("orchestrator_wait");
     expect(segmentTitle(tool("create_goal", { summary: "Ship the revamp" }))).toBe("Create goal");
     expect(segmentTitle(tool("read"))).toBe("Read File");
     expect(segmentTitle(tool("mcp__linear__read", { label: "MCP · Read" }))).toBe("MCP · Read");
@@ -281,8 +277,8 @@ describe("insight labels", () => {
       status: "ready",
     });
     expect(launching).toEqual({
-      action: "spawn-orchestrator",
-      label: "Spawn Orchestrator…",
+      action: "other",
+      label: "orchestrator_launch…",
       meta: null,
       status: "running",
     });

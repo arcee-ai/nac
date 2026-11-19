@@ -56,9 +56,6 @@ function toolContent(segment: ToolSegment, context: ItemContext): ItemContent {
     case "get-goal":
       return getGoalContent(segment, context);
     case "session-status":
-    case "session-steer":
-    case "session-read":
-    case "session-wait":
     case "session-cancel":
       return sessionContent(segment, context);
     default:

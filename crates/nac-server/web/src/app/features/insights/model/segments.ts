@@ -32,11 +32,6 @@ const UNSETTLED: ReadonlySet<ToolPresentationStatus> = new Set([
   "awaiting-approval",
 ]);
 
-const ROW_PREFIXES: Record<SpawnActionKind, "child" | "orchestrator"> = {
-  "spawn-agent": "child",
-  "spawn-orchestrator": "orchestrator",
-};
-
 /**
  * Key the Insights ids of a model turn hang off: the user prompt or delegated
  * completion right before it. `ModelTurn.key` cannot serve, since it moves to
@@ -101,7 +96,7 @@ function sessionEntry(
   presentation: ToolPresentation,
 ): InsightSessionEntry {
   const sessionId = presentation.spawnedSessionId;
-  const rowKey: DelegatedRowKey | null = sessionId ? `${ROW_PREFIXES[action]}:${sessionId}` : null;
+  const rowKey: DelegatedRowKey | null = sessionId ? `child:${sessionId}` : null;
   return {
     kind: "session",
     id,

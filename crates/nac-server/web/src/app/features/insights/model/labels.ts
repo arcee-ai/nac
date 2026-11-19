@@ -80,35 +80,11 @@ const ACTION_COPY: Record<ActionKind, ActionCopy> = {
     live: "Subagent request in progress…",
     meta: "Spawn",
   },
-  "spawn-orchestrator": {
-    type: "Spawn Orchestrator",
-    running: "Spawn Orchestrator…",
-    live: "Starting orchestrator…",
-    meta: "Spawn",
-  },
   "session-status": {
     type: "Check session status",
     running: "Checking session status…",
     live: "Checking session…",
     meta: "Check",
-  },
-  "session-steer": {
-    type: "Steer session",
-    running: "Steer session…",
-    live: "Steering session…",
-    meta: "Steer",
-  },
-  "session-read": {
-    type: "Read session",
-    running: "Reading session…",
-    live: "Reading session…",
-    meta: "Read",
-  },
-  "session-wait": {
-    type: "Wait for session",
-    running: "Wait for session…",
-    live: "Waiting for session…",
-    meta: "Wait",
   },
   "session-cancel": {
     type: "Cancel session",
@@ -133,11 +109,7 @@ const VERBATIM_ACTIONS: ReadonlySet<ActionKind> = new Set([
   "grep",
   "web-search",
   "spawn-agent",
-  "spawn-orchestrator",
   "session-status",
-  "session-steer",
-  "session-read",
-  "session-wait",
   "session-cancel",
 ]);
 const COMMAND_LABEL_LIMIT = 40;

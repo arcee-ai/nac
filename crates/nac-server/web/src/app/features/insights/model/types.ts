@@ -18,15 +18,11 @@ export type ActionKind =
   | "get-goal"
   | "update-goal"
   | "spawn-agent"
-  | "spawn-orchestrator"
   | "session-status"
-  | "session-steer"
-  | "session-read"
-  | "session-wait"
   | "session-cancel"
   | "other";
 
-export type SpawnActionKind = Extract<ActionKind, "spawn-agent" | "spawn-orchestrator">;
+export type SpawnActionKind = Extract<ActionKind, "spawn-agent">;
 
 export type ActionStatus = "ready" | "pending" | "running" | "failed";
 
@@ -45,7 +41,7 @@ export type InsightSegment =
       /** Transport tool name. */
       name: string;
       action: ActionKind;
-      /** Null for the compact tool blocks of orchestrator sessions. */
+      /** Null when no tool presentation is available. */
       presentation: ToolPresentation | null;
       /** The call has no outcome yet. */
       pending: boolean;
@@ -66,7 +62,7 @@ export interface InsightGroupEntry {
   group: InsightGroup;
 }
 
-export type DelegatedRowKey = `child:${string}` | `orchestrator:${string}`;
+export type DelegatedRowKey = `child:${string}`;
 
 export interface InsightSessionEntry {
   kind: "session";

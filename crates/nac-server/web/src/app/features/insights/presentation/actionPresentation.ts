@@ -17,11 +17,7 @@ const ROW_ICONS: Record<ActionKind, IconName> = {
   "get-goal": IconName.Goal,
   "update-goal": IconName.Checklist,
   "spawn-agent": IconName.Plane,
-  "spawn-orchestrator": IconName.Orchestrator,
   "session-status": IconName.Info,
-  "session-steer": IconName.AddChat,
-  "session-read": IconName.Eye,
-  "session-wait": IconName.Timelaps,
   "session-cancel": IconName.Close,
   other: IconName.Code,
 };
