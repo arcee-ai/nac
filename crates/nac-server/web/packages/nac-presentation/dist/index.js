@@ -23214,25 +23214,14 @@ var aw = {
 	threads: "Threads",
 	sessions: "Sessions",
 	worksets: "Worksets"
-}, ow = {
-	orchestrator: [
-		"all",
-		"tools",
-		"threads",
-		"worksets"
-	].map((e) => ({
-		value: e,
-		label: aw[e]
-	})),
-	direct: [
-		"all",
-		"tools",
-		"sessions"
-	].map((e) => ({
-		value: e,
-		label: aw[e]
-	}))
-}, sw = {
+}, ow = [
+	"all",
+	"tools",
+	"sessions"
+].map((e) => ({
+	value: e,
+	label: aw[e]
+})), sw = {
 	tools: (e) => e.kind !== "workset",
 	worksets: (e) => e.kind === "workset"
 };
@@ -23307,11 +23296,11 @@ function pw(e, t) {
 	}
 	return null;
 }
-function mw(e) {
-	return ow[e];
+function mw() {
+	return ow;
 }
-function hw(e, t) {
-	let n = t === "orchestrator" ? "the orchestrator" : "the agent";
+function hw(e) {
+	let t = "the agent";
 	switch (e) {
 		case "threads": return {
 			title: "No threads yet.",
@@ -23323,15 +23312,15 @@ function hw(e, t) {
 		};
 		case "sessions": return {
 			title: "No sessions yet.",
-			body: `They appear here as ${n} delegates work.`
+			body: `They appear here as ${t} delegates work.`
 		};
 		case "tools": return {
 			title: "No thoughts or tools yet.",
-			body: `They appear here as ${n} works.`
+			body: `They appear here as ${t} works.`
 		};
 		case "all": return {
 			title: "No actions yet.",
-			body: `They appear here as ${n} works.`
+			body: `They appear here as ${t} works.`
 		};
 	}
 }
@@ -24420,65 +24409,65 @@ function GT(e) {
 	}), r;
 }
 // src/app/features/insights/presentation/InsightsView.tsx
-function KT({ sessionId: e, snapshot: t, topology: n }) {
-	let { useInsightsFilter: r, useSelectedInsight: i, useInsightFocusNonce: a, useExpandedInsightGroups: o, selectInsight: s, selectInsightsFilter: c, showSidePanelList: l, toggleInsightGroup: u, rememberInsightsReturn: d } = x().stores.sessionLayoutStore, f = Bb(), p = pm(), m = q(() => mw(n), [n]), h = r(), g = m.some((e) => e.value === h) ? h : "all", _ = GT(q(() => uw(f.turns), [f.turns])), v = q(() => fw(_, g), [_, g]), y = $w(e, t, _), b = i(), S = a(), C = o(), w = q(() => LT(b, {
+function KT({ sessionId: e, snapshot: t }) {
+	let { useInsightsFilter: n, useSelectedInsight: r, useInsightFocusNonce: i, useExpandedInsightGroups: a, selectInsight: o, selectInsightsFilter: s, showSidePanelList: c, toggleInsightGroup: l, rememberInsightsReturn: u } = x().stores.sessionLayoutStore, d = Bb(), f = pm(), p = mw(), m = n(), h = p.some((e) => e.value === m) ? m : "all", g = GT(q(() => uw(d.turns), [d.turns])), _ = q(() => fw(g, h), [g, h]), v = $w(e, t, g), y = r(), b = i(), S = a(), C = q(() => LT(y, {
 		name: null,
 		episode: null
-	}, _, () => !1), [b, _]), T = q(() => w ?? RT(v, _), [
-		w,
-		v,
-		_
-	]), E = WT(T, UT), D = MS() ? E : null, O = J(null);
+	}, g, () => !1), [y, g]), w = q(() => C ?? RT(_, g), [
+		C,
+		_,
+		g
+	]), T = WT(w, UT), E = MS() ? T : null, D = J(null);
 	Ra(() => {
-		O.current !== S && (O.current = S, w && (g !== "all" && BT(w, v) && c("all"), w.kind === "group" && w.segmentKey && w.entry.group.segments.length > 1 && u(w.entry.id, !0)));
+		D.current !== b && (D.current = b, C && (h !== "all" && BT(C, _) && s("all"), C.kind === "group" && C.segmentKey && C.entry.group.segments.length > 1 && l(C.entry.id, !0)));
 	}, [
-		S,
-		w,
-		g,
-		v,
-		c,
-		u
+		b,
+		C,
+		h,
+		_,
+		s,
+		l
 	]);
-	let k = t?.threads, A = q(() => ({
-		resolveSession: y,
-		episodeCounts: new Map((k ?? []).map((e) => [e.name, e.episode_count]))
-	}), [y, k]), j = G((t) => {
-		let n = E?.kind === "group" ? {
+	let O = t?.threads, k = q(() => ({
+		resolveSession: v,
+		episodeCounts: new Map((O ?? []).map((e) => [e.name, e.episode_count]))
+	}), [v, O]), A = G((t) => {
+		let n = T?.kind === "group" ? {
 			kind: "group",
-			groupId: E.entry.id,
-			segmentKey: E.segmentKey
+			groupId: T.entry.id,
+			segmentKey: T.segmentKey
 		} : null;
-		d(e, n), p.openSubagent(t);
+		u(e, n), f.openSubagent(t);
 	}, [
-		p,
-		d,
+		f,
+		u,
 		e,
-		E
-	]), M = q(() => {
+		T
+	]), j = q(() => {
 		let e = (e, t) => () => {
-			s({
+			o({
 				kind: "group",
 				groupId: e.id,
 				segmentKey: t.key
-			}), l(!1);
+			}), c(!1);
 		};
 		return {
-			expanded: C,
-			entryView: (e) => FT(e, A),
-			segmentView: (e) => PT(e, A),
-			entrySelected: (e) => VT(e, D),
-			segmentSelected: (e, t) => HT(e, t, D),
-			entryShown: (e) => VT(e, E) === !0,
-			segmentShown: (e, t) => HT(e, t, E) === !0,
+			expanded: S,
+			entryView: (e) => FT(e, k),
+			segmentView: (e) => PT(e, k),
+			entrySelected: (e) => VT(e, E),
+			segmentSelected: (e, t) => HT(e, t, E),
+			entryShown: (e) => VT(e, T) === !0,
+			segmentShown: (e, t) => HT(e, t, T) === !0,
 			entryAction: (t) => {
 				if (t.kind === "thread") return null;
 				if (t.kind === "session") {
-					let e = y(t.rowKey);
-					return e ? () => j(e.rowKey) : null;
+					let e = v(t.rowKey);
+					return e ? () => A(e.rowKey) : null;
 				}
 				let { segments: n } = t.group;
 				return n.length === 1 ? e(t, n[0]) : () => {
-					u(t.id), s({
+					l(t.id), o({
 						kind: "group",
 						groupId: t.id,
 						segmentKey: null
@@ -24488,65 +24477,65 @@ function KT({ sessionId: e, snapshot: t, topology: n }) {
 			segmentAction: e
 		};
 	}, [
-		C,
-		A,
-		D,
+		S,
+		k,
 		E,
-		j,
-		y,
-		s,
-		l,
-		u
-	]), ee = t?.workspace?.host_root, te = t?.workspace?.file_path_prefix, ne = t?.metadata.workspace_host_path, re = t?.metadata.cwd, ie = q(() => ({
+		T,
+		A,
+		v,
+		o,
+		c,
+		l
+	]), M = t?.workspace?.host_root, ee = t?.workspace?.file_path_prefix, te = t?.metadata.workspace_host_path, ne = t?.metadata.cwd, re = q(() => ({
 		sessionId: e,
-		resolveSession: y,
-		openSubagent: j,
+		resolveSession: v,
+		openSubagent: A,
 		workspaceRoots: [
-			ee,
-			ne,
-			re
+			M,
+			te,
+			ne
 		],
-		filePathPrefix: te,
-		openFile: p.openFile
+		filePathPrefix: ee,
+		openFile: f.openFile
 	}), [
 		e,
-		y,
-		p,
-		j,
+		v,
+		f,
+		A,
+		M,
 		ee,
 		te,
-		ne,
-		re
-	]), ae = mm(b, t != null && w != null), oe = J({
-		picked: w,
-		timeline: _
+		ne
+	]), ie = mm(y, t != null && C != null), ae = J({
+		picked: C,
+		timeline: g
 	});
 	Ra(() => {
-		oe.current = {
-			picked: w,
-			timeline: _
+		ae.current = {
+			picked: C,
+			timeline: g
 		};
 	});
-	let se = G((e) => {
-		c(e);
-		let t = oe.current, n = fw(t.timeline, e);
-		t.picked && e !== "all" && BT(t.picked, n) && s(null);
-	}, [c, s]), ce = q(() => hw(g, n), [g, n]), le = t?.message_page?.has_older === !0, ue = q(() => le ? /* @__PURE__ */ Z(jT, { sessionId: e }) : null, [le, e]);
+	let oe = G((e) => {
+		s(e);
+		let t = ae.current, n = fw(t.timeline, e);
+		t.picked && e !== "all" && BT(t.picked, n) && o(null);
+	}, [s, o]), se = q(() => hw(h), [h]), ce = t?.message_page?.has_older === !0, le = q(() => ce ? /* @__PURE__ */ Z(jT, { sessionId: e }) : null, [ce, e]);
 	if (!t) return /* @__PURE__ */ Z(yS, { listTitle: "Insights" });
-	if (!T && !le && f.turns.length === 0) return /* @__PURE__ */ Z(AS, {
+	if (!w && !ce && d.turns.length === 0) return /* @__PURE__ */ Z(AS, {
 		listTitle: "Insights",
 		title: "No insights yet",
 		description: "Send the first message in this session to be able to see them"
 	});
-	let de, fe;
-	return T?.kind === "group" ? (de = FT(T.entry, A).label, fe = /* @__PURE__ */ Z(hT, {
-		group: T.entry.group,
-		segmentKey: T.segmentKey,
-		focusNonce: S,
-		context: ie
-	}, T.entry.id)) : fe = v.length === 0 ? /* @__PURE__ */ Z(jS, {
-		title: ce.title,
-		children: ce.body
+	let ue, de;
+	return w?.kind === "group" ? (ue = FT(w.entry, k).label, de = /* @__PURE__ */ Z(hT, {
+		group: w.entry.group,
+		segmentKey: w.segmentKey,
+		focusNonce: b,
+		context: re
+	}, w.entry.id)) : de = _.length === 0 ? /* @__PURE__ */ Z(jS, {
+		title: se.title,
+		children: se.body
 	}) : /* @__PURE__ */ Z(jS, {
 		title: "No action selected",
 		children: "Select an action in the list to see its details."
@@ -24554,29 +24543,29 @@ function KT({ sessionId: e, snapshot: t, topology: n }) {
 		listTitle: "Insights",
 		phoneListToolbarInFlow: !0,
 		listToolbar: /* @__PURE__ */ Z(_T, {
-			options: m,
-			value: g,
-			onChange: se
+			options: p,
+			value: h,
+			onChange: oe
 		}),
 		listClassName: "p-2",
-		title: de,
+		title: ue,
 		list: /* @__PURE__ */ Z(AT, {
 			sessionId: e,
-			sections: v,
-			pendingPrompt: f.pendingText,
-			emptyCopy: ce,
-			focusNonce: S,
-			controller: M,
-			footer: ue
+			sections: _,
+			pendingPrompt: d.pendingText,
+			emptyCopy: se,
+			focusNonce: b,
+			controller: j,
+			footer: le
 		}),
 		children: /* @__PURE__ */ Z("div", {
-			ref: ae,
+			ref: ie,
 			id: dm,
 			role: "region",
 			"aria-label": "Insights detail",
 			tabIndex: -1,
 			className: "flex flex-col flex-1 min-w-0 min-h-0 -outline-offset-2 outline-[var(--color-border-focus-outline)] focus-visible:outline-2",
-			children: fe
+			children: de
 		})
 	}) });
 }
@@ -26226,8 +26215,7 @@ function rD({ sessionId: e, snapshot: t, behavior: n, panel: r, onPanelChange: i
 	let { useSidePanelExpanded: c, useSelectedRevision: l, toggleSidePanelExpanded: u, showSidePanelList: d, selectRevision: f } = x().stores.sessionLayoutStore, p = c(), m = B(), h = Ar(), g = l(), _ = n === void 0 ? t?.metadata.behavior ?? "direct" : n, v = _ === "direct", y = _ == null ? null : hi(_, t?.lineage?.kind), b = y?.readOnly ?? !1, S = y?.widePanels ?? [], C = S.includes("delegated"), w = er(e, C).data?.length ?? 0, T = y == null ? null : S.includes(r) || m && y.mobilePanels.includes(r) ? r : y.defaultPanel, E = /* @__PURE__ */ Q(X, { children: [
 		T === "insights" ? /* @__PURE__ */ Z(KT, {
 			sessionId: e,
-			snapshot: t,
-			topology: "direct"
+			snapshot: t
 		}) : null,
 		T === "files" ? /* @__PURE__ */ Z(jE, {
 			sessionId: e,

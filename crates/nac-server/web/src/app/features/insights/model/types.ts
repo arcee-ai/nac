@@ -123,8 +123,6 @@ export interface InsightTurnSection {
   entries: readonly InsightEntry[];
 }
 
-export type InsightsTopology = "orchestrator" | "direct";
-
 export type InsightsFilter = "all" | "tools" | "threads" | "sessions" | "worksets";
 
 export interface InsightsFilterOption {

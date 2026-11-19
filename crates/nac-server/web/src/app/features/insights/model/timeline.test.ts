@@ -21,11 +21,7 @@ import {
   insightFilterOptions,
   newestInsightEntry,
 } from "@/app/features/insights/model/timeline";
-import type {
-  InsightsFilter,
-  InsightsTopology,
-  InsightTurnSection,
-} from "@/app/features/insights/model/types";
+import type { InsightsFilter, InsightTurnSection } from "@/app/features/insights/model/types";
 import { STREAMING_TURN_KEY, withStreamedOutput, type TranscriptTurn } from "@/app/lib/transcript";
 
 const ORCHESTRATOR_TURNS: TranscriptTurn[] = [
@@ -216,45 +212,20 @@ describe("insight timeline helpers", () => {
     expect(findInsightEntry(sections, "missing")).toBeNull();
   });
 
-  it("offers the filters of each topology", () => {
-    expect(insightFilterOptions("orchestrator")).toEqual([
-      { value: "all", label: "All actions" },
-      { value: "tools", label: "Tools & reasoning" },
-      { value: "threads", label: "Threads" },
-      { value: "worksets", label: "Worksets" },
-    ]);
-    expect(insightFilterOptions("direct")).toEqual([
+  it("offers the direct session filters", () => {
+    expect(insightFilterOptions()).toEqual([
       { value: "all", label: "All actions" },
       { value: "tools", label: "Tools & reasoning" },
       { value: "sessions", label: "Sessions" },
     ]);
-    expect(insightFilterOptions("direct")).toBe(insightFilterOptions("direct"));
+    expect(insightFilterOptions()).toBe(insightFilterOptions());
   });
 
-  it.each<[InsightsFilter, InsightsTopology, string, string]>([
-    ["all", "orchestrator", "No actions yet.", "They appear here as the orchestrator works."],
-    ["all", "direct", "No actions yet.", "They appear here as the agent works."],
-    [
-      "tools",
-      "orchestrator",
-      "No thoughts or tools yet.",
-      "They appear here as the orchestrator works.",
-    ],
-    ["tools", "direct", "No thoughts or tools yet.", "They appear here as the agent works."],
-    [
-      "threads",
-      "orchestrator",
-      "No threads yet.",
-      "They appear here as the orchestrator assigns work.",
-    ],
-    [
-      "worksets",
-      "orchestrator",
-      "No worksets yet.",
-      "They appear here as the orchestrator defines them.",
-    ],
-    ["sessions", "direct", "No sessions yet.", "They appear here as the agent delegates work."],
-  ])("explains an empty %s filter in a %s session", (filter, topology, title, body) => {
-    expect(insightFilterEmptyCopy(filter, topology)).toEqual({ title, body });
+  it.each<[InsightsFilter, string, string]>([
+    ["all", "No actions yet.", "They appear here as the agent works."],
+    ["tools", "No thoughts or tools yet.", "They appear here as the agent works."],
+    ["sessions", "No sessions yet.", "They appear here as the agent delegates work."],
+  ])("explains an empty %s filter", (filter, title, body) => {
+    expect(insightFilterEmptyCopy(filter)).toEqual({ title, body });
   });
 });

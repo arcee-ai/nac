@@ -10,7 +10,6 @@ import type {
   InsightsEmptyCopy,
   InsightsFilter,
   InsightsFilterOption,
-  InsightsTopology,
   InsightTurnSection,
 } from "@/app/features/insights/model/types";
 import { STREAMING_TURN_KEY, type TranscriptTurn } from "@/app/lib/transcript";
@@ -27,16 +26,9 @@ const FILTER_LABELS: Record<InsightsFilter, string> = {
   worksets: "Worksets",
 };
 
-const TOPOLOGY_FILTERS: Record<InsightsTopology, readonly InsightsFilterOption[]> = {
-  orchestrator: (["all", "tools", "threads", "worksets"] as const).map((value) => ({
-    value,
-    label: FILTER_LABELS[value],
-  })),
-  direct: (["all", "tools", "sessions"] as const).map((value) => ({
-    value,
-    label: FILTER_LABELS[value],
-  })),
-};
+const FILTER_OPTIONS: readonly InsightsFilterOption[] = (["all", "tools", "sessions"] as const).map(
+  (value) => ({ value, label: FILTER_LABELS[value] }),
+);
 
 const GROUP_FILTERS: Partial<Record<InsightsFilter, (segment: InsightSegment) => boolean>> = {
   tools: (segment) => segment.kind !== "workset",
@@ -166,15 +158,12 @@ export function newestInsightEntry(sections: readonly InsightTurnSection[]): Ins
   return sections[0]?.entries.at(-1) ?? null;
 }
 
-export function insightFilterOptions(topology: InsightsTopology): readonly InsightsFilterOption[] {
-  return TOPOLOGY_FILTERS[topology];
+export function insightFilterOptions(): readonly InsightsFilterOption[] {
+  return FILTER_OPTIONS;
 }
 
-export function insightFilterEmptyCopy(
-  filter: InsightsFilter,
-  topology: InsightsTopology,
-): InsightsEmptyCopy {
-  const actor = topology === "orchestrator" ? "the orchestrator" : "the agent";
+export function insightFilterEmptyCopy(filter: InsightsFilter): InsightsEmptyCopy {
+  const actor = "the agent";
   switch (filter) {
     case "threads":
       return {

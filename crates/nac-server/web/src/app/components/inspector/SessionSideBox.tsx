@@ -115,9 +115,7 @@ export function SessionSideBox({
 
   const body = (
     <>
-      {active === "insights" ? (
-        <InsightsView sessionId={sessionId} snapshot={snapshot} topology="direct" />
-      ) : null}
+      {active === "insights" ? <InsightsView sessionId={sessionId} snapshot={snapshot} /> : null}
       {active === "files" ? (
         <FilesView
           sessionId={sessionId}

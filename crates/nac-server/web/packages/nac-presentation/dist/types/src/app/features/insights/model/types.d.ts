@@ -87,7 +87,6 @@ export interface InsightTurnSection {
     /** Chronological. */
     entries: readonly InsightEntry[];
 }
-export type InsightsTopology = "orchestrator" | "direct";
 export type InsightsFilter = "all" | "tools" | "threads" | "sessions" | "worksets";
 export interface InsightsFilterOption {
     value: InsightsFilter;
