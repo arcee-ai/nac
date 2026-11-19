@@ -8,7 +8,7 @@ pub mod commands;
 pub mod events;
 mod goals;
 pub mod guide;
-pub mod light_model;
+mod light_model;
 #[cfg(feature = "managed-fault-fixture")]
 pub mod managed_fault_fixture;
 mod mcp;
@@ -16,16 +16,6 @@ pub mod model;
 pub mod peer_goal_control;
 pub mod task_followups;
 pub mod task_launch_control;
-
-/// Named, reusable model setups the launch UI offers instead of asking for a
-/// backend, model and base URL every time.
-pub mod model_configurations {
-    pub use crate::store::{
-        delete_model_configuration, insert_model_configuration, list_model_configurations,
-        load_model_configuration, update_model_configuration, ModelConfigurationRecord,
-        ModelConfigurationStoreError, NewModelConfiguration,
-    };
-}
 
 /// Store-scoped project metadata, creation defaults, and session association.
 pub mod projects {
