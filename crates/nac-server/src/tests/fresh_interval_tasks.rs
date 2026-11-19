@@ -1,7 +1,7 @@
 //! Local scripted-provider qualification of the real prepared launch and run
 //! transaction. This is an isolated fixture, not vendor or remote parity proof.
-#[path = "fresh_interval_tasks/model_defaults.rs"]
-mod model_defaults;
+#[path = "fresh_interval_tasks/model_selection.rs"]
+mod model_selection;
 #[path = "fresh_interval_tasks/recovery.rs"]
 mod recovery;
 

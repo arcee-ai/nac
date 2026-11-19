@@ -77,7 +77,7 @@ async fn reservation(
         &HeartbeatAction::Create {
             spec: specification(),
         },
-        "Create model-inheritance fixture tasks.",
+        "Create model-selection fixture tasks.",
         &binding,
         1_000,
     )
@@ -109,7 +109,7 @@ async fn frozen_model_choices_survive_replay_for_git_and_shared_tasks() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     for git_project in [false, true] {
         for explicit in [false, true] {
-            let root = temp_root("fresh_frozen_model_defaults")
+            let root = temp_root("fresh_frozen_model_selection")
                 .canonicalize()
                 .unwrap();
             let home = root.join("nac-home");
@@ -219,7 +219,7 @@ async fn frozen_model_choices_survive_replay_for_git_and_shared_tasks() {
 async fn frozen_model_choices_do_not_bypass_current_policy_or_credential_readiness() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     for failure in ["deny", "ask", "credential"] {
-        let root = temp_root("fresh_model_defaults_denied")
+        let root = temp_root("fresh_model_selection_denied")
             .canonicalize()
             .unwrap();
         let home = root.join("nac-home");
