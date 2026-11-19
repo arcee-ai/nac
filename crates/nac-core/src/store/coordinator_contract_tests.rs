@@ -267,12 +267,8 @@ async fn async_thread_event_waits_for_commit_before_publication_without_blocking
     let sink = crate::events::EventSink::bus(bus.clone());
     let (gate, release, _) = super::tests::block_executor(&owner);
     let publication = tokio::spawn(async move {
-        sink.emit_async(crate::events::AgentEvent::ThreadStarted {
-            name: "worker".into(),
-            action: "test".into(),
-            source_threads: vec![],
-        })
-        .await;
+        sink.emit_async(crate::events::test_primary_tool_started("persistence-gate"))
+            .await;
     });
     while owner.stats().queued == 0 {
         tokio::task::yield_now().await;
@@ -302,7 +298,7 @@ async fn async_thread_event_waits_for_commit_before_publication_without_blocking
         .await
         .unwrap();
     assert_eq!(events.len(), 1);
-    assert_eq!(events["worker"].len(), 1);
+    assert_eq!(events[crate::events::PRIMARY_TOOL_EVENT_TARGET].len(), 1);
     owner.shutdown().await.unwrap();
     std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
 }

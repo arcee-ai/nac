@@ -51,33 +51,6 @@ export interface components {
           thread_name?: string | null;
           type: "tool_call_finished";
         }
-      | { action: string; name: string; source_threads: string[]; type: "thread_started" }
-      | { line: string; name: string; type: "thread_log" }
-      | {
-          instruction_preview: string;
-          name: string;
-          steering_id: number;
-          type: "thread_steering_queued";
-        }
-      | {
-          instruction_preview: string;
-          name: string;
-          steering_id: number;
-          type: "thread_steering_delivered";
-        }
-      | {
-          instruction_preview: string;
-          name: string;
-          steering_id: number;
-          type: "thread_steering_expired";
-        }
-      | { instruction_preview: string; steering_id: number; type: "orchestrator_steering_queued" }
-      | {
-          instruction_preview: string;
-          steering_id: number;
-          type: "orchestrator_steering_delivered";
-        }
-      | { instruction_preview: string; steering_id: number; type: "orchestrator_steering_expired" }
       | {
           compaction_id: string;
           reason: components["schemas"]["CompactionReason"];
@@ -99,14 +72,6 @@ export interface components {
           failure: components["schemas"]["CompactionFailure"];
           reason: components["schemas"]["CompactionReason"];
           type: "orchestrator_compaction_failed";
-        }
-      | {
-          exit_code: number;
-          name: string;
-          timed_out: boolean;
-          timeout_reason?: string | null;
-          type: "thread_finished";
-          usage?: components["schemas"]["TokenUsage"] | null;
         }
       | {
           content: string;

@@ -247,42 +247,6 @@ pub enum AgentEvent {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         remote_outcome_uncertain: bool,
     },
-    ThreadStarted {
-        name: String,
-        action: String,
-        source_threads: Vec<String>,
-    },
-    ThreadLog {
-        name: String,
-        line: String,
-    },
-    ThreadSteeringQueued {
-        name: String,
-        steering_id: i64,
-        instruction_preview: String,
-    },
-    ThreadSteeringDelivered {
-        name: String,
-        steering_id: i64,
-        instruction_preview: String,
-    },
-    ThreadSteeringExpired {
-        name: String,
-        steering_id: i64,
-        instruction_preview: String,
-    },
-    OrchestratorSteeringQueued {
-        steering_id: i64,
-        instruction_preview: String,
-    },
-    OrchestratorSteeringDelivered {
-        steering_id: i64,
-        instruction_preview: String,
-    },
-    OrchestratorSteeringExpired {
-        steering_id: i64,
-        instruction_preview: String,
-    },
     OrchestratorCompactionStarted {
         compaction_id: Uuid,
         reason: CompactionReason,
@@ -300,15 +264,6 @@ pub enum AgentEvent {
         compaction_id: Uuid,
         reason: CompactionReason,
         failure: CompactionFailure,
-    },
-    ThreadFinished {
-        name: String,
-        exit_code: i32,
-        timed_out: bool,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        timeout_reason: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        usage: Option<crate::model::TokenUsage>,
     },
     AssistantMessage {
         thread_name: Option<String>,
@@ -1185,50 +1140,25 @@ impl SessionEventBus {
 fn persisted_thread_event_name(event: &AgentEvent) -> Option<&str> {
     match event {
         AgentEvent::ToolCallStarted {
-            thread_name: None,
-            name,
-            ..
+            thread_name: None, ..
         }
         | AgentEvent::ToolCallFinished {
-            thread_name: None,
-            name,
-            ..
-        } if !matches!(
-            name.as_str(),
-            "thread"
-                | "threads"
-                | "thread_read"
-                | "thread_delete"
-                | "workset_define"
-                | "workset_read"
-                | "workset_list"
-        ) =>
-        {
-            Some(PRIMARY_TOOL_EVENT_TARGET)
-        }
+            thread_name: None, ..
+        } => Some(PRIMARY_TOOL_EVENT_TARGET),
         AgentEvent::RunStarted { thread_name, .. }
         | AgentEvent::ToolCallStarted { thread_name, .. }
         | AgentEvent::ToolCallFinished { thread_name, .. }
         | AgentEvent::AssistantMessage { thread_name, .. }
         | AgentEvent::Error { thread_name, .. }
         | AgentEvent::RunFinished { thread_name } => thread_name.as_deref(),
-        AgentEvent::ThreadStarted { name, .. }
-        | AgentEvent::ThreadSteeringQueued { name, .. }
-        | AgentEvent::ThreadSteeringDelivered { name, .. }
-        | AgentEvent::ThreadSteeringExpired { name, .. }
-        | AgentEvent::ThreadFinished { name, .. } => Some(name),
         // Usage updates are deliberately live-only. Persisting them would
         // consume slots in the user-facing thread-event pages and make a DB
         // written by this version unreadable by older AgentEvent enums.
         AgentEvent::ModelCallStarted { .. }
         | AgentEvent::TokenUsageUpdated { .. }
-        | AgentEvent::ThreadLog { .. }
         | AgentEvent::McpServerSkipped { .. }
         | AgentEvent::McpNotification { .. }
         | AgentEvent::ModelError { .. }
-        | AgentEvent::OrchestratorSteeringQueued { .. }
-        | AgentEvent::OrchestratorSteeringDelivered { .. }
-        | AgentEvent::OrchestratorSteeringExpired { .. }
         | AgentEvent::OrchestratorCompactionStarted { .. }
         | AgentEvent::OrchestratorCompactionCompleted { .. }
         | AgentEvent::OrchestratorCompactionSkipped { .. }
@@ -1236,9 +1166,23 @@ fn persisted_thread_event_name(event: &AgentEvent) -> Option<&str> {
     }
 }
 
+#[cfg(test)]
+pub(crate) fn test_primary_tool_started(id: &str) -> AgentEvent {
+    AgentEvent::ToolCallStarted {
+        thread_name: None,
+        call_id: id.to_owned(),
+        name: "read".to_owned(),
+        args_preview: String::new(),
+        key_arg_preview: None,
+        args_detail: None,
+        delegation_intent: None,
+        delegation_summary_verified: false,
+    }
+}
+
 pub(crate) fn sanitize_external_agent_event(event: AgentEvent) -> Option<AgentEvent> {
     Some(match event {
-        AgentEvent::ModelCallStarted { .. } | AgentEvent::ThreadLog { .. } => return None,
+        AgentEvent::ModelCallStarted { .. } => return None,
         AgentEvent::RunStarted { thread_name, .. } => AgentEvent::RunStarted {
             thread_name,
             prompt_preview: "run started".to_string(),
@@ -1305,67 +1249,6 @@ pub(crate) fn sanitize_external_agent_event(event: AgentEvent) -> Option<AgentEv
             execution_duration_ms,
             cleanup_duration_ms,
             remote_outcome_uncertain,
-        },
-        AgentEvent::ThreadStarted {
-            name,
-            source_threads,
-            ..
-        } => AgentEvent::ThreadStarted {
-            name,
-            action: "thread dispatched".to_string(),
-            source_threads,
-        },
-        AgentEvent::ThreadSteeringQueued {
-            name, steering_id, ..
-        } => AgentEvent::ThreadSteeringQueued {
-            name,
-            steering_id,
-            instruction_preview: "steering queued".to_string(),
-        },
-        AgentEvent::ThreadSteeringDelivered {
-            name, steering_id, ..
-        } => AgentEvent::ThreadSteeringDelivered {
-            name,
-            steering_id,
-            instruction_preview: "steering delivered".to_string(),
-        },
-        AgentEvent::ThreadSteeringExpired {
-            name, steering_id, ..
-        } => AgentEvent::ThreadSteeringExpired {
-            name,
-            steering_id,
-            instruction_preview: "steering expired".to_string(),
-        },
-        AgentEvent::OrchestratorSteeringQueued { steering_id, .. } => {
-            AgentEvent::OrchestratorSteeringQueued {
-                steering_id,
-                instruction_preview: "steering queued".to_string(),
-            }
-        }
-        AgentEvent::OrchestratorSteeringDelivered { steering_id, .. } => {
-            AgentEvent::OrchestratorSteeringDelivered {
-                steering_id,
-                instruction_preview: "steering delivered".to_string(),
-            }
-        }
-        AgentEvent::OrchestratorSteeringExpired { steering_id, .. } => {
-            AgentEvent::OrchestratorSteeringExpired {
-                steering_id,
-                instruction_preview: "steering expired".to_string(),
-            }
-        }
-        AgentEvent::ThreadFinished {
-            name,
-            exit_code,
-            timed_out,
-            usage,
-            ..
-        } => AgentEvent::ThreadFinished {
-            name,
-            exit_code,
-            timed_out,
-            timeout_reason: timed_out.then(|| "thread timed out".to_string()),
-            usage,
         },
         AgentEvent::Error { thread_name, .. } => AgentEvent::Error {
             thread_name,

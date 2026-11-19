@@ -42,15 +42,6 @@ async fn frontend_snapshot_projects_sanitized_primary_tool_events_separately() {
             cleanup_duration_ms: None,
             remote_outcome_uncertain: false,
         });
-    parts
-        .service
-        .event_bus
-        .emit_agent(AgentEvent::ThreadStarted {
-            name: crate::events::PRIMARY_TOOL_EVENT_TARGET.to_string(),
-            action: "collision must remain thread-owned".to_string(),
-            source_threads: Vec::new(),
-        });
-
     let snapshot = parts.service.frontend_snapshot().await.unwrap();
 
     assert_eq!(snapshot.primary_tool_events.len(), 2);

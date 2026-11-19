@@ -3,11 +3,7 @@ use crate::terminal::CommandStatus;
 
 #[test]
 fn decode_prefixed_event_round_trip() {
-    let event = AgentEvent::ThreadStarted {
-        name: "impl".to_string(),
-        action: "inspect auth".to_string(),
-        source_threads: vec!["auth".to_string()],
-    };
+    let event = test_primary_tool_started("round-trip");
     let encoded = format!(
         "{}{}",
         STDERR_EVENT_PREFIX,
@@ -926,25 +922,18 @@ async fn event_sink_preserves_run_and_client_context_on_session_bus() {
 }
 
 #[test]
-fn model_start_and_thread_logs_are_never_forwarded() {
+fn model_start_events_are_never_forwarded() {
     let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
     let channel_sink = EventSink::channel(sender);
     let bus = SessionEventBus::new(Some("session-internal".to_string()));
     let mut bus_receiver = bus.subscribe();
     let bus_sink = EventSink::bus(bus.clone());
-    for event in [
-        AgentEvent::ModelCallStarted {
-            thread_name: Some("worker".to_string()),
-            iteration: 1,
-        },
-        AgentEvent::ThreadLog {
-            name: "worker".to_string(),
-            line: "CANARY_LOG".to_string(),
-        },
-    ] {
-        channel_sink.emit(event.clone());
-        bus_sink.emit(event);
-    }
+    let event = AgentEvent::ModelCallStarted {
+        thread_name: None,
+        iteration: 1,
+    };
+    channel_sink.emit(event.clone());
+    bus_sink.emit(event);
 
     assert!(receiver.try_recv().is_err());
     assert!(bus_receiver.try_recv().is_err());
@@ -987,7 +976,7 @@ fn external_tool_telemetry_is_fail_closed_before_channel_and_database() {
     let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
     let channel_sink = EventSink::channel(sender);
     let started = AgentEvent::ToolCallStarted {
-        thread_name: Some("worker".to_string()),
+        thread_name: None,
         call_id: "call-safe".to_string(),
         name: "exec_command".to_string(),
         args_preview: "CANARY_COMMAND".to_string(),
@@ -1008,7 +997,7 @@ fn external_tool_telemetry_is_fail_closed_before_channel_and_database() {
     };
     channel_sink.emit(started.clone());
     channel_sink.emit(AgentEvent::ToolCallStarted {
-        thread_name: Some("worker".to_string()),
+        thread_name: None,
         call_id: "call-write".to_string(),
         name: "write".to_string(),
         args_preview: "CANARY_WRITE".to_string(),
@@ -1025,7 +1014,7 @@ fn external_tool_telemetry_is_fail_closed_before_channel_and_database() {
     });
     bus_sink.emit(started);
     bus_sink.emit(AgentEvent::ToolCallFinished {
-        thread_name: Some("worker".to_string()),
+        thread_name: None,
         call_id: "call-safe".to_string(),
         name: "exec_command".to_string(),
         content_preview: "exit 7: test result".to_string(),
@@ -1041,22 +1030,9 @@ fn external_tool_telemetry_is_fail_closed_before_channel_and_database() {
         remote_outcome_uncertain: false,
     });
     bus_sink.emit(AgentEvent::Error {
-        thread_name: Some("worker".to_string()),
+        thread_name: None,
         message: "CANARY_ERROR".to_string(),
     });
-    bus_sink.emit(AgentEvent::ThreadStarted {
-        name: "worker".to_string(),
-        action: "CANARY_ACTION".to_string(),
-        source_threads: vec!["source".to_string()],
-    });
-    bus_sink.emit(AgentEvent::ThreadFinished {
-        name: "worker".to_string(),
-        exit_code: -1,
-        timed_out: true,
-        timeout_reason: Some("CANARY_TIMEOUT".to_string()),
-        usage: None,
-    });
-
     let channel_event = receiver.try_recv().unwrap();
     let AgentEvent::ToolCallStarted {
         args_preview,
@@ -1083,8 +1059,8 @@ fn external_tool_telemetry_is_fail_closed_before_channel_and_database() {
     assert!(!args_preview.contains("CANARY"));
 
     let records = crate::store::load_all_thread_events(&path, "session-safe-events", 20).unwrap();
-    assert_eq!(records["worker"].len(), 5);
-    let serialized = records["worker"]
+    assert_eq!(records[PRIMARY_TOOL_EVENT_TARGET].len(), 2);
+    let serialized = records[PRIMARY_TOOL_EVENT_TARGET]
         .iter()
         .map(|record| record.event_json.as_str())
         .collect::<Vec<_>>()
@@ -1092,9 +1068,6 @@ fn external_tool_telemetry_is_fail_closed_before_channel_and_database() {
     assert!(!serialized.contains("CANARY"));
     assert!(serialized.contains("/safe/work"));
     assert!(serialized.contains("exit 7: test result"));
-    assert!(serialized.contains("operation failed"));
-    assert!(serialized.contains("thread dispatched"));
-    assert!(serialized.contains("thread timed out"));
     let replay = serde_json::to_string(&bus.recent_events(None, 20).1).unwrap();
     assert!(!replay.contains("CANARY"));
 
@@ -1322,6 +1295,23 @@ fn mcp_server_skipped_sanitization_redacts_credentials_and_bounds_length() {
         "reason not bounded: {} bytes",
         reason.len()
     );
+}
+
+#[test]
+fn primary_tool_events_are_persisted_independently_of_tool_name() {
+    for name in ["read", "thread", "workset_define", "custom_tool"] {
+        let mut event = test_primary_tool_started("call");
+        if let AgentEvent::ToolCallStarted {
+            name: event_name, ..
+        } = &mut event
+        {
+            *event_name = name.to_owned();
+        }
+        assert_eq!(
+            persisted_thread_event_name(&event),
+            Some(PRIMARY_TOOL_EVENT_TARGET)
+        );
+    }
 }
 
 #[test]

@@ -159,42 +159,6 @@ export declare function createRuntimeStore(_storage?: Pick<Storage, "getItem" | 
         thread_name?: string | null;
         type: "tool_call_finished";
     } | {
-        action: string;
-        name: string;
-        source_threads: string[];
-        type: "thread_started";
-    } | {
-        line: string;
-        name: string;
-        type: "thread_log";
-    } | {
-        instruction_preview: string;
-        name: string;
-        steering_id: number;
-        type: "thread_steering_queued";
-    } | {
-        instruction_preview: string;
-        name: string;
-        steering_id: number;
-        type: "thread_steering_delivered";
-    } | {
-        instruction_preview: string;
-        name: string;
-        steering_id: number;
-        type: "thread_steering_expired";
-    } | {
-        instruction_preview: string;
-        steering_id: number;
-        type: "orchestrator_steering_queued";
-    } | {
-        instruction_preview: string;
-        steering_id: number;
-        type: "orchestrator_steering_delivered";
-    } | {
-        instruction_preview: string;
-        steering_id: number;
-        type: "orchestrator_steering_expired";
-    } | {
         compaction_id: string;
         reason: import("../types/openapi.generated").components["schemas"]["CompactionReason"];
         type: "orchestrator_compaction_started";
@@ -212,13 +176,6 @@ export declare function createRuntimeStore(_storage?: Pick<Storage, "getItem" | 
         failure: import("../types/openapi.generated").components["schemas"]["CompactionFailure"];
         reason: import("../types/openapi.generated").components["schemas"]["CompactionReason"];
         type: "orchestrator_compaction_failed";
-    } | {
-        exit_code: number;
-        name: string;
-        timed_out: boolean;
-        timeout_reason?: string | null;
-        type: "thread_finished";
-        usage?: import("../types/openapi.generated").components["schemas"]["TokenUsage"] | null;
     } | {
         content: string;
         thread_name?: string | null;
@@ -323,42 +280,6 @@ export declare const release: () => void, runtimeStore: import("../lib/store").S
     thread_name?: string | null;
     type: "tool_call_finished";
 } | {
-    action: string;
-    name: string;
-    source_threads: string[];
-    type: "thread_started";
-} | {
-    line: string;
-    name: string;
-    type: "thread_log";
-} | {
-    instruction_preview: string;
-    name: string;
-    steering_id: number;
-    type: "thread_steering_queued";
-} | {
-    instruction_preview: string;
-    name: string;
-    steering_id: number;
-    type: "thread_steering_delivered";
-} | {
-    instruction_preview: string;
-    name: string;
-    steering_id: number;
-    type: "thread_steering_expired";
-} | {
-    instruction_preview: string;
-    steering_id: number;
-    type: "orchestrator_steering_queued";
-} | {
-    instruction_preview: string;
-    steering_id: number;
-    type: "orchestrator_steering_delivered";
-} | {
-    instruction_preview: string;
-    steering_id: number;
-    type: "orchestrator_steering_expired";
-} | {
     compaction_id: string;
     reason: import("../types/openapi.generated").components["schemas"]["CompactionReason"];
     type: "orchestrator_compaction_started";
@@ -376,13 +297,6 @@ export declare const release: () => void, runtimeStore: import("../lib/store").S
     failure: import("../types/openapi.generated").components["schemas"]["CompactionFailure"];
     reason: import("../types/openapi.generated").components["schemas"]["CompactionReason"];
     type: "orchestrator_compaction_failed";
-} | {
-    exit_code: number;
-    name: string;
-    timed_out: boolean;
-    timeout_reason?: string | null;
-    type: "thread_finished";
-    usage?: import("../types/openapi.generated").components["schemas"]["TokenUsage"] | null;
 } | {
     content: string;
     thread_name?: string | null;
