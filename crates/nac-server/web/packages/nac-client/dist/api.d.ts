@@ -567,7 +567,6 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         active_compaction?: import("./openapi.generated.js").components["schemas"]["ActiveCompactionSnapshot"] | null;
         active_run?: import("./openapi.generated.js").components["schemas"]["ActiveRunSnapshot"] | null;
         active_threads?: string[];
-        covered_orchestrator_steering_ids?: number[];
         forks?: import("./openapi.generated.js").components["schemas"]["SessionForkLink"][];
         message_created_at?: (string | null)[];
         messages: import("./openapi.generated.js").components["schemas"]["Message"][];
@@ -581,7 +580,6 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         thread_event_boundary: import("./openapi.generated.js").components["schemas"]["SessionEventBoundary"];
         thread_event_diagnostics?: import("./openapi.generated.js").components["schemas"]["ThreadEventDecodeDiagnostic"][];
         thread_events?: Record<string, import("./openapi.generated.js").components["schemas"]["AgentEvent"][]>;
-        thread_steering?: import("./openapi.generated.js").components["schemas"]["ThreadSteeringRecord"][];
         threads: import("./openapi.generated.js").components["schemas"]["ThreadSnapshot"][];
         transcript_recovery_warning?: string | null;
         worksets: import("./openapi.generated.js").components["schemas"]["WorksetsSnapshot"];
@@ -597,7 +595,6 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         active_compaction?: import("./openapi.generated.js").components["schemas"]["ActiveCompactionSnapshot"] | null;
         active_run?: import("./openapi.generated.js").components["schemas"]["ActiveRunSnapshot"] | null;
         active_threads?: string[];
-        covered_orchestrator_steering_ids?: number[];
         forks?: import("./openapi.generated.js").components["schemas"]["SessionForkLink"][];
         message_created_at?: (string | null)[];
         messages: import("./openapi.generated.js").components["schemas"]["Message"][];
@@ -611,7 +608,6 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         thread_event_boundary: import("./openapi.generated.js").components["schemas"]["SessionEventBoundary"];
         thread_event_diagnostics?: import("./openapi.generated.js").components["schemas"]["ThreadEventDecodeDiagnostic"][];
         thread_events?: Record<string, import("./openapi.generated.js").components["schemas"]["AgentEvent"][]>;
-        thread_steering?: import("./openapi.generated.js").components["schemas"]["ThreadSteeringRecord"][];
         threads: import("./openapi.generated.js").components["schemas"]["ThreadSnapshot"][];
         transcript_recovery_warning?: string | null;
         worksets: import("./openapi.generated.js").components["schemas"]["WorksetsSnapshot"];

@@ -19864,14 +19864,6 @@
               "type": "string"
             }
           },
-          "covered_orchestrator_steering_ids": {
-            "type": "array",
-            "items": {
-              "type": "integer",
-              "format": "int64"
-            },
-            "description": "Delivered orchestrator steering records whose verbatim user message is\nalready present in the transcript source backing this snapshot. The\nfrontend hides those records so guidance renders exactly once — as the\ncanonical user message."
-          },
           "forks": {
             "type": "array",
             "items": {
@@ -19961,12 +19953,6 @@
             },
             "propertyNames": {
               "type": "string"
-            }
-          },
-          "thread_steering": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ThreadSteeringRecord"
             }
           },
           "threads": {
@@ -22007,60 +21993,6 @@
             "type": "string"
           },
           "updated_at": {
-            "type": "string"
-          }
-        }
-      },
-      "ThreadSteeringRecord": {
-        "type": "object",
-        "required": [
-          "id",
-          "session_id",
-          "thread_name",
-          "dispatch_id",
-          "instruction",
-          "status",
-          "created_at"
-        ],
-        "properties": {
-          "claimed_at": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "created_at": {
-            "type": "string"
-          },
-          "delivered_at": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "dispatch_id": {
-            "type": "string"
-          },
-          "expired_at": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "id": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "instruction": {
-            "type": "string"
-          },
-          "session_id": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          },
-          "thread_name": {
             "type": "string"
           }
         }

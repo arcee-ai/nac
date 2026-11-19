@@ -278,14 +278,6 @@ pub struct SessionFrontendSnapshot {
     pub thread_event_boundary: SessionEventBoundary,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub thread_event_diagnostics: Vec<ThreadEventDecodeDiagnostic>,
-    #[serde(default)]
-    pub thread_steering: Vec<crate::store::ThreadSteeringRecord>,
-    /// Delivered orchestrator steering records whose verbatim user message is
-    /// already present in the transcript source backing this snapshot. The
-    /// frontend hides those records so guidance renders exactly once — as the
-    /// canonical user message.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub covered_orchestrator_steering_ids: Vec<i64>,
     /// Conversation forks created from a model turn in this session.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub forks: Vec<crate::store::SessionForkLink>,
@@ -425,7 +417,6 @@ struct FrontendSnapshotBlockingLoad {
     thread_episodes: HashMap<String, Vec<EpisodeSnapshot>>,
     thread_events: DecodedThreadEvents,
     thread_event_boundary: SessionEventBoundary,
-    thread_steering: Vec<crate::store::ThreadSteeringRecord>,
     forks: Vec<crate::store::SessionForkLink>,
     worksets: WorksetsSnapshot,
     run_failure: Option<crate::run_failure::RunFailure>,
@@ -838,17 +829,13 @@ enum OperationAdmissionPreparationError {
 /// assistant-with-tool-calls and tool-result tails, never User messages and
 /// never visible responses (assistant messages without tool calls). A
 /// straggler row from an aborted append that is scanned in the cancel
-/// window before its `delete_from` would overcount — the same accepted
-/// imprecision class as `user_copies` (step 3).
+/// window before its `delete_from` would overcount.
 #[derive(Default)]
 struct TranscriptScanCache {
     /// Raw merged-transcript length scanned so far.
     scanned_len: usize,
     user_count: usize,
     last_user_idx: Option<usize>,
-    /// User message content → surviving copy count. Drives steering coverage
-    /// with newest-first pairing (see `covered_orchestrator_steering_ids`).
-    user_copies: HashMap<String, usize>,
     /// Assistant messages with no tool calls (user-visible responses).
     /// Diffed between run start and run end for the run-end token/timing
     /// bookkeeping (step 4, never-fold): the snapshot blob is never
@@ -868,10 +855,9 @@ impl TranscriptScanCache {
     }
 
     fn scan_message(&mut self, idx: usize, message: &Message) {
-        if let Message::User { content } = message {
+        if matches!(message, Message::User { .. }) {
             self.user_count += 1;
             self.last_user_idx = Some(idx);
-            *self.user_copies.entry(content.clone()).or_insert(0) += 1;
         }
         if is_visible_response(message) {
             self.visible_response_count += 1;
@@ -1019,80 +1005,6 @@ struct LoadedFrontendMessages {
     created_at: Vec<Option<String>>,
     page: Option<MessagePageMetadata>,
     cycle: Option<MessageCycleMetadata>,
-}
-
-/// Flags delivered orchestrator steering records whose verbatim user message
-/// is present in `transcript`. Steering is injected into the agent as an exact
-/// `Message::User`, so coverage is an exact-content match; only `delivered`
-/// records can ever have a canonical message. Transcript copies pair with the
-/// newest matching records first: messages are append-only (compaction rewrites
-/// the provider view, never the transcript), so the copies present are always
-/// the most recent deliveries of that instruction — relevant when a crash lost
-/// an earlier delivery of a duplicate instruction.
-///
-/// This is the reference implementation; the snapshot path computes the same
-/// result incrementally via [`covered_ids_from_scan`].
-#[cfg(test)]
-fn covered_orchestrator_steering_ids(
-    records: &[crate::store::ThreadSteeringRecord],
-    transcript: &[Message],
-) -> Vec<i64> {
-    let mut delivered: Vec<&crate::store::ThreadSteeringRecord> = records
-        .iter()
-        .filter(|record| {
-            record.thread_name == crate::store::ORCHESTRATOR_STEERING_TARGET
-                && record.status == "delivered"
-        })
-        .collect();
-    delivered.sort_by_key(|record| std::cmp::Reverse(record.id));
-    let mut consumed = vec![false; transcript.len()];
-    let mut covered = Vec::new();
-    for record in delivered {
-        let Some(index) = transcript.iter().enumerate().position(|(index, message)| {
-            !consumed[index]
-                && matches!(message, Message::User { content } if content == &record.instruction)
-        }) else {
-            continue;
-        };
-        consumed[index] = true;
-        covered.push(record.id);
-    }
-    covered.sort_unstable();
-    covered
-}
-
-/// Coverage from the incremental scan cache: per instruction, the newest
-/// `min(delivered, surviving transcript copies)` records are covered — the
-/// same newest-first pairing as [`covered_orchestrator_steering_ids`],
-/// computed without rescanning the transcript. The transcript is append-only
-/// for User messages, so once a record is covered it stays covered; guidance
-/// hides the moment its delivery is acked and appended to the log.
-fn covered_ids_from_scan(
-    records: &[crate::store::ThreadSteeringRecord],
-    scan: &TranscriptScanCache,
-) -> Vec<i64> {
-    let mut delivered: Vec<&crate::store::ThreadSteeringRecord> = records
-        .iter()
-        .filter(|record| {
-            record.thread_name == crate::store::ORCHESTRATOR_STEERING_TARGET
-                && record.status == "delivered"
-        })
-        .collect();
-    delivered.sort_by_key(|record| std::cmp::Reverse(record.id));
-    let mut by_instruction: BTreeMap<&str, Vec<i64>> = BTreeMap::new();
-    for record in delivered {
-        by_instruction
-            .entry(record.instruction.as_str())
-            .or_default()
-            .push(record.id);
-    }
-    let mut covered = Vec::new();
-    for (instruction, ids) in by_instruction {
-        let copies = scan.user_copies.get(instruction).copied().unwrap_or(0);
-        covered.extend(ids.into_iter().take(copies));
-    }
-    covered.sort_unstable();
-    covered
 }
 
 #[cfg(test)]

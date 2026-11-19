@@ -134,7 +134,6 @@ function snapshot(messages: Message[]): SessionSnapshotResponse {
     thread_episodes: {},
     thread_events: {},
     thread_event_boundary: { epoch_id: "epoch-test", sequence_id: 0 },
-    thread_steering: [],
     worksets: { items: [], error: null },
     workspace: {
       host_root: null,

@@ -360,7 +360,6 @@ export declare function useSessionSnapshot(id: string | null, options?: Partial<
     active_compaction?: import("../../types/openapi.generated").components["schemas"]["ActiveCompactionSnapshot"] | null;
     active_run?: import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"] | null;
     active_threads?: string[];
-    covered_orchestrator_steering_ids?: number[];
     forks?: import("../../types/openapi.generated").components["schemas"]["SessionForkLink"][];
     message_created_at?: (string | null)[];
     messages: import("../../types/openapi.generated").components["schemas"]["Message"][];
@@ -374,7 +373,6 @@ export declare function useSessionSnapshot(id: string | null, options?: Partial<
     thread_event_boundary: import("../../types/openapi.generated").components["schemas"]["SessionEventBoundary"];
     thread_event_diagnostics?: import("../../types/openapi.generated").components["schemas"]["ThreadEventDecodeDiagnostic"][];
     thread_events?: Record<string, import("../../types/openapi.generated").components["schemas"]["AgentEvent"][]>;
-    thread_steering?: import("../../types/openapi.generated").components["schemas"]["ThreadSteeringRecord"][];
     threads: import("../../types/openapi.generated").components["schemas"]["ThreadSnapshot"][];
     transcript_recovery_warning?: string | null;
     worksets: import("../../types/openapi.generated").components["schemas"]["WorksetsSnapshot"];
@@ -405,7 +403,6 @@ export declare function useCreateSession(): import("@tanstack/react-query").UseM
     active_compaction?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["ActiveCompactionSnapshot"] | null;
     active_run?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["ActiveRunSnapshot"] | null;
     active_threads?: string[];
-    covered_orchestrator_steering_ids?: number[];
     forks?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionForkLink"][];
     message_created_at?: (string | null)[];
     messages: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["Message"][];
@@ -419,7 +416,6 @@ export declare function useCreateSession(): import("@tanstack/react-query").UseM
     thread_event_boundary: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionEventBoundary"];
     thread_event_diagnostics?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["ThreadEventDecodeDiagnostic"][];
     thread_events?: Record<string, import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["AgentEvent"][]>;
-    thread_steering?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["ThreadSteeringRecord"][];
     threads: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["ThreadSnapshot"][];
     transcript_recovery_warning?: string | null;
     worksets: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["WorksetsSnapshot"];

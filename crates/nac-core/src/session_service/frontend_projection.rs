@@ -73,7 +73,6 @@ impl SessionService {
             thread_episodes,
             thread_events,
             thread_event_boundary,
-            thread_steering,
             run_failure,
             worksets,
             forks,
@@ -87,7 +86,6 @@ impl SessionService {
             thread_episodes,
             thread_events,
             thread_event_boundary,
-            thread_steering,
             forks,
             run_failure,
             worksets,
@@ -307,10 +305,6 @@ impl SessionService {
             }
         };
 
-        let covered_orchestrator_steering_ids = {
-            let scan = self.lock_transcript_scan();
-            covered_ids_from_scan(&blocking.thread_steering, &scan)
-        };
         let mut metadata = self.metadata();
         metadata.extra_headers.clear();
         let transcript_warning = self
@@ -336,8 +330,6 @@ impl SessionService {
             primary_tool_events: blocking.thread_events.primary_tool_events,
             thread_event_boundary: blocking.thread_event_boundary,
             thread_event_diagnostics: blocking.thread_events.diagnostics,
-            thread_steering: blocking.thread_steering,
-            covered_orchestrator_steering_ids,
             forks: blocking.forks,
             worksets: blocking.worksets,
             workspace: blocking.workspace,
@@ -359,7 +351,6 @@ struct StoredFrontendProjection {
     thread_episodes: HashMap<String, Vec<EpisodeSnapshot>>,
     thread_events: DecodedThreadEvents,
     thread_event_boundary: Option<SessionEventBoundary>,
-    thread_steering: Vec<crate::store::ThreadSteeringRecord>,
     forks: Vec<crate::store::SessionForkLink>,
     worksets: WorksetsSnapshot,
     run_failure: Option<crate::run_failure::RunFailure>,
@@ -383,7 +374,6 @@ fn read_stored_projection(
         items: Vec::new(),
         error: None,
     };
-    let thread_steering = Vec::new();
     let forks = session_id
         .map(|session_id| crate::store::list_session_forks_with_connection(conn, session_id))
         .transpose()?
@@ -410,7 +400,6 @@ fn read_stored_projection(
         thread_episodes,
         thread_events,
         thread_event_boundary,
-        thread_steering,
         run_failure,
         worksets,
         forks,

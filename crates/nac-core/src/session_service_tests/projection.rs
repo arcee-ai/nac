@@ -204,7 +204,6 @@ async fn frontend_snapshot_uses_four_operation_scoped_connections_for_direct_ses
     assert!(snapshot.threads.is_empty());
     assert!(snapshot.thread_episodes.is_empty());
     assert_eq!(snapshot.thread_events["worker"].len(), 1);
-    assert!(snapshot.thread_steering.is_empty());
     assert!(snapshot.worksets.items.is_empty());
     // Direct shell commands have one checkout, relational dashboard data one,
     // and the transcript writer checks out for messages and row times.

@@ -75,7 +75,6 @@ export type WorkspaceDiffHunk = ApiSchema<"WorkspaceDiffHunk">;
 export type WorkspaceDiffSection = ApiSchema<"WorkspaceDiffSection">;
 export type WorkspaceFileDiff = ApiSchema<"WorkspaceFileDiff">;
 export type SteeringStatus = "queued" | "claimed" | "delivered" | "expired";
-export type ThreadSteeringRecord = ApiSchema<"ThreadSteeringRecord">;
 export interface SessionOverviewRecord {
     session_id: string;
     summary: string;

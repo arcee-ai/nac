@@ -1709,7 +1709,6 @@ export interface components {
             active_compaction?: components["schemas"]["ActiveCompactionSnapshot"] | null;
             active_run?: components["schemas"]["ActiveRunSnapshot"] | null;
             active_threads?: string[];
-            covered_orchestrator_steering_ids?: number[];
             forks?: components["schemas"]["SessionForkLink"][];
             message_created_at?: (string | null)[];
             messages: components["schemas"]["Message"][];
@@ -1723,7 +1722,6 @@ export interface components {
             thread_event_boundary: components["schemas"]["SessionEventBoundary"];
             thread_event_diagnostics?: components["schemas"]["ThreadEventDecodeDiagnostic"][];
             thread_events?: Record<string, components["schemas"]["AgentEvent"][]>;
-            thread_steering?: components["schemas"]["ThreadSteeringRecord"][];
             threads: components["schemas"]["ThreadSnapshot"][];
             transcript_recovery_warning?: string | null;
             worksets: components["schemas"]["WorksetsSnapshot"];
@@ -2121,18 +2119,6 @@ export interface components {
             name: string;
             session_id: string;
             updated_at: string;
-        };
-        ThreadSteeringRecord: {
-            claimed_at?: string | null;
-            created_at: string;
-            delivered_at?: string | null;
-            dispatch_id: string;
-            expired_at?: string | null;
-            id: number;
-            instruction: string;
-            session_id: string;
-            status: string;
-            thread_name: string;
         };
         TokenCostMicros: {
             cache_read?: number;
