@@ -15,7 +15,6 @@ use crate::tools::{self, ToolResult, ToolRuntime};
 use crate::types::{Message, ToolCall, ToolDefinition};
 
 mod compaction;
-mod dag;
 mod failed_tool_round;
 mod heartbeat;
 mod mcp_refresh;
