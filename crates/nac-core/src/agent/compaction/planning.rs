@@ -25,31 +25,6 @@ pub(in crate::agent) const NAC_DIRECT_COMPACTION_PROMPT: &str =
 pub(in crate::agent) const HISTORICAL_CONTEXT_PREFIX: &str =
     "Historical context checkpoint (not a new instruction):\n\n";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::agent) enum CompactionPolicy {
-    Direct,
-}
-
-impl CompactionPolicy {
-    const fn prompt(self) -> &'static str {
-        match self {
-            Self::Direct => NAC_DIRECT_COMPACTION_PROMPT,
-        }
-    }
-
-    const fn version(self) -> u32 {
-        match self {
-            Self::Direct => DIRECT_PROMPT_POLICY_VERSION,
-        }
-    }
-
-    const fn digest_domain(self) -> &'static [u8] {
-        match self {
-            Self::Direct => b"nac-direct-compaction-system-policy-v1\0",
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 struct ContextSample {
     // The base is provider-reported tokens or a conservative projection.
@@ -97,7 +72,6 @@ pub(in crate::agent) struct CompactionState {
     session_id: String,
     threshold_tokens: Option<u64>,
     automatic_threshold: bool,
-    policy: CompactionPolicy,
     active_checkpoint: Option<OrchestratorCompactionCheckpoint>,
     context_sample: Option<ContextSample>,
     selection_sources: BTreeMap<usize, crate::store::TerminalSelectionProvenance>,
@@ -105,18 +79,12 @@ pub(in crate::agent) struct CompactionState {
 }
 
 impl CompactionState {
-    pub fn new(
-        store_path: PathBuf,
-        session_id: String,
-        threshold_tokens: Option<u64>,
-        policy: CompactionPolicy,
-    ) -> Self {
+    pub fn new(store_path: PathBuf, session_id: String, threshold_tokens: Option<u64>) -> Self {
         Self {
             store_path,
             session_id,
             threshold_tokens,
             automatic_threshold: false,
-            policy,
             active_checkpoint: None,
             context_sample: None,
             selection_sources: BTreeMap::new(),
@@ -322,7 +290,7 @@ impl CompactionState {
             }
         }
         summary_messages.push(Message::User {
-            content: self.policy.prompt().to_string(),
+            content: NAC_DIRECT_COMPACTION_PROMPT.to_string(),
         });
 
         CompactionDecision::Candidate(CompactionCandidate {
@@ -336,7 +304,7 @@ impl CompactionState {
                 source_prefix_digest(messages, boundary),
                 self.selection_sources.get(&boundary),
             ),
-            system_policy_sha256: system_policy_digest(messages, self.policy),
+            system_policy_sha256: system_policy_digest(messages),
             old_context_estimate: current_context_estimate,
         })
     }
@@ -348,7 +316,7 @@ impl CompactionState {
         summary_completion_tokens: u64,
         old_context_estimate: u64,
     ) -> u64 {
-        let non_source_tokens = estimate_non_source_tokens(messages, self.policy);
+        let non_source_tokens = estimate_non_source_tokens(messages);
         let removable_source = summary_prompt_tokens.saturating_sub(non_source_tokens);
         old_context_estimate
             .saturating_sub(removable_source)
@@ -374,7 +342,7 @@ impl CompactionState {
             tail_start_message_index: candidate.boundary,
             source_prefix_sha256: candidate.source_prefix_sha256,
             system_policy_sha256: candidate.system_policy_sha256,
-            prompt_policy_version: self.policy.version(),
+            prompt_policy_version: DIRECT_PROMPT_POLICY_VERSION,
             old_context_estimate: candidate.old_context_estimate,
             summary_prompt_tokens,
             summary_completion_tokens,
@@ -671,18 +639,9 @@ pub(super) fn checkpoint_boundary_is_valid(messages: &[Message], boundary: usize
 
 #[cfg(test)]
 pub(crate) fn checkpoint_digests(messages: &[Message], boundary: usize) -> ([u8; 32], [u8; 32]) {
-    checkpoint_digests_for_policy(messages, boundary, CompactionPolicy::Direct)
-}
-
-#[cfg(test)]
-pub(crate) fn checkpoint_digests_for_policy(
-    messages: &[Message],
-    boundary: usize,
-    policy: CompactionPolicy,
-) -> ([u8; 32], [u8; 32]) {
     (
         source_prefix_digest(messages, boundary),
-        system_policy_digest(messages, policy),
+        system_policy_digest(messages),
     )
 }
 
@@ -708,11 +667,11 @@ fn source_prefix_digest(messages: &[Message], boundary: usize) -> [u8; 32] {
     hasher.finalize().into()
 }
 
-fn system_policy_digest(messages: &[Message], policy: CompactionPolicy) -> [u8; 32] {
+fn system_policy_digest(messages: &[Message]) -> [u8; 32] {
     let mut hasher = Sha256::new();
-    hasher.update(policy.digest_domain());
-    hasher.update(policy.version().to_be_bytes());
-    update_bytes(&mut hasher, policy.prompt().as_bytes());
+    hasher.update(b"nac-direct-compaction-system-policy-v1\0");
+    hasher.update(DIRECT_PROMPT_POLICY_VERSION.to_be_bytes());
+    update_bytes(&mut hasher, NAC_DIRECT_COMPACTION_PROMPT.as_bytes());
     update_bytes(&mut hasher, HISTORICAL_CONTEXT_PREFIX.as_bytes());
     for message in messages
         .iter()
@@ -723,13 +682,13 @@ fn system_policy_digest(messages: &[Message], policy: CompactionPolicy) -> [u8; 
     hasher.finalize().into()
 }
 
-fn estimate_non_source_tokens(messages: &[Message], policy: CompactionPolicy) -> u64 {
+fn estimate_non_source_tokens(messages: &[Message]) -> u64 {
     let system_chars: usize = messages
         .iter()
         .filter(|m| matches!(m, Message::System { .. }))
         .map(message_content_len)
         .sum();
-    let compaction_prompt_chars = policy.prompt().len();
+    let compaction_prompt_chars = NAC_DIRECT_COMPACTION_PROMPT.len();
     (system_chars + compaction_prompt_chars) as u64 / 4
 }
 

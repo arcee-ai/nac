@@ -399,11 +399,7 @@ async fn valid_checkpoint_projects_after_restore_when_generation_is_disabled() {
             content: "current".to_string(),
         },
     ]);
-    let (source, policy) = compaction::checkpoint_digests_for_policy(
-        &agent.messages,
-        3,
-        compaction::CompactionPolicy::Direct,
-    );
+    let (source, policy) = compaction::checkpoint_digests(&agent.messages, 3);
     crate::store::orchestrator_compaction::append_orchestrator_compaction_checkpoint(
         &store_path,
         &crate::store::orchestrator_compaction::NewOrchestratorCompactionCheckpoint {

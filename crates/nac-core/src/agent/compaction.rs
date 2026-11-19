@@ -8,12 +8,10 @@ use uuid::Uuid;
 mod planning;
 mod provenance;
 
-use planning::*;
 #[cfg(test)]
-pub(crate) use planning::{checkpoint_digests, checkpoint_digests_for_policy};
-pub(super) use planning::{
-    CompactionPolicy, CompactionState, PreparedProviderView, HISTORICAL_CONTEXT_PREFIX,
-};
+pub(crate) use planning::checkpoint_digests;
+use planning::*;
+pub(super) use planning::{CompactionState, PreparedProviderView, HISTORICAL_CONTEXT_PREFIX};
 #[cfg(test)]
 pub(super) use planning::{DIRECT_PROMPT_POLICY_VERSION, NAC_DIRECT_COMPACTION_PROMPT};
 

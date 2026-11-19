@@ -566,7 +566,6 @@ async fn mcp_mount_refresh_during_compaction_applies_before_the_following_model_
         store.clone(),
         session.clone(),
         Some(1),
-        CompactionPolicy::Direct,
     ));
     configure(&home, &replacement.url, "approval = \"allow\"");
     request(&agent, 0);

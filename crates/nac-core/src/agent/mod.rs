@@ -47,12 +47,12 @@ pub(crate) fn direct_compaction_checkpoint_digests_for_test(
     messages: &[crate::types::Message],
     boundary: usize,
 ) -> ([u8; 32], [u8; 32]) {
-    compaction::checkpoint_digests_for_policy(messages, boundary, CompactionPolicy::Direct)
+    compaction::checkpoint_digests(messages, boundary)
 }
 pub(crate) use compaction::{
     CompactionCompletion, CompactionError, CompactionLifecycle, CompactionResult,
 };
-use compaction::{CompactionPolicy, CompactionState, PreparedProviderView};
+use compaction::{CompactionState, PreparedProviderView};
 use failed_tool_round::failed_tool_round;
 pub(crate) use preview::key_arg_preview;
 use preview::*;
@@ -222,7 +222,6 @@ impl Agent {
                 config.store_path.clone(),
                 session_id,
                 config.orchestrator_compaction_threshold,
-                CompactionPolicy::Direct,
             )
         });
         let transcript_log = config

@@ -32,15 +32,7 @@ fn temp_store_path(label: &str) -> PathBuf {
 }
 
 fn state(path: PathBuf, threshold: Option<u64>) -> CompactionState {
-    state_with_policy(path, threshold, CompactionPolicy::Direct)
-}
-
-fn state_with_policy(
-    path: PathBuf,
-    threshold: Option<u64>,
-    policy: CompactionPolicy,
-) -> CompactionState {
-    CompactionState::new(path, "session".to_string(), threshold, policy)
+    CompactionState::new(path, "session".to_string(), threshold)
 }
 
 fn candidate(plan: CompactionPlan) -> CompactionCandidate {

@@ -220,11 +220,7 @@ async fn cancellation_during_summary_keeps_the_prior_checkpoint() {
             content: "recent".to_string(),
         },
     ];
-    let (source, policy) = compaction::checkpoint_digests_for_policy(
-        &messages,
-        2,
-        compaction::CompactionPolicy::Direct,
-    );
+    let (source, policy) = compaction::checkpoint_digests(&messages, 2);
     let prior = crate::store::orchestrator_compaction::append_orchestrator_compaction_checkpoint(
         &store_path,
         &crate::store::orchestrator_compaction::NewOrchestratorCompactionCheckpoint {
