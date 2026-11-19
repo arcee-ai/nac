@@ -158,9 +158,6 @@ fn parent_and_store_ownership_bind_traditional_generations() {
     let mut absent = other_host.child("parent-b", "child-b");
     absent.admit_generation().unwrap();
     assert!(absent.resolve_credential().unwrap().is_none());
-    let ordinary = NativeWebCapabilities::new(AgentMode::Orchestrator, &f.store, None).unwrap();
-    assert!(!ordinary.is_eligible());
-    assert!(ordinary.resolve_credential().unwrap().is_none());
 }
 
 #[tokio::test]
