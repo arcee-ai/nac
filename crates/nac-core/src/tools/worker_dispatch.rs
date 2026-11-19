@@ -136,43 +136,6 @@ impl WorkerDispatchRegistry {
         }
     }
 
-    pub fn close_all(
-        &self,
-        store_path: &Path,
-        session_id: &str,
-    ) -> anyhow::Result<Vec<crate::store::ThreadSteeringRecord>> {
-        let mut state = self.lock();
-        state.run.accepting = false;
-        state.run.cancellation.cancel();
-        let targets = state
-            .workers
-            .entries
-            .iter()
-            .map(|(name, dispatch)| (name.clone(), dispatch.dispatch_id.clone()))
-            .collect::<Vec<_>>();
-        let mut expired = Vec::new();
-        for (name, dispatch_id) in targets {
-            expired.extend(crate::store::expire_thread_steering(
-                store_path,
-                session_id,
-                &dispatch_id,
-            )?);
-            if state
-                .workers
-                .entries
-                .get(&name)
-                .is_some_and(|dispatch| dispatch.dispatch_id == dispatch_id)
-            {
-                state.workers.entries.remove(&name);
-                state.run.in_flight -= 1;
-            }
-        }
-        state.run.run_id = None;
-        drop(state);
-        self.activity.notify_waiters();
-        Ok(expired)
-    }
-
     pub fn names(&self) -> Vec<String> {
         self.lock().workers.entries.keys().cloned().collect()
     }

@@ -583,15 +583,6 @@ impl SessionService {
                         None,
                     );
                 }
-                let expired = self
-                    .active_threads
-                    .close_all(&self.metadata.store_path, session_id)
-                    .map_err(|error| SessionSubmitError::Coordination {
-                        message: SessionCoordinationError::store(format!(
-                            "failed to clear stale worker targets: {error:#}"
-                        )),
-                    })?;
-                self.emit_steering_expired(expired);
             }
         }
 
