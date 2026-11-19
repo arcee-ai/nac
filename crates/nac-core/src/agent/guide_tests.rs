@@ -1,23 +1,17 @@
 use super::*;
 
-fn agent(mode: AgentMode, preload: bool) -> Agent {
+fn agent() -> Agent {
     let root = std::env::temp_dir();
     let registry = Arc::new(crate::skills::SkillRegistry::bundled_for_test());
-    let initial_messages = if preload {
-        crate::worker::build_preloaded_skill_messages(Some(&registry), &["nac-help".into()])
-            .unwrap()
-    } else {
-        Vec::new()
-    };
     Agent::with_config(
         ModelClient::new_for_test(),
         AgentConfig {
             command_output_limits: crate::terminal::CommandOutputLimits::default(),
-            mode,
+            mode: AgentMode::Direct,
             store_path: root.join("unused-guide-test.db"),
             session_id: None,
             orchestrator_compaction_threshold: None,
-            initial_messages,
+            initial_messages: Vec::new(),
             thread_name: None,
             dispatch_id: None,
             event_sink: EventSink::none(),
@@ -27,11 +21,7 @@ fn agent(mode: AgentMode, preload: bool) -> Agent {
             sandbox: None,
             ssh: None,
             mcp: None,
-            skills: if mode == AgentMode::Worker {
-                None
-            } else {
-                Some(registry)
-            },
+            skills: Some(registry),
             extra_tool_defs: Vec::new(),
             agents_md_message: None,
             thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
@@ -44,7 +34,7 @@ fn agent(mode: AgentMode, preload: bool) -> Agent {
 #[test]
 fn direct_guide_routing_is_bounded() {
     {
-        let mut agent = agent(AgentMode::Direct, false);
+        let mut agent = agent();
         let Message::System { content } = &agent.messages[0] else {
             panic!("missing system prompt")
         };
@@ -62,29 +52,14 @@ fn direct_guide_routing_is_bounded() {
         ] {
             assert!(!content.contains(retired));
         }
-        assert!(agent
-            .refresh_model_request_capabilities()
-            .unwrap()
-            .iter()
-            .any(|tool| tool.function.name == "nac_guide"));
+        for _ in 0..2 {
+            assert!(agent
+                .refresh_model_request_capabilities()
+                .unwrap()
+                .iter()
+                .any(|tool| tool.function.name == "nac_guide"));
+        }
     }
-}
-
-#[test]
-fn guide_worker_retrieval_requires_the_selected_preload_and_survives_refresh() {
-    let mut unselected = agent(AgentMode::Worker, false);
-    let defs = unselected.refresh_model_request_capabilities().unwrap();
-    assert!(!defs.iter().any(|tool| tool.function.name == "nac_guide"));
-    assert!(!unselected.messages.iter().any(|message| matches!(message, Message::System { content } if content.contains("NAC product self-help"))));
-    let mut selected = agent(AgentMode::Worker, true);
-    for _ in 0..2 {
-        let defs = selected.refresh_model_request_capabilities().unwrap();
-        assert!(defs.iter().any(|tool| tool.function.name == "nac_guide"));
-        assert!(!defs
-            .iter()
-            .any(|tool| tool.function.name == "activate_skill"));
-    }
-    assert!(selected.messages.iter().any(|message| matches!(message, Message::System { content } if content.contains("first-party bundled NAC Guide"))));
 }
 
 #[tokio::test]
