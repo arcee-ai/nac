@@ -69,21 +69,6 @@ pub fn effective_orchestrator_compaction_threshold(
     Ok(threshold)
 }
 
-pub(super) fn managed_worker_effective_model_settings(
-    model: &ModelOptions,
-) -> Result<EffectiveModelSettings> {
-    EffectiveModelSettings::from_optional_with_http_policy(
-        model.backend,
-        model.api_model.clone(),
-        model.api_base_url.clone(),
-        model.reasoning_effort.snapshot_value(),
-        model.api_key_env.snapshot_value(),
-        model.extra_headers.clone().unwrap_or_default(),
-        model.allow_insecure_http,
-    )?
-    .with_trusted_api_key_file(model.trusted_api_key_file.clone())
-}
-
 pub(super) fn default_config_cwd(workspace_cwd: &Path, ssh_host: Option<&str>) -> PathBuf {
     let is_ssh = ssh_host
         .map(str::trim)

@@ -6,8 +6,6 @@ fn agent() -> Agent {
     Agent::with_config(
         ModelClient::new_for_test(),
         AgentConfig {
-            command_output_limits: crate::terminal::CommandOutputLimits::default(),
-            mode: AgentMode::Direct,
             store_path: root.join("unused-guide-test.db"),
             session_id: None,
             orchestrator_compaction_threshold: None,
@@ -24,7 +22,6 @@ fn agent() -> Agent {
             skills: Some(registry),
             extra_tool_defs: Vec::new(),
             agents_md_message: None,
-            thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
             permission_rules: Vec::new(),
         },
     )

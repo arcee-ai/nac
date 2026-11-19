@@ -17,9 +17,11 @@ use crate::store::orchestrator_compaction::{
 };
 use crate::types::{Message, ToolDefinition};
 
+#[cfg(test)]
 pub(in crate::agent) const PROMPT_POLICY_VERSION: u32 = 2;
 pub(in crate::agent) const DIRECT_PROMPT_POLICY_VERSION: u32 = 1;
 
+#[cfg(test)]
 pub(in crate::agent) const NAC_COMPACTION_PROMPT: &str =
     include_str!("../prompts/nac_compaction.md");
 pub(in crate::agent) const NAC_DIRECT_COMPACTION_PROMPT: &str =
@@ -30,6 +32,7 @@ pub(in crate::agent) const HISTORICAL_CONTEXT_PREFIX: &str =
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::agent) enum CompactionPolicy {
+    #[cfg(test)]
     Orchestrator,
     Direct,
 }
@@ -37,6 +40,7 @@ pub(in crate::agent) enum CompactionPolicy {
 impl CompactionPolicy {
     const fn prompt(self) -> &'static str {
         match self {
+            #[cfg(test)]
             Self::Orchestrator => NAC_COMPACTION_PROMPT,
             Self::Direct => NAC_DIRECT_COMPACTION_PROMPT,
         }
@@ -44,6 +48,7 @@ impl CompactionPolicy {
 
     const fn version(self) -> u32 {
         match self {
+            #[cfg(test)]
             Self::Orchestrator => PROMPT_POLICY_VERSION,
             Self::Direct => DIRECT_PROMPT_POLICY_VERSION,
         }
@@ -53,6 +58,7 @@ impl CompactionPolicy {
         match self {
             // Preserve existing orchestrator checkpoints byte-for-byte while
             // separating direct checkpoints fail-closed.
+            #[cfg(test)]
             Self::Orchestrator => b"nac-orchestrator-compaction-system-policy-v2\0",
             Self::Direct => b"nac-direct-compaction-system-policy-v1\0",
         }

@@ -628,7 +628,6 @@ pub struct SessionService {
     published_operation: Arc<StdMutex<Option<ActiveSessionOperationSnapshot>>>,
     attention: Arc<StdMutex<Option<attention::ServiceAttention>>>,
     stopping_admission: Arc<std::sync::atomic::AtomicBool>,
-    active_threads: Arc<crate::tools::WorkerDispatchRegistry>,
     run_admission: Arc<crate::tools::RunAdmission>,
     /// The session's skill registry, captured from the agent at construction
     /// so `prepare_user_input` can expand top-level `$skillname` references

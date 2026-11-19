@@ -297,12 +297,18 @@ async fn direct_tool_batch_rejects_retired_thread_dispatch() {
 }
 
 #[tokio::test]
-async fn control_tools_report_duration_only_when_they_ran() {
+async fn direct_tools_report_duration_only_when_they_ran() {
     let root = std::env::temp_dir().join(format!(
         "nac-control-tool-duration-{}",
         uuid::Uuid::new_v4()
     ));
     let mut runtime = test_runtime();
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("fixture.txt"), "direct read").unwrap();
+    runtime.workspace_cwd = root.clone();
+    runtime.backend = Arc::new(crate::sandbox::ExecutionBackend::Local {
+        workspace_cwd: root.clone(),
+    });
     runtime.store_path = root.join("store.db");
     crate::store::initialize(&runtime.store_path).unwrap();
     crate::store::insert_test_session(&runtime.store_path, "test-session");
@@ -310,8 +316,8 @@ async fn control_tools_report_duration_only_when_they_ran() {
 
     execute_tools_parallel(
         vec![
-            make_tool_call("listed", "workset_list", json!({})),
-            make_tool_call("rejected", "workset_read", json!({})),
+            make_tool_call("listed", "read", json!({"path":"fixture.txt"})),
+            make_tool_call("rejected", "read", json!({})),
         ],
         runtime,
         ModelClient::new_for_test(),

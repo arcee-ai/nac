@@ -1,5 +1,6 @@
 //! Execution backend selection and dispatch.
 
+#[cfg(test)]
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -310,14 +311,6 @@ printf '%s%s' "$base" "$suffix"
         (command, pidfile)
     }
 
-    pub fn worker_cli_args(&self) -> Vec<OsString> {
-        match self {
-            Self::Local { .. } => Vec::new(),
-            Self::Sandbox(session) => session.worker_cli_args(),
-            Self::Ssh(ssh) => ssh.worker_cli_args(),
-        }
-    }
-
     pub fn default_terminal_cwd(&self) -> PathBuf {
         match self {
             Self::Local { workspace_cwd } => workspace_cwd.clone(),
@@ -455,10 +448,6 @@ mod tests {
         assert_eq!(
             backend.default_terminal_cwd(),
             PathBuf::from("/remote/project")
-        );
-        assert_eq!(
-            backend.worker_cli_args(),
-            vec![OsString::from("--ssh-host"), OsString::from("build-box")]
         );
     }
 

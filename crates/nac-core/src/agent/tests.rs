@@ -80,8 +80,6 @@ fn test_agent(root: &std::path::Path, base_url: &str) -> Agent {
     Agent::with_config(
         ModelClient::new_for_test_server(base_url.to_string()),
         AgentConfig {
-            command_output_limits: crate::terminal::CommandOutputLimits::default(),
-            mode: AgentMode::Direct,
             store_path: root.join("store.db"),
             session_id: None,
             orchestrator_compaction_threshold: None,
@@ -98,7 +96,6 @@ fn test_agent(root: &std::path::Path, base_url: &str) -> Agent {
             skills: None,
             extra_tool_defs: Vec::new(),
             agents_md_message: None,
-            thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
             permission_rules: Vec::new(),
         },
     )
@@ -174,8 +171,6 @@ fn direct_topologies_expose_exact_capability_boundaries() {
         Agent::with_config(
             ModelClient::new_for_test(),
             AgentConfig {
-                command_output_limits: crate::terminal::CommandOutputLimits::default(),
-                mode: AgentMode::Direct,
                 store_path: store_path.clone(),
                 session_id: Some(session_id.to_string()),
                 orchestrator_compaction_threshold: None,
@@ -192,7 +187,6 @@ fn direct_topologies_expose_exact_capability_boundaries() {
                 skills: Some(Arc::new(crate::skills::SkillRegistry::bundled_for_test())),
                 extra_tool_defs: Vec::new(),
                 agents_md_message: None,
-                thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
                 permission_rules: Vec::new(),
             },
         )
@@ -330,8 +324,6 @@ fn restore_messages_refreshes_leading_system_prompt() {
     let mut agent = Agent::with_config(
         client,
         AgentConfig {
-            command_output_limits: crate::terminal::CommandOutputLimits::default(),
-            mode: AgentMode::Direct,
             store_path: crate::store::default_store_path(),
             session_id: None,
             orchestrator_compaction_threshold: None,
@@ -348,7 +340,6 @@ fn restore_messages_refreshes_leading_system_prompt() {
             skills: None,
             extra_tool_defs: Vec::new(),
             agents_md_message: None,
-            thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
             permission_rules: Vec::new(),
         },
     )
@@ -898,8 +889,6 @@ async fn cancelled_image_call_still_emits_one_typed_finished_event() {
     let mut agent = Agent::with_config(
         ModelClient::new_for_test_server(server.base_url.clone()),
         AgentConfig {
-            command_output_limits: crate::terminal::CommandOutputLimits::default(),
-            mode: AgentMode::Direct,
             store_path: root.join("store.db"),
             session_id: None,
             orchestrator_compaction_threshold: None,
@@ -916,7 +905,6 @@ async fn cancelled_image_call_still_emits_one_typed_finished_event() {
             skills: None,
             extra_tool_defs: Vec::new(),
             agents_md_message: None,
-            thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
             permission_rules: Vec::new(),
         },
     )

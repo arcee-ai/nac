@@ -68,7 +68,6 @@ async fn model_execution_cannot_invoke_a_tool_outside_its_capability_snapshot() 
         result.content.as_text(),
         Some("Error: unknown tool 'thread' is not available to this agent")
     );
-    assert!(runtime.active_threads.names().is_empty());
 
     runtime.web_credential = Some(Arc::new(super::web::ExaCredential::new(
         "snapshot-only-canary".to_string(),

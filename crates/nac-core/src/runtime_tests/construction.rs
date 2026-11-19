@@ -41,13 +41,6 @@ async fn retired_behavior_is_rejected_before_runtime_or_store_preparation() {
 }
 
 #[tokio::test]
-async fn retired_worker_construction_is_rejected() {
-    let result =
-        build_managed_worker_config(ManagedWorkerOptions::default(), &NacConfig::default()).await;
-    assert!(result.is_err());
-}
-
-#[tokio::test]
 async fn retired_snapshot_is_rejected_before_resume_preparation() {
     let root = temp_store_path("retired_resume_rejected")
         .parent()
@@ -570,64 +563,6 @@ fn no_reasoning_effort_is_injected() {
     )
     .unwrap();
     assert_eq!(settings.reasoning_effort, None);
-}
-
-#[test]
-fn managed_worker_settings_are_snapshot_authoritative() {
-    let settings = managed_worker_effective_model_settings(&ModelOptions {
-        backend: Some(BackendKind::TogetherChat),
-        api_base_url: Some("https://worker.example/v1".to_string()),
-        api_model: Some("worker-model".to_string()),
-        api_key_env: OptionalModelOption::Value("SESSION_API_KEY".to_string()),
-        extra_headers: Some(BTreeMap::new()),
-        ..ModelOptions::default()
-    })
-    .unwrap();
-    assert_eq!(settings.reasoning_effort, None);
-    assert_eq!(settings.api_key_env.as_deref(), Some("SESSION_API_KEY"));
-    assert!(settings.extra_headers.is_empty());
-
-    for (backend, expected) in [
-        (
-            BackendKind::ChatGptCodexResponses,
-            crate::model::CHATGPT_CODEX_CANONICAL_BASE_URL,
-        ),
-        (
-            BackendKind::ArceeAuth,
-            crate::model::ARCEE_AUTH_CANONICAL_BASE_URL,
-        ),
-    ] {
-        let managed = managed_worker_effective_model_settings(&ModelOptions {
-            backend: Some(backend),
-            api_model: Some("managed-worker-model".to_string()),
-            extra_headers: Some(BTreeMap::new()),
-            ..ModelOptions::default()
-        })
-        .expect("managed worker resolver should use the same fixed URL invariant");
-        assert_eq!(managed.base_url, expected);
-    }
-
-    let raw_selector = " WORKER_KEY ";
-    let invalid = managed_worker_effective_model_settings(&ModelOptions {
-        backend: Some(BackendKind::TogetherChat),
-        api_base_url: Some("https://worker.example/v1".to_string()),
-        api_model: Some("worker-model".to_string()),
-        api_key_env: OptionalModelOption::Value(raw_selector.to_string()),
-        extra_headers: Some(BTreeMap::new()),
-        ..ModelOptions::default()
-    })
-    .unwrap();
-    assert_eq!(invalid.api_key_env.as_deref(), Some(raw_selector));
-    let error = ModelClient::from_effective_settings(invalid)
-        .expect_err("worker selector must be validated without normalization");
-    assert!(error.downcast_ref::<ModelConfigurationError>().is_some());
-
-    let error = managed_worker_effective_model_settings(&ModelOptions {
-        backend: Some(BackendKind::TogetherChat),
-        ..ModelOptions::default()
-    })
-    .unwrap_err();
-    assert!(error.to_string().contains("model"));
 }
 
 #[tokio::test]
@@ -1431,50 +1366,6 @@ async fn resume_and_delegated_worker_reject_arcee_api_key_env_early() {
         "invalid resume initialized its store"
     );
 
-    let worker_store = root.join("worker.db");
-    let worker_error = match build_managed_worker_config(
-        ManagedWorkerOptions {
-            workspace_cwd: root.clone(),
-            config_cwd: None,
-            dispatch: WorkerDispatchOptions {
-                session_id: "session".to_string(),
-                thread_name: "impl".to_string(),
-                dispatch_id: "test-dispatch".to_string(),
-                action: "work".to_string(),
-                source_threads: Vec::new(),
-                skills: Vec::new(),
-            },
-            store: StoreOptions {
-                store_path: Some(worker_store.clone()),
-            },
-            model: ModelOptions {
-                backend: Some(BackendKind::ArceeAuth),
-                api_base_url: Some("https://api.arcee.ai".to_string()),
-                api_model: Some("model".to_string()),
-                api_key_env: OptionalModelOption::Value("DELEGATED_ARCEE_KEY".to_string()),
-                ..ModelOptions::default()
-            },
-            sandbox: SandboxOptions::default(),
-            ssh: SshOptions::default(),
-        },
-        &NacConfig::default(),
-    )
-    .await
-    {
-        Ok(_) => panic!("delegated Arcee worker must reject api_key_env"),
-        Err(error) => error,
-    };
-    assert!(
-        worker_error
-            .to_string()
-            .contains("retired worker construction"),
-        "got: {worker_error:#}"
-    );
-    assert!(
-        !worker_store.exists(),
-        "invalid worker initialized its store"
-    );
-
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -1700,23 +1591,6 @@ async fn persisted_settings_are_identical_across_create_snapshot_resume_and_work
         ),
         RuntimeSession::Picker { .. } => panic!("expected active resumed session"),
     }
-    assert_eq!(
-        crate::tools::thread::worker_model_arguments_for_test(&resumed.client),
-        vec![
-            "--api-model",
-            "snapshot-model",
-            "--api-base-url",
-            "https://snapshot.example/v1",
-            "--backend",
-            "openai-responses",
-            "--effort",
-            "xhigh",
-            "--api-key-env",
-            key_name,
-            "--extra-headers",
-            "{\"X-Snapshot\":\"exact\"}",
-        ]
-    );
 
     let _ = std::fs::remove_dir_all(root);
     restore_env(key_name, original_key);

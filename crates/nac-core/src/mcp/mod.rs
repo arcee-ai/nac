@@ -278,19 +278,6 @@ pub(crate) mod test_support {
     use std::thread;
     use std::time::{Duration, Instant};
 
-    pub(crate) fn expand_env(input: &str) -> anyhow::Result<String> {
-        super::expand_env(input)
-    }
-
-    pub(crate) fn stdio_command(
-        program: &str,
-        args: &[String],
-        envs: &std::collections::BTreeMap<String, String>,
-        cwd: &Path,
-    ) -> anyhow::Result<tokio::process::Command> {
-        super::transport::build_stdio_command(program, args, envs, cwd)
-    }
-
     pub(crate) fn unique_temp_dir(prefix: &str) -> PathBuf {
         std::env::temp_dir().join(format!("{prefix}-{}", uuid::Uuid::new_v4()))
     }

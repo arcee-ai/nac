@@ -446,8 +446,6 @@ pub(super) async fn build_resume_config_from_snapshot(
         .unwrap_or_else(|| "off".to_string());
 
     let agent_config = AgentConfig {
-        command_output_limits: crate::terminal::CommandOutputLimits::default(),
-        mode: AgentMode::Direct,
         store_path: store_path.clone(),
         session_id: Some(snapshot.session_id.clone()),
         orchestrator_compaction_threshold: snapshot.orchestrator_compaction_threshold,
@@ -464,7 +462,6 @@ pub(super) async fn build_resume_config_from_snapshot(
         skills,
         extra_tool_defs,
         agents_md_message,
-        thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
         permission_rules: config.permissions.rules.clone(),
     };
     let agent_client = client.clone();

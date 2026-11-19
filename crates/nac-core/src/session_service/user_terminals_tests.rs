@@ -1,5 +1,5 @@
 use super::*;
-use crate::agent::{AgentConfig, AgentMode};
+use crate::agent::AgentConfig;
 use crate::permissions::{
     PermissionApprovalMode, PermissionEffect, PermissionReply, PermissionRule,
 };
@@ -71,8 +71,6 @@ fn fixture_with_policy(
     let mut agent = Agent::with_config(
         client.clone(),
         AgentConfig {
-            command_output_limits: crate::terminal::CommandOutputLimits::default(),
-            mode: AgentMode::Direct,
             store_path: store_path.clone(),
             session_id: Some("direct-terminal".into()),
             orchestrator_compaction_threshold: None,
@@ -89,7 +87,6 @@ fn fixture_with_policy(
             skills: None,
             extra_tool_defs: Vec::new(),
             agents_md_message: None,
-            thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
             permission_rules,
         },
     )

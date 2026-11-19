@@ -96,16 +96,7 @@ impl SessionService {
                 .map(|owner| owner.is_some())
                 .unwrap_or(true)
         });
-        let direct_idle = self.metadata.behavior != sessions::SessionBehavior::Orchestrator
-            && self.run_admission.cancel_and_retire_if_idle(owned).await;
-        if !direct_idle {
-            match self.active_threads.cancel_and_drain(steering_store).await {
-                Ok(records) => self.emit_steering_expired_async(records).await,
-                Err(error) => {
-                    eprintln!("nac: failed to expire cancelled worker steering: {error:#}");
-                }
-            }
-        }
+        self.run_admission.cancel_and_retire(owned).await;
 
         if let Some(task) = cancelling_run.task.as_mut() {
             let abort = self.metadata.behavior == sessions::SessionBehavior::Orchestrator

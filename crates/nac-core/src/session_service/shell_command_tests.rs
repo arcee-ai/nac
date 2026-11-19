@@ -21,7 +21,7 @@ fn test_environment() -> nac_contracts::CommandEnvironmentSnapshot {
 }
 
 use super::*;
-use crate::agent::{AgentConfig, AgentMode};
+use crate::agent::AgentConfig;
 use crate::model::ModelClient;
 use crate::session_service::tests::{test_active_service, test_store_path};
 
@@ -47,8 +47,6 @@ fn test_direct_active_service_at(
     let mut agent = Agent::with_config(
         client.clone(),
         AgentConfig {
-            command_output_limits: crate::terminal::CommandOutputLimits::default(),
-            mode: AgentMode::Direct,
             store_path: path.clone(),
             session_id: Some(session_id.into()),
             orchestrator_compaction_threshold: None,
@@ -65,7 +63,6 @@ fn test_direct_active_service_at(
             skills: None,
             extra_tool_defs: Vec::new(),
             agents_md_message: None,
-            thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
             permission_rules: if label == "deny" {
                 vec![crate::permissions::PermissionRule::new(
                     "*",

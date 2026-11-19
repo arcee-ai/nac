@@ -764,7 +764,7 @@ fn open_connection_with_hooks(
         "accepted_identity_json",
         "TEXT",
     )?;
-    super::worker_dispatches::create_worker_dispatches_table(&transaction)?;
+    create_worker_dispatches_table(&transaction)?;
     ensure_column(
         &transaction,
         "worker_dispatches",
@@ -826,6 +826,28 @@ fn open_connection_with_hooks(
     transaction.pragma_update(None, "user_version", STORE_SCHEMA_VERSION)?;
     transaction.commit()?;
     Ok(conn)
+}
+
+fn create_worker_dispatches_table(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS worker_dispatches (
+            dispatch_id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
+            thread_name TEXT NOT NULL,
+            generation INTEGER NOT NULL CHECK (generation > 0),
+            run_id TEXT,
+            action TEXT NOT NULL,
+            status TEXT NOT NULL CHECK (status IN ('pending', 'ok', 'error', 'timed_out', 'cancelled')),
+            episode_id INTEGER,
+            history_start_id INTEGER,
+            history_boundary_id INTEGER NOT NULL DEFAULT 0,
+            UNIQUE (session_id, thread_name, generation),
+            FOREIGN KEY (thread_name, session_id) REFERENCES threads(name, session_id) ON DELETE CASCADE,
+            CHECK ((status = 'pending' AND episode_id IS NULL) OR
+                   (status <> 'pending' AND episode_id IS NOT NULL))
+        );",
+    )?;
+    Ok(())
 }
 
 fn create_base_schema(conn: &Connection) -> Result<()> {

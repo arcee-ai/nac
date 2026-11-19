@@ -142,7 +142,14 @@ pub(super) struct NacMcpClientHandler {
     pub(super) connection_generation: u64,
 }
 
-/// A configured MCP server that could not be loaded for a worker, and why.
+/// A configured MCP server that could not be loaded, and why.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "named skip diagnostics remain available to loader callers and tests"
+    )
+)]
 #[derive(Debug)]
 pub(crate) struct McpSkippedServer {
     pub name: String,

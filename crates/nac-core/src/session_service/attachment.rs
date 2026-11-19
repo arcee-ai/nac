@@ -74,7 +74,6 @@ impl SessionService {
             extra_headers: run_config.client.extra_headers().clone(),
         };
         let session_snapshot = run_config.session.into_snapshot();
-        let active_threads = run_config.agent.active_threads_handle();
         let run_admission = run_config.agent.run_admission_handle();
         let transcript_log = run_config.agent.transcript_log_writer();
         let has_sandbox = run_config.agent.sandbox_session().is_some();
@@ -135,7 +134,6 @@ impl SessionService {
             published_operation: Arc::new(StdMutex::new(None)),
             attention: Arc::new(StdMutex::new(None)),
             stopping_admission: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            active_threads,
             run_admission,
             skills,
             mcp,

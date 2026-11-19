@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::paths::PathContext;
 use crate::sandbox::MountSpec;
+#[cfg(test)]
 use crate::tools::ToolResult;
 
 const SKILL_FILENAME: &str = "SKILL.md";
@@ -31,7 +32,6 @@ mod bundled_tests;
 #[cfg(all(test, unix))]
 mod qualification;
 
-pub(crate) use registry::bundled_help_for_prompt;
 pub use registry::SkillRegistry;
 pub use tool::auto_mounts;
 

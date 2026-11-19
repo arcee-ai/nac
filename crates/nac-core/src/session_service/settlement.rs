@@ -478,40 +478,6 @@ impl SessionService {
         }
     }
 
-    pub(super) async fn emit_steering_expired_async(
-        &self,
-        records: Vec<crate::store::ThreadSteeringRecord>,
-    ) {
-        let service = self.clone();
-        if let Err(error) = crate::store::spawn_blocking_store_caller(move || {
-            service.emit_steering_expired(records);
-        })
-        .await
-        {
-            eprintln!("nac: steering expiry publication failed: {error:#}");
-        }
-    }
-
-    pub(super) fn emit_steering_expired(&self, records: Vec<crate::store::ThreadSteeringRecord>) {
-        for record in records {
-            let instruction_preview = record.instruction.chars().take(160).collect();
-            if record.thread_name == crate::store::ORCHESTRATOR_STEERING_TARGET {
-                self.event_bus
-                    .emit_agent(AgentEvent::OrchestratorSteeringExpired {
-                        steering_id: record.id,
-                        instruction_preview,
-                    });
-            } else {
-                self.event_bus
-                    .emit_agent(AgentEvent::ThreadSteeringExpired {
-                        name: record.thread_name,
-                        steering_id: record.id,
-                        instruction_preview,
-                    });
-            }
-        }
-    }
-
     pub(super) fn mark_run_finishing(&self, run_id: &SessionRunId) -> Option<FinishingRun> {
         let mut guard = self.lock_active_operation();
         let Some(ActiveSessionOperation::Run(active_run)) = guard.as_mut() else {

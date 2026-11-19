@@ -292,8 +292,6 @@ async fn heartbeat_question_delivery_typed_answer_failure_uses_real_goal_retry_t
     let agent = Agent::with_config(
         client.clone(),
         AgentConfig {
-            command_output_limits: crate::terminal::CommandOutputLimits::default(),
-            mode: AgentMode::Direct,
             store_path: path.clone(),
             session_id: Some(id.into()),
             orchestrator_compaction_threshold: None,
@@ -310,7 +308,6 @@ async fn heartbeat_question_delivery_typed_answer_failure_uses_real_goal_retry_t
             skills: None,
             extra_tool_defs: vec![],
             agents_md_message: None,
-            thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
             permission_rules: vec![PermissionRule::new("*", "*", PermissionEffect::Allow)],
         },
     )

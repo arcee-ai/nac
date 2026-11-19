@@ -179,7 +179,6 @@ async fn pausing_a_goal_invalidates_its_persisted_retry_wake() {
         client.clone(),
         store_path.clone(),
         Some(session_id.to_string()),
-        AgentMode::Direct,
         None,
         None,
     );

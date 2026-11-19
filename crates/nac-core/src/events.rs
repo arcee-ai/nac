@@ -1750,7 +1750,6 @@ pub struct EventSink {
     run_id: Option<SessionRunId>,
     client_id: Option<SessionClientId>,
     stderr_prefixed: bool,
-    defer_worker_finish: bool,
 }
 
 impl EventSink {
@@ -1792,17 +1791,7 @@ impl EventSink {
         }
     }
 
-    pub(crate) fn worker_stderr_prefixed() -> Self {
-        Self {
-            defer_worker_finish: true,
-            ..Self::stderr_prefixed()
-        }
-    }
-
     pub fn emit(&self, event: AgentEvent) {
-        if self.defer_worker_finish && matches!(event, AgentEvent::RunFinished { .. }) {
-            return;
-        }
         if matches!(event, AgentEvent::ModelCallStarted { .. }) {
             if self.stderr_prefixed {
                 if let Ok(encoded) = serde_json::to_string(&event) {
@@ -1841,9 +1830,6 @@ impl EventSink {
         event: AgentEvent,
         retry_caller_overload: bool,
     ) -> anyhow::Result<()> {
-        if self.defer_worker_finish && matches!(event, AgentEvent::RunFinished { .. }) {
-            return Ok(());
-        }
         if matches!(event, AgentEvent::ModelCallStarted { .. }) {
             self.emit(event);
             return Ok(());

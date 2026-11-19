@@ -11,8 +11,6 @@ async fn sessionless_send_continues_when_provider_context_total_is_invalid() {
     let mut agent = Agent::with_config(
         ModelClient::new_for_test_server(server.base_url.clone()),
         AgentConfig {
-            command_output_limits: crate::terminal::CommandOutputLimits::default(),
-            mode: AgentMode::Direct,
             store_path: PathBuf::from("unused.db"),
             session_id: None,
             orchestrator_compaction_threshold: Some(1),
@@ -29,7 +27,6 @@ async fn sessionless_send_continues_when_provider_context_total_is_invalid() {
             skills: None,
             extra_tool_defs: Vec::new(),
             agents_md_message: None,
-            thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
             permission_rules: Vec::new(),
         },
     )

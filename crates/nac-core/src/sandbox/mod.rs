@@ -1,4 +1,3 @@
-use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -480,12 +479,6 @@ impl SandboxSession {
     pub(crate) async fn materialize_worktree(&self) -> Result<()> {
         match self {
             Self::Podman(inner) => inner.materialize_worktree().await,
-        }
-    }
-
-    pub fn worker_cli_args(&self) -> Vec<OsString> {
-        match self {
-            Self::Podman(inner) => inner.worker_cli_args(),
         }
     }
 

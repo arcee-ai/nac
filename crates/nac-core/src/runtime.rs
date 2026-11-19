@@ -6,9 +6,9 @@ use std::{
 use anyhow::{Context, Result};
 use uuid::Uuid;
 
-use crate::agent::{Agent, AgentConfig, AgentMode};
+use crate::agent::{Agent, AgentConfig};
 use crate::agents_md::AgentsMdBundle;
-use crate::events::{AgentEvent, EventSink};
+use crate::events::EventSink;
 pub use crate::managed_native_credentials::{
     capture_managed_native_credentials_from_environment, restrict_same_uid_inspection,
 };
@@ -34,9 +34,6 @@ pub use crate::sandbox::{
 use crate::sessions::{self, SessionSnapshot};
 use crate::skills::{self, SkillPathVisibility, SkillRegistry};
 use crate::store;
-use crate::worker::{build_preloaded_skill_messages, build_worker_context_messages};
-pub use crate::worker::{run_managed_worker, ManagedWorkerRunConfig};
-pub use crate::worker_credentials::ManagedWorkerCredentialReceiver;
 use crate::workspace::GitTarget;
 
 mod builders;
@@ -49,10 +46,9 @@ mod resume;
 mod sandboxing;
 
 pub use builders::{
-    build_managed_worker_config, build_run_config, build_run_config_for_project,
-    build_run_config_for_project_with_behavior, prepare_native_task_run_config,
-    prepare_retained_task_run_config, prepare_run_config_for_project_with_behavior,
-    prepare_scheduled_shared_task_run_config,
+    build_run_config, build_run_config_for_project, build_run_config_for_project_with_behavior,
+    prepare_native_task_run_config, prepare_retained_task_run_config,
+    prepare_run_config_for_project_with_behavior, prepare_scheduled_shared_task_run_config,
 };
 #[cfg(test)]
 use configuration::NonModelNacConfig;
@@ -62,11 +58,10 @@ pub use configuration::{
 };
 pub(crate) use contracts::RuntimeSession;
 pub use contracts::{
-    EffectiveSandboxOptions, ManagedWorkerOptions, ModelOptions, OptionalModelOption,
-    ResumeModelOptions, ResumeOptions, ResumePickerRunConfig, RunOptions, SandboxOptions,
-    SessionRunConfig, SshOptions, StoreOptions, WorkerDispatchOptions,
+    EffectiveSandboxOptions, ModelOptions, OptionalModelOption, ResumeModelOptions, ResumeOptions,
+    ResumePickerRunConfig, RunOptions, SandboxOptions, SessionRunConfig, SshOptions, StoreOptions,
 };
-use model_resolution::{default_config_cwd, managed_worker_effective_model_settings};
+use model_resolution::default_config_cwd;
 pub use model_resolution::{
     effective_model_settings, effective_orchestrator_compaction_threshold, resolve_store_path,
     resolve_store_path_for_track,

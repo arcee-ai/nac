@@ -213,8 +213,6 @@ async fn prepare_run_config_inner(
         let mut agent = Agent::with_config(
             client.clone(),
             AgentConfig {
-                command_output_limits: crate::terminal::CommandOutputLimits::default(),
-                mode: AgentMode::Direct,
                 store_path: store_path.clone(),
                 session_id: Some(session_id.clone()),
                 orchestrator_compaction_threshold,
@@ -231,7 +229,6 @@ async fn prepare_run_config_inner(
                 skills,
                 extra_tool_defs,
                 agents_md_message,
-                thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
                 permission_rules: config.permissions.rules.clone(),
             },
         )?;
@@ -351,8 +348,6 @@ async fn prepare_run_config_inner(
         let mut agent = Agent::with_config(
             client.clone(),
             AgentConfig {
-                command_output_limits: crate::terminal::CommandOutputLimits::default(),
-                mode: AgentMode::Direct,
                 store_path: store_path.clone(),
                 session_id: Some(session_id.clone()),
                 orchestrator_compaction_threshold,
@@ -369,7 +364,6 @@ async fn prepare_run_config_inner(
                 skills,
                 extra_tool_defs,
                 agents_md_message,
-                thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
                 permission_rules: config.permissions.rules.clone(),
             },
         )?;
@@ -427,145 +421,4 @@ async fn prepare_run_config_inner(
             Err(error)
         }
     }
-}
-
-pub async fn build_managed_worker_config(
-    _options: ManagedWorkerOptions,
-    _config: &NacConfig,
-) -> Result<ManagedWorkerRunConfig> {
-    anyhow::bail!("retired worker construction is unavailable")
-}
-
-#[expect(
-    dead_code,
-    reason = "retired worker construction is unreachable until ALL-614 removes it"
-)]
-async fn build_retired_managed_worker_config(
-    options: ManagedWorkerOptions,
-    config: &NacConfig,
-) -> Result<ManagedWorkerRunConfig> {
-    let client = ModelClient::from_effective_settings(managed_worker_effective_model_settings(
-        &options.model,
-    )?)?;
-    let ssh_host = options.ssh.host();
-    let config_cwd = options
-        .config_cwd
-        .clone()
-        .unwrap_or_else(|| default_config_cwd(&options.workspace_cwd, ssh_host.as_deref()));
-    let workspace_cwd = options.workspace_cwd;
-    let sandbox_options = effective_sandbox_options(options.sandbox, config);
-    validate_target_sandbox_options(ssh_host.as_deref(), &sandbox_options, "worker")?;
-    let store_base_cwd = if ssh_host.is_some() {
-        &config_cwd
-    } else {
-        &workspace_cwd
-    };
-    let store_path = resolve_store_path(store_base_cwd, options.store, config);
-    let sandbox = if ssh_host.is_some() {
-        None
-    } else {
-        build_sandbox_session(&sandbox_options, &workspace_cwd).await?
-    };
-    let workspace_paths = PathContext::new(&workspace_cwd);
-    let config_paths = PathContext::new(&config_cwd);
-    let (agents_md_message, mcp_outcome, skills) = if ssh_host.is_some() {
-        let mcp_outcome = McpRegistry::load_reporting_skips(
-            &workspace_cwd,
-            None,
-            &config_paths,
-            McpTransportPolicy::StreamableHttpOnly,
-            McpRootPolicy::None,
-        )
-        .await?;
-        let skills = SkillRegistry::load(None, SkillPathVisibility::Hidden, &config_paths)?;
-        (None, mcp_outcome, skills)
-    } else {
-        let workspace_dir = effective_workspace_dir(&workspace_cwd, sandbox.as_ref());
-        let agents_md = AgentsMdBundle::load(workspace_dir.as_deref(), &workspace_paths)?;
-        let mcp_outcome = McpRegistry::load_reporting_skips(
-            &workspace_cwd,
-            sandbox.as_ref(),
-            &workspace_paths,
-            McpTransportPolicy::All,
-            McpRootPolicy::Workspace,
-        )
-        .await?;
-        let (skill_workspace, visibility) = if sandbox.is_some() {
-            (None, SkillPathVisibility::Hidden)
-        } else {
-            (workspace_dir.as_deref(), SkillPathVisibility::Visible)
-        };
-        let skills = SkillRegistry::load(skill_workspace, visibility, &workspace_paths)?;
-        (agents_md.system_message(), mcp_outcome, skills)
-    };
-    // Surface each skip as a typed event on the worker's stderr channel so the
-    // dashboard shows why a server's tools are missing.
-    let worker_event_sink = EventSink::stderr_prefixed();
-    for skipped in &mcp_outcome.skipped {
-        worker_event_sink.emit(AgentEvent::McpServerSkipped {
-            thread_name: Some(options.dispatch.thread_name.clone()),
-            server_name: skipped.name.clone(),
-            reason: skipped.reason.clone(),
-        });
-    }
-    let mcp = mcp_outcome.registry;
-    let working_directory = sandbox
-        .as_ref()
-        .map(super::super::sandbox::SandboxSession::workdir_display)
-        .unwrap_or_else(|| directory_display(&workspace_cwd));
-    let extra_tool_defs = mcp
-        .as_ref()
-        .map(|registry| registry.model_tool_definitions())
-        .unwrap_or_default();
-    let agents_md_message = combine_system_guidance(
-        agents_md_message,
-        mcp.as_ref()
-            .and_then(|registry| registry.instructions_message()),
-    );
-
-    let worker_context = store::load_worker_context(
-        &store_path,
-        &options.dispatch.session_id,
-        &options.dispatch.thread_name,
-        &options.dispatch.source_threads,
-    )?;
-    let mut initial_messages =
-        build_preloaded_skill_messages(skills.as_deref(), &options.dispatch.skills)?;
-    initial_messages.extend(build_worker_context_messages(
-        &options.dispatch.thread_name,
-        &worker_context,
-    ));
-    let agent = Agent::with_config(
-        client.clone(),
-        AgentConfig {
-            command_output_limits: crate::terminal::CommandOutputLimits::default(),
-            mode: AgentMode::Worker,
-            store_path: store_path.clone(),
-            session_id: Some(options.dispatch.session_id.clone()),
-            orchestrator_compaction_threshold: None,
-            initial_messages,
-            thread_name: Some(options.dispatch.thread_name.clone()),
-            dispatch_id: Some(options.dispatch.dispatch_id.clone()),
-            event_sink: EventSink::worker_stderr_prefixed(),
-            workspace_cwd,
-            config_cwd,
-            working_directory,
-            sandbox,
-            ssh: options.ssh.connection(&config_paths),
-            mcp,
-            skills: None,
-            extra_tool_defs,
-            agents_md_message,
-            thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
-            permission_rules: config.permissions.rules.clone(),
-        },
-    )?;
-
-    Ok(ManagedWorkerRunConfig {
-        agent,
-        dispatch_id: options.dispatch.dispatch_id,
-        session_id: options.dispatch.session_id,
-        thread_name: options.dispatch.thread_name,
-        action: options.dispatch.action,
-    })
 }

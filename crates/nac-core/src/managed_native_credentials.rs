@@ -15,7 +15,7 @@ pub fn restrict_same_uid_inspection() -> io::Result<()> {
             return Err(io::Error::last_os_error());
         }
         // Executing an ordinary binary resets dumpability, so this function is
-        // called independently by the server and each managed worker.
+        // called independently by the managed server.
         // SAFETY: PR_SET_DUMPABLE takes an integer flag and no pointers.
         if unsafe { libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0) } != 0 {
             return Err(io::Error::last_os_error());
@@ -34,7 +34,7 @@ static MANAGED_NATIVE_CREDENTIALS: OnceLock<ManagedNativeCredentials> = OnceLock
 
 /// Capture native integration credentials before managed server construction
 /// and remove them from the generic process environment. Only the native web
-/// capability and the private worker transport can consult this snapshot.
+/// capability can consult this snapshot.
 pub fn capture_managed_native_credentials_from_environment() -> io::Result<()> {
     let credentials = ManagedNativeCredentials::read_process_environment()?;
     if let Some(existing) = MANAGED_NATIVE_CREDENTIALS.get() {
@@ -68,13 +68,6 @@ pub(crate) fn captured_managed_native_redactions() -> Vec<String> {
 }
 
 impl ManagedNativeCredentials {
-    pub(crate) fn from_process_environment() -> io::Result<Self> {
-        if let Some(credentials) = MANAGED_NATIVE_CREDENTIALS.get() {
-            return Ok(credentials.clone());
-        }
-        Self::read_process_environment()
-    }
-
     fn read_process_environment() -> io::Result<Self> {
         let exa_api_key = std::env::var_os(crate::model::EXA_API_KEY_ENV)
             .map(|value| {
@@ -92,20 +85,5 @@ impl ManagedNativeCredentials {
 
     pub(crate) fn exact_redactions(&self) -> Vec<String> {
         self.exa_api_key.iter().cloned().collect()
-    }
-
-    pub(crate) fn into_exa_api_key(self) -> Option<String> {
-        self.exa_api_key
-    }
-
-    pub(crate) fn from_exa_api_key(exa_api_key: Option<String>) -> Self {
-        Self { exa_api_key }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn for_test(exa_api_key: Option<&str>) -> Self {
-        Self {
-            exa_api_key: exa_api_key.map(str::to_string),
-        }
     }
 }

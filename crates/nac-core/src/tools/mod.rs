@@ -2,10 +2,10 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex as StdMutex, Weak as StdWeak};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde_json::Value;
-use tokio::sync::{Mutex, Notify, RwLock};
+use tokio::sync::{Notify, RwLock};
 
 use crate::events::EventSink;
 use crate::mcp::{McpRegistry, McpToolCapture};
@@ -45,11 +45,8 @@ mod run_cancellation;
 mod task_wait;
 mod task_wait_state;
 mod terminal_tools;
-pub mod thread;
 pub(crate) mod user_terminal;
 pub(crate) mod web;
-mod worker_dispatch;
-pub mod workset;
 pub mod write;
 
 pub(crate) use run_admission::RunAdmission;
@@ -57,7 +54,6 @@ pub(crate) use run_cancellation::RunCancellation;
 use runtime_context::shared_workspace_gate;
 pub(crate) use runtime_context::{remote_file_lock_busy, resolve_workspace_path};
 pub use runtime_context::{shared_workspace_gate_for, ToolRuntime};
-pub use worker_dispatch::WorkerDispatchRegistry;
 
 #[derive(Debug)]
 pub struct ToolResult {
@@ -86,13 +82,6 @@ impl ToolResult {
             delegation_outcome: None,
             delegation_summary: None,
         }
-    }
-
-    /// Records that the call ran, timed from `started`. Exits before a call
-    /// starts its work must not use it.
-    pub(crate) fn executed_since(mut self, started: Instant) -> Self {
-        self.execution_duration_ms = Some(started.elapsed().as_millis() as u64);
-        self
     }
 }
 
@@ -341,67 +330,6 @@ pub(crate) fn direct_tool_admission(name: &str) -> Option<kernel::ToolAdmission>
         .admission(name)
 }
 
-pub fn orchestrator_tool_definitions(skills: Option<&SkillRegistry>) -> Vec<ToolDefinition> {
-    vec![
-        guide::definition(),
-        thread::dispatch_definition(skills),
-        thread::threads_definition(),
-        thread::thread_read_definition(),
-        thread::thread_delete_definition(),
-        workset::define_definition(),
-        workset::read_definition(),
-        workset::list_definition(),
-    ]
-}
-
-pub fn require_str(args: &Value, key: &str) -> Result<String, ToolResult> {
-    args.get(key)
-        .and_then(|value| value.as_str())
-        .map(std::string::ToString::to_string)
-        .ok_or_else(|| ToolResult {
-            content: (format!("Error: '{key}' argument required")).into(),
-            is_error: true,
-            execution_duration_ms: None,
-            execution_duration_excludes_authorization: false,
-            delegation_outcome: None,
-            delegation_summary: None,
-        })
-}
-
-pub fn require_string_array(args: &Value, key: &str) -> Result<Vec<String>, ToolResult> {
-    let Some(value) = args.get(key) else {
-        return Ok(Vec::new());
-    };
-
-    let Some(items) = value.as_array() else {
-        return Err(ToolResult {
-            content: (format!("Error: '{key}' must be an array of strings")).into(),
-            is_error: true,
-            execution_duration_ms: None,
-            execution_duration_excludes_authorization: false,
-            delegation_outcome: None,
-            delegation_summary: None,
-        });
-    };
-
-    let mut out = Vec::with_capacity(items.len());
-    for item in items {
-        let Some(value) = item.as_str() else {
-            return Err(ToolResult {
-                content: (format!("Error: '{key}' must be an array of strings")).into(),
-                is_error: true,
-                execution_duration_ms: None,
-                execution_duration_excludes_authorization: false,
-                delegation_outcome: None,
-                delegation_summary: None,
-            });
-        };
-        out.push(value.to_string());
-    }
-
-    Ok(out)
-}
-
 #[cfg(test)]
 pub async fn execute_tool(
     name: &str,
@@ -476,22 +404,13 @@ pub async fn execute_tool_with_context(
             .await;
     }
 
-    match name {
-        "thread" => thread::execute_dispatch(args, runtime, client).await,
-        "threads" => thread::execute_threads(runtime).await,
-        "thread_read" => thread::execute_thread_read(args, runtime).await,
-        "thread_delete" => thread::execute_thread_delete(args, runtime).await,
-        "workset_define" => workset::execute_define(args, runtime).await,
-        "workset_read" => workset::execute_read(args, runtime).await,
-        "workset_list" => workset::execute_list(args, runtime).await,
-        unknown => ToolResult {
-            content: (format!("Error: unknown tool '{unknown}'")).into(),
-            is_error: true,
-            execution_duration_ms: None,
-            execution_duration_excludes_authorization: false,
-            delegation_outcome: None,
-            delegation_summary: None,
-        },
+    ToolResult {
+        content: (format!("Error: unknown tool '{name}'")).into(),
+        is_error: true,
+        execution_duration_ms: None,
+        execution_duration_excludes_authorization: false,
+        delegation_outcome: None,
+        delegation_summary: None,
     }
 }
 
@@ -500,7 +419,7 @@ pub async fn execute_tool_with_context(
 mod tests;
 
 // ------------------------------------------------------------------
-// Test helpers (shared across agent::dag, agent::tool_exec, tools::thread)
+// Test helpers for direct tool execution
 // ------------------------------------------------------------------
 
 /// Create a `ToolRuntime` suitable for unit tests.  Uses the current
@@ -520,8 +439,6 @@ pub(crate) fn test_runtime() -> ToolRuntime {
         workspace_cwd,
         store_path: PathBuf::new(),
         session_id: Some("test-session".to_string()),
-        worker_executable: None,
-        active_threads: Arc::new(WorkerDispatchRegistry::new(Arc::clone(&run_admission))),
         run_admission,
         event_sink: EventSink::none(),
         backend,
@@ -529,8 +446,6 @@ pub(crate) fn test_runtime() -> ToolRuntime {
         mcp_tools: Arc::new(HashMap::new()),
         skills: None,
         terminal_manager: TerminalManager::new(),
-        thread_timeout_secs: thread::DEFAULT_THREAD_TIMEOUT_SECS,
-        worker_usage: Arc::new(Mutex::new(crate::model::TokenUsage::default())),
         allowed_tools: None,
         permission_broker: None,
         permission_reviewer: None,

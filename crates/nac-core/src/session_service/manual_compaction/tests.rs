@@ -474,7 +474,6 @@ async fn assert_two_service_admissions_refresh_external_checkpoint(
         client.clone(),
         store_path.clone(),
         Some(session_id.clone()),
-        crate::agent::AgentMode::Direct,
         None,
         None,
     );

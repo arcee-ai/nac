@@ -503,7 +503,7 @@ async fn heartbeat_automatic_relinquishing_control_is_bound_to_own_occurrence_an
     let mut runtime = service.heartbeat_context.as_ref().unwrap().runtime.clone();
     runtime.heartbeat_execution = true;
     runtime.heartbeat_human_request = None;
-    assert!(runtime.active_threads.begin_run(&run));
+    assert!(runtime.run_admission.begin_run(&run));
     assert!(
         native_control(
             &runtime,

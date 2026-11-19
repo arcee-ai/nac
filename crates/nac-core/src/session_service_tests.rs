@@ -1,5 +1,5 @@
 use super::*;
-use crate::agent::{AgentConfig, AgentMode};
+use crate::agent::AgentConfig;
 use crate::model::ModelClient;
 use crate::types::{FunctionCall, ToolCall};
 use std::collections::BTreeMap;
@@ -210,14 +210,7 @@ pub(super) fn test_agent(
     store_path: PathBuf,
     session_id: Option<String>,
 ) -> Agent {
-    build_test_agent(
-        client,
-        store_path,
-        session_id,
-        AgentMode::Direct,
-        None,
-        None,
-    )
+    build_test_agent(client, store_path, session_id, None, None)
 }
 
 pub(super) fn test_agent_with_compaction_threshold(
@@ -230,7 +223,6 @@ pub(super) fn test_agent_with_compaction_threshold(
         client,
         store_path,
         session_id,
-        AgentMode::Direct,
         orchestrator_compaction_threshold,
         None,
     )
@@ -242,29 +234,19 @@ pub(super) fn test_agent_with_skills(
     session_id: Option<String>,
     skills: Option<Arc<SkillRegistry>>,
 ) -> Agent {
-    build_test_agent(
-        client,
-        store_path,
-        session_id,
-        AgentMode::Direct,
-        None,
-        skills,
-    )
+    build_test_agent(client, store_path, session_id, None, skills)
 }
 
 pub(super) fn build_test_agent(
     client: ModelClient,
     store_path: PathBuf,
     session_id: Option<String>,
-    mode: AgentMode,
     orchestrator_compaction_threshold: Option<u64>,
     skills: Option<Arc<SkillRegistry>>,
 ) -> Agent {
     Agent::with_config(
         client,
         AgentConfig {
-            command_output_limits: crate::terminal::CommandOutputLimits::default(),
-            mode,
             store_path,
             session_id,
             orchestrator_compaction_threshold,
@@ -281,7 +263,6 @@ pub(super) fn build_test_agent(
             skills,
             extra_tool_defs: Vec::new(),
             agents_md_message: None,
-            thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
             permission_rules: Vec::new(),
         },
     )
@@ -325,7 +306,6 @@ pub(crate) fn test_direct_active_service_at(
         client.clone(),
         store_path.clone(),
         Some(session_id.to_string()),
-        AgentMode::Direct,
         None,
         None,
     );
@@ -425,8 +405,6 @@ fn has_sandbox_reflects_the_agent_execution_backend() {
     let agent = Agent::with_config(
         client.clone(),
         AgentConfig {
-            command_output_limits: crate::terminal::CommandOutputLimits::default(),
-            mode: AgentMode::Direct,
             store_path: store_path.clone(),
             session_id: Some("has-sandbox-sandboxed".to_string()),
             orchestrator_compaction_threshold: None,
@@ -455,7 +433,6 @@ fn has_sandbox_reflects_the_agent_execution_backend() {
             skills: None,
             extra_tool_defs: Vec::new(),
             agents_md_message: None,
-            thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
             permission_rules: Vec::new(),
         },
     )
@@ -580,8 +557,6 @@ async fn sandbox_container_destruction_preserves_worktree_until_durable_delete()
     let agent = Agent::with_config(
         client.clone(),
         AgentConfig {
-            command_output_limits: crate::terminal::CommandOutputLimits::default(),
-            mode: AgentMode::Direct,
             store_path: store_path.clone(),
             session_id: Some("destroy-preserves-worktree".to_string()),
             orchestrator_compaction_threshold: None,
@@ -598,7 +573,6 @@ async fn sandbox_container_destruction_preserves_worktree_until_durable_delete()
             skills: None,
             extra_tool_defs: Vec::new(),
             agents_md_message: None,
-            thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
             permission_rules: Vec::new(),
         },
     )
@@ -761,7 +735,6 @@ pub(super) fn test_compaction_service(
         client.clone(),
         store_path.clone(),
         Some(session_id.to_string()),
-        AgentMode::Direct,
         None,
         None,
     );

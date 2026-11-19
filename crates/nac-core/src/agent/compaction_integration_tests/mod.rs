@@ -33,8 +33,6 @@ fn compaction_test_agent(
     Agent::with_config(
         client,
         AgentConfig {
-            command_output_limits: crate::terminal::CommandOutputLimits::default(),
-            mode: AgentMode::Direct,
             store_path,
             session_id: session_id.map(str::to_string),
             orchestrator_compaction_threshold: threshold,
@@ -51,7 +49,6 @@ fn compaction_test_agent(
             skills: None,
             extra_tool_defs: Vec::new(),
             agents_md_message: None,
-            thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
             permission_rules: Vec::new(),
         },
     )

@@ -94,16 +94,6 @@ impl SandboxOptions {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct WorkerDispatchOptions {
-    pub session_id: String,
-    pub thread_name: String,
-    pub dispatch_id: String,
-    pub action: String,
-    pub source_threads: Vec<String>,
-    pub skills: Vec<String>,
-}
-
-#[derive(Debug, Clone, Default)]
 pub struct RunOptions {
     pub workspace_cwd: PathBuf,
     /// Local cwd for config/store resolution; SSH workspaces are remote.
@@ -180,19 +170,6 @@ impl SshOptions {
         }
         Ok(())
     }
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct ManagedWorkerOptions {
-    pub workspace_cwd: PathBuf,
-    /// Local cwd for config/store resolution; SSH workspaces are remote.
-    pub config_cwd: Option<PathBuf>,
-    pub dispatch: WorkerDispatchOptions,
-    pub store: StoreOptions,
-    pub model: ModelOptions,
-    pub sandbox: SandboxOptions,
-    /// How to reach the host of a remote worker; mutually exclusive with sandbox.
-    pub ssh: SshOptions,
 }
 
 #[derive(Debug, Clone, Default)]

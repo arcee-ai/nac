@@ -1,18 +1,5 @@
-const WORKER_SYSTEM_PROMPT: &str = include_str!("prompts/nac_worker.md");
-const ORCHESTRATOR_SYSTEM_PROMPT: &str = include_str!("prompts/nac_orchestrator.md");
 const DIRECT_SYSTEM_PROMPT: &str = include_str!("prompts/nac_direct.md");
 const GENERAL_CHILD_SYSTEM_PROMPT: &str = include_str!("prompts/nac_direct_child.md");
-
-#[expect(
-    clippy::expect_used,
-    reason = "the checked-in worker prompt must retain its working-directory placeholder"
-)]
-pub(super) fn render_worker_system_prompt(working_directory: &str) -> String {
-    let (prefix, suffix) = WORKER_SYSTEM_PROMPT
-        .split_once("{working_directory}")
-        .expect("worker system prompt must contain {working_directory}");
-    format!("{prefix}{working_directory}{suffix}")
-}
 
 #[expect(
     clippy::expect_used,
@@ -32,21 +19,4 @@ pub(crate) fn render_general_child_system_prompt(
     GENERAL_CHILD_SYSTEM_PROMPT
         .replace("{working_directory}", working_directory)
         .replace("{description}", description)
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "the checked-in orchestrator prompt must retain both formatting placeholders"
-)]
-pub(super) fn render_orchestrator_system_prompt(
-    working_directory: &str,
-    thread_timeout_secs: u64,
-) -> String {
-    let (prefix, remainder) = ORCHESTRATOR_SYSTEM_PROMPT
-        .split_once("{working_directory}")
-        .expect("orchestrator system prompt must contain {working_directory}");
-    let (middle, suffix) = remainder
-        .split_once("{thread_timeout_secs}")
-        .expect("orchestrator system prompt must contain {thread_timeout_secs}");
-    format!("{prefix}{working_directory}{middle}{thread_timeout_secs}{suffix}")
 }

@@ -92,9 +92,6 @@ pub mod traditional_children;
 pub mod types;
 pub mod upgrade;
 pub mod view;
-mod worker;
-mod worker_credentials;
-mod worker_protocol;
 pub mod workspace;
 
 #[cfg(test)]

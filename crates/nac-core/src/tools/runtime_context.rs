@@ -13,8 +13,6 @@ pub struct ToolRuntime {
     pub config_cwd: PathBuf,
     pub store_path: PathBuf,
     pub session_id: Option<String>,
-    pub worker_executable: Option<PathBuf>,
-    pub active_threads: Arc<WorkerDispatchRegistry>,
     pub(crate) run_admission: Arc<RunAdmission>,
     pub event_sink: EventSink,
     pub backend: Arc<ExecutionBackend>,
@@ -23,12 +21,6 @@ pub struct ToolRuntime {
     pub skills: Option<Arc<SkillRegistry>>,
     pub terminal_manager: TerminalManager,
     pub command_cancellation: RunCancellation,
-    pub thread_timeout_secs: u64,
-    /// Accumulated worker token usage from thread dispatches.  The agent
-    /// loop reads and resets this after each tool-execution round so worker
-    /// API costs are included in the session totals.  `orchestrator_context_tokens` is
-    /// intentionally NOT accumulated here — it stays orchestrator-only.
-    pub worker_usage: Arc<Mutex<crate::model::TokenUsage>>,
     /// Exact construction-time capability set exposed to this agent. `None`
     /// is reserved for native/test callers that intentionally invoke the
     /// global operation boundary without a model-visible snapshot.
