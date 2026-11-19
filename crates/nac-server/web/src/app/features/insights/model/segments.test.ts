@@ -209,27 +209,6 @@ describe("partitionModelTurn", () => {
     expect(settled.group.durationMs).toBeNull();
   });
 
-  it("never sees the orchestrator lookups the transcript drops", () => {
-    const calls = [
-      toolCall("call-threads", "threads"),
-      toolCall("call-thread-read", "thread_read", { name: "impl" }),
-      toolCall("call-workset-read", "workset_read", { id: "w" }),
-      toolCall("call-workset-list", "workset_list"),
-      toolCall("call-delete", "thread_delete", { name: "impl" }),
-    ];
-    const turns = buildTranscript(
-      snapshot([
-        { role: "user", content: "Clean up the threads" },
-        assistant({ reasoning: "Only the stale thread has to go.", calls }),
-        ...calls.map((call) => toolResult(call.id)),
-      ]),
-      {},
-    );
-
-    const list = partitionModelTurn(modelAt(turns, 1), turns[0]);
-    expect(shape(list)).toEqual(["group:thoughts-0,thread_delete-1-4"]);
-  });
-
   it("keeps ids when another assistant message joins the turn", () => {
     const first: Message[] = [
       { role: "user", content: "Fix the store" },
@@ -239,13 +218,12 @@ describe("partitionModelTurn", () => {
       }),
       toolResult("call-read"),
     ];
-    const before = buildTranscript(snapshot(first, "direct"), {});
+    const before = buildTranscript(snapshot(first, "direct"));
     const after = buildTranscript(
       snapshot(
         [...first, assistant({ reasoning: "Now patch it.", content: "Patched the store." })],
         "direct",
       ),
-      {},
     );
 
     expect(modelAt(before, 1).key).not.toBe(modelAt(after, 1).key);
@@ -269,7 +247,6 @@ describe("partitionModelTurn", () => {
         ],
         "direct",
       ),
-      {},
     );
 
     expect(modelAt(early, 1).key).toBe(STREAMING_TURN_KEY);

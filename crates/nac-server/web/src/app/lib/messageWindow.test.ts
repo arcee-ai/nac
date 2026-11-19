@@ -204,7 +204,7 @@ describe("bounded transcript projection", () => {
       [100, 200, 300, 400],
     );
 
-    const turns = buildTranscript(value, {});
+    const turns = buildTranscript(value);
     expect(turns.map((turn) => [turn.kind, turn.key])).toEqual([
       ["user", "user-21"],
       ["model", "model-22"],
@@ -230,7 +230,7 @@ describe("bounded transcript projection", () => {
     // fields the projection does not read.
     value.active_run = {} as SessionSnapshotResponse["active_run"];
 
-    const models = buildTranscript(value, {}).filter((turn) => turn.kind === "model");
+    const models = buildTranscript(value).filter((turn) => turn.kind === "model");
     expect(models.map((turn) => turn.durationMs)).toEqual([900, null]);
   });
 
@@ -242,11 +242,11 @@ describe("bounded transcript projection", () => {
     });
     const current = snapshot([call("new"), assistant("final")], 50, 52);
     current.metadata = { behavior: "direct" } as SessionSnapshotResponse["metadata"];
-    const before = buildTranscript(current, {});
+    const before = buildTranscript(current);
     const merged = prependMessagePage(current, page([call("old"), tool("old")], 48, 52), 50);
     expect(merged).not.toBeNull();
     if (!merged) return;
-    const after = buildTranscript(merged, {});
+    const after = buildTranscript(merged);
     const keys = (turns: ReturnType<typeof buildTranscript>) =>
       turns.flatMap((turn) =>
         turn.kind === "model"
@@ -262,7 +262,7 @@ describe("bounded transcript projection", () => {
       user(`user-${index}`),
       assistant(`assistant-${index}`),
     ]).flat();
-    expect(buildTranscript(snapshot(messages, 0, messages.length), {})).toHaveLength(100);
+    expect(buildTranscript(snapshot(messages, 0, messages.length))).toHaveLength(100);
   });
 });
 

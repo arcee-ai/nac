@@ -1,4 +1,4 @@
-import { S as e, a as t, j as n, n as r, x as i } from "./RuntimeContext-DDCGeB4w.js";
+import { S as e, a as t, j as n, n as r, x as i } from "./RuntimeContext-CzbBXx-g.js";
 import { a, y as o } from "./PresentationBoundary-BAUfAcJZ.js";
 import { n as s, t as c } from "./Toast-J9CfluTU.js";
 import { Profiler as l, createContext as u, useCallback as d, useContext as f, useEffect as p, useMemo as m, useReducer as ee, useRef as te, useState as ne } from "react";
@@ -127,17 +127,6 @@ var be = 5e3, v = {
 	],
 	sessionsAll: ["sessions"],
 	fleetAttention: (e) => ["fleet-attention", { projectId: e }],
-	threadEventsRoot: (e) => [
-		"session",
-		e,
-		"thread-events"
-	],
-	threadEvents: (e, t) => [
-		"session",
-		e,
-		"thread-events",
-		t
-	],
 	toolCallContent: (e, t, n, r) => [
 		"session",
 		e,

@@ -16,7 +16,6 @@ import {
   type ToolPresentation,
 } from "@/app/lib/toolPresentation";
 import type { ThreadLogLine } from "@/app/lib/threadLog";
-import type { RuntimeThread } from "@/app/store/runtimeStore";
 import type { AgentEvent, DispatchWeight, SessionSnapshotResponse } from "@/app/types/api";
 
 /** Exact assistant marker written after any partial response on cancellation. */
@@ -244,14 +243,9 @@ export function withStreamedOutput(
   return live ? [...turns.slice(0, -1), turn] : [...turns, turn];
 }
 
-/**
- * Group the snapshot messages into user bubbles and model messages. Live thread
- * state comes from the SSE store so a wave animates before the snapshot lands.
- */
+/** Group the snapshot messages into user bubbles and model messages. */
 export function buildTranscript(
   snapshot: SessionSnapshotResponse | null,
-  _liveThreads: Record<string, RuntimeThread>,
-  _liveFinishedToolCalls: Record<string, true> = {},
   livePrimaryToolEvents: AgentEvent[] = [],
   pendingPermissionCallIds: ReadonlySet<string> = new Set(),
 ): TranscriptTurn[] {

@@ -161,7 +161,7 @@ export function SubagentPreview({
   }, [hasOlder, loadOlder, olderFailed, scrollRef, windowStart]);
 
   const built = useMemo(
-    () => buildTranscript(data ?? null, {}, {}, live.toolEvents, pendingPermissionCallIds),
+    () => buildTranscript(data ?? null, live.toolEvents, pendingPermissionCallIds),
     [data, live.toolEvents, pendingPermissionCallIds],
   );
   const [drawn, setDrawn] = useState<

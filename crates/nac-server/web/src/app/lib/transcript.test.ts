@@ -81,7 +81,6 @@ it("treats the failed-run sentinel as metadata instead of copyable model prose",
         content: `useful partial answer\n\n${RUN_FAILED_PARTIAL_MARKER}`,
       },
     ]),
-    {},
   );
   expect(turns[1]).toMatchObject({
     kind: "model",
@@ -150,7 +149,6 @@ describe("delegated completion turns", () => {
           })}`,
         },
       ]),
-      {},
     );
     expect(turns).toHaveLength(1);
     expect(turns[0]).toMatchObject({
@@ -184,8 +182,8 @@ describe("delegated completion turns", () => {
     const tail = snapshot(messages.slice(2));
     tail.message_created_at = ["t-2"];
     tail.message_page = { start: 10, end: 11, total: 11, has_older: true };
-    const fullTurns = buildTranscript(full, {});
-    const tailTurns = buildTranscript(tail, {});
+    const fullTurns = buildTranscript(full);
+    const tailTurns = buildTranscript(tail);
     expect(fullTurns.map((turn) => turn.key)).toEqual([
       "delegated-completion-8",
       "user-9",
@@ -204,7 +202,7 @@ describe("delegated completion turns", () => {
 
   it("keeps malformed prefix text as an ordinary user-authored turn", () => {
     const content = `${prefix}not json`;
-    expect(buildTranscript(snapshot([{ role: "user", content }]), {})[0]).toMatchObject({
+    expect(buildTranscript(snapshot([{ role: "user", content }]))[0]).toMatchObject({
       kind: "user",
       text: content,
     });
@@ -231,7 +229,7 @@ describe("delegated completion turns", () => {
       "direct",
     );
     value.primary_tool_events = [primaryStart("completion", "subagent", "Review UI")];
-    const turns = buildTranscript(value, {});
+    const turns = buildTranscript(value);
     expect(turns[0]?.kind).toBe("delegated-completion");
     expect(toolDetails(turns)).toEqual([]);
   });
@@ -251,7 +249,7 @@ describe.each<SessionBehavior>(["direct", "direct-with-orchestrator"])(
         behavior,
       );
       snapshot.tool_call_occurrences = ["log:session:store:1:digest:3", null, null];
-      const tools = toolDetails(buildTranscript(snapshot, {}));
+      const tools = toolDetails(buildTranscript(snapshot));
       expect(tools).toHaveLength(2);
       expect(tools.every((item) => item.status === "unknown" && item.resultPreview === null)).toBe(
         true,
@@ -269,7 +267,7 @@ describe.each<SessionBehavior>(["direct", "direct-with-orchestrator"])(
         behavior,
       );
       snapshot.tool_call_occurrences = ["log:session:store:1:digest:3", null, null];
-      expect(toolDetails(buildTranscript(snapshot, {}))).toMatchObject([
+      expect(toolDetails(buildTranscript(snapshot))).toMatchObject([
         { status: "unknown", statusLabel: "Outcome unavailable", resultPreview: null },
       ]);
     });
@@ -293,7 +291,7 @@ describe.each<SessionBehavior>(["direct", "direct-with-orchestrator"])(
         started_at_epoch_ms: 1,
       };
       const start = primaryStart("call-primary", "exec_command", "printf safe-command");
-      const live = toolDetails(buildTranscript(base, {}, {}, [start]));
+      const live = toolDetails(buildTranscript(base, [start]));
       expect(live).toEqual([
         expect.objectContaining({
           callId: "call-primary",
@@ -304,7 +302,7 @@ describe.each<SessionBehavior>(["direct", "direct-with-orchestrator"])(
       ]);
 
       const awaitingApproval = toolDetails(
-        buildTranscript(base, {}, {}, [start], new Set(["call-primary"])),
+        buildTranscript(base, [start], new Set(["call-primary"])),
       );
       expect(awaitingApproval).toEqual([
         expect.objectContaining({
@@ -315,7 +313,7 @@ describe.each<SessionBehavior>(["direct", "direct-with-orchestrator"])(
       ]);
 
       const finish = primaryFinish("call-primary", "exec_command");
-      const settled = toolDetails(buildTranscript(base, {}, {}, [start, finish]));
+      const settled = toolDetails(buildTranscript(base, [start, finish]));
       expect(settled).toHaveLength(1);
       expect(settled[0]).toMatchObject({ status: "success", resultPreview: "bounded result" });
 
@@ -327,7 +325,7 @@ describe.each<SessionBehavior>(["direct", "direct-with-orchestrator"])(
         behavior,
       );
       reloaded.primary_tool_events = [start, finish];
-      expect(toolDetails(buildTranscript(reloaded, {}))).toEqual(settled);
+      expect(toolDetails(buildTranscript(reloaded))).toEqual(settled);
       expect(JSON.stringify(settled)).not.toContain("SECRET_RAW_COMMAND");
       expect(JSON.stringify(settled)).not.toContain("SECRET_ENV");
       expect(JSON.stringify(settled)).not.toContain("RAW_SECRET_RESULT");
@@ -350,11 +348,11 @@ describe.each<SessionBehavior>(["direct", "direct-with-orchestrator"])(
         delegation_summary: "Review store",
         content_preview: "Instructions sent to subagent",
       } as AgentEvent;
-      expect(toolDetails(buildTranscript(base, {}, {}, [start]))[0]).toMatchObject({
+      expect(toolDetails(buildTranscript(base, [start]))[0]).toMatchObject({
         label: "Subagent request outcome unavailable",
         summary: null,
       });
-      const settled = toolDetails(buildTranscript(base, {}, {}, [start, finish]));
+      const settled = toolDetails(buildTranscript(base, [start, finish]));
       expect(settled).toHaveLength(1);
       expect(settled[0]).toMatchObject({
         label: "Subagent request outcome unavailable",
@@ -369,7 +367,7 @@ describe.each<SessionBehavior>(["direct", "direct-with-orchestrator"])(
         behavior,
       );
       reloaded.primary_tool_events = [start, finish];
-      const retained = toolDetails(buildTranscript(reloaded, {}));
+      const retained = toolDetails(buildTranscript(reloaded));
       expect(retained[0]).toMatchObject({ status: "unknown", summary: null });
       expect(retained[0]).not.toHaveProperty("delegationOutcome");
       expect(JSON.stringify(retained)).not.toContain("RAW_SECRET");
@@ -382,7 +380,6 @@ describe.each<SessionBehavior>(["direct", "direct-with-orchestrator"])(
           [{ role: "assistant", content: null, tool_calls: [call] }, imageToolResult("call-image")],
           behavior,
         ),
-        {},
       );
       expect(toolDetails(turns)).toEqual([
         expect.objectContaining({
@@ -407,7 +404,6 @@ describe("goal continuation turns", () => {
         { role: "assistant", content: "first step" },
         { role: "user", content: message },
       ]),
-      {},
     );
     expect(turns.map((turn) => turn.kind)).toEqual([
       "goal-continuation",
@@ -428,7 +424,7 @@ describe("goal continuation turns", () => {
   it("does not call a goal's run its first while older messages are unloaded", () => {
     const value = snapshot([{ role: "user", content: message }]);
     value.message_page = { start: 4, end: 5, total: 5, has_older: true };
-    expect(buildTranscript(value, {})[0]).toMatchObject({
+    expect(buildTranscript(value)[0]).toMatchObject({
       kind: "goal-continuation",
       first: false,
       messageIndex: 4,

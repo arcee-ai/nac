@@ -68,23 +68,6 @@ describe("canonical refresh classification", () => {
     ).toBe("none");
   });
 
-  it("refetches the snapshot when a thread starts so a re-dispatch escapes the previous episode", () => {
-    resetRuntime("session-a");
-    expect(
-      applyEnvelope(
-        envelope({
-          type: "agent",
-          event: {
-            type: "thread_started",
-            name: "worker",
-            action: "run",
-            source_threads: [],
-          },
-        }),
-      ),
-    ).toBe("snapshot");
-  });
-
   it("distinguishes normal lifecycle snapshots from destructive fences", () => {
     resetRuntime("session-a");
     expect(applyEnvelope(envelope({ type: "run_completed", response: "ok" }))).toBe("snapshot");
@@ -216,14 +199,34 @@ describe("canonical refresh classification", () => {
     expect(getRuntimeState().primaryToolEvents).toHaveLength(2);
   });
 
-  it("surfaces bounded MCP observations in the event and worker log views", () => {
+  it("reports a skipped MCP integration for a direct session", () => {
+    resetRuntime("session-a");
+    applyEnvelope(
+      envelope({
+        type: "agent",
+        event: {
+          type: "mcp_server_skipped",
+          thread_name: null,
+          server_name: "docs",
+          reason: "connection failed",
+        },
+      }),
+    );
+    expect(getRuntimeState().events.at(-1)).toMatchObject({
+      kind: "mcp",
+      text: "MCP docs: connection failed",
+      isError: true,
+    });
+  });
+
+  it("surfaces bounded MCP observations in the event view", () => {
     resetRuntime("session-a");
     applyEnvelope(
       envelope({
         type: "agent",
         event: {
           type: "mcp_notification",
-          thread_name: "worker",
+          thread_name: null,
           server_name: "docs",
           kind: "catalog_refresh_failed",
           message: "tool refresh failed; retaining the last-known-good catalog",
@@ -237,96 +240,24 @@ describe("canonical refresh classification", () => {
       text: "MCP docs: tool refresh failed; retaining the last-known-good catalog",
       isError: true,
     });
-    expect(state.threads.worker.log.at(-1)).toMatchObject({
-      name: "docs",
-      body: "tool refresh failed; retaining the last-known-good catalog",
-      isError: true,
-    });
   });
 });
 
 describe("run cancellation", () => {
-  it("stops live threads without erasing finished history or reporting failure", () => {
+  it("clears errors when a direct run is cancelled", () => {
     resetRuntime("session-a");
     applyEnvelope(
       envelope({ type: "run_started", prompt_preview: "work", started_at_epoch_ms: 0 }),
     );
-    for (const name of ["finished", "worker-a", "worker-b"]) {
-      applyEnvelope(
-        envelope({
-          type: "agent",
-          event: { type: "thread_started", name, action: `run ${name}`, source_threads: [] },
-        }),
-      );
-    }
     applyEnvelope(
-      envelope({
-        type: "agent",
-        event: { type: "thread_log", name: "finished", line: "kept output" },
-      }),
+      envelope({ type: "agent", event: { type: "model_error", message: "provider refused" } }),
     );
-    applyEnvelope(
-      envelope({
-        type: "agent",
-        event: {
-          type: "thread_finished",
-          name: "finished",
-          exit_code: 0,
-          timed_out: false,
-        },
-      }),
-    );
-    applyEnvelope(
-      envelope({
-        type: "agent",
-        event: { type: "model_error", message: "provider refused" },
-      }),
-    );
-
     expect(applyEnvelope(envelope({ type: "run_cancelled" }))).toBe("snapshot");
-    const state = getRuntimeState();
-    expect(state.running).toBe(false);
-    expect(state.error).toBeNull();
-    expect(state.modelError).toBeNull();
-    expect(Object.values(state.threads).every((thread) => thread.status === "finished")).toBe(true);
-    expect(Object.values(state.threads).every((thread) => thread.isError === false)).toBe(true);
-    expect(state.threads.finished.log).toHaveLength(1);
-    expect(state.events.at(-1)).toMatchObject({
+    expect(getRuntimeState()).toMatchObject({ running: false, error: null, modelError: null });
+    expect(getRuntimeState().events.at(-1)).toMatchObject({
       text: "Run cancelled",
       isError: false,
     });
-  });
-
-  it("finishes live threads when the run completes without their finish events", () => {
-    resetRuntime("session-a");
-    applyEnvelope(
-      envelope({ type: "run_started", prompt_preview: "work", started_at_epoch_ms: 0 }),
-    );
-    applyEnvelope(
-      envelope({
-        type: "agent",
-        event: { type: "thread_started", name: "worker", action: "run", source_threads: [] },
-      }),
-    );
-    applyEnvelope(
-      envelope({
-        type: "agent",
-        event: {
-          type: "tool_call_started",
-          thread_name: "worker",
-          call_id: "call-1",
-          name: "exec_command",
-          args_preview: "ls",
-        },
-      }),
-    );
-
-    expect(applyEnvelope(envelope({ type: "run_completed", response: "ok" }))).toBe("snapshot");
-    const state = getRuntimeState();
-    expect(state.running).toBe(false);
-    expect(state.threads.worker.status).toBe("finished");
-    expect(state.threads.worker.isError).toBe(false);
-    expect(state.threads.worker.log).toHaveLength(1);
   });
 
   it("keeps provider failures visible for failed runs", () => {

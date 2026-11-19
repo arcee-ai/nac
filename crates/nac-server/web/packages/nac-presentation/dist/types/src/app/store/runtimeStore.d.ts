@@ -1,7 +1,6 @@
-import { type ThreadLogLine } from "../lib/threadLog";
 import type { StreamStatus } from "../services/eventStream";
 import type { ActiveRunSnapshot, AgentEvent, AssistantStreamDelta, SessionEventEnvelope, RunFailure, TokenUsage } from "../types/api";
-export type RuntimeEventKind = "run" | "tool" | "mcp" | "thread" | "assistant" | "steering" | "compaction" | "error";
+export type RuntimeEventKind = "run" | "tool" | "mcp" | "assistant" | "steering" | "compaction" | "error";
 export interface RuntimeEvent {
     seq: number | null;
     kind: RuntimeEventKind;
@@ -9,19 +8,6 @@ export interface RuntimeEvent {
     isError: boolean;
     ts: number;
     local: boolean;
-}
-export interface RuntimeThread {
-    name: string;
-    status: "running" | "finished";
-    /** The active dispatch ended because the parent run was stopped. */
-    cancelled: boolean;
-    exitCode: number | null;
-    isError: boolean;
-    /**
-     * The commands the thread has issued and their results, oldest first. The
-     * card tails the last few lines of it and the side panel shows all of them.
-     */
-    log: ThreadLogLine[];
 }
 export interface RuntimeState {
     sessionId: string | null;
@@ -40,13 +26,6 @@ export interface RuntimeState {
     modelRetryAttempt: number | null;
     streamStatus: StreamStatus;
     events: RuntimeEvent[];
-    threads: Record<string, RuntimeThread>;
-    /**
-     * Orchestrator tool-call ids that have already emitted `tool_call_finished`.
-     * Used by the transcript so a workset badge can leave the pending state
-     * before the DAG batch commits its tool messages.
-     */
-    finishedToolCalls: Record<string, true>;
     /** Safe top-level tool lifecycle overlays, merged with durable snapshot rows by call id. */
     primaryToolEvents: AgentEvent[];
     /** Prose the current model call has produced so far. */
@@ -99,7 +78,7 @@ export interface RuntimeState {
      */
     workspaceEpoch: number;
     /**
-     * Stop was painted; the HTTP cancel is still waiting on worker trees.
+     * Stop was painted; the HTTP cancel is still waiting for process cleanup.
      * Composer Send and transcript Regenerate stay blocked, and a still-live
      * `active_run` on the snapshot must not snap the chrome back to running.
      */
@@ -112,7 +91,6 @@ export declare function createRuntimeStore(_storage?: Pick<Storage, "getItem" | 
     runtimeStore: import("../lib/store").Store<RuntimeState>;
     captureRuntimeActivation: (sessionId: string) => () => boolean;
     resetRuntime: (sessionId: string | null) => void;
-    clearRuntimeThreads: () => void;
     liftSessionSpend: (persisted: TokenUsage | null | undefined) => void;
     setOptimisticUserPrompt: (prompt: string | null, settlement?: "rejected" | "committed") => void;
     applyAssistantDelta: (delta: AssistantStreamDelta) => void;
@@ -142,8 +120,6 @@ export declare function createRuntimeStore(_storage?: Pick<Storage, "getItem" | 
     useModelRetryAttempt: () => number | null;
     useLiveEvents: () => RuntimeEvent[];
     useStreamStatus: () => StreamStatus;
-    useLiveThreads: () => Record<string, RuntimeThread>;
-    useFinishedToolCalls: () => Record<string, true>;
     usePrimaryToolEvents: () => ({
         prompt_preview: string;
         thread_name?: string | null;
@@ -224,12 +200,16 @@ export declare function createRuntimeStore(_storage?: Pick<Storage, "getItem" | 
         type: "orchestrator_compaction_started";
     } | {
         compaction_id: string;
-        reason: import("../types/openapi.generated").components["schemas"]["CompactionReason"];
+        reason: import("../types/openapi.generated").components["schemas"] /**
+         * Wall-clock start of the current run, kept after Stop so the composer
+         * clock can keep showing elapsed instead of falling back to a previous
+         * response's duration (or `--:--`).
+         */["CompactionReason"];
         type: "orchestrator_compaction_completed";
     } | {
         cause: import("../types/openapi.generated").components["schemas"]["CompactionSkipReason"];
         compaction_id: string;
-        reason: import("../types/openapi.generated").components["schemas"]["CompactionReason"];
+        reason: import("../types/openapi.generated").components["schemas"] /** Frozen elapsed ms from the last run, used once live `startedAt` is gone. */["CompactionReason"];
         type: "orchestrator_compaction_skipped";
     } | {
         compaction_id: string;
@@ -297,7 +277,7 @@ export declare function createRuntimeStore(_storage?: Pick<Storage, "getItem" | 
     useOptimisticUserPrompt: () => string | null;
     getRuntimeState: () => RuntimeState;
 };
-export declare const release: () => void, runtimeStore: import("../lib/store").Store<RuntimeState>, captureRuntimeActivation: (sessionId: string) => () => boolean, resetRuntime: (sessionId: string | null) => void, clearRuntimeThreads: () => void, liftSessionSpend: (persisted: TokenUsage | null | undefined) => void, setOptimisticUserPrompt: (prompt: string | null, settlement?: "rejected" | "committed") => void, applyAssistantDelta: (delta: AssistantStreamDelta) => void, setStreamStatus: (streamStatus: StreamStatus) => void, syncRunFromSnapshot: (activeRun: ActiveRunSnapshot | null | undefined) => void, pushLocalEvent: (kind: RuntimeEventKind, text: string, isError?: boolean) => void, requestRunCancel: () => RuntimeState, restoreRunCancel: (previous: RuntimeState) => void, finishRunCancel: () => void, applyEnvelope: (envelope: SessionEventEnvelope) => RefreshKind, useRunning: (sessionId: string | null) => boolean, useCancelArmed: (sessionId: string | null) => boolean, useActivity: () => string, useRunError: () => string | null, useRunFailure: () => {
+export declare const release: () => void, runtimeStore: import("../lib/store").Store<RuntimeState>, captureRuntimeActivation: (sessionId: string) => () => boolean, resetRuntime: (sessionId: string | null) => void, liftSessionSpend: (persisted: TokenUsage | null | undefined) => void, setOptimisticUserPrompt: (prompt: string | null, settlement?: "rejected" | "committed") => void, applyAssistantDelta: (delta: AssistantStreamDelta) => void, setStreamStatus: (streamStatus: StreamStatus) => void, syncRunFromSnapshot: (activeRun: ActiveRunSnapshot | null | undefined) => void, pushLocalEvent: (kind: RuntimeEventKind, text: string, isError?: boolean) => void, requestRunCancel: () => RuntimeState, restoreRunCancel: (previous: RuntimeState) => void, finishRunCancel: () => void, applyEnvelope: (envelope: SessionEventEnvelope) => RefreshKind, useRunning: (sessionId: string | null) => boolean, useCancelArmed: (sessionId: string | null) => boolean, useActivity: () => string, useRunError: () => string | null, useRunFailure: () => {
     attempt_count: number;
     diagnostic: string;
     http_status?: number | null;
@@ -308,7 +288,7 @@ export declare const release: () => void, runtimeStore: import("../lib/store").S
     retry_after_ms?: number | null;
     summary: string;
     transient: boolean;
-} | null, useModelRetryAttempt: () => number | null, useLiveEvents: () => RuntimeEvent[], useStreamStatus: () => StreamStatus, useLiveThreads: () => Record<string, RuntimeThread>, useFinishedToolCalls: () => Record<string, true>, usePrimaryToolEvents: () => ({
+} | null, useModelRetryAttempt: () => number | null, useLiveEvents: () => RuntimeEvent[], useStreamStatus: () => StreamStatus, usePrimaryToolEvents: () => ({
     prompt_preview: string;
     thread_name?: string | null;
     type: "run_started";
@@ -388,12 +368,16 @@ export declare const release: () => void, runtimeStore: import("../lib/store").S
     type: "orchestrator_compaction_started";
 } | {
     compaction_id: string;
-    reason: import("../types/openapi.generated").components["schemas"]["CompactionReason"];
+    reason: import("../types/openapi.generated").components["schemas"] /**
+     * Wall-clock start of the current run, kept after Stop so the composer
+     * clock can keep showing elapsed instead of falling back to a previous
+     * response's duration (or `--:--`).
+     */["CompactionReason"];
     type: "orchestrator_compaction_completed";
 } | {
     cause: import("../types/openapi.generated").components["schemas"]["CompactionSkipReason"];
     compaction_id: string;
-    reason: import("../types/openapi.generated").components["schemas"]["CompactionReason"];
+    reason: import("../types/openapi.generated").components["schemas"] /** Frozen elapsed ms from the last run, used once live `startedAt` is gone. */["CompactionReason"];
     type: "orchestrator_compaction_skipped";
 } | {
     compaction_id: string;

@@ -1,7 +1,6 @@
 import { type DelegatedCompletion } from "../features/delegation/completion";
 import { type ToolPresentation } from "./toolPresentation";
 import type { ThreadLogLine } from "./threadLog";
-import type { RuntimeThread } from "../store/runtimeStore";
 import type { AgentEvent, DispatchWeight, SessionSnapshotResponse } from "../types/api";
 /** Exact assistant marker written after any partial response on cancellation. */
 export declare const RUN_CANCELLED_MARKER = "[run cancelled by user]";
@@ -154,8 +153,5 @@ promptUncommitted?: boolean,
  * passes a committed key only when it is the one this turn will be given.
  */
 key?: string): TranscriptTurn[];
-/**
- * Group the snapshot messages into user bubbles and model messages. Live thread
- * state comes from the SSE store so a wave animates before the snapshot lands.
- */
-export declare function buildTranscript(snapshot: SessionSnapshotResponse | null, _liveThreads: Record<string, RuntimeThread>, _liveFinishedToolCalls?: Record<string, true>, livePrimaryToolEvents?: AgentEvent[], pendingPermissionCallIds?: ReadonlySet<string>): TranscriptTurn[];
+/** Group the snapshot messages into user bubbles and model messages. */
+export declare function buildTranscript(snapshot: SessionSnapshotResponse | null, livePrimaryToolEvents?: AgentEvent[], pendingPermissionCallIds?: ReadonlySet<string>): TranscriptTurn[];
