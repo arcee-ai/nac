@@ -222,12 +222,13 @@ fn metadata_with_connection(
     connection: &Connection,
     session: Option<&str>,
 ) -> Result<Vec<AttentionStoredSession>> {
-    let mut statement = connection.prepare("SELECT substr(s.session_id,1,513),s.behavior,
-        NOT EXISTS(SELECT 1 FROM traditional_children c WHERE c.child_session_id=s.session_id)
-        AND NOT EXISTS(SELECT 1 FROM managed_orchestrators m WHERE m.orchestrator_session_id=s.session_id),
+    let mut statement = connection.prepare(
+        "SELECT substr(s.session_id,1,513),s.behavior,
+        NOT EXISTS(SELECT 1 FROM traditional_children c WHERE c.child_session_id=s.session_id),
         s.host_id IS NULL AND s.sandbox_json IS NULL, s.config_version,
         EXISTS(SELECT 1 FROM traditional_children c WHERE c.child_session_id=s.session_id)
-        FROM sessions s WHERE (?1 IS NULL OR s.session_id=?1) ORDER BY s.session_id LIMIT 1025")?;
+        FROM sessions s WHERE (?1 IS NULL OR s.session_id=?1) ORDER BY s.session_id LIMIT 1025",
+    )?;
     let rows = statement
         .query_map([session], |row| {
             Ok((

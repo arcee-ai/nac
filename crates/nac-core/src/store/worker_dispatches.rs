@@ -308,32 +308,5 @@ correlation |_command| crate::telemetry::Correlation::default();
 port internal;
 }
 
-/// Called only by session recovery under the session operation lease. Preserve
-/// committed results; classify every uncommitted dispatch once before restart.
-pub(super) fn recover_worker_dispatches(tx: &Transaction<'_>, session_id: &str) -> Result<()> {
-    let pending = {
-        let mut stmt = tx.prepare("SELECT dispatch_id, thread_name, action FROM worker_dispatches WHERE session_id = ?1 AND status = 'pending'")?;
-        let rows = stmt
-            .query_map([session_id], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                ))
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        rows
-    };
-    for (dispatch, thread, action) in pending {
-        tx.execute("INSERT INTO episodes (thread_name, session_id, action, content, status, created_at) VALUES (?1, ?2, ?3, ?4, 'error', ?5)",
-            params![thread, session_id, action, "Worker interrupted before host commit acknowledgement.", now_utc()])?;
-        tx.execute(
-            "UPDATE worker_dispatches SET status = 'error', episode_id = ?2 WHERE dispatch_id = ?1",
-            params![dispatch, tx.last_insert_rowid()],
-        )?;
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests;

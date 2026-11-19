@@ -48,8 +48,7 @@ pub(super) fn begin(conn: &Connection, session: &str, run: &str, submitted: i64)
         "INSERT OR IGNORE INTO session_completion_bindings
          (session_id,run_id,submitted_message_id,behavior,eligible,goal_participated,question_yield)
          SELECT s.session_id,?2,?3,s.behavior,
-             NOT EXISTS(SELECT 1 FROM traditional_children WHERE child_session_id=s.session_id AND run_id=?2)
-             AND NOT EXISTS(SELECT 1 FROM managed_orchestrators WHERE orchestrator_session_id=s.session_id AND run_id=?2),
+             NOT EXISTS(SELECT 1 FROM traditional_children WHERE child_session_id=s.session_id AND run_id=?2),
              EXISTS(SELECT 1 FROM session_goals g WHERE g.session_id=s.session_id AND g.accounting_run_id=?2),
              EXISTS(SELECT 1 FROM task_questions q WHERE q.session_id=s.session_id AND json_extract(q.request_json,'$.run_id')=?2)
          FROM sessions s WHERE s.session_id=?1",
