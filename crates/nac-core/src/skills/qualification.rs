@@ -4,10 +4,9 @@ use crate::commands::{prepare_user_input, PreparedUserInput};
 use crate::model::test_http::{ScriptedResponse, ScriptedServer};
 use crate::permissions::{PermissionEffect, PermissionRule};
 use crate::runtime::{
-    build_run_config_for_project_with_behavior, ModelOptions, NacConfig, OptionalModelOption,
-    RunOptions, SessionRunConfig, StoreOptions,
+    build_run_config_for_project, ModelOptions, NacConfig, OptionalModelOption, RunOptions,
+    SessionRunConfig, StoreOptions,
 };
-use crate::sessions::SessionBehavior;
 use crate::types::Message;
 use serde_json::json;
 use std::ffi::OsString;
@@ -110,7 +109,7 @@ impl Fixture {
     async fn direct(&self, url: &str, rules: Vec<PermissionRule>) -> SessionRunConfig {
         let mut config = NacConfig::default();
         config.permissions.rules = rules;
-        let mut run = build_run_config_for_project_with_behavior(
+        let mut run = build_run_config_for_project(
             RunOptions {
                 workspace_cwd: self.project(),
                 config_cwd: Some(self.project()),
@@ -129,7 +128,6 @@ impl Fixture {
             },
             &config,
             None,
-            SessionBehavior::Direct,
         )
         .await
         .unwrap();

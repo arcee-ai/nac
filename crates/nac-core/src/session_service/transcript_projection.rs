@@ -651,13 +651,13 @@ impl SessionService {
     }
 
     /// Message-cycle metadata from the incremental transcript scan cache.
-    pub(super) async fn message_cycle_from_store(&self) -> Result<MessageCycleMetadata> {
+    pub(super) fn message_cycle_from_store(&self) -> MessageCycleMetadata {
         let cache = self.lock_transcript_scan();
         let marker = match cache.last_user_idx {
             Some(index) => format!("history:{}:{index}", cache.user_count),
             None => "none".to_string(),
         };
-        Ok(MessageCycleMetadata { marker })
+        MessageCycleMetadata { marker }
     }
 
     /// Returns the freshest session messages available without building

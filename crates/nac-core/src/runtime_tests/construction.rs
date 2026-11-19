@@ -106,7 +106,7 @@ async fn direct_behavior_builds_and_resumes_a_persistent_direct_primary() {
     unsafe { std::env::set_var("NAC_HOME", root.join("nac-home")) };
     let direct_model = test_openai_model_options();
 
-    let created = build_run_config_for_project_with_behavior(
+    let created = build_run_config_for_project(
         RunOptions {
             workspace_cwd: root.clone(),
             config_cwd: Some(root.clone()),
@@ -121,7 +121,6 @@ async fn direct_behavior_builds_and_resumes_a_persistent_direct_primary() {
         },
         &NacConfig::default(),
         None,
-        sessions::SessionBehavior::Direct,
     )
     .await
     .unwrap();

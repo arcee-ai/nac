@@ -55,7 +55,6 @@ fn deserialize_token_accounting(
 
 coordinated_command! {
 pub fn create_session(path: &Path, snapshot: &SessionSnapshot) -> Result<()> {
-    validate_new_session(snapshot)?;
     crate::store::retry_busy_correlated(
         crate::telemetry::Correlation::session(Some(&snapshot.session_id)),
         || create_session_once(path, snapshot),
@@ -83,7 +82,6 @@ pub(crate) fn insert_new_session_in_transaction(
     path: &Path,
     snapshot: &SessionSnapshot,
 ) -> Result<()> {
-    validate_new_session(snapshot)?;
     let existing: Option<String> = tx
         .query_row(
             "SELECT session_id FROM sessions WHERE session_id = ?1",
@@ -106,14 +104,6 @@ pub(crate) fn insert_new_session_in_transaction(
             params![snapshot.session_id, project_id],
         )?;
     }
-    Ok(())
-}
-
-fn validate_new_session(snapshot: &SessionSnapshot) -> Result<()> {
-    anyhow::ensure!(
-        snapshot.behavior == SessionBehavior::Direct,
-        "only direct session behavior is supported"
-    );
     Ok(())
 }
 

@@ -183,7 +183,7 @@ impl SessionService {
             }
             FrontendSnapshotMessages::Page(request) => {
                 let page = self.page_store_transcript(request).await?;
-                let cycle = self.message_cycle_from_store().await?;
+                let cycle = self.message_cycle_from_store();
                 LoadedFrontendMessages {
                     canonical_message_indices: page.canonical_message_indices,
                     tool_call_occurrences: page.tool_call_occurrences,

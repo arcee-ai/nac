@@ -46,9 +46,9 @@ mod resume;
 mod sandboxing;
 
 pub use builders::{
-    build_run_config, build_run_config_for_project, build_run_config_for_project_with_behavior,
-    prepare_native_task_run_config, prepare_retained_task_run_config,
-    prepare_run_config_for_project_with_behavior, prepare_scheduled_shared_task_run_config,
+    build_run_config, build_run_config_for_project, prepare_native_task_run_config,
+    prepare_retained_task_run_config, prepare_run_config_for_project,
+    prepare_scheduled_shared_task_run_config,
 };
 #[cfg(test)]
 use configuration::NonModelNacConfig;

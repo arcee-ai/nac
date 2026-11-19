@@ -9,7 +9,7 @@ fn combine_system_guidance(primary: Option<String>, secondary: Option<String>) -
 }
 
 pub async fn build_run_config(options: RunOptions, config: &NacConfig) -> Result<SessionRunConfig> {
-    build_run_config_inner(options, config, None, sessions::SessionBehavior::Direct).await
+    build_run_config_for_project(options, config, None).await
 }
 
 pub async fn build_run_config_for_project(
@@ -17,33 +17,7 @@ pub async fn build_run_config_for_project(
     config: &NacConfig,
     project_id: Option<String>,
 ) -> Result<SessionRunConfig> {
-    build_run_config_inner(
-        options,
-        config,
-        project_id,
-        sessions::SessionBehavior::Direct,
-    )
-    .await
-}
-
-/// Build a persistent top-level direct session. Retired behavior selections
-/// are rejected before runtime or workspace preparation.
-pub async fn build_run_config_for_project_with_behavior(
-    options: RunOptions,
-    config: &NacConfig,
-    project_id: Option<String>,
-    behavior: sessions::SessionBehavior,
-) -> Result<SessionRunConfig> {
-    build_run_config_inner(options, config, project_id, behavior).await
-}
-
-async fn build_run_config_inner(
-    options: RunOptions,
-    config: &NacConfig,
-    project_id: Option<String>,
-    behavior: sessions::SessionBehavior,
-) -> Result<SessionRunConfig> {
-    prepare_run_config_inner(options, config, project_id, behavior, None)
+    prepare_run_config_inner(options, config, project_id, None)
         .await?
         .persist()
         .await
@@ -51,13 +25,12 @@ async fn build_run_config_inner(
 
 /// Resolve a fresh runtime without committing its session. Application creation
 /// retains the resources only after its response and durable row are ready.
-pub async fn prepare_run_config_for_project_with_behavior(
+pub async fn prepare_run_config_for_project(
     options: RunOptions,
     config: &NacConfig,
     project_id: Option<String>,
-    behavior: sessions::SessionBehavior,
 ) -> Result<PreparedSessionRunConfig> {
-    prepare_run_config_inner(options, config, project_id, behavior, None).await
+    prepare_run_config_inner(options, config, project_id, None).await
 }
 
 /// Construct only the runtime belonging to a durable retained launch. Resource
@@ -79,7 +52,6 @@ pub async fn prepare_retained_task_run_config(
         options,
         config,
         Some(launch.request.project_id.clone()),
-        sessions::SessionBehavior::Direct,
         Some(launch.session_id.clone()),
     )
     .await
@@ -104,7 +76,6 @@ pub async fn prepare_native_task_run_config(
         options,
         config,
         Some(launch.project_id.clone()),
-        sessions::SessionBehavior::Direct,
         Some(launch.session_id.clone()),
     )
     .await
@@ -131,7 +102,6 @@ pub async fn prepare_scheduled_shared_task_run_config(
         options,
         config,
         Some(receipt.destination.project_id.clone()),
-        sessions::SessionBehavior::Direct,
         Some(receipt.session_id.clone()),
     )
     .await
@@ -141,13 +111,8 @@ async fn prepare_run_config_inner(
     options: RunOptions,
     config: &NacConfig,
     project_id: Option<String>,
-    behavior: sessions::SessionBehavior,
     retained_session_id: Option<String>,
 ) -> Result<PreparedSessionRunConfig> {
-    anyhow::ensure!(
-        behavior == sessions::SessionBehavior::Direct,
-        "only direct session behavior is supported"
-    );
     let ssh_host = options.ssh.host();
     let config_cwd = options
         .config_cwd
@@ -246,7 +211,6 @@ async fn prepare_run_config_inner(
             settings.api_key_env.clone(),
             settings.extra_headers.clone(),
         );
-        session_snapshot.behavior = behavior;
         session_snapshot.allow_insecure_http = settings.allow_insecure_http;
         session_snapshot.project_id = project_id.clone();
         session_snapshot.orchestrator_compaction_threshold = orchestrator_compaction_threshold;
@@ -379,7 +343,6 @@ async fn prepare_run_config_inner(
             settings.api_key_env.clone(),
             settings.extra_headers.clone(),
         );
-        session_snapshot.behavior = behavior;
         session_snapshot.allow_insecure_http = settings.allow_insecure_http;
         session_snapshot.project_id = project_id;
         session_snapshot.orchestrator_compaction_threshold = orchestrator_compaction_threshold;

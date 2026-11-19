@@ -1,13 +1,5 @@
 use super::*;
 
-fn require_direct_snapshot(snapshot: &SessionSnapshot) -> Result<()> {
-    anyhow::ensure!(
-        snapshot.behavior == sessions::SessionBehavior::Direct,
-        "retired session was not found"
-    );
-    Ok(())
-}
-
 pub async fn build_resume_picker_config(
     options: ResumeOptions,
     config: &NacConfig,
@@ -71,7 +63,6 @@ pub async fn build_resume_config(
         (Some(_), true) => unreachable!(),
         (None, _) => sessions::load_last_session_async(resume_store_path.clone()).await?,
     };
-    require_direct_snapshot(&snapshot)?;
     let session_id = snapshot.session_id.clone();
     let lease = sessions::SessionOperationLease::try_acquire(&resume_store_path, &session_id)?;
     lease.validate(&resume_store_path, &session_id)?;
@@ -105,8 +96,7 @@ pub async fn build_resume_config_for_session(
     resume_base_cwd: PathBuf,
     model: ResumeModelOptions,
 ) -> Result<SessionRunConfig> {
-    let snapshot = sessions::load_session_async(store_path.clone(), session_id.to_string()).await?;
-    require_direct_snapshot(&snapshot)?;
+    sessions::load_session_async(store_path.clone(), session_id.to_string()).await?;
     let lease = sessions::SessionOperationLease::try_acquire(&store_path, session_id)?;
     lease.validate(&store_path, session_id)?;
     let recovery = if let Some(owner) = store::coordinator::owner_for(&store_path)? {
@@ -142,7 +132,6 @@ pub async fn build_resume_config_for_session_attachment(
     Option<sessions::SessionOperationLease>,
 )> {
     let snapshot = sessions::load_session_async(store_path.clone(), session_id.to_string()).await?;
-    require_direct_snapshot(&snapshot)?;
     let metadata = resolve_model_metadata(snapshot.backend, &snapshot.model);
     let requires_migration = snapshot.reasoning_effort.is_some_and(|effort| {
         metadata.source.is_authoritative() && !metadata.thinking_level_map.is_supported(effort)
@@ -218,8 +207,7 @@ pub async fn build_resume_config_for_session_with_lease(
     model: ResumeModelOptions,
 ) -> Result<SessionRunConfig> {
     operation_lease.validate(&store_path, session_id)?;
-    let snapshot = sessions::load_session_async(store_path.clone(), session_id.to_string()).await?;
-    require_direct_snapshot(&snapshot)?;
+    sessions::load_session_async(store_path.clone(), session_id.to_string()).await?;
     let recovery = if let Some(owner) = store::coordinator::owner_for(&store_path)? {
         owner.reconcile_active_run(session_id.to_owned()).await?
     } else {
@@ -255,7 +243,6 @@ pub(super) async fn build_resume_config_from_snapshot(
     resolved_metadata: Option<ModelMetadata>,
     model: ResumeModelOptions,
 ) -> Result<SessionRunConfig> {
-    require_direct_snapshot(&snapshot)?;
     let mut snapshot = normalize_snapshot_paths(snapshot, &resume_base_cwd)?;
     // Resume reaches the host with the connection the session recorded, not with
     // whatever the local ssh config happens to say now.

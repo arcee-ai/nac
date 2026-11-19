@@ -9,7 +9,7 @@ use nac_core::{
 };
 
 use crate::{
-    create_compaction_threshold_override, model_options, nonblank, request_configuration_error,
+    create_compaction_threshold_override, model_options, nonblank,
     request_configuration_error_from, sandbox_options, sandbox_requested, ResolvedLaunchLocation,
     SessionManager, SshRequest,
 };
@@ -227,11 +227,6 @@ impl<'a> SessionCreationApplication<'a> {
         native: Option<nac_core::task_launch_control::NativeTaskLaunch>,
         scheduled: Option<nac_core::store::PreparedFreshTaskLaunch>,
     ) -> Result<SessionFrontendSnapshot> {
-        if request.behavior != SessionBehavior::Direct {
-            return Err(request_configuration_error(
-                "only direct session behavior is supported",
-            ));
-        }
         anyhow::ensure!(
             native.is_none() || (retained.is_none() && scheduled.is_none()),
             "conflict: native and scheduled creation ownership are mutually exclusive"
@@ -265,7 +260,6 @@ impl<'a> SessionCreationApplication<'a> {
             }
         }
         self.manager.sweep_idle_sessions(None).await;
-        let behavior = request.behavior;
         let project_context = request
             .project_id
             .as_deref()
@@ -395,10 +389,7 @@ impl<'a> SessionCreationApplication<'a> {
             } else if let Some(scheduled) = &scheduled {
                 runtime::prepare_scheduled_shared_task_run_config(options, &config, scheduled).await
             } else {
-                runtime::prepare_run_config_for_project_with_behavior(
-                    options, &config, project_id, behavior,
-                )
-                .await
+                runtime::prepare_run_config_for_project(options, &config, project_id).await
             }
         };
         let mut prepared = preparation.await?;
