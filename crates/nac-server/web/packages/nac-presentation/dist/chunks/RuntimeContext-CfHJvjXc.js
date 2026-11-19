@@ -1747,13 +1747,7 @@ var fn = {
 	launch_task: "Start separate task",
 	task_launch_status: "Read task preparation",
 	subagent_status: "Check subagent",
-	subagent_cancel: "Cancel subagent",
-	orchestrator_launch: "Start NAC orchestrator",
-	orchestrator_status: "Check NAC orchestrator",
-	orchestrator_steer: "Steer NAC orchestrator",
-	orchestrator_read: "Read NAC orchestrator",
-	orchestrator_wait: "Wait for NAC orchestrator",
-	orchestrator_cancel: "Cancel NAC orchestrator"
+	subagent_cancel: "Cancel subagent"
 }, pn = {
 	pending: "Pending",
 	running: "Running",
@@ -1764,7 +1758,7 @@ var fn = {
 	cancelled: "Cancelled",
 	interrupted: "Interrupted",
 	unknown: "Outcome unavailable"
-}, mn = "[tool call cancelled by user]", hn = "Tool execution was interrupted; no result was recorded.", gn = 160, _n = 180, vn = /* @__PURE__ */ new Map([["subagent", "child_session_id"], ["orchestrator_launch", "orchestrator_session_id"]]), yn = /^[^\s\p{Cc}]+$/u;
+}, mn = "[tool call cancelled by user]", hn = "Tool execution was interrupted; no result was recorded.", gn = 160, _n = 180, vn = /* @__PURE__ */ new Map([["subagent", "child_session_id"]]), yn = /^[^\s\p{Cc}]+$/u;
 function Q(e, t) {
 	let n = [...e ?? ""].map((e) => {
 		let t = e.codePointAt(0) ?? 0;

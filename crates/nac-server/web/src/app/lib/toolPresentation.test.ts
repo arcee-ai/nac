@@ -66,8 +66,6 @@ describe("tool presentation mapper", () => {
       ["web_search", "Search web"],
       ["web_fetch", "Fetch web page"],
       ["subagent", "Subagent request in progress"],
-      ["orchestrator_launch", "Start NAC orchestrator"],
-      ["orchestrator_wait", "Wait for NAC orchestrator"],
     ] as const;
 
     for (const [name, label] of cases) {
@@ -498,31 +496,10 @@ describe("tool durations and spawned sessions", () => {
     expect(JSON.stringify(presentation)).not.toContain("Fixed the race.");
   });
 
-  it("reads a new orchestrator from the background acknowledgement", () => {
-    const ack = {
-      orchestrator_session_id: ORCHESTRATOR_ID,
-      generation: 0,
-      status: "running",
-      message: "The orchestrator is running in the background.",
-    };
-
-    expect(
-      launch(
-        "orchestrator_launch",
-        { orchestrator_session_id: null, background: true },
-        JSON.stringify(ack),
-      ).spawnedSessionId,
-    ).toBe(ORCHESTRATOR_ID);
-  });
-
   it("takes a continued session from the arguments before any result exists", () => {
     expect(launch("subagent", { child_session_id: CHILD_ID }, null).spawnedSessionId).toBe(
       CHILD_ID,
     );
-    expect(
-      launch("orchestrator_launch", { orchestrator_session_id: ORCHESTRATOR_ID }, null)
-        .spawnedSessionId,
-    ).toBe(ORCHESTRATOR_ID);
   });
 
   it("omits the session id when neither the arguments nor the result name one", () => {
@@ -645,22 +622,7 @@ describe("tool durations and spawned sessions", () => {
     }
   });
 
-  it("does not infer a managed invocation outcome from an unbound response", () => {
-    for (const childStatus of ["completed", "failed", "cancelled", "interrupted"]) {
-      const presentation = presentToolCall({
-        call: call("orchestrator_launch"),
-        hasResult: true,
-        resultText: JSON.stringify({ status: childStatus }),
-        resultHasImage: false,
-        active: false,
-        turnCancelled: false,
-        occurrence: "log:parent:1:2",
-      });
-      expect(presentation).toMatchObject({ status: "unknown", statusLabel: "Outcome unavailable" });
-    }
-  });
-
-  it.each(["subagent", "orchestrator_launch"])(
+  it.each(["subagent"])(
     "does not attach unbound %s events without an occurrence token",
     (name) => {
       const presentation = presentToolCall({

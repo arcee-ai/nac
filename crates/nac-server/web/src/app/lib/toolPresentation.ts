@@ -53,7 +53,7 @@ export interface ToolPresentation {
    */
   durationMs?: number;
   /**
-   * Session a `subagent` or `orchestrator_launch` call started or continued.
+   * Session a `subagent` call started or continued.
    * An identity hint for delegated-session links that is never displayed:
    * consumers must resolve it against the delegation queries before trusting it.
    */
@@ -180,12 +180,6 @@ const TOOL_LABELS: Record<string, string> = {
   task_launch_status: "Read task preparation",
   subagent_status: "Check subagent",
   subagent_cancel: "Cancel subagent",
-  orchestrator_launch: "Start NAC orchestrator",
-  orchestrator_status: "Check NAC orchestrator",
-  orchestrator_steer: "Steer NAC orchestrator",
-  orchestrator_read: "Read NAC orchestrator",
-  orchestrator_wait: "Wait for NAC orchestrator",
-  orchestrator_cancel: "Cancel NAC orchestrator",
 };
 
 const STATUS_LABELS: Record<ToolPresentationStatus, string> = {
@@ -207,7 +201,6 @@ const PREVIEW_LIMIT = 180;
 /** Launch tools name their session with the same field in arguments and results. */
 const SPAWNED_SESSION_FIELDS = new Map([
   ["subagent", "child_session_id"],
-  ["orchestrator_launch", "orchestrator_session_id"],
 ]);
 const SESSION_ID = /^[^\s\p{Cc}]+$/u;
 
