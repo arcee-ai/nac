@@ -726,32 +726,8 @@ fn deleted_project_disables_pending_launch_and_changed_control_arguments_conflic
 }
 
 #[test]
-fn selected_model_ignores_project_defaults_and_keeps_configuration_headers_private() {
+fn selected_model_is_preserved_on_reservation_replay() {
     let mut f = Fixture::new();
-    insert_model_configuration(
-        &f.path,
-        "fixture-config",
-        NewModelConfiguration {
-            name: "Fixture model".into(),
-            backend: "openai-responses".into(),
-            model: "fixture-first".into(),
-            base_url: "https://fixture.invalid/v1".into(),
-            allow_insecure_http: false,
-            api_key_env: None,
-            reasoning_effort: Some("high".into()),
-            extra_headers: std::collections::BTreeMap::from([(
-                "X-Fixture".into(),
-                "private-configuration-value".into(),
-            )]),
-            orchestrator_compaction_threshold: None,
-            initial_prompt: None,
-            light_model: None,
-        },
-    )
-    .unwrap();
-    open_runtime_connection(&f.path).unwrap().execute(
-        "UPDATE projects SET default_model_config_id='fixture-config' WHERE project_id='project'", []
-    ).unwrap();
     let destination = f.binding.fresh_task.clone().unwrap();
     f.binding =
         fresh_heartbeat_binding(&f.path, &destination, None, f.root.to_str().unwrap()).unwrap();
@@ -771,7 +747,6 @@ fn selected_model_ignores_project_defaults_and_keeps_configuration_headers_priva
             .model,
         "fixture-model"
     );
-    open_runtime_connection(&f.path).unwrap().execute("UPDATE model_configurations SET model='fixture-later' WHERE config_id='fixture-config'",[]).unwrap();
     let replay =
         reserve_fresh_heartbeat_launch(&f.path, &pending.occurrence_id, pending.revision, 99_000)
             .unwrap()
@@ -779,11 +754,6 @@ fn selected_model_ignores_project_defaults_and_keeps_configuration_headers_priva
     assert_eq!(
         replay.receipt().request.model_selection,
         reserved.receipt().request.model_selection
-    );
-    assert!(
-        !encode(&fresh_heartbeat_inventory(&f.path, "project", None).unwrap())
-            .unwrap()
-            .contains("private-configuration-value")
     );
 }
 

@@ -28,7 +28,6 @@ pub use completion_occurrences::{
 mod managed_maintenance;
 mod managed_orchestrators;
 mod managed_probe;
-mod model_configurations;
 pub(crate) mod orchestrator_compaction;
 pub(crate) mod peer_goals;
 mod permission_grants;
@@ -105,7 +104,6 @@ pub use managed_probe::{
     observe_managed_probe_store, observe_managed_probe_store_for_identity,
     retain_managed_probe_identity,
 };
-pub use model_configurations::*;
 pub use permission_grants::*;
 pub use projects::*;
 pub use render::*;

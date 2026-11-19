@@ -625,7 +625,6 @@ port public;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::BTreeMap;
 
     fn temp_store_path(label: &str) -> PathBuf {
         let unique = std::time::SystemTime::now()
@@ -646,22 +645,6 @@ mod tests {
             ssh_host: None,
             ssh_port: None,
             ssh_identity_file: None,
-        }
-    }
-
-    fn model_configuration(name: &str) -> NewModelConfiguration {
-        NewModelConfiguration {
-            name: name.to_string(),
-            backend: "openai-responses".to_string(),
-            model: "gpt-5.5".to_string(),
-            base_url: "https://api.openai.com/v1".to_string(),
-            allow_insecure_http: false,
-            api_key_env: Some("PROJECT_TEST_KEY".to_string()),
-            reasoning_effort: Some("high".to_string()),
-            extra_headers: BTreeMap::new(),
-            orchestrator_compaction_threshold: Some(64_000),
-            initial_prompt: None,
-            light_model: None,
         }
     }
 
@@ -698,31 +681,10 @@ mod tests {
     }
 
     #[test]
-    fn project_launch_context_does_not_load_a_saved_model_configuration() {
-        let path = temp_store_path("default");
+    fn project_launch_context_loads_project_identity() {
+        let path = temp_store_path("launch_context");
         initialize(&path).unwrap();
-        insert_model_configuration(&path, "config-a", model_configuration("Project default"))
-            .unwrap();
         insert_project(&path, new_project("project-a", "/work/alpha")).unwrap();
-
-        let conn = open_runtime_connection(&path).unwrap();
-        conn.execute(
-            "UPDATE projects SET default_model_config_id='config-a' WHERE project_id='project-a'",
-            [],
-        )
-        .unwrap();
-        conn.execute("UPDATE model_configurations SET extra_headers_json='not-json' WHERE config_id='config-a'", []).unwrap();
-        drop(conn);
-        let context = load_project_launch_context(&path, "project-a").unwrap();
-        assert_eq!(context.project.project_id, "project-a");
-        let deletion = delete_model_configuration(&path, "config-a");
-        assert!(
-            matches!(
-                &deletion,
-                Err(ModelConfigurationStoreError::InUse(id)) if id == "config-a"
-            ),
-            "unexpected deletion result: {deletion:?}"
-        );
         assert_eq!(
             load_project_launch_context(&path, "project-a")
                 .unwrap()
@@ -730,23 +692,6 @@ mod tests {
                 .project_id,
             "project-a"
         );
-
-        open_runtime_connection(&path)
-            .unwrap()
-            .execute(
-                "UPDATE projects SET default_model_config_id=NULL WHERE project_id='project-a'",
-                [],
-            )
-            .unwrap();
-        assert!(delete_model_configuration(&path, "config-a").unwrap());
-        assert_eq!(
-            load_project_launch_context(&path, "project-a")
-                .unwrap()
-                .project
-                .project_id,
-            "project-a"
-        );
-
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 

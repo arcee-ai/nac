@@ -1,37 +1,7 @@
 use super::*;
 
-fn configuration(model: &str) -> NewModelConfiguration {
-    NewModelConfiguration {
-        name: model.into(),
-        backend: "openai-responses".into(),
-        model: model.into(),
-        base_url: "https://fixture.invalid/v1".into(),
-        allow_insecure_http: false,
-        api_key_env: None,
-        reasoning_effort: Some("high".into()),
-        extra_headers: std::collections::BTreeMap::new(),
-        orchestrator_compaction_threshold: None,
-        initial_prompt: None,
-        light_model: None,
-    }
-}
-
-fn select(f: &Fixture, id: Option<&str>) {
-    open_runtime_connection(&f.path)
-        .unwrap()
-        .execute(
-            "UPDATE projects SET default_model_config_id=?1 WHERE project_id='project'",
-            [id],
-        )
-        .unwrap();
-}
-
 fn configured() -> Fixture {
     let mut f = Fixture::new();
-    for id in ["model-a", "model-b"] {
-        insert_model_configuration(&f.path, id, configuration(id)).unwrap();
-    }
-    select(&f, Some("model-a"));
     f.binding = fresh_heartbeat_binding(
         &f.path,
         f.binding.fresh_task.as_ref().unwrap(),
@@ -47,7 +17,6 @@ fn legacy_schedule_without_selection_suspends_without_reserving_or_guessing() {
     let mut f = configured();
     f.binding.fresh_task.as_mut().unwrap().model_selection = None;
     let schedule = f.create();
-    select(&f, Some("model-b"));
     let pending = f.pending();
     assert!(reserve_fresh_heartbeat_launch(
         &f.path,
@@ -75,17 +44,16 @@ fn legacy_schedule_without_selection_suspends_without_reserving_or_guessing() {
 }
 
 #[test]
-fn absent_defaults_and_explicit_choices_do_not_change_project_identity() {
-    for (before, after) in [(None, Some("model-b")), (Some("model-a"), None)] {
+fn explicit_choices_preserve_project_and_schedule_identity() {
+    for model in ["model-a", "model-b"] {
         let mut f = configured();
-        select(&f, before);
         let mut destination = f.binding.fresh_task.clone().unwrap();
+        destination.model_selection.as_mut().unwrap().model = model.into();
         destination.model = Some("explicit-model".into());
         destination.reasoning_effort = Some("low".into());
         f.binding =
             fresh_heartbeat_binding(&f.path, &destination, None, f.root.to_str().unwrap()).unwrap();
         let schedule = f.create();
-        select(&f, after);
         let pending = f.pending();
         let prepared = reserve_fresh_heartbeat_launch(
             &f.path,
@@ -103,14 +71,14 @@ fn absent_defaults_and_explicit_choices_do_not_change_project_identity() {
         let saved = read_heartbeat(&f.path, "project:project", &schedule.schedule_id).unwrap();
         assert_eq!(
             saved.binding, schedule.binding,
-            "new defaults do not rewrite a schedule"
+            "reserving a launch does not rewrite a schedule"
         );
         assert_eq!(saved.starts, 1);
     }
 }
 
 #[test]
-fn resume_after_default_change_needs_no_edit_and_replays_its_original_receipt() {
+fn resume_replays_its_original_receipt() {
     let f = configured();
     let schedule = f.create();
     let paused = f.control(
@@ -120,7 +88,6 @@ fn resume_after_default_change_needs_no_edit_and_replays_its_original_receipt() 
         },
         2_000,
     );
-    select(&f, Some("model-b"));
     let binding = fresh_heartbeat_binding(
         &f.path,
         f.binding.fresh_task.as_ref().unwrap(),
@@ -146,7 +113,6 @@ fn resume_after_default_change_needs_no_edit_and_replays_its_original_receipt() 
     assert_eq!(resumed.schedule.state, HeartbeatState::Active);
     assert_eq!(resumed.schedule.spec, schedule.spec);
     assert_eq!(resumed.schedule.binding, schedule.binding);
-    select(&f, None);
     let replay = control_heartbeat(
         &f.path,
         "project:project",
@@ -199,7 +165,7 @@ fn publish(
 }
 
 #[test]
-fn reserved_defaults_survive_reopen_publication_and_initial_admission_after_pointer_changes() {
+fn reserved_model_survives_reopen_publication_and_initial_admission() {
     let mut f = configured();
     f.binding.fresh_task.as_mut().unwrap().default_ref = None;
     f.create();
@@ -208,15 +174,12 @@ fn reserved_defaults_survive_reopen_publication_and_initial_admission_after_poin
         reserve_fresh_heartbeat_launch(&f.path, &pending.occurrence_id, pending.revision, 61_000)
             .unwrap()
             .unwrap();
-    select(&f, Some("model-b"));
-    update_model_configuration(&f.path, "model-a", configuration("edited-model-a")).unwrap();
     initialize(&f.path).unwrap();
     let replay = reserve_fresh_heartbeat_launch(&f.path, &pending.occurrence_id, 1, 62_000)
         .unwrap()
         .unwrap();
     assert_eq!(replay.receipt(), prepared.receipt());
     let snapshot = publish(&f, &pending, &replay);
-    select(&f, None);
     let published = heartbeat_history(&f.path, "project:project", &pending.schedule_id)
         .unwrap()
         .remove(0);
@@ -272,7 +235,6 @@ fn changed_prepared_configuration_or_input_still_blocks_initial_admission() {
         )
         .unwrap()
         .unwrap();
-        select(&f, Some("model-b"));
         let snapshot = publish(&f, &pending, &prepared);
         let published = heartbeat_history(&f.path, "project:project", &pending.schedule_id)
             .unwrap()

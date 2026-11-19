@@ -119,7 +119,6 @@ macro_rules! store_failure_identity {
 }
 store_failure_identity!(
     [super], ProjectStoreError;
-    [super], ModelConfigurationStoreError;
     [super], SshConfigurationStoreError;
     [super], ManagedMaintenanceError;
     [crate::sessions], SessionConfigUpdateError;
