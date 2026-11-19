@@ -481,7 +481,6 @@ impl SessionService {
             review_intent,
             goal_continuation,
             child_execution_mode,
-            managed_orchestrator_execution_mode,
         } = admission;
         let mut inbox_prompt = inbox_prompt.map(RunInboxPrompt::CapturedRaw);
         let mut guard = guard.unwrap_or_else(|| self.lock_active_operation());
@@ -684,62 +683,43 @@ impl SessionService {
         };
         let (prompt_commit, _prompt_commit_receiver) =
             watch::channel(RunPromptCommitStatus::Pending);
-        if self.metadata.behavior == sessions::SessionBehavior::Orchestrator {
-            if let (Some(session_id), Some(execution_mode)) = (
-                self.metadata.session_id.as_deref(),
-                managed_orchestrator_execution_mode,
-            ) {
-                crate::store::begin_managed_orchestrator_run(
+        if let Some(session_id) = self.metadata.session_id.as_deref() {
+            if crate::store::load_traditional_child(&self.metadata.store_path, session_id)
+                .map_err(|error| SessionSubmitError::Coordination {
+                    message: SessionCoordinationError::store(format!(
+                        "failed to inspect traditional child relationship: {error:#}"
+                    )),
+                })?
+                .is_some()
+            {
+                crate::store::begin_traditional_child_run(
                     &self.metadata.store_path,
                     session_id,
                     active_run.run_id.as_str(),
-                    execution_mode,
+                    child_execution_mode
+                        .unwrap_or(crate::store::TraditionalChildExecutionMode::Background),
                 )
                 .map_err(|error| SessionSubmitError::Coordination {
                     message: SessionCoordinationError::store(format!(
-                        "failed to bind managed orchestrator generation to run: {error:#}"
+                        "failed to bind traditional child generation to run: {error:#}"
                     )),
                 })?;
-            }
-        } else {
-            if let Some(session_id) = self.metadata.session_id.as_deref() {
-                if crate::store::load_traditional_child(&self.metadata.store_path, session_id)
-                    .map_err(|error| SessionSubmitError::Coordination {
-                        message: SessionCoordinationError::store(format!(
-                            "failed to inspect traditional child relationship: {error:#}"
-                        )),
-                    })?
-                    .is_some()
-                {
-                    crate::store::begin_traditional_child_run(
-                        &self.metadata.store_path,
-                        session_id,
-                        active_run.run_id.as_str(),
-                        child_execution_mode
-                            .unwrap_or(crate::store::TraditionalChildExecutionMode::Background),
-                    )
-                    .map_err(|error| SessionSubmitError::Coordination {
-                        message: SessionCoordinationError::store(format!(
-                            "failed to bind traditional child generation to run: {error:#}"
-                        )),
-                    })?;
-                } else if heartbeat_occurrence.is_none() {
-                    crate::store::bind_session_goal_run(
-                        &self.metadata.store_path,
-                        session_id,
-                        &crate::store::GoalRunBaseline {
-                            run_id: active_run.run_id.to_string(),
-                            billable_tokens: 0,
-                            started_at_epoch_ms: active_run.started_at_epoch_ms,
-                            continuation: goal_continuation,
-                        },
-                    )
-                    .map_err(|error| SessionSubmitError::Coordination {
-                        message: SessionCoordinationError::store(format!(
-                            "failed to bind goal accounting to run: {error:#}"
-                        )),
-                    })?;
-                }
+            } else if heartbeat_occurrence.is_none() {
+                crate::store::bind_session_goal_run(
+                    &self.metadata.store_path,
+                    session_id,
+                    &crate::store::GoalRunBaseline {
+                        run_id: active_run.run_id.to_string(),
+                        billable_tokens: 0,
+                        started_at_epoch_ms: active_run.started_at_epoch_ms,
+                        continuation: goal_continuation,
+                    },
+                )
+                .map_err(|error| SessionSubmitError::Coordination {
+                    message: SessionCoordinationError::store(format!(
+                        "failed to bind goal accounting to run: {error:#}"
+                    )),
+                })?;
             }
         }
         if let Some(lease) = operation_lease.as_ref() {

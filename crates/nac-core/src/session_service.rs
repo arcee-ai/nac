@@ -590,27 +590,6 @@ impl SessionClientHandle {
         clippy::result_large_err,
         reason = "submission errors carry the complete active-operation conflict snapshot"
     )]
-    pub fn try_submit_prepared_managed_orchestrator_prompt_with_lease(
-        &self,
-        prompt: PreparedPrompt,
-        lease: sessions::SessionOperationLease,
-        execution_mode: crate::store::ManagedOrchestratorExecutionMode,
-    ) -> std::result::Result<SessionRunHandle, SessionSubmitError> {
-        self.service.try_submit_prompt_inner(
-            Some(self.client_id.clone()),
-            prompt.agent_prompt,
-            Some(lease),
-            RunAdmissionKind {
-                managed_orchestrator_execution_mode: Some(execution_mode),
-                ..RunAdmissionKind::default()
-            },
-        )
-    }
-
-    #[expect(
-        clippy::result_large_err,
-        reason = "submission errors carry the complete active-operation conflict snapshot"
-    )]
     pub fn try_submit_prompt(
         &self,
         expanded_prompt: String,
@@ -783,7 +762,6 @@ struct RunAdmissionKind {
     review_intent: Option<String>,
     goal_continuation: bool,
     child_execution_mode: Option<crate::store::TraditionalChildExecutionMode>,
-    managed_orchestrator_execution_mode: Option<crate::store::ManagedOrchestratorExecutionMode>,
 }
 
 struct FinishingRun {
