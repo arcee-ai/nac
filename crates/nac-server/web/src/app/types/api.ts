@@ -135,7 +135,6 @@ export type WorkspaceFileDiff = ApiSchema<"WorkspaceFileDiff">;
 
 export type SteeringStatus = "queued" | "claimed" | "delivered" | "expired";
 
-
 export interface SessionOverviewRecord {
   session_id: string;
   summary: string;
