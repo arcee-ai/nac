@@ -439,10 +439,7 @@ fn previous_schema_upgrade_rolls_back_and_retries_as_one_transaction() {
         std::fs::read_to_string(root.join("user-file")).unwrap(),
         "preserve this file"
     );
-    assert!(crate::sessions::load_session(&path, "direct")
-        .unwrap()
-        .light_model
-        .is_none());
+    assert!(crate::sessions::load_session(&path, "direct").is_ok());
     std::fs::remove_dir_all(root).unwrap();
 }
 

@@ -16,10 +16,7 @@ async fn direct_config_patch_preserves_inert_legacy_light_bytes_and_rejects_sele
     )
     .unwrap();
     drop(conn);
-    assert!(sessions::load_session(&store, "session")
-        .unwrap()
-        .light_model
-        .is_none());
+    assert!(sessions::load_session(&store, "session").is_ok());
     let manager = test_manager(&root);
     manager
         .update_session_config(
@@ -502,25 +499,9 @@ async fn empty_patch_never_repairs_or_revisions_uncached_managed_config() {
     let store_path = root.join("store.db");
     let manager = test_manager(&root);
 
-    for (session_id, backend, expected_base, light_api_key_env) in [
-        (
-            "repair-codex",
-            BackendKind::ChatGptCodexResponses,
-            nac_core::model::CHATGPT_CODEX_CANONICAL_BASE_URL,
-            Some("STALE_API_KEY"),
-        ),
-        (
-            "repair-arcee",
-            BackendKind::ArceeAuth,
-            nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL,
-            Some("STALE_API_KEY"),
-        ),
-        (
-            "repair-arcee-without-light-selector",
-            BackendKind::ArceeAuth,
-            nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL,
-            None,
-        ),
+    for (session_id, backend) in [
+        ("repair-codex", BackendKind::ChatGptCodexResponses),
+        ("repair-arcee", BackendKind::ArceeAuth),
     ] {
         seed_session(&root, session_id, "2026-01-01 00:00:00.000000000");
         let mut incomplete = sessions::load_session(&store_path, session_id).unwrap();
@@ -530,18 +511,6 @@ async fn empty_patch_never_repairs_or_revisions_uncached_managed_config() {
         }
         incomplete.base_url.clear();
         incomplete.api_key_env = Some("STALE_API_KEY".to_string());
-        incomplete.light_model = Some(LightModelSettings {
-            model: match backend {
-                BackendKind::ArceeAuth => "trinity-large-thinking",
-                BackendKind::ChatGptCodexResponses => "gpt-5.2-codex",
-                _ => unreachable!("test only covers managed backends"),
-            }
-            .to_string(),
-            backend: Some(backend),
-            base_url: Some(expected_base.to_string()),
-            api_key_env: light_api_key_env.map(str::to_string),
-            reasoning_effort: None,
-        });
         sessions::update_session_config(&store_path, &incomplete).unwrap();
         let before = sessions::load_session(&store_path, session_id).unwrap();
 
@@ -552,7 +521,6 @@ async fn empty_patch_never_repairs_or_revisions_uncached_managed_config() {
         let after = sessions::load_session(&store_path, session_id).unwrap();
         assert_eq!(after.base_url, before.base_url);
         assert_eq!(after.api_key_env, before.api_key_env);
-        assert_eq!(after.light_model, before.light_model);
         assert_eq!(after.config_version, before.config_version);
         assert_eq!(after.updated_at, before.updated_at);
     }

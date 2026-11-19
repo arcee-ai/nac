@@ -53,26 +53,6 @@ fn deserialize_token_accounting(
     }
 }
 
-pub(super) fn serialize_light_model(
-    light: Option<&crate::light_model::LightModelSettings>,
-) -> Result<Option<String>> {
-    light
-        .map(|config| {
-            serde_json::to_string(config).context("failed to serialize session light model")
-        })
-        .transpose()
-}
-
-pub(super) fn deserialize_light_model(
-    raw: Option<&str>,
-) -> Result<Option<crate::light_model::LightModelSettings>> {
-    raw.map(|json| {
-        serde_json::from_str::<crate::light_model::LightModelSettings>(json)
-            .context("failed to parse stored session light model")
-    })
-    .transpose()
-}
-
 coordinated_command! {
 pub fn create_session(path: &Path, snapshot: &SessionSnapshot) -> Result<()> {
     validate_new_session(snapshot)?;
@@ -133,10 +113,6 @@ fn validate_new_session(snapshot: &SessionSnapshot) -> Result<()> {
     anyhow::ensure!(
         snapshot.behavior == SessionBehavior::Direct,
         "only direct session behavior is supported"
-    );
-    anyhow::ensure!(
-        snapshot.light_model.is_none(),
-        "light_model is no longer supported"
     );
     Ok(())
 }
@@ -412,7 +388,7 @@ pub fn update_session_config(
                 .map(|effort| effort.as_str().to_string()),
             api_key_env: snapshot.api_key_env.clone(),
             extra_headers_json,
-            light_model: snapshot.light_model.clone(),
+            light_model: None,
             orchestrator_compaction_threshold: snapshot.orchestrator_compaction_threshold,
             automatic_compaction: snapshot.automatic_compaction,
             config_version: snapshot.config_version,
@@ -1069,7 +1045,6 @@ fn map_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow> {
         orchestrator_compaction_threshold: row.get(19)?,
         ssh_port: row.get(20)?,
         ssh_identity_file: row.get(21)?,
-        light_model_json: row.get(22)?,
         project_id: row.get(23)?,
         behavior: row.get(24)?,
         automatic_compaction: row.get(25)?,
@@ -1583,7 +1558,7 @@ pub(crate) fn insert_or_replace_session(
         &snapshot.token_usages,
         snapshot.unattributed_token_usage.as_ref(),
     )?;
-    let light_model_json = serialize_light_model(snapshot.light_model.as_ref())?;
+    let light_model_json: Option<String> = None;
 
     // The legacy `store_path` column is kept physically (NOT NULL in existing
     // stores) but is informational only: it records the store that was
@@ -1676,7 +1651,6 @@ struct SessionRow {
     orchestrator_compaction_threshold: Option<u64>,
     ssh_port: Option<u16>,
     ssh_identity_file: Option<String>,
-    light_model_json: Option<String>,
     behavior: String,
     automatic_compaction: bool,
 }
@@ -1696,13 +1670,6 @@ impl SessionRow {
         let backend = parse_backend(self.backend)?;
         let extra_headers = parse_extra_headers(self.extra_headers_json.as_deref())?;
         let behavior: SessionBehavior = self.behavior.parse()?;
-        // Direct sessions have no consumer for the retired selector. Leave its
-        // stored bytes alone and do not let malformed inert data block resume.
-        let light_model = if behavior == SessionBehavior::Direct {
-            None
-        } else {
-            deserialize_light_model(self.light_model_json.as_deref())?
-        };
         let (token_usages, unattributed_token_usage) =
             deserialize_token_accounting(self.token_usages_json.as_deref())?;
         Ok(SessionSnapshot {
@@ -1719,7 +1686,6 @@ impl SessionRow {
             ssh: stored_ssh_connection(self.ssh_host, self.ssh_port, self.ssh_identity_file),
             api_key_env: self.api_key_env,
             extra_headers,
-            light_model,
             orchestrator_compaction_threshold: validate_stored_compaction_threshold(
                 self.orchestrator_compaction_threshold,
             )?,

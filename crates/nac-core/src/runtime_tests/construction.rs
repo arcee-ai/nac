@@ -204,7 +204,6 @@ async fn direct_behavior_builds_and_resumes_a_persistent_direct_primary() {
     ));
     let stored = sessions::load_session(&store_path, &session_id).unwrap();
     assert_eq!(stored.behavior, sessions::SessionBehavior::Direct);
-    assert!(stored.light_model.is_none());
     drop(created);
 
     let resumed = build_resume_config_for_session(

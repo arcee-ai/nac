@@ -259,7 +259,6 @@ fn persist_fork(
     // new independent lifecycle, but it remains the same kind of top-level
     // agent rather than silently reverting direct sessions to orchestrator.
     fork.behavior = source_behavior;
-    fork.light_model = source.light_model;
     fork.orchestrator_compaction_threshold = source.orchestrator_compaction_threshold;
     fork.automatic_compaction = source.automatic_compaction;
     if let Some(spec) = fork.sandbox_spec.as_mut() {

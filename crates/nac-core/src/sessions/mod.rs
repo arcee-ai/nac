@@ -213,7 +213,7 @@ pub struct SessionSnapshot {
     pub cwd: PathBuf,
     pub model: String,
     pub base_url: String,
-    /// Explicit opt-in allowing public plaintext HTTP for primary and light endpoints.
+    /// Explicit opt-in allowing public plaintext HTTP for the session model.
     pub allow_insecure_http: bool,
     pub backend: BackendKind,
     pub reasoning_effort: Option<ReasoningEffort>,
@@ -228,8 +228,6 @@ pub struct SessionSnapshot {
     /// Custom HTTP headers captured at session creation time.
     /// Stored per-session so resume uses the same headers, not current config.
     pub extra_headers: BTreeMap<String, String>,
-    /// Light worker model; `None` keeps single-model dispatch.
-    pub light_model: Option<LightModelSettings>,
     /// Absolute compaction threshold captured for this orchestrator session.
     /// `None` disables new checkpoint generation; valid stored checkpoints still project.
     pub orchestrator_compaction_threshold: Option<u64>,

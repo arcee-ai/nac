@@ -335,17 +335,6 @@ fn direct_sessions_preserve_but_do_not_load_or_rewrite_inert_light_data() {
         "2026-01-01 00:00:00.000000000",
         "2026-01-01 00:00:00.000000000",
     );
-    let mut rejected = snapshot.clone();
-    rejected.session_id = "new-light".into();
-    rejected.light_model = Some(LightModelSettings {
-        model: "test".into(),
-        backend: None,
-        base_url: None,
-        api_key_env: None,
-        reasoning_effort: None,
-    });
-    assert!(create_session(&store_path, &rejected).is_err());
-    assert!(!store_path.exists());
     create_session(&store_path, &snapshot).unwrap();
     let legacy = "{broken";
     let conn = rusqlite::Connection::open(&store_path).unwrap();
@@ -355,10 +344,7 @@ fn direct_sessions_preserve_but_do_not_load_or_rewrite_inert_light_data() {
     )
     .unwrap();
     drop(conn);
-    assert!(load_session(&store_path, "light")
-        .unwrap()
-        .light_model
-        .is_none());
+    assert!(load_session(&store_path, "light").is_ok());
     let mut config = load_session_config(&store_path, "light").unwrap();
     assert!(config.light_model.is_none());
     assert!(config.diagnostics.is_empty());
