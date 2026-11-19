@@ -1010,33 +1010,6 @@ pub(crate) async fn close_thread_dispatch_async(
     }
 }
 
-#[cfg(test)]
-pub(crate) fn close_thread_dispatch(
-    runtime: &ToolRuntime,
-    session_id: &str,
-    thread_name: &str,
-    dispatch_id: &str,
-) {
-    match runtime
-        .active_threads
-        .close(&runtime.store_path, session_id, thread_name, dispatch_id)
-    {
-        Ok(expired) => {
-            for record in expired {
-                runtime.event_sink.emit(AgentEvent::ThreadSteeringExpired {
-                    name: record.thread_name,
-                    steering_id: record.id,
-                    instruction_preview: record.instruction.chars().take(160).collect(),
-                });
-            }
-        }
-        Err(error) => runtime.event_sink.emit(AgentEvent::Error {
-            thread_name: Some(thread_name.to_string()),
-            message: format!("failed to expire undelivered steering: {error}"),
-        }),
-    }
-}
-
 fn is_thread_active(runtime: &ToolRuntime, thread_name: &str) -> bool {
     runtime.active_threads.is_active(thread_name)
 }
@@ -1438,72 +1411,5 @@ mod tests {
 
         let params = parse_dispatch_args(&args, &runtime).unwrap();
         assert_eq!(params.timeout_secs, DEFAULT_THREAD_TIMEOUT_SECS);
-    }
-
-    #[test]
-    fn queue_close_ordering_and_name_reuse_are_dispatch_exact() {
-        let mut runtime = test_runtime();
-        let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        runtime.store_path = std::env::temp_dir()
-            .join(format!("nac_registry_ordering_{unique}"))
-            .join("store.db");
-        crate::store::initialize(&runtime.store_path).unwrap();
-        crate::store::insert_test_session(&runtime.store_path, "test-session");
-
-        assert!(mark_thread_active(&runtime, "worker", "dispatch-a"));
-        runtime
-            .active_threads
-            .queue(
-                &runtime.store_path,
-                "test-session",
-                "worker",
-                "for A",
-                None,
-                crate::store::InputOrigin::Automation,
-            )
-            .unwrap()
-            .unwrap();
-        close_thread_dispatch(&runtime, "test-session", "worker", "dispatch-a");
-        assert!(!runtime.active_threads.is_active("worker"));
-        assert_eq!(
-            crate::store::list_thread_steering(&runtime.store_path, "test-session").unwrap()[0]
-                .status,
-            "expired",
-            "queue-before-close must be expired"
-        );
-
-        assert!(mark_thread_active(&runtime, "worker", "dispatch-b"));
-        close_thread_dispatch(&runtime, "test-session", "worker", "dispatch-a");
-        let reused = runtime
-            .active_threads
-            .queue(
-                &runtime.store_path,
-                "test-session",
-                "worker",
-                "for B",
-                None,
-                crate::store::InputOrigin::Automation,
-            )
-            .unwrap()
-            .unwrap();
-        assert_eq!(reused.dispatch_id, "dispatch-b");
-
-        close_thread_dispatch(&runtime, "test-session", "worker", "dispatch-b");
-        assert!(runtime
-            .active_threads
-            .queue(
-                &runtime.store_path,
-                "test-session",
-                "worker",
-                "too late",
-                None,
-                crate::store::InputOrigin::Automation,
-            )
-            .unwrap()
-            .is_none());
-        let _ = std::fs::remove_dir_all(runtime.store_path.parent().unwrap());
     }
 }

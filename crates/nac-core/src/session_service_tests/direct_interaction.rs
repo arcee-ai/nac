@@ -1292,69 +1292,6 @@ async fn direct_inbox_steer_is_consumed_at_the_next_model_boundary() {
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
 
-#[tokio::test]
-async fn steering_requires_an_active_run_and_active_target_thread() {
-    let (parts, store_path) = test_active_service("steering", "session-steering");
-    let service = parts.service;
-    let no_run = service
-        .queue_thread_steering(
-            "impl/ui",
-            "make the layout denser",
-            crate::store::InputOrigin::Automation,
-        )
-        .unwrap_err();
-    assert!(no_run.to_string().contains("no active run"));
-
-    let (prompt_commit, _prompt_commit_receiver) = watch::channel(RunPromptCommitStatus::Pending);
-    *service.lock_active_operation() = Some(ActiveSessionOperation::Run(ActiveRunState {
-        heartbeat: false,
-        snapshot: ActiveRunSnapshot {
-            run_id: SessionRunId::new(),
-            client_id: None,
-            prompt_preview: "revamp the UI".to_string(),
-            submitted_user_message: None,
-            started_at_epoch_ms: 0,
-        },
-        started_at: Instant::now(),
-        finishing: false,
-        task: None,
-        prompt_commit,
-        settlement: watch::channel(false).0,
-        transcript_baseline: None,
-        command_cancellation: crate::tools::RunCancellation::default(),
-        inbox_item_id: None,
-        inbox_prompt: None,
-        review_intent: None,
-        _operation_lease: None,
-        _workspace_activity_lease: None,
-    }));
-    let inactive = service
-        .queue_thread_steering(
-            "impl/ui",
-            "make the layout denser",
-            crate::store::InputOrigin::Automation,
-        )
-        .unwrap_err();
-    assert!(inactive.to_string().contains("not active"));
-
-    service.active_threads.mark("impl/ui", "worker-dispatch");
-    let queued = service
-        .queue_thread_steering(
-            "impl/ui",
-            "make the layout denser",
-            crate::store::InputOrigin::Automation,
-        )
-        .unwrap();
-    assert_eq!(queued.status, "queued");
-    assert_eq!(queued.dispatch_id, "worker-dispatch");
-    assert_eq!(
-        crate::store::list_thread_steering(&store_path, "session-steering").unwrap(),
-        vec![queued]
-    );
-
-    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
-}
-
 fn steering_record(
     id: i64,
     thread_name: &str,

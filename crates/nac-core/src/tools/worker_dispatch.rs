@@ -213,41 +213,6 @@ impl WorkerDispatchRegistry {
         Some(cancellation)
     }
 
-    pub fn queue(
-        &self,
-        store_path: &Path,
-        session_id: &str,
-        thread_name: &str,
-        instruction: &str,
-        expected_run_id: Option<&str>,
-        origin: crate::store::InputOrigin,
-    ) -> anyhow::Result<Option<crate::store::ThreadSteeringRecord>> {
-        let state = self.lock();
-        if expected_run_id.is_some() && state.run.run_id.as_deref() != expected_run_id {
-            return Ok(None);
-        }
-        let Some(dispatch) = state.workers.entries.get(thread_name) else {
-            return Ok(None);
-        };
-        match origin {
-            crate::store::InputOrigin::Person => crate::store::queue_person_thread_steering(
-                store_path,
-                session_id,
-                thread_name,
-                &dispatch.dispatch_id,
-                instruction,
-            ),
-            crate::store::InputOrigin::Automation => crate::store::queue_thread_steering(
-                store_path,
-                session_id,
-                thread_name,
-                &dispatch.dispatch_id,
-                instruction,
-            ),
-        }
-        .map(Some)
-    }
-
     #[cfg(test)]
     pub fn close(
         &self,
@@ -437,42 +402,6 @@ mod active_thread_registry_tests {
             .unwrap()
             .is_empty());
         assert!(registry.is_active("worker"));
-    }
-
-    #[tokio::test]
-    async fn stale_run_cannot_steer_same_name_replacement() {
-        let root =
-            std::env::temp_dir().join(format!("nac-thread-generation-{}", uuid::Uuid::new_v4()));
-        let store = root.join("store.db");
-        crate::store::initialize(&store).unwrap();
-        crate::store::insert_test_session(&store, "session");
-        let registry = WorkerDispatchRegistry::default();
-
-        assert!(registry.begin_run("run-1"));
-        assert!(registry.mark("worker", "dispatch-1"));
-        registry
-            .close(&store, "session", "worker", "dispatch-1")
-            .unwrap();
-        registry.cancel_and_drain(None).await.unwrap();
-        assert!(registry.begin_run("run-2"));
-        assert!(registry.mark("worker", "dispatch-2"));
-
-        assert!(registry
-            .queue(
-                &store,
-                "session",
-                "worker",
-                "belongs to run one",
-                Some("run-1"),
-                crate::store::InputOrigin::Automation,
-            )
-            .unwrap()
-            .is_none());
-        assert!(crate::store::list_thread_steering(&store, "session")
-            .unwrap()
-            .is_empty());
-
-        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

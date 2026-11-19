@@ -886,51 +886,6 @@ impl SessionService {
         names
     }
 
-    pub fn queue_thread_steering(
-        &self,
-        thread_name: &str,
-        instruction: &str,
-        origin: crate::store::InputOrigin,
-    ) -> Result<crate::store::ThreadSteeringRecord> {
-        self.queue_thread_steering_for_run(thread_name, instruction, None, origin)
-    }
-
-    pub fn queue_thread_steering_for_run(
-        &self,
-        thread_name: &str,
-        instruction: &str,
-        expected_run_id: Option<&str>,
-        origin: crate::store::InputOrigin,
-    ) -> Result<crate::store::ThreadSteeringRecord> {
-        let session_id = self
-            .metadata
-            .session_id
-            .as_deref()
-            .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
-        if self.active_run().is_none() {
-            return Err(anyhow::anyhow!("session has no active run"));
-        }
-        let record = self
-            .active_threads
-            .queue(
-                &self.metadata.store_path,
-                session_id,
-                thread_name,
-                instruction,
-                expected_run_id,
-                origin,
-            )?
-            .ok_or_else(|| {
-                anyhow::anyhow!("thread '{thread_name}' is not active in this session")
-            })?;
-        self.event_bus.emit_agent(AgentEvent::ThreadSteeringQueued {
-            name: thread_name.to_string(),
-            steering_id: record.id,
-            instruction_preview: record.instruction.chars().take(160).collect(),
-        });
-        Ok(record)
-    }
-
     pub fn prepare_user_input(&self, input: &str) -> PreparedUserInput {
         commands::prepare_user_input_with_mcp(
             input,
