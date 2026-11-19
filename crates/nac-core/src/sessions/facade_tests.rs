@@ -1183,73 +1183,34 @@ fn delete_session_uses_cascades_for_owned_auxiliary_rows() {
     );
     create_session(&store_path, &snapshot).unwrap();
 
-    // Add threads with episodes
-    crate::store::append_episode(
+    // Direct inbox and primary tool events are session-owned durable state.
+    let queued = crate::store::create_session_inbox_item(
         &store_path,
         "session-del",
-        "auth",
-        "inspect",
-        "auth episode",
-    )
-    .unwrap();
-    crate::store::append_episode(&store_path, "session-del", "tests", "scan", "test episode")
-        .unwrap();
-
-    // Add a workset with items
-    let workset = crate::store::WorksetDefinition {
-        id: "ws-1".to_string(),
-        goal: "refresh".to_string(),
-        status: "planned".to_string(),
-        summary: "summary".to_string(),
-        verification_recipe: None,
-        items: vec![crate::store::WorksetItemDefinition {
-            title: "item-1".to_string(),
-            scope: "src/main.rs".to_string(),
-            description: "do thing".to_string(),
-            role: "implement".to_string(),
-            depends_on: Vec::new(),
-            acceptance: "done".to_string(),
-            notes: None,
-        }],
-    };
-    crate::store::define_workset(&store_path, "session-del", &workset).unwrap();
-    crate::store::queue_thread_steering(
-        &store_path,
-        "session-del",
-        "auth",
-        "auth-dispatch",
+        crate::store::InboxDelivery::Queue,
         "check the failure path",
+        None,
+        None,
     )
     .unwrap();
     crate::store::append_thread_event(
         &store_path,
         "session-del",
-        "auth",
-        r#"{"type":"model_call_started","thread_name":"auth","iteration":1}"#,
+        crate::events::PRIMARY_TOOL_EVENT_TARGET,
+        r#"{"type":"model_call_started","thread_name":null,"iteration":1}"#,
     )
     .unwrap();
-
-    // Verify data exists
-    assert!(!crate::store::list_threads(&store_path, "session-del")
-        .unwrap()
-        .is_empty());
-    assert!(
-        crate::store::list_worksets(&store_path, "session-del")
-            .unwrap()
-            .len()
-            == 1
-    );
-    assert!(list_sessions(&store_path).unwrap().len() == 1);
     assert_eq!(
-        crate::store::list_thread_steering(&store_path, "session-del")
-            .unwrap()
+        crate::store::list_session_inbox(&store_path, "session-del").unwrap(),
+        vec![queued]
+    );
+    assert_eq!(
+        crate::store::load_all_thread_events(&store_path, "session-del", 20).unwrap()
+            [crate::events::PRIMARY_TOOL_EVENT_TARGET]
             .len(),
         1
     );
-    assert_eq!(
-        crate::store::load_all_thread_events(&store_path, "session-del", 20).unwrap()["auth"].len(),
-        1
-    );
+    assert_eq!(list_sessions(&store_path).unwrap().len(), 1);
 
     // Delete the session
     let deleted = delete_session(&store_path, "session-del").unwrap();
@@ -1258,19 +1219,11 @@ fn delete_session_uses_cascades_for_owned_auxiliary_rows() {
         "delete_session should return true for existing session"
     );
 
-    // Verify all related rows are gone
-    assert!(crate::store::list_threads(&store_path, "session-del")
-        .unwrap()
-        .is_empty());
-    assert!(crate::store::list_worksets(&store_path, "session-del")
-        .unwrap()
-        .is_empty());
+    // Verify all session-owned rows are gone.
     assert!(list_sessions(&store_path).unwrap().is_empty());
-    assert!(
-        crate::store::list_thread_steering(&store_path, "session-del")
-            .unwrap()
-            .is_empty()
-    );
+    assert!(crate::store::list_session_inbox(&store_path, "session-del")
+        .unwrap()
+        .is_empty());
     assert!(
         crate::store::load_all_thread_events(&store_path, "session-del", 20)
             .unwrap()
