@@ -379,7 +379,6 @@ struct TelemetryEvidence {
     api_latency_us: BTreeMap<String, LatencyDistribution>,
     max_connection_active: u64,
     max_persistence_queue_active: u64,
-    max_orchestrators_active: u64,
     max_direct_active: u64,
     max_terminal_settlement_overlap: usize,
     max_child_processes_active: u64,

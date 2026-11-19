@@ -951,12 +951,13 @@ fn config_and_history_writes_preserve_each_other_in_both_orders() {
         );
         initial.orchestrator_compaction_threshold = Some(4_096);
         create_session(&store_path, &initial).unwrap();
-        crate::store::append_episode(
+        crate::store::create_session_inbox_item(
             &store_path,
             session_id,
-            "worker",
-            "progress",
-            "retained episode",
+            crate::store::InboxDelivery::Queue,
+            "retained input",
+            None,
+            None,
         )
         .unwrap();
 
@@ -1034,9 +1035,9 @@ fn config_and_history_writes_preserve_each_other_in_both_orders() {
         assert_eq!(stored.response_durations_ms, Some(vec![Some(250)]));
         assert_eq!(stored.token_usages.len(), 1);
         assert_eq!(stored.updated_at, completed_run.updated_at);
-        let episodes = crate::store::thread_read(&store_path, session_id, "worker").unwrap();
-        assert_eq!(episodes.len(), 1);
-        assert_eq!(episodes[0].content, "retained episode");
+        let inbox = crate::store::list_session_inbox(&store_path, session_id).unwrap();
+        assert_eq!(inbox.len(), 1);
+        assert_eq!(inbox[0].content, "retained input");
     }
 
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());

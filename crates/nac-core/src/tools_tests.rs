@@ -116,11 +116,11 @@ fn read_description_advertises_images_only_when_supported() {
 }
 
 #[test]
-fn worker_registry_preserves_definition_order_and_declares_admission() {
+fn coding_registry_preserves_definition_order_and_declares_admission() {
     let registry = native_tool_registry(false).unwrap();
     let snapshot = registry
         .snapshot(super::CODING_TOOL_NAMES)
-        .expect("complete worker capabilities");
+        .expect("complete coding capabilities");
     assert_eq!(
         snapshot
             .definitions()

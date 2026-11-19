@@ -96,7 +96,7 @@ fn emit_everything(mut correlations: Vec<Correlation>) {
         Ok::<_, anyhow::Error>(())
     })
     .unwrap();
-    drop(RuntimeActivityGuard::start(RuntimeActivity::Worker, next()));
+    drop(RuntimeActivityGuard::start(RuntimeActivity::Direct, next()));
     drop(ChildProcessGuard::start(Some(std::process::id()), next()));
 }
 

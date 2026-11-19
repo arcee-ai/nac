@@ -52,7 +52,7 @@ fn emit_everything(correlation: &Correlation) {
     .unwrap();
     in_store_command(correlation.clone(), || ());
     drop(RuntimeActivityGuard::start(
-        RuntimeActivity::Worker,
+        RuntimeActivity::Direct,
         correlation.clone(),
     ));
     drop(ChildProcessGuard::start(
@@ -232,9 +232,9 @@ fn enabled_emitters_record_the_same_observations() {
             gauge(PersistenceQueueActive, true),
             gauge(PersistenceQueueActive, true),
             gauge(PersistenceQueueActive, true),
-            activity(RuntimeActivity::Worker),
+            activity(RuntimeActivity::Direct),
             gauge(ResourceSample, true),
-            activity(RuntimeActivity::Worker),
+            activity(RuntimeActivity::Direct),
             gauge(ResourceSample, true),
             activity(RuntimeActivity::ChildProcess),
             child(TelemetryOutcome::Started),

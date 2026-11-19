@@ -115,8 +115,6 @@ pub enum StoreOperation {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeActivity {
-    Orchestrator,
-    Worker,
     Direct,
     ChildProcess,
 }
@@ -725,8 +723,6 @@ pub fn emit_connection_counts(process: usize, store: usize, correlation: Correla
 
 static ACTIVE_PERSISTENCE: AtomicUsize = AtomicUsize::new(0);
 static ACTIVE_TERMINAL_SETTLEMENTS: AtomicUsize = AtomicUsize::new(0);
-static ACTIVE_ORCHESTRATORS: AtomicUsize = AtomicUsize::new(0);
-static ACTIVE_WORKERS: AtomicUsize = AtomicUsize::new(0);
 static ACTIVE_DIRECT: AtomicUsize = AtomicUsize::new(0);
 static ACTIVE_CHILD_PROCESSES: AtomicUsize = AtomicUsize::new(0);
 
@@ -876,8 +872,6 @@ impl Drop for ChildProcessGuard {
 
 fn activity_counter(activity: RuntimeActivity) -> &'static AtomicUsize {
     match activity {
-        RuntimeActivity::Orchestrator => &ACTIVE_ORCHESTRATORS,
-        RuntimeActivity::Worker => &ACTIVE_WORKERS,
         RuntimeActivity::Direct => &ACTIVE_DIRECT,
         RuntimeActivity::ChildProcess => &ACTIVE_CHILD_PROCESSES,
     }

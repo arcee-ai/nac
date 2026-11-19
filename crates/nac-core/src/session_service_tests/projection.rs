@@ -290,56 +290,18 @@ async fn benchmark_frontend_snapshot_latency() {
     let metadata = Arc::make_mut(&mut parts.service.metadata);
     metadata.cwd = workspace.display().to_string();
     metadata.workspace_host_path = Some(workspace);
-    for thread_index in 0..16 {
-        let thread_name = format!("worker-{thread_index}");
-        for episode_index in 0..8 {
-            crate::store::append_episode(
-                &store_path,
-                "benchmark-session",
-                &thread_name,
-                "implementation",
-                &format!("episode {episode_index}"),
-            )
-            .unwrap();
-        }
-        for event_index in 0..32 {
-            let event_json = serde_json::to_string(&AgentEvent::AssistantMessage {
-                thread_name: Some(thread_name.clone()),
-                content: format!("event {event_index}"),
-                usage: None,
-            })
-            .unwrap();
-            crate::store::append_thread_event(
-                &store_path,
-                "benchmark-session",
-                &thread_name,
-                &event_json,
-            )
-            .unwrap();
-        }
-    }
-    for workset_index in 0..4 {
-        crate::store::define_workset(
+    for event_index in 0..512 {
+        let event_json = serde_json::to_string(&AgentEvent::AssistantMessage {
+            thread_name: None,
+            content: format!("event {event_index}"),
+            usage: None,
+        })
+        .unwrap();
+        crate::store::append_thread_event(
             &store_path,
             "benchmark-session",
-            &crate::store::WorksetDefinition {
-                id: format!("workset-{workset_index}"),
-                goal: "measure dashboard reads".to_string(),
-                status: "active".to_string(),
-                summary: "benchmark fixture".to_string(),
-                verification_recipe: None,
-                items: (0..8)
-                    .map(|item_index| crate::store::WorksetItemDefinition {
-                        title: format!("item-{item_index}"),
-                        scope: "crates/nac-core".to_string(),
-                        description: "exercise workset detail reads".to_string(),
-                        role: "implementation".to_string(),
-                        depends_on: Vec::new(),
-                        acceptance: "snapshot includes this item".to_string(),
-                        notes: None,
-                    })
-                    .collect(),
-            },
+            crate::events::PRIMARY_TOOL_EVENT_TARGET,
+            &event_json,
         )
         .unwrap();
     }
