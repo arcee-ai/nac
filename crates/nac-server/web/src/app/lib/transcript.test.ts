@@ -235,163 +235,161 @@ describe("delegated completion turns", () => {
   });
 });
 
-describe.each<SessionBehavior>(["direct", "direct-with-orchestrator"])(
-  "%s primary tool transcript",
-  (behavior) => {
-    it("does not claim interruption for ambiguous settled delegation results", () => {
-      const call = genericToolCall("subagent", "reused", "{}");
-      const snapshot = directSnapshot(
-        [
-          { role: "assistant", content: null, tool_calls: [call, call] },
-          { role: "tool", tool_call_id: "reused", content: "first" },
-          { role: "tool", tool_call_id: "reused", content: "second" },
-        ],
-        behavior,
-      );
-      snapshot.tool_call_occurrences = ["log:session:store:1:digest:3", null, null];
-      const tools = toolDetails(buildTranscript(snapshot));
-      expect(tools).toHaveLength(2);
-      expect(tools.every((item) => item.status === "unknown" && item.resultPreview === null)).toBe(
-        true,
-      );
+describe("direct primary tool transcript", () => {
+  const behavior: SessionBehavior = "direct";
+  it("does not claim interruption for ambiguous settled delegation results", () => {
+    const call = genericToolCall("subagent", "reused", "{}");
+    const snapshot = directSnapshot(
+      [
+        { role: "assistant", content: null, tool_calls: [call, call] },
+        { role: "tool", tool_call_id: "reused", content: "first" },
+        { role: "tool", tool_call_id: "reused", content: "second" },
+      ],
+      behavior,
+    );
+    snapshot.tool_call_occurrences = ["log:session:store:1:digest:3", null, null];
+    const tools = toolDetails(buildTranscript(snapshot));
+    expect(tools).toHaveLength(2);
+    expect(tools.every((item) => item.status === "unknown" && item.resultPreview === null)).toBe(
+      true,
+    );
+  });
+
+  it("marks two result rows for one delegation call as unavailable", () => {
+    const call = genericToolCall("subagent", "reused", "{}");
+    const snapshot = directSnapshot(
+      [
+        { role: "assistant", content: null, tool_calls: [call] },
+        { role: "tool", tool_call_id: "reused", content: "first" },
+        { role: "tool", tool_call_id: "reused", content: "second" },
+      ],
+      behavior,
+    );
+    snapshot.tool_call_occurrences = ["log:session:store:1:digest:3", null, null];
+    expect(toolDetails(buildTranscript(snapshot))).toMatchObject([
+      { status: "unknown", statusLabel: "Outcome unavailable", resultPreview: null },
+    ]);
+  });
+
+  it("keeps one semantic entry across live, settled, and reload projections", () => {
+    const call = genericToolCall(
+      "exec_command",
+      "call-primary",
+      '{"cmd":"printf SECRET_RAW_COMMAND","env":{"TOKEN":"SECRET_ENV"}}',
+    );
+    const base = directSnapshot(
+      [
+        { role: "user", content: "run it" },
+        { role: "assistant", content: null, tool_calls: [call] },
+      ],
+      behavior,
+    );
+    base.active_run = {
+      run_id: "run-primary",
+      prompt_preview: "run it",
+      started_at_epoch_ms: 1,
+    };
+    const start = primaryStart("call-primary", "exec_command", "printf safe-command");
+    const live = toolDetails(buildTranscript(base, [start]));
+    expect(live).toEqual([
+      expect.objectContaining({
+        callId: "call-primary",
+        label: "Run command",
+        summary: "printf safe-command",
+        status: "running",
+      }),
+    ]);
+
+    const awaitingApproval = toolDetails(
+      buildTranscript(base, [start], new Set(["call-primary"])),
+    );
+    expect(awaitingApproval).toEqual([
+      expect.objectContaining({
+        callId: "call-primary",
+        status: "awaiting-approval",
+        statusLabel: "Awaiting approval",
+      }),
+    ]);
+
+    const finish = primaryFinish("call-primary", "exec_command");
+    const settled = toolDetails(buildTranscript(base, [start, finish]));
+    expect(settled).toHaveLength(1);
+    expect(settled[0]).toMatchObject({ status: "success", resultPreview: "bounded result" });
+
+    const reloaded = directSnapshot(
+      [
+        ...base.messages,
+        { role: "tool", tool_call_id: "call-primary", content: "RAW_SECRET_RESULT" },
+      ],
+      behavior,
+    );
+    reloaded.primary_tool_events = [start, finish];
+    expect(toolDetails(buildTranscript(reloaded))).toEqual(settled);
+    expect(JSON.stringify(settled)).not.toContain("SECRET_RAW_COMMAND");
+    expect(JSON.stringify(settled)).not.toContain("SECRET_ENV");
+    expect(JSON.stringify(settled)).not.toContain("RAW_SECRET_RESULT");
+  });
+
+  it("does not attach unbound lifecycle facts to a live or durable subagent invocation", () => {
+    const call = genericToolCall("subagent", "child-call", '{"prompt":"RAW_SECRET"}');
+    const base = directSnapshot(
+      [
+        { role: "user", content: "delegate" },
+        { role: "assistant", content: null, tool_calls: [call] },
+      ],
+      behavior,
+    );
+    base.active_run = { run_id: "run-child", prompt_preview: "delegate", started_at_epoch_ms: 1 };
+    const start = primaryStart("child-call", "subagent", "Review store");
+    const finish = {
+      ...primaryFinish("child-call", "subagent"),
+      delegation_outcome: "background_continued",
+      delegation_summary: "Review store",
+      content_preview: "Instructions sent to subagent",
+    } as AgentEvent;
+    expect(toolDetails(buildTranscript(base, [start]))[0]).toMatchObject({
+      label: "Subagent request outcome unavailable",
+      summary: null,
     });
-
-    it("marks two result rows for one delegation call as unavailable", () => {
-      const call = genericToolCall("subagent", "reused", "{}");
-      const snapshot = directSnapshot(
-        [
-          { role: "assistant", content: null, tool_calls: [call] },
-          { role: "tool", tool_call_id: "reused", content: "first" },
-          { role: "tool", tool_call_id: "reused", content: "second" },
-        ],
-        behavior,
-      );
-      snapshot.tool_call_occurrences = ["log:session:store:1:digest:3", null, null];
-      expect(toolDetails(buildTranscript(snapshot))).toMatchObject([
-        { status: "unknown", statusLabel: "Outcome unavailable", resultPreview: null },
-      ]);
+    const settled = toolDetails(buildTranscript(base, [start, finish]));
+    expect(settled).toHaveLength(1);
+    expect(settled[0]).toMatchObject({
+      label: "Subagent request outcome unavailable",
+      summary: null,
     });
+    expect(settled[0]).not.toHaveProperty("delegationOutcome");
+    const reloaded = directSnapshot(
+      [
+        ...base.messages,
+        { role: "tool", tool_call_id: "child-call", content: "RAW_SECRET_RESULT" },
+      ],
+      behavior,
+    );
+    reloaded.primary_tool_events = [start, finish];
+    const retained = toolDetails(buildTranscript(reloaded));
+    expect(retained[0]).toMatchObject({ status: "unknown", summary: null });
+    expect(retained[0]).not.toHaveProperty("delegationOutcome");
+    expect(JSON.stringify(retained)).not.toContain("RAW_SECRET");
+  });
 
-    it("keeps one semantic entry across live, settled, and reload projections", () => {
-      const call = genericToolCall(
-        "exec_command",
-        "call-primary",
-        '{"cmd":"printf SECRET_RAW_COMMAND","env":{"TOKEN":"SECRET_ENV"}}',
-      );
-      const base = directSnapshot(
-        [
-          { role: "user", content: "run it" },
-          { role: "assistant", content: null, tool_calls: [call] },
-        ],
+  it("uses a bounded image fallback and does not render base64 payloads", () => {
+    const call = genericToolCall("mcp__vision__inspect", "call-image", "malformed secret");
+    const turns = buildTranscript(
+      directSnapshot(
+        [{ role: "assistant", content: null, tool_calls: [call] }, imageToolResult("call-image")],
         behavior,
-      );
-      base.active_run = {
-        run_id: "run-primary",
-        prompt_preview: "run it",
-        started_at_epoch_ms: 1,
-      };
-      const start = primaryStart("call-primary", "exec_command", "printf safe-command");
-      const live = toolDetails(buildTranscript(base, [start]));
-      expect(live).toEqual([
-        expect.objectContaining({
-          callId: "call-primary",
-          label: "Run command",
-          summary: "printf safe-command",
-          status: "running",
-        }),
-      ]);
-
-      const awaitingApproval = toolDetails(
-        buildTranscript(base, [start], new Set(["call-primary"])),
-      );
-      expect(awaitingApproval).toEqual([
-        expect.objectContaining({
-          callId: "call-primary",
-          status: "awaiting-approval",
-          statusLabel: "Awaiting approval",
-        }),
-      ]);
-
-      const finish = primaryFinish("call-primary", "exec_command");
-      const settled = toolDetails(buildTranscript(base, [start, finish]));
-      expect(settled).toHaveLength(1);
-      expect(settled[0]).toMatchObject({ status: "success", resultPreview: "bounded result" });
-
-      const reloaded = directSnapshot(
-        [
-          ...base.messages,
-          { role: "tool", tool_call_id: "call-primary", content: "RAW_SECRET_RESULT" },
-        ],
-        behavior,
-      );
-      reloaded.primary_tool_events = [start, finish];
-      expect(toolDetails(buildTranscript(reloaded))).toEqual(settled);
-      expect(JSON.stringify(settled)).not.toContain("SECRET_RAW_COMMAND");
-      expect(JSON.stringify(settled)).not.toContain("SECRET_ENV");
-      expect(JSON.stringify(settled)).not.toContain("RAW_SECRET_RESULT");
-    });
-
-    it("does not attach unbound lifecycle facts to a live or durable subagent invocation", () => {
-      const call = genericToolCall("subagent", "child-call", '{"prompt":"RAW_SECRET"}');
-      const base = directSnapshot(
-        [
-          { role: "user", content: "delegate" },
-          { role: "assistant", content: null, tool_calls: [call] },
-        ],
-        behavior,
-      );
-      base.active_run = { run_id: "run-child", prompt_preview: "delegate", started_at_epoch_ms: 1 };
-      const start = primaryStart("child-call", "subagent", "Review store");
-      const finish = {
-        ...primaryFinish("child-call", "subagent"),
-        delegation_outcome: "background_continued",
-        delegation_summary: "Review store",
-        content_preview: "Instructions sent to subagent",
-      } as AgentEvent;
-      expect(toolDetails(buildTranscript(base, [start]))[0]).toMatchObject({
-        label: "Subagent request outcome unavailable",
-        summary: null,
-      });
-      const settled = toolDetails(buildTranscript(base, [start, finish]));
-      expect(settled).toHaveLength(1);
-      expect(settled[0]).toMatchObject({
-        label: "Subagent request outcome unavailable",
-        summary: null,
-      });
-      expect(settled[0]).not.toHaveProperty("delegationOutcome");
-      const reloaded = directSnapshot(
-        [
-          ...base.messages,
-          { role: "tool", tool_call_id: "child-call", content: "RAW_SECRET_RESULT" },
-        ],
-        behavior,
-      );
-      reloaded.primary_tool_events = [start, finish];
-      const retained = toolDetails(buildTranscript(reloaded));
-      expect(retained[0]).toMatchObject({ status: "unknown", summary: null });
-      expect(retained[0]).not.toHaveProperty("delegationOutcome");
-      expect(JSON.stringify(retained)).not.toContain("RAW_SECRET");
-    });
-
-    it("uses a bounded image fallback and does not render base64 payloads", () => {
-      const call = genericToolCall("mcp__vision__inspect", "call-image", "malformed secret");
-      const turns = buildTranscript(
-        directSnapshot(
-          [{ role: "assistant", content: null, tool_calls: [call] }, imageToolResult("call-image")],
-          behavior,
-        ),
-      );
-      expect(toolDetails(turns)).toEqual([
-        expect.objectContaining({
-          label: "MCP · Inspect",
-          resultPreview: "Image result",
-          status: "success",
-        }),
-      ]);
-      expect(JSON.stringify(toolDetails(turns))).not.toContain("base64-payload");
-    });
-  },
-);
+      ),
+    );
+    expect(toolDetails(turns)).toEqual([
+      expect.objectContaining({
+        label: "MCP · Inspect",
+        resultPreview: "Image result",
+        status: "success",
+      }),
+    ]);
+    expect(JSON.stringify(toolDetails(turns))).not.toContain("base64-payload");
+  });
+});
 
 describe("goal continuation turns", () => {
   const goalFixture = fixture.vectors.find((vector) => vector.name === "budget-above-slider");

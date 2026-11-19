@@ -19106,11 +19106,9 @@
       },
       "SessionBehavior": {
         "type": "string",
-        "description": "Immutable stored execution behavior. New sessions select direct; old values\nremain available only while the retirement migration and removal are staged.",
+        "description": "Immutable stored execution behavior for direct sessions.",
         "enum": [
-          "orchestrator",
-          "direct",
-          "direct-with-orchestrator"
+          "direct"
         ]
       },
       "SessionClientId": {

@@ -89,24 +89,19 @@ pub async fn reviewable_intent(path: std::path::PathBuf, session_id: String) -> 
     .unwrap_or(ReviewIntent::Unavailable)
 }
 
-/// Immutable stored execution behavior. New sessions select direct; old values
-/// remain available only while the retirement migration and removal are staged.
+/// Immutable stored execution behavior for direct sessions.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "kebab-case")]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum SessionBehavior {
-    Orchestrator,
     #[default]
     Direct,
-    DirectWithOrchestrator,
 }
 
 impl SessionBehavior {
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::Orchestrator => "orchestrator",
             Self::Direct => "direct",
-            Self::DirectWithOrchestrator => "direct-with-orchestrator",
         }
     }
 }
@@ -122,9 +117,7 @@ impl std::str::FromStr for SessionBehavior {
 
     fn from_str(value: &str) -> Result<Self> {
         match value {
-            "orchestrator" => Ok(Self::Orchestrator),
             "direct" => Ok(Self::Direct),
-            "direct-with-orchestrator" => Ok(Self::DirectWithOrchestrator),
             _ => Err(anyhow!("unsupported stored session behavior '{value}'")),
         }
     }

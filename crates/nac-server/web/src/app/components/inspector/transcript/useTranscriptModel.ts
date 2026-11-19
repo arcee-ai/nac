@@ -81,8 +81,7 @@ export function useTranscriptModel(
   const streamPredatesPrompt = runtimeStore.useStore((state) => state.streamPredatesPrompt);
   const optimisticPrompt = useOptimisticUserPrompt();
   const direct =
-    snapshot?.metadata.behavior === "direct" ||
-    snapshot?.metadata.behavior === "direct-with-orchestrator";
+    snapshot?.metadata.behavior === "direct";
   const { data: permissions } = useSessionPermissions(sessionId, direct);
   const pendingPermissionCallIds = useMemo(
     () =>

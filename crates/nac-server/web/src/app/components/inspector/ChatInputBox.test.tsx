@@ -442,12 +442,6 @@ describe("responsive Enter behavior", () => {
 
 describe("slash-command suggestions", () => {
   it("offers goal commands only to direct behaviors", () => {
-    const orchestrator = composer({ behavior: "orchestrator" });
-    type(orchestrator, "/g");
-    expect(screen.getByRole("listbox").textContent).toContain("No matching commands");
-    expect(screen.queryByRole("option", { name: /goal/i })).toBeNull();
-
-    cleanup();
     const direct = composer({ behavior: "direct" });
     type(direct, "/g");
     expect(screen.getByRole("option", { name: /goal/i })).toBeTruthy();
@@ -702,12 +696,9 @@ describe("slash-command suggestions", () => {
 describe("direct inbox and goal journeys", () => {
   it.each([false, true])("offers no subagent launch control (mobile: %s)", (phone) => {
     mobile = phone;
-    for (const behavior of ["direct", "direct-with-orchestrator"] as const) {
-      composer({ behavior });
-      for (const name of ["Spawn", "Launch coding agent", "Launch NAC orchestrator"]) {
-        expect(screen.queryByRole("button", { name })).toBeNull();
-      }
-      cleanup();
+    composer({ behavior: "direct" });
+    for (const name of ["Spawn", "Launch coding agent", "Launch NAC orchestrator"]) {
+      expect(screen.queryByRole("button", { name })).toBeNull();
     }
   });
 
@@ -1214,31 +1205,28 @@ describe("human command composer integration", () => {
     expect(fakes.submitRun.mock.calls[0][1]).toBe("!literal");
     expect(fakes.submitShellCommand).not.toHaveBeenCalled();
   });
-  it("rejects bang execution in a classic chat or while a human command is active", async () => {
-    for (const behavior of ["orchestrator", "direct"] as const) {
-      const textarea = composer({
-        behavior,
-        snapshotAvailable: true,
-        shellCommands: [
-          {
-            request_id: "active",
-            operation_id: "operation",
-            command: "sleep",
-            state: "started",
-            timeout_ms: 30000,
-            accepted_at_epoch_ms: 1,
-            stdout: "",
-            stderr: "",
-          },
-        ],
-      });
-      type(textarea, "!echo must-not-run");
-      fireEvent.keyDown(textarea, { key: "Enter" });
-      await screen.findByText("Shell commands require an idle direct-primary chat");
-      expect(fakes.submitShellCommand).not.toHaveBeenCalled();
-      expect(fakes.submitRun).not.toHaveBeenCalled();
-      cleanup();
-    }
+  it("rejects bang execution while a human command is active", async () => {
+    const textarea = composer({
+      behavior: "direct",
+      snapshotAvailable: true,
+      shellCommands: [
+        {
+          request_id: "active",
+          operation_id: "operation",
+          command: "sleep",
+          state: "started",
+          timeout_ms: 30000,
+          accepted_at_epoch_ms: 1,
+          stdout: "",
+          stderr: "",
+        },
+      ],
+    });
+    type(textarea, "!echo must-not-run");
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    await screen.findByText("Shell commands require an idle direct-primary chat");
+    expect(fakes.submitShellCommand).not.toHaveBeenCalled();
+    expect(fakes.submitRun).not.toHaveBeenCalled();
   });
   it("does not clear a newer draft when the command admission settles", async () => {
     let accept!: (value: unknown) => void;

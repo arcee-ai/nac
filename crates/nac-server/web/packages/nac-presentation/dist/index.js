@@ -13789,7 +13789,7 @@ function wh({ grant: e, deleting: t, disabled: n, onDelete: r }) {
 	});
 }
 function Th({ sessionId: e, behavior: t, label: n = "Permissions", autoApprovalAvailable: r = !0, requesterLabel: i, retryParentSessionId: a, poll: o = !0, compact: s = !1, sheetOpen: c, onSheetOpenChange: l, focusRequestKey: u = null }) {
-	let d = no(), [f] = ao(), p = f.get("permission_request"), m = f.get("review_request"), [h, g] = Y(null), _ = m ? `${e}:${d.key}:${m}` : null, v = _ !== null && h !== _, y = t === "direct" || t === "direct-with-orchestrator", b = vm(e, y, i, {
+	let d = no(), [f] = ao(), p = f.get("permission_request"), m = f.get("review_request"), [h, g] = Y(null), _ = m ? `${e}:${d.key}:${m}` : null, v = _ !== null && h !== _, y = t === "direct", b = vm(e, y, i, {
 		poll: o,
 		includeChildren: r,
 		parentSessionId: a
@@ -15268,7 +15268,7 @@ function Ng({ sessionId: e, snapshot: t, entry: n }) {
 	}), [te, ne] = Y({
 		start: 0,
 		end: 0
-	}), [re, ie] = Y(null), [oe, se] = Y(0), [le, ue] = Y(null), de = O ? Tg.mobile : Tg.wide, fe = !j && x !== "", pe = u(e), he = d(), ge = p(e), _e = Gn(), ve = $d(), ye = Rn(), be = Qm(e), xe = Gt(), we = Mn(), Te = Vt(), Ee = Ve(), De = n?.summary.behavior ?? t?.metadata.behavior ?? null, Oe = De === "direct" || De === "direct-with-orchestrator", ke = n?.lineage ?? t?.lineage ?? null, Ae = ke != null, je = n !== null || t !== null, Ne = qe(e, Oe && !Ae), { data: Pe, refetch: Ie } = Ct(e, Oe && !Ae), Le = Me(), Re = Fe(), ze = Fn(), [Be, He] = Y(!1), [Ue, We] = Y(e);
+	}), [re, ie] = Y(null), [oe, se] = Y(0), [le, ue] = Y(null), de = O ? Tg.mobile : Tg.wide, fe = !j && x !== "", pe = u(e), he = d(), ge = p(e), _e = Gn(), ve = $d(), ye = Rn(), be = Qm(e), xe = Gt(), we = Mn(), Te = Vt(), Ee = Ve(), De = n?.summary.behavior ?? t?.metadata.behavior ?? null, Oe = De === "direct", ke = n?.lineage ?? t?.lineage ?? null, Ae = ke != null, je = n !== null || t !== null, Ne = qe(e, Oe && !Ae), { data: Pe, refetch: Ie } = Ct(e, Oe && !Ae), Le = Me(), Re = Fe(), ze = Fn(), [Be, He] = Y(!1), [Ue, We] = Y(e);
 	Ue !== e && (We(e), He(!1));
 	let Ge = G(() => {
 		M(!1), He(!0);
@@ -17487,7 +17487,7 @@ function oy(e, t, n = !1, r = ry) {
 	}), u = !0), u ? s ? [...e.slice(0, -1), c] : [...e, c] : e;
 }
 function sy(e, t = [], n = /* @__PURE__ */ new Set()) {
-	let r = e?.messages ?? [], i = e?.response_timing.response_durations_ms ?? [], a = e?.message_created_at ?? [], o = e?.message_page?.start ?? 0, s = e?.metadata?.behavior === "direct" || e?.metadata?.behavior === "direct-with-orchestrator", c = ee(s ? [...e?.primary_tool_events ?? [], ...t] : []), l = -1;
+	let r = e?.messages ?? [], i = e?.response_timing.response_durations_ms ?? [], a = e?.message_created_at ?? [], o = e?.message_page?.start ?? 0, s = e?.metadata?.behavior === "direct", c = ee(s ? [...e?.primary_tool_events ?? [], ...t] : []), l = -1;
 	r.forEach((e, t) => {
 		e.role === "user" && (l = t);
 	});
@@ -18705,7 +18705,7 @@ function Sb(e) {
 }
 var Cb = [], wb = 24;
 function Tb({ sessionId: e, snapshot: t, panel: n, onFocusPanel: r, errorNotice: i = null }) {
-	let { useModelRetryAttempt: a, useRunFailure: o, useRunError: s, useCancelArmed: c, useActivity: l, useRunStartedAt: u, setOptimisticUserPrompt: d, pushLocalEvent: f } = T().stores.runtimeStore, { useSelectedInsight: p, useSelectedRevision: m, useSelectedFile: h, selectRevision: g, selectFile: _ } = T().stores.sessionLayoutStore, v = c(e), y = l(), b = u(), x = s(), C = o(), w = a(), E = p(), D = E?.kind === "group" ? E.groupId : null, O = h(), k = m(), A = Gn(), j = $d(), M = ro(), N = t?.metadata.backend ?? null, ee = Qy(e, N), te = Xy(N, x), ne = Rn(), re = nr(), ie = _n(), ae = De(), oe = cr(e), { data: se } = rt(e), ce = t?.metadata.behavior === "direct" || t?.metadata.behavior === "direct-with-orchestrator", le = Ct(e, ce).data, ue = Fe(), { scrollRef: de, contentRef: fe, showJumpButton: pe, jumpToLatest: me, followLatest: he } = pb({ resetKey: e }), ge = J(null), _e = J(!1), ve = J(!1), ye = t?.message_page?.start ?? 0;
+	let { useModelRetryAttempt: a, useRunFailure: o, useRunError: s, useCancelArmed: c, useActivity: l, useRunStartedAt: u, setOptimisticUserPrompt: d, pushLocalEvent: f } = T().stores.runtimeStore, { useSelectedInsight: p, useSelectedRevision: m, useSelectedFile: h, selectRevision: g, selectFile: _ } = T().stores.sessionLayoutStore, v = c(e), y = l(), b = u(), x = s(), C = o(), w = a(), E = p(), D = E?.kind === "group" ? E.groupId : null, O = h(), k = m(), A = Gn(), j = $d(), M = ro(), N = t?.metadata.backend ?? null, ee = Qy(e, N), te = Xy(N, x), ne = Rn(), re = nr(), ie = _n(), ae = De(), oe = cr(e), { data: se } = rt(e), ce = t?.metadata.behavior === "direct", le = Ct(e, ce).data, ue = Fe(), { scrollRef: de, contentRef: fe, showJumpButton: pe, jumpToLatest: me, followLatest: he } = pb({ resetKey: e }), ge = J(null), _e = J(!1), ve = J(!1), ye = t?.message_page?.start ?? 0;
 	Va(() => {
 		let e = ge.current, t = de.current;
 		e && t && (t.scrollTop = e.top + (t.scrollHeight - e.height), ge.current = null);
@@ -19048,7 +19048,7 @@ function Ab(e) {
 	return -1;
 }
 function jb(t, n) {
-	let { useStreamText: r, useStreamReasoning: i, useRunning: a, useOptimisticUserPrompt: o, usePrimaryToolEvents: s, runtimeStore: l } = T().stores.runtimeStore, u = a(t), d = s(), f = r(), p = i(), m = l.useStore((e) => e.streamSettled), h = l.useStore((e) => e.streamPredatesPrompt), g = o(), _ = n?.metadata.behavior === "direct" || n?.metadata.behavior === "direct-with-orchestrator", { data: v } = nt(t, _), y = q(() => new Set((v?.requests ?? []).map((e) => e.call_id).filter((e) => !!e)), [v?.requests]), b = q(() => e("buildTranscript", () => sy(n, d, y)), [
+	let { useStreamText: r, useStreamReasoning: i, useRunning: a, useOptimisticUserPrompt: o, usePrimaryToolEvents: s, runtimeStore: l } = T().stores.runtimeStore, u = a(t), d = s(), f = r(), p = i(), m = l.useStore((e) => e.streamSettled), h = l.useStore((e) => e.streamPredatesPrompt), g = o(), _ = n?.metadata.behavior === "direct", { data: v } = nt(t, _), y = q(() => new Set((v?.requests ?? []).map((e) => e.call_id).filter((e) => !!e)), [v?.requests]), b = q(() => e("buildTranscript", () => sy(n, d, y)), [
 		n,
 		d,
 		y
@@ -25073,7 +25073,7 @@ function KT({ sessionId: e, title: t, fallbackText: n, relationship: r, header: 
 		r?.status,
 		u
 	]);
-	let d = cr(e), f = l.data, p = f?.metadata.behavior === "direct" || f?.metadata.behavior === "direct-with-orchestrator", { data: m } = nt(e, p), h = q(() => new Set((m?.requests ?? []).map((e) => e.call_id).filter((e) => !!e)), [m?.requests]), g = !!f?.message_page?.has_older, _ = f?.message_page?.start ?? 0, [v, y] = Y(!1), [b, x] = Y(e), S = J(!1);
+	let d = cr(e), f = l.data, p = f?.metadata.behavior === "direct", { data: m } = nt(e, p), h = q(() => new Set((m?.requests ?? []).map((e) => e.call_id).filter((e) => !!e)), [m?.requests]), g = !!f?.message_page?.has_older, _ = f?.message_page?.start ?? 0, [v, y] = Y(!1), [b, x] = Y(e), S = J(!1);
 	b !== e && (x(e), y(!1));
 	let C = c.running || !!f?.active_run, w = gb(e, !!f && (!g || v) || l.isError), { scrollRef: T, contentRef: E } = pb({ resetKey: e }), D = J(null);
 	Va(() => {

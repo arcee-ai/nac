@@ -629,7 +629,7 @@ describe("direct permission controls", () => {
     );
   });
 
-  it("does not fetch or render controls for orchestrator sessions", () => {
+  it("does not fetch or render controls before session behavior is known", () => {
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
@@ -637,7 +637,7 @@ describe("direct permission controls", () => {
       <QueryClientProvider client={client}>
         <MemoryRouter>
           <ToastProvider>
-            <PermissionControls sessionId={SESSION_ID} behavior="orchestrator" />
+            <PermissionControls sessionId={SESSION_ID} behavior={null} />
           </ToastProvider>
         </MemoryRouter>
       </QueryClientProvider>,

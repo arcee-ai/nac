@@ -47,7 +47,7 @@ function goal(status: SessionGoalRecord["status"] = "active"): SessionGoalRecord
   };
 }
 
-function mount(value: SessionGoalRecord | null, behavior: "direct" | "orchestrator" = "direct") {
+function mount(value: SessionGoalRecord | null, behavior: "direct" | null = "direct") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
@@ -147,8 +147,8 @@ describe("durable goal controls", () => {
     );
   });
 
-  it("does not fetch or render for orchestrator sessions", () => {
-    mount(null, "orchestrator");
+  it("does not fetch or render before session behavior is known", () => {
+    mount(null, null);
     expect(screen.queryByRole("button", { name: "Create durable goal" })).toBeNull();
     expect(fakes.getGoal).not.toHaveBeenCalled();
   });

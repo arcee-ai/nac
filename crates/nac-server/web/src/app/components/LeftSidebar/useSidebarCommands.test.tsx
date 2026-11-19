@@ -61,8 +61,8 @@ beforeEach(() => {
   state.projects = [{ id: "project" }];
 });
 
-it.each(["orchestrator", "direct-with-orchestrator"] as const)(
-  "opens a new chat in a hidden %s session's project without exposing it in navigation",
+it.each(["direct"] as const)(
+  "opens a new chat in the %s session's project",
   (behavior) => {
     state.sessions = [legacy(behavior)];
     const { result } = renderHook(useSidebarCommands, { wrapper });
@@ -77,7 +77,7 @@ it("waits for canonical route identity before choosing a creation destination", 
   act(() => expect(result.current.newSession()).toBe(false));
   expect(state.create).not.toHaveBeenCalled();
   expect(state.newChat).not.toHaveBeenCalled();
-  state.sessions = [legacy("orchestrator")];
+  state.sessions = [legacy("direct")];
   rerender();
   act(() => result.current.newSession());
   expect(state.newChat).toHaveBeenCalledExactlyOnceWith("project");

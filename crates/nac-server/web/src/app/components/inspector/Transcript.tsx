@@ -162,8 +162,7 @@ export function Transcript({
   const olderMessages = useLoadOlderMessages(sessionId);
   const { data: revisions } = useWorkspaceRevisions(sessionId);
   const direct =
-    snapshot?.metadata.behavior === "direct" ||
-    snapshot?.metadata.behavior === "direct-with-orchestrator";
+    snapshot?.metadata.behavior === "direct";
   // Read on every render: a query whose fields went unread re-renders on every
   // fetch, and the goal is polled each second.
   const goal = useSessionGoal(sessionId, direct).data;

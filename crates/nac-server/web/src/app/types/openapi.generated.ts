@@ -1469,7 +1469,7 @@ export interface components {
       shm_size?: string | null;
       workdir?: string | null;
     };
-    SessionBehavior: "orchestrator" | "direct" | "direct-with-orchestrator";
+    SessionBehavior: "direct";
     SessionClientId: string;
     SessionEvent:
       | { event: components["schemas"]["AgentEvent"]; type: "agent" }

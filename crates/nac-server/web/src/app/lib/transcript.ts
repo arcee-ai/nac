@@ -228,8 +228,7 @@ export function buildTranscript(
   const createdAt = snapshot?.message_created_at ?? [];
   const windowStart = snapshot?.message_page?.start ?? 0;
   const direct =
-    snapshot?.metadata?.behavior === "direct" ||
-    snapshot?.metadata?.behavior === "direct-with-orchestrator";
+    snapshot?.metadata?.behavior === "direct";
   const toolEvents = indexToolEvents(
     direct ? [...(snapshot?.primary_tool_events ?? []), ...livePrimaryToolEvents] : [],
   );

@@ -17,71 +17,14 @@ fn session_picker_uses_direct_behavior() {
     assert_eq!(picker.behavior(), sessions::SessionBehavior::Direct);
 }
 
-#[tokio::test]
-async fn retired_behavior_is_rejected_before_runtime_or_store_preparation() {
-    let store_path = temp_store_path("retired_behavior_rejected");
-    let root = store_path.parent().unwrap().to_path_buf();
-    for behavior in [
-        sessions::SessionBehavior::Orchestrator,
-        sessions::SessionBehavior::DirectWithOrchestrator,
-    ] {
-        let result = prepare_run_config_for_project_with_behavior(
-            RunOptions {
-                workspace_cwd: root.clone(),
-                config_cwd: Some(root.clone()),
-
-                store: StoreOptions {
-                    store_path: Some(store_path.clone()),
-                },
-                model: test_openai_model_options(),
-                orchestrator_compaction_threshold: None,
-                sandbox: SandboxOptions::default(),
-                ssh: SshOptions::default(),
-            },
-            &NacConfig::default(),
-            None,
-            behavior,
-        )
-        .await;
-        assert!(result.is_err());
-        assert!(!store_path.exists());
+#[test]
+fn retired_behaviors_are_rejected_at_the_api_boundary() {
+    for value in ["orchestrator", "direct-with-orchestrator"] {
+        assert!(value.parse::<sessions::SessionBehavior>().is_err());
+        assert!(
+            serde_json::from_value::<sessions::SessionBehavior>(serde_json::json!(value)).is_err()
+        );
     }
-}
-
-#[tokio::test]
-async fn retired_snapshot_is_rejected_before_resume_preparation() {
-    let root = temp_store_path("retired_resume_rejected")
-        .parent()
-        .unwrap()
-        .to_path_buf();
-    let store_path = root.join("store.db");
-    let mut snapshot = sessions::new_snapshot(
-        "retired".into(),
-        root.clone(),
-        "test-model".into(),
-        "https://example.invalid".into(),
-        BackendKind::OpenAiResponses,
-        None,
-        None,
-        None,
-        Vec::new(),
-        None,
-        BTreeMap::new(),
-    );
-    snapshot.behavior = sessions::SessionBehavior::Orchestrator;
-    let result = build_resume_config_from_snapshot(
-        snapshot,
-        store_path.clone(),
-        &NacConfig::default(),
-        root,
-        None,
-        false,
-        None,
-        ResumeModelOptions::default(),
-    )
-    .await;
-    assert!(result.is_err());
-    assert!(!store_path.exists());
 }
 
 #[cfg(unix)]

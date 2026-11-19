@@ -238,7 +238,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   const updateInboxItem = useUpdateInboxItem();
   const cancelInboxItem = useCancelInboxItem();
   const behavior = entry?.summary.behavior ?? snapshot?.metadata.behavior ?? null;
-  const direct = behavior === "direct" || behavior === "direct-with-orchestrator";
+  const direct = behavior === "direct";
   const lineage = entry?.lineage ?? snapshot?.lineage ?? null;
   const readOnly = lineage != null;
   const ownershipKnown = entry !== null || snapshot !== null;

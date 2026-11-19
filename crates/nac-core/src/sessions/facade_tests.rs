@@ -175,7 +175,7 @@ fn openai_chat_completions_backend_round_trips_without_inference() {
 }
 
 #[test]
-fn behavior_round_trips_lists_and_cannot_change_during_state_save() {
+fn direct_behavior_round_trips_and_retired_values_are_rejected() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     let store_path = temp_store_path("behavior_round_trip");
 
@@ -190,28 +190,19 @@ fn behavior_round_trips_lists_and_cannot_change_during_state_save() {
         load_session_behavior(&store_path, "direct").unwrap(),
         SessionBehavior::Direct
     );
-    for (session_id, behavior) in [
-        ("orchestrator", SessionBehavior::Orchestrator),
-        (
-            "direct-with-orchestrator",
-            SessionBehavior::DirectWithOrchestrator,
-        ),
-    ] {
-        let mut retired = test_snapshot(session_id, "created", "updated");
-        retired.behavior = behavior;
-        assert!(create_session(&store_path, &retired).is_err());
-    }
     let summaries = list_sessions(&store_path).unwrap();
     assert_eq!(summaries.len(), 1);
     assert_eq!(summaries[0].behavior, SessionBehavior::Direct);
-
-    let mut stale = load_session(&store_path, "direct").unwrap();
-    stale.behavior = SessionBehavior::Orchestrator;
-    assert!(save_session(&store_path, &stale).is_err());
-    assert_eq!(
-        load_session(&store_path, "direct").unwrap().behavior,
-        SessionBehavior::Direct
-    );
+    let conn = rusqlite::Connection::open(&store_path).unwrap();
+    for value in ["orchestrator", "direct-with-orchestrator"] {
+        assert!(conn
+            .execute(
+                "UPDATE sessions SET behavior = ?1 WHERE session_id = 'direct'",
+                [value]
+            )
+            .is_err());
+    }
+    drop(conn);
     let conn = rusqlite::Connection::open(&store_path).unwrap();
     conn.execute(
         "UPDATE sessions SET extra_headers_json = '{broken' WHERE session_id = 'direct'",

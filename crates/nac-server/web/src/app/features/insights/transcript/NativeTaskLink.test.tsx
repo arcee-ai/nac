@@ -56,7 +56,7 @@ it("opens the exact known independent task through the app router", () => {
   ).toBe(`/session/${task.sessionId}/insights`);
 });
 
-it.each(["unknown", "other caller", "other project", "delegated", "orchestrator"])(
+it.each(["unknown", "other caller", "other project", "delegated"])(
   "withholds a receipt link for %s",
   (reason) => {
     const entry = structuredClone(known);
@@ -69,7 +69,6 @@ it.each(["unknown", "other caller", "other project", "delegated", "orchestrator"
         root_session_id: "caller",
         description: "Child",
       };
-    if (reason === "orchestrator") entry.summary.behavior = "orchestrator";
     if (reason !== "unknown") state.sessions = [entry];
     mount();
     expect(screen.queryByRole("link")).toBeNull();
@@ -177,7 +176,7 @@ it("withholds a pre-publication failure link despite a syntactically valid reser
   expect(state.inventoryIntervals).toEqual([0]);
 });
 
-it.each(["other caller", "other project", "delegated", "orchestrator", "hybrid"])(
+it.each(["other caller", "other project", "delegated"])(
   "withholds the error-receipt link for %s",
   (reason) => {
     const entry = structuredClone(known);
@@ -190,8 +189,6 @@ it.each(["other caller", "other project", "delegated", "orchestrator", "hybrid"]
         root_session_id: "caller",
         description: "Child",
       };
-    if (reason === "orchestrator") entry.summary.behavior = "orchestrator";
-    if (reason === "hybrid") entry.summary.behavior = "direct-with-orchestrator";
     state.sessions = [entry];
     mountErrorReceipt();
     expect(screen.queryByRole("link")).toBeNull();
