@@ -1281,11 +1281,9 @@ async fn request_cancel_persists_marker_and_emits_terminal_event() {
             .is_none(),
         "the cancellation marker and run-state save clear the durable active marker"
     );
-    assert!(parts.service.active_thread_names().is_empty());
-    assert!(crate::store::list_thread_steering(&store_path, &session_id)
+    assert!(crate::store::list_session_inbox(&store_path, &session_id)
         .unwrap()
-        .iter()
-        .all(|record| record.status == "expired"));
+        .is_empty());
 
     // Never-fold (step 4): the cancel path persists bookkeeping only —
     // the blob keeps the system head and the cancellation marker lives

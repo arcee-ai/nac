@@ -844,12 +844,6 @@ impl TranscriptScanCache {
 }
 
 impl SessionService {
-    pub fn active_thread_names(&self) -> Vec<String> {
-        let mut names = self.active_threads.names();
-        names.sort();
-        names
-    }
-
     pub fn prepare_user_input(&self, input: &str) -> PreparedUserInput {
         commands::prepare_user_input_with_mcp(
             input,
