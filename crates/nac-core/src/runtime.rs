@@ -9,10 +9,7 @@ use uuid::Uuid;
 use crate::agent::{Agent, AgentConfig, AgentMode};
 use crate::agents_md::AgentsMdBundle;
 use crate::events::{AgentEvent, EventSink};
-use crate::light_model::{
-    resolve_light_client_with_http_policy, LightModelError, LightModelSettings,
-    TrustedLightCredential,
-};
+use crate::light_model::{LightModelSettings, TrustedLightCredential};
 pub use crate::managed_native_credentials::{
     capture_managed_native_credentials_from_environment, restrict_same_uid_inspection,
 };

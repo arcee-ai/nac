@@ -152,12 +152,7 @@ async fn prepare_run_config_inner(
         options.model.light_model.is_none(),
         "light_model is no longer supported"
     );
-    let agent_mode = match behavior {
-        sessions::SessionBehavior::Orchestrator => AgentMode::Orchestrator,
-        sessions::SessionBehavior::Direct | sessions::SessionBehavior::DirectWithOrchestrator => {
-            AgentMode::Direct
-        }
-    };
+    let agent_mode = AgentMode::Direct;
     let ssh_host = options.ssh.host();
     let config_cwd = options
         .config_cwd
@@ -174,27 +169,6 @@ async fn prepare_run_config_inner(
         limits.effective_input_tokens,
     )?;
     let client = ModelClient::from_effective_settings(settings.clone())?.with_cache_ttl(Some("1h"));
-    let light_model = options.model.light_model.clone();
-    let light_client = if behavior == sessions::SessionBehavior::Direct {
-        // ALL-36 owns the future responsibilities of a light model in a plain
-        // direct session. Retain its durable configuration, but do not resolve
-        // credentials or construct a client until that product and safety
-        // design has been explicitly accepted.
-        None
-    } else {
-        light_model
-            .as_ref()
-            .map(|light| {
-                resolve_light_client_with_http_policy(
-                    light,
-                    &settings.extra_headers,
-                    options.model.trusted_light_credential.as_ref(),
-                    settings.allow_insecure_http,
-                )
-            })
-            .transpose()?
-            .map(std::sync::Arc::new)
-    };
     let sandbox_options = effective_sandbox_options(options.sandbox, config);
     validate_target_sandbox_options(ssh_host.as_deref(), &sandbox_options, "session")?;
     let store_base_cwd = if ssh_host.is_some() {
@@ -268,7 +242,7 @@ async fn prepare_run_config_inner(
                 extra_tool_defs,
                 agents_md_message,
                 thread_timeout_secs: worker_thread_timeout_secs(config),
-                light_client: light_client.clone(),
+                light_client: None,
                 permission_rules: config.permissions.rules.clone(),
             },
         )?;
@@ -293,7 +267,6 @@ async fn prepare_run_config_inner(
         session_snapshot.project_id = project_id.clone();
         session_snapshot.orchestrator_compaction_threshold = orchestrator_compaction_threshold;
         session_snapshot.automatic_compaction = automatic_compaction;
-        session_snapshot.light_model = light_model;
         return Ok(PreparedSessionRunConfig::new(
             SessionRunConfig {
                 agent,
@@ -413,7 +386,7 @@ async fn prepare_run_config_inner(
                 extra_tool_defs,
                 agents_md_message,
                 thread_timeout_secs: worker_thread_timeout_secs(config),
-                light_client: light_client.clone(),
+                light_client: None,
                 permission_rules: config.permissions.rules.clone(),
             },
         )?;
@@ -438,7 +411,6 @@ async fn prepare_run_config_inner(
         session_snapshot.project_id = project_id;
         session_snapshot.orchestrator_compaction_threshold = orchestrator_compaction_threshold;
         session_snapshot.automatic_compaction = automatic_compaction;
-        session_snapshot.light_model = light_model;
         Ok(SessionRunConfig {
             agent,
             client,

@@ -268,12 +268,7 @@ pub(super) async fn build_resume_config_from_snapshot(
 ) -> Result<SessionRunConfig> {
     require_direct_snapshot(&snapshot)?;
     let mut snapshot = normalize_snapshot_paths(snapshot, &resume_base_cwd)?;
-    let agent_mode = match snapshot.behavior {
-        sessions::SessionBehavior::Orchestrator => AgentMode::Orchestrator,
-        sessions::SessionBehavior::Direct | sessions::SessionBehavior::DirectWithOrchestrator => {
-            AgentMode::Direct
-        }
-    };
+    let agent_mode = AgentMode::Direct;
     // Resume reaches the host with the connection the session recorded, not with
     // whatever the local ssh config happens to say now.
     let ssh = snapshot.ssh.clone();
@@ -350,37 +345,6 @@ pub(super) async fn build_resume_config_from_snapshot(
             }
         })?
         .with_cache_ttl(Some("1h"));
-    let light_client = if snapshot.behavior == sessions::SessionBehavior::Direct {
-        // Keep this symmetric with fresh construction: ALL-36 owns any future
-        // direct-session use. The durable selection is retained without
-        // credential resolution and is absent from the resumed direct runtime.
-        None
-    } else {
-        snapshot
-            .light_model
-            .as_ref()
-            .map(|light| {
-                resolve_light_client_with_http_policy(
-                    light,
-                    &snapshot.extra_headers,
-                    model.trusted_light_credential.as_ref(),
-                    snapshot.allow_insecure_http,
-                )
-            })
-            .transpose()
-            .map_err(|error| match error {
-                // The resolver classifies the failure at the source; add the
-                // repair context without type-sniffing the chain. The boundary
-                // renders the full chain once with `{:#}`.
-                LightModelError::InvalidSettings(inner) => inner.context(
-                    "stored session light-model settings are invalid; settings repair required",
-                ),
-                // Keep the typed wrapper so its top-level context still names
-                // the light model as the failing component.
-                error @ LightModelError::Other(_) => anyhow::Error::from(error),
-            })?
-            .map(std::sync::Arc::new)
-    };
     let sandbox = if ssh.is_some() {
         None
     } else {
@@ -520,7 +484,7 @@ pub(super) async fn build_resume_config_from_snapshot(
         extra_tool_defs,
         agents_md_message,
         thread_timeout_secs: worker_thread_timeout_secs(config),
-        light_client,
+        light_client: None,
         permission_rules: config.permissions.rules.clone(),
     };
     let agent_client = client.clone();
