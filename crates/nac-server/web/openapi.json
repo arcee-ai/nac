@@ -17384,7 +17384,6 @@
         "type": "string",
         "enum": [
           "traditional_subagents",
-          "managed_orchestrators",
           "managed_host",
           "product_navigation"
         ]

@@ -18,7 +18,6 @@ vi.mock("@/app/services/queries", () => ({
   useWorkspaceRevisionChanges: () => ({ data: null }),
   useWorkspaceRevisions: () => ({ data: [], isLoading: false, error: null }),
   useTraditionalChildren: () => ({ data: [] }),
-  useManagedOrchestrators: () => ({ data: [] }),
 }));
 vi.mock("@/app/components/inspector/FilesView", () => ({ FilesView: () => <div>files</div> }));
 vi.mock("@/app/components/inspector/DelegatedWorkView", () => ({

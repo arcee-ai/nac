@@ -870,11 +870,7 @@ export interface components {
       feature: components["schemas"]["ProductFeatureKind"];
       label: string;
     };
-    ProductFeatureKind:
-      | "traditional_subagents"
-      | "managed_orchestrators"
-      | "managed_host"
-      | "product_navigation";
+    ProductFeatureKind: "traditional_subagents" | "managed_host" | "product_navigation";
     ProductNavigationRequest: {
       destination: components["schemas"]["ProductDestination"];
       expected_build_id: string;
