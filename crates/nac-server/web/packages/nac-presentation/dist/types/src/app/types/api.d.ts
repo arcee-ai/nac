@@ -8,11 +8,6 @@ export type DispatchWeight = "light" | "heavy";
 /** Immutable execution topology selected when a session is created. */
 export type SessionBehavior = ApiSchema<"SessionBehavior">;
 export type SessionMcpRefreshStatus = ApiSchema<"SessionMcpRefreshStatus">;
-/**
- * The optional light worker model. Same shape on records and requests: the
- * credential is always a selector name, never a key value.
- */
-export type LightModelSettings = ApiSchema<"LightModelSettings">;
 export type StoreInfo = ApiSchema<"StoreInfo">;
 export type ReadinessResponse = ApiSchema<"ReadinessResponse">;
 export type ManagedReadinessCheck = ApiSchema<"ReadinessCheck">;

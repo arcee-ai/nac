@@ -12825,10 +12825,6 @@
             "type": "boolean",
             "description": "Opt-in first-chat admission restricted to the requested immutable behavior.\nOmission preserves newest-primary admission across all behaviors."
           },
-          "light_model": {
-            "$ref": "#/components/schemas/RequestField_LightModelSettings_LightModelSettings",
-            "description": "Retired selector. Any explicitly supplied value is rejected."
-          },
           "model": {
             "$ref": "#/components/schemas/RequestField_String_String"
           },
@@ -15500,50 +15496,6 @@
             "type": "integer",
             "format": "int64",
             "minimum": 0
-          }
-        }
-      },
-      "LightModelSettings": {
-        "type": "object",
-        "description": "The optional light model selection stored with a session. Orchestrator\nruntimes use it for weight-classified dispatch, and direct-with-orchestrator\nsessions pass it to the orchestrators they launch. Plain direct sessions\nretain it without a runtime consumer pending ALL-36. The model remains a\ncatalog id; backend and reasoning effort are typed before entering the\ndomain model, and the credential is always a selector name, never a key\nvalue.",
-        "required": [
-          "model"
-        ],
-        "properties": {
-          "api_key_env": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "backend": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/BackendKind"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "base_url": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "model": {
-            "type": "string"
-          },
-          "reasoning_effort": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/ReasoningEffort"
-              },
-              {
-                "type": "null"
-              }
-            ]
           }
         }
       },
@@ -18415,17 +18367,6 @@
               "null"
             ]
           },
-          "light_model": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/LightModelSettings",
-                "description": "Light worker model; `None` keeps single-model dispatch."
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "model": {
             "type": "string"
           },
@@ -18823,57 +18764,6 @@
               }
             ],
             "description": "Prefer an object of header names to values. The JSON-encoded string form is accepted for compatibility."
-          }
-        ]
-      },
-      "RequestField_LightModelSettings_LightModelSettings": {
-        "oneOf": [
-          {
-            "type": "null"
-          },
-          {
-            "type": "object",
-            "description": "The optional light model selection stored with a session. Orchestrator\nruntimes use it for weight-classified dispatch, and direct-with-orchestrator\nsessions pass it to the orchestrators they launch. Plain direct sessions\nretain it without a runtime consumer pending ALL-36. The model remains a\ncatalog id; backend and reasoning effort are typed before entering the\ndomain model, and the credential is always a selector name, never a key\nvalue.",
-            "required": [
-              "model"
-            ],
-            "properties": {
-              "api_key_env": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "backend": {
-                "oneOf": [
-                  {
-                    "$ref": "#/components/schemas/BackendKind"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              },
-              "base_url": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "model": {
-                "type": "string"
-              },
-              "reasoning_effort": {
-                "oneOf": [
-                  {
-                    "$ref": "#/components/schemas/ReasoningEffort"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              }
-            }
           }
         ]
       },
@@ -22560,10 +22450,6 @@
           "extra_headers": {
             "$ref": "#/components/schemas/RequestField_HeadersRequest_HeadersRequest",
             "description": "Prefer a JSON object. Null or an empty object clears the persisted map."
-          },
-          "light_model": {
-            "$ref": "#/components/schemas/RequestField_LightModelSettings_LightModelSettings",
-            "description": "Retired selector. Any explicitly supplied value is rejected."
           },
           "model": {
             "$ref": "#/components/schemas/RequestField_String_String"

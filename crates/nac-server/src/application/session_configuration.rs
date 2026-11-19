@@ -2,7 +2,6 @@ use std::collections::BTreeMap;
 
 use anyhow::{anyhow, Result};
 use nac_core::{
-    light_model::LightModelSettings,
     model::{validate_model_configuration, BackendKind, EffectiveModelSettings},
     sessions,
 };
@@ -23,7 +22,7 @@ pub(crate) struct SessionConfigPatch {
     pub(crate) api_key_env: Field<String>,
     pub(crate) extra_headers: Field<BTreeMap<String, String>>,
     pub(crate) orchestrator_compaction_threshold: Field<u64>,
-    pub(crate) light_model: Field<LightModelSettings>,
+    pub(crate) light_model: Field<serde_json::Value>,
 }
 
 impl SessionConfigPatch {

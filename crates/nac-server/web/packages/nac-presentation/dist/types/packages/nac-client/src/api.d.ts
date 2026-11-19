@@ -293,10 +293,6 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         path: string;
         truncated: boolean;
     }>;
-    /**
-     * The same listing for a directory on an SSH host. Also the connection test
-     * the launch form runs first: only a working connection can answer.
-     */
     browseSshPath: (target: SshTarget, path: string | null, hidden?: boolean, signal?: AbortSignal) => Promise<{
         entries: import("./openapi.generated.js").components["schemas"]["BrowseEntry"][];
         home?: string | null;
@@ -666,7 +662,6 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         config_version: number;
         diagnostics?: string[];
         extra_headers_json: string | null;
-        light_model?: import("./openapi.generated.js").components["schemas"]["LightModelSettings"] | null;
         model: string;
         orchestrator_compaction_threshold: number | null;
         reasoning_effort: string | null;

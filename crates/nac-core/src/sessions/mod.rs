@@ -6,7 +6,6 @@ use anyhow::{anyhow, Context, Result};
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
-use crate::light_model::LightModelSettings;
 use crate::model::{BackendKind, ReasoningEffort};
 use crate::sandbox::{SandboxBackendType, SandboxSpec, SshConnection};
 use crate::types::Message;
@@ -148,9 +147,6 @@ pub struct RawSessionConfig {
     pub api_key_env: Option<String>,
     #[cfg_attr(feature = "openapi", schema(required))]
     pub extra_headers_json: Option<String>,
-    /// Light worker model; `None` keeps single-model dispatch.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub light_model: Option<LightModelSettings>,
     #[cfg_attr(feature = "openapi", schema(required))]
     pub orchestrator_compaction_threshold: Option<u64>,
     /// New sessions may follow the locally resolved model's automatic budget.

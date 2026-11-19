@@ -78,7 +78,6 @@ function renderReadySettings({
   threshold = 111,
   headersJson = "{}",
   orchestration: _orchestration = true,
-  lightModel = null,
   projectId = null,
   diagnostics = [],
 }: {
@@ -87,7 +86,6 @@ function renderReadySettings({
   threshold?: number | null;
   headersJson?: string;
   orchestration?: boolean;
-  lightModel?: RawSessionConfig["light_model"];
 } = {}) {
   const initial = {
     backend: "openai-responses",
@@ -144,7 +142,6 @@ function renderReadySettings({
     config_version: 1,
     ...initial,
     extra_headers_json: headersJson,
-    light_model: lightModel,
     orchestrator_compaction_threshold: threshold,
     diagnostics,
   } as RawSessionConfig);
@@ -239,7 +236,6 @@ it("holds a fast settings submit until managed status authorizes the mounted mod
     config_version: 1,
     ...initial,
     extra_headers_json: "{}",
-    light_model: null,
     orchestrator_compaction_threshold: null,
     diagnostics: [],
   } as RawSessionConfig);
@@ -313,12 +309,11 @@ it("repairs malformed stored extra headers to an explicit empty object", async (
   }
 });
 
-it("saving direct settings keeps a hidden light model and disabled compaction intact", async () => {
+it("saving direct settings keeps disabled compaction intact", async () => {
   const { client, view, update } = renderReadySettings({
     orchestration: false,
     threshold: null,
     headersJson: "{not-json}",
-    lightModel: { model: "gpt-5-mini", backend: "openai-responses", api_key_env: "OTHER_ACCOUNT" },
   });
   try {
     fireEvent.click(await screen.findByRole("button", { name: "Keep current configuration" }));

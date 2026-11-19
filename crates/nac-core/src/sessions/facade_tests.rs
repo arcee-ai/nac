@@ -346,7 +346,6 @@ fn direct_sessions_preserve_but_do_not_load_or_rewrite_inert_light_data() {
     drop(conn);
     assert!(load_session(&store_path, "light").is_ok());
     let mut config = load_session_config(&store_path, "light").unwrap();
-    assert!(config.light_model.is_none());
     assert!(config.diagnostics.is_empty());
     config.model = "replacement-model".into();
     assert_eq!(update_raw_session_config(&store_path, &config).unwrap(), 1);

@@ -396,7 +396,6 @@ export declare function useSessionConfig(id: string | null): import("@tanstack/r
     config_version: number;
     diagnostics?: string[];
     extra_headers_json: string | null;
-    light_model?: import("../../types/openapi.generated").components["schemas"]["LightModelSettings"] | null;
     model: string;
     orchestrator_compaction_threshold: number | null;
     reasoning_effort: string | null;
@@ -441,7 +440,6 @@ export declare function useCreateSession(): import("@tanstack/react-query").UseM
     extra_headers?: import("../../types/openapi.generated").components["schemas"]["RequestField_HeadersRequest_HeadersRequest"];
     first_chat?: boolean;
     first_chat_same_behavior?: boolean;
-    light_model?: import("../../types/openapi.generated").components["schemas"]["RequestField_LightModelSettings_LightModelSettings"];
     model?: import("../../types/openapi.generated").components["schemas"]["RequestField_String_String"];
     orchestrator_compaction_threshold?: import("../../types/openapi.generated").components["schemas"]["RequestField_u64_u64"];
     project_id?: string | null;

@@ -46,7 +46,6 @@ function renderReadySettings({
   threshold = 111,
   headersJson = "{}",
   orchestration: _orchestration = true,
-  lightModel = null,
   projectId = null,
   diagnostics = [],
   providerBackend = "openai-responses",
@@ -59,7 +58,6 @@ function renderReadySettings({
   threshold?: number | null;
   headersJson?: string;
   orchestration?: boolean;
-  lightModel?: RawSessionConfig["light_model"];
 } = {}) {
   const initial = {
     backend: providerBackend,
@@ -116,7 +114,6 @@ function renderReadySettings({
     config_version: 1,
     ...initial,
     extra_headers_json: headersJson,
-    light_model: lightModel,
     orchestrator_compaction_threshold: threshold,
     automatic_compaction: automaticCompaction,
     diagnostics,
@@ -289,15 +286,6 @@ it.each([
       orchestration,
       threshold,
       headersJson: '{"X-Saved":"old"}',
-      lightModel: orchestration
-        ? {
-            model: "gpt-5.2",
-            backend: "openai-responses",
-            base_url: "https://api.openai.com/v1",
-            api_key_env: "OPENAI_API_KEY",
-            reasoning_effort: "high",
-          }
-        : null,
     });
     try {
       await waitFor(() =>

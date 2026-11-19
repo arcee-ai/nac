@@ -2,7 +2,6 @@ use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 
 use anyhow::{anyhow, Result};
 use nac_core::{
-    light_model::{LightModelError, LightModelSettings},
     projects,
     runtime::{self, NacConfig, OptionalModelOption, RunOptions, StoreOptions},
     session_service::{SessionFrontendSnapshot, SessionService},
@@ -94,7 +93,7 @@ pub(crate) struct SessionCreationCommand {
     pub(crate) api_key_env: Field<String>,
     pub(crate) extra_headers: Field<BTreeMap<String, String>>,
     pub(crate) orchestrator_compaction_threshold: Field<u64>,
-    pub(crate) light_model: Field<LightModelSettings>,
+    pub(crate) light_model: Field<serde_json::Value>,
     pub(crate) ssh_host: Option<String>,
     pub(crate) ssh_port: Option<u16>,
     pub(crate) ssh_identity_file: Option<String>,
@@ -408,17 +407,7 @@ impl<'a> SessionCreationApplication<'a> {
                 .await
             }
         };
-        let mut prepared = preparation.await.map_err(|error| {
-            // A broken light model fails here, at launch resolution. Route it
-            // through the configuration-error boundary so the response names
-            // the actionable cause.
-            match error.downcast_ref::<LightModelError>() {
-                Some(light_error) if light_error.is_invalid_settings() => {
-                    request_configuration_error_from(error)
-                }
-                _ => error,
-            }
-        })?;
+        let mut prepared = preparation.await?;
         if let Err(error) = self
             .manager
             .attach_managed_command_environment(prepared.run_config_mut())

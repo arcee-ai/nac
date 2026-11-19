@@ -354,7 +354,6 @@ export interface components {
       extra_headers?: components["schemas"]["RequestField_HeadersRequest_HeadersRequest"];
       first_chat?: boolean;
       first_chat_same_behavior?: boolean;
-      light_model?: components["schemas"]["RequestField_LightModelSettings_LightModelSettings"];
       model?: components["schemas"]["RequestField_String_String"];
       orchestrator_compaction_threshold?: components["schemas"]["RequestField_u64_u64"];
       project_id?: string | null;
@@ -811,13 +810,6 @@ export interface components {
       outcome: components["schemas"]["InputDeliveryOutcome"];
     };
     LaggedEvent: { missed: number };
-    LightModelSettings: {
-      api_key_env?: string | null;
-      backend?: components["schemas"]["BackendKind"] | null;
-      base_url?: string | null;
-      model: string;
-      reasoning_effort?: components["schemas"]["ReasoningEffort"] | null;
-    };
     LimitOrigin: "observed" | "profile" | "inherited" | "customized" | "estimated";
     ManagedAcceptedIdentity: {
       host_incarnation_id: string;
@@ -1361,7 +1353,6 @@ export interface components {
       config_version: number;
       diagnostics?: string[];
       extra_headers_json: string | null;
-      light_model?: components["schemas"]["LightModelSettings"] | null;
       model: string;
       orchestrator_compaction_threshold: number | null;
       reasoning_effort: string | null;
@@ -1424,13 +1415,6 @@ export interface components {
     RequestField_BTreeMap_BTreeMap_String_Option_String: null | Record<string, null | string>;
     RequestField_BTreeMap_BTreeMap_String_String: null | Record<string, string>;
     RequestField_HeadersRequest_HeadersRequest: null | (Record<string, string> | string);
-    RequestField_LightModelSettings_LightModelSettings: null | {
-      api_key_env?: string | null;
-      backend?: components["schemas"]["BackendKind"] | null;
-      base_url?: string | null;
-      model: string;
-      reasoning_effort?: components["schemas"]["ReasoningEffort"] | null;
-    };
     RequestField_McpProtocolSelection_McpProtocolSelection: null | ("legacy" | "auto" | "current");
     RequestField_McpToolApproval_McpToolApproval: null | ("allow" | "ask");
     RequestField_String_String: null | string;
@@ -2059,7 +2043,6 @@ export interface components {
       backend?: components["schemas"]["RequestField_String_String"];
       base_url?: components["schemas"]["RequestField_String_String"];
       extra_headers?: components["schemas"]["RequestField_HeadersRequest_HeadersRequest"];
-      light_model?: components["schemas"]["RequestField_LightModelSettings_LightModelSettings"];
       model?: components["schemas"]["RequestField_String_String"];
       orchestrator_compaction_threshold?: components["schemas"]["RequestField_u64_u64"];
       reasoning_effort?: components["schemas"]["RequestField_String_String"];

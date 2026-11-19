@@ -342,10 +342,7 @@ export function createNacApi(
       return request<BrowseListing>("GET", `/fs/browse?${query.toString()}`, { signal });
     },
 
-    /**
-     * The same listing for a directory on an SSH host. Also the connection test
-     * the launch form runs first: only a working connection can answer.
-     */
+    // The launch form also uses this listing to test the SSH connection.
     browseSshPath: (target: SshTarget, path: string | null, hidden = false, signal?: AbortSignal) =>
       request<BrowseListing>("POST", "/ssh/browse", {
         body: { ...target, path, hidden } satisfies SshBrowseRequest,

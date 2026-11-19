@@ -2,7 +2,6 @@ use std::{collections::BTreeMap, path::PathBuf};
 
 use nac_core::{
     events::{SessionEventBoundary, SessionEventEnvelope, SessionReplayGap},
-    light_model::LightModelSettings,
     model::{BackendKind, ProviderModel},
     permissions::{PermissionApprovalMode, PermissionReply, PermissionRequest},
     session_service::{
@@ -258,7 +257,8 @@ pub struct CreateSessionRequest {
     pub orchestrator_compaction_threshold: RequestField<u64>,
     /// Retired selector. Any explicitly supplied value is rejected.
     #[serde(default)]
-    pub light_model: RequestField<LightModelSettings>,
+    #[schema(ignore)]
+    pub light_model: RequestField<serde_json::Value>,
     /// OpenSSH target for remote sessions; `cwd` is remote and defaults to `~`.
     #[serde(default, alias = "host_id")]
     pub ssh_host: Option<String>,
@@ -400,7 +400,8 @@ pub struct UpdateConfigRequest {
     pub orchestrator_compaction_threshold: RequestField<u64>,
     /// Retired selector. Any explicitly supplied value is rejected.
     #[serde(default)]
-    pub light_model: RequestField<LightModelSettings>,
+    #[schema(ignore)]
+    pub light_model: RequestField<serde_json::Value>,
 }
 
 impl UpdateConfigRequest {
