@@ -15,8 +15,6 @@ async fn sessionless_send_continues_when_provider_context_total_is_invalid() {
             session_id: None,
             orchestrator_compaction_threshold: Some(1),
             initial_messages: Vec::new(),
-            thread_name: None,
-            dispatch_id: None,
             event_sink: EventSink::none(),
             workspace_cwd: PathBuf::from("."),
             config_cwd: PathBuf::from("."),

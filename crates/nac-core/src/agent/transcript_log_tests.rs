@@ -24,8 +24,6 @@ pub(super) fn transcript_test_agent(
             session_id: session_id.map(str::to_string),
             orchestrator_compaction_threshold: None,
             initial_messages: Vec::new(),
-            thread_name: None,
-            dispatch_id: None,
             event_sink: EventSink::none(),
             workspace_cwd: PathBuf::from("."),
             config_cwd: PathBuf::from("."),

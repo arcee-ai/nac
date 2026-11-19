@@ -75,8 +75,6 @@ fn fixture_with_policy(
             session_id: Some("direct-terminal".into()),
             orchestrator_compaction_threshold: None,
             initial_messages: Vec::new(),
-            thread_name: None,
-            dispatch_id: None,
             event_sink: EventSink::none(),
             workspace_cwd: directory.clone(),
             config_cwd: directory.clone(),

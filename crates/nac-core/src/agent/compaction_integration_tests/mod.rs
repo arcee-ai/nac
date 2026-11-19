@@ -37,8 +37,6 @@ fn compaction_test_agent(
             session_id: session_id.map(str::to_string),
             orchestrator_compaction_threshold: threshold,
             initial_messages: Vec::new(),
-            thread_name: None,
-            dispatch_id: None,
             event_sink,
             workspace_cwd: PathBuf::from("."),
             config_cwd: PathBuf::from("."),

@@ -86,11 +86,8 @@ Reply with your answer as ordinary text, or issue the tool call you meant to mak
 
 /// Flash-class models can ignore a correct tool error and retry the same call
 /// forever (`write` + `expected_revision: null` on an existing file). The
-/// error stays on the tool result; this only stops the worker after the
-/// identical failing round has repeated enough times to be a loop. The stop
-/// is reported as `ModelError` so the parent dispatch keeps the reason (plain
-/// `Error` is reduced to "operation failed" before it leaves the worker) and
-/// the orchestrator sees it on the `thread` tool result.
+/// error stays on the tool result; this stops the run after the identical
+/// failing round has repeated enough times to be a loop.
 const REPEATED_TOOL_FAILURE_LIMIT: usize = 3;
 
 fn duration_millis(duration: Duration) -> u64 {
@@ -105,15 +102,10 @@ pub(crate) enum RunPromptCommitStatus {
 }
 
 pub struct AgentConfig {
-    /// Authoritative immutable behavior for a persistent top-level session.
-    /// Fresh sessions are constructed before their row exists, so callers
-    /// must not rely on a store reread to distinguish the two direct modes.
     pub store_path: PathBuf,
     pub session_id: Option<String>,
     pub orchestrator_compaction_threshold: Option<u64>,
     pub initial_messages: Vec<Message>,
-    pub thread_name: Option<String>,
-    pub dispatch_id: Option<String>,
     pub event_sink: EventSink,
     pub workspace_cwd: PathBuf,
     /// Local cwd for nac config/store paths; differs from workspace_cwd for SSH.
@@ -144,13 +136,12 @@ pub struct Agent {
     compaction: Option<CompactionState>,
     tool_runtime: ToolRuntime,
     event_sink: EventSink,
-    thread_name: Option<String>,
     mcp_observation: Option<McpObservation>,
     mcp_mounts: Arc<crate::mcp::SessionMcpMounts>,
     current_run_id: Option<String>,
     /// Top-level transcript log sink (DB-direct transcript workset, see
     /// store/transcript.rs). Present for persistent primary agents with a
-    /// session id — workers (separate `__worker` processes) never log.
+    /// session id.
     transcript_log: Option<TranscriptLogSink>,
     /// Exclusive upper bound of transcript log rows this process has
     /// committed or adopted (restore/refresh). Durable rows at or beyond
@@ -282,9 +273,10 @@ impl Agent {
         messages.extend(config.initial_messages);
 
         let local_paths = crate::paths::PathContext::new(&config.config_cwd);
-        let mcp_observation = config.mcp.as_ref().map(|mcp| {
-            mcp.register_event_sink(config.event_sink.clone(), config.thread_name.clone())
-        });
+        let mcp_observation = config
+            .mcp
+            .as_ref()
+            .map(|mcp| mcp.register_event_sink(config.event_sink.clone(), None));
         let mcp_mounts = Arc::new(crate::mcp::SessionMcpMounts::new(config.mcp.clone()));
         let workspace_lease_identity =
             crate::workspace::workspace_lease_identity(config.ssh.as_ref(), &config.workspace_cwd);
@@ -363,10 +355,9 @@ impl Agent {
                 command_redactions: Arc::new(StdMutex::new(HashMap::new())),
             },
             event_sink: config.event_sink,
-            thread_name: config.thread_name,
             mcp_observation,
             mcp_mounts,
-            current_run_id: config.dispatch_id,
+            current_run_id: None,
             transcript_log,
             committed_log_len,
             pending_log_end: None,
@@ -498,8 +489,6 @@ impl Agent {
                 session_id: None,
                 orchestrator_compaction_threshold: None,
                 initial_messages: Vec::new(),
-                thread_name: None,
-                dispatch_id: None,
                 event_sink: EventSink::none(),
                 workspace_cwd: workspace_cwd.clone(),
                 config_cwd: workspace_cwd,
@@ -632,7 +621,7 @@ impl Agent {
             correlation,
         ));
         self.emit(AgentEvent::RunStarted {
-            thread_name: self.thread_name.clone(),
+            thread_name: None,
             prompt_preview: preview(prompt, 160),
         })
         .await;
@@ -666,7 +655,7 @@ impl Agent {
         }
         if let Err(error) = prompt_result {
             self.emit(AgentEvent::Error {
-                thread_name: self.thread_name.clone(),
+                thread_name: None,
                 message: error.to_string(),
             })
             .await;
@@ -676,7 +665,7 @@ impl Agent {
 
         if let Err(error) = self.ensure_backend_ready().await {
             self.emit(AgentEvent::Error {
-                thread_name: self.thread_name.clone(),
+                thread_name: None,
                 message: error.to_string(),
             })
             .await;
@@ -711,7 +700,7 @@ impl Agent {
                     Err(error) => {
                         self.last_usage = Some(accumulated_usage.clone());
                         self.emit(AgentEvent::Error {
-                            thread_name: self.thread_name.clone(),
+                            thread_name: None,
                             message: error.to_string(),
                         })
                         .await;
@@ -738,7 +727,7 @@ impl Agent {
             self.project_mcp_instructions(&mut provider_view.messages);
             iteration = iteration.saturating_add(1);
             self.emit(AgentEvent::ModelCallStarted {
-                thread_name: self.thread_name.clone(),
+                thread_name: None,
                 iteration,
             })
             .await;
@@ -747,10 +736,7 @@ impl Agent {
             self.clear_partial_stream();
             let deltas = CoalescedDeltas::new(|delta: ModelStreamDelta| {
                 self.event_sink
-                    .emit_assistant_delta(AssistantStreamDelta::from_model(
-                        self.thread_name.clone(),
-                        delta,
-                    ));
+                    .emit_assistant_delta(AssistantStreamDelta::from_model(None, delta));
             });
             let push_delta = |delta: ModelStreamDelta| {
                 {
@@ -764,12 +750,11 @@ impl Agent {
                 }
                 deltas.push(delta);
             };
-            // Only the orchestrator's output is read as it arrives: a thread is
-            // summarized on its card, and nobody watching at all means the
-            // cheaper buffered request shape.
-            let delta_sink: DeltaSink<'_> = (self.thread_name.is_none()
-                && self.event_sink.wants_assistant_deltas())
-            .then_some(&push_delta);
+            // Use the cheaper buffered request shape when nobody is watching.
+            let delta_sink: DeltaSink<'_> = self
+                .event_sink
+                .wants_assistant_deltas()
+                .then_some(&push_delta);
             let model_call = self.client.send_turn_streaming(
                 provider_view.messages,
                 request_tool_defs,
@@ -788,7 +773,7 @@ impl Agent {
                     // one error class worth showing rather than reducing to
                     // "operation failed".
                     self.emit(AgentEvent::ModelError {
-                        thread_name: self.thread_name.clone(),
+                        thread_name: None,
                         message: error.to_string(),
                     })
                     .await;
@@ -813,7 +798,7 @@ impl Agent {
                     goals.update_usage(&accumulated_usage);
                 }
                 self.emit(AgentEvent::TokenUsageUpdated {
-                    thread_name: self.thread_name.clone(),
+                    thread_name: None,
                     usage,
                 })
                 .await;
@@ -832,7 +817,7 @@ impl Agent {
                 );
                 self.last_usage = Some(accumulated_usage.clone());
                 self.emit(AgentEvent::Error {
-                    thread_name: self.thread_name.clone(),
+                    thread_name: None,
                     message: error.to_string(),
                 })
                 .await;
@@ -864,7 +849,7 @@ impl Agent {
                 // path above.
                 self.last_usage = Some(accumulated_usage.clone());
                 self.emit(AgentEvent::Error {
-                    thread_name: self.thread_name.clone(),
+                    thread_name: None,
                     message: error.to_string(),
                 })
                 .await;
@@ -899,7 +884,7 @@ impl Agent {
                         {
                             self.last_usage = Some(accumulated_usage.clone());
                             self.emit(AgentEvent::Error {
-                                thread_name: self.thread_name.clone(),
+                                thread_name: None,
                                 message: error.to_string(),
                             })
                             .await;
@@ -915,7 +900,7 @@ impl Agent {
                     );
                     self.last_usage = Some(accumulated_usage.clone());
                     self.emit(AgentEvent::Error {
-                        thread_name: self.thread_name.clone(),
+                        thread_name: None,
                         message: error.to_string(),
                     })
                     .await;
@@ -923,7 +908,7 @@ impl Agent {
                     return Err(error);
                 };
                 self.emit(AgentEvent::AssistantMessage {
-                    thread_name: self.thread_name.clone(),
+                    thread_name: None,
                     content: content.clone(),
                     usage: Some(accumulated_usage.clone()),
                 })
@@ -931,16 +916,14 @@ impl Agent {
                 self.last_usage = Some(accumulated_usage.clone());
                 if let Err(error) = self.tool_runtime.terminal_manager.settle_run().await {
                     self.emit(AgentEvent::Error {
-                        thread_name: self.thread_name.clone(),
+                        thread_name: None,
                         message: error.to_string(),
                     })
                     .await;
                     return Err(error);
                 }
-                self.emit(AgentEvent::RunFinished {
-                    thread_name: self.thread_name.clone(),
-                })
-                .await;
+                self.emit(AgentEvent::RunFinished { thread_name: None })
+                    .await;
                 return Ok(content);
             }
 
@@ -954,7 +937,7 @@ impl Agent {
                 self.tool_runtime.clone(),
                 self.client.clone(),
                 self.event_sink.clone(),
-                self.thread_name.clone(),
+                None,
                 self.admission_controlled_tools,
             )
             .await;
@@ -981,13 +964,12 @@ impl Agent {
             };
             let failure_detail = last_failure_detail.clone();
             let tool_messages =
-                finalize_tool_results(&self.messages, results, &self.event_sink, &self.thread_name)
-                    .await;
+                finalize_tool_results(&self.messages, results, &self.event_sink, &None).await;
 
             if self.tool_runtime.command_cancellation.is_cancelled() {
                 let error = anyhow!("command cancelled");
                 self.emit(AgentEvent::Error {
-                    thread_name: self.thread_name.clone(),
+                    thread_name: None,
                     message: error.to_string(),
                 })
                 .await;
@@ -1007,7 +989,7 @@ impl Agent {
             if let Err(error) = self.push_batch_and_log(tool_messages).await {
                 self.last_usage = Some(accumulated_usage.clone());
                 self.emit(AgentEvent::Error {
-                    thread_name: self.thread_name.clone(),
+                    thread_name: None,
                     message: error.to_string(),
                 })
                 .await;
@@ -1027,7 +1009,7 @@ impl Agent {
                 // which the identical-failure guard below cannot see.
                 let error = anyhow!("{reason}");
                 self.emit(AgentEvent::ModelError {
-                    thread_name: self.thread_name.clone(),
+                    thread_name: None,
                     message: error.to_string(),
                 })
                 .await;
@@ -1038,12 +1020,9 @@ impl Agent {
                 let error = anyhow!(
                     "Stopped after {REPEATED_TOOL_FAILURE_LIMIT} identical tool failures: {failure_detail}"
                 );
-                // Same channel as a provider refusal: the message survives
-                // sanitization and is captured as `WorkerRun.model_error`,
-                // which `worker_failure_details` puts on the orchestrator's
-                // thread tool result.
+                // Use the same sanitized error channel as a provider refusal.
                 self.emit(AgentEvent::ModelError {
-                    thread_name: self.thread_name.clone(),
+                    thread_name: None,
                     message: error.to_string(),
                 })
                 .await;
@@ -1101,7 +1080,7 @@ impl Agent {
     pub fn set_event_sink(&mut self, sink: EventSink) {
         self.event_sink = sink.clone();
         if let Some(observation) = self.mcp_observation.as_ref() {
-            observation(sink.clone(), self.thread_name.clone());
+            observation(sink.clone(), None);
         }
         self.tool_runtime.set_event_sink(sink);
     }
@@ -1147,8 +1126,8 @@ impl Agent {
         Arc::clone(&self.tool_runtime.run_admission)
     }
 
-    pub fn set_current_run_id(&mut self, dispatch_id: Option<String>) {
-        self.current_run_id = dispatch_id;
+    pub fn set_current_run_id(&mut self, run_id: Option<String>) {
+        self.current_run_id = run_id;
     }
 
     /// Shared handle to the transcript log writer, present only for
@@ -1662,7 +1641,7 @@ impl Agent {
             }
             Err(error) => {
                 self.emit(AgentEvent::Error {
-                    thread_name: self.thread_name.clone(),
+                    thread_name: None,
                     message: error.to_string(),
                 })
                 .await;
@@ -1675,7 +1654,7 @@ impl Agent {
     async fn record_terminal_cleanup_error(&self) {
         if let Err(error) = self.tool_runtime.terminal_manager.settle_run().await {
             self.emit(AgentEvent::Error {
-                thread_name: self.thread_name.clone(),
+                thread_name: None,
                 message: format!("terminal cleanup incomplete: {error:#}"),
             })
             .await;

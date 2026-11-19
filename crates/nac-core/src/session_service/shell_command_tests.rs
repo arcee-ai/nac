@@ -51,8 +51,6 @@ fn test_direct_active_service_at(
             session_id: Some(session_id.into()),
             orchestrator_compaction_threshold: None,
             initial_messages: Vec::new(),
-            thread_name: None,
-            dispatch_id: None,
             event_sink: EventSink::none(),
             workspace_cwd: cwd.clone(),
             config_cwd: cwd.clone(),

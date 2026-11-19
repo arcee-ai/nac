@@ -590,7 +590,7 @@ impl super::Agent {
             delta.replace_context(installed_context.unwrap_or_default());
             event_sink
                 .emit_async(AgentEvent::TokenUsageUpdated {
-                    thread_name: self.thread_name.clone(),
+                    thread_name: None,
                     usage: delta,
                 })
                 .await;

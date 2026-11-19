@@ -296,8 +296,6 @@ async fn heartbeat_question_delivery_typed_answer_failure_uses_real_goal_retry_t
             session_id: Some(id.into()),
             orchestrator_compaction_threshold: None,
             initial_messages: vec![],
-            thread_name: None,
-            dispatch_id: None,
             event_sink: EventSink::none(),
             workspace_cwd: root.clone(),
             config_cwd: root.clone(),

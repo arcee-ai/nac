@@ -450,8 +450,6 @@ pub(super) async fn build_resume_config_from_snapshot(
         session_id: Some(snapshot.session_id.clone()),
         orchestrator_compaction_threshold: snapshot.orchestrator_compaction_threshold,
         initial_messages: Vec::new(),
-        thread_name: None,
-        dispatch_id: None,
         event_sink: EventSink::none(),
         workspace_cwd,
         config_cwd,
