@@ -7,7 +7,6 @@ async fn frontend_snapshot_projects_sanitized_primary_tool_events_separately() {
         .service
         .event_bus
         .emit_agent(AgentEvent::ToolCallStarted {
-            thread_name: None,
             call_id: "call-primary".to_string(),
             name: "exec_command".to_string(),
             args_preview: "RAW_ARGUMENTS_MUST_NOT_SURVIVE".to_string(),
@@ -27,7 +26,6 @@ async fn frontend_snapshot_projects_sanitized_primary_tool_events_separately() {
         .service
         .event_bus
         .emit_agent(AgentEvent::ToolCallFinished {
-            thread_name: None,
             call_id: "call-primary".to_string(),
             name: "exec_command".to_string(),
             content_preview: "primary result".to_string(),
@@ -61,7 +59,6 @@ async fn primary_tool_tail_is_bounded_and_excludes_other_targets() {
             .service
             .event_bus
             .emit_agent(AgentEvent::ToolCallStarted {
-                thread_name: None,
                 call_id: id.into(),
                 name: "read".into(),
                 args_preview: String::new(),
@@ -98,7 +95,6 @@ async fn validated_subagent_progress_survives_snapshot_projection() {
         .service
         .event_bus
         .emit_agent(AgentEvent::ToolCallStarted {
-            thread_name: None,
             call_id: "child-call".into(),
             name: "subagent".into(),
             args_preview: String::new(),
@@ -111,7 +107,6 @@ async fn validated_subagent_progress_survives_snapshot_projection() {
         .service
         .event_bus
         .emit_agent(AgentEvent::ToolCallStarted {
-            thread_name: None,
             call_id: "child-call".into(),
             name: "subagent".into(),
             args_preview: String::new(),
@@ -134,7 +129,6 @@ async fn validated_subagent_progress_survives_snapshot_projection() {
         .service
         .event_bus
         .emit_agent(AgentEvent::ToolCallStarted {
-            thread_name: None,
             call_id: "child-call".into(),
             name: "subagent".into(),
             args_preview: String::new(),
@@ -157,7 +151,6 @@ async fn validated_subagent_progress_survives_snapshot_projection() {
         .service
         .event_bus
         .emit_agent(AgentEvent::ToolCallFinished {
-            thread_name: None,
             call_id: "child-call".into(),
             name: "subagent".into(),
             content_preview: "Subagent completed".into(),
@@ -188,7 +181,6 @@ async fn validated_subagent_progress_survives_snapshot_projection() {
         .service
         .event_bus
         .emit_agent(AgentEvent::tool_call_finished(
-            None,
             "denied-call".into(),
             "subagent".into(),
             &denied,
@@ -214,7 +206,6 @@ async fn frontend_snapshot_uses_four_operation_scoped_connections_for_direct_ses
         .service
         .event_bus
         .emit_agent(AgentEvent::ToolCallStarted {
-            thread_name: None,
             call_id: "direct-call".into(),
             name: "read".into(),
             args_preview: String::new(),
@@ -317,7 +308,6 @@ async fn benchmark_frontend_snapshot_latency() {
     metadata.workspace_host_path = Some(workspace);
     for event_index in 0..512 {
         let event_json = serde_json::to_string(&AgentEvent::AssistantMessage {
-            thread_name: None,
             content: format!("event {event_index}"),
             usage: None,
         })
@@ -838,7 +828,6 @@ async fn frontend_snapshot_restores_persisted_primary_tool_activity() {
         .service
         .event_bus
         .emit_agent(AgentEvent::ToolCallStarted {
-            thread_name: None,
             call_id: "call-1".to_string(),
             name: "read".to_string(),
             args_preview: r#"{"path":"index.html"}"#.to_string(),
@@ -851,7 +840,6 @@ async fn frontend_snapshot_restores_persisted_primary_tool_activity() {
         .service
         .event_bus
         .emit_agent(AgentEvent::ToolCallFinished {
-            thread_name: None,
             call_id: "call-1".to_string(),
             name: "read".to_string(),
             content_preview: "done".to_string(),

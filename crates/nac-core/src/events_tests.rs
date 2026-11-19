@@ -18,7 +18,6 @@ fn tool_output_cannot_spoof_deadline_telemetry() {
         true,
     );
     let event = AgentEvent::tool_call_finished(
-        None,
         "call-spoof".to_string(),
         "remote_tool".to_string(),
         &result,
@@ -51,7 +50,7 @@ fn successful_tool_output_cannot_spoof_completion_status() {
     ] {
         let result = crate::tools::ToolResult::text(content, false);
         let event =
-            AgentEvent::tool_call_finished(None, format!("call-{name}"), name.to_string(), &result);
+            AgentEvent::tool_call_finished(format!("call-{name}"), name.to_string(), &result);
         let AgentEvent::ToolCallFinished {
             completion_status, ..
         } = event
@@ -70,7 +69,7 @@ fn successful_tool_output_cannot_spoof_completion_status() {
 fn unknown_tool_error_text_cannot_declare_a_deadline_outcome() {
     for content in ["worker timed out after a report", "worker was cancelled"] {
         let result = crate::tools::ToolResult::text(content, true);
-        let event = AgentEvent::tool_call_finished(None, "call".into(), "thread".into(), &result);
+        let event = AgentEvent::tool_call_finished("call".into(), "thread".into(), &result);
         assert!(matches!(
             event,
             AgentEvent::ToolCallFinished {
@@ -98,7 +97,6 @@ fn kernel_deadline_shape_populates_typed_telemetry() {
         true,
     );
     let event = AgentEvent::tool_call_finished(
-        None,
         "call-timeout".to_string(),
         "remote_tool".to_string(),
         &result,
@@ -146,7 +144,6 @@ fn finished_duration_prefers_the_deadline_envelope_over_the_measured_field() {
             execution_duration_ms,
             ..
         } = AgentEvent::tool_call_finished(
-            None,
             "call-1".to_string(),
             "remote_tool".to_string(),
             &result,
@@ -164,7 +161,7 @@ fn durable_cancelled_records_have_typed_cancelled_completion() {
     for name in ["subagent", "subagent_cancel"] {
         let result = crate::tools::ToolResult::text(r#"{"status":"cancelled"}"#, true);
         let event =
-            AgentEvent::tool_call_finished(None, format!("call-{name}"), name.to_string(), &result);
+            AgentEvent::tool_call_finished(format!("call-{name}"), name.to_string(), &result);
         let AgentEvent::ToolCallFinished {
             completion_status, ..
         } = event
@@ -454,7 +451,6 @@ async fn session_event_bus_broadcasts_monotonic_envelopes_to_multiple_subscriber
     let mut second = bus.subscribe();
 
     bus.emit_agent(AgentEvent::AssistantMessage {
-        thread_name: Some("impl".to_string()),
         content: "started".to_string(),
         usage: None,
     });
@@ -496,7 +492,6 @@ fn session_event_bus_replays_recent_envelopes_in_order() {
 
     let first = bus
         .emit_agent(AgentEvent::AssistantMessage {
-            thread_name: Some("impl".to_string()),
             content: "one".to_string(),
             usage: None,
         })
@@ -592,14 +587,12 @@ fn session_event_bus_replay_filters_after_sequence_and_trims_capacity() {
 
     let first = bus
         .emit_agent(AgentEvent::AssistantMessage {
-            thread_name: Some("impl".to_string()),
             content: "one".to_string(),
             usage: None,
         })
         .unwrap();
     let second = bus
         .emit_agent(AgentEvent::AssistantMessage {
-            thread_name: Some("impl".to_string()),
             content: "two".to_string(),
             usage: None,
         })
@@ -662,7 +655,6 @@ fn session_event_bus_replay_trims_to_byte_capacity() {
     let sample_bus = SessionEventBus::with_limits(Some("session-byte".to_string()), 10, 4096);
     let sample = sample_bus
         .emit_agent(AgentEvent::AssistantMessage {
-            thread_name: Some("impl".to_string()),
             content: "one".to_string(),
             usage: None,
         })
@@ -672,14 +664,12 @@ fn session_event_bus_replay_trims_to_byte_capacity() {
     let bus = SessionEventBus::with_limits(Some("session-byte".to_string()), 10, sample_size);
     let first = bus
         .emit_agent(AgentEvent::AssistantMessage {
-            thread_name: Some("impl".to_string()),
             content: "one".to_string(),
             usage: None,
         })
         .unwrap();
     let second = bus
         .emit_agent(AgentEvent::AssistantMessage {
-            thread_name: Some("impl".to_string()),
             content: "two".to_string(),
             usage: None,
         })
@@ -710,7 +700,6 @@ fn replay_subscription_reports_non_replayable_gap_between_retained_events() {
         SessionEventBus::with_limits(Some("session-replay-large".to_string()), 10, 4096);
     let sample = sample_bus
         .emit_agent(AgentEvent::AssistantMessage {
-            thread_name: Some("impl".to_string()),
             content: "sample".to_string(),
             usage: None,
         })
@@ -720,7 +709,6 @@ fn replay_subscription_reports_non_replayable_gap_between_retained_events() {
         SessionEventBus::with_limits(Some("session-replay-large".to_string()), 10, byte_capacity);
     let before = bus
         .emit_agent(AgentEvent::AssistantMessage {
-            thread_name: Some("impl".to_string()),
             content: "before".to_string(),
             usage: None,
         })
@@ -731,7 +719,6 @@ fn replay_subscription_reports_non_replayable_gap_between_retained_events() {
     });
     let after = bus
         .emit_agent(AgentEvent::AssistantMessage {
-            thread_name: Some("impl".to_string()),
             content: "after".to_string(),
             usage: None,
         })
@@ -764,7 +751,6 @@ async fn replay_subscription_delivers_non_replayed_oversize_live_after_boundary(
     let sample_bus = SessionEventBus::with_limits(Some("session-live-large".to_string()), 10, 4096);
     let sample = sample_bus
         .emit_agent(AgentEvent::AssistantMessage {
-            thread_name: Some("impl".to_string()),
             content: "sample".to_string(),
             usage: None,
         })
@@ -774,7 +760,6 @@ async fn replay_subscription_delivers_non_replayed_oversize_live_after_boundary(
         SessionEventBus::with_limits(Some("session-live-large".to_string()), 10, byte_capacity);
     let before = bus
         .emit_agent(AgentEvent::AssistantMessage {
-            thread_name: Some("impl".to_string()),
             content: "before".to_string(),
             usage: None,
         })
@@ -787,7 +772,6 @@ async fn replay_subscription_delivers_non_replayed_oversize_live_after_boundary(
     });
     let after = bus
         .emit_agent(AgentEvent::AssistantMessage {
-            thread_name: Some("impl".to_string()),
             content: "after".to_string(),
             usage: None,
         })
@@ -809,14 +793,12 @@ async fn replay_subscription_replays_boundary_events_then_live_without_gap() {
     let bus = SessionEventBus::new(Some("session-gap".to_string()));
     let first = bus
         .emit_agent(AgentEvent::AssistantMessage {
-            thread_name: Some("impl".to_string()),
             content: "one".to_string(),
             usage: None,
         })
         .unwrap();
     let second = bus
         .emit_agent(AgentEvent::AssistantMessage {
-            thread_name: Some("impl".to_string()),
             content: "two".to_string(),
             usage: None,
         })
@@ -879,7 +861,7 @@ async fn event_sink_can_emit_agent_events_to_legacy_channel_and_session_bus() {
     let bus = SessionEventBus::new(Some("session-2".to_string()));
     let mut bus_rx = bus.subscribe();
     let bus_sink = EventSink::bus(bus);
-    let event = AgentEvent::RunFinished { thread_name: None };
+    let event = AgentEvent::RunFinished {};
 
     legacy_sink.emit(event.clone());
     bus_sink.emit(event.clone());
@@ -905,7 +887,7 @@ async fn event_sink_preserves_run_and_client_context_on_session_bus() {
     let client_id = SessionClientId::new();
     let sink = EventSink::bus_with_context(bus, Some(run_id.clone()), Some(client_id.clone()));
 
-    sink.emit(AgentEvent::RunFinished { thread_name: None });
+    sink.emit(AgentEvent::RunFinished {});
 
     let envelope = bus_rx.recv().await.unwrap();
     assert_eq!(envelope.run_id.as_ref(), Some(&run_id));
@@ -920,10 +902,7 @@ fn model_start_events_are_never_forwarded() {
     let bus = SessionEventBus::new(Some("session-internal".to_string()));
     let mut bus_receiver = bus.subscribe();
     let bus_sink = EventSink::bus(bus.clone());
-    let event = AgentEvent::ModelCallStarted {
-        thread_name: None,
-        iteration: 1,
-    };
+    let event = AgentEvent::ModelCallStarted { iteration: 1 };
     channel_sink.emit(event.clone());
     bus_sink.emit(event);
 
@@ -968,7 +947,6 @@ fn external_tool_telemetry_is_fail_closed_before_channel_and_database() {
     let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
     let channel_sink = EventSink::channel(sender);
     let started = AgentEvent::ToolCallStarted {
-        thread_name: None,
         call_id: "call-safe".to_string(),
         name: "exec_command".to_string(),
         args_preview: "CANARY_COMMAND".to_string(),
@@ -989,7 +967,6 @@ fn external_tool_telemetry_is_fail_closed_before_channel_and_database() {
     };
     channel_sink.emit(started.clone());
     channel_sink.emit(AgentEvent::ToolCallStarted {
-        thread_name: None,
         call_id: "call-write".to_string(),
         name: "write".to_string(),
         args_preview: "CANARY_WRITE".to_string(),
@@ -1006,7 +983,6 @@ fn external_tool_telemetry_is_fail_closed_before_channel_and_database() {
     });
     bus_sink.emit(started);
     bus_sink.emit(AgentEvent::ToolCallFinished {
-        thread_name: None,
         call_id: "call-safe".to_string(),
         name: "exec_command".to_string(),
         content_preview: "exit 7: test result".to_string(),
@@ -1022,7 +998,6 @@ fn external_tool_telemetry_is_fail_closed_before_channel_and_database() {
         remote_outcome_uncertain: false,
     });
     bus_sink.emit(AgentEvent::Error {
-        thread_name: None,
         message: "CANARY_ERROR".to_string(),
     });
     let channel_event = receiver.try_recv().unwrap();
@@ -1235,7 +1210,6 @@ fn thread_event_boundary_blocks_concurrent_emit() {
 #[test]
 fn model_error_sanitization_redacts_credential_shapes_and_bounds_length() {
     let event = AgentEvent::ModelError {
-        thread_name: Some("impl".to_string()),
         message: "HTTP 400 from https://api.test: Authorization: Bearer sk-canary-event-12345; x-api-key: sk-canary-event-12345; no credits".to_string(),
     };
     let sanitized = sanitize_external_agent_event(event).unwrap();
@@ -1255,7 +1229,6 @@ fn model_error_sanitization_redacts_credential_shapes_and_bounds_length() {
 fn mcp_server_skipped_sanitization_redacts_credentials_and_bounds_length() {
     let long_tail = "x".repeat(700);
     let event = AgentEvent::McpServerSkipped {
-        thread_name: Some("impl".to_string()),
         server_name: "github".to_string(),
         reason: format!(
             "connect failed: Authorization: Bearer sk-canary-event-12345; x-api-key: sk-canary-event-12345; no credits; {long_tail}"
@@ -1280,6 +1253,21 @@ fn mcp_server_skipped_sanitization_redacts_credentials_and_bounds_length() {
 }
 
 #[test]
+fn historical_direct_tool_event_decodes_without_worker_identity() {
+    let json = r#"{"type":"tool_call_started","thread_name":null,"call_id":"old","name":"read","args_preview":"","delegation_summary_verified":false}"#;
+    let event: AgentEvent = serde_json::from_str(json).unwrap();
+    assert!(matches!(event, AgentEvent::ToolCallStarted { ref call_id, .. } if call_id == "old"));
+    let sanitized = sanitize_external_agent_event(event).unwrap();
+    assert_eq!(
+        persisted_thread_event_name(&sanitized),
+        Some(PRIMARY_TOOL_EVENT_TARGET)
+    );
+    assert!(!serde_json::to_string(&sanitized)
+        .unwrap()
+        .contains("thread_name"));
+}
+
+#[test]
 fn primary_tool_events_are_persisted_independently_of_tool_name() {
     for name in ["read", "thread", "workset_define", "custom_tool"] {
         let mut event = test_primary_tool_started("call");
@@ -1299,7 +1287,6 @@ fn primary_tool_events_are_persisted_independently_of_tool_name() {
 #[test]
 fn primary_tool_event_sanitization_keeps_only_bounded_safe_presentation_fields() {
     let started = AgentEvent::ToolCallStarted {
-        thread_name: None,
         call_id: "call-safe".to_string(),
         name: format!("exec_command\u{0}{}", "x".repeat(200)),
         args_preview: r#"{"cmd":"printf safe","authorization":"Bearer sk-tool-canary","env":{"TOKEN":"sk-tool-canary"}}"#.to_string(),
@@ -1334,7 +1321,6 @@ fn primary_tool_event_sanitization_keeps_only_bounded_safe_presentation_fields()
     assert!(serialized.contains("printf safe"), "{serialized}");
 
     let finished = AgentEvent::ToolCallFinished {
-        thread_name: None,
         call_id: "call-safe".to_string(),
         name: "exec_command".to_string(),
         content_preview: format!(
@@ -1369,7 +1355,7 @@ fn primary_tool_event_sanitization_keeps_only_bounded_safe_presentation_fields()
 fn subagent_finished_summary_is_bounded_and_sanitized() {
     let mut result = crate::tools::ToolResult::text("raw body not for display", false);
     result.delegation_summary = Some(format!("Bearer sk-tool-canary {}", "x".repeat(400)));
-    let event = AgentEvent::tool_call_finished(None, "call".into(), "subagent".into(), &result);
+    let event = AgentEvent::tool_call_finished("call".into(), "subagent".into(), &result);
     let sanitized = sanitize_external_agent_event(event).unwrap();
     let encoded = serde_json::to_string(&sanitized).unwrap();
     assert!(!encoded.contains("sk-tool-canary"));
@@ -1383,7 +1369,6 @@ const MODEL_ERROR_CANARY: &str = "sk-canary-sink-12345";
 
 fn credential_bearing_model_error() -> AgentEvent {
     AgentEvent::ModelError {
-        thread_name: Some("impl".to_string()),
         message: format!("HTTP 400: Authorization: Bearer {MODEL_ERROR_CANARY}; no credits"),
     }
 }
@@ -1444,7 +1429,7 @@ fn authorization_adjusted_duration_overrides_only_the_finished_event_metric() {
             effective_timeout_ms,
             cleanup_duration_ms,
             ..
-        } = AgentEvent::tool_call_finished(None, "call".into(), "remote_tool".into(), &result)
+        } = AgentEvent::tool_call_finished("call".into(), "remote_tool".into(), &result)
         else {
             panic!("expected finished event");
         };

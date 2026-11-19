@@ -29,10 +29,9 @@ pub const ASSISTANT_DELTA_CHANNEL_CAPACITY: usize = 256;
 
 /// Internal thread-event target for sanitized top-level tool lifecycle rows.
 ///
-/// Primary direct calls have no worker `thread_name`, but their safe event
-/// projection must survive reload so the transcript does not fall back to raw
-/// durable tool payloads. This target is never exposed as a worker thread; the
-/// frontend snapshot projection separates its events into `primary_tool_events`.
+/// Direct tool calls have a safe event projection that survives reload so the
+/// transcript does not fall back to raw durable tool payloads. The frontend
+/// snapshot projection separates these events into `primary_tool_events`.
 pub(crate) const PRIMARY_TOOL_EVENT_TARGET: &str = "__nac_primary_tools__";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -196,19 +195,15 @@ pub enum McpNotificationKind {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum AgentEvent {
     RunStarted {
-        thread_name: Option<String>,
         prompt_preview: String,
     },
     ModelCallStarted {
-        thread_name: Option<String>,
         iteration: usize,
     },
     TokenUsageUpdated {
-        thread_name: Option<String>,
         usage: crate::model::TokenUsage,
     },
     ToolCallStarted {
-        thread_name: Option<String>,
         call_id: String,
         name: String,
         args_preview: String,
@@ -222,7 +217,6 @@ pub enum AgentEvent {
         delegation_summary_verified: bool,
     },
     ToolCallFinished {
-        thread_name: Option<String>,
         call_id: String,
         name: String,
         content_preview: String,
@@ -265,20 +259,17 @@ pub enum AgentEvent {
         failure: CompactionFailure,
     },
     AssistantMessage {
-        thread_name: Option<String>,
         content: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         usage: Option<crate::model::TokenUsage>,
     },
     Error {
-        thread_name: Option<String>,
         message: String,
     },
-    /// A configured MCP server that could not be loaded for a worker, reported
+    /// A configured MCP server that could not be loaded, reported
     /// with a bounded, credential-redacted reason so the user can see why the
     /// server's tools are missing.
     McpServerSkipped {
-        thread_name: Option<String>,
         server_name: String,
         reason: String,
     },
@@ -286,7 +277,6 @@ pub enum AgentEvent {
     /// are live-only because older durable event readers do not know this
     /// vocabulary and catalog state is reconstructed from the server.
     McpNotification {
-        thread_name: Option<String>,
         server_name: String,
         kind: McpNotificationKind,
         message: String,
@@ -302,17 +292,13 @@ pub enum AgentEvent {
     /// the event leaves the process. Live-only, like the other events whose
     /// absence keeps the persisted stream readable by older builds.
     ModelError {
-        thread_name: Option<String>,
         message: String,
     },
-    RunFinished {
-        thread_name: Option<String>,
-    },
+    RunFinished {},
 }
 
 impl AgentEvent {
     pub(crate) fn tool_call_finished(
-        thread_name: Option<String>,
         call_id: String,
         name: String,
         result: &crate::tools::ToolResult,
@@ -395,7 +381,6 @@ impl AgentEvent {
                 .and_then(serde_json::Value::as_u64)
         };
         Self::ToolCallFinished {
-            thread_name,
             call_id,
             name: name.clone(),
             content_preview: preview_tool_result_with_completion(&name, result, completion_status),
@@ -603,7 +588,6 @@ pub enum SessionEvent {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct AssistantStreamDelta {
-    pub thread_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -616,12 +600,8 @@ pub struct AssistantStreamDelta {
 }
 
 impl AssistantStreamDelta {
-    pub(crate) fn from_model(
-        thread_name: Option<String>,
-        delta: crate::model::ModelStreamDelta,
-    ) -> Self {
+    pub(crate) fn from_model(delta: crate::model::ModelStreamDelta) -> Self {
         Self {
-            thread_name,
             text: (!delta.text.is_empty()).then_some(delta.text),
             reasoning: (!delta.reasoning.is_empty()).then_some(delta.reasoning),
             reset: delta.reset,
@@ -1131,37 +1111,16 @@ impl SessionEventBus {
 
 fn persisted_thread_event_name(event: &AgentEvent) -> Option<&str> {
     match event {
-        AgentEvent::ToolCallStarted {
-            thread_name: None, ..
+        AgentEvent::ToolCallStarted { .. } | AgentEvent::ToolCallFinished { .. } => {
+            Some(PRIMARY_TOOL_EVENT_TARGET)
         }
-        | AgentEvent::ToolCallFinished {
-            thread_name: None, ..
-        } => Some(PRIMARY_TOOL_EVENT_TARGET),
-        AgentEvent::RunStarted { thread_name, .. }
-        | AgentEvent::ToolCallStarted { thread_name, .. }
-        | AgentEvent::ToolCallFinished { thread_name, .. }
-        | AgentEvent::AssistantMessage { thread_name, .. }
-        | AgentEvent::Error { thread_name, .. }
-        | AgentEvent::RunFinished { thread_name } => thread_name.as_deref(),
-        // Usage updates are deliberately live-only. Persisting them would
-        // consume slots in the user-facing thread-event pages and make a DB
-        // written by this version unreadable by older AgentEvent enums.
-        AgentEvent::ModelCallStarted { .. }
-        | AgentEvent::TokenUsageUpdated { .. }
-        | AgentEvent::McpServerSkipped { .. }
-        | AgentEvent::McpNotification { .. }
-        | AgentEvent::ModelError { .. }
-        | AgentEvent::OrchestratorCompactionStarted { .. }
-        | AgentEvent::OrchestratorCompactionCompleted { .. }
-        | AgentEvent::OrchestratorCompactionSkipped { .. }
-        | AgentEvent::OrchestratorCompactionFailed { .. } => None,
+        _ => None,
     }
 }
 
 #[cfg(test)]
 pub(crate) fn test_primary_tool_started(id: &str) -> AgentEvent {
     AgentEvent::ToolCallStarted {
-        thread_name: None,
         call_id: id.to_owned(),
         name: "read".to_owned(),
         args_preview: String::new(),
@@ -1175,12 +1134,10 @@ pub(crate) fn test_primary_tool_started(id: &str) -> AgentEvent {
 pub(crate) fn sanitize_external_agent_event(event: AgentEvent) -> Option<AgentEvent> {
     Some(match event {
         AgentEvent::ModelCallStarted { .. } => return None,
-        AgentEvent::RunStarted { thread_name, .. } => AgentEvent::RunStarted {
-            thread_name,
+        AgentEvent::RunStarted { .. } => AgentEvent::RunStarted {
             prompt_preview: "run started".to_string(),
         },
         AgentEvent::ToolCallStarted {
-            thread_name,
             call_id,
             name,
             args_preview,
@@ -1200,7 +1157,6 @@ pub(crate) fn sanitize_external_agent_event(event: AgentEvent) -> Option<AgentEv
             let key = bounded_tool_preview(&redact_credentials(&key, &[]));
             let safe_args = safe_tool_arguments(&name, args_detail.as_deref(), &args_preview);
             AgentEvent::ToolCallStarted {
-                thread_name,
                 call_id,
                 args_preview: safe_args,
                 key_arg_preview: Some(key),
@@ -1211,7 +1167,6 @@ pub(crate) fn sanitize_external_agent_event(event: AgentEvent) -> Option<AgentEv
             }
         }
         AgentEvent::ToolCallFinished {
-            thread_name,
             call_id,
             name,
             content_preview,
@@ -1226,7 +1181,6 @@ pub(crate) fn sanitize_external_agent_event(event: AgentEvent) -> Option<AgentEv
             cleanup_duration_ms,
             remote_outcome_uncertain,
         } => AgentEvent::ToolCallFinished {
-            thread_name,
             call_id,
             name: safe_tool_name(&name),
             content_preview: bounded_tool_preview(&redact_credentials(&content_preview, &[])),
@@ -1242,35 +1196,26 @@ pub(crate) fn sanitize_external_agent_event(event: AgentEvent) -> Option<AgentEv
             cleanup_duration_ms,
             remote_outcome_uncertain,
         },
-        AgentEvent::Error { thread_name, .. } => AgentEvent::Error {
-            thread_name,
+        AgentEvent::Error { .. } => AgentEvent::Error {
             message: "operation failed".to_string(),
         },
         AgentEvent::McpServerSkipped {
-            thread_name,
             server_name,
             reason,
         } => AgentEvent::McpServerSkipped {
-            thread_name,
             server_name,
             reason: bounded_provider_message(&redact_credentials(&reason, &[])),
         },
         AgentEvent::McpNotification {
-            thread_name,
             server_name,
             kind,
             message,
         } => AgentEvent::McpNotification {
-            thread_name,
             server_name: safe_tool_name(&server_name),
             kind,
             message: bounded_provider_message(&redact_credentials(&message, &[])),
         },
-        AgentEvent::ModelError {
-            thread_name,
-            message,
-        } => AgentEvent::ModelError {
-            thread_name,
+        AgentEvent::ModelError { message } => AgentEvent::ModelError {
             // Provider bodies can be long; the actionable part is at the front.
             // Credential shapes are masked first as defense in depth: the exact
             // secret is not known here, but header-shaped credential lines and

@@ -26,7 +26,6 @@ impl SessionService {
         if let Err(error) = self.terminal_manager.settle_run().await {
             EventSink::bus(self.event_bus.clone())
                     .emit_async(AgentEvent::Error {
-                        thread_name: None,
                         message: format!(
                             "run {run_id} remains active because terminal cleanup is incomplete: {error:#}"
                         ),

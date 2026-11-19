@@ -67,11 +67,11 @@ it("preserves standalone performance instrumentation around the shared stream", 
   });
   expect(onSessionEvent).toHaveBeenCalledWith(envelope);
 
-  const delta = { thread_name: "worker", text: "hello", reasoning: "why" };
+  const delta = { text: "hello", reasoning: "why" };
   source.emit("assistant_delta", delta);
   expect(perfEpoch).toHaveBeenCalledOnce();
   expect(perfMark).toHaveBeenCalledWith("sse:assistant_delta", {
-    fields: { chars: 8, thread: "worker" },
+    fields: { chars: 8 },
     throttleMs: 1000,
   });
   expect(onAssistantDelta).toHaveBeenCalledWith(delta);

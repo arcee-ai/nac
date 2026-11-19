@@ -98,7 +98,6 @@ function directSnapshot(messages: Message[], behavior: SessionBehavior): Session
 function primaryStart(callId: string, name: string, preview: string): AgentEvent {
   return {
     type: "tool_call_started",
-    thread_name: null,
     call_id: callId,
     name,
     args_preview: '{"operation":"invoke"}',
@@ -109,7 +108,6 @@ function primaryStart(callId: string, name: string, preview: string): AgentEvent
 function primaryFinish(callId: string, name: string): AgentEvent {
   return {
     type: "tool_call_finished",
-    thread_name: null,
     call_id: callId,
     name,
     content_preview: "bounded result",

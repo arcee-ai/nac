@@ -588,9 +588,7 @@ async fn subscribe_agent_events_filters_agent_envelopes() {
         resume_base_cwd: PathBuf::from("/repo"),
     });
     let mut agent_events = parts.service.subscribe_agent_events();
-    let agent_event = AgentEvent::RunFinished {
-        thread_name: Some("impl".to_string()),
-    };
+    let agent_event = AgentEvent::RunFinished {};
 
     parts.service.event_bus.emit(SessionEvent::SnapshotSaved {
         session_id: session_id.clone(),
@@ -614,9 +612,7 @@ async fn client_subscribers_receive_same_events_with_unique_identity() {
     assert_eq!(&second_events.client_id, second_client.client_id());
     assert_ne!(first_events.subscription_id, second_events.subscription_id);
 
-    let agent_event = AgentEvent::RunFinished {
-        thread_name: Some("impl".to_string()),
-    };
+    let agent_event = AgentEvent::RunFinished {};
     parts.service.event_bus.emit_agent(agent_event.clone());
 
     let first = first_events.receiver.recv().await.unwrap();

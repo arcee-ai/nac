@@ -14,14 +14,11 @@ export interface components {
         };
         AgentEvent: {
             prompt_preview: string;
-            thread_name?: string | null;
             type: "run_started";
         } | {
             iteration: number;
-            thread_name?: string | null;
             type: "model_call_started";
         } | {
-            thread_name?: string | null;
             type: "token_usage_updated";
             usage: components["schemas"]["TokenUsage"];
         } | {
@@ -32,7 +29,6 @@ export interface components {
             delegation_summary_verified?: boolean;
             key_arg_preview?: string | null;
             name: string;
-            thread_name?: string | null;
             type: "tool_call_started";
         } | {
             call_id: string;
@@ -48,7 +44,6 @@ export interface components {
             is_error: boolean;
             name: string;
             remote_outcome_uncertain?: boolean;
-            thread_name?: string | null;
             type: "tool_call_finished";
         } | {
             compaction_id: string;
@@ -70,30 +65,24 @@ export interface components {
             type: "orchestrator_compaction_failed";
         } | {
             content: string;
-            thread_name?: string | null;
             type: "assistant_message";
             usage?: components["schemas"]["TokenUsage"] | null;
         } | {
             message: string;
-            thread_name?: string | null;
             type: "error";
         } | {
             reason: string;
             server_name: string;
-            thread_name?: string | null;
             type: "mcp_server_skipped";
         } | {
             kind: components["schemas"]["McpNotificationKind"];
             message: string;
             server_name: string;
-            thread_name?: string | null;
             type: "mcp_notification";
         } | {
             message: string;
-            thread_name?: string | null;
             type: "model_error";
         } | {
-            thread_name?: string | null;
             type: "run_finished";
         };
         ApiErrorBody: {
@@ -107,7 +96,6 @@ export interface components {
             reset?: boolean;
             retry_attempt?: number | null;
             text?: string | null;
-            thread_name?: string | null;
         };
         AttachUserTerminalRequest: {
             page_limit: number;

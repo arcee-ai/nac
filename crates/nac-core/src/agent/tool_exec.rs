@@ -34,7 +34,6 @@ async fn spawn_tools_into(
             Some(args_str.clone())
         };
         let raw_started = AgentEvent::ToolCallStarted {
-            thread_name: None,
             call_id: tool_call_id.clone(),
             name: tool_name.clone(),
             args_preview: presentation_args
@@ -169,7 +168,6 @@ pub(super) async fn finalize_tool_results(
             }
             event_sink
                 .emit_async(AgentEvent::tool_call_finished(
-                    None,
                     tool_call_id.clone(),
                     tool_name,
                     &result,
@@ -244,7 +242,6 @@ async fn spawn_and_collect_tools(
                 if !result.content.contains_images() {
                     event_sink
                         .emit_async(AgentEvent::tool_call_finished(
-                            None,
                             tool_call_id.clone(),
                             tool_name.clone(),
                             &result,

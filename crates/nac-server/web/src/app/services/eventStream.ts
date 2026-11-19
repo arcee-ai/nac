@@ -31,7 +31,6 @@ export function subscribeToSessionEvents(
         perfMark("sse:assistant_delta", {
           fields: {
             chars: (delta.text?.length ?? 0) + (delta.reasoning?.length ?? 0),
-            thread: delta.thread_name ?? "-",
           },
           throttleMs: 1000,
         });

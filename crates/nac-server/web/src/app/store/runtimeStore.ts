@@ -219,7 +219,6 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
    * Fold one slice of the session's live model output into the buffers.
    */
   function applyAssistantDelta(delta: AssistantStreamDelta): void {
-    if (delta.thread_name) return;
     if (delta.reset) {
       setState({
         streamSettled: false,
@@ -474,7 +473,6 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
   function applyAgent(seq: number, event: AgentEvent): RefreshKind {
     switch (event.type) {
       case "tool_call_started":
-        if (event.thread_name) return "none";
         pushPrimaryToolEvent(event);
         if (event.delegation_intent || event.delegation_summary_verified) return "none";
         setState({ activity: `Tool: ${event.name}` });
@@ -486,7 +484,6 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
         });
         return "none";
       case "mcp_server_skipped":
-        if (event.thread_name) return "none";
         pushEvent({
           seq,
           kind: "mcp",
@@ -495,7 +492,6 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
         });
         return "none";
       case "mcp_notification":
-        if (event.thread_name) return "none";
         pushEvent({
           seq,
           kind: "mcp",
@@ -504,7 +500,6 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
         });
         return "none";
       case "tool_call_finished": {
-        if (event.thread_name) return "none";
         const failed = toolCallFailed(event);
         pushPrimaryToolEvent(event);
         pushEvent({
@@ -517,7 +512,6 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
         return "none";
       }
       case "token_usage_updated":
-        if (event.thread_name) return "none";
         setState((state) => ({
           runUsage: addTokenUsage(state.runUsage, event.usage, event.usage.total_tokens),
           sessionSpend: addTokenUsage(

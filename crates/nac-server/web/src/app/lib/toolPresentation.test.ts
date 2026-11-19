@@ -19,7 +19,6 @@ function started(
 ): Extract<AgentEvent, { type: "tool_call_started" }> {
   return {
     type: "tool_call_started",
-    thread_name: null,
     call_id: `call-${name}`,
     name,
     args_preview: '{"operation":"invoke"}',
@@ -33,7 +32,6 @@ function finished(
 ): Extract<AgentEvent, { type: "tool_call_finished" }> {
   return {
     type: "tool_call_finished",
-    thread_name: null,
     call_id: `call-${name}`,
     name,
     content_preview: "bounded result",
@@ -448,10 +446,7 @@ describe("tool presentation mapper", () => {
     ).toBe("Image result");
   });
 
-  it("ignores worker events and malformed or missing optional event data", () => {
-    const worker = started("read", "must not appear");
-    worker.thread_name = "worker";
-    expect(indexToolEvents([worker]).size).toBe(0);
+  it("handles malformed or missing optional event data", () => {
     expect(
       presentToolCall({
         call: call("unknown", "malformed SECRET"),

@@ -110,14 +110,12 @@ impl Agent {
             .install(request.revision, registry, state, message.clone());
         if let Some(message) = message {
             self.emit(AgentEvent::McpServerSkipped {
-                thread_name: None,
                 server_name: "session integrations".to_string(),
                 reason: message,
             })
             .await;
         } else {
             self.emit(AgentEvent::McpNotification {
-                thread_name: None,
                 server_name: "session integrations".to_string(),
                 kind: crate::events::McpNotificationKind::CatalogRefreshed,
                 message: format!(

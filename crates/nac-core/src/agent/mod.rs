@@ -619,7 +619,6 @@ impl Agent {
             correlation,
         ));
         self.emit(AgentEvent::RunStarted {
-            thread_name: None,
             prompt_preview: preview(prompt, 160),
         })
         .await;
@@ -653,7 +652,6 @@ impl Agent {
         }
         if let Err(error) = prompt_result {
             self.emit(AgentEvent::Error {
-                thread_name: None,
                 message: error.to_string(),
             })
             .await;
@@ -663,7 +661,6 @@ impl Agent {
 
         if let Err(error) = self.ensure_backend_ready().await {
             self.emit(AgentEvent::Error {
-                thread_name: None,
                 message: error.to_string(),
             })
             .await;
@@ -698,7 +695,6 @@ impl Agent {
                     Err(error) => {
                         self.last_usage = Some(accumulated_usage.clone());
                         self.emit(AgentEvent::Error {
-                            thread_name: None,
                             message: error.to_string(),
                         })
                         .await;
@@ -724,17 +720,13 @@ impl Agent {
             }
             self.project_mcp_instructions(&mut provider_view.messages);
             iteration = iteration.saturating_add(1);
-            self.emit(AgentEvent::ModelCallStarted {
-                thread_name: None,
-                iteration,
-            })
-            .await;
+            self.emit(AgentEvent::ModelCallStarted { iteration }).await;
 
             let call_started = Instant::now();
             self.clear_partial_stream();
             let deltas = CoalescedDeltas::new(|delta: ModelStreamDelta| {
                 self.event_sink
-                    .emit_assistant_delta(AssistantStreamDelta::from_model(None, delta));
+                    .emit_assistant_delta(AssistantStreamDelta::from_model(delta));
             });
             let push_delta = |delta: ModelStreamDelta| {
                 {
@@ -771,7 +763,6 @@ impl Agent {
                     // one error class worth showing rather than reducing to
                     // "operation failed".
                     self.emit(AgentEvent::ModelError {
-                        thread_name: None,
                         message: error.to_string(),
                     })
                     .await;
@@ -795,11 +786,7 @@ impl Agent {
                 if let Some(goals) = &self.tool_runtime.goal_runtime {
                     goals.update_usage(&accumulated_usage);
                 }
-                self.emit(AgentEvent::TokenUsageUpdated {
-                    thread_name: None,
-                    usage,
-                })
-                .await;
+                self.emit(AgentEvent::TokenUsageUpdated { usage }).await;
             }
             if response.finish_reason.as_deref() == Some("length") {
                 if let Some(compaction) = &mut self.compaction {
@@ -815,7 +802,6 @@ impl Agent {
                 );
                 self.last_usage = Some(accumulated_usage.clone());
                 self.emit(AgentEvent::Error {
-                    thread_name: None,
                     message: error.to_string(),
                 })
                 .await;
@@ -847,7 +833,6 @@ impl Agent {
                 // path above.
                 self.last_usage = Some(accumulated_usage.clone());
                 self.emit(AgentEvent::Error {
-                    thread_name: None,
                     message: error.to_string(),
                 })
                 .await;
@@ -882,7 +867,6 @@ impl Agent {
                         {
                             self.last_usage = Some(accumulated_usage.clone());
                             self.emit(AgentEvent::Error {
-                                thread_name: None,
                                 message: error.to_string(),
                             })
                             .await;
@@ -898,7 +882,6 @@ impl Agent {
                     );
                     self.last_usage = Some(accumulated_usage.clone());
                     self.emit(AgentEvent::Error {
-                        thread_name: None,
                         message: error.to_string(),
                     })
                     .await;
@@ -906,7 +889,6 @@ impl Agent {
                     return Err(error);
                 };
                 self.emit(AgentEvent::AssistantMessage {
-                    thread_name: None,
                     content: content.clone(),
                     usage: Some(accumulated_usage.clone()),
                 })
@@ -914,14 +896,12 @@ impl Agent {
                 self.last_usage = Some(accumulated_usage.clone());
                 if let Err(error) = self.tool_runtime.terminal_manager.settle_run().await {
                     self.emit(AgentEvent::Error {
-                        thread_name: None,
                         message: error.to_string(),
                     })
                     .await;
                     return Err(error);
                 }
-                self.emit(AgentEvent::RunFinished { thread_name: None })
-                    .await;
+                self.emit(AgentEvent::RunFinished {}).await;
                 return Ok(content);
             }
 
@@ -966,7 +946,6 @@ impl Agent {
             if self.tool_runtime.command_cancellation.is_cancelled() {
                 let error = anyhow!("command cancelled");
                 self.emit(AgentEvent::Error {
-                    thread_name: None,
                     message: error.to_string(),
                 })
                 .await;
@@ -986,7 +965,6 @@ impl Agent {
             if let Err(error) = self.push_batch_and_log(tool_messages).await {
                 self.last_usage = Some(accumulated_usage.clone());
                 self.emit(AgentEvent::Error {
-                    thread_name: None,
                     message: error.to_string(),
                 })
                 .await;
@@ -1006,7 +984,6 @@ impl Agent {
                 // which the identical-failure guard below cannot see.
                 let error = anyhow!("{reason}");
                 self.emit(AgentEvent::ModelError {
-                    thread_name: None,
                     message: error.to_string(),
                 })
                 .await;
@@ -1019,7 +996,6 @@ impl Agent {
                 );
                 // Use the same sanitized error channel as a provider refusal.
                 self.emit(AgentEvent::ModelError {
-                    thread_name: None,
                     message: error.to_string(),
                 })
                 .await;
@@ -1638,7 +1614,6 @@ impl Agent {
             }
             Err(error) => {
                 self.emit(AgentEvent::Error {
-                    thread_name: None,
                     message: error.to_string(),
                 })
                 .await;
@@ -1651,7 +1626,6 @@ impl Agent {
     async fn record_terminal_cleanup_error(&self) {
         if let Err(error) = self.tool_runtime.terminal_manager.settle_run().await {
             self.emit(AgentEvent::Error {
-                thread_name: None,
                 message: format!("terminal cleanup incomplete: {error:#}"),
             })
             .await;

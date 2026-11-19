@@ -199,7 +199,6 @@ impl McpSyncState {
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .clone();
             target.sink.emit(AgentEvent::McpNotification {
-                thread_name: None,
                 server_name: server.to_string(),
                 kind,
                 message: bounded.clone(),
@@ -721,7 +720,6 @@ mod tests {
             assert!(matches!(
                 receiver.try_recv(),
                 Ok(AgentEvent::McpNotification {
-                    thread_name: None,
                     message,
                     ..
                 }) if message == "shared observation"

@@ -924,7 +924,6 @@ impl ToolSnapshot {
                         .runtime
                         .event_sink
                         .emit_async(crate::events::AgentEvent::ToolCallStarted {
-                            thread_name: None,
                             call_id: call_id.clone(),
                             name: name.to_string(),
                             args_preview: String::new(),

@@ -1019,7 +1019,7 @@ function De(e, t, n = {}) {
 				e.event.type, r?.onSessionEvent?.(e);
 			},
 			onAssistantDelta: (e) => {
-				(e.text?.length ?? 0) + (e.reasoning?.length ?? 0), e.thread_name, r?.onAssistantDelta?.(e);
+				(e.text?.length ?? 0) + (e.reasoning?.length ?? 0), r?.onAssistantDelta?.(e);
 			}
 		}
 	});
@@ -1820,7 +1820,7 @@ function Dn(e) {
 function On(e) {
 	let t = /* @__PURE__ */ new Map();
 	for (let n of e) {
-		if (n.type !== "tool_call_started" && n.type !== "tool_call_finished" || n.thread_name) continue;
+		if (n.type !== "tool_call_started" && n.type !== "tool_call_finished") continue;
 		let e = t.get(n.call_id) ?? {};
 		n.type === "tool_call_started" ? e.started = n : e.finished = n, t.set(n.call_id, e);
 	}
@@ -1970,7 +1970,7 @@ function Mn(e) {
 		});
 	}
 	function h(e) {
-		e.thread_name || (e.reset ? s({
+		e.reset ? s({
 			streamSettled: !1,
 			streamPredatesPrompt: !1,
 			streamText: "",
@@ -1990,7 +1990,7 @@ function Mn(e) {
 				streamText: n.streamText + (e.text ?? ""),
 				streamReasoning: n.streamReasoning + (e.reasoning ?? "")
 			};
-		}));
+		});
 	}
 	function g(e) {
 		s({ streamStatus: e });
@@ -2164,26 +2164,25 @@ function Mn(e) {
 	}
 	function E(e, t) {
 		switch (t.type) {
-			case "tool_call_started": return t.thread_name || (D(t), t.delegation_intent || t.delegation_summary_verified) || (s({ activity: `Tool: ${t.name}` }), y({
+			case "tool_call_started": return D(t), t.delegation_intent || t.delegation_summary_verified || (s({ activity: `Tool: ${t.name}` }), y({
 				seq: e,
 				kind: "tool",
 				text: `▶ ${t.name}(${t.args_preview})`,
 				isError: !1
 			})), "none";
-			case "mcp_server_skipped": return t.thread_name || y({
+			case "mcp_server_skipped": return y({
 				seq: e,
 				kind: "mcp",
 				text: `MCP ${t.server_name}: ${t.reason}`,
 				isError: !0
 			}), "none";
-			case "mcp_notification": return t.thread_name || y({
+			case "mcp_notification": return y({
 				seq: e,
 				kind: "mcp",
 				text: `MCP ${t.server_name}: ${t.message}`,
 				isError: t.kind === "catalog_refresh_failed"
 			}), "none";
 			case "tool_call_finished": {
-				if (t.thread_name) return "none";
 				let n = sn(t);
 				return D(t), y({
 					seq: e,
@@ -2192,7 +2191,7 @@ function Mn(e) {
 					isError: n
 				}), s((e) => ({ workspaceEpoch: e.workspaceEpoch + 1 })), "none";
 			}
-			case "token_usage_updated": return t.thread_name || s((e) => ({
+			case "token_usage_updated": return s((e) => ({
 				runUsage: i(e.runUsage, t.usage, t.usage.total_tokens),
 				sessionSpend: i(e.sessionSpend, t.usage, t.usage.total_tokens || (e.sessionSpend?.total_tokens ?? 0))
 			})), "none";

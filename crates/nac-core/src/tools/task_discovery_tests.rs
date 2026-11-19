@@ -868,12 +868,7 @@ async fn assert_deadline_during_internal_approval(cancel: bool) {
             completion_status,
             execution_duration_ms,
             ..
-        } = AgentEvent::tool_call_finished(
-            None,
-            "late-project".into(),
-            "find_tasks".into(),
-            &result,
-        )
+        } = AgentEvent::tool_call_finished("late-project".into(), "find_tasks".into(), &result)
         else {
             panic!("expected finished event");
         };
@@ -913,7 +908,7 @@ async fn assert_deadline_during_internal_approval(cancel: bool) {
         completion_status,
         remote_outcome_uncertain,
         ..
-    } = AgentEvent::tool_call_finished(None, "late-project".into(), "find_tasks".into(), &result)
+    } = AgentEvent::tool_call_finished("late-project".into(), "find_tasks".into(), &result)
     else {
         panic!("expected finished event");
     };

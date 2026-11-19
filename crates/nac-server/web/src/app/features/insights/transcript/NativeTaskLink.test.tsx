@@ -95,7 +95,6 @@ function mountErrorReceipt({
       {
         type: "tool_call_finished",
         call_id: "launch",
-        thread_name: null,
         name: "launch_task",
         content_preview: "initial input admission failed: operation lease unavailable",
         is_error: true,

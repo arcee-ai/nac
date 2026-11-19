@@ -10660,12 +10660,6 @@
               "prompt_preview": {
                 "type": "string"
               },
-              "thread_name": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -10685,12 +10679,6 @@
                 "type": "integer",
                 "minimum": 0
               },
-              "thread_name": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -10706,12 +10694,6 @@
               "type"
             ],
             "properties": {
-              "thread_name": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -10765,12 +10747,6 @@
               },
               "name": {
                 "type": "string"
-              },
-              "thread_name": {
-                "type": [
-                  "string",
-                  "null"
-                ]
               },
               "type": {
                 "type": "string",
@@ -10871,12 +10847,6 @@
               },
               "remote_outcome_uncertain": {
                 "type": "boolean"
-              },
-              "thread_name": {
-                "type": [
-                  "string",
-                  "null"
-                ]
               },
               "type": {
                 "type": "string",
@@ -10996,12 +10966,6 @@
               "content": {
                 "type": "string"
               },
-              "thread_name": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -11030,12 +10994,6 @@
               "message": {
                 "type": "string"
               },
-              "thread_name": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -11046,7 +11004,7 @@
           },
           {
             "type": "object",
-            "description": "A configured MCP server that could not be loaded for a worker, reported\nwith a bounded, credential-redacted reason so the user can see why the\nserver's tools are missing.",
+            "description": "A configured MCP server that could not be loaded, reported\nwith a bounded, credential-redacted reason so the user can see why the\nserver's tools are missing.",
             "required": [
               "server_name",
               "reason",
@@ -11058,12 +11016,6 @@
               },
               "server_name": {
                 "type": "string"
-              },
-              "thread_name": {
-                "type": [
-                  "string",
-                  "null"
-                ]
               },
               "type": {
                 "type": "string",
@@ -11092,12 +11044,6 @@
               "server_name": {
                 "type": "string"
               },
-              "thread_name": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -11117,12 +11063,6 @@
               "message": {
                 "type": "string"
               },
-              "thread_name": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -11137,12 +11077,6 @@
               "type"
             ],
             "properties": {
-              "thread_name": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -11198,12 +11132,6 @@
             "minimum": 0
           },
           "text": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "thread_name": {
             "type": [
               "string",
               "null"

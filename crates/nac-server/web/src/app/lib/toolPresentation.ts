@@ -330,7 +330,6 @@ export function indexToolEvents(events: AgentEvent[]): Map<string, ToolEventPair
   const byCall = new Map<string, ToolEventPair>();
   for (const event of events) {
     if (event.type !== "tool_call_started" && event.type !== "tool_call_finished") continue;
-    if (event.thread_name) continue;
     const pair = byCall.get(event.call_id) ?? {};
     if (event.type === "tool_call_started") pair.started = event;
     else pair.finished = event;

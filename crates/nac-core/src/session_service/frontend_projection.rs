@@ -92,12 +92,7 @@ fn decode_thread_events(records: Vec<crate::store::ThreadEventRecord>) -> Decode
     let mut diagnostics = Vec::new();
     for record in records {
         if let Some(
-            event @ (AgentEvent::ToolCallStarted {
-                thread_name: None, ..
-            }
-            | AgentEvent::ToolCallFinished {
-                thread_name: None, ..
-            }),
+            event @ (AgentEvent::ToolCallStarted { .. } | AgentEvent::ToolCallFinished { .. }),
         ) = decode_thread_event(record, &mut diagnostics)
         {
             primary_tool_events.push(event);

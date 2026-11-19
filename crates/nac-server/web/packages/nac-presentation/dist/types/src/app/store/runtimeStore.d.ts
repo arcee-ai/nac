@@ -122,14 +122,11 @@ export declare function createRuntimeStore(_storage?: Pick<Storage, "getItem" | 
     useStreamStatus: () => StreamStatus;
     usePrimaryToolEvents: () => ({
         prompt_preview: string;
-        thread_name?: string | null;
         type: "run_started";
     } | {
         iteration: number;
-        thread_name?: string | null;
         type: "model_call_started";
     } | {
-        thread_name?: string | null;
         type: "token_usage_updated";
         usage: import("../types/openapi.generated").components["schemas"]["TokenUsage"];
     } | {
@@ -140,12 +137,11 @@ export declare function createRuntimeStore(_storage?: Pick<Storage, "getItem" | 
         delegation_summary_verified?: boolean;
         key_arg_preview?: string | null;
         name: string;
-        thread_name?: string | null;
         type: "tool_call_started";
     } | {
         call_id: string;
         cleanup_duration_ms?: number | null;
-        command_status?: import("../types/openapi.generated").components["schemas"]["CommandStatus"] | null;
+        command_status?: import("../types/openapi.generated").components["schemas"] /** Structured terminal failure for recovery-aware transcript actions. */["CommandStatus"] | null;
         completion_status?: import("../types/openapi.generated").components["schemas"]["ToolCompletionStatus"] | null;
         content_preview: string;
         delegation_outcome?: import("../types/openapi.generated").components["schemas"]["DelegationOutcome"] | null;
@@ -156,7 +152,6 @@ export declare function createRuntimeStore(_storage?: Pick<Storage, "getItem" | 
         is_error: boolean;
         name: string;
         remote_outcome_uncertain?: boolean;
-        thread_name?: string | null;
         type: "tool_call_finished";
     } | {
         compaction_id: string;
@@ -167,7 +162,10 @@ export declare function createRuntimeStore(_storage?: Pick<Storage, "getItem" | 
         reason: import("../types/openapi.generated").components["schemas"]["CompactionReason"];
         type: "orchestrator_compaction_completed";
     } | {
-        cause: import("../types/openapi.generated").components["schemas"]["CompactionSkipReason"];
+        cause: import("../types/openapi.generated").components["schemas"] /**
+         * The buffers hold output from before the prompt sent last, and its run has
+         * neither started nor streamed since, so none of that output answers it.
+         */["CompactionSkipReason"];
         compaction_id: string;
         reason: import("../types/openapi.generated").components["schemas"]["CompactionReason"];
         type: "orchestrator_compaction_skipped";
@@ -178,30 +176,24 @@ export declare function createRuntimeStore(_storage?: Pick<Storage, "getItem" | 
         type: "orchestrator_compaction_failed";
     } | {
         content: string;
-        thread_name?: string | null;
         type: "assistant_message";
         usage?: import("../types/openapi.generated").components["schemas"]["TokenUsage"] | null;
     } | {
         message: string;
-        thread_name?: string | null;
         type: "error";
     } | {
         reason: string;
         server_name: string;
-        thread_name?: string | null;
         type: "mcp_server_skipped";
     } | {
         kind: import("../types/openapi.generated").components["schemas"]["McpNotificationKind"];
         message: string;
         server_name: string;
-        thread_name?: string | null;
         type: "mcp_notification";
     } | {
         message: string;
-        thread_name?: string | null;
         type: "model_error";
     } | {
-        thread_name?: string | null;
         type: "run_finished";
     })[];
     useRunUsage: () => {
@@ -243,14 +235,11 @@ export declare const release: () => void, runtimeStore: import("../lib/store").S
     transient: boolean;
 } | null, useModelRetryAttempt: () => number | null, useLiveEvents: () => RuntimeEvent[], useStreamStatus: () => StreamStatus, usePrimaryToolEvents: () => ({
     prompt_preview: string;
-    thread_name?: string | null;
     type: "run_started";
 } | {
     iteration: number;
-    thread_name?: string | null;
     type: "model_call_started";
 } | {
-    thread_name?: string | null;
     type: "token_usage_updated";
     usage: import("../types/openapi.generated").components["schemas"]["TokenUsage"];
 } | {
@@ -261,12 +250,11 @@ export declare const release: () => void, runtimeStore: import("../lib/store").S
     delegation_summary_verified?: boolean;
     key_arg_preview?: string | null;
     name: string;
-    thread_name?: string | null;
     type: "tool_call_started";
 } | {
     call_id: string;
     cleanup_duration_ms?: number | null;
-    command_status?: import("../types/openapi.generated").components["schemas"]["CommandStatus"] | null;
+    command_status?: import("../types/openapi.generated").components["schemas"] /** Structured terminal failure for recovery-aware transcript actions. */["CommandStatus"] | null;
     completion_status?: import("../types/openapi.generated").components["schemas"]["ToolCompletionStatus"] | null;
     content_preview: string;
     delegation_outcome?: import("../types/openapi.generated").components["schemas"]["DelegationOutcome"] | null;
@@ -277,7 +265,6 @@ export declare const release: () => void, runtimeStore: import("../lib/store").S
     is_error: boolean;
     name: string;
     remote_outcome_uncertain?: boolean;
-    thread_name?: string | null;
     type: "tool_call_finished";
 } | {
     compaction_id: string;
@@ -288,7 +275,10 @@ export declare const release: () => void, runtimeStore: import("../lib/store").S
     reason: import("../types/openapi.generated").components["schemas"]["CompactionReason"];
     type: "orchestrator_compaction_completed";
 } | {
-    cause: import("../types/openapi.generated").components["schemas"]["CompactionSkipReason"];
+    cause: import("../types/openapi.generated").components["schemas"] /**
+     * The buffers hold output from before the prompt sent last, and its run has
+     * neither started nor streamed since, so none of that output answers it.
+     */["CompactionSkipReason"];
     compaction_id: string;
     reason: import("../types/openapi.generated").components["schemas"]["CompactionReason"];
     type: "orchestrator_compaction_skipped";
@@ -299,30 +289,24 @@ export declare const release: () => void, runtimeStore: import("../lib/store").S
     type: "orchestrator_compaction_failed";
 } | {
     content: string;
-    thread_name?: string | null;
     type: "assistant_message";
     usage?: import("../types/openapi.generated").components["schemas"]["TokenUsage"] | null;
 } | {
     message: string;
-    thread_name?: string | null;
     type: "error";
 } | {
     reason: string;
     server_name: string;
-    thread_name?: string | null;
     type: "mcp_server_skipped";
 } | {
     kind: import("../types/openapi.generated").components["schemas"]["McpNotificationKind"];
     message: string;
     server_name: string;
-    thread_name?: string | null;
     type: "mcp_notification";
 } | {
     message: string;
-    thread_name?: string | null;
     type: "model_error";
 } | {
-    thread_name?: string | null;
     type: "run_finished";
 })[], useRunUsage: () => {
     cache_read_tokens: number;

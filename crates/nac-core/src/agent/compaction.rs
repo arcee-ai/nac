@@ -589,10 +589,7 @@ impl super::Agent {
             let mut delta = usage.clone();
             delta.replace_context(installed_context.unwrap_or_default());
             event_sink
-                .emit_async(AgentEvent::TokenUsageUpdated {
-                    thread_name: None,
-                    usage: delta,
-                })
+                .emit_async(AgentEvent::TokenUsageUpdated { usage: delta })
                 .await;
         }
     }

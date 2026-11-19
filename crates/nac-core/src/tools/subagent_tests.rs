@@ -32,7 +32,6 @@ fn child_outcome_projection_is_typed_and_preview_does_not_expose_raw_fields() {
         let result = outcome_result(record);
         assert_eq!(result.delegation_outcome, Some(expected));
         let event = crate::events::AgentEvent::tool_call_finished(
-            None,
             "call".into(),
             "subagent".into(),
             &result,
@@ -117,12 +116,8 @@ fn successful_control_requests_keep_child_outcome_separate() {
             record.report = Some("RAW_SECRET".into());
             let result = control_result(record);
             assert!(!result.is_error);
-            let event = crate::events::AgentEvent::tool_call_finished(
-                None,
-                "call".into(),
-                name.into(),
-                &result,
-            );
+            let event =
+                crate::events::AgentEvent::tool_call_finished("call".into(), name.into(), &result);
             let encoded = serde_json::to_string(&event).unwrap();
             assert!(!encoded.contains("RAW_SECRET"));
             assert!(!encoded.contains("child-1"));
@@ -263,7 +258,6 @@ async fn progress_is_emitted_only_for_validated_authorized_invocations() {
         Some("Safe task summary")
     );
     let finish = crate::events::AgentEvent::tool_call_finished(
-        None,
         "call-progress".into(),
         "subagent".into(),
         &result,
@@ -372,7 +366,6 @@ async fn progress_waits_until_permission_is_granted() {
     assert!(rejected.is_error);
     assert_eq!(rejected.delegation_summary.as_deref(), Some("Review store"));
     let finish = crate::events::AgentEvent::tool_call_finished(
-        None,
         "call-approval".into(),
         "subagent".into(),
         &rejected,
@@ -470,7 +463,6 @@ async fn denied_native_invocations_retain_only_verified_summary() {
     assert_eq!(denied.delegation_summary.as_deref(), Some("Safe summary"));
     for result in [hard, denied] {
         let finish = crate::events::AgentEvent::tool_call_finished(
-            None,
             "denied".into(),
             "subagent".into(),
             &result,
@@ -750,7 +742,6 @@ async fn native_status_and_cancel_hide_foreign_child_ownership() {
         Some(crate::events::DelegationOutcome::Cancelled)
     );
     let event = crate::events::AgentEvent::tool_call_finished(
-        None,
         "cancel".into(),
         "subagent_cancel".into(),
         &cancelled,
@@ -825,7 +816,6 @@ async fn native_foreground_deadline_and_cancel_use_request_previews() {
         )
         .await;
         let event = crate::events::AgentEvent::tool_call_finished(
-            None,
             "native".into(),
             "subagent".into(),
             &result,

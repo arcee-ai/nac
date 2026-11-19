@@ -557,12 +557,8 @@ fn exec_command_finished_event_carries_structured_outcome() {
         delegation_outcome: None,
         delegation_summary: None,
     };
-    let event = AgentEvent::tool_call_finished(
-        Some("worker".to_string()),
-        "call-1".to_string(),
-        "exec_command".to_string(),
-        &result,
-    );
+    let event =
+        AgentEvent::tool_call_finished("call-1".to_string(), "exec_command".to_string(), &result);
     assert!(matches!(
         event,
         AgentEvent::ToolCallFinished {
@@ -591,12 +587,8 @@ fn generic_deadline_finished_event_carries_typed_timing_metadata() {
         .to_string(),
         true,
     );
-    let event = AgentEvent::tool_call_finished(
-        None,
-        "call-deadline".to_string(),
-        "read".to_string(),
-        &result,
-    );
+    let event =
+        AgentEvent::tool_call_finished("call-deadline".to_string(), "read".to_string(), &result);
     assert!(matches!(
         event,
         AgentEvent::ToolCallFinished {
@@ -660,7 +652,6 @@ fn exec_command_finished_events_distinguish_terminal_statuses() {
             delegation_summary: None,
         };
         let event = AgentEvent::tool_call_finished(
-            Some("worker".to_string()),
             format!("call-{serialized}"),
             "exec_command".to_string(),
             &result,

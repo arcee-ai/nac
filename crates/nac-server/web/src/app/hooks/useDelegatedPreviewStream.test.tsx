@@ -172,13 +172,6 @@ it("keeps child tool lifecycle events isolated across switches and ignores worke
     content_preview: "error",
     is_error: true,
   });
-  emit("child-a", {
-    type: "tool_call_started",
-    call_id: "worker",
-    name: "shell",
-    args_preview: "",
-    thread_name: "worker",
-  });
   expect(hook.result.current.toolEvents.map((event) => event.type)).toEqual([
     "tool_call_started",
     "tool_call_finished",

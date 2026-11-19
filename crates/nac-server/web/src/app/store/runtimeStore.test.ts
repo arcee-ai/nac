@@ -95,7 +95,6 @@ describe("canonical refresh classification", () => {
         type: "agent",
         event: {
           type: "tool_call_started",
-          thread_name: null,
           call_id: "call-primary",
           name: "read",
           args_preview: '{"operation":"read"}',
@@ -108,7 +107,6 @@ describe("canonical refresh classification", () => {
         type: "agent",
         event: {
           type: "tool_call_finished",
-          thread_name: null,
           call_id: "call-primary",
           name: "read",
           content_preview: "src/lib.rs",
@@ -126,40 +124,10 @@ describe("canonical refresh classification", () => {
     expect(getRuntimeState().primaryToolEvents).toEqual([]);
   });
 
-  it("does not pair host-scoped worker finishes with primary calls sharing an ID", () => {
-    resetRuntime("session-a");
-    const start = {
-      type: "tool_call_started",
-      thread_name: null,
-      call_id: "shared",
-      name: "subagent",
-      args_preview: "",
-      key_arg_preview: "Review store",
-      delegation_summary_verified: true,
-    } as const;
-    applyEnvelope(envelope({ type: "agent", event: start }));
-    applyEnvelope(
-      envelope({
-        type: "agent",
-        event: {
-          type: "tool_call_finished",
-          thread_name: "host-worker",
-          call_id: "shared",
-          name: "subagent",
-          content_preview: "",
-          is_error: true,
-          completion_status: "timed_out",
-        },
-      }),
-    );
-    expect(getRuntimeState().primaryToolEvents).toEqual([start]);
-  });
-
   it("coalesces repeated validated subagent progress without adding activity entries", () => {
     resetRuntime("session-a");
     const start = {
       type: "tool_call_started",
-      thread_name: null,
       call_id: "child-call",
       name: "subagent",
       args_preview: "safe",
@@ -186,7 +154,6 @@ describe("canonical refresh classification", () => {
         type: "agent",
         event: {
           type: "tool_call_finished",
-          thread_name: null,
           call_id: "child-call",
           name: "subagent",
           content_preview: "Subagent started in background",
@@ -206,7 +173,6 @@ describe("canonical refresh classification", () => {
         type: "agent",
         event: {
           type: "mcp_server_skipped",
-          thread_name: null,
           server_name: "docs",
           reason: "connection failed",
         },
@@ -226,7 +192,6 @@ describe("canonical refresh classification", () => {
         type: "agent",
         event: {
           type: "mcp_notification",
-          thread_name: null,
           server_name: "docs",
           kind: "catalog_refresh_failed",
           message: "tool refresh failed; retaining the last-known-good catalog",

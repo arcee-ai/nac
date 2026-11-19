@@ -158,7 +158,6 @@ fn transcript_payload_is_not_an_agent_event_and_vice_versa() {
     assert!(is_transcript_log_payload(&payload));
 
     let event = crate::events::AgentEvent::RunStarted {
-        thread_name: None,
         prompt_preview: "run started".to_string(),
     };
     let event_json = serde_json::to_string(&event).unwrap();

@@ -906,7 +906,7 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         created_at: (string | null)[];
         messages: import("./openapi.generated.js").components["schemas"]["Message"][];
         page: import("./openapi.generated.js").components["schemas"]["MessagePageMetadata"];
-        terminal_selection_attributions?: import("./openapi.generated.js").components["schemas"] /** Explicit existing Local target only; never opens a missing parent. */["TerminalSelectionMessageReference"][];
+        terminal_selection_attributions?: import("./openapi.generated.js").components["schemas"]["TerminalSelectionMessageReference"][];
         tool_call_occurrences?: (string | null)[];
     }>;
     getToolCallContent: (id: string, callId: string, signal?: AbortSignal, occurrence?: string) => Promise<{
