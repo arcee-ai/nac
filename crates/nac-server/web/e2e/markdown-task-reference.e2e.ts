@@ -141,10 +141,17 @@ for (const packed of [false, true]) {
       // Inventory may already have removed the link by the time deletion
       // returns. If it is still present, activate that stale reference.
       await page.evaluate(() => {
+        const { document } = globalThis as unknown as {
+          document: {
+            querySelectorAll(
+              selector: string,
+            ): Iterable<{ textContent: string | null; click(): void }>;
+          };
+        };
         const link = [...document.querySelectorAll('a[role="link"]')].find(
           (item) => item.textContent?.trim() === "Open research",
         );
-        if (link instanceof HTMLElement) link.click();
+        link?.click();
       });
       await expect(page.getByText(/Task unavailable/)).toBeVisible();
       await expectCaller();
