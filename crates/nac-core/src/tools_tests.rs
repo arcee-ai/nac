@@ -604,9 +604,11 @@ fn prepared_builtin_calls_project_validated_correlated_permission_resources() {
 }
 
 #[tokio::test]
-async fn brokerless_worker_model_calls_still_enforce_native_hard_denials() {
-    let directory =
-        std::env::temp_dir().join(format!("nac-worker-hard-denial-{}", uuid::Uuid::new_v4()));
+async fn brokerless_model_calls_still_enforce_native_hard_denials() {
+    let directory = std::env::temp_dir().join(format!(
+        "nac-brokerless-hard-denial-{}",
+        uuid::Uuid::new_v4()
+    ));
     std::fs::create_dir_all(&directory).unwrap();
     let mut runtime = crate::tools::test_runtime();
     runtime.workspace_cwd = directory.clone();
@@ -621,8 +623,7 @@ async fn brokerless_worker_model_calls_still_enforce_native_hard_denials() {
     let registry = native_tool_registry(false).unwrap();
     let snapshot = registry.snapshot(super::CODING_TOOL_NAMES).unwrap();
     let context = kernel::ToolCallContext {
-        call_id: Some("call-worker-denied".to_string()),
-        thread_name: Some("worker".to_string()),
+        call_id: Some("call-brokerless-denied".to_string()),
         ..Default::default()
     };
 
@@ -794,7 +795,6 @@ async fn direct_terminal_input_requires_once_only_approval_for_the_exact_handle(
     let snapshot = registry.snapshot(super::CODING_TOOL_NAMES).unwrap();
     let context = kernel::ToolCallContext {
         call_id: Some("call-terminal-input".to_string()),
-        thread_name: None,
         ..Default::default()
     };
 

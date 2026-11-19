@@ -937,7 +937,6 @@ impl Agent {
                 self.tool_runtime.clone(),
                 self.client.clone(),
                 self.event_sink.clone(),
-                None,
                 self.admission_controlled_tools,
             )
             .await;
@@ -964,7 +963,7 @@ impl Agent {
             };
             let failure_detail = last_failure_detail.clone();
             let tool_messages =
-                finalize_tool_results(&self.messages, results, &self.event_sink, &None).await;
+                finalize_tool_results(&self.messages, results, &self.event_sink).await;
 
             if self.tool_runtime.command_cancellation.is_cancelled() {
                 let error = anyhow!("command cancelled");

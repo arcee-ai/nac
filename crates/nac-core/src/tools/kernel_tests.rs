@@ -789,7 +789,6 @@ async fn prepared_calls_validate_before_invocation_and_keep_identity() {
             services,
             &ToolCallContext {
                 call_id: Some("call-1".into()),
-                thread_name: None,
                 ..Default::default()
             },
         )
@@ -822,7 +821,6 @@ async fn native_hard_denial_blocks_brokerless_model_invocation() {
             },
             &ToolCallContext {
                 call_id: Some("call-1".into()),
-                thread_name: Some("worker".into()),
                 ..Default::default()
             },
         )
@@ -940,7 +938,6 @@ async fn direct_broker_authorizes_between_prepare_and_side_effects() {
     };
     let context = ToolCallContext {
         call_id: Some("call-1".to_string()),
-        thread_name: None,
         ..Default::default()
     };
 

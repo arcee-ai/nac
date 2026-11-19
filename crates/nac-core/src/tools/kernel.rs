@@ -114,7 +114,6 @@ impl PermissionResource {
 #[derive(Clone, Default)]
 pub struct ToolCallContext {
     pub call_id: Option<String>,
-    pub thread_name: Option<String>,
     /// Already-sanitized start-event summary, never raw model arguments.
     pub(crate) presentation_key_arg: Option<String>,
     pub(crate) cancellation: Option<super::RunCancellation>,
@@ -462,7 +461,6 @@ impl PreparedToolCall {
         let cancellation = services.runtime.command_cancellation.child();
         let call_context = ToolCallContext {
             call_id: context.call_id.clone(),
-            thread_name: context.thread_name.clone(),
             presentation_key_arg: context.presentation_key_arg.clone(),
             cancellation: Some(cancellation.clone()),
             execution_timing: context.execution_timing.clone(),
@@ -927,7 +925,7 @@ impl ToolSnapshot {
                         .runtime
                         .event_sink
                         .emit_async(crate::events::AgentEvent::ToolCallStarted {
-                            thread_name: context.thread_name.clone(),
+                            thread_name: None,
                             call_id: call_id.clone(),
                             name: name.to_string(),
                             args_preview: String::new(),

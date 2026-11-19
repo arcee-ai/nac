@@ -99,7 +99,6 @@ async fn reads_overlap_and_exclusive_calls_wait_for_prior_groups_in_model_order(
         runtime,
         ModelClient::new_for_test(),
         EventSink::channel(events_tx),
-        None,
         true,
     ));
     let stage = std::sync::atomic::AtomicUsize::new(0);
@@ -226,7 +225,6 @@ async fn timed_out_exclusive_call_releases_the_following_admission_group() {
         runtime,
         ModelClient::new_for_test(),
         EventSink::none(),
-        None,
         true,
     )
     .await;
@@ -257,8 +255,7 @@ async fn simple_tool_batch_preserves_order() {
     let client = ModelClient::new_for_test();
     let event_sink = EventSink::none();
 
-    let results =
-        execute_tools_parallel(tool_calls, runtime, client, event_sink, None, false).await;
+    let results = execute_tools_parallel(tool_calls, runtime, client, event_sink, false).await;
 
     assert_eq!(results.len(), 2);
     // Results should be sorted by original index.
@@ -287,7 +284,6 @@ async fn direct_tool_batch_rejects_retired_thread_dispatch() {
         runtime,
         ModelClient::new_for_test(),
         EventSink::none(),
-        None,
         true,
     )
     .await;
@@ -322,7 +318,6 @@ async fn direct_tools_report_duration_only_when_they_ran() {
         runtime,
         ModelClient::new_for_test(),
         EventSink::channel(events_tx),
-        None,
         false,
     )
     .await;
@@ -382,15 +377,8 @@ async fn slow_subagent_preview_keeps_mixed_admission_order() {
         make_tool_call("read-after", "read", json!({"path":"input.txt"})),
     ];
     let started = std::time::Instant::now();
-    let results = execute_tools_parallel(
-        calls,
-        runtime,
-        ModelClient::new_for_test(),
-        sink,
-        None,
-        true,
-    )
-    .await;
+    let results =
+        execute_tools_parallel(calls, runtime, ModelClient::new_for_test(), sink, true).await;
     assert!(started.elapsed() < std::time::Duration::from_secs(2));
     assert_eq!(
         results.iter().map(|r| r.0.as_str()).collect::<Vec<_>>(),

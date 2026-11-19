@@ -827,7 +827,6 @@ async fn image_limit_error_is_the_only_finished_event_for_the_result() {
             },
         )],
         &EventSink::channel(events_tx),
-        &None,
     )
     .await;
 

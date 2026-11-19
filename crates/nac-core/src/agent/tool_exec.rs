@@ -24,7 +24,6 @@ async fn spawn_tools_into(
     runtime: &ToolRuntime,
     client: &ModelClient,
     event_sink: &EventSink,
-    thread_name: &Option<String>,
 ) {
     for (index, tool_call_id, tool_name, args_str) in calls {
         let runtime = runtime.clone();
@@ -35,7 +34,7 @@ async fn spawn_tools_into(
             Some(args_str.clone())
         };
         let raw_started = AgentEvent::ToolCallStarted {
-            thread_name: thread_name.clone(),
+            thread_name: None,
             call_id: tool_call_id.clone(),
             name: tool_name.clone(),
             args_preview: presentation_args
@@ -77,7 +76,6 @@ async fn spawn_tools_into(
         }
         let call_context = tools::kernel::ToolCallContext {
             call_id: Some(tool_call_id.clone()),
-            thread_name: thread_name.clone(),
             presentation_key_arg,
             ..Default::default()
         };
@@ -126,7 +124,6 @@ pub(super) async fn execute_tools_parallel(
     runtime: ToolRuntime,
     client: ModelClient,
     event_sink: EventSink,
-    thread_name: Option<String>,
     admission_controlled: bool,
 ) -> Vec<(String, String, ToolResult)> {
     let calls = tool_calls
@@ -135,9 +132,9 @@ pub(super) async fn execute_tools_parallel(
         .map(|(index, call)| (index, call.id, call.function.name, call.function.arguments))
         .collect();
     if admission_controlled {
-        execute_admission_controlled(calls, runtime, client, event_sink, thread_name).await
+        execute_admission_controlled(calls, runtime, client, event_sink).await
     } else {
-        execute_simple(calls, runtime, client, event_sink, thread_name).await
+        execute_simple(calls, runtime, client, event_sink).await
     }
 }
 
@@ -145,7 +142,6 @@ pub(super) async fn finalize_tool_results(
     messages: &[Message],
     results: Vec<(String, String, ToolResult)>,
     event_sink: &EventSink,
-    thread_name: &Option<String>,
 ) -> Vec<Message> {
     let mut transcript_image_stats = Ok(crate::tool_content::ImageStats::default());
     for message in messages {
@@ -173,7 +169,7 @@ pub(super) async fn finalize_tool_results(
             }
             event_sink
                 .emit_async(AgentEvent::tool_call_finished(
-                    thread_name.clone(),
+                    None,
                     tool_call_id.clone(),
                     tool_name,
                     &result,
@@ -217,16 +213,13 @@ async fn execute_admission_controlled(
     runtime: ToolRuntime,
     client: ModelClient,
     event_sink: EventSink,
-    thread_name: Option<String>,
 ) -> Vec<(String, String, ToolResult)> {
     let mut all_results = Vec::new();
     // Consecutive read/discovery calls may overlap. Every exclusive call is a
     // barrier for all earlier and later calls, preserving model response order
     // while preventing shell and mutation overlap.
     for group in admission_groups(calls) {
-        all_results.extend(
-            spawn_and_collect_tools(group, &runtime, &client, &event_sink, &thread_name).await,
-        );
+        all_results.extend(spawn_and_collect_tools(group, &runtime, &client, &event_sink).await);
     }
     sort_and_strip_index(all_results)
 }
@@ -239,19 +232,10 @@ async fn spawn_and_collect_tools(
     runtime: &ToolRuntime,
     client: &ModelClient,
     event_sink: &EventSink,
-    thread_name: &Option<String>,
 ) -> Vec<(usize, String, String, ToolResult)> {
     let mut join_set: JoinSet<(usize, String, String, ToolResult)> = JoinSet::new();
 
-    spawn_tools_into(
-        &mut join_set,
-        calls,
-        runtime,
-        client,
-        event_sink,
-        thread_name,
-    )
-    .await;
+    spawn_tools_into(&mut join_set, calls, runtime, client, event_sink).await;
 
     let mut results = Vec::new();
     while let Some(join_result) = join_set.join_next().await {
@@ -260,7 +244,7 @@ async fn spawn_and_collect_tools(
                 if !result.content.contains_images() {
                     event_sink
                         .emit_async(AgentEvent::tool_call_finished(
-                            thread_name.clone(),
+                            None,
                             tool_call_id.clone(),
                             tool_name.clone(),
                             &result,
@@ -295,13 +279,11 @@ async fn execute_simple(
     runtime: ToolRuntime,
     client: ModelClient,
     event_sink: EventSink,
-    thread_name: Option<String>,
 ) -> Vec<(String, String, ToolResult)> {
     let mut all_results: Vec<(usize, String, String, ToolResult)> = Vec::new();
 
     // Execute the calls.
-    let batch_results =
-        spawn_and_collect_tools(calls, &runtime, &client, &event_sink, &thread_name).await;
+    let batch_results = spawn_and_collect_tools(calls, &runtime, &client, &event_sink).await;
     all_results.extend(batch_results);
 
     sort_and_strip_index(all_results)

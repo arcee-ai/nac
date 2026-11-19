@@ -174,7 +174,7 @@ impl NativeTool for SubagentTool {
                     .runtime
                     .event_sink
                     .emit_async(crate::events::AgentEvent::ToolCallStarted {
-                        thread_name: context.thread_name.clone(),
+                        thread_name: None,
                         call_id: call_id.clone(),
                         name: "subagent".to_string(),
                         args_preview: String::new(),

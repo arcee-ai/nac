@@ -286,7 +286,6 @@ impl SessionService {
         self.publish_shell_snapshot();
         let context = ToolCallContext {
             call_id: Some(snapshot.operation_id.clone()),
-            thread_name: None,
             cancellation: Some(runtime.command_cancellation.clone()),
             ..Default::default()
         };
