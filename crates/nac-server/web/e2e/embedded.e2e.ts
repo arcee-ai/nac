@@ -1032,6 +1032,9 @@ test("interprets literal goal commands before launching goal continuation", asyn
     })
     .toBeNull();
   await page.getByRole("button", { name: "Close goal editor" }).click();
+  // A restored draft can contain the command after reload; an empty composer
+  // exposes Stop rather than the active-run Steer action.
+  await composer.fill("");
   await page.getByRole("button", { name: "Stop run" }).click();
   await waitForRunIdle(request, harness, sessionId);
   continuation.release();
