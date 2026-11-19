@@ -363,10 +363,10 @@ fn transcript_append_generation_change_rejects_even_the_same_run_id() {
     let (_dir, path) = setup();
     insert_test_session(&path, "parent");
     let connection = open_runtime_connection(&path).unwrap();
-    connection.execute("INSERT INTO managed_orchestrators
-        (orchestrator_session_id, parent_session_id, root_session_id, description,
+    connection.execute("INSERT INTO traditional_children
+        (child_session_id, parent_session_id, root_session_id, profile, description, nesting_depth,
          status, generation, run_id, execution_mode, created_at, updated_at)
-        VALUES ('session', 'parent', 'parent', 'test', 'running', 1, 'run', 'background', 'now', 'now')", []).unwrap();
+        VALUES ('session', 'parent', 'parent', 'general', 'test', 1, 'running', 1, 'run', 'background', 'now', 'now')", []).unwrap();
     let lease = Arc::new(SessionOperationLease::try_acquire(&path, "session").unwrap());
     let writer = TranscriptLogWriter::for_run(&path, "session", "run", &lease).unwrap();
     writer
@@ -381,7 +381,7 @@ fn transcript_append_generation_change_rejects_even_the_same_run_id() {
         .unwrap();
     assert_eq!(generation, 1);
     connection
-        .execute("UPDATE managed_orchestrators SET generation = 2", [])
+        .execute("UPDATE traditional_children SET generation = 2", [])
         .unwrap();
     assert_eq!(
         writer

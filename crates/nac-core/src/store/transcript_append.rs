@@ -89,8 +89,7 @@ fn relationship_generation(
     session_id: &str,
 ) -> Result<Option<RelationshipGeneration>> {
     conn.query_row(
-        "SELECT 'managed', generation, run_id, status FROM managed_orchestrators WHERE orchestrator_session_id = ?1
-         UNION ALL SELECT 'child', generation, run_id, status FROM traditional_children WHERE child_session_id = ?1",
+        "SELECT 'child', generation, run_id, status FROM traditional_children WHERE child_session_id = ?1",
         params![session_id],
         |r| Ok(RelationshipGeneration { kind: r.get(0)?, generation: r.get(1)?, run_id: r.get(2)?, status: r.get(3)? }),
     ).optional().map_err(Into::into)
