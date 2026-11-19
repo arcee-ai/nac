@@ -804,19 +804,6 @@ async fn resume_picker_and_selection_perform_no_network() {
     );
 }
 
-#[test]
-fn parse_extra_headers_json_requires_valid_object() {
-    assert!(parse_extra_headers_json("").is_err());
-    assert_eq!(parse_extra_headers_json("{}").unwrap(), BTreeMap::new());
-    let headers = BTreeMap::from([("X-Custom".to_string(), "val".to_string())]);
-    assert_eq!(
-        parse_extra_headers_json(r#"{"X-Custom":"val"}"#).unwrap(),
-        headers
-    );
-    assert!(parse_extra_headers_json("not json").is_err());
-    assert!(parse_extra_headers_json(r#"{"X-Custom":1}"#).is_err());
-}
-
 #[tokio::test]
 async fn required_model_failures_occur_before_session_persistence() {
     let root = temp_store_path("required_model_before_persist")

@@ -84,18 +84,6 @@ pub(super) fn managed_worker_effective_model_settings(
     .with_trusted_api_key_file(model.trusted_api_key_file.clone())
 }
 
-/// Parse the hidden worker header transport as a JSON object.
-///
-/// A present argument must be valid JSON. In particular, workers use `{}` to
-/// transport an explicitly empty snapshot header map; absence is represented by
-/// omitting the argument entirely.
-pub fn parse_extra_headers_json(
-    json: &str,
-) -> std::result::Result<BTreeMap<String, String>, String> {
-    serde_json::from_str::<BTreeMap<String, String>>(json)
-        .map_err(|error| format!("expected a JSON object with string header values: {error}"))
-}
-
 pub(super) fn worker_thread_timeout_secs(config: &NacConfig) -> u64 {
     config
         .worker

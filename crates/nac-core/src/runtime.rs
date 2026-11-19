@@ -71,8 +71,8 @@ use model_resolution::{
     worker_thread_timeout_secs,
 };
 pub use model_resolution::{
-    effective_model_settings, effective_orchestrator_compaction_threshold,
-    parse_extra_headers_json, resolve_store_path, resolve_store_path_for_track,
+    effective_model_settings, effective_orchestrator_compaction_threshold, resolve_store_path,
+    resolve_store_path_for_track,
 };
 pub use prepared_session::{PreparedSessionResources, PreparedSessionRunConfig};
 pub use remote::{browse_ssh_directory, create_ssh_folder};
