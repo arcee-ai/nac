@@ -4,8 +4,6 @@ use super::*;
 pub struct NacConfig {
     #[serde(default)]
     pub storage: StorageConfig,
-    #[serde(skip)]
-    pub model: ModelConfig,
     #[serde(default)]
     pub compaction: CompactionConfig,
     #[serde(default)]
@@ -25,16 +23,6 @@ pub struct PermissionConfig {
     /// backend defaults. Hard safety policy remains outside this list.
     #[serde(default)]
     pub rules: Vec<crate::permissions::PermissionRule>,
-}
-
-/// Transitional in-memory shape for older callers. Config files no longer
-/// populate these fields or choose model settings for new sessions.
-#[derive(Debug, Clone, Default, serde::Deserialize)]
-pub struct ModelConfig {
-    pub model: Option<String>,
-    pub reasoning_effort: Option<ReasoningEffort>,
-    #[serde(default)]
-    pub extra_headers: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Default, serde::Deserialize)]
@@ -65,7 +53,6 @@ impl From<NonModelNacConfig> for NacConfig {
     fn from(config: NonModelNacConfig) -> Self {
         Self {
             storage: config.storage,
-            model: ModelConfig::default(),
             compaction: CompactionConfig::default(),
             sandbox: config.sandbox,
             permissions: config.permissions,
@@ -107,6 +94,7 @@ impl NacConfig {
             return Ok(Self::default());
         };
         let raw = Self::read_config(&path)?;
+        Self::warn_removed_model_keys(&raw);
         Self::warn_removed_worker_settings(&raw);
         toml::from_str::<NonModelNacConfig>(&raw)
             .map(Into::into)
@@ -118,7 +106,7 @@ impl NacConfig {
     /// Launching ignores these keys — the catalog resolves the provider from
     /// the model id — but importing a file the user pointed at is the one
     /// case where they are the only statement of intent available, so the
-    /// importer reads them directly instead of through [`ModelConfig`].
+    /// importer reads them directly from the selected file.
     pub fn load_model_identity_from_file(path: &Path) -> Result<ConfiguredModelIdentity> {
         let raw = Self::read_explicit_config(path)
             .with_context(|| format!("failed to read config {}", path.display()))?;
@@ -134,6 +122,7 @@ impl NacConfig {
     pub fn load_from_file(path: &Path) -> Result<Self> {
         let raw = Self::read_explicit_config(path)
             .with_context(|| format!("failed to read config {}", path.display()))?;
+        Self::warn_removed_model_keys(&raw);
         Self::warn_removed_worker_settings(&raw);
         toml::from_str(&raw).with_context(|| format!("failed to parse config {}", path.display()))
     }

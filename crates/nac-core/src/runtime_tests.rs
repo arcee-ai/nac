@@ -31,16 +31,6 @@ fn restore_env(name: &str, value: Option<OsString>) {
     }
 }
 
-/// A config whose `[model]` section resolves through the catalog:
-/// gpt-5.2 is unique to openai-responses, so the backend, the catalog
-/// endpoint default and the conventional credential variable all come
-/// from the catalog rather than config fields.
-fn complete_model_config() -> NacConfig {
-    let mut config = NacConfig::default();
-    config.model.model = Some("gpt-5.2".to_string());
-    config
-}
-
 #[path = "runtime_tests/construction.rs"]
 mod construction;
 #[path = "runtime_tests/mcp_admission.rs"]

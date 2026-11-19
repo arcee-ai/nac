@@ -82,9 +82,7 @@ async fn resume_config_restores_messages_without_changing_process_cwd() {
     .unwrap();
 
     let caller_cwd = original_cwd.canonicalize().unwrap();
-    let mut changed_config = complete_model_config();
-    changed_config.model.model = Some("changed-config-model".to_string());
-    changed_config.model.reasoning_effort = Some(ReasoningEffort::High);
+    let changed_config = NacConfig::default();
     let mut run_config = build_resume_config(
         ResumeOptions {
             lookup_cwd: session_cwd.clone(),
@@ -257,7 +255,7 @@ async fn invalid_legacy_snapshot_requires_settings_repair_without_persistence() 
     let error = match build_resume_config_from_snapshot(
         snapshot,
         store_path.clone(),
-        &complete_model_config(),
+        &NacConfig::default(),
         PathBuf::from("/local/resume/base"),
         None,
         None,

@@ -2,10 +2,10 @@ use super::*;
 
 #[test]
 fn new_session_model_does_not_inherit_global_model_defaults() {
-    let config = complete_model_config();
+    let config = NacConfig::default();
     assert!(effective_model_settings(&ModelOptions::default(), &config).is_err());
     let selected = effective_model_settings(&test_openai_model_options(), &config).unwrap();
-    assert_ne!(selected.model, config.model.model.unwrap());
+    assert_eq!(selected.model, "test-model");
     assert!(selected.extra_headers.is_empty());
 }
 
@@ -98,8 +98,7 @@ fn explicitly_selected_config_is_read_only_even_when_named_config_toml() {
     std::fs::write(&path, "[model]\nmodel = \"selected-model\"\n").unwrap();
     std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o500)).unwrap();
 
-    let config = NacConfig::load_from_file(&path).expect("explicit config should be read-only");
-    assert!(config.model.model.is_none());
+    NacConfig::load_from_file(&path).expect("explicit config should be read-only");
     assert!(
         !path.with_extension("toml.lock").exists(),
         "an explicit import must not create the ambient MCP lock sidecar"
@@ -300,7 +299,7 @@ fn effective_model_settings_ignore_ambient_model_and_base() {
         api_model: Some("gpt-5.2".into()),
         ..ModelOptions::default()
     };
-    let settings = effective_model_settings(&options, &complete_model_config()).unwrap();
+    let settings = effective_model_settings(&options, &NacConfig::default()).unwrap();
     assert_eq!(settings.base_url, "https://api.openai.com/v1");
     assert_eq!(settings.model, "gpt-5.2");
 
@@ -314,12 +313,7 @@ fn explicit_model_settings_do_not_inherit_config_defaults() {
     let original_openai_key = std::env::var_os("OPENAI_API_KEY");
     unsafe { std::env::remove_var("OPENAI_API_KEY") };
 
-    let mut config = complete_model_config();
-    config.model.reasoning_effort = Some(ReasoningEffort::High);
-    config
-        .model
-        .extra_headers
-        .insert("X-Config".to_string(), "config".to_string());
+    let config = NacConfig::default();
 
     assert!(effective_model_settings(&ModelOptions::default(), &config).is_err());
 
@@ -350,12 +344,9 @@ fn explicit_model_settings_do_not_inherit_config_defaults() {
 
 #[test]
 fn managed_backends_materialize_base_after_explicit_over_config_resolution() {
-    // A configured model id that collides with a managed provider's
-    // entries resolves to the non-managed provider (the codex seed ids
-    // all overlap the openai baseline), so managed backends are
-    // reachable only through an explicit selection.
-    let mut colliding_config = NacConfig::default();
-    colliding_config.model.model = Some("gpt-5.3-codex-spark".to_string());
+    // Colliding catalog IDs resolve to the non-managed provider unless a
+    // managed backend is selected explicitly.
+    let colliding_config = NacConfig::default();
     let resolved = effective_model_settings(
         &ModelOptions {
             api_model: Some("gpt-5.3-codex-spark".into()),
@@ -377,8 +368,7 @@ fn managed_backends_materialize_base_after_explicit_over_config_resolution() {
             crate::model::ARCEE_AUTH_CANONICAL_BASE_URL,
         ),
     ] {
-        let mut explicit_config = NacConfig::default();
-        explicit_config.model.model = Some("managed-model".to_string());
+        let explicit_config = NacConfig::default();
         let explicit = effective_model_settings(
             &ModelOptions {
                 backend: Some(backend),
@@ -398,7 +388,7 @@ fn managed_backends_materialize_base_after_explicit_over_config_resolution() {
 
 #[test]
 fn openai_to_managed_launch_normalizes_omitted_url_and_credentials() {
-    let config = complete_model_config();
+    let config = NacConfig::default();
 
     for (backend, expected_base_url) in [
         (
@@ -445,8 +435,7 @@ fn optional_model_overrides_distinguish_inherit_value_and_clear() {
     let original_openai_key = std::env::var_os("OPENAI_API_KEY");
     unsafe { std::env::remove_var("OPENAI_API_KEY") };
 
-    let mut config = complete_model_config();
-    config.model.reasoning_effort = Some(ReasoningEffort::High);
+    let config = NacConfig::default();
 
     let inherited = effective_model_settings(
         &ModelOptions {
@@ -530,7 +519,7 @@ fn api_key_selectors_are_preserved_for_api_backends_and_normalized_for_managed_a
                 api_key_env: OptionalModelOption::Value(selector.to_string()),
                 ..ModelOptions::default()
             },
-            &complete_model_config(),
+            &NacConfig::default(),
         )
         .unwrap();
         assert_eq!(settings.api_key_env.as_deref(), Some(selector));
@@ -556,16 +545,10 @@ fn api_key_selectors_are_preserved_for_api_backends_and_normalized_for_managed_a
 
 #[test]
 fn required_model_settings_are_rejected_without_defaults() {
-    // No configured or requested model: no id to resolve a backend
-    // from. An unknown configured model id fails the same way.
-    for config in [NacConfig::default(), {
-        let mut config = NacConfig::default();
-        config.model.model = Some("never-seen-model".to_string());
-        config
-    }] {
-        let error = effective_model_settings(&ModelOptions::default(), &config).unwrap_err();
-        assert!(error.to_string().contains("backend"), "{error:#}");
-    }
+    // Without a selected model there is no ID from which to resolve a backend.
+    let error =
+        effective_model_settings(&ModelOptions::default(), &NacConfig::default()).unwrap_err();
+    assert!(error.to_string().contains("backend"), "{error:#}");
 
     // An explicit backend with no model id anywhere fails on the model.
     let error = effective_model_settings(
@@ -586,7 +569,7 @@ fn no_reasoning_effort_is_injected() {
             api_model: Some("gpt-5.2".into()),
             ..ModelOptions::default()
         },
-        &complete_model_config(),
+        &NacConfig::default(),
     )
     .unwrap();
     assert_eq!(settings.reasoning_effort, None);
@@ -811,17 +794,8 @@ async fn required_model_failures_occur_before_session_persistence() {
         .unwrap()
         .to_path_buf();
     std::fs::create_dir_all(&root).unwrap();
-    let cases: [(ModelOptions, NacConfig, &str); 3] = [
+    let cases: [(ModelOptions, NacConfig, &str); 2] = [
         (ModelOptions::default(), NacConfig::default(), "backend"),
-        (
-            ModelOptions::default(),
-            {
-                let mut config = NacConfig::default();
-                config.model.model = Some("never-seen-model".to_string());
-                config
-            },
-            "backend",
-        ),
         (
             ModelOptions {
                 backend: Some(BackendKind::OpenAiResponses),
@@ -1001,8 +975,6 @@ url = "https://mcp.context7.com/mcp"
         config.storage.store_path.as_deref(),
         Some(Path::new("custom/store.db"))
     );
-    assert!(config.model.model.is_none());
-    assert!(config.model.reasoning_effort.is_none());
     assert_eq!(config.sandbox.image.as_deref(), Some("config-image"));
 
     restore_env("NAC_HOME", original_nac_home);
@@ -1064,7 +1036,6 @@ fn non_model_config_load_ignores_invalid_model_values_but_keeps_other_sections_s
                 crate::permissions::PermissionEffect::Deny,
             )]
         );
-        assert!(config.model.model.is_none());
         assert_eq!(
             NacConfig::load_from_cwd(&root).is_ok(),
             accepted,
@@ -1121,9 +1092,6 @@ X-Config = "yes"
     }
 
     let config = NacConfig::load().expect("removed keys parse tolerantly");
-    assert!(config.model.model.is_none());
-    assert!(config.model.reasoning_effort.is_none());
-    assert!(config.model.extra_headers.is_empty());
     assert!(effective_model_settings(&ModelOptions::default(), &config).is_err());
     let settings = effective_model_settings(
         &ModelOptions {
@@ -1710,10 +1678,8 @@ async fn persisted_settings_are_identical_across_create_snapshot_resume_and_work
     assert_eq!(snapshot.extra_headers, headers);
     assert_eq!(snapshot.orchestrator_compaction_threshold, Some(48_000));
 
-    let mut conflicting_config = complete_model_config();
+    let mut conflicting_config = NacConfig::default();
     conflicting_config.compaction.threshold_tokens = Some(96_000);
-    conflicting_config.model.reasoning_effort = Some(ReasoningEffort::Low);
-    conflicting_config.model.model = Some("must-not-win".to_string());
     let resumed = build_resume_config(
         ResumeOptions {
             lookup_cwd: workspace,
