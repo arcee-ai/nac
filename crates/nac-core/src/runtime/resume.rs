@@ -27,7 +27,6 @@ pub async fn build_resume_picker_config(
     Ok(ResumePickerRunConfig {
         store_path,
         lookup_cwd,
-        worker_executable: options.worker_executable,
     })
 }
 
@@ -89,7 +88,6 @@ pub async fn build_resume_config(
         resume_store_path,
         config,
         lookup_cwd,
-        options.worker_executable,
         Some(&lease),
         true,
         None,
@@ -105,7 +103,6 @@ pub async fn build_resume_config_for_session(
     session_id: &str,
     config: &NacConfig,
     resume_base_cwd: PathBuf,
-    worker_executable: Option<PathBuf>,
     model: ResumeModelOptions,
 ) -> Result<SessionRunConfig> {
     let snapshot = sessions::load_session_async(store_path.clone(), session_id.to_string()).await?;
@@ -123,7 +120,6 @@ pub async fn build_resume_config_for_session(
         store_path,
         config,
         resume_base_cwd,
-        worker_executable,
         Some(&lease),
         true,
         None,
@@ -139,7 +135,6 @@ pub async fn build_resume_config_for_session_attachment(
     session_id: &str,
     config: &NacConfig,
     resume_base_cwd: PathBuf,
-    worker_executable: Option<PathBuf>,
     model: ResumeModelOptions,
 ) -> Result<(
     SessionRunConfig,
@@ -164,7 +159,6 @@ pub async fn build_resume_config_for_session_attachment(
             store_path,
             config,
             resume_base_cwd,
-            worker_executable,
             None,
             true,
             Some(metadata),
@@ -188,7 +182,6 @@ pub async fn build_resume_config_for_session_attachment(
                 store_path,
                 config,
                 resume_base_cwd,
-                worker_executable,
                 Some(&lease),
                 true,
                 None,
@@ -204,7 +197,6 @@ pub async fn build_resume_config_for_session_attachment(
                 store_path,
                 config,
                 resume_base_cwd,
-                worker_executable,
                 None,
                 false,
                 Some(metadata),
@@ -222,7 +214,6 @@ pub async fn build_resume_config_for_session_with_lease(
     session_id: &str,
     config: &NacConfig,
     resume_base_cwd: PathBuf,
-    worker_executable: Option<PathBuf>,
     operation_lease: &sessions::SessionOperationLease,
     model: ResumeModelOptions,
 ) -> Result<SessionRunConfig> {
@@ -240,7 +231,6 @@ pub async fn build_resume_config_for_session_with_lease(
         store_path,
         config,
         resume_base_cwd,
-        worker_executable,
         Some(operation_lease),
         true,
         None,
@@ -253,14 +243,13 @@ pub async fn build_resume_config_for_session_with_lease(
 
 #[expect(
     clippy::too_many_arguments,
-    reason = "resume composition keeps persisted snapshot, overrides, lease, and executable authority explicit"
+    reason = "resume composition keeps persisted snapshot, overrides, and lease authority explicit"
 )]
 pub(super) async fn build_resume_config_from_snapshot(
     snapshot: SessionSnapshot,
     store_path: PathBuf,
     config: &NacConfig,
     resume_base_cwd: PathBuf,
-    worker_executable: Option<PathBuf>,
     operation_lease: Option<&sessions::SessionOperationLease>,
     persist_recovery: bool,
     resolved_metadata: Option<ModelMetadata>,
@@ -469,7 +458,7 @@ pub(super) async fn build_resume_config_from_snapshot(
         workspace_cwd,
         config_cwd,
         working_directory: working_directory.clone(),
-        worker_executable,
+        worker_executable: None,
         sandbox,
         ssh,
         mcp,

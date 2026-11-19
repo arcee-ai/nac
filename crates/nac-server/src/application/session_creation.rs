@@ -381,7 +381,7 @@ impl<'a> SessionCreationApplication<'a> {
         let options = RunOptions {
             workspace_cwd: location.workspace_cwd,
             config_cwd: Some(location.config_cwd.clone()),
-            worker_executable: None,
+
             store: StoreOptions {
                 store_path: Some(self.manager.inner.store_path.clone()),
             },

@@ -8,7 +8,7 @@ fn run_options(root: &Path, store_path: &Path) -> RunOptions {
     RunOptions {
         workspace_cwd: root.to_path_buf(),
         config_cwd: Some(root.to_path_buf()),
-        worker_executable: None,
+
         store: StoreOptions {
             store_path: Some(store_path.to_path_buf()),
         },
@@ -65,7 +65,6 @@ async fn disconnect_refuses_mounted_direct_and_child_sessions() {
         &child_id,
         &NacConfig::default(),
         root.clone(),
-        None,
         ResumeModelOptions::default(),
     )
     .await

@@ -393,7 +393,6 @@ impl<'a> SessionAttachmentApplication<'a> {
                 session_id,
                 &config,
                 self.manager.inner.root_cwd.clone(),
-                None,
                 operation_lease,
                 model.clone(),
             )
@@ -404,7 +403,6 @@ impl<'a> SessionAttachmentApplication<'a> {
                 session_id,
                 &config,
                 self.manager.inner.root_cwd.clone(),
-                None,
                 model,
             )
             .await?
@@ -467,7 +465,6 @@ impl<'a> SessionAttachmentApplication<'a> {
                 session_id,
                 &config,
                 self.manager.inner.root_cwd.clone(),
-                None,
                 model,
             )
             .await?;

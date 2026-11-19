@@ -21,7 +21,7 @@ async fn retired_behavior_is_rejected_before_runtime_or_store_preparation() {
             RunOptions {
                 workspace_cwd: root.clone(),
                 config_cwd: Some(root.clone()),
-                worker_executable: None,
+
                 store: StoreOptions {
                     store_path: Some(store_path.clone()),
                 },
@@ -73,7 +73,6 @@ async fn retired_snapshot_is_rejected_before_resume_preparation() {
         store_path.clone(),
         &NacConfig::default(),
         root,
-        None,
         None,
         false,
         None,
@@ -142,7 +141,6 @@ async fn create_and_resume_effort_snapshot(
         session_id,
         &NacConfig::default(),
         root.to_path_buf(),
-        None,
         ResumeModelOptions::default(),
     )
     .await
@@ -168,7 +166,7 @@ async fn direct_behavior_builds_and_resumes_a_persistent_direct_primary() {
         RunOptions {
             workspace_cwd: root.clone(),
             config_cwd: Some(root.clone()),
-            worker_executable: None,
+
             store: StoreOptions {
                 store_path: Some(store_path.clone()),
             },
@@ -206,7 +204,6 @@ async fn direct_behavior_builds_and_resumes_a_persistent_direct_primary() {
         &session_id,
         &NacConfig::default(),
         root.clone(),
-        None,
         ResumeModelOptions::default(),
     )
     .await
@@ -688,7 +685,6 @@ async fn resume_picker_defers_snapshot_and_credential_validation_until_selection
         "picker-session",
         &NacConfig::default(),
         picker.lookup_cwd,
-        None,
         ResumeModelOptions::default(),
     )
     .await
@@ -761,7 +757,6 @@ async fn resume_picker_and_selection_perform_no_network() {
         "network-free-session",
         &NacConfig::default(),
         picker.lookup_cwd,
-        None,
         ResumeModelOptions::default(),
     )
     .await
@@ -1418,7 +1413,6 @@ async fn resume_and_delegated_worker_reject_arcee_api_key_env_early() {
         &NacConfig::default(),
         root.clone(),
         None,
-        None,
         true,
         None,
         ResumeModelOptions::default(),
@@ -1590,7 +1584,6 @@ async fn resume_effort_migration_requires_operation_lease() {
         "session",
         &NacConfig::default(),
         root.clone(),
-        None,
         ResumeModelOptions::default(),
     )
     .await
@@ -1607,7 +1600,6 @@ async fn resume_effort_migration_requires_operation_lease() {
         "session",
         &NacConfig::default(),
         root.clone(),
-        None,
         &lease,
         ResumeModelOptions::default(),
     )
@@ -1645,7 +1637,7 @@ async fn persisted_settings_are_identical_across_create_snapshot_resume_and_work
         RunOptions {
             workspace_cwd: workspace.clone(),
             config_cwd: None,
-            worker_executable: None,
+
             store: StoreOptions {
                 store_path: Some(store_path.clone()),
             },
@@ -1683,7 +1675,7 @@ async fn persisted_settings_are_identical_across_create_snapshot_resume_and_work
     let resumed = build_resume_config(
         ResumeOptions {
             lookup_cwd: workspace,
-            worker_executable: None,
+
             session_id: Some(session_id),
             last: false,
             store: StoreOptions {

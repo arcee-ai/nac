@@ -32,7 +32,6 @@ async fn direct(home: &TestHome, behavior: crate::sessions::SessionBehavior) -> 
         RunOptions {
             workspace_cwd: root.clone(),
             config_cwd: Some(root),
-            worker_executable: None,
             store: StoreOptions {
                 store_path: Some(home.path.join("store.db")),
             },
@@ -226,7 +225,6 @@ async fn mcp_mount_refresh_add_replace_remove_and_restart_preserve_captured_roun
         &id,
         &runtime::NacConfig::default(),
         home.path.join("repo"),
-        None,
         runtime::ResumeModelOptions::default(),
     )
     .await
@@ -508,7 +506,6 @@ async fn mcp_mount_refresh_keeps_parent_and_child_mounts_independent() {
         &child_id,
         &runtime::NacConfig::default(),
         home.path.join("repo"),
-        None,
         runtime::ResumeModelOptions::default(),
     )
     .await
@@ -703,7 +700,6 @@ async fn mcp_mount_refresh_retains_ssh_backend_and_never_spawns_stdio() {
         &session,
         &runtime::NacConfig::default(),
         home.path.join("repo"),
-        None,
         runtime::ResumeModelOptions::default(),
     )
     .await

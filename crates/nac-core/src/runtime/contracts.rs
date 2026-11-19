@@ -108,7 +108,6 @@ pub struct RunOptions {
     pub workspace_cwd: PathBuf,
     /// Local cwd for config/store resolution; SSH workspaces are remote.
     pub config_cwd: Option<PathBuf>,
-    pub worker_executable: Option<PathBuf>,
     pub store: StoreOptions,
     pub model: ModelOptions,
     /// New-session override. `None` defaults to 70% of the resolved model's
@@ -199,7 +198,6 @@ pub struct ManagedWorkerOptions {
 #[derive(Debug, Clone, Default)]
 pub struct ResumeOptions {
     pub lookup_cwd: PathBuf,
-    pub worker_executable: Option<PathBuf>,
     pub session_id: Option<String>,
     pub last: bool,
     pub store: StoreOptions,
@@ -332,5 +330,4 @@ impl SessionRunConfig {
 pub struct ResumePickerRunConfig {
     pub store_path: PathBuf,
     pub lookup_cwd: PathBuf,
-    pub worker_executable: Option<PathBuf>,
 }
