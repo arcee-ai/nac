@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
@@ -378,14 +378,6 @@ pub fn read_workspace_revision(
     store::read_workspace_revision(store_path, session_id, id)
 }
 
-pub fn list_threads(store_path: &Path, session_id: Option<&str>) -> Result<Vec<ThreadSnapshot>> {
-    let Some(session_id) = session_id else {
-        return Ok(Vec::new());
-    };
-    store::list_threads(store_path, session_id)
-        .map(|threads| threads.into_iter().map(Into::into).collect())
-}
-
 pub(crate) fn list_threads_with_connection(
     conn: &rusqlite::Connection,
     session_id: Option<&str>,
@@ -395,32 +387,6 @@ pub(crate) fn list_threads_with_connection(
     };
     store::list_threads_with_connection(conn, session_id)
         .map(|threads| threads.into_iter().map(Into::into).collect())
-}
-
-pub fn load_thread_episodes(
-    store_path: &Path,
-    session_id: Option<&str>,
-    thread_name: &str,
-) -> Result<Vec<EpisodeSnapshot>> {
-    let Some(session_id) = session_id else {
-        return Ok(Vec::new());
-    };
-    store::thread_dispatches(store_path, session_id, thread_name)
-        .map(|episodes| episodes.into_iter().map(Into::into).collect())
-}
-
-pub fn load_all_thread_episodes(
-    store_path: &Path,
-    session_id: Option<&str>,
-) -> Result<HashMap<String, Vec<EpisodeSnapshot>>> {
-    let Some(session_id) = session_id else {
-        return Ok(HashMap::new());
-    };
-    let episodes = store::load_all_dispatches(store_path, session_id)?;
-    Ok(episodes
-        .into_iter()
-        .map(|(thread, episodes)| (thread, episodes.into_iter().map(Into::into).collect()))
-        .collect())
 }
 
 pub(crate) fn load_all_thread_episodes_with_connection(
@@ -435,45 +401,6 @@ pub(crate) fn load_all_thread_episodes_with_connection(
         .into_iter()
         .map(|(thread, episodes)| (thread, episodes.into_iter().map(Into::into).collect()))
         .collect())
-}
-
-pub fn list_worksets(
-    store_path: &Path,
-    session_id: Option<&str>,
-) -> Result<Vec<WorksetSummarySnapshot>> {
-    let Some(session_id) = session_id else {
-        return Err(anyhow!("no active session"));
-    };
-    store::list_worksets(store_path, session_id)
-        .map(|worksets| worksets.into_iter().map(Into::into).collect())
-}
-
-pub fn read_workset(
-    store_path: &Path,
-    session_id: Option<&str>,
-    workset_id: &str,
-) -> Result<Option<WorksetSnapshot>> {
-    let Some(session_id) = session_id else {
-        return Err(anyhow!("no active session"));
-    };
-    store::read_workset(store_path, session_id, workset_id).map(|workset| workset.map(Into::into))
-}
-
-pub fn worksets_snapshot(store_path: &Path, session_id: Option<&str>) -> WorksetsSnapshot {
-    let Some(session_id) = session_id else {
-        return WorksetsSnapshot {
-            items: Vec::new(),
-            error: Some("no active session".to_string()),
-        };
-    };
-
-    match load_workset_records(store_path, session_id) {
-        Ok(items) => WorksetsSnapshot { items, error: None },
-        Err(error) => WorksetsSnapshot {
-            items: Vec::new(),
-            error: Some(error.to_string()),
-        },
-    }
 }
 
 pub(crate) fn worksets_snapshot_with_connection(
@@ -494,17 +421,6 @@ pub(crate) fn worksets_snapshot_with_connection(
             error: Some(error.to_string()),
         },
     }
-}
-
-coordinated_command! {
-fn load_workset_records(store_path: &Path, session_id: &str) -> Result<Vec<WorksetSnapshot>> {
-    let conn = store::open_runtime_connection(store_path)?;
-    load_workset_records_with_connection(&conn, session_id)
-}
-command ReadWorksetProjectionCommand { session_id: String = session_id.to_owned() }
-call |command| (&command.session_id)
-correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
-port internal;
 }
 
 fn load_workset_records_with_connection(
