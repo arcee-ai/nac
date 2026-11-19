@@ -344,7 +344,6 @@ fn explicit_model_settings_do_not_inherit_config_defaults() {
             api_key_env: OptionalModelOption::Value("EXPLICIT_API_KEY".to_string()),
             trusted_api_key_file: None,
             extra_headers: Some(headers.clone()),
-            light_model: None,
         },
         &config,
     )
@@ -1761,7 +1760,6 @@ async fn persisted_settings_are_identical_across_create_snapshot_resume_and_work
                 api_key_env: OptionalModelOption::Value(key_name.to_string()),
                 trusted_api_key_file: None,
                 extra_headers: Some(headers.clone()),
-                light_model: None,
             },
             orchestrator_compaction_threshold: Some(48_000),
             sandbox: SandboxOptions::default(),

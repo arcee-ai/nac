@@ -379,7 +379,6 @@ impl<'a> SessionCreationApplication<'a> {
                 model.trusted_api_key_file = profile.trusted_api_key_file();
             }
         }
-        model.light_model = None;
         let options = RunOptions {
             workspace_cwd: location.workspace_cwd,
             config_cwd: Some(location.config_cwd.clone()),

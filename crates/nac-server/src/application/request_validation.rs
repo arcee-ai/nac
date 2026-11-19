@@ -118,7 +118,6 @@ pub(crate) fn model_options(
         api_key_env,
         trusted_api_key_file: None,
         extra_headers,
-        light_model: None,
     })
 }
 

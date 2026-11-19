@@ -148,10 +148,6 @@ async fn prepare_run_config_inner(
         behavior == sessions::SessionBehavior::Direct,
         "only direct session behavior is supported"
     );
-    anyhow::ensure!(
-        options.model.light_model.is_none(),
-        "light_model is no longer supported"
-    );
     let ssh_host = options.ssh.host();
     let config_cwd = options
         .config_cwd

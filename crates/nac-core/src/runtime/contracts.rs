@@ -46,9 +46,6 @@ pub struct ModelOptions {
     /// composition state and is never populated from ordinary CLI/HTTP input.
     pub trusted_api_key_file: Option<PathBuf>,
     pub extra_headers: Option<BTreeMap<String, String>>,
-    /// Optional light worker model; `Some` enables weight-classified
-    /// dispatch for the session, `None` keeps single-model behavior.
-    pub light_model: Option<LightModelSettings>,
 }
 
 /// Ephemeral model inputs needed to reconstruct a persisted session.
