@@ -198,8 +198,8 @@ test-e2e-remote:
 ## Run focused deterministic lifecycle and crash-window regressions
 test-durability:
 	$(CARGO) test --locked -p nac-core human_shell_real_process_death_never_repeats_effects
-	$(CARGO) test --locked -p nac-core store::worker_dispatches
-	$(CARGO) test --locked -p nac-core host_completion_protocol
+	$(CARGO) test --locked -p nac-core v53_retirement_preserves_live_direct_data_and_edited_connections
+	$(CARGO) test --locked -p nac-core fenced_prompt_lost_ack_replays_before_adopting_the_user_turn
 	$(CARGO) test --locked -p nac-core store_process_lease
 	$(CARGO) test --locked -p nac-core stale_session_owner_is_fenced_until_process_death_then_restart_acquires
 	$(CARGO) test --locked -p nac-core current_schema_initialize_is_byte_exact_and_does_not_enter_a_writer_transaction
@@ -219,9 +219,9 @@ test-durability:
 	$(CARGO) test --locked -p nac-server parent_deletion_excludes_late_child_relationship_commit
 	$(CARGO) test --locked -p nac-server serving_store_ownership_rejects_a_second_manager_and_allows_restart
 	$(CARGO) test --locked -p nac-server serving_managers_can_own_separate_stores_concurrently
-	$(CARGO) test --locked -p nac-server managed_monitor_treats_peer_lease_as_live
-	$(CARGO) test --locked -p nac-server managed_binding_failure_precedes_run_and_prompt_execution
-	$(CARGO) test --locked -p nac-server parent_attachment_settles_canonical_managed_terminal_once_after_restart
+	$(CARGO) test --locked -p nac-server foreign_child_attachment_is_uncached_until_peer_lease_retires
+	$(CARGO) test --locked -p nac-server uncached_inbox_wake_survives_a_busy_peer_without_another_request
+	$(CARGO) test --locked -p nac-server native_initial_input_continues_after_peer_releases_lease
 	$(CARGO) test --locked -p nac-server wrong_parent_relationship_reads_are_opaque_not_found
 
 ## Verify compile-gated one-shot controls for private managed fault images
