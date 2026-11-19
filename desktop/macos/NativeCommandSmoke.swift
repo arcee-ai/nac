@@ -16,6 +16,32 @@ final class NativeCommandSmoke {
         try await wait("production Home composer") {
             try await self.js("const f = document.getElementById('home-composer'); return !!f && !f.disabled && [...f.labels].some(l => l.textContent.trim() === 'What should we work on?')") as? Bool == true
         }
+        try await wait("model selection control") {
+            try await self.js("const b=[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Choose a model');if(!b)return false;b.click();return true") as? Bool == true
+        }
+        try await wait("model search") {
+            try await self.js("""
+            if (document.querySelector('input[aria-label="Search models"]')) return true;
+            const b=document.querySelector('[role=dialog] [role=group] button[aria-expanded]');
+            if (b && !b.disabled && b.getAttribute('aria-expanded') === 'false') b.click();
+            return false;
+            """) as? Bool == true
+        }
+        _ = try await js("""
+        const f=document.querySelector('input[aria-label="Search models"]');
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(f,'gpt-5.6-sol');
+        f.dispatchEvent(new Event('input',{bubbles:true})); return true;
+        """)
+        try await wait("fixture OpenAI model") {
+            try await self.js("""
+            const b=[...document.querySelectorAll('[aria-label="Model results"] button[data-row]')]
+                .find(b=>b.parentElement?.textContent.includes('OpenAI') && b.textContent.toLowerCase().includes('gpt-5.6'));
+            if (!b) return false; b.click(); return true;
+            """) as? Bool == true
+        }
+        try await wait("available session model") {
+            try await self.js("const b=[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Use this model'&&!b.disabled);if(!b)return false;b.click();return true") as? Bool == true
+        }
         _ = try await js("const f = document.getElementById('home-composer'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(f, 'Native command fixture session'); f.dispatchEvent(new Event('input', {bubbles: true})); return true")
         try await wait("production Start session") {
             try await self.js("const b = document.querySelector('button[aria-label=\"Start session\"]'); if (!b || b.disabled) return false; b.click(); return true") as? Bool == true
