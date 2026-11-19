@@ -631,12 +631,12 @@ async fn brokerless_model_calls_still_enforce_native_hard_denials() {
         (
             "write_stdin",
             serde_json::json!({"session_id":"shell-test", "chars":"help<RET>"}),
-            "nonempty terminal input is unavailable to brokerless workers",
+            "nonempty terminal input is unavailable without an approval broker",
         ),
         (
             "exec_command",
             serde_json::json!({"cmd":"bash", "tty":true}),
-            "interactive opaque commands and broad interpreters are unavailable to brokerless workers",
+            "interactive opaque commands and broad interpreters are unavailable without an approval broker",
         ),
     ] {
         let result = snapshot.invoke(tool, input, services, &context).await;

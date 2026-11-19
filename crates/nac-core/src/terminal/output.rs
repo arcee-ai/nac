@@ -34,24 +34,18 @@ impl Default for CommandOutputLimits {
 impl CommandOutputLimits {
     pub fn validate(self) -> Result<Self> {
         if self.per_command_bytes == 0 {
-            return Err(anyhow!(
-                "worker.command_output_max_bytes must be at least 1"
-            ));
+            return Err(anyhow!("command output limit must be at least 1"));
         }
         if self.per_command_bytes > 1024 * 1024 * 1024 {
-            return Err(anyhow!(
-                "worker.command_output_max_bytes must not exceed 1073741824"
-            ));
+            return Err(anyhow!("command output limit must not exceed 1073741824"));
         }
         if self.per_session_bytes < self.per_command_bytes {
             return Err(anyhow!(
-                "worker.command_output_session_max_bytes must be at least worker.command_output_max_bytes"
+                "session output limit must be at least command output limit"
             ));
         }
         if self.per_session_bytes > 4usize * 1024 * 1024 * 1024 {
-            return Err(anyhow!(
-                "worker.command_output_session_max_bytes must not exceed 4294967296"
-            ));
+            return Err(anyhow!("session output limit must not exceed 4294967296"));
         }
         Ok(self)
     }
