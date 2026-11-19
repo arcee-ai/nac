@@ -298,7 +298,7 @@ pub fn expire_thread_steering(
 ) -> Result<Vec<ThreadSteeringRecord>> {
     crate::store::retry_busy_correlated(
         crate::telemetry::Correlation::session(Some(session_id)).with_run(Some(dispatch_id)),
-        || expire_thread_steering_once(path, session_id, Some(dispatch_id)),
+        || expire_thread_steering_once(path, session_id, dispatch_id),
     )
 }
 command ExpireThreadSteeringCommand {
@@ -310,43 +310,20 @@ correlation |command| crate::telemetry::Correlation::session(Some(&command.sessi
 port public;
 }
 
-coordinated_command! {
-pub fn expire_session_steering(path: &Path, session_id: &str) -> Result<Vec<ThreadSteeringRecord>> {
-    crate::store::retry_busy_correlated(
-        crate::telemetry::Correlation::session(Some(session_id)),
-        || expire_thread_steering_once(path, session_id, None),
-    )
-}
-command ExpireSessionSteeringCommand {
-    session_id: String = session_id.to_owned(),
-}
-call |command| (&command.session_id)
-correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
-port public;
-}
-
 fn expire_thread_steering_once(
     path: &Path,
     session_id: &str,
-    dispatch_id: Option<&str>,
+    dispatch_id: &str,
 ) -> Result<Vec<ThreadSteeringRecord>> {
     let mut conn = open_runtime_connection(path)?;
     let transaction = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-    let pending = if let Some(dispatch_id) = dispatch_id {
+    let pending = {
         let mut statement = transaction.prepare(&format!(
             "SELECT {RECORD_COLUMNS} FROM thread_steering
              WHERE session_id = ?1 AND dispatch_id = ?2
                AND status IN ('queued', 'claimed') ORDER BY id ASC"
         ))?;
         let mapped = statement.query_map(params![session_id, dispatch_id], row_to_record)?;
-        mapped.collect::<std::result::Result<Vec<_>, _>>()?
-    } else {
-        let mut statement = transaction.prepare(&format!(
-            "SELECT {RECORD_COLUMNS} FROM thread_steering
-             WHERE session_id = ?1 AND status IN ('queued', 'claimed')
-             ORDER BY id ASC"
-        ))?;
-        let mapped = statement.query_map(params![session_id], row_to_record)?;
         mapped.collect::<std::result::Result<Vec<_>, _>>()?
     };
     if pending.is_empty() {

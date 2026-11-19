@@ -1,5 +1,5 @@
 use super::super::tests::{
-    build_test_agent, compaction_response, test_active_service, test_agent,
+    build_test_agent, compaction_response, test_active_service,
     test_agent_with_compaction_threshold, test_compaction_service, test_picker_service,
     test_store_path,
 };
