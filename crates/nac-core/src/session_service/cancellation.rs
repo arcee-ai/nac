@@ -69,22 +69,20 @@ impl SessionService {
             });
         };
 
-        if self.metadata.behavior != sessions::SessionBehavior::Orchestrator {
-            if crate::store::coordinator::owner_for(&self.metadata.store_path)
-                .map(|owner| owner.is_some())
-                .unwrap_or(true)
-            {
-                cancelling_run.command_cancellation.cancel_async().await;
-            } else {
-                cancelling_run.command_cancellation.cancel();
-            }
-            // Terminal handles are session-owned and can be idle while the
-            // model is between tool calls. Start settlement immediately, then
-            // repeat it after the run task has stopped. PTY spawn and input
-            // share the cancellation token's final mutation gate, so neither
-            // can cross this cancellation boundary after it wins.
-            let _ = self.terminal_manager.settle_run().await;
+        if crate::store::coordinator::owner_for(&self.metadata.store_path)
+            .map(|owner| owner.is_some())
+            .unwrap_or(true)
+        {
+            cancelling_run.command_cancellation.cancel_async().await;
+        } else {
+            cancelling_run.command_cancellation.cancel();
         }
+        // Terminal handles are session-owned and can be idle while the
+        // model is between tool calls. Start settlement immediately, then
+        // repeat it after the run task has stopped. PTY spawn and input
+        // share the cancellation token's final mutation gate, so neither
+        // can cross this cancellation boundary after it wins.
+        let _ = self.terminal_manager.settle_run().await;
 
         let steering_store = self
             .metadata
@@ -99,26 +97,23 @@ impl SessionService {
         self.run_admission.cancel_and_retire(owned).await;
 
         if let Some(task) = cancelling_run.task.as_mut() {
-            let abort = self.metadata.behavior == sessions::SessionBehavior::Orchestrator
-                || tokio::time::timeout(Duration::from_secs(2), &mut *task)
-                    .await
-                    .is_err();
+            let abort = tokio::time::timeout(Duration::from_secs(2), &mut *task)
+                .await
+                .is_err();
             if abort {
                 task.abort();
                 let _ = (&mut *task).await;
             }
         }
 
-        if self.metadata.behavior != sessions::SessionBehavior::Orchestrator {
-            if let Err(error) = self.terminal_manager.settle_run().await {
-                // Cleanup is a terminal-state admission boundary. Keep the run,
-                // its operation lease, goal/child bindings, and queued inbox
-                // successor unsettled so a later cancellation can retry.
-                return Err(SessionCancelError::Cleanup {
-                    run_id: cancelling_run.snapshot.run_id.clone(),
-                    message: format!("{error:#}"),
-                });
-            }
+        if let Err(error) = self.terminal_manager.settle_run().await {
+            // Cleanup is a terminal-state admission boundary. Keep the run,
+            // its operation lease, goal/child bindings, and queued inbox
+            // successor unsettled so a later cancellation can retry.
+            return Err(SessionCancelError::Cleanup {
+                run_id: cancelling_run.snapshot.run_id.clone(),
+                message: format!("{error:#}"),
+            });
         }
 
         // A cancellation marker is itself a visible response. If the run task
@@ -171,24 +166,24 @@ impl SessionService {
                 cancelling_run.snapshot.run_id
             );
         }
-        if self.metadata.behavior != sessions::SessionBehavior::Orchestrator {
-            self.settle_direct_goal_run(
-                &cancelling_run.snapshot.run_id,
-                cancel_usage,
-                crate::store::GoalRunDisposition::Cancelled,
-                None,
-            )
+
+        self.settle_direct_goal_run(
+            &cancelling_run.snapshot.run_id,
+            cancel_usage,
+            crate::store::GoalRunDisposition::Cancelled,
+            None,
+        )
+        .await;
+        self.capture_workspace_revision(&cancelling_run.snapshot)
             .await;
-            self.capture_workspace_revision(&cancelling_run.snapshot)
-                .await;
-            self.settle_traditional_child_run(
-                &cancelling_run.snapshot.run_id,
-                crate::store::TraditionalChildStatus::Cancelled,
-                None,
-                Some("parent or user cancelled the child run".to_string()),
-            )
-            .await;
-        }
+        self.settle_traditional_child_run(
+            &cancelling_run.snapshot.run_id,
+            crate::store::TraditionalChildStatus::Cancelled,
+            None,
+            Some("parent or user cancelled the child run".to_string()),
+        )
+        .await;
+
         if let Err(error) = self
             .event_bus
             .emit_with_context_async(
@@ -207,11 +202,11 @@ impl SessionService {
                 run_id: cancelling_run.snapshot.run_id.clone(),
                 message: format!("cancellation cleanup failed: {error:#}"),
             })?;
-        if self.metadata.behavior != sessions::SessionBehavior::Orchestrator {
-            if let Err(error) = self.start_next_direct_inbox_item().await {
-                eprintln!("nac: failed to promote direct inbox after cancellation: {error:#}");
-            }
+
+        if let Err(error) = self.start_next_direct_inbox_item().await {
+            eprintln!("nac: failed to promote direct inbox after cancellation: {error:#}");
         }
+
         Ok(())
     }
 }
