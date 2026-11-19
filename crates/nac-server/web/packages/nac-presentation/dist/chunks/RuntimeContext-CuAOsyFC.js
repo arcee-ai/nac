@@ -1,5 +1,5 @@
 import { n as e } from "./rolldown-runtime-QGRDbDUS.js";
-import { S as t, T as n, _ as r, c as i, g as a, s as o, v as s, x as c, y as l } from "./PresentationBoundary-dedQ5W_c.js";
+import { S as t, T as n, _ as r, c as i, g as a, s as o, v as s, x as c, y as l } from "./PresentationBoundary-BVEraDGB.js";
 import { createContext as u, useCallback as d, useContext as f, useMemo as p, useSyncExternalStore as m } from "react";
 import { QueryClient as h, hashKey as g } from "@tanstack/react-query";
 // src/app/features/product-context/navigation.ts

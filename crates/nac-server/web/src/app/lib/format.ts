@@ -155,8 +155,7 @@ export function displayPromptFromMessageText(content: string | null | undefined)
   if (isGoalContinuationEnvelope(normalized)) return "[durable goal continuation]";
   const completion = parseDelegatedCompletion(normalized);
   if (completion) {
-    const type = completion.kind === "coding-agent" ? "traditional child" : "managed orchestrator";
-    return `[${type} ${completion.status}: ${completion.description}]`;
+    return `[traditional child ${completion.status}: ${completion.description}]`;
   }
   return text;
 }
