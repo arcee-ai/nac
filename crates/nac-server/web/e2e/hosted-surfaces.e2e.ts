@@ -155,7 +155,7 @@ for (const mobile of [false, true]) {
       harness.provider.enqueue(
         token,
         { token },
-        { kind: "text", text: token + " done", stream: true },
+        { kind: "text", text: token + " done", stream: "request" },
       );
       const submitted = await request.post(`${harness.baseUrl}/sessions/${id}/runs`, {
         data: { prompt: token },
@@ -210,7 +210,13 @@ for (const mobile of [false, true]) {
         .toBe("injected accepted commit");
       await withBranchPicker(page, mobile, async () => {
         await page.getByRole("button", { name: "Branch: injected-feature", exact: true }).click();
+        const switched = page.waitForResponse(
+          (response) =>
+            response.request().method() === "POST" &&
+            new URL(response.url()).pathname.endsWith(`/sessions/${id}/workspace/branches`),
+        );
         await page.getByRole("button", { name: "other", exact: true }).click();
+        expect((await switched).ok()).toBe(true);
         await expect(
           page.getByRole("button", { name: "Branch: other", exact: true }),
         ).toBeVisible();
@@ -220,7 +226,7 @@ for (const mobile of [false, true]) {
       harness.provider.enqueue(
         "REFRESH_DIRTY",
         { token: "REFRESH_DIRTY" },
-        { kind: "text", text: "dirty refresh done", stream: true },
+        { kind: "text", text: "dirty refresh done", stream: "request" },
       );
       expect(
         (
