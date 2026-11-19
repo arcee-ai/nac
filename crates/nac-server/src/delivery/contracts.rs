@@ -669,7 +669,6 @@ pub struct ToolCallContentResponse {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq, utoipa::ToSchema)]
 pub struct MessageCycleMetadata {
     pub marker: String,
-    pub thread_names: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
@@ -717,7 +716,6 @@ impl From<nac_core::session_service::MessageCycleMetadata> for MessageCycleMetad
     fn from(cycle: nac_core::session_service::MessageCycleMetadata) -> Self {
         Self {
             marker: cycle.marker,
-            thread_names: cycle.thread_names,
         }
     }
 }

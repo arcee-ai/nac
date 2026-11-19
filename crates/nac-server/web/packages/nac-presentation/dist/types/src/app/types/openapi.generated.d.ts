@@ -1133,7 +1133,6 @@ export interface components {
         };
         MessageCycleMetadata: {
             marker: string;
-            thread_names: string[];
         };
         MessagePageMetadata: {
             end: number;

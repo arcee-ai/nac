@@ -408,7 +408,6 @@ async fn focused_snapshot_options_page_messages_and_preserve_default_wrapper_con
         loaded.message_cycle,
         Some(MessageCycleMetadata {
             marker: "history:2:5".to_string(),
-            thread_names: vec!["alpha".to_string(), "zeta".to_string()],
         })
     );
     assert_eq!(
@@ -532,7 +531,6 @@ async fn store_backed_pages_are_live_mid_run_while_the_agent_is_busy() {
         loaded.message_cycle,
         Some(MessageCycleMetadata {
             marker: format!("history:3:{}", persisted_messages.len()),
-            thread_names: Vec::new(),
         })
     );
     assert_eq!(

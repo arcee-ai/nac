@@ -178,23 +178,6 @@ fn paged_messages_match_legacy_windows_for_mixed_history_and_cursor_bounds() {
     assert_eq!(beyond_end.messages.len(), 4);
 }
 
-#[test]
-fn thread_tool_call_names_ignore_malformed_and_non_thread_calls() {
-    let messages = mixed_message_history();
-    // Names come from `thread` tool calls only; malformed arguments,
-    // blank names, and non-thread calls are ignored, and names are
-    // sorted and deduplicated.
-    assert_eq!(
-        thread_tool_call_names(&messages[6..]),
-        vec!["alpha".to_string(), "zeta".to_string()]
-    );
-    assert!(thread_tool_call_names(&messages[..2]).is_empty());
-    assert!(thread_tool_call_names(&[Message::System {
-        content: "only system".to_string(),
-    }])
-    .is_empty());
-}
-
 pub(super) fn test_store_path(label: &str) -> PathBuf {
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

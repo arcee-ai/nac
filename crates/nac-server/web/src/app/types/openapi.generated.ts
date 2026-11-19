@@ -1025,7 +1025,7 @@ export interface components {
           tool_calls?: components["schemas"]["ToolCall"][] | null;
         }
       | { content: components["schemas"]["ToolContentSchema"]; role: "tool"; tool_call_id: string };
-    MessageCycleMetadata: { marker: string; thread_names: string[] };
+    MessageCycleMetadata: { marker: string };
     MessagePageMetadata: { end: number; has_older: boolean; start: number; total: number };
     MessagesPageResponse: {
       created_at: (string | null)[];

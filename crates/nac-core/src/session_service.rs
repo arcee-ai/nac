@@ -320,7 +320,6 @@ pub struct MessagePageMetadata {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MessageCycleMetadata {
     pub marker: String,
-    pub thread_names: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -995,42 +994,6 @@ fn page_messages(messages: &[Message], request: MessagePageRequest) -> MessagesP
             has_older: start > 0,
         },
     }
-}
-
-/// Names of threads dispatched via `thread` tool calls in `messages`
-/// (malformed and empty names ignored). Used for the message-cycle metadata's
-/// bounded tail scan.
-fn thread_tool_call_names(messages: &[Message]) -> Vec<String> {
-    let mut thread_names = BTreeMap::<String, ()>::new();
-    for message in messages {
-        let Message::Assistant {
-            tool_calls: Some(tool_calls),
-            ..
-        } = message
-        else {
-            continue;
-        };
-        for tool_call in tool_calls {
-            if tool_call.function.name != "thread" {
-                continue;
-            }
-            let Ok(arguments) =
-                serde_json::from_str::<serde_json::Value>(&tool_call.function.arguments)
-            else {
-                continue;
-            };
-            let Some(name) = arguments
-                .get("name")
-                .and_then(serde_json::Value::as_str)
-                .map(str::trim)
-                .filter(|name| !name.is_empty())
-            else {
-                continue;
-            };
-            thread_names.insert(name.to_string(), ());
-        }
-    }
-    thread_names.into_keys().collect()
 }
 
 fn decode_thread_event(

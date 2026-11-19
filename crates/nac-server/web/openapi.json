@@ -16645,18 +16645,11 @@
       "MessageCycleMetadata": {
         "type": "object",
         "required": [
-          "marker",
-          "thread_names"
+          "marker"
         ],
         "properties": {
           "marker": {
             "type": "string"
-          },
-          "thread_names": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
           }
         }
       },
