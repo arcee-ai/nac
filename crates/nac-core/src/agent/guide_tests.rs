@@ -133,7 +133,6 @@ async fn resumed_direct_guide_uses_fresh_system_head_without_rewriting_history()
         ModelClient::new_for_test_server(server.base_url.clone()),
         store_path.clone(),
         Some("session"),
-        AgentMode::Direct,
     );
     agent
         .restore_messages_merging_log_tail(stored, None)

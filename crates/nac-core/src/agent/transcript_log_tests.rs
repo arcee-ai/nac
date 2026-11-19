@@ -16,21 +16,17 @@ pub(super) fn transcript_test_agent(
     client: ModelClient,
     store_path: PathBuf,
     session_id: Option<&str>,
-    mode: AgentMode,
 ) -> Agent {
     Agent::with_config(
         client,
         AgentConfig {
             command_output_limits: crate::terminal::CommandOutputLimits::default(),
-            mode,
+            mode: AgentMode::Direct,
             store_path,
             session_id: session_id.map(str::to_string),
             orchestrator_compaction_threshold: None,
             initial_messages: Vec::new(),
-            thread_name: match mode {
-                AgentMode::Worker => Some("impl/x".to_string()),
-                AgentMode::Orchestrator | AgentMode::Direct => None,
-            },
+            thread_name: None,
             dispatch_id: None,
             event_sink: EventSink::none(),
             workspace_cwd: PathBuf::from("."),
@@ -58,7 +54,7 @@ fn direct_transcript_agent(
         Some(url) => ModelClient::new_for_test_server(url),
         None => ModelClient::new_for_test(),
     };
-    let mut agent = transcript_test_agent(client, store_path, Some(session_id), AgentMode::Direct);
+    let mut agent = transcript_test_agent(client, store_path, Some(session_id));
     agent.set_current_run_id(Some("run".to_string()));
     agent
 }
@@ -166,7 +162,6 @@ fn transcript_log_requires_a_persistent_session() {
         ModelClient::new_for_test(),
         test_store_path("gate_picker"),
         None,
-        AgentMode::Direct,
     );
     assert!(picker.transcript_log.is_none());
 
@@ -177,7 +172,6 @@ fn transcript_log_requires_a_persistent_session() {
         ModelClient::new_for_test(),
         store_path.clone(),
         Some("session"),
-        AgentMode::Direct,
     );
     assert_eq!(agent.transcript_log.as_ref().unwrap().session_id, "session");
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
@@ -767,7 +761,6 @@ async fn direct_failure_marks_streamed_partial_output_as_failed_in_the_log() {
         ModelClient::new_for_test(),
         store_path.clone(),
         Some("session"),
-        AgentMode::Direct,
     );
     let seeded = vec![
         Message::System {
@@ -820,7 +813,6 @@ async fn direct_failure_replays_unacknowledged_assistant_without_duplicate_parti
         ModelClient::new_for_test(),
         store_path.clone(),
         Some("session"),
-        AgentMode::Direct,
     );
     store_snapshot_messages(&store_path, &agent.messages);
     agent.committed_log_len = agent.messages.len() as u64;
@@ -866,7 +858,6 @@ async fn direct_failure_replays_unacknowledged_assistant_without_duplicate_parti
         ModelClient::new_for_test(),
         store_path.clone(),
         Some("session"),
-        AgentMode::Direct,
     );
     restarted.reload_transcript_from_store().await.unwrap();
     assert_eq!(
@@ -886,7 +877,6 @@ fn fenced_prompt_agent(
         ModelClient::new_for_test(),
         path.to_path_buf(),
         Some("session"),
-        AgentMode::Direct,
     );
     store_snapshot_messages(path, &agent.messages);
     agent.committed_log_len = agent.messages.len() as u64;
@@ -1159,7 +1149,6 @@ async fn cancellation_adopts_a_committed_single_direct_steer_after_async_abort()
         ModelClient::new_for_test(),
         store_path.clone(),
         Some("session"),
-        AgentMode::Direct,
     );
     agent.messages = seeded.into();
     agent.committed_log_len = 3;
