@@ -98,39 +98,6 @@ pub struct ThreadSnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct EpisodeSnapshot {
-    pub id: i64,
-    pub thread_name: String,
-    pub session_id: String,
-    pub action: String,
-    pub content: String,
-    /// `ok` for a retained handoff, otherwise how the dispatch died. Snapshots
-    /// written before dispatch outcomes were recorded only held handoffs.
-    #[serde(default = "retained_episode_status")]
-    #[cfg_attr(
-        feature = "openapi",
-        schema(required, value_type = store::EpisodeStatus)
-    )]
-    pub status: String,
-    pub created_at: String,
-}
-
-fn retained_episode_status() -> String {
-    store::EpisodeStatus::Ok.as_str().to_string()
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct WorksetSummarySnapshot {
-    pub id: String,
-    pub status: String,
-    pub summary: String,
-    pub item_count: i64,
-    pub updated_at: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct WorksetItemSnapshot {
     pub position: i64,
     pub title: String,
@@ -267,32 +234,6 @@ impl From<store::ThreadRecord> for ThreadSnapshot {
             updated_at: thread.updated_at,
             episode_count: thread.episode_count,
             latest_action: thread.latest_action,
-        }
-    }
-}
-
-impl From<store::EpisodeRecord> for EpisodeSnapshot {
-    fn from(episode: store::EpisodeRecord) -> Self {
-        Self {
-            id: episode.id,
-            thread_name: episode.thread_name,
-            session_id: episode.session_id,
-            action: episode.action,
-            content: episode.content,
-            status: episode.status,
-            created_at: episode.created_at,
-        }
-    }
-}
-
-impl From<store::WorksetSummary> for WorksetSummarySnapshot {
-    fn from(summary: store::WorksetSummary) -> Self {
-        Self {
-            id: summary.id,
-            status: summary.status,
-            summary: summary.summary,
-            item_count: summary.item_count,
-            updated_at: summary.updated_at,
         }
     }
 }

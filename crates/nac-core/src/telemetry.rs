@@ -98,7 +98,6 @@ pub enum StoreOperation {
     Retry,
     TranscriptAppend,
     EventPersistence,
-    WorkerEpisodeCommit,
     ManagedMonitorPoll,
     Recovery,
     TerminalSettlement,
