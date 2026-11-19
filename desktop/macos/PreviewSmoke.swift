@@ -338,9 +338,12 @@ final class PreviewSmoke {
         // model through the same picker a person uses for the first session.
         try await waitJS("model selection control", "return [...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Choose a model');")
         _ = try await js("[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Choose a model').click(); return true;")
-        try await waitJS("model selector", "return !!document.querySelector('[role=dialog] button[aria-expanded]');")
-        _ = try await js("document.querySelector('[role=dialog] button[aria-expanded]').click(); return true;")
-        try await waitJS("model search", "return !!document.querySelector('input[aria-label=\"Search models\"]');")
+        try await waitJS("model search", """
+        if (document.querySelector('input[aria-label="Search models"]')) return true;
+        const b=document.querySelector('[role=dialog] [role=group] button[aria-expanded]');
+        if (b && !b.disabled && b.getAttribute('aria-expanded') === 'false') b.click();
+        return false;
+        """)
         _ = try await js("const f=document.querySelector('input[aria-label=\"Search models\"]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(f,'gpt-5.6-sol'); f.dispatchEvent(new Event('input',{bubbles:true})); return true;")
         try await waitJS("fixture OpenAI model", "return [...document.querySelectorAll('[aria-label=\"Model results\"] button[data-row]')].some(b => b.parentElement?.textContent.includes('OpenAI') && b.textContent.toLowerCase().includes('gpt-5.6'));")
         _ = try await js("[...document.querySelectorAll('[aria-label=\"Model results\"] button[data-row]')].find(b => b.parentElement?.textContent.includes('OpenAI') && b.textContent.toLowerCase().includes('gpt-5.6')).click(); return true;")

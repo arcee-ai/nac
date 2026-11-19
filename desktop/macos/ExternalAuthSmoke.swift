@@ -80,11 +80,14 @@ final class ExternalAuthSmoke {
         try await wait("model selection control") {
             try await self.js("const b=[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Choose a model'); if(!b)return false;b.click();return true") as? Bool == true
         }
-        try await wait("model selector") {
-            try await self.js("const b=document.querySelector('[role=dialog] button[aria-expanded]');if(!b)return false;b.click();return true") as? Bool == true
-        }
         try await wait("model search") {
-            try await self.js("const f=document.querySelector('input[aria-label=\"Search models\"]');if(!f)return false;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(f,'gpt-5.6-sol');f.dispatchEvent(new Event('input',{bubbles:true}));return true") as? Bool == true
+            try await self.js("""
+            const f=document.querySelector('input[aria-label="Search models"]');
+            if (f) { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(f,'gpt-5.6-sol'); f.dispatchEvent(new Event('input',{bubbles:true})); return true; }
+            const b=document.querySelector('[role=dialog] [role=group] button[aria-expanded]');
+            if (b && !b.disabled && b.getAttribute('aria-expanded') === 'false') b.click();
+            return false;
+            """) as? Bool == true
         }
         try await wait("fixture OpenAI model") {
             try await self.js("const b=[...document.querySelectorAll('[aria-label=\"Model results\"] button[data-row]')].find(b=>b.parentElement?.textContent.includes('OpenAI')&&b.textContent.toLowerCase().includes('gpt-5.6'));if(!b)return false;b.click();return true") as? Bool == true

@@ -168,9 +168,12 @@ final class WorkspaceSmoke {
         try await waitJS("Home composer", Self.homeComposerScript)
         guard behavior == "direct" else { throw PreviewError.message("Only direct sessions are supported") }
         try await button("Choose a model")
-        try await waitJS("model selector", "return !!document.querySelector('[role=dialog] button[aria-expanded]');")
-        _ = try await js("document.querySelector('[role=dialog] button[aria-expanded]').click(); return true;")
-        try await waitJS("model search", "return !!document.querySelector('input[aria-label=\"Search models\"]');")
+        try await waitJS("model search", """
+        if (document.querySelector('input[aria-label="Search models"]')) return true;
+        const b=document.querySelector('[role=dialog] [role=group] button[aria-expanded]');
+        if (b && !b.disabled && b.getAttribute('aria-expanded') === 'false') b.click();
+        return false;
+        """)
         try await fill("input[aria-label='Search models']", "gpt-5.6-sol")
         try await waitJS("fixture OpenAI model", "return [...document.querySelectorAll('[aria-label=\"Model results\"] button[data-row]')].some(b => b.parentElement?.textContent.includes('OpenAI') && b.textContent.toLowerCase().includes('gpt-5.6')); ")
         _ = try await js("[...document.querySelectorAll('[aria-label=\"Model results\"] button[data-row]')].find(b => b.parentElement?.textContent.includes('OpenAI') && b.textContent.toLowerCase().includes('gpt-5.6')).click(); return true;")
