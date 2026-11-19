@@ -152,7 +152,6 @@ async fn prepare_run_config_inner(
         options.model.light_model.is_none(),
         "light_model is no longer supported"
     );
-    let agent_mode = AgentMode::Direct;
     let ssh_host = options.ssh.host();
     let config_cwd = options
         .config_cwd
@@ -199,19 +198,15 @@ async fn prepare_run_config_inner(
             .clone()
             .unwrap_or_else(|| Uuid::new_v4().to_string());
         let skills = SkillRegistry::load(None, SkillPathVisibility::Hidden, &config_paths)?;
-        let mcp = if agent_mode == AgentMode::Direct {
-            McpRegistry::load_reporting_skips(
-                &options.workspace_cwd,
-                None,
-                &config_paths,
-                McpTransportPolicy::StreamableHttpOnly,
-                McpRootPolicy::None,
-            )
-            .await?
-            .registry
-        } else {
-            None
-        };
+        let mcp = McpRegistry::load_reporting_skips(
+            &options.workspace_cwd,
+            None,
+            &config_paths,
+            McpTransportPolicy::StreamableHttpOnly,
+            McpRootPolicy::None,
+        )
+        .await?
+        .registry;
         let extra_tool_defs = mcp
             .as_ref()
             .map(|registry| registry.model_tool_definitions())
@@ -223,7 +218,7 @@ async fn prepare_run_config_inner(
             client.clone(),
             AgentConfig {
                 command_output_limits: worker_command_output_limits(config)?,
-                mode: agent_mode,
+                mode: AgentMode::Direct,
                 store_path: store_path.clone(),
                 session_id: Some(session_id.clone()),
                 orchestrator_compaction_threshold,
@@ -304,31 +299,27 @@ async fn prepare_run_config_inner(
             .as_ref()
             .and_then(|session| session.spec().worktree.clone()),
     );
-    let mcp = if agent_mode == AgentMode::Direct {
-        match McpRegistry::load_reporting_skips(
-            &workspace_cwd,
-            sandbox.as_ref(),
-            &paths,
-            McpTransportPolicy::All,
-            McpRootPolicy::Workspace,
-        )
-        .await
-        {
-            Ok(outcome) => outcome.registry,
-            Err(error) => {
-                if let Some(sandbox) = sandbox.as_ref() {
-                    sandbox.disable_drop_cleanup();
-                    if let Err(cleanup) = sandbox.destroy().await {
-                        return Err(error.context(format!(
+    let mcp = match McpRegistry::load_reporting_skips(
+        &workspace_cwd,
+        sandbox.as_ref(),
+        &paths,
+        McpTransportPolicy::All,
+        McpRootPolicy::Workspace,
+    )
+    .await
+    {
+        Ok(outcome) => outcome.registry,
+        Err(error) => {
+            if let Some(sandbox) = sandbox.as_ref() {
+                sandbox.disable_drop_cleanup();
+                if let Err(cleanup) = sandbox.destroy().await {
+                    return Err(error.context(format!(
                             "fresh sandbox MCP setup also failed to roll back its container: {cleanup:#}"
                         )));
-                    }
                 }
-                return Err(error);
             }
+            return Err(error);
         }
-    } else {
-        None
     };
     let build_result = (|| -> Result<SessionRunConfig> {
         let workspace_dir = effective_workspace_dir(&workspace_cwd, sandbox.as_ref());
@@ -367,7 +358,7 @@ async fn prepare_run_config_inner(
             client.clone(),
             AgentConfig {
                 command_output_limits: worker_command_output_limits(config)?,
-                mode: agent_mode,
+                mode: AgentMode::Direct,
                 store_path: store_path.clone(),
                 session_id: Some(session_id.clone()),
                 orchestrator_compaction_threshold,

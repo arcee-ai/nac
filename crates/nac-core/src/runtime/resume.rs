@@ -268,7 +268,6 @@ pub(super) async fn build_resume_config_from_snapshot(
 ) -> Result<SessionRunConfig> {
     require_direct_snapshot(&snapshot)?;
     let mut snapshot = normalize_snapshot_paths(snapshot, &resume_base_cwd)?;
-    let agent_mode = AgentMode::Direct;
     // Resume reaches the host with the connection the session recorded, not with
     // whatever the local ssh config happens to say now.
     let ssh = snapshot.ssh.clone();
@@ -399,9 +398,7 @@ pub(super) async fn build_resume_config_from_snapshot(
             (workspace_dir.as_deref(), SkillPathVisibility::Visible)
         };
         let skills = SkillRegistry::load(skill_workspace, visibility, &paths)?;
-        let message = (agent_mode == AgentMode::Direct)
-            .then(|| agents_md.system_message())
-            .flatten();
+        let message = agents_md.system_message();
         (skills, agents_md.status_text(), message)
     };
     let mcp_paths = if ssh.is_some() {
@@ -409,27 +406,23 @@ pub(super) async fn build_resume_config_from_snapshot(
     } else {
         PathContext::new(&workspace_cwd)
     };
-    let mcp = if agent_mode == AgentMode::Direct {
-        McpRegistry::load_reporting_skips(
-            &workspace_cwd,
-            sandbox.as_ref(),
-            &mcp_paths,
-            if ssh.is_some() {
-                McpTransportPolicy::StreamableHttpOnly
-            } else {
-                McpTransportPolicy::All
-            },
-            if ssh.is_some() {
-                McpRootPolicy::None
-            } else {
-                McpRootPolicy::Workspace
-            },
-        )
-        .await?
-        .registry
-    } else {
-        None
-    };
+    let mcp = McpRegistry::load_reporting_skips(
+        &workspace_cwd,
+        sandbox.as_ref(),
+        &mcp_paths,
+        if ssh.is_some() {
+            McpTransportPolicy::StreamableHttpOnly
+        } else {
+            McpTransportPolicy::All
+        },
+        if ssh.is_some() {
+            McpRootPolicy::None
+        } else {
+            McpRootPolicy::Workspace
+        },
+    )
+    .await?
+    .registry;
     if let Some(instructions) = mcp
         .as_ref()
         .and_then(|registry| registry.instructions_message())
@@ -465,7 +458,7 @@ pub(super) async fn build_resume_config_from_snapshot(
 
     let agent_config = AgentConfig {
         command_output_limits: worker_command_output_limits(config)?,
-        mode: agent_mode,
+        mode: AgentMode::Direct,
         store_path: store_path.clone(),
         session_id: Some(snapshot.session_id.clone()),
         orchestrator_compaction_threshold: snapshot.orchestrator_compaction_threshold,
