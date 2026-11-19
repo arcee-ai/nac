@@ -2,24 +2,6 @@ use super::*;
 use crate::terminal::CommandStatus;
 
 #[test]
-fn decode_prefixed_event_round_trip() {
-    let event = test_primary_tool_started("round-trip");
-    let encoded = format!(
-        "{}{}",
-        STDERR_EVENT_PREFIX,
-        serde_json::to_string(&event).unwrap()
-    );
-
-    let decoded = decode_stderr_event(&encoded).unwrap();
-    assert_eq!(decoded, event);
-}
-
-#[test]
-fn decode_prefixed_event_ignores_plain_lines() {
-    assert!(decode_stderr_event("plain stderr line").is_none());
-}
-
-#[test]
 fn tool_output_cannot_spoof_deadline_telemetry() {
     let result = crate::tools::ToolResult::text(
         serde_json::json!({
@@ -1408,7 +1390,6 @@ fn subagent_finished_summary_is_bounded_and_sanitized() {
 }
 
 const MODEL_ERROR_CANARY: &str = "sk-canary-sink-12345";
-const MODEL_ERROR_STDERR_HELPER_ENV: &str = "NAC_MODEL_ERROR_STDERR_HELPER";
 
 fn credential_bearing_model_error() -> AgentEvent {
     AgentEvent::ModelError {
@@ -1431,43 +1412,6 @@ async fn model_error_sink_redacts_session_event_replay() {
         panic!("expected replayed ModelError");
     };
     assert!(!message.contains(MODEL_ERROR_CANARY), "{message}");
-    assert!(message.contains("[REDACTED]"), "{message}");
-    assert!(message.contains("no credits"), "{message}");
-}
-
-#[test]
-fn model_error_stderr_process_helper() {
-    if std::env::var_os(MODEL_ERROR_STDERR_HELPER_ENV).is_some() {
-        EventSink::stderr_prefixed().emit(credential_bearing_model_error());
-    }
-}
-
-#[test]
-fn model_error_sink_redacts_prefixed_stderr() {
-    let output = std::process::Command::new(std::env::current_exe().unwrap())
-        .args([
-            "--exact",
-            "events::tests::model_error_stderr_process_helper",
-            "--nocapture",
-        ])
-        .env(MODEL_ERROR_STDERR_HELPER_ENV, "1")
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "stderr helper failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-
-    let stderr = String::from_utf8(output.stderr).unwrap();
-    assert!(!stderr.contains(MODEL_ERROR_CANARY), "{stderr}");
-    let event = stderr
-        .lines()
-        .find_map(decode_stderr_event)
-        .expect("prefixed ModelError on stderr");
-    let AgentEvent::ModelError { message, .. } = event else {
-        panic!("expected stderr ModelError");
-    };
     assert!(message.contains("[REDACTED]"), "{message}");
     assert!(message.contains("no credits"), "{message}");
 }

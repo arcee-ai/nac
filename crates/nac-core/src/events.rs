@@ -21,7 +21,6 @@ pub use attention::{
     SettledWorkDisposition,
 };
 
-pub const STDERR_EVENT_PREFIX: &str = "__NAC_EVENT__";
 pub const SESSION_EVENT_BUS_CAPACITY: usize = 1024;
 pub const SESSION_EVENT_BUS_REPLAY_BYTE_CAP: usize = 256 * 1024;
 /// Deltas are coalesced before they reach the bus, so this holds many seconds
@@ -1595,7 +1594,6 @@ pub struct EventSink {
     bus: Option<SessionEventBus>,
     run_id: Option<SessionRunId>,
     client_id: Option<SessionClientId>,
-    stderr_prefixed: bool,
 }
 
 impl EventSink {
@@ -1630,30 +1628,13 @@ impl EventSink {
         }
     }
 
-    pub fn stderr_prefixed() -> Self {
-        Self {
-            stderr_prefixed: true,
-            ..Self::default()
-        }
-    }
-
     pub fn emit(&self, event: AgentEvent) {
         if matches!(event, AgentEvent::ModelCallStarted { .. }) {
-            if self.stderr_prefixed {
-                if let Ok(encoded) = serde_json::to_string(&event) {
-                    eprintln!("{STDERR_EVENT_PREFIX}{encoded}");
-                }
-            }
             return;
         }
         let Some(event) = sanitize_external_agent_event(event) else {
             return;
         };
-        if self.stderr_prefixed {
-            if let Ok(encoded) = serde_json::to_string(&event) {
-                eprintln!("{STDERR_EVENT_PREFIX}{encoded}");
-            }
-        }
         if let Some(bus) = &self.bus {
             let _ = bus.emit_agent_with_context(
                 event.clone(),
@@ -1698,9 +1679,6 @@ impl EventSink {
                 bus.emit_with_context_async(event, self.run_id.clone(), self.client_id.clone())
                     .await?;
             }
-        }
-        if self.stderr_prefixed {
-            eprintln!("{STDERR_EVENT_PREFIX}{}", serde_json::to_string(&event)?);
         }
         if let Some(channel) = &self.channel {
             let _ = channel.send(event);
@@ -1819,11 +1797,6 @@ impl EventSink {
             }
         }
     }
-}
-
-pub fn decode_stderr_event(line: &str) -> Option<AgentEvent> {
-    let encoded = line.strip_prefix(STDERR_EVENT_PREFIX)?;
-    serde_json::from_str(encoded).ok()
 }
 
 #[cfg(test)]
