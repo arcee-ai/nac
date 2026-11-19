@@ -1,8 +1,5 @@
 use anyhow::{anyhow, Result};
-use nac_core::{
-    sessions,
-    store::{TraditionalChildExecutionMode, TraditionalChildRecord},
-};
+use nac_core::store::{TraditionalChildExecutionMode, TraditionalChildRecord};
 
 use crate::SessionManager;
 
@@ -34,12 +31,7 @@ impl<'a> DelegationApplication<'a> {
         &self,
         parent_session_id: &str,
     ) -> Result<Vec<TraditionalChildRecord>> {
-        let service = self.manager.attach_session(parent_session_id).await?;
-        if service.metadata().behavior == sessions::SessionBehavior::Orchestrator {
-            return Err(anyhow!(
-                "traditional children are available only for direct behaviors"
-            ));
-        }
+        self.manager.attach_session(parent_session_id).await?;
         let path = self.manager.inner.store_path.clone();
         let parent = parent_session_id.to_owned();
         self.manager.inner._store_ownership.call_legacy(move || {

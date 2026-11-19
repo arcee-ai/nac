@@ -1529,11 +1529,6 @@ impl SessionManager {
                 Ok::<_, anyhow::Error>((lease, parent))
             })
             .await??;
-        if parent.behavior == sessions::SessionBehavior::Orchestrator {
-            return Err(anyhow!(
-                "traditional children are available only to direct parent sessions"
-            ));
-        }
         if parent.sandbox_spec.is_some() {
             let parent_service = self.attach_session_locked(parent_session_id, None).await?;
             if parent_service.metadata().workspace_host_path.is_none() {

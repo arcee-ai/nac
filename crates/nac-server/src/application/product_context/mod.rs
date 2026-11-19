@@ -84,11 +84,10 @@ impl ProductContextApplication {
                 .map_err(|_| anyhow!("product context is unavailable"))?
                 .map_err(|_| anyhow!("product context is unavailable"))?;
             let backend = execution_backend(summary.sandboxed, summary.ssh.is_some());
-            let direct = summary.behavior != sessions::SessionBehavior::Orchestrator;
             features.push(ProductFeature {
                 feature: ProductFeatureKind::TraditionalSubagents,
                 label: "Traditional subagents".into(),
-                availability: if direct && !lineage {
+                availability: if !lineage {
                     ProductAvailability::Available
                 } else {
                     ProductAvailability::Unavailable
@@ -115,12 +114,9 @@ impl ProductContextApplication {
                 ProductDestination::SessionHistory,
             ] {
                 let supported = match target {
-                    ProductDestination::SessionSubagents => direct && !lineage,
+                    ProductDestination::SessionSubagents => !lineage,
                     ProductDestination::SessionTerminal => {
-                        direct
-                            && !lineage
-                            && backend == ProductExecutionBackend::Local
-                            && cached.is_some()
+                        !lineage && backend == ProductExecutionBackend::Local && cached.is_some()
                     }
                     _ => true,
                 };

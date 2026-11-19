@@ -336,9 +336,6 @@ impl SessionManager {
             .session_attachment()
             .attach_current_operation_service_locked(session, &lease)
             .await?;
-        if service.metadata().behavior == sessions::SessionBehavior::Orchestrator {
-            return Ok(false);
-        }
         service.continue_owned_inbox_with_lease(lease).await?;
         // Admission or an active run is not evidence of consumption. Recheck
         // the durable row on the next iteration, including after settlement.
