@@ -1115,7 +1115,6 @@ export interface components {
     RevertSessionResponse: {
       messages_removed: number;
       revisions_removed: number;
-      threads_removed: number;
       transcript_len: number;
       workspace_restored: boolean;
     };

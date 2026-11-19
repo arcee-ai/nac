@@ -532,36 +532,6 @@ impl SessionService {
             .map_err(|error| anyhow::anyhow!("workspace revision prune task failed: {error}"))??
         };
 
-        // Threads the discarded messages dispatched are work nothing can reach
-        // any more: the tool calls that named them are gone. A name the kept
-        // messages also dispatched stays whole, because the same rows carry the
-        // episodes of those earlier dispatches, which the transcript still
-        // refers to.
-        let orphaned_threads: Vec<String> = {
-            let kept_names = thread_tool_call_names(kept);
-            thread_tool_call_names(&messages[message_idx..])
-                .into_iter()
-                .filter(|name| {
-                    name != crate::store::ORCHESTRATOR_STEERING_TARGET && !kept_names.contains(name)
-                })
-                .collect()
-        };
-        let threads_removed = {
-            let store_path = store_path.clone();
-            let session_id = session_id.clone();
-            crate::store::spawn_blocking_store_caller(move || {
-                let mut removed = 0usize;
-                for name in orphaned_threads {
-                    if crate::store::delete_thread(&store_path, &session_id, &name)? {
-                        removed += 1;
-                    }
-                }
-                anyhow::Ok(removed)
-            })
-            .await
-            .map_err(|error| anyhow::anyhow!("thread prune task failed: {error}"))??
-        };
-
         self.event_bus
             .emit_with_context_async(
                 SessionEvent::TranscriptReverted {
@@ -577,7 +547,6 @@ impl SessionService {
             messages_removed: messages.len() - message_idx,
             workspace_restored,
             revisions_removed,
-            threads_removed,
         })
     }
 

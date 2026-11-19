@@ -19125,8 +19125,7 @@
           "transcript_len",
           "messages_removed",
           "workspace_restored",
-          "revisions_removed",
-          "threads_removed"
+          "revisions_removed"
         ],
         "properties": {
           "messages_removed": {
@@ -19134,10 +19133,6 @@
             "minimum": 0
           },
           "revisions_removed": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "threads_removed": {
             "type": "integer",
             "minimum": 0
           },

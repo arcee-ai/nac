@@ -1013,7 +1013,6 @@ export declare function createNacApi(nacClient: NacClient, options?: {
     revertSession: (id: string, messageIdx: number) => Promise<{
         messages_removed: number;
         revisions_removed: number;
-        threads_removed: number;
         transcript_len: number;
         workspace_restored: boolean;
     }>;

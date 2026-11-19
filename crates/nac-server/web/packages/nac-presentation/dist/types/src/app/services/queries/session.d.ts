@@ -914,7 +914,6 @@ export declare function useCompactSession(): import("@tanstack/react-query").Use
 export declare function useRevertSession(): import("@tanstack/react-query").UseMutationResult<{
     messages_removed: number;
     revisions_removed: number;
-    threads_removed: number;
     transcript_len: number;
     workspace_restored: boolean;
 }, Error, {

@@ -1009,7 +1009,6 @@ pub struct RevertOutcome {
     pub messages_removed: usize,
     pub workspace_restored: bool,
     pub revisions_removed: usize,
-    pub threads_removed: usize,
 }
 
 struct LoadedFrontendMessages {
