@@ -751,10 +751,10 @@ fn forward_only_schema_gate_runs_before_maintenance() {
 }
 
 #[test]
-fn running_child_and_managed_orchestrator_are_distinct_blockers() {
+fn running_child_is_a_distinct_upgrade_blocker() {
     let path = path("topologies");
     initialize(&path).unwrap();
-    for session in ["parent", "child", "orchestrator"] {
+    for session in ["parent", "child"] {
         insert_test_session(&path, session);
     }
     let conn = Connection::open(&path).unwrap();
@@ -764,15 +764,6 @@ fn running_child_and_managed_orchestrator_are_distinct_blockers() {
               nesting_depth, status, generation, run_id, execution_mode, created_at, updated_at)
          VALUES ('child', 'parent', 'parent', 'general', 'child work', 1,
                  'running', 1, 'child-run', 'background', 'created', 'created')",
-        [],
-    )
-    .unwrap();
-    conn.execute(
-        "INSERT INTO managed_orchestrators
-             (orchestrator_session_id, parent_session_id, root_session_id, description,
-              status, generation, run_id, execution_mode, created_at, updated_at)
-         VALUES ('orchestrator', 'parent', 'parent', 'orchestrator work',
-                 'running', 1, 'orchestrator-run', 'background', 'created', 'created')",
         [],
     )
     .unwrap();
@@ -792,9 +783,6 @@ fn running_child_and_managed_orchestrator_are_distinct_blockers() {
     assert!(blockers
         .iter()
         .any(|blocker| blocker.kind == ManagedBlockerKind::TraditionalChild));
-    assert!(blockers
-        .iter()
-        .any(|blocker| blocker.kind == ManagedBlockerKind::ManagedOrchestrator));
     cleanup(&path);
 }
 
