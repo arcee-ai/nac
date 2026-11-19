@@ -36,8 +36,7 @@ pub struct UserTerminalStatus {
 
 pub use output::{
     ArtifactKind, CommandOutputLimits, OutputArtifactLease, OutputBytePage, OutputPage,
-    OutputRegistry, OutputStream, DEFAULT_COMMAND_OUTPUT_MAX_BYTES,
-    DEFAULT_COMMAND_OUTPUT_SESSION_MAX_BYTES, DEFAULT_OUTPUT_PAGE_BYTES, MAX_OUTPUT_PAGE_BYTES,
+    OutputRegistry, OutputStream, DEFAULT_OUTPUT_PAGE_BYTES, MAX_OUTPUT_PAGE_BYTES,
 };
 
 use serde::{Deserialize, Serialize};

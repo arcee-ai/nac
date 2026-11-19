@@ -100,6 +100,13 @@ fn finder_and_terminal_profiles_keep_existing_config_store_and_credential_owners
                 "{profile}, terminal={terminal}: {}",
                 String::from_utf8_lossy(&output.stderr)
             );
+            if profile != "no-home" {
+                assert!(
+                    String::from_utf8_lossy(&output.stderr)
+                        .contains("ignoring removed [worker] settings"),
+                    "missing removed-settings diagnostic for {profile}"
+                );
+            }
             assert!(!String::from_utf8_lossy(&output.stdout).contains("disposable-finder-fixture"));
         }
         assert_eq!(
@@ -133,7 +140,6 @@ fn finder_profile_child() {
         return;
     }
     assert_eq!(paths.nac_home_dir(), Some(expected_home.clone()));
-    assert_eq!(config.worker.thread_timeout_secs, Some(342));
     assert_eq!(
         resolve_named_api_key("FINDER_FIXTURE_KEY")
             .unwrap()

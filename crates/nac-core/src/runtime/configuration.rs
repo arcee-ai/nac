@@ -11,8 +11,6 @@ pub struct NacConfig {
     #[serde(default)]
     pub sandbox: SandboxConfig,
     #[serde(default)]
-    pub worker: WorkerConfig,
-    #[serde(default)]
     pub permissions: PermissionConfig,
 }
 
@@ -54,20 +52,11 @@ pub struct SandboxConfig {
 }
 
 #[derive(Debug, Clone, Default, serde::Deserialize)]
-pub struct WorkerConfig {
-    pub thread_timeout_secs: Option<u64>,
-    pub command_output_max_bytes: Option<usize>,
-    pub command_output_session_max_bytes: Option<usize>,
-}
-
-#[derive(Debug, Clone, Default, serde::Deserialize)]
 pub(super) struct NonModelNacConfig {
     #[serde(default)]
     storage: StorageConfig,
     #[serde(default)]
     sandbox: SandboxConfig,
-    #[serde(default)]
-    worker: WorkerConfig,
     #[serde(default)]
     permissions: PermissionConfig,
 }
@@ -79,7 +68,6 @@ impl From<NonModelNacConfig> for NacConfig {
             model: ModelConfig::default(),
             compaction: CompactionConfig::default(),
             sandbox: config.sandbox,
-            worker: config.worker,
             permissions: config.permissions,
         }
     }
@@ -119,6 +107,7 @@ impl NacConfig {
             return Ok(Self::default());
         };
         let raw = Self::read_config(&path)?;
+        Self::warn_removed_worker_settings(&raw);
         toml::from_str::<NonModelNacConfig>(&raw)
             .map(Into::into)
             .with_context(|| format!("failed to parse non-model config {}", path.display()))
@@ -145,12 +134,14 @@ impl NacConfig {
     pub fn load_from_file(path: &Path) -> Result<Self> {
         let raw = Self::read_explicit_config(path)
             .with_context(|| format!("failed to read config {}", path.display()))?;
+        Self::warn_removed_worker_settings(&raw);
         toml::from_str(&raw).with_context(|| format!("failed to parse config {}", path.display()))
     }
 
     fn load_from_path(path: PathBuf) -> Result<Self> {
         let raw = Self::read_config(&path)?;
         Self::warn_removed_model_keys(&raw);
+        Self::warn_removed_worker_settings(&raw);
         toml::from_str(&raw).with_context(|| format!("failed to parse config {}", path.display()))
     }
 
@@ -186,6 +177,23 @@ impl NacConfig {
             "nac: config: ignoring removed [model] defaults ({}); select a model and its settings for each new session",
             removed.join(", ")
         );
+    }
+
+    /// Worker settings no longer affect direct sessions. Report their presence
+    /// without rejecting unrelated supported configuration.
+    fn warn_removed_worker_settings(raw: &str) {
+        static WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if WARNED.load(std::sync::atomic::Ordering::Relaxed) {
+            return;
+        }
+        if raw
+            .parse::<toml::Value>()
+            .ok()
+            .is_some_and(|value| value.get("worker").is_some())
+        {
+            WARNED.store(true, std::sync::atomic::Ordering::Relaxed);
+            eprintln!("nac: config: ignoring removed [worker] settings; direct sessions use fixed output limits");
+        }
     }
 
     fn read_config(path: &Path) -> Result<String> {

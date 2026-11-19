@@ -956,46 +956,6 @@ async fn sandbox_spec_failure_after_fork_rolls_back_the_worktree() {
 }
 
 #[test]
-fn worker_timeout_reads_config_default() {
-    let mut config = NacConfig::default();
-    config.worker.thread_timeout_secs = Some(7_200);
-    assert_eq!(worker_thread_timeout_secs(&config), 7_200);
-
-    config.worker.thread_timeout_secs = Some(10);
-    assert_eq!(
-        worker_thread_timeout_secs(&config),
-        crate::tools::thread::MIN_THREAD_TIMEOUT_SECS
-    );
-}
-
-#[test]
-fn worker_command_output_limits_validate_config() {
-    let mut config = NacConfig::default();
-    let defaults = worker_command_output_limits(&config).unwrap();
-    assert_eq!(
-        defaults.per_command_bytes,
-        crate::terminal::DEFAULT_COMMAND_OUTPUT_MAX_BYTES
-    );
-    assert_eq!(
-        defaults.per_session_bytes,
-        crate::terminal::DEFAULT_COMMAND_OUTPUT_SESSION_MAX_BYTES
-    );
-
-    config.worker.command_output_max_bytes = Some(1_024);
-    config.worker.command_output_session_max_bytes = Some(4_096);
-    assert_eq!(
-        worker_command_output_limits(&config).unwrap(),
-        crate::terminal::CommandOutputLimits {
-            per_command_bytes: 1_024,
-            per_session_bytes: 4_096,
-        }
-    );
-
-    config.worker.command_output_session_max_bytes = Some(512);
-    assert!(worker_command_output_limits(&config).is_err());
-}
-
-#[test]
 fn nac_config_loads_new_sections_alongside_existing_mcp() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     let original_nac_home = std::env::var_os("NAC_HOME");
@@ -1044,12 +1004,6 @@ url = "https://mcp.context7.com/mcp"
     assert!(config.model.model.is_none());
     assert!(config.model.reasoning_effort.is_none());
     assert_eq!(config.sandbox.image.as_deref(), Some("config-image"));
-    assert_eq!(config.worker.thread_timeout_secs, Some(7_200));
-    assert_eq!(config.worker.command_output_max_bytes, Some(8_388_608));
-    assert_eq!(
-        config.worker.command_output_session_max_bytes,
-        Some(67_108_864)
-    );
 
     restore_env("NAC_HOME", original_nac_home);
     let _ = std::fs::remove_dir_all(root);
@@ -1102,7 +1056,6 @@ fn non_model_config_load_ignores_invalid_model_values_but_keeps_other_sections_s
             Some(Path::new("persisted/store.db"))
         );
         assert_eq!(config.sandbox.image.as_deref(), Some("runtime-image"));
-        assert_eq!(config.worker.thread_timeout_secs, Some(7_200));
         assert_eq!(
             config.permissions.rules,
             [crate::permissions::PermissionRule::new(

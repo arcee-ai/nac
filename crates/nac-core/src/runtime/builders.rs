@@ -213,7 +213,7 @@ async fn prepare_run_config_inner(
         let mut agent = Agent::with_config(
             client.clone(),
             AgentConfig {
-                command_output_limits: worker_command_output_limits(config)?,
+                command_output_limits: crate::terminal::CommandOutputLimits::default(),
                 mode: AgentMode::Direct,
                 store_path: store_path.clone(),
                 session_id: Some(session_id.clone()),
@@ -232,7 +232,7 @@ async fn prepare_run_config_inner(
                 skills,
                 extra_tool_defs,
                 agents_md_message,
-                thread_timeout_secs: worker_thread_timeout_secs(config),
+                thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
                 permission_rules: config.permissions.rules.clone(),
             },
         )?;
@@ -352,7 +352,7 @@ async fn prepare_run_config_inner(
         let mut agent = Agent::with_config(
             client.clone(),
             AgentConfig {
-                command_output_limits: worker_command_output_limits(config)?,
+                command_output_limits: crate::terminal::CommandOutputLimits::default(),
                 mode: AgentMode::Direct,
                 store_path: store_path.clone(),
                 session_id: Some(session_id.clone()),
@@ -371,7 +371,7 @@ async fn prepare_run_config_inner(
                 skills,
                 extra_tool_defs,
                 agents_md_message,
-                thread_timeout_secs: worker_thread_timeout_secs(config),
+                thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
                 permission_rules: config.permissions.rules.clone(),
             },
         )?;
@@ -540,7 +540,7 @@ async fn build_retired_managed_worker_config(
     let agent = Agent::with_config(
         client.clone(),
         AgentConfig {
-            command_output_limits: worker_command_output_limits(config)?,
+            command_output_limits: crate::terminal::CommandOutputLimits::default(),
             mode: AgentMode::Worker,
             store_path: store_path.clone(),
             session_id: Some(options.dispatch.session_id.clone()),
@@ -559,7 +559,7 @@ async fn build_retired_managed_worker_config(
             skills: None,
             extra_tool_defs,
             agents_md_message,
-            thread_timeout_secs: worker_thread_timeout_secs(config),
+            thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
             permission_rules: config.permissions.rules.clone(),
         },
     )?;

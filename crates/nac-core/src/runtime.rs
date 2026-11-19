@@ -58,7 +58,7 @@ pub use builders::{
 use configuration::NonModelNacConfig;
 pub use configuration::{
     CompactionConfig, ConfiguredModelIdentity, ModelConfig, NacConfig, PermissionConfig,
-    SandboxConfig, StorageConfig, WorkerConfig,
+    SandboxConfig, StorageConfig,
 };
 pub(crate) use contracts::RuntimeSession;
 pub use contracts::{
@@ -66,10 +66,7 @@ pub use contracts::{
     ResumeModelOptions, ResumeOptions, ResumePickerRunConfig, RunOptions, SandboxOptions,
     SessionRunConfig, SshOptions, StoreOptions, WorkerDispatchOptions,
 };
-use model_resolution::{
-    default_config_cwd, managed_worker_effective_model_settings, worker_command_output_limits,
-    worker_thread_timeout_secs,
-};
+use model_resolution::{default_config_cwd, managed_worker_effective_model_settings};
 pub use model_resolution::{
     effective_model_settings, effective_orchestrator_compaction_threshold, resolve_store_path,
     resolve_store_path_for_track,

@@ -84,30 +84,6 @@ pub(super) fn managed_worker_effective_model_settings(
     .with_trusted_api_key_file(model.trusted_api_key_file.clone())
 }
 
-pub(super) fn worker_thread_timeout_secs(config: &NacConfig) -> u64 {
-    config
-        .worker
-        .thread_timeout_secs
-        .unwrap_or(crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS)
-        .max(crate::tools::thread::MIN_THREAD_TIMEOUT_SECS)
-}
-
-pub(super) fn worker_command_output_limits(
-    config: &NacConfig,
-) -> Result<crate::terminal::CommandOutputLimits> {
-    crate::terminal::CommandOutputLimits {
-        per_command_bytes: config
-            .worker
-            .command_output_max_bytes
-            .unwrap_or(crate::terminal::DEFAULT_COMMAND_OUTPUT_MAX_BYTES),
-        per_session_bytes: config
-            .worker
-            .command_output_session_max_bytes
-            .unwrap_or(crate::terminal::DEFAULT_COMMAND_OUTPUT_SESSION_MAX_BYTES),
-    }
-    .validate()
-}
-
 pub(super) fn default_config_cwd(workspace_cwd: &Path, ssh_host: Option<&str>) -> PathBuf {
     let is_ssh = ssh_host
         .map(str::trim)
