@@ -894,7 +894,7 @@ mod tests {
     #[test]
     fn version_thirteen_store_adds_only_the_recovery_table() {
         let path = temp_store_path("v13_migration");
-        initialize(&path).unwrap();
+        crate::store::initialize_synthetic_predecessor(&path).unwrap();
         {
             let connection = open_connection(&path).unwrap();
             connection

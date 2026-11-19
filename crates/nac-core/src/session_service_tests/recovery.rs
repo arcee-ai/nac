@@ -629,8 +629,8 @@ async fn client_subscribers_receive_same_events_with_unique_identity() {
 #[tokio::test]
 async fn frontend_snapshot_does_not_wait_for_agent_lock_while_active_run() {
     let parts = test_picker_service("snapshot_nonblocking");
-    let agent_guard = parts.service.agent.lock().await;
     let active = parts.service.try_begin_run(None, "blocked prompt").unwrap();
+    let agent_guard = parts.service.agent.lock().await;
 
     let snapshot = tokio::time::timeout(
         std::time::Duration::from_secs(2),

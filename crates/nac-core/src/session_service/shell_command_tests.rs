@@ -23,7 +23,7 @@ fn test_environment() -> nac_contracts::CommandEnvironmentSnapshot {
 use super::*;
 use crate::agent::AgentConfig;
 use crate::model::ModelClient;
-use crate::session_service::tests::{test_active_service, test_store_path};
+use crate::session_service::tests::test_store_path;
 
 fn test_direct_active_service(
     label: &str,
@@ -211,11 +211,21 @@ async fn human_shell_executes_once_without_model_or_approval_and_appends_once() 
 
 #[tokio::test]
 async fn human_shell_rejects_unsupported_topology_and_busy_without_effects() {
-    let (orchestrator, _) = test_active_service("human_shell_orchestrator", "session");
+    let (child, path) =
+        test_direct_active_service("human_shell_child", "session", ModelClient::new_for_test());
+    crate::store::insert_test_session(&path, "parent");
+    crate::store::create_traditional_child_relationship(
+        &path,
+        "parent",
+        "session",
+        crate::store::GENERAL_CHILD_PROFILE,
+        "child",
+    )
+    .unwrap();
     assert_eq!(
-        orchestrator
+        child
             .service
-            .submit_shell_command(request("unsupported", "touch /tmp/never-human-shell"))
+            .submit_shell_command(request("unsupported", "echo forbidden"))
             .await
             .unwrap_err(),
         ShellCommandError::Unsupported
