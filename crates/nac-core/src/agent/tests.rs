@@ -50,7 +50,7 @@ async fn direct_run_emits_balanced_runtime_activity() {
     })
     .to_string();
     let server = ScriptedServer::start(vec![ScriptedResponse::json("200 OK", response)]);
-    let mut agent = test_agent(&root, &server.base_url, AgentMode::Direct);
+    let mut agent = test_agent(&root, &server.base_url);
     assert_eq!(
         agent.send("exercise direct activity").await.unwrap(),
         "done"
@@ -76,100 +76,18 @@ async fn direct_run_emits_balanced_runtime_activity() {
     std::fs::remove_dir_all(root).unwrap();
 }
 
-#[tokio::test]
-async fn managed_worker_cancellation_interrupts_blocked_model_io() {
-    use crate::model::test_http::{ScriptedResponse, ScriptedServer};
-    let root = std::env::temp_dir().join(format!("nac_cancelled_model_{}", uuid::Uuid::new_v4()));
-    std::fs::create_dir_all(&root).unwrap();
-    let (arrived_tx, arrived_rx) = tokio::sync::oneshot::channel();
-    let arrived_tx = std::sync::Mutex::new(Some(arrived_tx));
-    let (release_tx, release_rx) = std::sync::mpsc::channel();
-    let server = ScriptedServer::start_observed(
-        vec![ScriptedResponse::json("200 OK", "{}").drop_connection()],
-        move |_, _| {
-            arrived_tx.lock().unwrap().take().unwrap().send(()).unwrap();
-            let _ = release_rx.recv_timeout(std::time::Duration::from_secs(3));
-        },
-    );
-    let mut agent = managed_worker_test_agent(&root, &server.base_url);
-    let cancellation = agent.command_cancellation();
-    let mut task = tokio::spawn(async move { agent.send("wait at the model barrier").await });
-    tokio::time::timeout(std::time::Duration::from_secs(2), arrived_rx)
-        .await
-        .unwrap()
-        .unwrap();
-    cancellation.cancel();
-    let result = tokio::time::timeout(std::time::Duration::from_millis(250), &mut task).await;
-    release_tx.send(()).unwrap();
-    let requests = server.finish();
-    if result.is_err() {
-        task.abort();
-        let _ = task.await;
-    }
-    assert_eq!(requests.len(), 1);
-    let error = result
-        .expect("cancel must interrupt provider I/O before the host cleanup grace")
-        .unwrap()
-        .unwrap_err();
-    assert!(error.to_string().contains("worker command cancelled"));
-    std::fs::remove_dir_all(root).unwrap();
-}
-
-#[tokio::test]
-async fn managed_worker_cancelled_before_model_io_sends_no_request() {
-    use crate::model::test_http::ScriptedServer;
-    let root =
-        std::env::temp_dir().join(format!("nac_pre_cancelled_model_{}", uuid::Uuid::new_v4()));
-    std::fs::create_dir_all(&root).unwrap();
-    let server =
-        ScriptedServer::start_unexpected_request_server(std::time::Duration::from_millis(250));
-    let mut agent = managed_worker_test_agent(&root, &server.base_url);
-    agent.command_cancellation().cancel();
-    let error = agent.send("already cancelled").await.unwrap_err();
-    assert!(error.to_string().contains("worker command cancelled"));
-    assert!(server.finish().is_empty());
-    std::fs::remove_dir_all(root).unwrap();
-}
-
-#[tokio::test]
-async fn managed_worker_model_io_completes_without_cancellation() {
-    use crate::model::test_http::{ScriptedResponse, ScriptedServer};
-    let root = std::env::temp_dir().join(format!("nac_worker_model_{}", uuid::Uuid::new_v4()));
-    std::fs::create_dir_all(&root).unwrap();
-    let response = serde_json::json!({
-        "status": "completed",
-        "output": [{"type": "message", "role": "assistant", "content": [
-            {"type": "output_text", "text": "worker completed"}
-        ]}],
-        "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}
-    })
-    .to_string();
-    let server = ScriptedServer::start(vec![ScriptedResponse::json("200 OK", response)]);
-    let mut agent = managed_worker_test_agent(&root, &server.base_url);
-    assert_eq!(
-        agent.send("complete normally").await.unwrap(),
-        "worker completed"
-    );
-    assert_eq!(server.finish().len(), 1);
-    std::fs::remove_dir_all(root).unwrap();
-}
-
-fn managed_worker_test_agent(root: &std::path::Path, base_url: &str) -> Agent {
-    test_agent(root, base_url, AgentMode::Worker)
-}
-
-fn test_agent(root: &std::path::Path, base_url: &str, mode: AgentMode) -> Agent {
+fn test_agent(root: &std::path::Path, base_url: &str) -> Agent {
     Agent::with_config(
         ModelClient::new_for_test_server(base_url.to_string()),
         AgentConfig {
             command_output_limits: crate::terminal::CommandOutputLimits::default(),
-            mode,
+            mode: AgentMode::Direct,
             store_path: root.join("store.db"),
             session_id: None,
             orchestrator_compaction_threshold: None,
             initial_messages: Vec::new(),
-            thread_name: Some("worker".to_string()),
-            dispatch_id: Some("dispatch".to_string()),
+            thread_name: None,
+            dispatch_id: None,
             event_sink: EventSink::none(),
             workspace_cwd: root.to_path_buf(),
             config_cwd: root.to_path_buf(),
@@ -193,15 +111,6 @@ fn test_agent_creation() {
     let agent = Agent::default(client);
     assert!(!agent.messages.is_empty());
     assert!(!agent.tool_defs.is_empty());
-}
-
-#[test]
-fn worker_prompt_prefers_native_workspace_discovery() {
-    let prompt = render_worker_system_prompt("/workspace");
-    assert!(prompt.contains("Use glob to find workspace paths"));
-    assert!(prompt.contains("Use grep to search file contents"));
-    assert!(prompt.contains("instead of find, fd"));
-    assert!(prompt.contains("instead of grep, rg"));
 }
 
 #[test]
@@ -395,104 +304,24 @@ fn direct_topologies_expose_exact_capability_boundaries() {
             Box::pin(async { Err(anyhow!("test-only unavailable destination")) })
         }
     }
-    let mut worker = Agent::default(ModelClient::new_for_test());
-    worker.bind_product_context(Arc::new(ProductPort)).unwrap();
     child.bind_product_context(Arc::new(ProductPort)).unwrap();
-    for unbound in [&worker, &child] {
-        assert!(unbound.tool_runtime.product_context.is_none());
-        assert!(!names(unbound)
-            .iter()
-            .any(|name| crate::tools::PRODUCT_CONTEXT_TOOL_NAMES.contains(&name.as_str())));
-    }
-    for primary in [&mut parent] {
-        primary.bind_product_context(Arc::new(ProductPort)).unwrap();
-        let refreshed = capability_names(primary.model_request_capabilities_for_test(None));
-        assert!(crate::tools::PRODUCT_CONTEXT_TOOL_NAMES
-            .iter()
-            .all(|name| refreshed.iter().any(|found| found == name)));
-        let before = names(primary);
-        assert!(primary.bind_product_context(Arc::new(ProductPort)).is_err());
-        assert_eq!(names(primary), before);
-    }
+    assert!(child.tool_runtime.product_context.is_none());
+    assert!(!names(&child)
+        .iter()
+        .any(|name| crate::tools::PRODUCT_CONTEXT_TOOL_NAMES.contains(&name.as_str())));
+    parent.bind_product_context(Arc::new(ProductPort)).unwrap();
+    let refreshed = capability_names(parent.model_request_capabilities_for_test(None));
+    assert!(crate::tools::PRODUCT_CONTEXT_TOOL_NAMES
+        .iter()
+        .all(|name| refreshed.iter().any(|found| found == name)));
+    let before = names(&parent);
+    assert!(parent.bind_product_context(Arc::new(ProductPort)).is_err());
+    assert_eq!(names(&parent), before);
 
     drop(parent);
     drop(child);
     drop(remote);
     let _ = std::fs::remove_dir_all(root);
-}
-
-#[test]
-fn delegated_worker_native_search_is_credential_gated_and_model_safe() {
-    let mut worker = Agent::with_config(
-        ModelClient::new_for_test(),
-        AgentConfig {
-            command_output_limits: crate::terminal::CommandOutputLimits::default(),
-            mode: AgentMode::Worker,
-            store_path: crate::store::default_store_path(),
-            session_id: None,
-            orchestrator_compaction_threshold: None,
-            initial_messages: Vec::new(),
-            thread_name: Some("delegated".to_string()),
-            dispatch_id: Some("dispatch".to_string()),
-            event_sink: EventSink::none(),
-            workspace_cwd: PathBuf::from("."),
-            config_cwd: PathBuf::from("."),
-            working_directory: ".".to_string(),
-            sandbox: None,
-            ssh: None,
-            mcp: None,
-            skills: None,
-            extra_tool_defs: Vec::new(),
-            agents_md_message: None,
-            thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
-            permission_rules: Vec::new(),
-        },
-    )
-    .unwrap();
-    let names = |definitions: Vec<ToolDefinition>| {
-        definitions
-            .into_iter()
-            .map(|definition| definition.function.name)
-            .collect::<Vec<_>>()
-    };
-
-    assert_eq!(
-        names(worker.refresh_model_request_capabilities().unwrap()),
-        crate::tools::CODING_TOOL_NAMES
-    );
-    let credential = "delegated-exa-capability-canary";
-    worker.set_worker_web_credential(Some(credential.to_string()));
-    let definitions = worker.refresh_model_request_capabilities().unwrap();
-    let definition_json = serde_json::to_string(&definitions).unwrap();
-    assert!(!definition_json.contains(credential));
-    assert_eq!(
-        serde_json::to_string(&worker.tool_defs).unwrap(),
-        definition_json
-    );
-    let refreshed = worker.refresh_model_request_capabilities().unwrap();
-    assert_eq!(
-        serde_json::to_string(&refreshed).unwrap(),
-        definition_json,
-        "refreshing a request must not feed installed capabilities back into the fallback"
-    );
-    worker.refresh_compaction_tool_definitions();
-    assert_eq!(
-        serde_json::to_string(&worker.tool_defs).unwrap(),
-        definition_json,
-        "manual compaction must preserve the installed web view while refreshing MCP"
-    );
-    let names = names(definitions);
-    assert_eq!(
-        &names[..crate::tools::CODING_TOOL_NAMES.len()],
-        crate::tools::CODING_TOOL_NAMES
-    );
-    assert_eq!(
-        &names[crate::tools::CODING_TOOL_NAMES.len()..],
-        crate::tools::WEB_TOOL_NAMES
-    );
-    let credential_debug = format!("{:?}", worker.tool_runtime.web_credential);
-    assert!(credential_debug.contains("[REDACTED]"));
-    assert!(!credential_debug.contains(credential));
 }
 
 #[test]
@@ -502,7 +331,7 @@ fn restore_messages_refreshes_leading_system_prompt() {
         client,
         AgentConfig {
             command_output_limits: crate::terminal::CommandOutputLimits::default(),
-            mode: AgentMode::Orchestrator,
+            mode: AgentMode::Direct,
             store_path: crate::store::default_store_path(),
             session_id: None,
             orchestrator_compaction_threshold: None,
@@ -868,76 +697,6 @@ fn exec_command_finished_events_distinguish_terminal_statuses() {
 }
 
 #[test]
-fn worker_cannot_self_activate_skills_and_orchestrator_can_schedule_them() {
-    let client = ModelClient::new_for_test();
-    let registry = Arc::new(crate::skills::SkillRegistry::load_for_test(vec![
-        crate::skills::SkillRecord {
-            name: "lint".to_string(),
-            description: "Run linting workflows.".to_string(),
-            compatibility: None,
-            skill_root_visible: PathBuf::from("/tmp/lint"),
-            body: "lint body".to_string(),
-            resources: Vec::new(),
-        },
-    ]));
-    let build_agent = |mode, skills| {
-        Agent::with_config(
-            client.clone(),
-            AgentConfig {
-                command_output_limits: crate::terminal::CommandOutputLimits::default(),
-                mode,
-                store_path: crate::store::default_store_path(),
-                session_id: None,
-                orchestrator_compaction_threshold: None,
-                initial_messages: Vec::new(),
-                thread_name: None,
-                dispatch_id: None,
-                event_sink: EventSink::none(),
-                workspace_cwd: PathBuf::from("."),
-                config_cwd: PathBuf::from("."),
-                working_directory: ".".to_string(),
-                sandbox: None,
-                ssh: None,
-                mcp: None,
-                skills,
-                extra_tool_defs: Vec::new(),
-                agents_md_message: None,
-                thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
-                permission_rules: Vec::new(),
-            },
-        )
-        .expect("agent config must be valid")
-    };
-
-    let worker = build_agent(AgentMode::Worker, Some(registry.clone()));
-    assert!(!worker
-        .tool_defs
-        .iter()
-        .any(|definition| definition.function.name == "activate_skill"));
-    assert!(!worker.messages.iter().any(|message| match message {
-        Message::System { content } => content.contains("<available_skills>"),
-        _ => false,
-    }));
-
-    let orchestrator = build_agent(AgentMode::Orchestrator, Some(registry));
-    assert!(!orchestrator
-        .tool_defs
-        .iter()
-        .any(|definition| definition.function.name == "activate_skill"));
-    let thread_tool = orchestrator
-        .tool_defs
-        .iter()
-        .find(|definition| definition.function.name == "thread")
-        .unwrap();
-    let skills = &thread_tool.function.parameters["properties"]["skills"];
-    assert_eq!(skills["items"]["enum"], serde_json::json!(["lint"]));
-    assert!(skills["description"]
-        .as_str()
-        .unwrap()
-        .contains("workers cannot activate skills themselves"));
-}
-
-#[test]
 fn tool_args_detail_is_larger_than_preview_but_bounded() {
     let args = "x".repeat(TOOL_ARGS_DETAIL_LIMIT + 10);
     let detail = tool_args_detail(&args);
@@ -1055,76 +814,6 @@ async fn direct_inbox_batch_ack_failure_rolls_back_and_retries_once() {
 }
 
 #[tokio::test]
-async fn orchestrator_claims_steering_as_an_exact_user_message() {
-    let unique = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let store_path = std::env::temp_dir()
-        .join(format!("nac_orchestrator_steering_{unique}"))
-        .join("store.db");
-    crate::store::initialize(&store_path).unwrap();
-    crate::store::insert_test_session(&store_path, "session");
-    let (events_tx, mut events_rx) = tokio::sync::mpsc::unbounded_channel();
-    let mut agent = Agent::with_config(
-        ModelClient::new_for_test(),
-        AgentConfig {
-            command_output_limits: crate::terminal::CommandOutputLimits::default(),
-            mode: AgentMode::Orchestrator,
-            store_path: store_path.clone(),
-            session_id: Some("session".to_string()),
-            orchestrator_compaction_threshold: None,
-            initial_messages: Vec::new(),
-            thread_name: None,
-            dispatch_id: Some("run-dispatch".to_string()),
-            event_sink: EventSink::channel(events_tx),
-            workspace_cwd: PathBuf::from("."),
-            config_cwd: PathBuf::from("."),
-            working_directory: ".".to_string(),
-            sandbox: None,
-            ssh: None,
-            mcp: None,
-            skills: None,
-            extra_tool_defs: Vec::new(),
-            agents_md_message: None,
-            thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
-            permission_rules: Vec::new(),
-        },
-    )
-    .unwrap();
-    crate::store::open_runtime_connection(&store_path)
-        .unwrap()
-        .execute(
-            "UPDATE sessions SET messages_json = ?1 WHERE session_id = 'session'",
-            rusqlite::params![serde_json::to_string(&agent.messages).unwrap()],
-        )
-        .unwrap();
-    let instruction = "Drop the fun facts and recommend a niche OSS repository.";
-    let queued = crate::store::queue_thread_steering(
-        &store_path,
-        "session",
-        crate::store::ORCHESTRATOR_STEERING_TARGET,
-        "run-dispatch",
-        instruction,
-    )
-    .unwrap();
-
-    assert_eq!(agent.append_pending_steering().await.unwrap(), 1);
-    assert_eq!(agent.append_pending_steering().await.unwrap(), 0);
-    assert!(matches!(
-        agent.messages.last(),
-        Some(Message::User { content }) if content == instruction
-    ));
-    assert!(matches!(
-        events_rx.try_recv().unwrap(),
-        AgentEvent::OrchestratorSteeringDelivered { steering_id, .. }
-            if steering_id == queued.id
-    ));
-
-    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
-}
-
-#[tokio::test]
 async fn image_limit_error_is_the_only_finished_event_for_the_result() {
     use crate::tool_content::{ToolContent, ToolContentPart, ToolImage, MAX_TRANSCRIPT_IMAGES};
     use image::{DynamicImage, ImageBuffer, ImageFormat, Rgba};
@@ -1210,12 +899,12 @@ async fn cancelled_image_call_still_emits_one_typed_finished_event() {
         ModelClient::new_for_test_server(server.base_url.clone()),
         AgentConfig {
             command_output_limits: crate::terminal::CommandOutputLimits::default(),
-            mode: AgentMode::Worker,
+            mode: AgentMode::Direct,
             store_path: root.join("store.db"),
             session_id: None,
             orchestrator_compaction_threshold: None,
             initial_messages: Vec::new(),
-            thread_name: Some("worker".to_string()),
+            thread_name: None,
             dispatch_id: None,
             event_sink: EventSink::channel(events_tx),
             workspace_cwd: root.clone(),
@@ -1235,7 +924,7 @@ async fn cancelled_image_call_still_emits_one_typed_finished_event() {
     agent.command_cancellation().cancel();
 
     let error = agent.send("read the fixture").await.unwrap_err();
-    assert!(error.to_string().contains("worker command cancelled"));
+    assert!(error.to_string().contains("command cancelled"));
     let finished = std::iter::from_fn(|| events_rx.try_recv().ok())
         .filter_map(|event| match event {
             AgentEvent::ToolCallFinished {

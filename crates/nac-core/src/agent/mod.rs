@@ -594,7 +594,7 @@ impl Agent {
             client,
             AgentConfig {
                 command_output_limits: crate::terminal::CommandOutputLimits::default(),
-                mode: AgentMode::Worker,
+                mode: AgentMode::Direct,
                 store_path: crate::store::default_store_path(),
                 session_id: None,
                 orchestrator_compaction_threshold: None,
@@ -893,7 +893,7 @@ impl Agent {
                 // and the CLI's final telemetry receipt run before host reap.
                 tokio::select! {
                     biased;
-                    _ = cancellation.cancelled() => Err(anyhow!("worker command cancelled")),
+                    _ = cancellation.cancelled() => Err(anyhow!("command cancelled")),
                     result = model_call => result,
                 }
             } else {
@@ -1108,7 +1108,7 @@ impl Agent {
                     .await;
 
             if self.tool_runtime.command_cancellation.is_cancelled() {
-                let error = anyhow!("worker command cancelled");
+                let error = anyhow!("command cancelled");
                 self.emit(AgentEvent::Error {
                     thread_name: self.thread_name.clone(),
                     message: error.to_string(),
