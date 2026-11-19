@@ -36,7 +36,7 @@ fn compaction_test_agent(
         session_id,
         threshold,
         event_sink,
-        AgentMode::Orchestrator,
+        AgentMode::Direct,
     )
 }
 

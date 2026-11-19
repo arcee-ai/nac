@@ -62,7 +62,7 @@ async fn manual_compaction_forces_disabled_and_high_threshold_without_mutating_r
         assert!(request.get("tools").is_none());
         assert_eq!(
             request["input"].as_array().unwrap().last().unwrap()["content"],
-            compaction::NAC_COMPACTION_PROMPT
+            compaction::NAC_DIRECT_COMPACTION_PROMPT
         );
 
         let checkpoints =

@@ -93,7 +93,7 @@ async fn compaction_is_durable_before_ordinary_request_and_preserves_canonical_t
     let summary_input = summary_request["input"].as_array().unwrap();
     assert_eq!(
         summary_input.last().unwrap()["content"],
-        compaction::NAC_COMPACTION_PROMPT
+        compaction::NAC_DIRECT_COMPACTION_PROMPT
     );
     assert_eq!(
         summary_input[0],
@@ -243,12 +243,13 @@ async fn long_single_prompt_can_compact_once_per_hook_and_again_after_steering()
         ],
         move |index, _request| {
             if index == 1 {
-                crate::store::queue_thread_steering(
+                crate::store::create_session_inbox_item(
                     &observer_path,
                     "session",
-                    crate::store::ORCHESTRATOR_STEERING_TARGET,
-                    "run",
+                    crate::store::InboxDelivery::Steer,
                     "steer now",
+                    Some("run"),
+                    None,
                 )
                 .unwrap();
             }
@@ -398,7 +399,11 @@ async fn valid_checkpoint_projects_after_restore_when_generation_is_disabled() {
             content: "current".to_string(),
         },
     ]);
-    let (source, policy) = compaction::checkpoint_digests(&agent.messages, 3);
+    let (source, policy) = compaction::checkpoint_digests_for_policy(
+        &agent.messages,
+        3,
+        compaction::CompactionPolicy::Direct,
+    );
     crate::store::orchestrator_compaction::append_orchestrator_compaction_checkpoint(
         &store_path,
         &crate::store::orchestrator_compaction::NewOrchestratorCompactionCheckpoint {
@@ -408,7 +413,7 @@ async fn valid_checkpoint_projects_after_restore_when_generation_is_disabled() {
             tail_start_message_index: 3,
             source_prefix_sha256: source,
             system_policy_sha256: policy,
-            prompt_policy_version: compaction::PROMPT_POLICY_VERSION,
+            prompt_policy_version: compaction::DIRECT_PROMPT_POLICY_VERSION,
             old_context_estimate: 2_000,
             summary_prompt_tokens: Some(1_000),
             summary_completion_tokens: Some(100),

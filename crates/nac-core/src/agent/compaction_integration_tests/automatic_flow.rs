@@ -364,7 +364,7 @@ async fn complete_tool_result_batch_reenters_threshold_hook_before_next_ordinary
     assert!(second.get("tools").is_none(), "second call must be summary");
     assert_eq!(
         second["input"].as_array().unwrap().last().unwrap()["content"],
-        compaction::NAC_COMPACTION_PROMPT
+        compaction::NAC_DIRECT_COMPACTION_PROMPT
     );
     let summary_input = second["input"].to_string();
     assert!(summary_input.contains("call-1"));
