@@ -166,9 +166,7 @@ pub(crate) use schema::{
 };
 #[cfg(test)]
 pub(crate) use schema::{track_connection_opens, tracked_connection_opens};
-pub(crate) use thread_events::{
-    load_all_thread_events_with_connection, load_thread_events_page_with_connection,
-};
+pub(crate) use thread_events::load_all_thread_events_with_connection;
 pub(crate) use time::now_utc;
 
 #[cfg(test)]

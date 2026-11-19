@@ -136,8 +136,7 @@ use nac_core::{
     session_service::{
         ActiveSessionOperationSnapshot, FrontendSnapshotLoadOptions, MessagePageRequest,
         MessagesPageSnapshot, SessionEventReceiver, SessionFrontendSnapshot,
-        SessionFrontendSnapshotLoad, SessionRunHandle, SessionService, ThreadEventPage,
-        ToolCallContent,
+        SessionFrontendSnapshotLoad, SessionRunHandle, SessionService, ToolCallContent,
     },
     sessions,
     store::{SessionGoalRecord, SessionInboxRecord},
@@ -1400,18 +1399,6 @@ impl SessionManager {
     pub async fn delete_permission_grant(&self, session_id: &str, grant_id: &str) -> Result<()> {
         self.session_intents()
             .delete_permission_grant(session_id, grant_id)
-            .await
-    }
-
-    pub async fn thread_events(
-        &self,
-        session_id: &str,
-        thread_name: &str,
-        before_id: Option<i64>,
-        limit: usize,
-    ) -> Result<ThreadEventPage> {
-        self.session_state()
-            .thread_events(session_id, thread_name, before_id, limit)
             .await
     }
 

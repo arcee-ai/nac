@@ -211,10 +211,9 @@ async fn frontend_snapshot_uses_four_operation_scoped_connections_for_direct_ses
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
 
-#[test]
-fn latest_thread_event_page_waits_for_capacity_before_event_state() {
-    let (parts, store_path) =
-        test_active_service("thread_event_page_lock_order", "connection-session");
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn snapshot_waits_for_capacity_before_event_state() {
+    let (parts, store_path) = test_active_service("snapshot_lock_order", "connection-session");
     let held_connections = (0..4)
         .map(|_| {
             parts
@@ -225,23 +224,20 @@ fn latest_thread_event_page_waits_for_capacity_before_event_state() {
         })
         .collect::<Vec<_>>();
     let service = parts.service.clone();
-    let (started_sender, started_receiver) = std::sync::mpsc::channel();
-    let page = std::thread::spawn(move || {
-        started_sender.send(()).unwrap();
-        service.thread_events_page("worker", None, 10)
+    let (started, ready) = tokio::sync::oneshot::channel();
+    let snapshot = tokio::spawn(async move {
+        let _ = started.send(());
+        service.frontend_snapshot().await
     });
-
-    started_receiver.recv().unwrap();
-    std::thread::sleep(Duration::from_millis(100));
+    ready.await.unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
     assert!(
         parts.service.event_bus.event_state_is_available_for_test(),
-        "latest-page loading held event state while waiting for connection capacity"
+        "snapshot held event state while waiting for connection capacity"
     );
-
     drop(held_connections);
-    let page = page.join().unwrap().unwrap();
-    assert!(page.events.is_empty());
-    assert!(page.thread_event_boundary.is_some());
+    let snapshot = snapshot.await.unwrap().unwrap();
+    assert!(!snapshot.thread_event_boundary.epoch_id.is_empty());
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
 
@@ -820,7 +816,7 @@ async fn skill_references_expand_into_the_agent_prompt_only() {
 }
 
 #[tokio::test]
-async fn malformed_internal_and_future_thread_events_are_nonfatal_and_advance_raw_cursor() {
+async fn malformed_internal_and_future_events_are_nonfatal() {
     let (parts, store_path) = test_active_service("tolerant_events", "events-session");
     let valid = serde_json::to_string(&AgentEvent::AssistantMessage {
         thread_name: Some("worker-a".to_string()),
@@ -860,23 +856,6 @@ async fn malformed_internal_and_future_thread_events_are_nonfatal_and_advance_ra
         .thread_event_diagnostics
         .iter()
         .any(|diagnostic| diagnostic.error.contains('{')));
-
-    let first_page = parts
-        .service
-        .thread_events_page("worker-a", None, 1)
-        .unwrap();
-    assert!(first_page.events.is_empty());
-    assert_eq!(first_page.diagnostics.len(), 1);
-    assert!(first_page.has_older);
-    assert!(first_page.thread_event_boundary.is_some());
-    let malformed_id = first_page.next_before_id.unwrap();
-    let older_page = parts
-        .service
-        .thread_events_page("worker-a", Some(malformed_id), 1)
-        .unwrap();
-    assert_eq!(older_page.events.len(), 1);
-    assert!(older_page.thread_event_boundary.is_none());
-    assert!(older_page.next_before_id.unwrap() < malformed_id);
 
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }

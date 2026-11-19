@@ -371,26 +371,6 @@ pub struct SessionFrontendSnapshotLoad {
     pub message_cycle: Option<MessageCycleMetadata>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct ThreadEventPageItem {
-    pub id: i64,
-    pub created_at: String,
-    pub event: AgentEvent,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct ThreadEventPage {
-    pub events: Vec<ThreadEventPageItem>,
-    pub has_older: bool,
-    pub next_before_id: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub thread_event_boundary: Option<SessionEventBoundary>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub diagnostics: Vec<ThreadEventDecodeDiagnostic>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ThreadEventDecodeDiagnostic {

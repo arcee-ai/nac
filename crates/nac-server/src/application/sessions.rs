@@ -6,7 +6,7 @@ use nac_core::{
     permissions::{PermissionApprovalMode, PermissionReply, PermissionRequest},
     session_service::{
         FrontendSnapshotLoadOptions, MessagePageRequest, MessagesPageSnapshot,
-        SessionFrontendSnapshot, SessionFrontendSnapshotLoad, ThreadEventPage, ToolCallContent,
+        SessionFrontendSnapshot, SessionFrontendSnapshotLoad, ToolCallContent,
     },
     sessions,
     store::{
@@ -405,19 +405,6 @@ impl<'a> SessionStateApplication<'a> {
 
     pub(crate) async fn direct_goal(&self, session_id: &str) -> Result<Option<SessionGoalRecord>> {
         self.manager.attach_session(session_id).await?.direct_goal()
-    }
-
-    pub(crate) async fn thread_events(
-        &self,
-        session_id: &str,
-        thread_name: &str,
-        before_id: Option<i64>,
-        limit: usize,
-    ) -> Result<ThreadEventPage> {
-        self.manager
-            .attach_session(session_id)
-            .await?
-            .thread_events_page(thread_name, before_id, limit)
     }
 
     pub(crate) async fn skills(
