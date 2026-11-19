@@ -376,17 +376,14 @@ fn read_stored_projection(
     } else {
         Vec::new()
     };
-    let threads = view::list_threads_with_connection(conn, session_id)?;
-    let thread_episodes = view::load_all_thread_episodes_with_connection(conn, session_id)?;
+    let threads = Vec::new();
+    let thread_episodes = HashMap::new();
     let (thread_event_boundary, thread_events) = load_events()?;
-    let worksets = view::worksets_snapshot_with_connection(conn, session_id);
-    // Keep this final storage read adjacent to the transcript scan so
-    // a delivery committed during slower workspace inspection has the
-    // current status needed to cover its canonical message.
-    let thread_steering = session_id
-        .map(|session_id| crate::store::list_thread_steering_with_connection(conn, session_id))
-        .transpose()?
-        .unwrap_or_default();
+    let worksets = WorksetsSnapshot {
+        items: Vec::new(),
+        error: None,
+    };
+    let thread_steering = Vec::new();
     let forks = session_id
         .map(|session_id| crate::store::list_session_forks_with_connection(conn, session_id))
         .transpose()?

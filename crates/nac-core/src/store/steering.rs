@@ -333,7 +333,8 @@ correlation |command| crate::telemetry::Correlation::session(Some(&command.sessi
 port public;
 }
 
-pub(crate) fn list_thread_steering_with_connection(
+#[cfg(test)]
+fn list_thread_steering_with_connection(
     conn: &Connection,
     session_id: &str,
 ) -> Result<Vec<ThreadSteeringRecord>> {

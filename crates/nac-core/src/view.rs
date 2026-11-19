@@ -378,65 +378,6 @@ pub fn read_workspace_revision(
     store::read_workspace_revision(store_path, session_id, id)
 }
 
-pub(crate) fn list_threads_with_connection(
-    conn: &rusqlite::Connection,
-    session_id: Option<&str>,
-) -> Result<Vec<ThreadSnapshot>> {
-    let Some(session_id) = session_id else {
-        return Ok(Vec::new());
-    };
-    store::list_threads_with_connection(conn, session_id)
-        .map(|threads| threads.into_iter().map(Into::into).collect())
-}
-
-pub(crate) fn load_all_thread_episodes_with_connection(
-    conn: &rusqlite::Connection,
-    session_id: Option<&str>,
-) -> Result<HashMap<String, Vec<EpisodeSnapshot>>> {
-    let Some(session_id) = session_id else {
-        return Ok(HashMap::new());
-    };
-    let episodes = store::load_all_dispatches_with_connection(conn, session_id)?;
-    Ok(episodes
-        .into_iter()
-        .map(|(thread, episodes)| (thread, episodes.into_iter().map(Into::into).collect()))
-        .collect())
-}
-
-pub(crate) fn worksets_snapshot_with_connection(
-    conn: &rusqlite::Connection,
-    session_id: Option<&str>,
-) -> WorksetsSnapshot {
-    let Some(session_id) = session_id else {
-        return WorksetsSnapshot {
-            items: Vec::new(),
-            error: Some("no active session".to_string()),
-        };
-    };
-
-    match load_workset_records_with_connection(conn, session_id) {
-        Ok(items) => WorksetsSnapshot { items, error: None },
-        Err(error) => WorksetsSnapshot {
-            items: Vec::new(),
-            error: Some(error.to_string()),
-        },
-    }
-}
-
-fn load_workset_records_with_connection(
-    conn: &rusqlite::Connection,
-    session_id: &str,
-) -> Result<Vec<WorksetSnapshot>> {
-    let summaries = store::list_worksets_with_connection(conn, session_id)?;
-    let mut worksets = Vec::with_capacity(summaries.len());
-    for summary in summaries {
-        if let Some(workset) = store::read_workset_with_connection(conn, session_id, &summary.id)? {
-            worksets.push(workset.into());
-        }
-    }
-    Ok(worksets)
-}
-
 pub fn workspace_diff_totals(
     workspace_display: &str,
     target: Option<&GitTarget>,
