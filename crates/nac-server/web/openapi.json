@@ -12868,7 +12868,8 @@
             "description": "Port and private key for the ssh target. Both are optional: omitted\nleaves the choice to ssh, which is what a host configured in\n`~/.ssh/config` wants. Supplying them is what lets a session reach a box\nnac has no config for at all.",
             "minimum": 0
           }
-        }
+        },
+        "additionalProperties": false
       },
       "CreateSshConfigurationRequest": {
         "type": "object",
@@ -22323,7 +22324,8 @@
           "reasoning_effort": {
             "$ref": "#/components/schemas/RequestField_String_String"
           }
-        }
+        },
+        "additionalProperties": false
       },
       "UpdateGitIdentityRequest": {
         "type": "object",

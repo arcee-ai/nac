@@ -53,9 +53,7 @@ fn mcp_server_info_for_version(version: &str) -> ServerConfig {
 struct CreateSessionParams {
     #[schemars(description = "Optional session behavior; only direct is supported.")]
     behavior: Option<String>,
-    #[schemars(
-        description = "Project id. When set, the project supplies the working directory and any default model configuration."
-    )]
+    #[schemars(description = "Project id. When set, the project supplies the working directory.")]
     project_id: Option<String>,
     #[schemars(description = "Working directory for the session")]
     cwd: Option<String>,
@@ -255,7 +253,7 @@ impl NacMcpService {
 
     #[tool(
         name = "create_session",
-        description = "Create a new nac session. Call list_models first to see available model IDs and their supported reasoning efforts. You only need to pass model — the backend is auto-detected from the model ID. Pass reasoning_effort only if the model supports it. Valid efforts: none, minimal, low, medium, high, xhigh, max. Pass project_id by itself to use a project's directory and defaults; do not combine it with cwd or SSH fields. For remote sessions, pass ssh_host (and optionally ssh_port, ssh_identity_file). For sandboxed sessions, pass sandbox: true."
+        description = "Create a new nac session. Call list_models first to see available model IDs and their supported reasoning efforts. You only need to pass model — the backend is auto-detected from the model ID. Pass reasoning_effort only if the model supports it. Valid efforts: none, minimal, low, medium, high, xhigh, max. Pass project_id to use a project's directory; do not combine it with cwd or SSH fields. For remote sessions, pass ssh_host (and optionally ssh_port, ssh_identity_file). For sandboxed sessions, pass sandbox: true."
     )]
     async fn create_session(
         &self,
@@ -270,9 +268,9 @@ impl NacMcpService {
                 "Only direct session behavior is supported",
             )]));
         }
-        if params.extra.contains_key("light_model") {
+        if !params.extra.is_empty() {
             return Ok(CallToolResult::error(vec![Content::text(
-                "light_model is no longer supported",
+                "Unsupported session fields",
             )]));
         }
         let extra_headers = match params.extra_headers {
@@ -310,7 +308,6 @@ impl NacMcpService {
                 .compaction_threshold
                 .map(RequestField::Value)
                 .unwrap_or(RequestField::Omitted),
-            light_model: RequestField::Omitted,
             ssh_host: params.ssh_host,
             ssh_port: params.ssh_port,
             ssh_identity_file: params.ssh_identity_file,
@@ -530,9 +527,9 @@ impl NacMcpService {
         &self,
         Parameters(params): Parameters<UpdateSessionParams>,
     ) -> Result<CallToolResult, ErrorData> {
-        if params.extra.contains_key("light_model") {
+        if !params.extra.is_empty() {
             return Ok(CallToolResult::error(vec![Content::text(
-                "light_model is no longer supported",
+                "Unsupported session fields",
             )]));
         }
         let request = UpdateConfigRequest {
@@ -547,7 +544,6 @@ impl NacMcpService {
             api_key_env: RequestField::Omitted,
             extra_headers: RequestField::Omitted,
             orchestrator_compaction_threshold: RequestField::Omitted,
-            light_model: RequestField::Omitted,
         };
         match self
             .operations

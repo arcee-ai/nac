@@ -35,17 +35,10 @@ async fn direct_config_patch_updates_selected_model_and_rejects_light_selector()
         "replacement-model"
     );
     drop(conn);
-    let error = manager
-        .update_session_config(
-            "session",
-            UpdateConfigRequest {
-                light_model: RequestField::Null,
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap_err();
-    assert_eq!(ApiError::from(error).status, StatusCode::BAD_REQUEST);
+    assert!(serde_json::from_value::<UpdateConfigRequest>(
+        serde_json::json!({"light_model": null})
+    )
+    .is_err());
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -961,7 +954,6 @@ async fn patch_round_trips_every_state_and_rebuilds_from_persisted_settings() {
                     "true".to_string(),
                 )]))),
                 orchestrator_compaction_threshold: RequestField::Value(64_000),
-                light_model: RequestField::Omitted,
             },
         )
         .await
@@ -1247,7 +1239,6 @@ async fn removed_backend_updates_are_bad_requests_and_are_not_persisted() {
                     api_key_env: RequestField::Omitted,
                     extra_headers: RequestField::Omitted,
                     orchestrator_compaction_threshold: RequestField::Omitted,
-                    light_model: RequestField::Omitted,
                 },
             )
             .await
@@ -1294,7 +1285,6 @@ async fn server_arcee_configuration_status_and_persistence_are_consistent() {
             api_key_env: RequestField::Omitted,
             extra_headers: RequestField::Omitted,
             orchestrator_compaction_threshold: RequestField::Omitted,
-            light_model: RequestField::Omitted,
             ssh_host: None,
             ssh_port: None,
             ssh_identity_file: None,
@@ -1348,7 +1338,6 @@ async fn server_arcee_configuration_status_and_persistence_are_consistent() {
                     api_key_env: RequestField::Omitted,
                     extra_headers: RequestField::Omitted,
                     orchestrator_compaction_threshold: RequestField::Omitted,
-                    light_model: RequestField::Omitted,
                 },
             )
             .await
@@ -1378,7 +1367,6 @@ async fn server_arcee_configuration_status_and_persistence_are_consistent() {
                 api_key_env: RequestField::Omitted,
                 extra_headers: RequestField::Omitted,
                 orchestrator_compaction_threshold: RequestField::Omitted,
-                light_model: RequestField::Omitted,
             },
         )
         .await
@@ -1400,7 +1388,6 @@ async fn server_arcee_configuration_status_and_persistence_are_consistent() {
                 api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
                 extra_headers: RequestField::Omitted,
                 orchestrator_compaction_threshold: RequestField::Omitted,
-                light_model: RequestField::Omitted,
             },
         )
         .await
@@ -1424,7 +1411,6 @@ async fn server_arcee_configuration_status_and_persistence_are_consistent() {
             api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
             extra_headers: RequestField::Omitted,
             orchestrator_compaction_threshold: RequestField::Omitted,
-            light_model: RequestField::Omitted,
             ssh_host: None,
             ssh_port: None,
             ssh_identity_file: None,
@@ -1472,7 +1458,6 @@ async fn null_update_clears_legacy_arcee_api_key_env() {
                 api_key_env: RequestField::Null,
                 extra_headers: RequestField::Omitted,
                 orchestrator_compaction_threshold: RequestField::Omitted,
-                light_model: RequestField::Omitted,
             },
         )
         .await

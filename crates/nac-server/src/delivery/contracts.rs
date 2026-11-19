@@ -218,6 +218,7 @@ impl utoipa::ToSchema for HeadersRequest {
 }
 
 #[derive(Debug, Clone, Default, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
 pub struct CreateSessionRequest {
     /// Direct session behavior. Omission selects direct.
     #[serde(default)]
@@ -255,10 +256,6 @@ pub struct CreateSessionRequest {
     /// Omitted defaults to 70% of the model's context window; null or zero disables.
     #[serde(default)]
     pub orchestrator_compaction_threshold: RequestField<u64>,
-    /// Retired selector. Any explicitly supplied value is rejected.
-    #[serde(default)]
-    #[schema(ignore)]
-    pub light_model: RequestField<serde_json::Value>,
     /// OpenSSH target for remote sessions; `cwd` is remote and defaults to `~`.
     #[serde(default, alias = "host_id")]
     pub ssh_host: Option<String>,
@@ -324,7 +321,6 @@ impl CreateSessionRequest {
             orchestrator_compaction_threshold: application_field(
                 self.orchestrator_compaction_threshold,
             ),
-            light_model: application_field(self.light_model),
             ssh_host: self.ssh_host,
             ssh_port: self.ssh_port,
             ssh_identity_file: self.ssh_identity_file,
@@ -378,6 +374,7 @@ pub struct ProviderModelList {
 }
 
 #[derive(Debug, Clone, Default, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
 pub struct UpdateConfigRequest {
     #[serde(default)]
     pub model: RequestField<String>,
@@ -398,10 +395,6 @@ pub struct UpdateConfigRequest {
     /// Omitted preserves; null or zero disables.
     #[serde(default)]
     pub orchestrator_compaction_threshold: RequestField<u64>,
-    /// Retired selector. Any explicitly supplied value is rejected.
-    #[serde(default)]
-    #[schema(ignore)]
-    pub light_model: RequestField<serde_json::Value>,
 }
 
 impl UpdateConfigRequest {
@@ -423,7 +416,6 @@ impl UpdateConfigRequest {
             orchestrator_compaction_threshold: application_field(
                 self.orchestrator_compaction_threshold,
             ),
-            light_model: application_field(self.light_model),
         }
     }
 }

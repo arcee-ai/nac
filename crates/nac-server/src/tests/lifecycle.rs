@@ -591,7 +591,6 @@ async fn stale_manager_rebuilds_all_model_authority_after_external_patch() {
                 api_key_env: RequestField::Value("SECOND_API_KEY".to_string()),
                 extra_headers: RequestField::Value(HeadersRequest(new_headers.clone())),
                 orchestrator_compaction_threshold: RequestField::Omitted,
-                light_model: RequestField::Omitted,
             },
         )
         .await

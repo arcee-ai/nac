@@ -498,7 +498,6 @@ async fn create_session_rejects_ssh_host_combined_with_sandbox() {
         api_key_env: RequestField::Omitted,
         extra_headers: RequestField::Omitted,
         orchestrator_compaction_threshold: RequestField::Omitted,
-        light_model: RequestField::Omitted,
         ssh_host: Some("build-box".to_string()),
         ssh_port: None,
         ssh_identity_file: None,
@@ -539,7 +538,6 @@ async fn server_create_rejects_removed_backend_names_as_bad_requests() {
                 api_key_env: RequestField::Omitted,
                 extra_headers: RequestField::Omitted,
                 orchestrator_compaction_threshold: RequestField::Omitted,
-                light_model: RequestField::Omitted,
                 ssh_host: None,
                 ssh_port: None,
                 ssh_identity_file: None,
@@ -586,7 +584,6 @@ async fn stored_arcee_auth_config_errors_are_400_and_store_failures_are_500() {
                     api_key_env: RequestField::Omitted,
                     extra_headers: RequestField::Omitted,
                     orchestrator_compaction_threshold: RequestField::Omitted,
-                    light_model: RequestField::Omitted,
                 },
             )
             .await
@@ -630,7 +627,6 @@ async fn stored_arcee_auth_config_errors_are_400_and_store_failures_are_500() {
                     api_key_env: RequestField::Omitted,
                     extra_headers: RequestField::Omitted,
                     orchestrator_compaction_threshold: RequestField::Omitted,
-                    light_model: RequestField::Omitted,
                 },
             )
             .await
@@ -667,7 +663,6 @@ async fn stored_arcee_auth_config_errors_are_400_and_store_failures_are_500() {
                     api_key_env: RequestField::Omitted,
                     extra_headers: RequestField::Omitted,
                     orchestrator_compaction_threshold: RequestField::Omitted,
-                    light_model: RequestField::Omitted,
                 },
             )
             .await

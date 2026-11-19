@@ -93,7 +93,6 @@ pub(crate) struct SessionCreationCommand {
     pub(crate) api_key_env: Field<String>,
     pub(crate) extra_headers: Field<BTreeMap<String, String>>,
     pub(crate) orchestrator_compaction_threshold: Field<u64>,
-    pub(crate) light_model: Field<serde_json::Value>,
     pub(crate) ssh_host: Option<String>,
     pub(crate) ssh_port: Option<u16>,
     pub(crate) ssh_identity_file: Option<String>,
@@ -231,11 +230,6 @@ impl<'a> SessionCreationApplication<'a> {
         if request.behavior != SessionBehavior::Direct {
             return Err(request_configuration_error(
                 "only direct session behavior is supported",
-            ));
-        }
-        if !matches!(request.light_model, Field::Unchanged) {
-            return Err(request_configuration_error(
-                "light_model is no longer supported",
             ));
         }
         anyhow::ensure!(
