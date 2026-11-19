@@ -175,6 +175,7 @@ fn retired_behavior_in_corrupt_current_store_is_rejected_before_mutation() {
     conn.execute_batch("DROP TRIGGER session_direct_only_update; UPDATE sessions SET behavior='direct-with-orchestrator' WHERE session_id='parent';").unwrap();
     drop(conn);
     assert!(load_direct_task(&path, "parent").is_err());
+    assert!(read_attention_metadata(&path, Some("parent")).is_err());
     assert!(create_session_goal(&path, "parent", "goal", None, None).is_err());
     assert!(create_traditional_child_relationship(
         &path,

@@ -25,9 +25,9 @@ pub(in crate::application) fn classify(
 ) -> AttentionSourceSnapshot {
     // Primary direct sessions own settled work and goals. Traditional children
     // additionally report their own broker decisions and topology, attributed
-    // to the child session; orchestration topologies stay unsupported.
-    let primary = stored.primary && stored.direct;
-    let supported = primary || (stored.traditional_child && stored.direct);
+    // to the child session.
+    let primary = stored.primary;
+    let supported = primary || stored.traditional_child;
     let broker = service.and_then(|service| service.broker.as_ref());
     let mut pending: Vec<_> = stored.question.clone().into_iter().collect();
     let broker_available = if supported {
