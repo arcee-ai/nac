@@ -626,20 +626,13 @@ impl SessionService {
             });
         }
 
-        let command_cancellation =
-            if self.metadata.behavior == sessions::SessionBehavior::Orchestrator {
-                // Orchestrator cancellation continues through its established
-                // active-thread registry and must not add a new agent-lock
-                // admission requirement.
-                crate::tools::RunCancellation::default()
-            } else {
-                self.agent
-                    .try_lock()
-                    .map_err(|_| SessionSubmitError::Coordination {
-                        message: SessionCoordinationError::local_agent_busy(),
-                    })?
-                    .begin_run_cancellation()
-            };
+        let command_cancellation = self
+            .agent
+            .try_lock()
+            .map_err(|_| SessionSubmitError::Coordination {
+                message: SessionCoordinationError::local_agent_busy(),
+            })?
+            .begin_run_cancellation();
 
         let submitted_at_epoch_ms = now_epoch_ms();
         let submitted_user_message = (!goal_continuation).then(|| SubmittedUserMessageSnapshot {

@@ -138,9 +138,7 @@ impl SessionService {
         &self,
         options: FrontendSnapshotLoadOptions,
     ) -> Result<SessionFrontendSnapshotLoad> {
-        let shell_commands = if self.metadata.session_id.is_some()
-            && self.metadata.behavior != sessions::SessionBehavior::Orchestrator
-        {
+        let shell_commands = if self.metadata.session_id.is_some() {
             self.shell_commands().await?
         } else {
             Vec::new()

@@ -141,9 +141,6 @@ impl SessionService {
             }
             return Ok((snapshot, true));
         }
-        if self.metadata.behavior == sessions::SessionBehavior::Orchestrator {
-            return Err(ShellCommandError::Unsupported);
-        }
         if crate::store::load_traditional_child(&self.metadata.store_path, session_id)
             .map_err(store_error)?
             .is_some()

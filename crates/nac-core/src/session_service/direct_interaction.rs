@@ -39,17 +39,7 @@ impl SessionService {
         .await
     }
 
-    fn require_direct_behavior(&self) -> Result<()> {
-        if self.metadata.behavior == sessions::SessionBehavior::Orchestrator {
-            return Err(anyhow::anyhow!(
-                "the durable session inbox is available only for direct behaviors"
-            ));
-        }
-        Ok(())
-    }
-
     fn require_direct_primary_behavior(&self) -> Result<()> {
-        self.require_direct_behavior()?;
         let session_id = self
             .metadata
             .session_id
@@ -80,14 +70,12 @@ impl SessionService {
     }
 
     fn direct_permission_broker(&self) -> Result<&Arc<crate::permissions::PermissionBroker>> {
-        self.require_direct_behavior()?;
         self.permission_broker
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("direct permission broker is unavailable"))
     }
 
     fn require_direct_goal_behavior(&self) -> Result<()> {
-        self.require_direct_behavior()?;
         let session_id = self
             .metadata
             .session_id
@@ -183,7 +171,6 @@ impl SessionService {
         parent_session_id: &str,
         review_id: &str,
     ) -> Result<crate::permissions::PermissionReview> {
-        self.require_direct_behavior()?;
         let service = self.clone();
         let parent = parent_session_id.to_owned();
         // Deletion takes these same leases, parent first. Keep them through
@@ -204,11 +191,9 @@ impl SessionService {
                     &service.metadata.store_path,
                     child,
                 )?;
-                let parent_snapshot =
-                    sessions::load_session(&service.metadata.store_path, &parent)?;
-                if parent_snapshot.behavior == sessions::SessionBehavior::Orchestrator
-                    || crate::store::load_traditional_child(&service.metadata.store_path, &parent)?
-                        .is_some()
+                sessions::load_session(&service.metadata.store_path, &parent)?;
+                if crate::store::load_traditional_child(&service.metadata.store_path, &parent)?
+                    .is_some()
                 {
                     return Err(anyhow::anyhow!("retry requires a primary direct parent"));
                 }
@@ -344,7 +329,6 @@ impl SessionService {
         content: &str,
         origin: crate::store::InputOrigin,
     ) -> Result<crate::store::SessionInboxRecord> {
-        self.require_direct_behavior()?;
         let session_id = self
             .metadata
             .session_id
@@ -655,7 +639,6 @@ impl SessionService {
         &self,
         lease: sessions::SessionOperationLease,
     ) -> Result<Option<SessionRunHandle>> {
-        self.require_direct_behavior()?;
         let session_id = self
             .metadata
             .session_id
@@ -694,7 +677,6 @@ impl SessionService {
         use attention::{
             ContinuationDisposition as Disposition, ContinuationSelection as Selection,
         };
-        self.require_direct_behavior()?;
         let _wake = self.inbox_wake.lock().await;
         if self
             .stopping_admission
