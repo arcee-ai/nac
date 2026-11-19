@@ -1,8 +1,8 @@
 import { type DelegatedCompletion } from "../features/delegation/completion";
 import { type ToolPresentation } from "./toolPresentation";
-import { type ThreadLogLine } from "./threadLog";
+import type { ThreadLogLine } from "./threadLog";
 import type { RuntimeThread } from "../store/runtimeStore";
-import type { AgentEvent, DispatchWeight, SessionSnapshotResponse, ToolCall } from "../types/api";
+import type { AgentEvent, DispatchWeight, SessionSnapshotResponse } from "../types/api";
 /** Exact assistant marker written after any partial response on cancellation. */
 export declare const RUN_CANCELLED_MARKER = "[run cancelled by user]";
 /** Stored sentinel identifying an assistant response abandoned by run failure. */
@@ -129,19 +129,6 @@ export interface StreamedOutput {
      */
     settled?: boolean;
 }
-/** Public for the threads list, which ranks rows by the open DAG batch. */
-export declare function dispatchThreadName(call: ToolCall): string;
-/**
- * Latest dispatch prompt per thread, read off the orchestrator's own tool
- * calls. The live `thread_started` event cannot serve this: event sanitization
- * replaces the action with a fixed placeholder before it reaches the stream.
- */
-export declare function dispatchActions(messages: SessionSnapshotResponse["messages"]): Record<string, string>;
-/**
- * Split one assistant batch into Kahn levels using in-batch `threads` deps.
- * Cycles / duplicate names fall back to a single row so the UI still renders.
- */
-export declare function partitionThreadCalls(calls: ToolCall[]): ToolCall[][];
 /**
  * Show model output that has reached the browser ahead of the snapshot.
  *
@@ -171,4 +158,4 @@ key?: string): TranscriptTurn[];
  * Group the snapshot messages into user bubbles and model messages. Live thread
  * state comes from the SSE store so a wave animates before the snapshot lands.
  */
-export declare function buildTranscript(snapshot: SessionSnapshotResponse | null, liveThreads: Record<string, RuntimeThread>, liveFinishedToolCalls?: Record<string, true>, livePrimaryToolEvents?: AgentEvent[], pendingPermissionCallIds?: ReadonlySet<string>): TranscriptTurn[];
+export declare function buildTranscript(snapshot: SessionSnapshotResponse | null, _liveThreads: Record<string, RuntimeThread>, _liveFinishedToolCalls?: Record<string, true>, livePrimaryToolEvents?: AgentEvent[], pendingPermissionCallIds?: ReadonlySet<string>): TranscriptTurn[];

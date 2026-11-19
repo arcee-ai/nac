@@ -370,7 +370,6 @@ export declare function useSessionSnapshot(id: string | null, options?: Partial<
     shell_commands?: import("../../types/openapi.generated").components["schemas"]["ShellCommandSnapshot"][];
     thread_event_boundary: import("../../types/openapi.generated").components["schemas"]["SessionEventBoundary"];
     thread_event_diagnostics?: import("../../types/openapi.generated").components["schemas"]["ThreadEventDecodeDiagnostic"][];
-    thread_events?: Record<string, import("../../types/openapi.generated").components["schemas"]["AgentEvent"][]>;
     transcript_recovery_warning?: string | null;
     workspace: import("../../types/openapi.generated").components["schemas"]["WorkspaceSnapshot"];
 } & {
@@ -409,7 +408,6 @@ export declare function useCreateSession(): import("@tanstack/react-query").UseM
     shell_commands?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["ShellCommandSnapshot"][];
     thread_event_boundary: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionEventBoundary"];
     thread_event_diagnostics?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["ThreadEventDecodeDiagnostic"][];
-    thread_events?: Record<string, import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["AgentEvent"][]>;
     transcript_recovery_warning?: string | null;
     workspace: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["WorkspaceSnapshot"];
 } & {

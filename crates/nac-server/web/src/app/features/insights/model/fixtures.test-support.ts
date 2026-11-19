@@ -31,7 +31,6 @@ export function snapshot(messages: Message[], behavior?: SessionBehavior): Sessi
       response_durations_ms: [],
     },
     sessions: [],
-    thread_events: {},
     thread_event_boundary: { epoch_id: "epoch-test", sequence_id: 0 },
     workspace: {
       host_root: null,

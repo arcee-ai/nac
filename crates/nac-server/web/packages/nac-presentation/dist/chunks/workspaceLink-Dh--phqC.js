@@ -1,4 +1,4 @@
-import { C as e, N as t, a as n, n as r, w as i } from "./RuntimeContext-BVqjWqri.js";
+import { S as e, a as t, j as n, n as r, x as i } from "./RuntimeContext-DDCGeB4w.js";
 import { a, y as o } from "./PresentationBoundary-BAUfAcJZ.js";
 import { n as s, t as c } from "./Toast-J9CfluTU.js";
 import { Profiler as l, createContext as u, useCallback as d, useContext as f, useEffect as p, useMemo as m, useReducer as ee, useRef as te, useState as ne } from "react";
@@ -6165,28 +6165,28 @@ async function aw(e) {
 	throw En(n) ? n.value.cause : Nx(t.cause);
 }
 // src/app/features/direct-session/commandAdapters.ts
-function ow(e, t) {
-	let { api: r, stores: { runtimeStore: { captureRuntimeActivation: i, finishRunCancel: a, requestRunCancel: o, restoreRunCancel: s, runtimeStore: c } } } = n(e), l = i(t), u = v.sessionSnapshot(t), d, f, p, m = [];
+function ow(e, n) {
+	let { api: r, stores: { runtimeStore: { captureRuntimeActivation: i, finishRunCancel: a, requestRunCancel: o, restoreRunCancel: s, runtimeStore: c } } } = t(e), l = i(n), u = v.sessionSnapshot(n), d, f, p, m = [];
 	return {
 		optimistic: () => {
 			l() && (d = o()), f = e.getQueryData(u), p = f?.active_run ? {
 				...f,
 				active_run: void 0
 			} : f, p &&= e.setQueryData(u, p);
-			for (let n of [!1, !0]) {
-				let r = e.getQueryData(v.sessions(n))?.find((e) => e.summary.session_id === t), i = e.setQueryData(v.sessions(n), (e) => e?.map((e) => e.summary.session_id !== t || !e.active && e.active_run === void 0 ? e : {
+			for (let t of [!1, !0]) {
+				let r = e.getQueryData(v.sessions(t))?.find((e) => e.summary.session_id === n), i = e.setQueryData(v.sessions(t), (e) => e?.map((e) => e.summary.session_id !== n || !e.active && e.active_run === void 0 ? e : {
 					...e,
 					active: !1,
 					active_run: void 0
-				}))?.find((e) => e.summary.session_id === t);
+				}))?.find((e) => e.summary.session_id === n);
 				r && i && r !== i && m.push({
-					stats: n,
+					stats: t,
 					before: r,
 					optimistic: i
 				});
 			}
 		},
-		cancel: () => r.cancelActiveRun(t),
+		cancel: () => r.cancelActiveRun(n),
 		rollback: () => {
 			d && l() && c.getState().cancelArmed && s(d), e.setQueryData(u, (e) => e === p ? f : e);
 			for (let { stats: t, before: n, optimistic: r } of m) e.setQueryData(v.sessions(t), (e) => e?.map((e) => e === r ? n : e));
@@ -6617,26 +6617,26 @@ function tT() {
 	});
 }
 function nT() {
-	let { api: e } = r(), { captureRuntimeActivation: n, setOptimisticUserPrompt: i } = r().stores.runtimeStore, a = Dw(), o = _();
+	let { api: e } = r(), { captureRuntimeActivation: t, setOptimisticUserPrompt: i } = r().stores.runtimeStore, a = Dw(), o = _();
 	return h({
 		retry: !1,
 		mutationFn: ({ id: r, prompt: s, signal: c }) => {
-			let l = n(r);
+			let l = t(r);
 			return aw(tw({
 				optimistic: () => {
 					l() && i(s);
 				},
 				admit: async () => {
-					let n = await (c ? e.submitRun(r, s, c) : e.submitRun(r, s));
-					return n.status === "accepted" ? {
+					let t = await (c ? e.submitRun(r, s, c) : e.submitRun(r, s));
+					return t.status === "accepted" ? {
 						kind: "accepted",
-						value: n.response
-					} : n.status === "not-sent" ? {
+						value: t.response
+					} : t.status === "not-sent" ? {
 						kind: "not-sent",
 						error: new DOMException("Prompt submission was cancelled before it was sent.", "AbortError")
 					} : {
 						kind: "uncertain",
-						error: new t(n.requestId, n.error)
+						error: new n(t.requestId, t.error)
 					};
 				},
 				rejected: () => {
@@ -7571,20 +7571,20 @@ function PE(e) {
 	return e instanceof Error ? e.message : String(e);
 }
 // src/app/lib/PerfProfiler.tsx
-var FE = (e, t, n) => {
-	i(`commit:${e}`, {
-		ms: n,
-		fields: { phase: t },
+var FE = (t, n, r) => {
+	e(`commit:${t}`, {
+		ms: r,
+		fields: { phase: n },
 		throttleMs: 1e3,
 		slowMs: 16
 	});
 };
-function IE({ id: t, children: n }) {
-	return e() ? /* @__PURE__ */ oe(l, {
-		id: t,
+function IE({ id: e, children: t }) {
+	return i() ? /* @__PURE__ */ oe(l, {
+		id: e,
 		onRender: FE,
-		children: n
-	}) : /* @__PURE__ */ oe(ae, { children: n });
+		children: t
+	}) : /* @__PURE__ */ oe(ae, { children: t });
 }
 // src/app/lib/workspaceLink.ts
 var LE = /^(https?|ircs?|mailto|xmpp|file)$/i, RE = /^[a-zA-Z]:[\\/]/, zE = /^(https?|mailto|ircs?|xmpp):/i;

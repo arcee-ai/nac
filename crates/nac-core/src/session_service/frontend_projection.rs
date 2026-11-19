@@ -5,19 +5,18 @@ impl SessionService {
         view::list_sessions(&self.metadata.store_path)
     }
 
-    fn load_all_thread_events_with_connection(
+    fn load_primary_tool_events_with_connection(
         &self,
         conn: &rusqlite::Connection,
         per_thread_limit: usize,
     ) -> Result<DecodedThreadEvents> {
         let Some(session_id) = self.metadata.session_id.as_deref() else {
             return Ok(DecodedThreadEvents {
-                events: HashMap::new(),
                 primary_tool_events: Vec::new(),
                 diagnostics: Vec::new(),
             });
         };
-        let records = crate::store::load_all_thread_events_with_connection(
+        let records = crate::store::load_primary_tool_events_with_connection(
             conn,
             session_id,
             per_thread_limit,
@@ -59,7 +58,7 @@ impl SessionService {
             read_stored_projection(&connection, session_id, options, || {
                 self.event_bus
                     .thread_event_boundary(|| {
-                        self.load_all_thread_events_with_connection(
+                        self.load_primary_tool_events_with_connection(
                             &connection,
                             options.thread_event_limit,
                         )
@@ -88,46 +87,23 @@ impl SessionService {
     }
 }
 
-fn decode_thread_events(
-    records: HashMap<String, Vec<crate::store::ThreadEventRecord>>,
-) -> DecodedThreadEvents {
-    let mut events = HashMap::new();
+fn decode_thread_events(records: Vec<crate::store::ThreadEventRecord>) -> DecodedThreadEvents {
     let mut primary_tool_events = Vec::new();
     let mut diagnostics = Vec::new();
-    let mut records: Vec<_> = records.into_iter().collect();
-    records.sort_by(|(left, _), (right, _)| left.cmp(right));
-    for (thread_name, records) in records {
-        let decoded = records
-            .into_iter()
-            .filter_map(|record| decode_thread_event(record, &mut diagnostics))
-            .collect::<Vec<_>>();
-        if thread_name == crate::events::PRIMARY_TOOL_EVENT_TARGET {
-            let mut ordinary_events = Vec::new();
-            for event in decoded {
-                match &event {
-                    AgentEvent::ToolCallStarted {
-                        thread_name: None, ..
-                    }
-                    | AgentEvent::ToolCallFinished {
-                        thread_name: None, ..
-                    } => primary_tool_events.push(event),
-                    _ => ordinary_events.push(event),
-                }
+    for record in records {
+        if let Some(
+            event @ (AgentEvent::ToolCallStarted {
+                thread_name: None, ..
             }
-            // A model-selected worker name can equal the private persistence
-            // bucket. Preserve any genuinely thread-owned rows rather than
-            // hiding that durable transcript behind the projection detail.
-            if !ordinary_events.is_empty() {
-                events.insert(thread_name, ordinary_events);
-            }
-            continue;
-        }
-        if !decoded.is_empty() {
-            events.insert(thread_name, decoded);
+            | AgentEvent::ToolCallFinished {
+                thread_name: None, ..
+            }),
+        ) = decode_thread_event(record, &mut diagnostics)
+        {
+            primary_tool_events.push(event);
         }
     }
     DecodedThreadEvents {
-        events,
         primary_tool_events,
         diagnostics,
     }
@@ -240,7 +216,6 @@ impl SessionService {
             active_compaction: self.active_compaction(),
             shell_commands,
             sessions: blocking.sessions,
-            thread_events: blocking.thread_events.events,
             primary_tool_events: blocking.thread_events.primary_tool_events,
             thread_event_boundary: blocking.thread_event_boundary,
             thread_event_diagnostics: blocking.thread_events.diagnostics,
@@ -336,7 +311,7 @@ impl crate::store::coordinator::PersistenceCommand for ReadFrontendProjection {
             || {
                 let records = session_id
                     .map(|session_id| {
-                        crate::store::load_all_thread_events_with_connection(
+                        crate::store::load_primary_tool_events_with_connection(
                             &connection,
                             session_id,
                             self.options.thread_event_limit,

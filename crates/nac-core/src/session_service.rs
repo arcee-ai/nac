@@ -261,8 +261,6 @@ pub struct SessionFrontendSnapshot {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub shell_commands: Vec<ShellCommandSnapshot>,
     pub sessions: Vec<SessionSummarySnapshot>,
-    #[serde(default)]
-    pub thread_events: HashMap<String, Vec<AgentEvent>>,
     /// Sanitized, bounded lifecycle events for top-level direct tool calls.
     /// Kept separate from worker logs so primary calls cannot become a fake
     /// delegated topology and the web never needs raw transcript payloads.
@@ -378,7 +376,6 @@ const INTERRUPTED_RUN_WARNING: &str =
 const INTERRUPTED_RUN_EVENT_MESSAGE: &str = "run interrupted by process restart";
 
 struct DecodedThreadEvents {
-    events: HashMap<String, Vec<AgentEvent>>,
     primary_tool_events: Vec<AgentEvent>,
     diagnostics: Vec<ThreadEventDecodeDiagnostic>,
 }

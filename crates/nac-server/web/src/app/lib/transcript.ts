@@ -1,9 +1,4 @@
-// Turns the flat orchestrator message log into the blocks the chat renders.
-//
-// Everything the model does between two user prompts belongs to one model
-// message: reasoning, prose, the worksets it defined and the waves of threads
-// it dispatched. Thread tool calls from one assistant message form one package;
-// in-batch `threads` deps split that package into stacked DAG rows.
+// Turns the session's message log into the blocks the chat renders.
 
 import { displayPromptFromMessageText, invokedSkillNames } from "@/app/lib/format";
 import {
@@ -11,8 +6,6 @@ import {
   type DelegatedCompletion,
 } from "@/app/features/delegation/completion";
 import { parseGoalContinuation } from "@/app/features/goals/continuation";
-import type { JsonObject, JsonValue } from "@/app/lib/json";
-import { isString } from "@/app/lib/primitive";
 import { stripNativeToolMarkup } from "@/app/lib/toolMarkup";
 import {
   ambiguousToolResultIds,
@@ -20,17 +13,11 @@ import {
   collectToolResults,
   indexToolEvents,
   presentToolCall,
-  type ToolResultRecord,
   type ToolPresentation,
 } from "@/app/lib/toolPresentation";
-import { mergeThreadLog, persistedThreadLog, type ThreadLogLine } from "@/app/lib/threadLog";
+import type { ThreadLogLine } from "@/app/lib/threadLog";
 import type { RuntimeThread } from "@/app/store/runtimeStore";
-import type {
-  AgentEvent,
-  DispatchWeight,
-  SessionSnapshotResponse,
-  ToolCall,
-} from "@/app/types/api";
+import type { AgentEvent, DispatchWeight, SessionSnapshotResponse } from "@/app/types/api";
 
 /** Exact assistant marker written after any partial response on cancellation. */
 export const RUN_CANCELLED_MARKER = "[run cancelled by user]";
@@ -43,20 +30,6 @@ function stripRunFailureMarker(content: string): string {
   const suffix = `\n\n${RUN_FAILED_PARTIAL_MARKER}`;
   return trimmed.endsWith(suffix) ? trimmed.slice(0, -suffix.length).trimEnd() : trimmed;
 }
-/**
- * Prefix the backend puts on every tool result that exists only because the
- * user stopped the run — both the synthetic result that closes a call the run
- * never reached and the one a worker returns when its dispatch is drained.
- */
-const TOOL_CALL_CANCELLED_MARKER = "[tool call cancelled by user]";
-
-/**
- * Orchestrator tools that only read back state the side panel already shows.
- * A badge for them is noise, so the transcript keeps the steps that changed
- * something — dispatches, worksets, deletions — and drops the lookups.
- */
-const SILENT_TOOLS = new Set(["threads", "thread_read", "workset_read", "workset_list"]);
-
 export type ThreadState = "running" | "pending" | "done" | "cancelled" | "error";
 
 export interface TranscriptThread {
@@ -172,304 +145,6 @@ export interface StreamedOutput {
   settled?: boolean;
 }
 
-function parseArguments(call: ToolCall): JsonObject {
-  try {
-    const parsed: unknown = JSON.parse(call.function?.arguments || "{}");
-    // SAFETY: JSON.parse only ever yields JSON values, and the identity check
-    // below rejects primitives (Object() boxes them) while admitting objects
-    // and arrays, which is exactly the original typeof === "object" contract.
-    return Object(parsed) === parsed ? (parsed as JsonObject) : {};
-  } catch {
-    return {};
-  }
-}
-
-/** String fields only; any other JSON value reads as "". */
-function text(value: JsonValue | undefined): string {
-  return isString(value) ? value : "";
-}
-
-interface BuildContext {
-  liveThreads: Record<string, RuntimeThread>;
-  /** Each thread's persisted events, split into the episodes that produced them. */
-  threadEpisodes: Record<string, AgentEvent[][]>;
-  /** How often each name is dispatched across the whole transcript. */
-  dispatchCounts: Record<string, number>;
-  /**
-   * Orchestrator tool-call ids whose `tool_call_finished` already arrived.
-   * DAG batches only commit tool *messages* once every thread in the round
-   * returns, so a workset can be saved long before `results` sees the call.
-   */
-  liveFinishedToolCalls: Record<string, true>;
-  /** Latest dispatch of this name exists only because the user stopped. */
-  cancelledNames: Set<string>;
-}
-
-/**
- * One thread's persisted events cut into episodes, oldest first.
- *
- * The backend writes them as one stream per name, so a re-dispatched thread
- * arrives as several runs end to end, each opened by its `thread_started`.
- */
-function splitEpisodes(events: AgentEvent[]): AgentEvent[][] {
-  const episodes: AgentEvent[][] = [];
-  events.forEach((event) => {
-    if (event.type === "thread_started" || !episodes.length) episodes.push([]);
-    episodes[episodes.length - 1].push(event);
-  });
-  return episodes;
-}
-
-function threadEpisodes(events: Record<string, AgentEvent[]>) {
-  const episodes: Record<string, AgentEvent[][]> = {};
-  Object.entries(events).forEach(([name, list]) => {
-    episodes[name] = splitEpisodes(list);
-  });
-  return episodes;
-}
-
-function countThreadDispatches(messages: SessionSnapshotResponse["messages"]) {
-  const counts: Record<string, number> = {};
-  messages.forEach((message) => {
-    if (message.role !== "assistant") return;
-    (message.tool_calls ?? []).forEach((call) => {
-      if (call.function?.name !== "thread") return;
-      const name = threadName(call);
-      counts[name] = (counts[name] ?? 0) + 1;
-    });
-  });
-  return counts;
-}
-
-function threadName(call: ToolCall): string {
-  return text(parseArguments(call).name) || "thread";
-}
-
-/** Public for the threads list, which ranks rows by the open DAG batch. */
-export function dispatchThreadName(call: ToolCall): string {
-  return threadName(call);
-}
-
-/**
- * Latest dispatch prompt per thread, read off the orchestrator's own tool
- * calls. The live `thread_started` event cannot serve this: event sanitization
- * replaces the action with a fixed placeholder before it reaches the stream.
- */
-export function dispatchActions(messages: SessionSnapshotResponse["messages"]) {
-  const actions: Record<string, string> = {};
-  messages.forEach((message) => {
-    if (message.role !== "assistant") return;
-    (message.tool_calls ?? []).forEach((call) => {
-      if (call.function?.name !== "thread") return;
-      const action = text(parseArguments(call).action);
-      if (action) actions[threadName(call)] = action;
-    });
-  });
-  return actions;
-}
-
-/** Source thread names from a dispatch; only strings count. */
-function sourceThreads(call: ToolCall): string[] {
-  const value = parseArguments(call).threads;
-  if (!Array.isArray(value)) return [];
-  return value.filter(isString);
-}
-
-/**
- * Split one assistant batch into Kahn levels using in-batch `threads` deps.
- * Cycles / duplicate names fall back to a single row so the UI still renders.
- */
-export function partitionThreadCalls(calls: ToolCall[]): ToolCall[][] {
-  const n = calls.length;
-  if (n <= 1) return n ? [calls] : [];
-
-  const nameToIndex = new Map<string, number>();
-  for (let i = 0; i < n; i += 1) {
-    const name = threadName(calls[i]);
-    if (nameToIndex.has(name)) return [calls];
-    nameToIndex.set(name, i);
-  }
-
-  const adjacency: number[][] = Array.from({ length: n }, () => []);
-  const inDegree = Array.from({ length: n }, () => 0);
-
-  for (let i = 0; i < n; i += 1) {
-    const seen = new Set<number>();
-    for (const source of sourceThreads(calls[i])) {
-      const depIdx = nameToIndex.get(source);
-      if (depIdx === undefined) continue;
-      if (depIdx === i) return [calls];
-      if (seen.has(depIdx)) continue;
-      seen.add(depIdx);
-      adjacency[depIdx].push(i);
-      inDegree[i] += 1;
-    }
-  }
-
-  const waves: ToolCall[][] = [];
-  const sorted = Array.from({ length: n }, () => false);
-  let sortedCount = 0;
-  const degree = inDegree.slice();
-
-  while (sortedCount < n) {
-    const waveIdxs: number[] = [];
-    for (let i = 0; i < n; i += 1) {
-      if (!sorted[i] && degree[i] === 0) waveIdxs.push(i);
-    }
-    if (!waveIdxs.length) return [calls];
-    for (const node of waveIdxs) {
-      for (const neighbor of adjacency[node]) degree[neighbor] -= 1;
-      sorted[node] = true;
-    }
-    sortedCount += waveIdxs.length;
-    waves.push(waveIdxs.map((i) => calls[i]));
-  }
-
-  return waves;
-}
-
-/**
- * The events of one dispatch.
- *
- * The snapshot carries only a bounded window of each thread's events while the
- * transcript keeps every dispatch, so the episodes are lined up with the newest
- * dispatch; the oldest cards fall off the front and show their action instead.
- */
-function eventsForEpisode(
-  ctx: BuildContext,
-  name: string,
-  episode: number,
-): AgentEvent[] | undefined {
-  const episodes = ctx.threadEpisodes[name] ?? [];
-  const dropped = (ctx.dispatchCounts[name] ?? episodes.length) - episodes.length;
-  return episodes[episode - dropped];
-}
-
-/**
- * Thread names whose latest dispatch exists only because the user stopped the
- * run. A later dispatch of the same name — finished or still in flight —
- * drops off this set, so Continue does not keep painting the live card as
- * cancelled.
- *
- * A stop does not always write a tool result for every dispatch — a name that
- * never started has no `[tool call cancelled by user]` row. Those still belong
- * here: the run ended without them, so a checkmark would claim work that never
- * ran.
- */
-function cancelledThreadNames(messages: SessionSnapshotResponse["messages"]): Set<string> {
-  const cancelled = new Set<string>();
-  messages.forEach((message, index) => {
-    if (message.role !== "assistant") return;
-    const results = collectToolResults(messages, index);
-    const threadCalls = (message.tool_calls ?? []).filter(
-      (call) => call.function?.name === "thread",
-    );
-    if (!threadCalls.length) return;
-
-    const turnCancelled = assistantTurnCancelled(messages, index, RUN_CANCELLED_MARKER);
-    let anyCancelMarker = false;
-    for (const call of threadCalls) {
-      const result = results.get(call.id)?.text;
-      const name = dispatchThreadName(call);
-      if (result == null) {
-        if (!turnCancelled) cancelled.delete(name);
-        continue;
-      }
-      if (result.startsWith(TOOL_CALL_CANCELLED_MARKER)) {
-        cancelled.add(name);
-        anyCancelMarker = true;
-      } else {
-        cancelled.delete(name);
-      }
-    }
-
-    if (!anyCancelMarker && !turnCancelled) return;
-    for (const call of threadCalls) {
-      if (results.get(call.id) != null) continue;
-      cancelled.add(dispatchThreadName(call));
-    }
-  });
-  return cancelled;
-}
-
-/**
- * @param episode Which dispatch of this name the card stands for, from 0.
- * @param batchNames Thread names in this assistant message (for in-batch deps).
- * @param finishedNames Names in this batch that have finished (tool result or
- *   live `thread_finished`). Tool results for a DAG batch are committed only
- *   after every wave returns, so live finish is what flips cards to done while
- *   later rows are still pending.
- */
-function describeThread(
-  call: ToolCall,
-  episode: number,
-  identity: string,
-  ctx: BuildContext,
-  results: Map<string, ToolResultRecord>,
-  batchNames: Set<string>,
-  finishedNames: Set<string>,
-): TranscriptThread {
-  const name = threadName(call);
-  const args = parseArguments(call);
-  const action = text(args.action);
-  const rawWeight = text(args.weight);
-  const weight = rawWeight === "light" || rawWeight === "heavy" ? rawWeight : null;
-  const result = results.get(call.id)?.text ?? null;
-  // The stream is keyed by name and only ever describes the dispatch running
-  // now, which is the newest one. Handing it to the earlier cards of that name
-  // would replay this episode's commands on them and mark them failed with it.
-  const live = episode === (ctx.dispatchCounts[name] ?? 1) - 1 ? ctx.liveThreads[name] : undefined;
-
-  const waitingOnBatchDep = sourceThreads(call).some(
-    (source) => batchNames.has(source) && !finishedNames.has(source),
-  );
-
-  const episodeEvents = eventsForEpisode(ctx, name, episode);
-  // A live "running" can only describe the newest dispatch (older cards never
-  // see the stream), while the persisted events may still be the previous
-  // episode's: the snapshot's window only gains this dispatch's thread_started
-  // on the refetch its start triggers. Until then the old episode's
-  // thread_finished must not mark the running card done. A committed tool
-  // result still can — it only exists once the worker actually returned.
-  const finishedPersisted =
-    live?.status === "running"
-      ? false
-      : episodeEvents?.some((event) => event.type === "thread_finished");
-  const finishedLive = live?.status === "finished";
-  // A follow-up that re-dispatches a stopped name is the live episode now.
-  // The previous cancel marker still belongs on the older card; it must not
-  // keep this one on Close while the worker is running.
-  const liveRunning = live?.status === "running" && !live.cancelled;
-  const cancelled =
-    !liveRunning &&
-    (result?.startsWith(TOOL_CALL_CANCELLED_MARKER) === true ||
-      Boolean(live?.cancelled) ||
-      (result == null &&
-        episode === (ctx.dispatchCounts[name] ?? 1) - 1 &&
-        ctx.cancelledNames.has(name)));
-  const state: ThreadState = cancelled
-    ? "cancelled"
-    : live?.isError
-      ? "error"
-      : result != null || finishedLive || finishedPersisted
-        ? "done"
-        : waitingOnBatchDep
-          ? "pending"
-          : "running";
-
-  return {
-    key: identity,
-    name,
-    action,
-    weight,
-    summary: result || action,
-    // The persisted events are what a reload falls back on, and the stream is
-    // what carries the commands issued since the last snapshot.
-    log: mergeThreadLog(persistedThreadLog(episodeEvents), live?.log ?? []),
-    state,
-  };
-}
-
 /**
  * Whether the newest block of a kind, the only one streamed output could belong
  * to, already holds it. Whitespace is ignored: a stored reasoning joins its
@@ -575,8 +250,8 @@ export function withStreamedOutput(
  */
 export function buildTranscript(
   snapshot: SessionSnapshotResponse | null,
-  liveThreads: Record<string, RuntimeThread>,
-  liveFinishedToolCalls: Record<string, true> = {},
+  _liveThreads: Record<string, RuntimeThread>,
+  _liveFinishedToolCalls: Record<string, true> = {},
   livePrimaryToolEvents: AgentEvent[] = [],
   pendingPermissionCallIds: ReadonlySet<string> = new Set(),
 ): TranscriptTurn[] {
@@ -594,17 +269,6 @@ export function buildTranscript(
   messages.forEach((message, index) => {
     if (message.role === "user") lastUserIndex = index;
   });
-
-  const windowDispatchCounts = countThreadDispatches(messages);
-  const dispatchCounts = windowDispatchCounts;
-  const dispatchesSeen: Record<string, number> = {};
-  const ctx: BuildContext = {
-    liveThreads,
-    liveFinishedToolCalls,
-    threadEpisodes: threadEpisodes(snapshot?.thread_events ?? {}),
-    dispatchCounts,
-    cancelledNames: cancelledThreadNames(messages),
-  };
 
   const turns: TranscriptTurn[] = [];
   const goalsSeen = new Set<string>();
@@ -702,95 +366,35 @@ export function buildTranscript(
     }
 
     const results = collectToolResults(messages, index);
-    const threadCalls: ToolCall[] = [];
     const ambiguousResults = ambiguousToolResultIds(messages, index);
     (message.tool_calls ?? []).forEach((call, callIndex) => {
       const name = call.function?.name ?? "tool";
       const key = `${name}-${absoluteIndex}-${callIndex}`;
-      if (name === "thread") {
-        threadCalls.push(call);
-      } else if (name === "workset_define") {
-        const worksetId = text(parseArguments(call).id);
+      const repeatedInBatch =
+        (message.tool_calls ?? []).filter((item) => item.id === call.id).length > 1;
+      const result = repeatedInBatch ? undefined : results.get(call.id);
+      if (direct) {
         blocks.push({
-          kind: "workset",
-          key,
-          worksetId,
-          pending: !results.has(call.id) && !ctx.liveFinishedToolCalls[call.id],
+          kind: "tool-detail",
+          key: `tool-${absoluteIndex}-${call.id}${repeatedInBatch ? `-${callIndex}` : ""}`,
+          presentation: presentToolCall({
+            call,
+            events: toolEvents.get(call.id),
+            hasResult: result != null,
+            resultText: result?.text ?? null,
+            resultHasImage: result?.hasImage ?? false,
+            active: Boolean(snapshot?.active_run) && index > lastUserIndex,
+            awaitingApproval: pendingPermissionCallIds.has(call.id),
+            turnCancelled: assistantTurnCancelled(messages, index, RUN_CANCELLED_MARKER),
+            occurrence: snapshot?.tool_call_occurrences?.[index],
+            ambiguousResult: repeatedInBatch || ambiguousResults.has(call.id),
+            unboundEvents: name === "subagent" || name === "orchestrator_launch",
+          }),
         });
-      } else if (!SILENT_TOOLS.has(name)) {
-        const repeatedInBatch =
-          (message.tool_calls ?? []).filter((item) => item.id === call.id).length > 1;
-        const result = repeatedInBatch ? undefined : results.get(call.id);
-        if (direct) {
-          blocks.push({
-            kind: "tool-detail",
-            key: `tool-${absoluteIndex}-${call.id}${repeatedInBatch ? `-${callIndex}` : ""}`,
-            presentation: presentToolCall({
-              call,
-              events: toolEvents.get(call.id),
-              hasResult: result != null,
-              resultText: result?.text ?? null,
-              resultHasImage: result?.hasImage ?? false,
-              active: Boolean(snapshot?.active_run) && index > lastUserIndex,
-              awaitingApproval: pendingPermissionCallIds.has(call.id),
-              turnCancelled: assistantTurnCancelled(messages, index, RUN_CANCELLED_MARKER),
-              occurrence: snapshot?.tool_call_occurrences?.[index],
-              ambiguousResult: repeatedInBatch || ambiguousResults.has(call.id),
-              unboundEvents: name === "subagent" || name === "orchestrator_launch",
-            }),
-          });
-        } else {
-          blocks.push({ kind: "tool", key, name, pending: result == null });
-        }
+      } else {
+        blocks.push({ kind: "tool", key, name, pending: result == null });
       }
     });
-
-    if (threadCalls.length) {
-      const batchNames = new Set(threadCalls.map(threadName));
-      // Prefer live `thread_finished` over tool results: DAG tool rows are
-      // committed only once every topological wave has returned.
-      const finishedNames = new Set<string>();
-      for (const call of threadCalls) {
-        const name = threadName(call);
-        if (results.has(call.id)) {
-          finishedNames.add(name);
-          continue;
-        }
-        if (ctx.liveThreads[name]?.status === "finished") {
-          finishedNames.add(name);
-          continue;
-        }
-        // Snapshot may already have thread_finished before the tool-result
-        // batch is committed for this DAG. A live "running" means the newest
-        // dispatch is still going, so the window's latest episode is the
-        // previous one and its finish says nothing about this dispatch.
-        const episodes = ctx.threadEpisodes[name] ?? [];
-        const latest = episodes[episodes.length - 1];
-        if (
-          ctx.liveThreads[name]?.status !== "running" &&
-          latest?.some((event) => event.type === "thread_finished")
-        ) {
-          finishedNames.add(name);
-        }
-      }
-      const rows = partitionThreadCalls(threadCalls).map((level) =>
-        level.map((call) => {
-          const dispatched = threadName(call);
-          const episode = dispatchesSeen[dispatched] ?? 0;
-          dispatchesSeen[dispatched] = episode + 1;
-          return describeThread(
-            call,
-            episode,
-            `${dispatched}@${absoluteIndex}:${call.id}`,
-            ctx,
-            results,
-            batchNames,
-            finishedNames,
-          );
-        }),
-      );
-      blocks.push({ kind: "wave", key: `wave-${absoluteIndex}`, rows });
-    }
   });
 
   let durationIndex = durations.length - 1;

@@ -155,7 +155,7 @@ pub(crate) use schema::{
     open_connection, open_initialized_read_connection, open_probe_read_connection,
     open_runtime_connection, StoreConnection,
 };
-pub(crate) use thread_events::load_all_thread_events_with_connection;
+pub(crate) use thread_events::load_primary_tool_events_with_connection;
 pub(crate) use time::now_utc;
 
 #[cfg(test)]

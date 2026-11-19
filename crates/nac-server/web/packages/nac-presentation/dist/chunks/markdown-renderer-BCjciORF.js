@@ -1,6 +1,6 @@
 import { n as e, r as t, t as n } from "./rolldown-runtime-QGRDbDUS.js";
-import { T as r, n as i } from "./RuntimeContext-BVqjWqri.js";
-import { Yn as a, ct as o, ir as s, n as c, nr as l, o as u, r as d, rr as f, t as p, tr as m } from "./workspaceLink-Ci20agcH.js";
+import { C as r, n as i } from "./RuntimeContext-DDCGeB4w.js";
+import { Yn as a, ct as o, ir as s, n as c, nr as l, o as u, r as d, rr as f, t as p, tr as m } from "./workspaceLink-Dh--phqC.js";
 import { a as h } from "./PresentationBoundary-BAUfAcJZ.js";
 import { i as g, q as _, r as v } from "./Toast-J9CfluTU.js";
 import { a as y, c as b, l as x, o as S, r as C, s as w, t as T } from "./lib-rX7C_D5H.js";
@@ -6658,7 +6658,7 @@ function Cl(e) {
 var wl = /* @__PURE__ */ e({ default: () => Hl }), Tl = [Xc], El = /* @__PURE__ */ new Map();
 function Dl(e) {
 	let t = El.get(e);
-	return t || (t = import("./markdown-mathjax-B9i1uf7D.js").then(({ createMathjaxPlugin: t, remarkMathPlugin: n }) => ({
+	return t || (t = import("./markdown-mathjax-CDJB9hpJ.js").then(({ createMathjaxPlugin: t, remarkMathPlugin: n }) => ({
 		remark: [...Tl, n],
 		rehype: [t(e)]
 	})), El.set(e, t)), t;

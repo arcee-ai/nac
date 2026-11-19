@@ -6,12 +6,7 @@ import {
   prependMessagePage,
 } from "@/app/lib/messageWindow";
 import { buildTranscript } from "@/app/lib/transcript";
-import type {
-  AgentEvent,
-  Message,
-  MessagesPageResponse,
-  SessionSnapshotResponse,
-} from "@/app/types/api";
+import type { Message, MessagesPageResponse, SessionSnapshotResponse } from "@/app/types/api";
 
 function user(content: string): Message {
   // SAFETY: test fixture — the user variant is exactly { role, content }.
@@ -24,45 +19,8 @@ function assistant(content: string): Message {
   return { role: "assistant", content } as Message;
 }
 
-function threadAssistant(name: string, callId: string): Message {
-  // SAFETY: test fixture — the transcript projection only reads role, content,
-  // and tool_calls from an assistant message; the optional fields are omitted.
-  return {
-    role: "assistant",
-    content: null,
-    tool_calls: [
-      {
-        id: callId,
-        type: "function",
-        function: {
-          name: "thread",
-          arguments: JSON.stringify({ name, action: callId }),
-        },
-      },
-    ],
-  } as Message;
-}
-
 function tool(callId: string): Message {
-  // SAFETY: test fixture — the tool variant is exactly { role, tool_call_id,
-  // content }.
-  return {
-    role: "tool",
-    tool_call_id: callId,
-    content: "done",
-  } as Message;
-}
-
-function toolStarted(callId: string): AgentEvent {
-  // SAFETY: test fixture — only the tool_call_started fields the projection
-  // reads are populated; the optional event fields are omitted.
-  return {
-    type: "tool_call_started",
-    call_id: callId,
-    name: "read",
-    args_preview: "latest.ts",
-    key_arg_preview: "latest.ts",
-  } as AgentEvent;
+  return { role: "tool", tool_call_id: callId, content: "done" } as Message;
 }
 
 function system(content: string): Message {
@@ -89,7 +47,6 @@ function snapshot(
       has_older: start > 0,
     },
     response_timing: { response_durations_ms: durations },
-    thread_events: {},
   } as SessionSnapshotResponse;
 }
 
@@ -277,44 +234,27 @@ describe("bounded transcript projection", () => {
     expect(models.map((turn) => turn.durationMs)).toEqual([900, null]);
   });
 
-  it("retains model and thread identities across a partial-turn prepend", () => {
-    const current = snapshot([threadAssistant("worker", "call-new"), assistant("final")], 50, 52);
-    current.thread_events = { worker: [toolStarted("event-new")] };
+  it("retains direct tool identity across a partial-turn prepend", () => {
+    const call = (id: string): Message => ({
+      role: "assistant",
+      content: null,
+      tool_calls: [{ id, type: "function", function: { name: "read", arguments: "{}" } }],
+    });
+    const current = snapshot([call("new"), assistant("final")], 50, 52);
+    current.metadata = { behavior: "direct" } as SessionSnapshotResponse["metadata"];
     const before = buildTranscript(current, {});
-
-    const merged = prependMessagePage(
-      current,
-      page([threadAssistant("worker", "call-old"), tool("call-old")], 48, 52),
-      50,
-    );
+    const merged = prependMessagePage(current, page([call("old"), tool("old")], 48, 52), 50);
     expect(merged).not.toBeNull();
     if (!merged) return;
     const after = buildTranscript(merged, {});
-
-    expect(before[0]?.key).toBe("model-51");
-    expect(after[0]?.key).toBe(before[0]?.key);
-    const beforeKeys =
-      before[0]?.kind === "model"
-        ? before[0].blocks.flatMap((block) =>
-            block.kind === "wave" ? block.rows.flat().map((thread) => thread.key) : [],
-          )
-        : [];
-    const afterKeys =
-      after[0]?.kind === "model"
-        ? after[0].blocks.flatMap((block) =>
-            block.kind === "wave" ? block.rows.flat().map((thread) => thread.key) : [],
-          )
-        : [];
-    expect(beforeKeys).toEqual(["worker@50:call-new"]);
-    expect(afterKeys).toEqual(["worker@48:call-old", "worker@50:call-new"]);
-    const newestThread =
-      before[0]?.kind === "model"
-        ? before[0].blocks
-            .filter((block) => block.kind === "wave")
-            .flatMap((block) => block.rows.flat())
-            .find((thread) => thread.key === "worker@50:call-new")
-        : undefined;
-    expect(newestThread?.log.map((line) => line.key)).toEqual(["call-event-new"]);
+    const keys = (turns: ReturnType<typeof buildTranscript>) =>
+      turns.flatMap((turn) =>
+        turn.kind === "model"
+          ? turn.blocks.filter((block) => block.kind === "tool-detail").map((block) => block.key)
+          : [],
+      );
+    expect(keys(before)).toEqual(["tool-50-new"]);
+    expect(keys(after)).toEqual(["tool-48-old", "tool-50-new"]);
   });
 
   it("renders every turn the user explicitly loaded", () => {

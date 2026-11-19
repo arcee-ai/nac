@@ -19877,18 +19877,6 @@
               "$ref": "#/components/schemas/ThreadEventDecodeDiagnostic"
             }
           },
-          "thread_events": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "array",
-              "items": {
-                "$ref": "#/components/schemas/AgentEvent"
-              }
-            },
-            "propertyNames": {
-              "type": "string"
-            }
-          },
           "transcript_recovery_warning": {
             "type": [
               "string",

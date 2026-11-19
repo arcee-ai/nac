@@ -106,7 +106,6 @@ function snapshot(messages: Message[], total = messages.length): SessionSnapshot
     message_created_at: messages.map((_, index) => `t-${index}`),
     message_page: messagePage,
     response_timing: timing,
-    thread_events: {},
   } as SessionSnapshotResponse;
 }
 

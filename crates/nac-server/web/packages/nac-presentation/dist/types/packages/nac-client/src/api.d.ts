@@ -577,7 +577,6 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         shell_commands?: import("./openapi.generated.js").components["schemas"]["ShellCommandSnapshot"][];
         thread_event_boundary: import("./openapi.generated.js").components["schemas"]["SessionEventBoundary"];
         thread_event_diagnostics?: import("./openapi.generated.js").components["schemas"]["ThreadEventDecodeDiagnostic"][];
-        thread_events?: Record<string, import("./openapi.generated.js").components["schemas"]["AgentEvent"][]>;
         transcript_recovery_warning?: string | null;
         workspace: import("./openapi.generated.js").components["schemas"]["WorkspaceSnapshot"];
     } & {
@@ -601,7 +600,6 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         shell_commands?: import("./openapi.generated.js").components["schemas"]["ShellCommandSnapshot"][];
         thread_event_boundary: import("./openapi.generated.js").components["schemas"]["SessionEventBoundary"];
         thread_event_diagnostics?: import("./openapi.generated.js").components["schemas"]["ThreadEventDecodeDiagnostic"][];
-        thread_events?: Record<string, import("./openapi.generated.js").components["schemas"]["AgentEvent"][]>;
         transcript_recovery_warning?: string | null;
         workspace: import("./openapi.generated.js").components["schemas"]["WorkspaceSnapshot"];
     } & {

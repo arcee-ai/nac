@@ -204,6 +204,39 @@ correlation |command| crate::telemetry::Correlation::session(Some(&command.sessi
 port public;
 }
 
+/// Load the bounded primary-tool event tail in chronological order. The
+/// transcript ledger shares this table but has a different reserved target.
+pub(crate) fn load_primary_tool_events_with_connection(
+    conn: &Connection,
+    session_id: &str,
+    limit: usize,
+) -> Result<Vec<ThreadEventRecord>> {
+    if limit == 0 {
+        return Ok(Vec::new());
+    }
+    let mut statement = conn.prepare(
+        "SELECT id, thread_name, session_id, event_json, created_at FROM (
+            SELECT id, thread_name, session_id, event_json, created_at
+            FROM thread_events WHERE session_id = ?1 AND thread_name = ?2
+            ORDER BY id DESC LIMIT ?3
+         ) ORDER BY id ASC",
+    )?;
+    let rows = statement.query_map(
+        params![session_id, crate::events::PRIMARY_TOOL_EVENT_TARGET, limit],
+        |row| {
+            Ok(ThreadEventRecord {
+                id: row.get(0)?,
+                thread_name: row.get(1)?,
+                session_id: row.get(2)?,
+                event_json: row.get(3)?,
+                created_at: row.get(4)?,
+            })
+        },
+    )?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
+#[cfg(test)]
 pub(crate) fn load_all_thread_events_with_connection(
     conn: &Connection,
     session_id: &str,

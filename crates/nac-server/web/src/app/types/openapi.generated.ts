@@ -1567,7 +1567,6 @@ export interface components {
       shell_commands?: components["schemas"]["ShellCommandSnapshot"][];
       thread_event_boundary: components["schemas"]["SessionEventBoundary"];
       thread_event_diagnostics?: components["schemas"]["ThreadEventDecodeDiagnostic"][];
-      thread_events?: Record<string, components["schemas"]["AgentEvent"][]>;
       transcript_recovery_warning?: string | null;
       workspace: components["schemas"]["WorkspaceSnapshot"];
     };
