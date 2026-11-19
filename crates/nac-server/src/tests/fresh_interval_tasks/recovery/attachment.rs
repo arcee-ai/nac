@@ -232,25 +232,6 @@ async fn attachment_recovery_child() {
         let owner = format!("project:{}", published.destination.project_id);
         let write_owner = owner.clone();
         let schedule_b = call(move || {
-            let defaults =
-                model_configurations::load_model_configuration(&write_path, "task-config")?;
-            model_configurations::update_model_configuration(
-                &write_path,
-                "task-config",
-                model_configurations::NewModelConfiguration {
-                    name: defaults.name,
-                    backend: defaults.backend,
-                    model: defaults.model,
-                    base_url: endpoint,
-                    allow_insecure_http: false,
-                    api_key_env: Some("SECOND_API_KEY".into()),
-                    reasoning_effort: defaults.reasoning_effort,
-                    extra_headers: defaults.extra_headers,
-                    orchestrator_compaction_threshold: None,
-                    initial_prompt: None,
-                    light_model: None,
-                },
-            )?;
             let binding = store::fresh_heartbeat_binding(&write_path, &destination, None, &cwd)?;
             // Constructed due-time, not elapsed-cadence evidence. No RunNow for B.
             Ok(store::control_heartbeat(

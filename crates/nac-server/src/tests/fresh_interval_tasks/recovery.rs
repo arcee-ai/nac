@@ -92,28 +92,6 @@ async fn seed_occurrence(
 ) -> (SessionManager, store::HeartbeatOccurrence, i64) {
     let manager = test_manager(root);
     let request = task_launches::fixture(root, &manager).await;
-    let mut defaults =
-        model_configurations::load_model_configuration(&manager.inner.store_path, "task-config")
-            .unwrap();
-    defaults.base_url = endpoint.to_owned();
-    model_configurations::update_model_configuration(
-        &manager.inner.store_path,
-        "task-config",
-        model_configurations::NewModelConfiguration {
-            name: defaults.name,
-            backend: defaults.backend,
-            model: defaults.model,
-            base_url: defaults.base_url,
-            allow_insecure_http: false,
-            api_key_env: defaults.api_key_env,
-            reasoning_effort: defaults.reasoning_effort,
-            extra_headers: defaults.extra_headers,
-            orchestrator_compaction_threshold: None,
-            initial_prompt: None,
-            light_model: None,
-        },
-    )
-    .unwrap();
     let path = manager.inner.store_path.clone();
     let cwd = root.join("repo/nested");
     std::fs::write(cwd.join("file"), "staged source").unwrap();

@@ -14,7 +14,6 @@ use axum::{
 };
 use flate2::read::GzDecoder;
 use nac_core::model::{BackendKind, ModelConfigurationError, ReasoningEffort};
-use nac_core::model_configurations;
 use nac_core::projects::ProjectRecord;
 use nac_core::runtime::OptionalModelOption;
 use nac_core::store::{GoalStatus, InboxDelivery};
