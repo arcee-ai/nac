@@ -976,121 +976,82 @@ Here's the quick summary of what was discovered:\n\n\
 }
 
 #[tokio::test]
-async fn multi_row_steering_ack_failure_rolls_back_messages_and_retries_once() {
-    let unique = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let store_path = std::env::temp_dir()
-        .join(format!("nac_agent_steering_{unique}"))
-        .join("store.db");
+async fn direct_inbox_batch_ack_failure_rolls_back_and_retries_once() {
+    let root = std::env::temp_dir().join(format!("nac_direct_steering_{}", uuid::Uuid::new_v4()));
+    let store_path = root.join("store.db");
     crate::store::initialize(&store_path).unwrap();
     crate::store::insert_test_session(&store_path, "session");
-    let (events_tx, mut events_rx) = tokio::sync::mpsc::unbounded_channel();
-    let mut agent = Agent::with_config(
+    let mut agent = super::transcript_log_tests::transcript_test_agent(
         ModelClient::new_for_test(),
-        AgentConfig {
-            command_output_limits: crate::terminal::CommandOutputLimits::default(),
-            mode: AgentMode::Worker,
-            store_path: store_path.clone(),
-            session_id: Some("session".to_string()),
-            orchestrator_compaction_threshold: None,
-            initial_messages: Vec::new(),
-            thread_name: Some("impl/ui".to_string()),
-            dispatch_id: Some("worker-dispatch".to_string()),
-            event_sink: EventSink::channel(events_tx),
-            workspace_cwd: PathBuf::from("."),
-            config_cwd: PathBuf::from("."),
-            working_directory: ".".to_string(),
-            sandbox: None,
-            ssh: None,
-            mcp: None,
-            skills: None,
-            extra_tool_defs: Vec::new(),
-            agents_md_message: None,
-            thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
-            permission_rules: Vec::new(),
-        },
-    )
-    .unwrap();
-    let message_checkpoint = agent.messages.len();
-    let first = crate::store::queue_thread_steering(
+        store_path.clone(),
+        Some("session"),
+    );
+    agent.set_current_run_id(Some("run".to_string()));
+    super::transcript_log_tests::store_snapshot_messages(&store_path, &agent.messages);
+    let checkpoint = agent.messages.len();
+    let first = crate::store::create_session_inbox_item(
         &store_path,
         "session",
-        "impl/ui",
-        "worker-dispatch",
+        crate::store::InboxDelivery::Steer,
         "Keep the picker keyboard accessible.",
+        Some("run"),
+        None,
     )
     .unwrap();
-    let second = crate::store::queue_thread_steering(
+    let second = crate::store::create_session_inbox_item(
         &store_path,
         "session",
-        "impl/ui",
-        "worker-dispatch",
+        crate::store::InboxDelivery::Steer,
         "Preserve visible focus states.",
+        Some("run"),
+        None,
     )
     .unwrap();
     let connection = rusqlite::Connection::open(&store_path).unwrap();
     connection
         .execute_batch(&format!(
-            "CREATE TRIGGER fail_second_steering_ack
-             BEFORE UPDATE OF status ON thread_steering
-             WHEN OLD.id = {} AND NEW.status = 'delivered'
-             BEGIN
-                 SELECT RAISE(FAIL, 'forced batch acknowledgement failure');
-             END;",
-            second.id
+            "CREATE TRIGGER fail_second_inbox_ack BEFORE UPDATE OF status ON session_inbox
+         WHEN OLD.id = {} AND NEW.status = 'delivered'
+         BEGIN SELECT RAISE(FAIL, 'forced batch acknowledgement failure'); END;",
+            second.id,
         ))
         .unwrap();
 
-    assert!(agent.append_pending_steering().await.is_err());
-    assert_eq!(agent.messages.len(), message_checkpoint);
-    assert!(agent.appended_steering_ids.is_empty());
-    assert!(events_rx.try_recv().is_err());
-    let claimed = crate::store::list_thread_steering(&store_path, "session").unwrap();
-    assert_eq!(claimed.len(), 2);
-    assert!(claimed.iter().all(|record| record.status == "claimed"));
+    assert!(agent.append_pending_direct_inbox().await.is_err());
+    assert_eq!(agent.messages.len(), checkpoint);
+    let pending = crate::store::list_session_inbox(&store_path, "session").unwrap();
+    assert_eq!(
+        pending.iter().map(|item| item.id).collect::<Vec<_>>(),
+        [first.id, second.id]
+    );
+    assert!(pending
+        .iter()
+        .all(|item| item.status == crate::store::InboxStatus::Pending));
 
     connection
-        .execute_batch("DROP TRIGGER fail_second_steering_ack")
+        .execute_batch("DROP TRIGGER fail_second_inbox_ack")
         .unwrap();
-    assert_eq!(agent.append_pending_steering().await.unwrap(), 2);
-    assert_eq!(agent.append_pending_steering().await.unwrap(), 0);
-    let appended = agent.messages[message_checkpoint..]
+    assert_eq!(agent.append_pending_direct_inbox().await.unwrap(), 2);
+    assert_eq!(agent.append_pending_direct_inbox().await.unwrap(), 0);
+    let appended = agent.messages[checkpoint..]
         .iter()
-        .filter_map(|message| match message {
-            Message::User { content } => Some(content.as_str()),
-            _ => None,
+        .map(|message| match message {
+            Message::User { content } => content.as_str(),
+            other => panic!("expected user steering, got {other:?}"),
         })
         .collect::<Vec<_>>();
-    assert_eq!(appended.len(), 2);
     assert_eq!(
-        appended
-            .iter()
-            .filter(|content| content.contains("Keep the picker keyboard accessible."))
-            .count(),
-        1
+        appended,
+        [
+            "Keep the picker keyboard accessible.",
+            "Preserve visible focus states."
+        ]
     );
-    assert_eq!(
-        appended
-            .iter()
-            .filter(|content| content.contains("Preserve visible focus states."))
-            .count(),
-        1
-    );
-    assert!(crate::store::list_thread_steering(&store_path, "session")
-        .unwrap()
+    let delivered = crate::store::list_session_inbox(&store_path, "session").unwrap();
+    assert!(delivered
         .iter()
-        .all(|record| record.status == "delivered"));
-    let delivered_ids =
-        [events_rx.try_recv().unwrap(), events_rx.try_recv().unwrap()].map(|event| match event {
-            AgentEvent::ThreadSteeringDelivered { steering_id, .. } => steering_id,
-            event => panic!("expected delivered event, got {event:?}"),
-        });
-    assert_eq!(delivered_ids, [first.id, second.id]);
-    assert!(events_rx.try_recv().is_err());
-
-    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+        .all(|item| item.status == crate::store::InboxStatus::Delivered));
+    let _ = std::fs::remove_dir_all(root);
 }
 
 #[tokio::test]
