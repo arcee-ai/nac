@@ -5,7 +5,6 @@ use crate::permissions::{
 };
 use nac_contracts::{
     CommandEnvironmentFuture, CommandEnvironmentProvider, CommandEnvironmentSnapshot,
-    WorkerEnvironment,
 };
 
 #[path = "user_terminal_control_tests.rs"]
@@ -29,9 +28,6 @@ impl CommandEnvironmentProvider for Environment {
     fn redaction_snapshot(&self) -> Result<CommandEnvironmentSnapshot> {
         Ok(self.0.clone())
     }
-    fn worker_environment(&self) -> WorkerEnvironment {
-        WorkerEnvironment::default()
-    }
 }
 
 // Pause the real environment snapshot after prepared authorization and before
@@ -51,9 +47,6 @@ impl CommandEnvironmentProvider for PausedEnvironment {
     }
     fn redaction_snapshot(&self) -> Result<CommandEnvironmentSnapshot> {
         Ok(CommandEnvironmentSnapshot::empty())
-    }
-    fn worker_environment(&self) -> WorkerEnvironment {
-        WorkerEnvironment::default()
     }
 }
 

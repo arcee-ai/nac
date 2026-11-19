@@ -12,9 +12,6 @@ impl nac_contracts::CommandEnvironmentProvider for TestEnvironment {
     fn redaction_snapshot(&self) -> anyhow::Result<nac_contracts::CommandEnvironmentSnapshot> {
         Ok(test_environment())
     }
-    fn worker_environment(&self) -> nac_contracts::WorkerEnvironment {
-        Default::default()
-    }
 }
 fn test_environment() -> nac_contracts::CommandEnvironmentSnapshot {
     nac_contracts::CommandEnvironmentSnapshot::from_parts(

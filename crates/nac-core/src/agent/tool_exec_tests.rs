@@ -530,9 +530,6 @@ async fn slow_subagent_preview_keeps_mixed_admission_order() {
             std::thread::sleep(std::time::Duration::from_millis(500));
             Ok(nac_contracts::CommandEnvironmentSnapshot::empty())
         }
-        fn worker_environment(&self) -> nac_contracts::WorkerEnvironment {
-            Default::default()
-        }
     }
     let root = std::env::temp_dir().join(format!("nac-preview-admission-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&root).unwrap();

@@ -162,9 +162,6 @@ impl nac_contracts::CommandEnvironmentProvider for UnavailableDiagnostic {
             anyhow::bail!("diagnostic-private-error-canary")
         }
     }
-    fn worker_environment(&self) -> nac_contracts::WorkerEnvironment {
-        Default::default()
-    }
 }
 
 #[tokio::test]

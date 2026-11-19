@@ -1146,9 +1146,6 @@ impl nac_contracts::CommandEnvironmentProvider for FailingEnvironment {
     fn redaction_snapshot(&self) -> anyhow::Result<nac_contracts::CommandEnvironmentSnapshot> {
         Err(anyhow::anyhow!("secret store unavailable"))
     }
-    fn worker_environment(&self) -> nac_contracts::WorkerEnvironment {
-        nac_contracts::WorkerEnvironment::default()
-    }
 }
 
 struct ManagedSecretEnvironment(String);
@@ -1165,9 +1162,6 @@ impl nac_contracts::CommandEnvironmentProvider for ManagedSecretEnvironment {
                 .collect(),
             vec![self.0.clone()],
         ))
-    }
-    fn worker_environment(&self) -> nac_contracts::WorkerEnvironment {
-        nac_contracts::WorkerEnvironment::default()
     }
 }
 

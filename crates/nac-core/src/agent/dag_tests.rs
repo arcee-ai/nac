@@ -496,9 +496,6 @@ async fn subagent_preview_provider_failure_and_delay_only_suppress_preview() {
             }
             Err(anyhow::anyhow!("unavailable"))
         }
-        fn worker_environment(&self) -> nac_contracts::WorkerEnvironment {
-            Default::default()
-        }
     }
     let active = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let peak = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -623,9 +620,6 @@ async fn captured_managed_exa_is_redacted_without_web_capability() {
         }
         fn redaction_snapshot(&self) -> anyhow::Result<nac_contracts::CommandEnvironmentSnapshot> {
             Ok(nac_contracts::CommandEnvironmentSnapshot::empty())
-        }
-        fn worker_environment(&self) -> nac_contracts::WorkerEnvironment {
-            Default::default()
         }
     }
     crate::managed_native_credentials::capture_managed_native_credentials_from_environment()

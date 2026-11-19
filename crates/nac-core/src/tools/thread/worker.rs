@@ -311,18 +311,6 @@ pub(super) async fn run_worker(
     let mut command = Command::new(executable);
     command.arg("__worker");
     remove_worker_native_credentials(&mut command);
-    if let Some(provider) = runtime.command_environment.as_ref() {
-        let environment = provider.worker_environment();
-        if let Some(secret_root) = environment.secret_root {
-            command.arg("--managed-secret-root").arg(secret_root);
-        }
-        if let Some(client_id) = environment.github_client_id {
-            command.arg("--managed-github-client-id").arg(client_id);
-        }
-        if let Some(home_root) = environment.home_root {
-            command.arg("--managed-home-root").arg(home_root);
-        }
-    }
     if runtime.backend.workspace_cwd_is_local() {
         command.current_dir(&runtime.workspace_cwd);
     }
