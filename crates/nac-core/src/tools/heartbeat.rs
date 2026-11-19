@@ -178,7 +178,7 @@ impl NativeTool for HeartbeatControlTool {
                 if !relinquishing || !services.runtime.heartbeat_execution {
                     return error("this automatic turn has no new human scheduling request; it can only relinquish its own active heartbeat");
                 }
-                let Some(run) = services.runtime.active_threads.run_id() else {
+                let Some(run) = services.runtime.run_admission.run_id() else {
                     return error("automatic heartbeat control has no active run binding");
                 };
                 let target = input
@@ -362,7 +362,7 @@ impl NativeTool for ReportHeartbeatTool {
                 Ok(id) => id,
                 Err(e) => return e,
             };
-            let Some(run) = services.runtime.active_threads.run_id() else {
+            let Some(run) = services.runtime.run_admission.run_id() else {
                 return error("no active heartbeat run");
             };
             let environment = match services.runtime.command_environment_snapshot().await {
@@ -421,7 +421,7 @@ pub(super) async fn record_denial(services: ToolServices<'_>) {
         .store(true, std::sync::atomic::Ordering::Release);
     let (Some(id), Some(run)) = (
         services.runtime.session_id.clone(),
-        services.runtime.active_threads.run_id(),
+        services.runtime.run_admission.run_id(),
     ) else {
         return;
     };

@@ -27,6 +27,10 @@ pub(crate) struct RunAdmission {
 }
 
 impl RunAdmission {
+    pub(crate) fn run_id(&self) -> Option<String> {
+        self.lock().run_id.clone()
+    }
+
     pub(super) fn lock(&self) -> std::sync::MutexGuard<'_, RunAdmissionState> {
         self.state
             .lock()
