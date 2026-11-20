@@ -1,27 +1,19 @@
-import {
-  Button,
-  ButtonContent,
-  ButtonSize,
-  ButtonVariant,
-  Icon,
-  IconName,
-  Tooltip,
-} from "@/app/atoms";
+import type { ReactNode } from "react";
+
+import { Icon, IconName } from "@/app/atoms";
 import { cn } from "@/app/lib/cn";
 
 /** The "Projects" heading over the sidebar's project groups: folds the list and adds a project. */
 export function ProjectsSectionHeader({
   expanded,
   touch = false,
-  createLabel,
   onToggle,
-  onCreate,
+  children,
 }: {
   expanded: boolean;
   touch?: boolean;
-  createLabel: string;
   onToggle: () => void;
-  onCreate: () => void;
+  children: ReactNode;
 }) {
   return (
     <div className={cn("flex min-w-0 items-center gap-0.5 pr-1", touch ? "min-h-11" : "h-8")}>
@@ -45,18 +37,7 @@ export function ProjectsSectionHeader({
           )}
         />
       </button>
-      <Tooltip title={createLabel} sticky>
-        <Button
-          variant={ButtonVariant.Ghost}
-          size={touch ? ButtonSize.Medium : ButtonSize.Small}
-          content={ButtonContent.Icon}
-          aria-label={createLabel}
-          className={cn(touch && "!size-11")}
-          onClick={onCreate}
-        >
-          <Icon iconName={IconName.Add} />
-        </Button>
-      </Tooltip>
+      {children}
     </div>
   );
 }

@@ -18,6 +18,9 @@ const fakes = vi.hoisted(() => ({
   togglePin: vi.fn(),
   assign: vi.fn(),
   newChat: vi.fn(),
+  create: vi.fn(),
+  isManaged: false,
+  addRepository: vi.fn(),
   stores: null as unknown,
 }));
 
@@ -45,15 +48,15 @@ vi.mock("@/app/providers/ProjectActionsProvider", () => ({
     togglePin: vi.fn(),
     rename: vi.fn(),
     remove: vi.fn(),
-    create: vi.fn(),
+    create: fakes.create,
   }),
 }));
 vi.mock("@/app/features/managed/controller/useManagedHost", () => ({
   useManagedHost: () => ({
     status: null,
-    isManaged: false,
+    isManaged: fakes.isManaged,
     openSettings: vi.fn(),
-    addRepository: vi.fn(),
+    addRepository: fakes.addRepository,
   }),
 }));
 
@@ -115,8 +118,35 @@ beforeEach(() => {
     sidebarLayoutStore: createSidebarLayoutStore(),
     attentionStore: createAttentionStore(),
   };
-  for (const fake of [fakes.rename, fakes.remove, fakes.togglePin, fakes.assign, fakes.newChat])
+  fakes.isManaged = false;
+  for (const fake of [
+    fakes.rename,
+    fakes.remove,
+    fakes.togglePin,
+    fakes.assign,
+    fakes.newChat,
+    fakes.create,
+    fakes.addRepository,
+  ])
     fake.mockReset();
+});
+
+it("offers both managed project creation paths from the populated sidebar", () => {
+  fakes.isManaged = true;
+  mount([]);
+  const add = screen.getByRole("button", { name: "Add project to this host" });
+  fireEvent.click(add);
+  const menu = screen.getByRole("menu", { name: "Add project" });
+  expect(fakes.addRepository).not.toHaveBeenCalled();
+  fireEvent.click(within(menu).getByRole("menuitem", { name: /Create from an existing path/ }));
+  expect(fakes.create).toHaveBeenCalledOnce();
+  fireEvent.click(add);
+  fireEvent.click(
+    within(screen.getByRole("menu", { name: "Add project" })).getByRole("menuitem", {
+      name: /Add repository/,
+    }),
+  );
+  expect(fakes.addRepository).toHaveBeenCalledOnce();
 });
 afterEach(() => {
   cleanup();

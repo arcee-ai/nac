@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { useManagedHost } from "@/app/features/managed/controller/useManagedHost";
+import { AddProjectAction } from "@/app/features/home/AddProjectAction";
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { useNow } from "@/app/hooks/useNow";
 import { useSessionTitle } from "@/app/hooks/useSessionTitle";
@@ -227,8 +227,6 @@ export function SessionTree({
   const stores = useNativeRuntime().stores;
   const { useOrganize, useCollapsedProjects, useExpandedParents, toggleProjectCollapsed } =
     stores.sidebarLayoutStore;
-  const projectActions = useProjectActions();
-  const managed = useManagedHost();
   const [projectsOpen, setProjectsOpen] = useState(true);
   const { clearAttention } = stores.attentionStore;
   const organize = useOrganize();
@@ -297,14 +295,10 @@ export function SessionTree({
       <ProjectsSectionHeader
         expanded={projectsOpen}
         touch={touch}
-        createLabel={managed.isManaged ? "Add repository" : "New project"}
         onToggle={() => setProjectsOpen((open) => !open)}
-        onCreate={() => {
-          onNavigate?.();
-          if (managed.isManaged) managed.addRepository();
-          else projectActions.create();
-        }}
-      />
+      >
+        <AddProjectAction iconOnly touch={touch} beforeCreate={onNavigate} />
+      </ProjectsSectionHeader>
       <div className="flex flex-col gap-3">
         {(projectsOpen ? projects : []).map((project) => {
           const roots = byProject.get(project.project_id) ?? [];
