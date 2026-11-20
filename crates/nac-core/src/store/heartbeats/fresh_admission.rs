@@ -9,6 +9,13 @@ struct ReservedLaunch {
     model_defaults: Option<super::fresh_model::LegacyFrozenModel>,
 }
 
+// A current explicit selection makes the historical defaults inert. Read the
+// public receipt first so an opaque retired payload cannot block its replay.
+#[derive(serde::Deserialize)]
+struct ReservedReceipt {
+    receipt: FreshTaskLaunchReceipt,
+}
+
 // Parse the retired binding separately from the public binding so duplicate
 // identity fields cannot be hidden by generic JSON's last-key-wins behavior.
 #[derive(serde::Deserialize)]
@@ -64,7 +71,18 @@ pub(super) fn load_reserved(
 ) -> Result<Option<PreparedFreshTaskLaunch>> {
     let row:Option<ReservedLaunchRow>=conn.query_row("SELECT launch_json,first_input_id,stop_requested,initial_run_id,initial_outcome_json FROM heartbeat_task_launches WHERE occurrence_id=?1",[occurrence_id],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?))).optional()?;
     row.map(|(json, input, stop, run, outcome)| {
-        let ReservedLaunch { mut receipt, model_defaults } = serde_json::from_str(&json)?;
+        let ReservedReceipt { mut receipt } = serde_json::from_str(&json)?;
+        let (model_defaults, legacy_binding_id) = if receipt.destination.model_selection.is_some()
+            || receipt.request.model_selection.is_some()
+        {
+            (None, None)
+        } else {
+            let ReservedLaunch { model_defaults, .. } = serde_json::from_str(&json)?;
+            let binding_id = serde_json::from_str::<LegacyEnvelope>(&json)
+                .map_err(|_| anyhow!("invalid historical scheduled model binding"))?
+                .receipt.binding.model_configuration_id;
+            (model_defaults, binding_id)
+        };
         receipt.first_input_id = input;
         receipt.stop_requested = stop;
         receipt.initial_run_id = run;
@@ -72,9 +90,6 @@ pub(super) fn load_reserved(
         receipt.initial_outcome = outcome
             .map(|json| serde_json::from_str(&json))
             .transpose()?;
-        let legacy_binding_id = serde_json::from_str::<LegacyEnvelope>(&json)
-            .map_err(|_| anyhow!("invalid historical scheduled model binding"))?
-            .receipt.binding.model_configuration_id;
         Ok(PreparedFreshTaskLaunch { receipt, model_defaults, legacy_binding_id })
     })
     .transpose()

@@ -204,12 +204,22 @@ fn legacy_receipt_defaults_remain_in_storage_but_never_replace_the_selection() {
         replay.receipt().request.model_selection,
         original.receipt().request.model_selection
     );
+    assert!(replay.legacy_frozen_model().unwrap().is_none());
     let conn = open_runtime_connection(&f.path).unwrap();
     let retained: String = conn.query_row(
         "SELECT json_extract(launch_json,'$.model_defaults.model') FROM heartbeat_task_launches WHERE occurrence_id=?1",
         [&pending.occurrence_id], |row| row.get(0),
     ).unwrap();
     assert_eq!(retained, "retired-preset");
+    // Without either explicit selection the same payload is the legacy
+    // recovery authority, so its incomplete structure must fail closed.
+    conn.execute(
+        "UPDATE heartbeat_task_launches SET launch_json=json_remove(launch_json,'$.receipt.request.model_selection','$.receipt.destination.model_selection') WHERE occurrence_id=?1",
+        [&pending.occurrence_id],
+    )
+    .unwrap();
+    drop(conn);
+    assert!(read_fresh_heartbeat_launch(&f.path, &pending.occurrence_id).is_err());
 }
 
 #[test]
