@@ -103,8 +103,9 @@ async fn user_messages(service: &SessionService) -> Vec<String> {
 async fn parent_receives_each_background_completion_once_without_editable_controls() {
     let (started_tx, started_rx) = std::sync::mpsc::channel();
     let (release_tx, release_rx) = std::sync::mpsc::channel();
-    // This is one absolute budget for setup, the held first response, and all
-    // five sequential model requests, not a per-request timeout.
+    // The server uses one deadline when waiting for requests, starting before
+    // setup, rather than resetting the timeout for each model request. The
+    // observer separately bounds the held first response.
     let server = ScriptedServer::start_observed_with_timeout(
         vec![
             text_response("first answer"),
