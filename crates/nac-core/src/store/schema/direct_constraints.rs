@@ -10,6 +10,32 @@ const SESSION_CHECK: &str =
     "CHECK (behavior IN ('orchestrator', 'direct', 'direct-with-orchestrator'))";
 const COMPLETION_COLUMN: &str = "behavior TEXT NOT NULL CHECK(behavior IN ('orchestrator','direct','direct-with-orchestrator'))";
 const INBOX_COLUMN: &str = "completion_source TEXT CHECK (completion_source IN ('traditional_child', 'managed_orchestrator'))";
+const ADA_INBOX_COLUMN: &str = "completion_source\n    TEXT CHECK(completion_source IN ('traditional_child','managed_orchestrator'))";
+
+const INBOX_COLUMNS: &[&str] = &[
+    "id",
+    "session_id",
+    "delivery",
+    "status",
+    "content",
+    "target_run_id",
+    "client_id",
+    "delivered_run_id",
+    "created_at",
+    "updated_at",
+    "delivered_at",
+    "cancelled_at",
+    "version",
+    "admission_id",
+    "admission_digest",
+    "child_execution_mode",
+    "child_wait_id",
+    "review_intent",
+    "completion_source",
+    "completion_session_id",
+    "completion_generation",
+];
+const INBOX_BASE_COLUMNS: usize = 13;
 
 fn replace_once(sql: &str, old: &str, new: &str, table: &str) -> Result<String> {
     if sql.matches(old).count() != 1 || !is_column_definition(sql, old) {
@@ -99,6 +125,7 @@ fn is_column_definition(sql: &str, candidate: &str) -> bool {
 
 pub(super) fn tighten(conn: &Connection) -> Result<()> {
     let mut edits = Vec::new();
+    let mut normalize_inbox = false;
     for table in [
         "sessions",
         "session_completion_bindings",
@@ -132,16 +159,32 @@ pub(super) fn tighten(conn: &Connection) -> Result<()> {
                 replace_once(&sql, &variants[0].0, &variants[0].1, table)?
             }
             "session_inbox" => {
-                let ada_column = "completion_source\n    TEXT CHECK(completion_source IN ('traditional_child','managed_orchestrator'))";
-                if sql.matches(INBOX_COLUMN).count() == 1 && !sql.contains(ada_column) {
+                let columns = inbox_columns(conn)?;
+                if columns.len() != INBOX_COLUMNS.len()
+                    || columns[..INBOX_BASE_COLUMNS]
+                        .iter()
+                        .map(String::as_str)
+                        .collect::<Vec<_>>()
+                        != INBOX_COLUMNS[..INBOX_BASE_COLUMNS]
+                    || INBOX_COLUMNS[INBOX_BASE_COLUMNS..]
+                        .iter()
+                        .any(|name| columns.iter().filter(|column| *column == name).count() != 1)
+                {
+                    anyhow::bail!("unsupported session inbox column layout");
+                }
+                normalize_inbox =
+                    columns.iter().map(String::as_str).collect::<Vec<_>>() != INBOX_COLUMNS;
+                if sql.matches(INBOX_COLUMN).count() == 1 && !sql.contains(ADA_INBOX_COLUMN) {
                     replace_once(
                         &sql,
                         INBOX_COLUMN,
                         "completion_source TEXT CHECK (completion_source = 'traditional_child')",
                         table,
                     )?
-                } else if sql.matches(ada_column).count() == 1 && !sql.contains(INBOX_COLUMN) {
-                    replace_once(&sql, ada_column, "completion_source\n    TEXT CHECK(completion_source = 'traditional_child')", table)?
+                } else if sql.matches(ADA_INBOX_COLUMN).count() == 1 && !sql.contains(INBOX_COLUMN)
+                {
+                    normalize_inbox = true;
+                    replace_once(&sql, ADA_INBOX_COLUMN, "completion_source\n    TEXT CHECK(completion_source = 'traditional_child')", table)?
                 } else {
                     anyhow::bail!("unexpected session inbox origin definition");
                 }
@@ -222,6 +265,9 @@ pub(super) fn tighten(conn: &Connection) -> Result<()> {
     let reset = conn.execute_batch("PRAGMA writable_schema=OFF");
     result?;
     reset?;
+    if normalize_inbox {
+        normalize_inbox_columns(conn)?;
+    }
     let integrity: String = conn.query_row("PRAGMA integrity_check", [], |r| r.get(0))?;
     if integrity != "ok" {
         anyhow::bail!("SQLite integrity check failed: {integrity}");
@@ -237,330 +283,136 @@ pub(super) fn tighten(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn setup() -> (std::path::PathBuf, std::path::PathBuf) {
-        let root = std::env::temp_dir().join(format!("nac-v56-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&root).unwrap();
-        let path = root.join("store.db");
-        let conn = Connection::open(&path).unwrap();
-        conn.execute_batch(include_str!("fixtures/v55.sql"))
-            .unwrap();
-        conn.execute_batch("PRAGMA foreign_keys=ON;
-            INSERT INTO heartbeat_retained_allowance VALUES(1,100,1);
-            INSERT INTO managed_host_maintenance VALUES(1,'serving',NULL,NULL,NULL,NULL,0);
-            INSERT INTO session_completion_feed VALUES(1,'feed');
-            INSERT INTO sessions(session_id,cwd,store_path,model,base_url,messages_json,created_at,updated_at) VALUES('s','/tmp','/tmp/store','m','https://example.invalid','[]','now','now');
-            INSERT INTO sessions(session_id,cwd,store_path,model,base_url,messages_json,created_at,updated_at) VALUES('child','/tmp','/tmp/store','m','https://example.invalid','[]','now','now');
-            INSERT INTO session_events(id,session_id,event_target,event_json,created_at) VALUES(7,'s','session','{}','now');
-            INSERT INTO session_completion_bindings VALUES('s','r',7,'direct',1,0,0);
-            INSERT INTO session_completion_marks VALUES('s','r','g',1);
-            INSERT INTO session_completion_occurrences(sequence,session_id,run_id,behavior,kind,committed_at) VALUES(9,'s','r','direct','request','now');
-            INSERT INTO session_inbox(id,session_id,delivery,status,content,created_at,updated_at) VALUES(4,'s','queue','pending','orchestrator is user text','now','now');
-            INSERT INTO traditional_children(child_session_id,parent_session_id,root_session_id,profile,description,nesting_depth,status,generation,run_id,execution_mode,completion_inbox_id,created_at,updated_at) VALUES('child','s','s','general','child',1,'completed',1,'run','background',4,'now','now');
-            UPDATE sqlite_sequence SET seq=1000 WHERE name='session_inbox';
-            UPDATE sqlite_sequence SET seq=2000 WHERE name='session_completion_occurrences';
-            PRAGMA user_version=55;").unwrap();
-        drop(conn);
-        (root, path)
-    }
-
-    fn catalog(conn: &Connection) -> Vec<(String, String, String)> {
-        conn.prepare("SELECT type,name,sql FROM sqlite_schema WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' ORDER BY type,name").unwrap()
-            .query_map([], |r| Ok((r.get(0)?,r.get(1)?,r.get::<_, String>(2)?.split_whitespace().collect::<Vec<_>>().join(" ")))).unwrap()
-            .map(Result::unwrap).collect()
-    }
-
-    #[test]
-    fn v55_upgrade_preserves_rows_sequences_cascades_and_catalog() {
-        let (root, path) = setup();
-        let fresh_path = root.join("fresh.db");
-        initialize(&fresh_path).unwrap();
-        initialize(&path).unwrap();
-        let conn = Connection::open(&path).unwrap();
-        conn.execute_batch("PRAGMA foreign_keys=ON").unwrap();
-        let fresh = Connection::open(fresh_path).unwrap();
-        assert_eq!(catalog(&conn), catalog(&fresh));
-        assert_eq!(
-            conn.query_row::<i64, _, _>(
-                "SELECT rowid FROM sessions WHERE session_id='s'",
-                [],
-                |r| r.get(0)
-            )
-            .unwrap(),
-            1
-        );
-        assert_eq!(
-            conn.query_row::<String, _, _>(
-                "SELECT content FROM session_inbox WHERE id=4",
-                [],
-                |r| r.get(0)
-            )
-            .unwrap(),
-            "orchestrator is user text"
-        );
-        assert_eq!(
-            conn.query_row::<i64, _, _>(
-                "SELECT seq FROM sqlite_sequence WHERE name='session_inbox'",
-                [],
-                |r| r.get(0)
-            )
-            .unwrap(),
-            1000
-        );
-        assert_eq!(
-            conn.query_row::<i64, _, _>(
-                "SELECT seq FROM sqlite_sequence WHERE name='session_completion_occurrences'",
-                [],
-                |r| r.get(0)
-            )
-            .unwrap(),
-            2000
-        );
-        assert!(conn
-            .execute(
-                "UPDATE sessions SET behavior='orchestrator' WHERE session_id='s'",
-                []
-            )
-            .is_err());
-        assert!(conn
-            .execute(
-                "UPDATE session_completion_bindings SET behavior='orchestrator'",
-                []
-            )
-            .is_err());
-        assert!(conn
-            .execute(
-                "UPDATE session_completion_occurrences SET behavior='direct-with-orchestrator'",
-                []
-            )
-            .is_err());
-        assert!(conn.execute("UPDATE session_inbox SET completion_source='managed_orchestrator',completion_session_id='s',completion_generation=1", []).is_err());
-        conn.execute("UPDATE session_inbox SET completion_source='traditional_child',completion_session_id='child',completion_generation=1 WHERE id=4", []).unwrap();
-        assert_eq!(conn.query_row::<i64,_,_>("SELECT completion_inbox_id FROM traditional_children WHERE child_session_id='child'", [], |r|r.get(0)).unwrap(), 4);
-        conn.execute("DELETE FROM session_inbox WHERE id=4", [])
-            .unwrap();
-        assert_eq!(conn.query_row::<Option<i64>,_,_>("SELECT completion_inbox_id FROM traditional_children WHERE child_session_id='child'", [], |r|r.get(0)).unwrap(), None);
-        conn.execute("INSERT INTO session_inbox(session_id,delivery,status,content,created_at,updated_at) VALUES('s','queue','pending','new','now','now')", []).unwrap();
-        assert_eq!(conn.last_insert_rowid(), 1001);
-        conn.execute("DELETE FROM sessions WHERE session_id='s'", [])
-            .unwrap();
-        for table in [
-            "session_inbox",
-            "session_events",
-            "session_completion_bindings",
-            "session_completion_marks",
-            "session_completion_occurrences",
-        ] {
-            assert_eq!(
-                conn.query_row::<i64, _, _>(&format!("SELECT count(*) FROM {table}"), [], |r| r
-                    .get(0))
-                    .unwrap(),
-                0,
-                "{table}"
-            );
+fn inbox_columns(conn: &Connection) -> Result<Vec<String>> {
+    let mut statement = conn.prepare("PRAGMA table_xinfo(session_inbox)")?;
+    let columns = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, i64>(5)?,
+                row.get::<_, i64>(6)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut names = Vec::with_capacity(columns.len());
+    for (name, kind, not_null, default, primary_key, hidden) in columns {
+        if hidden != 0 {
+            anyhow::bail!("unsupported hidden session inbox column {name}");
         }
-        assert!(conn
-            .prepare("PRAGMA foreign_key_check")
-            .unwrap()
-            .query([])
-            .unwrap()
-            .next()
-            .unwrap()
-            .is_none());
-        drop((conn, fresh));
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn failure_rolls_back_catalog_and_rows_and_retry_works() {
-        let (root, path) = setup();
-        let before = Connection::open(&path).unwrap();
-        let original_catalog = catalog(&before);
-        drop(before);
-        assert!(initialize_with_hooks(&path, || {}, || {}, || Err(anyhow!("injected"))).is_err());
-        let conn = Connection::open(&path).unwrap();
-        assert_eq!(
-            conn.pragma_query_value::<i64, _>(None, "user_version", |r| r.get(0))
-                .unwrap(),
-            55
-        );
-        assert_eq!(catalog(&conn), original_catalog);
-        assert_eq!(
-            conn.query_row::<i64, _, _>("SELECT count(*) FROM session_completion_marks", [], |r| r
-                .get(0))
-                .unwrap(),
-            1
-        );
-        assert_eq!(
-            conn.query_row::<i64, _, _>(
-                "SELECT seq FROM sqlite_sequence WHERE name='session_inbox'",
-                [],
-                |r| r.get(0)
-            )
-            .unwrap(),
-            1000
-        );
-        drop(conn);
-        initialize(&path).unwrap();
-        std::fs::remove_dir_all(root).unwrap();
-    }
-    #[test]
-    fn peer_schema_cache_observes_atomic_commit() {
-        let (root, path) = setup();
-        let peer = Connection::open(&path).unwrap();
-        peer.execute_batch("PRAGMA journal_mode=WAL; BEGIN; SELECT * FROM sessions;")
-            .unwrap();
-        let old: String = peer
-            .query_row(
-                "SELECT sql FROM sqlite_schema WHERE name='sessions'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        initialize(&path).unwrap();
-        let pinned: String = peer
-            .query_row(
-                "SELECT sql FROM sqlite_schema WHERE name='sessions'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(pinned, old);
-        peer.execute_batch("COMMIT").unwrap();
-        let changed: String = peer
-            .query_row(
-                "SELECT sql FROM sqlite_schema WHERE name='sessions'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_ne!(changed, old);
-        assert!(peer
-            .execute(
-                "UPDATE sessions SET behavior='orchestrator' WHERE session_id='s'",
-                []
-            )
-            .is_err());
-        drop(peer);
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn unsupported_shape_fails_without_mutating_catalog() {
-        let (root, path) = setup();
-        let conn = Connection::open(&path).unwrap();
-        conn.execute_batch("PRAGMA writable_schema=ON; UPDATE sqlite_schema SET sql=replace(sql, 'behavior TEXT NOT NULL CHECK(behavior IN', 'behavior TEXT NOT NULL CHECK (behavior IN') WHERE name='session_completion_bindings'; PRAGMA writable_schema=OFF;").unwrap();
-        let original = catalog(&conn);
-        drop(conn);
-        assert!(initialize(&path).is_err());
-        let conn = Connection::open(&path).unwrap();
-        assert_eq!(catalog(&conn), original);
-        assert_eq!(
-            conn.pragma_query_value::<i64, _>(None, "user_version", |r| r.get(0))
-                .unwrap(),
-            55
-        );
-        drop(conn);
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn old_constraint_hidden_in_comment_is_rejected_atomically() {
-        let (root, path) = setup();
-        let conn = Connection::open(&path).unwrap();
-        let sql: String = conn
-            .query_row(
-                "SELECT sql FROM sqlite_schema WHERE name='session_completion_bindings'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        let deceptive = sql.replace(
-            COMPLETION_COLUMN,
-            &format!("behavior TEXT NOT NULL CHECK(behavior IN ('direct','orchestrator','direct-with-orchestrator')) /* {COMPLETION_COLUMN} */"),
-        );
-        assert_ne!(sql, deceptive);
-        conn.execute_batch("PRAGMA writable_schema=ON").unwrap();
-        conn.execute(
-            "UPDATE sqlite_schema SET sql=?1 WHERE name='session_completion_bindings'",
-            [&deceptive],
-        )
-        .unwrap();
-        conn.execute_batch("PRAGMA writable_schema=OFF").unwrap();
-        drop(conn);
-        let original = catalog(&Connection::open(&path).unwrap());
-
-        assert!(initialize(&path).is_err());
-        let conn = Connection::open(&path).unwrap();
-        assert_eq!(catalog(&conn), original);
-        assert_eq!(
-            conn.pragma_query_value::<i64, _>(None, "user_version", |row| row.get(0))
-                .unwrap(),
-            55
-        );
-        assert_eq!(
-            conn.query_row::<i64, _, _>(
-                "SELECT count(*) FROM session_completion_marks",
-                [],
-                |row| row.get(0)
-            )
-            .unwrap(),
-            1
-        );
-        drop(conn);
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn column_match_ignores_nested_and_quoted_sql() {
-        let actual = format!("CREATE TABLE t (id TEXT, {COMPLETION_COLUMN}, other TEXT)");
-        assert!(is_column_definition(&actual, COMPLETION_COLUMN));
-        for sql in [
-            format!("CREATE TABLE t (id TEXT /* {COMPLETION_COLUMN} */)"),
-            format!("CREATE TABLE t (id TEXT -- {COMPLETION_COLUMN}\n)"),
-            format!("CREATE TABLE t (\"{COMPLETION_COLUMN}\" TEXT)"),
-            format!("CREATE TABLE t (id TEXT CHECK({COMPLETION_COLUMN}))"),
-        ] {
-            assert!(!is_column_definition(&sql, COMPLETION_COLUMN), "{sql}");
+        let expected_kind = if matches!(name.as_str(), "id" | "version" | "completion_generation") {
+            "INTEGER"
+        } else {
+            "TEXT"
+        };
+        let expected_not_null = i64::from(matches!(
+            name.as_str(),
+            "session_id"
+                | "delivery"
+                | "status"
+                | "content"
+                | "created_at"
+                | "updated_at"
+                | "version"
+        ));
+        let expected_primary_key = i64::from(name == "id");
+        let expected_default = match name.as_str() {
+            "status" => Some("'pending'"),
+            "version" => Some("0"),
+            _ => None,
+        };
+        if !kind.eq_ignore_ascii_case(expected_kind)
+            || not_null != expected_not_null
+            || primary_key != expected_primary_key
+            || default.as_deref() != expected_default
+        {
+            anyhow::bail!("unsupported session inbox column definition for {name}");
         }
+        names.push(name);
     }
-
-    #[test]
-    fn v52_upgrade_catalog_matches_fresh() {
-        let root = std::env::temp_dir().join(format!("nac-v52-catalog-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&root).unwrap();
-        let old_path = root.join("old.db");
-        let old = Connection::open(&old_path).unwrap();
-        old.execute_batch(include_str!("fixtures/v52.sql")).unwrap();
-        drop(old);
-        let fresh_path = root.join("fresh.db");
-        initialize(&old_path).unwrap();
-        initialize(&fresh_path).unwrap();
-        let old = Connection::open(old_path).unwrap();
-        let fresh = Connection::open(fresh_path).unwrap();
-        let old_catalog = catalog(&old);
-        let fresh_catalog = catalog(&fresh);
-        let old_map: std::collections::BTreeMap<_, _> = old_catalog
-            .iter()
-            .map(|(kind, name, sql)| ((kind, name), sql))
-            .collect();
-        let fresh_map: std::collections::BTreeMap<_, _> = fresh_catalog
-            .iter()
-            .map(|(kind, name, sql)| ((kind, name), sql))
-            .collect();
-        let differences: Vec<_> = old_map
-            .keys()
-            .chain(fresh_map.keys())
-            .filter(|key| old_map.get(key) != fresh_map.get(key))
-            .collect();
-        assert!(
-            differences.is_empty(),
-            "catalog differences: {differences:?}"
-        );
-        drop((old, fresh));
-        std::fs::remove_dir_all(root).unwrap();
-    }
+    Ok(names)
 }
+
+/// SQLite's DROP COLUMN rewrites each record in place without dropping the
+/// parent table, so foreign keys and inbound ON DELETE actions are untouched.
+/// Preserve the additive columns transactionally and append their canonical shape.
+fn normalize_inbox_columns(conn: &Connection) -> Result<()> {
+    let extra_triggers: i64 = conn.query_row(
+        "SELECT count(*) FROM sqlite_schema WHERE type='trigger' AND tbl_name='session_inbox'",
+        [],
+        |row| row.get(0),
+    )?;
+    if extra_triggers != 0 {
+        anyhow::bail!("unsupported session inbox triggers while normalizing columns");
+    }
+    let admission_index: String = conn.query_row(
+        "SELECT sql FROM sqlite_schema WHERE type='index' AND name='idx_session_inbox_admission' AND tbl_name='session_inbox'",
+        [],
+        |row| row.get(0),
+    )?;
+    if admission_index.split_whitespace().collect::<Vec<_>>().join(" ") != "CREATE UNIQUE INDEX idx_session_inbox_admission ON session_inbox(session_id,admission_id) WHERE admission_id IS NOT NULL" {
+        anyhow::bail!("unsupported session inbox admission index");
+    }
+    let before_sequence: Option<i64> = conn
+        .query_row(
+            "SELECT seq FROM sqlite_sequence WHERE name='session_inbox'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?;
+    conn.execute_batch(
+        "CREATE TEMP TABLE nac_v56_inbox_columns AS
+           SELECT id,admission_id,admission_digest,child_execution_mode,child_wait_id,review_intent,completion_source,completion_session_id,completion_generation FROM main.session_inbox;
+         CREATE UNIQUE INDEX temp.nac_v56_inbox_columns_id ON nac_v56_inbox_columns(id);
+         DROP INDEX idx_session_inbox_admission;
+         ALTER TABLE session_inbox DROP COLUMN completion_generation;
+         ALTER TABLE session_inbox DROP COLUMN completion_session_id;
+         ALTER TABLE session_inbox DROP COLUMN completion_source;
+         ALTER TABLE session_inbox DROP COLUMN review_intent;
+         ALTER TABLE session_inbox DROP COLUMN child_wait_id;
+         ALTER TABLE session_inbox DROP COLUMN child_execution_mode;
+         ALTER TABLE session_inbox DROP COLUMN admission_digest;
+         ALTER TABLE session_inbox DROP COLUMN admission_id;
+         ALTER TABLE session_inbox ADD COLUMN admission_id TEXT CHECK (admission_id IS NULL OR length(admission_id)=36);
+         ALTER TABLE session_inbox ADD COLUMN admission_digest TEXT CHECK ((admission_digest IS NULL) = (admission_id IS NULL)) CHECK (admission_digest IS NULL OR (length(admission_digest)=64 AND admission_digest NOT GLOB '*[^0-9a-f]*'));
+         ALTER TABLE session_inbox ADD COLUMN child_execution_mode TEXT CHECK (child_execution_mode IN ('foreground', 'background'));
+         ALTER TABLE session_inbox ADD COLUMN child_wait_id TEXT CHECK (child_wait_id IS NULL OR length(child_wait_id) = 36);
+         ALTER TABLE session_inbox ADD COLUMN review_intent TEXT;
+         ALTER TABLE session_inbox ADD COLUMN completion_source TEXT CHECK (completion_source = 'traditional_child');
+         ALTER TABLE session_inbox ADD COLUMN completion_session_id TEXT CHECK ((completion_session_id IS NULL) = (completion_source IS NULL));
+         ALTER TABLE session_inbox ADD COLUMN completion_generation INTEGER CHECK ((completion_generation IS NULL) = (completion_source IS NULL)) CHECK (completion_generation IS NULL OR completion_generation > 0);
+         UPDATE session_inbox SET (admission_id,admission_digest,child_execution_mode,child_wait_id,review_intent,completion_source,completion_session_id,completion_generation) =
+           (SELECT admission_id,admission_digest,child_execution_mode,child_wait_id,review_intent,completion_source,completion_session_id,completion_generation FROM temp.nac_v56_inbox_columns WHERE id=session_inbox.id);
+         CREATE UNIQUE INDEX idx_session_inbox_admission ON session_inbox(session_id,admission_id) WHERE admission_id IS NOT NULL;",
+    )?;
+    let mismatches: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM session_inbox i LEFT JOIN temp.nac_v56_inbox_columns o ON o.id=i.id
+          WHERE o.id IS NULL OR i.admission_id IS NOT o.admission_id OR i.admission_digest IS NOT o.admission_digest OR i.child_execution_mode IS NOT o.child_execution_mode OR i.child_wait_id IS NOT o.child_wait_id OR i.review_intent IS NOT o.review_intent OR i.completion_source IS NOT o.completion_source OR i.completion_session_id IS NOT o.completion_session_id OR i.completion_generation IS NOT o.completion_generation)
+          OR (SELECT count(*) FROM session_inbox) <> (SELECT count(*) FROM temp.nac_v56_inbox_columns)", [], |row| row.get(0),
+    )?;
+    let after_sequence: Option<i64> = conn
+        .query_row(
+            "SELECT seq FROM sqlite_sequence WHERE name='session_inbox'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if mismatches
+        || after_sequence != before_sequence
+        || inbox_columns(conn)?
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+            != INBOX_COLUMNS
+    {
+        anyhow::bail!("session inbox columns or identity changed during normalization");
+    }
+    conn.execute_batch("DROP TABLE temp.nac_v56_inbox_columns")?;
+    Ok(())
+}
+
+#[cfg(test)]
+#[path = "direct_constraints_tests.rs"]
+mod tests;
