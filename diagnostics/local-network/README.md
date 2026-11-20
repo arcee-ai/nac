@@ -7,9 +7,14 @@ non-allocation sentinel `local-network-diagnostic-v1`. The ordinary paths
 admission is skipped only for that branch and sentinel. This manually
 dispatched diagnostic has four independent macOS 26 hosts. Its
 fixed immutable H/P/Q/R sources match the failing investigation snapshot. Each
-cell uses a Python controller. `idle` establishes that baseline; `provider`
-starts H's actual dummy Node provider; `loopback` adds H's numeric-loopback
-Python request to that same provider. A 404 is sufficient to show an HTTP
+cell uses a Python controller. The first three cells use a separately
+source-bound Q-prime XCTest and a disposable AppKit fixture with no network
+behavior. Q-prime uses the existing public app-window screenshot API and
+emits only inferred `ocr_title_match` or `unknown` before and after the fixed
+operation; it sends no UI input and does not explicitly request permissions.
+`idle` runs two baseline snapshots; `provider` starts H's actual dummy Node
+provider; `loopback` adds H's numeric-loopback Python request to that same
+provider. A 404 is sufficient to show an HTTP
 request was made, not a successful model call. The provider's own bounded
 stop/settlement owner remains in charge.
 
@@ -52,3 +57,11 @@ delivered. Only the existing positive owner process-settlement proof yields
 `positive_owner_proof`; false, absent or mismatched evidence remains unknown.
 All of these fields remain diagnostic and do not grant acceptance or cleanup
 authority.
+
+Q-prime never establishes a system-dialog identity, the absence of a prompt,
+or qualification. Its app and launch ancestry differ from ordinary NAC, and
+the fixture itself may affect focus or system behavior. If an XCTest run or
+screenshot cannot complete using existing host permissions, the checkpoint
+remains unknown; no permission prompt is acted on. Its small fixture terminates
+itself after a fixed timeout and its private tree remains on the disposable
+host until teardown, because a failed test does not prove fixture settlement.

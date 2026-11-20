@@ -1311,7 +1311,7 @@ jobs:
               --test-source-root "$GITHUB_WORKSPACE/q" --protocol-source-root "$GITHUB_WORKSPACE/r" \
               --output "$RUNNER_TEMP/qualification-private") > "$RUNNER_TEMP/journey-private.log" 2>&1 || true
           else
-            python3 -B diagnostic/diagnostics/local-network/probe.py "$CELL" "$GITHUB_WORKSPACE/h" > "$RUNNER_TEMP/probe-private.json"
+            python3 -B diagnostic/diagnostics/local-network/checkpoint.py "$CELL" "$GITHUB_WORKSPACE/h" "$GITHUB_WORKSPACE/diagnostic" "$RUNNER_TEMP" > "$RUNNER_TEMP/probe-private.json"
           fi
           kill "$observer" 2>/dev/null || true
           wait "$observer" 2>/dev/null || true

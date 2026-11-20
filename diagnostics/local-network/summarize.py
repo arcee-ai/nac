@@ -31,6 +31,9 @@ def main():
     else:
         raw = json.loads(Path(result_path).read_text())
         data = summarize(cell, lines, raw['operation'], raw['owned_provider_settlement'])
+        data.update({key: raw.get(key) if raw.get(key) in ('unknown', 'ocr_title_match') else 'unknown'
+                     for key in ('before_image', 'after_image')})
+        data.update(scope='diagnostic_fixture_window', fixture_process_settlement='unknown')
     print(json.dumps(data, sort_keys=True))
 
 
