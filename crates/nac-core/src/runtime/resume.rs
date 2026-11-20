@@ -298,6 +298,7 @@ pub(super) async fn build_resume_config_from_snapshot(
         snapshot.allow_insecure_http,
     )
     .and_then(|settings| settings.with_trusted_api_key_file(model.trusted_api_key_file.clone()))
+    .map(|settings| settings.with_saved_service_tier(snapshot.service_tier))
     .map_err(|error| {
         anyhow::anyhow!(
             "stored session model settings are invalid; settings repair required: {error}"

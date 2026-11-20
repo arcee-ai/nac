@@ -61,6 +61,7 @@ async fn actual_goal_settlement_publishes_only_after_existing_continuation_bound
             .unwrap();
         agent
             .push_and_log_for_test(Message::Assistant {
+                service_tier_receipt: None,
                 content: Some("done".into()),
                 reasoning_text: None,
                 reasoning_details: None,

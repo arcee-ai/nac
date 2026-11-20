@@ -24,6 +24,7 @@ fn mixed_message_history() -> Vec<Message> {
             content: "older request".to_string(),
         },
         Message::Assistant {
+            service_tier_receipt: None,
             content: None,
             reasoning_text: Some("reasoning without visible content".to_string()),
             reasoning_details: Some(serde_json::json!({"type": "reasoning"})),
@@ -43,6 +44,7 @@ fn mixed_message_history() -> Vec<Message> {
             content: "latest request".to_string(),
         },
         Message::Assistant {
+            service_tier_receipt: None,
             content: None,
             reasoning_text: None,
             reasoning_details: None,
@@ -63,6 +65,7 @@ fn mixed_message_history() -> Vec<Message> {
             content: "zeta started".into(),
         },
         Message::Assistant {
+            service_tier_receipt: None,
             content: None,
             reasoning_text: Some("new reasoning".to_string()),
             reasoning_details: None,
@@ -75,6 +78,7 @@ fn mixed_message_history() -> Vec<Message> {
             content: "system-three".to_string(),
         },
         Message::Assistant {
+            service_tier_receipt: None,
             content: None,
             reasoning_text: None,
             reasoning_details: None,
@@ -91,6 +95,7 @@ fn mixed_message_history() -> Vec<Message> {
             content: "alpha started".into(),
         },
         Message::Assistant {
+            service_tier_receipt: None,
             content: Some("latest answer".to_string()),
             reasoning_text: None,
             reasoning_details: None,
@@ -724,6 +729,7 @@ pub(super) fn compaction_messages() -> Vec<Message> {
             content: "old request".to_string(),
         },
         Message::Assistant {
+            service_tier_receipt: None,
             content: Some("old answer".to_string()),
             reasoning_text: None,
             reasoning_details: None,

@@ -52,6 +52,7 @@ async fn checkpoint_store_failure_keeps_prior_view_and_continues_ordinary_call()
             content: "old".to_string(),
         },
         Message::Assistant {
+            service_tier_receipt: None,
             content: Some("old answer".to_string()),
             reasoning_text: None,
             reasoning_details: None,
@@ -196,6 +197,7 @@ async fn cancellation_during_summary_keeps_the_prior_checkpoint() {
             content: "old".to_string(),
         },
         Message::Assistant {
+            service_tier_receipt: None,
             content: Some("old answer".to_string()),
             reasoning_text: None,
             reasoning_details: None,
@@ -208,6 +210,7 @@ async fn cancellation_during_summary_keeps_the_prior_checkpoint() {
             content: "aged".to_string(),
         },
         Message::Assistant {
+            service_tier_receipt: None,
             content: Some("aged answer".to_string()),
             reasoning_text: None,
             reasoning_details: None,
@@ -354,6 +357,7 @@ async fn cancellation_after_checkpoint_commit_keeps_the_committed_projection() {
             content: "old".to_string(),
         },
         Message::Assistant {
+            service_tier_receipt: None,
             content: Some("old answer".to_string()),
             reasoning_text: None,
             reasoning_details: None,

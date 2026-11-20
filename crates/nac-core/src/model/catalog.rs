@@ -55,6 +55,13 @@ pub(super) fn codex_refresh_after_login() {
     codex_overlay::request_refresh(true);
 }
 
+#[cfg(feature = "codex-e2e-fixture")]
+pub(super) fn codex_e2e_models(
+    fingerprint: &str,
+) -> Result<Vec<crate::model::ProviderModel>, String> {
+    codex_overlay::fixture_models(fingerprint)
+}
+
 pub(super) fn record_codex_discovery(account: &str, body: &str) {
     codex_overlay::record_discovery(account, body);
 }
@@ -62,8 +69,8 @@ pub use overlay::spawn_overlay_refresh;
 pub use types::{
     ApiKind, AuthStatus, Compat, CompletionsThinkingFormat, CompletionsTokenLimit, CostTier,
     DefaultLimits, LimitOrigin, ModelCostRates, ModelEntry, ModelListing, ModelMetadata,
-    ModelSource, ProviderAuth, ProviderConnection, ProviderListing, ThinkingLevelMap,
-    FALLBACK_CONTEXT_WINDOW, FALLBACK_MAX_TOKENS,
+    ModelServiceTier, ModelSource, ProviderAuth, ProviderConnection, ProviderListing,
+    ThinkingLevelMap, FALLBACK_CONTEXT_WINDOW, FALLBACK_MAX_TOKENS,
 };
 
 /// Well-known id of each provider's fallback entry.
@@ -245,6 +252,9 @@ impl ProviderCatalog {
             if let Some(metadata) = self.models.get(family) {
                 let mut resolved = metadata.clone();
                 resolved.id = model.to_string();
+                // Family matching may provide limits, never account entitlements.
+                resolved.service_tiers = None;
+                resolved.default_service_tier = None;
                 return resolved;
             }
         }
@@ -544,6 +554,8 @@ pub fn api_listing_for_invocation(invocation_name: &str) -> ModelListing {
                     .map(|metadata| ModelEntry {
                         id: metadata.id.clone(),
                         display_name: metadata.display_name.clone(),
+                        service_tiers: metadata.service_tiers.clone(),
+                        default_service_tier: metadata.default_service_tier.clone(),
                         context_window: metadata.context_window,
                         max_tokens: metadata.max_tokens,
                         cost: metadata.cost.clone(),

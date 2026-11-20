@@ -134,6 +134,8 @@ pub(super) fn hydrate_entry(
         max_tokens: entry.max_tokens,
         max_input_tokens: entry.max_input_tokens,
         auto_compact_token_limit: None,
+        service_tiers: None,
+        default_service_tier: None,
         context_origin: entry
             .context_origin
             .unwrap_or(super::LimitOrigin::Estimated),

@@ -194,6 +194,7 @@ async fn attention_both_recovery_failure_branches_wake_after_commit_and_stage_tr
                     "session",
                     1,
                     &crate::types::Message::Assistant {
+                        service_tier_receipt: None,
                         content: Some(crate::agent::RUN_FAILED_PARTIAL_MARKER.into()),
                         tool_calls: None,
                         reasoning_text: None,
@@ -312,6 +313,7 @@ async fn attention_lifecycle_commits_wake_before_lost_ack_and_replay_stays_silen
                         "session",
                         1,
                         &crate::types::Message::Assistant {
+                            service_tier_receipt: None,
                             content: Some(crate::agent::RUN_FAILED_PARTIAL_MARKER.into()),
                             tool_calls: None,
                             reasoning_text: None,
@@ -600,6 +602,7 @@ fn prepare_recovery_effect(case: RecoveryEffectCase) -> PathBuf {
                     "session",
                     1,
                     &crate::types::Message::Assistant {
+                        service_tier_receipt: None,
                         content: Some(content.into()),
                         tool_calls: None,
                         reasoning_text: None,

@@ -29,6 +29,7 @@ impl Controller {
             default_model_config_id: None,
             default_model: None,
             default_reasoning_effort: None,
+            default_service_tier: None,
             default_ref: None,
             eligible: true,
             eligibility_detail: "Local".into(),

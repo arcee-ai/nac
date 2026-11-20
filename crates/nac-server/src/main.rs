@@ -406,6 +406,25 @@ impl From<ReasoningEffortArg> for ReasoningEffort {
     }
 }
 
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+enum ServiceTierArg {
+    Standard,
+    Fast,
+    Ultrafast,
+    ProviderDefault,
+}
+
+impl From<ServiceTierArg> for OptionalModelOption<nac_core::model::ServiceTier> {
+    fn from(value: ServiceTierArg) -> Self {
+        match value {
+            ServiceTierArg::Standard => Self::Value(nac_core::model::ServiceTier::Standard),
+            ServiceTierArg::Fast => Self::Value(nac_core::model::ServiceTier::Fast),
+            ServiceTierArg::Ultrafast => Self::Value(nac_core::model::ServiceTier::Ultrafast),
+            ServiceTierArg::ProviderDefault => Self::Clear,
+        }
+    }
+}
+
 #[derive(clap::Args, Default)]
 struct ModelArgs {
     /// Persisted backend snapshot transported to a managed worker.
@@ -415,6 +434,9 @@ struct ModelArgs {
     /// Persisted reasoning-effort snapshot transported to a managed worker.
     #[arg(long = "effort", value_enum)]
     reasoning_effort: Option<ReasoningEffortArg>,
+    /// Explicit model speed preference.
+    #[arg(long, value_enum)]
+    service_tier: Option<ServiceTierArg>,
 
     /// Persisted API base URL snapshot transported to a managed worker.
     #[arg(long, hide = true)]
@@ -933,6 +955,7 @@ async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
                 .map(Into::into)
                 .map(OptionalModelOption::Value)
                 .unwrap_or_default(),
+            service_tier: cli.model.service_tier.map(Into::into).unwrap_or_default(),
             api_base_url: cli.model.api_base_url,
             allow_insecure_http: cli.model.allow_insecure_http,
             api_model: cli.model.api_model,
@@ -1441,6 +1464,43 @@ thread_timeout_secs = 7200
             assert!(error.contains("invalid value"), "{error}");
             assert!(error.contains("arcee-auth"), "{error}");
             assert!(error.contains("arcee-api"), "{error}");
+        }
+    }
+
+    #[test]
+    fn worker_cli_speed_accepts_explicit_values_and_default_reset() {
+        let required = [
+            "--session-id",
+            "session",
+            "--thread-name",
+            "thread",
+            "--dispatch-id",
+            "dispatch-123",
+            "--action",
+            "work",
+        ];
+        for (raw, expected) in [
+            (
+                "standard",
+                OptionalModelOption::Value(nac_core::model::ServiceTier::Standard),
+            ),
+            (
+                "fast",
+                OptionalModelOption::Value(nac_core::model::ServiceTier::Fast),
+            ),
+            (
+                "ultrafast",
+                OptionalModelOption::Value(nac_core::model::ServiceTier::Ultrafast),
+            ),
+            ("provider-default", OptionalModelOption::Clear),
+        ] {
+            let mut args = vec!["nac-web", "__worker", "--service-tier", raw];
+            args.extend(required);
+            let cli = Cli::try_parse_from(args).unwrap();
+            let Some(RootCommand::ManagedWorker(worker)) = cli.command else {
+                panic!("expected worker")
+            };
+            assert_eq!(worker.model.service_tier.map(Into::into), Some(expected));
         }
     }
 

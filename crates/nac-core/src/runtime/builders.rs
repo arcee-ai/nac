@@ -288,6 +288,7 @@ async fn prepare_run_config_inner(
             settings.api_key_env.clone(),
             settings.extra_headers.clone(),
         );
+        session_snapshot.service_tier = settings.service_tier;
         session_snapshot.behavior = behavior;
         session_snapshot.allow_insecure_http = settings.allow_insecure_http;
         session_snapshot.project_id = project_id.clone();
@@ -434,6 +435,7 @@ async fn prepare_run_config_inner(
             settings.api_key_env.clone(),
             settings.extra_headers.clone(),
         );
+        session_snapshot.service_tier = settings.service_tier;
         session_snapshot.behavior = behavior;
         session_snapshot.allow_insecure_http = settings.allow_insecure_http;
         session_snapshot.project_id = project_id;

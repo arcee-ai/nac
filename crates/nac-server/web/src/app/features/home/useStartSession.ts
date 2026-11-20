@@ -1,3 +1,4 @@
+import type { ServiceTier } from "@/app/lib/serviceTier";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -100,6 +101,11 @@ export function useStartSession() {
           allow_insecure_http: record.allow_insecure_http ?? false,
           api_key_env: record.api_key_env ?? null,
           reasoning_effort: record.reasoning_effort ?? null,
+          ...(selection.request.service_tier === null
+            ? { service_tier: null }
+            : record.service_tier != null
+              ? { service_tier: record.service_tier as ServiceTier }
+              : {}),
           extra_headers: record.extra_headers,
           orchestrator_compaction_threshold: record.orchestrator_compaction_threshold ?? null,
         };

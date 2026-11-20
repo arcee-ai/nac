@@ -62,6 +62,7 @@ pub(super) fn durable_selection_history() -> (PathBuf, Vec<(u64, Message)>) {
                 "session",
                 (index * 2 + 1) as u64,
                 &Message::Assistant {
+                    service_tier_receipt: None,
                     content: Some("observed literal evidence".into()),
                     reasoning_text: None,
                     reasoning_details: None,

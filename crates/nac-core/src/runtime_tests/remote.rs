@@ -34,6 +34,7 @@ async fn resume_config_restores_messages_without_changing_process_cwd() {
                 content: "old prompt".to_string(),
             },
             Message::Assistant {
+                service_tier_receipt: None,
                 content: Some("old answer".to_string()),
                 reasoning_text: None,
                 reasoning_details: None,
@@ -46,6 +47,7 @@ async fn resume_config_restores_messages_without_changing_process_cwd() {
                 content: "hello".to_string(),
             },
             Message::Assistant {
+                service_tier_receipt: None,
                 content: Some("world".to_string()),
                 reasoning_text: Some("hidden thinking".to_string()),
                 reasoning_details: None,

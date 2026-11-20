@@ -316,3 +316,18 @@ it("collapses only a complete heartbeat display envelope", () => {
   const literal = "Heartbeat check: Local job\n<nac_heartbeat>mention";
   expect(displayPromptFromMessageText(literal)).toBe(literal);
 });
+
+it("retains the incomplete speed-tier estimate across later usage", async () => {
+  const { addTokenUsage, maxBillableUsage } = await import("@/app/lib/format");
+  const fast = {
+    input_tokens: 10,
+    output_tokens: 5,
+    cache_read_tokens: 0,
+    cache_write_tokens: 0,
+    total_tokens: 15,
+    speed_tier_charges_excluded: true,
+  };
+  const standard = { ...fast, speed_tier_charges_excluded: false };
+  expect(addTokenUsage(fast, standard, 15).speed_tier_charges_excluded).toBe(true);
+  expect(maxBillableUsage(standard, fast)?.speed_tier_charges_excluded).toBe(true);
+});

@@ -74,6 +74,7 @@ fn anthropic_request_with_1h_ttl_sets_ttl_on_all_breakpoints() {
                 content: "hello".to_string(),
             },
             Message::Assistant {
+                service_tier_receipt: None,
                 content: Some("working".to_string()),
                 reasoning_text: None,
                 reasoning_details: None,
@@ -316,6 +317,7 @@ fn anthropic_response_tool_thinking_round_trips() {
                 content: "please inspect".to_string(),
             },
             Message::Assistant {
+                service_tier_receipt: None,
                 content: parsed.assistant.content.clone(),
                 reasoning_text: None,
                 reasoning_details: parsed.assistant.reasoning_details.clone(),

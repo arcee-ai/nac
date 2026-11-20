@@ -715,6 +715,7 @@ mod tests {
             allow_insecure_http: false,
             api_key_env: Some("PROJECT_TEST_KEY".to_string()),
             reasoning_effort: Some("high".to_string()),
+            service_tier: None,
             extra_headers: BTreeMap::new(),
             orchestrator_compaction_threshold: Some(64_000),
             initial_prompt: None,

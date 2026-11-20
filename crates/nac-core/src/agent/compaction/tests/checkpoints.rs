@@ -297,6 +297,7 @@ fn restore_accepts_legacy_user_assistant_and_end_boundaries_but_rejects_unsafe_p
         assistant("first"),
         user("middle"),
         Message::Assistant {
+            service_tier_receipt: None,
             content: None,
             reasoning_text: None,
             reasoning_details: None,

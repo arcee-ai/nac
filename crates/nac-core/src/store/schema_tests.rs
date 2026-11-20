@@ -536,7 +536,7 @@ fn v16_store_adds_orchestrator_behavior_and_establishes_downgrade_barrier() {
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
     assert_eq!(version, STORE_SCHEMA_VERSION);
-    assert_eq!(STORE_SCHEMA_VERSION, 52);
+    assert_eq!(STORE_SCHEMA_VERSION, 53);
     drop(migrated);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
@@ -1193,6 +1193,7 @@ fn transcript_log_rows_survive_thread_events_rebuild_migration() {
     let transcript_one = crate::store::encode_transcript_log_entry(
         1,
         &crate::types::Message::Assistant {
+            service_tier_receipt: None,
             content: Some("answer".to_string()),
             reasoning_text: None,
             reasoning_details: None,
@@ -1364,6 +1365,7 @@ fn v3_to_v4_backfills_materialized_session_summaries() {
             content: "first prompt".to_string(),
         },
         crate::types::Message::Assistant {
+            service_tier_receipt: None,
             content: Some("answer".to_string()),
             reasoning_text: None,
             reasoning_details: None,
@@ -1910,4 +1912,20 @@ fn readiness_requires_the_session_schema() {
 
     let _ = std::fs::remove_dir_all(healthy.parent().unwrap());
     let _ = std::fs::remove_dir_all(malformed.parent().unwrap());
+}
+
+#[test]
+fn v52_adds_optional_speed_without_rewriting_session_identity() {
+    let path = temp_store_path("v52_speed");
+    initialize(&path).unwrap();
+    let legacy = Connection::open(&path).unwrap();
+    insert_legacy_session(&legacy, "legacy-speed-session");
+    legacy.execute_batch("ALTER TABLE sessions DROP COLUMN service_tier; ALTER TABLE model_configurations DROP COLUMN service_tier; PRAGMA user_version = 52;").unwrap();
+    drop(legacy);
+    initialize(&path).unwrap();
+    let migrated = Connection::open(&path).unwrap();
+    let row: (String, Option<String>) = migrated.query_row("SELECT session_id, service_tier FROM sessions WHERE session_id = 'legacy-speed-session'", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
+    assert_eq!(row, ("legacy-speed-session".to_string(), None));
+    drop(migrated);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }

@@ -648,3 +648,30 @@ describe("goal continuation turns", () => {
     });
   });
 });
+
+it("retains every requested and served tier receipt in a model turn", () => {
+  const turns = buildTranscript(
+    snapshot([
+      { role: "user", content: "run" },
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [genericToolCall("read_file", "call", "{}")],
+        service_tier_receipt: { requested: "fast", served: "priority" },
+      },
+      { role: "tool", tool_call_id: "call", content: "done" },
+      {
+        role: "assistant",
+        content: "done",
+        service_tier_receipt: { requested: "fast", served: "default" },
+      },
+    ]),
+    {},
+  );
+  expect(turns[1]).toMatchObject({
+    serviceTierReceipts: [
+      { requested: "fast", served: "priority" },
+      { requested: "fast", served: "default" },
+    ],
+  });
+});

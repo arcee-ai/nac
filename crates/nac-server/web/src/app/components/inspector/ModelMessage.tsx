@@ -239,6 +239,12 @@ const ModelMessageBody = memo(function ModelMessageBody({
         );
       })}
 
+      {turn.serviceTierReceipts?.map((receipt, index) => (
+        <p key={index} className="type-meta text-basic-muted">
+          Requested speed: {receipt.requested ?? "Provider default"}; served tier:{" "}
+          {receipt.served ?? "Unknown"}
+        </p>
+      ))}
       {!active && snapshotRevision && filesPanel ? (
         <SnapshotBadge revision={snapshotRevision} panel={filesPanel} />
       ) : null}

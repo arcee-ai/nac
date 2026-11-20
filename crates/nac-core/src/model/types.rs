@@ -152,6 +152,7 @@ pub struct EffectiveModelSettings {
     pub(crate) base_url: String,
     pub(crate) allow_insecure_http: bool,
     pub(crate) reasoning_effort: Option<ReasoningEffort>,
+    pub(crate) service_tier: Option<super::ServiceTier>,
     pub(crate) api_key_env: Option<String>,
     /// Trusted operator-mounted credential source. Only its path is
     /// transported to workers; the credential value never enters argv or the
@@ -311,6 +312,7 @@ impl EffectiveModelSettings {
             base_url,
             allow_insecure_http,
             reasoning_effort,
+            service_tier: None,
             api_key_env,
             trusted_api_key_file: None,
             extra_headers,
@@ -604,6 +606,9 @@ pub struct TokenUsage {
     /// before S3 deserialize with zero cost.
     #[serde(default)]
     pub cost: TokenCostMicros,
+    /// Catalog rates do not account for speed-tier charges.
+    #[serde(default)]
+    pub speed_tier_charges_excluded: bool,
 }
 
 impl TokenUsage {
@@ -619,6 +624,7 @@ impl TokenUsage {
             .saturating_add(other.cache_write_tokens);
         self.reasoning_tokens = self.reasoning_tokens.saturating_add(other.reasoning_tokens);
         self.cost.add_saturating(&other.cost);
+        self.speed_tier_charges_excluded |= other.speed_tier_charges_excluded;
     }
 
     pub(crate) fn replace_context(&mut self, context_tokens: u64) {
@@ -686,4 +692,8 @@ pub struct ModelTurnResponse {
     pub assistant: AssistantTurn,
     pub finish_reason: Option<String>,
     pub usage: Option<TokenUsage>,
+    /// The provider's reported tier, retained verbatim; absence remains unknown.
+    pub served_service_tier: Option<String>,
+    /// Tier placed on the request after resolving account-scoped defaults.
+    pub effective_service_tier: Option<String>,
 }

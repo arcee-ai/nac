@@ -49,7 +49,8 @@ pub fn effective_model_settings(
             .unwrap_or_else(|| config.model.extra_headers.clone()),
         model.allow_insecure_http,
     )?
-    .with_trusted_api_key_file(model.trusted_api_key_file.clone())
+    .with_trusted_api_key_file(model.trusted_api_key_file.clone())?
+    .with_service_tier(model.service_tier.resolve(config.model.service_tier))
 }
 
 /// Resolve and normalize the persisted orchestrator compaction threshold for a
@@ -89,7 +90,8 @@ pub(super) fn managed_worker_effective_model_settings(
         model.extra_headers.clone().unwrap_or_default(),
         model.allow_insecure_http,
     )?
-    .with_trusted_api_key_file(model.trusted_api_key_file.clone())
+    .with_trusted_api_key_file(model.trusted_api_key_file.clone())?
+    .with_service_tier(model.service_tier.snapshot_value())
 }
 
 /// Parse the hidden worker header transport as a JSON object.

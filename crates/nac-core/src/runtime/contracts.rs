@@ -37,6 +37,7 @@ impl<T: Clone> OptionalModelOption<T> {
 pub struct ModelOptions {
     pub backend: Option<BackendKind>,
     pub reasoning_effort: OptionalModelOption<ReasoningEffort>,
+    pub service_tier: OptionalModelOption<crate::model::ServiceTier>,
     pub api_base_url: Option<String>,
     /// Explicitly permit public plaintext HTTP for both primary and light model endpoints.
     pub allow_insecure_http: bool,

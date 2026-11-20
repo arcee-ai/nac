@@ -1490,6 +1490,7 @@ async fn saved_config_managed_updates_clear_inherited_light_selectors() {
         &manager.inner.store_path,
         "repair",
         model_configurations::NewModelConfiguration {
+            service_tier: None,
             name: "Managed repair".to_string(),
             backend: BackendKind::ArceeAuth.to_string(),
             model: "trinity-large-thinking".to_string(),
@@ -1524,6 +1525,7 @@ async fn saved_config_managed_updates_clear_inherited_light_selectors() {
         &manager.inner.store_path,
         "switch",
         model_configurations::NewModelConfiguration {
+            service_tier: None,
             name: "Managed switch".to_string(),
             backend: BackendKind::ArceeApi.to_string(),
             model: "trinity-large-thinking".to_string(),

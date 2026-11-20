@@ -433,6 +433,7 @@ fn compactable_server_messages() -> Vec<Message> {
             content: "old request".to_string(),
         },
         Message::Assistant {
+            service_tier_receipt: None,
             content: Some("old answer".to_string()),
             reasoning_text: None,
             reasoning_details: None,

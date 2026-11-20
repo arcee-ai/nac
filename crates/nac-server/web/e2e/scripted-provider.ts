@@ -8,6 +8,7 @@ export type ScriptedResponse =
       reasoning?: string;
       failAfterReasoning?: boolean;
       usage?: { input_tokens: number; output_tokens: number; total_tokens: number };
+      service_tier?: string;
     }
   | {
       kind: "function_call";
@@ -295,6 +296,9 @@ export class ScriptedProvider {
       object: "response",
       status: "completed",
       model: "gpt-5.6-sol",
+      ...(scripted.kind === "text" && scripted.service_tier
+        ? { service_tier: scripted.service_tier }
+        : {}),
       output:
         scripted.kind === "text" && scripted.reasoning
           ? [

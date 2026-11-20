@@ -81,6 +81,10 @@ export interface ModelTurn {
     blocks: TranscriptBlock[];
     /** How long the run behind this turn took, once it finished. */
     durationMs: number | null;
+    serviceTierReceipts?: {
+        requested: string | null;
+        served: string | null;
+    }[];
     /**
      * Raw snapshot index of the turn's first message, which is what places it
      * against the transcript lengths the workspace revisions were captured at.

@@ -141,6 +141,7 @@ async fn manual_compaction_skips_empty_and_unsafe_history_without_model_requests
                     content: "old".to_string(),
                 },
                 Message::Assistant {
+                    service_tier_receipt: None,
                     content: None,
                     reasoning_text: None,
                     reasoning_details: None,

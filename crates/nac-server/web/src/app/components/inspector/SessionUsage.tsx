@@ -23,6 +23,8 @@ interface UsageReadingsProps {
   /** Cache reads, listed only when the provider reported any. */
   cacheRead?: string | null;
   cost: string;
+  speedTierChargesExcluded?: boolean;
+  subscriptionEstimate?: boolean;
   running: boolean;
   startedAt: number | null;
   /** The last finished response, shown while nothing runs. */
@@ -73,6 +75,16 @@ export function SessionUsageReadings(props: UsageReadingsProps) {
           </Fragment>
         ))}
       </dl>
+      {props.speedTierChargesExcluded ? (
+        <p className="type-meta text-basic-muted">
+          Base-rate estimate; speed-tier charges excluded.
+        </p>
+      ) : null}
+      {props.subscriptionEstimate ? (
+        <p className="type-meta text-basic-muted">
+          API-equivalent estimate, not subscription allowance or credits.
+        </p>
+      ) : null}
       {props.contextShare ? (
         <p className="type-meta text-basic-muted">{props.contextShare}</p>
       ) : null}

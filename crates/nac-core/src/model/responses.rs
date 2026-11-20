@@ -149,10 +149,12 @@ pub(super) fn parse_openai_responses_response(
                 .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0),
             cost: TokenCostMicros::default(),
+            speed_tier_charges_excluded: false,
         }
     });
 
     Ok(ModelTurnResponse {
+        effective_service_tier: None,
         assistant: AssistantTurn {
             content,
             reasoning_text,
@@ -166,6 +168,11 @@ pub(super) fn parse_openai_responses_response(
         },
         finish_reason,
         usage,
+        served_service_tier: value
+            .get("service_tier")
+            .and_then(Value::as_str)
+            .filter(|tier| matches!(*tier, "default" | "priority" | "ultrafast"))
+            .map(str::to_owned),
     })
 }
 

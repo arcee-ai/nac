@@ -6,6 +6,7 @@ use super::*;
 #[test]
 fn deepseek_request_reasoning_is_driven_only_by_explicit_effort() {
     let messages = [Message::Assistant {
+        service_tier_receipt: None,
         content: Some("calling a tool".to_string()),
         reasoning_text: Some("need current context".to_string()),
         reasoning_details: None,
@@ -79,6 +80,7 @@ fn one_completions_builder_reproduces_every_provider_shape_from_compat() {
             content: "hi".to_string(),
         },
         Message::Assistant {
+            service_tier_receipt: None,
             content: Some("prior".to_string()),
             reasoning_text: Some("thought".to_string()),
             reasoning_details: None,
@@ -412,6 +414,7 @@ fn responses_input_items_expand_reasoning_and_tool_state() {
             content: "system".to_string(),
         },
         Message::Assistant {
+            service_tier_receipt: None,
             content: Some("assistant text".to_string()),
             reasoning_text: Some("hidden".to_string()),
             reasoning_details: Some(json!([{
@@ -472,6 +475,7 @@ fn responses_input_items_replay_exact_output_sequence() {
     ];
     let items = responses_input_items(&[
         Message::Assistant {
+            service_tier_receipt: None,
             content: Some("Checking that now.".to_string()),
             reasoning_text: Some("Need the file.".to_string()),
             reasoning_details: Some(json!({

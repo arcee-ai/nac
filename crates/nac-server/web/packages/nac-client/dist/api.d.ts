@@ -369,6 +369,7 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         name: string;
         orchestrator_compaction_threshold?: number | null;
         reasoning_effort?: string | null;
+        service_tier?: string | null;
         updated_at: string;
     }>;
     updateModelConfig: (configId: string, payload: UpdateModelConfigurationRequest) => Promise<{
@@ -385,6 +386,7 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         name: string;
         orchestrator_compaction_threshold?: number | null;
         reasoning_effort?: string | null;
+        service_tier?: string | null;
         updated_at: string;
     }>;
     deleteModelConfig: (configId: string) => Promise<void>;
@@ -552,6 +554,7 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         models: import("./openapi.generated.js").components["schemas"]["ProviderModel"][];
         models_error: string | null;
         reasoning_effort: import("./openapi.generated.js").components["schemas"]["ReasoningEffort"] | null;
+        service_tier?: import("./openapi.generated.js").components["schemas"]["ServiceTier"] | null;
     }>;
     resolveConfigFile: (path: string, signal?: AbortSignal) => Promise<{
         allow_insecure_http: boolean;
@@ -562,6 +565,7 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         models: import("./openapi.generated.js").components["schemas"]["ProviderModel"][];
         models_error: string | null;
         reasoning_effort: import("./openapi.generated.js").components["schemas"]["ReasoningEffort"] | null;
+        service_tier?: import("./openapi.generated.js").components["schemas"]["ServiceTier"] | null;
     }>;
     listProjects: (signal?: AbortSignal) => Promise<{
         projects: import("./openapi.generated.js").components["schemas"]["ProjectRecord"][];
@@ -694,6 +698,7 @@ export declare function createNacApi(nacClient: NacClient, options?: {
     launchDefaults: (payload: LaunchModelDefaultsRequest, signal?: AbortSignal) => Promise<{
         configured_model?: string | null;
         configured_reasoning_effort?: import("./openapi.generated.js").components["schemas"]["ReasoningEffort"] | null;
+        configured_service_tier?: import("./openapi.generated.js").components["schemas"]["ServiceTier"] | null;
     }>;
     updatePresentation: (id: string, payload: UpdateSessionPresentationRequest) => Promise<{
         backend: string;
@@ -711,6 +716,7 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         sandboxed: boolean;
         session_id: string;
         sort_order?: number;
+        speed_tier_charges_excluded?: boolean;
         ssh_host: string | null;
         ssh_identity_file?: string | null;
         ssh_port?: number | null;
@@ -737,6 +743,7 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         model: string;
         orchestrator_compaction_threshold: number | null;
         reasoning_effort: string | null;
+        service_tier?: string | null;
         session_id: string;
     }>;
     getPermissions: (id: string, signal?: AbortSignal) => Promise<{

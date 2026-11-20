@@ -6,6 +6,7 @@ use super::*;
 #[test]
 fn token_usage_validation_and_accumulation_are_overflow_safe() {
     let valid = TokenUsage {
+        speed_tier_charges_excluded: false,
         input_tokens: 10,
         output_tokens: 5,
         cache_read_tokens: 2,
@@ -32,6 +33,7 @@ fn token_usage_validation_and_accumulation_are_overflow_safe() {
     assert_eq!(oversized_total.valid_provider_context(), None);
 
     let hostile = TokenUsage {
+        speed_tier_charges_excluded: false,
         input_tokens: u64::MAX,
         output_tokens: u64::MAX,
         cache_read_tokens: u64::MAX,
@@ -51,6 +53,7 @@ fn token_usage_validation_and_accumulation_are_overflow_safe() {
     // Fallback: provider omits total_tokens (zero) but reports component
     // usage. The component sum is used as the context total.
     let no_total = TokenUsage {
+        speed_tier_charges_excluded: false,
         input_tokens: 10,
         output_tokens: 5,
         cache_read_tokens: 2,
@@ -86,6 +89,7 @@ fn calculate_cost_bills_each_bucket_at_its_catalog_rate() {
         tiers: None,
     };
     let usage = TokenUsage {
+        speed_tier_charges_excluded: false,
         input_tokens: 100,
         output_tokens: 50,
         cache_read_tokens: 200,
@@ -114,6 +118,7 @@ fn calculate_cost_rounds_half_up_once_at_the_micro_conversion() {
         tiers: None,
     };
     let usage = TokenUsage {
+        speed_tier_charges_excluded: false,
         input_tokens: 1,
         output_tokens: 3,
         cache_read_tokens: 1,
@@ -134,6 +139,7 @@ fn calculate_cost_rounds_half_up_once_at_the_micro_conversion() {
 #[test]
 fn calculate_cost_saturates_and_treats_hostile_rates_as_zero() {
     let usage = TokenUsage {
+        speed_tier_charges_excluded: false,
         input_tokens: u64::MAX,
         output_tokens: 10,
         cache_read_tokens: 10,
@@ -189,6 +195,7 @@ fn calculate_cost_bills_1h_cache_writes_at_the_1h_rate() {
         tiers: None,
     };
     let usage = TokenUsage {
+        speed_tier_charges_excluded: false,
         input_tokens: 0,
         output_tokens: 0,
         cache_read_tokens: 0,
@@ -223,6 +230,7 @@ fn calculate_cost_bills_reasoning_at_the_output_rate() {
     // kimi-k3): output_tokens includes reasoning, so the bill is exactly
     // the old single multiply over output_tokens.
     let included = TokenUsage {
+        speed_tier_charges_excluded: false,
         input_tokens: 0,
         output_tokens: 50,
         cache_read_tokens: 0,
@@ -279,6 +287,7 @@ fn calculate_cost_selects_the_highest_matching_context_tier() {
         ]),
     };
     let usage = |input, cache_read, output| TokenUsage {
+        speed_tier_charges_excluded: false,
         input_tokens: input,
         output_tokens: output,
         cache_read_tokens: cache_read,
@@ -320,6 +329,7 @@ fn old_catalog_rates_without_tiers_still_deserialize() {
     assert_eq!(rates.tiers, None);
     // Flat pricing behaves as before.
     let usage = TokenUsage {
+        speed_tier_charges_excluded: false,
         input_tokens: 300_000,
         output_tokens: 1_000,
         cache_read_tokens: 0,

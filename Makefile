@@ -191,6 +191,12 @@ test-e2e-review:
 	$(CARGO) build --locked -p $(PKG) --bin $(BIN) --features review-fixture --target-dir target/review-fixture
 	NAC_E2E_REVIEW_FIXTURE=1 NAC_E2E_BINARY="$(CURDIR)/target/review-fixture/debug/$(BIN)" npm --prefix $(WEB_DIR) run test:e2e -- review.e2e.ts
 
+## Exercise Codex receipt persistence with an isolated loopback fixture build
+test-e2e-codex:
+	npm --prefix $(WEB_DIR) run build
+	$(CARGO) build --locked -p $(PKG) --bin $(BIN) --features codex-e2e-fixture --target-dir target/codex-e2e-fixture
+	NAC_E2E_CODEX_FIXTURE=1 NAC_E2E_BINARY="$(CURDIR)/target/codex-e2e-fixture/debug/$(BIN)" npm --prefix $(WEB_DIR) run test:e2e -- codex-speed.e2e.ts
+
 ## Run non-destructive BasicAuth or portal-launch smoke checks against a remote Managed NAC
 test-e2e-remote:
 	npm --prefix $(WEB_DIR) run test:e2e:remote

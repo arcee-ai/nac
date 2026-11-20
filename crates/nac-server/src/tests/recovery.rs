@@ -164,6 +164,7 @@ async fn rebuilt_manager_hides_legacy_failed_partial_marker_in_run_event() {
             "session",
             1,
             &nac_core::types::Message::Assistant {
+                service_tier_receipt: None,
                 content: Some("[run failed after this partial assistant response]".to_string()),
                 reasoning_text: None,
                 reasoning_details: None,

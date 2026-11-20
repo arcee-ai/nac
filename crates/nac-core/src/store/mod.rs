@@ -552,6 +552,7 @@ mod tests {
                 "session-c",
                 1,
                 &crate::types::Message::Assistant {
+                    service_tier_receipt: None,
                     content: Some("answer".to_string()),
                     reasoning_text: None,
                     reasoning_details: None,

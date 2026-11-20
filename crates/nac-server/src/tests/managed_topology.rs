@@ -1343,6 +1343,7 @@ async fn parent_attachment_settles_canonical_managed_terminal_once_after_restart
             &orchestrator,
             start_idx + 1,
             &Message::Assistant {
+                service_tier_receipt: None,
                 content: Some("durable orchestrator report".to_string()),
                 reasoning_text: None,
                 reasoning_details: None,

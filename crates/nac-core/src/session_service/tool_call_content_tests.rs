@@ -30,6 +30,7 @@ impl nac_contracts::CommandEnvironmentProvider for ExactSecret {
 
 fn assistant(calls: &[(&str, &str)]) -> Message {
     Message::Assistant {
+        service_tier_receipt: None,
         content: None,
         reasoning_text: None,
         reasoning_details: None,

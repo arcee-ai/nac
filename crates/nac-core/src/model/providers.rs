@@ -207,6 +207,16 @@ pub async fn list_provider_models_with_http_policy(
 pub async fn list_managed_provider_models(
     provider: ManagedAuthProvider,
 ) -> Result<Vec<ProviderModel>> {
+    #[cfg(feature = "codex-e2e-fixture")]
+    let fixture_account = if matches!(provider, ManagedAuthProvider::Codex) {
+        chatgpt_codex::codex_e2e_discovery_account()?
+    } else {
+        None
+    };
+    #[cfg(feature = "codex-e2e-fixture")]
+    if let Some(fingerprint) = fixture_account {
+        return catalog::codex_e2e_models(&fingerprint).map_err(anyhow::Error::msg);
+    }
     let backend = provider.backend();
     let client = client::no_redirect_model_client()?;
 

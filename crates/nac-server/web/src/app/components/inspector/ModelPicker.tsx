@@ -1,7 +1,13 @@
 import { useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 
 import {
+  Button,
+  ButtonContent,
   ButtonSize,
+  ButtonVariant,
+  Icon,
+  IconName,
   PopoverPlacement,
   Tooltip,
   TooltipPosition,
@@ -9,6 +15,13 @@ import {
 } from "@/app/atoms";
 import { CatalogModelPicker } from "@/app/components/modals/CatalogModelPicker";
 import { EFFORT_LEVEL_OPTIONS, reasoningOptionsFor } from "@/app/components/modals/options";
+import { SpeedControl } from "@/app/components/modals/SpeedControl";
+import {
+  discoveredSpeed,
+  speedLabel,
+  supportsSpeed,
+  type ServiceTier,
+} from "@/app/lib/serviceTier";
 import { SmallSelect } from "@/app/components/modals/SmallSelect";
 import { useManagedModelProfile } from "@/app/features/managed/controller/useManagedModelProfile";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
@@ -16,7 +29,13 @@ import { resolveCatalogModel, type CatalogPick } from "@/app/lib/catalog";
 import { cn } from "@/app/lib/cn";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { useToast } from "@/app/providers/ToastProvider";
-import { useModelCatalog, useReadyProviderModels, useUpdateConfig } from "@/app/services/queries";
+import {
+  queryKeys,
+  useModelCatalog,
+  useReadyProviderModels,
+  useSessionSnapshot,
+  useUpdateConfig,
+} from "@/app/services/queries";
 import type { BackendKind, ReasoningEffort, SessionMetadata } from "@/app/types/api";
 
 const EFFORT_ROW_HINTS: Record<string, { title: string; description: string }> = {
@@ -91,9 +110,24 @@ export function ModelPicker({
   const catalog = useModelCatalog();
   const managedModel = useManagedModelProfile();
   const liveByBackend = useReadyProviderModels(catalog.data);
+  const queryClient = useQueryClient();
   const updateConfig = useUpdateConfig();
+  // Observe the existing snapshot without starting a separate fetch. A failed
+  // refresh leaves cached metadata visible, but it is unsafe for another edit.
+  const snapshot = useSessionSnapshot(sessionId, { enabled: false });
+  const controlsDisabled = disabled || !metadata || updateConfig.isPending || snapshot.isError;
+  const reportRefreshFailure = () => {
+    // Read the query after the mutation's awaited invalidation has settled.
+    // React state can still be from the preceding render at this point.
+    const state = queryClient.getQueryState(queryKeys.sessionSnapshot(sessionId));
+    if (state?.status === "error")
+      toast.error(
+        "Settings were saved, but the latest session could not be loaded. Retry the refresh before making another change.",
+      );
+  };
   const currentModel = metadata?.model ?? label;
   const currentEffort = metadata?.reasoning_effort ?? "";
+  const currentSpeed = (metadata?.service_tier ?? null) as ServiceTier | null;
   const currentPick: CatalogPick | null = metadata
     ? {
         backend: metadata.backend as BackendKind,
@@ -130,8 +164,24 @@ export function ModelPicker({
     const supported = resolveCatalogModel(catalog.data, pick.backend, pick.model).supportedEfforts;
     const compatibleEffort =
       currentEffort && supported.includes(currentEffort as ReasoningEffort) ? currentEffort : null;
+    const targetSpeed = discoveredSpeed(
+      resolveCatalogModel(catalog.data, pick.backend, pick.model).model,
+      pick.model,
+    );
+    let speed = currentSpeed;
+    if (speed && pick.backend !== "chatgpt-codex-responses") {
+      toast.error("Choose a compatible speed before switching to this model.");
+      return;
+    }
+    if (speed && !supportsSpeed(targetSpeed, speed)) {
+      speed = "standard";
+    }
     const patch = preservesRoute
-      ? { model: pick.model, reasoning_effort: compatibleEffort }
+      ? {
+          model: pick.model,
+          reasoning_effort: compatibleEffort,
+          ...(speed !== currentSpeed ? { service_tier: speed } : {}),
+        }
       : {
           backend: pick.backend,
           model: pick.model,
@@ -140,12 +190,16 @@ export function ModelPicker({
           // selected backend to resolve its managed login or conventional env.
           api_key_env: provider?.connection?.api_key_env ?? null,
           reasoning_effort: compatibleEffort,
+          ...(speed !== currentSpeed ? { service_tier: speed } : {}),
           // Provider-specific headers must never leak into another backend.
           extra_headers: null,
         };
     try {
       await updateConfig.mutateAsync({ id: sessionId, patch });
-      toast.success(`Model switched to ${pick.model}`);
+      reportRefreshFailure();
+      toast.success(
+        `Model switched to ${pick.model}${speed !== currentSpeed ? "; speed reset to Standard" : ""}`,
+      );
     } catch (error) {
       toast.error(`The model was not switched: ${humanErrorText(toRunError(error), pick.backend)}`);
     }
@@ -158,11 +212,23 @@ export function ModelPicker({
         id: sessionId,
         patch: { reasoning_effort: effort || null },
       });
+      reportRefreshFailure();
       toast.success(`Reasoning set to ${effort || "the model default"}`);
     } catch (error) {
       toast.error(
         `Reasoning was not changed: ${humanErrorText(toRunError(error), metadata.backend)}`,
       );
+    }
+  };
+
+  const chooseSpeed = async (speed: ServiceTier | null) => {
+    if (!metadata || speed === currentSpeed) return;
+    try {
+      await updateConfig.mutateAsync({ id: sessionId, patch: { service_tier: speed } });
+      reportRefreshFailure();
+      toast.success(`Speed set to ${speedLabel(speed)}`);
+    } catch (error) {
+      toast.error(`Speed was not changed: ${humanErrorText(toRunError(error), metadata.backend)}`);
     }
   };
 
@@ -173,30 +239,57 @@ export function ModelPicker({
         loading={catalog.isLoading}
         failed={catalog.isError}
         compact
-        disabled={disabled || !metadata || updateConfig.isPending}
+        disabled={controlsDisabled}
         liveByBackend={liveByBackend}
         value={currentPick}
         onSelect={(pick) => void chooseModel(pick)}
       />
-      <Tooltip
-        title={`Effort: ${effortLabel}`}
-        description="How much the model reasons before it answers."
-        position={TooltipPosition.TopCenter}
-        sticky
-        disabled={effortOpen}
-      >
-        <SmallSelect
-          items={effortItems}
-          value={currentEffort}
-          placeholder="Default"
-          disabled={disabled || !metadata || updateConfig.isPending}
+      {!(snapshot.isError && isMobile) ? (
+        <Tooltip
+          title={`Effort: ${effortLabel}`}
+          description="How much the model reasons before it answers."
+          position={TooltipPosition.TopCenter}
+          sticky
+          disabled={effortOpen}
+        >
+          <SmallSelect
+            items={effortItems}
+            value={currentEffort}
+            placeholder="Default"
+            disabled={controlsDisabled}
+            size={ButtonSize.Small}
+            trailingIcon={null}
+            placement={PopoverPlacement.TopCenter}
+            onOpenChange={setEffortOpen}
+            onValueChange={(effort) => void chooseEffort(effort)}
+          />
+        </Tooltip>
+      ) : null}
+      {snapshot.isError ? (
+        <Button
           size={ButtonSize.Small}
-          trailingIcon={null}
-          placement={PopoverPlacement.TopCenter}
-          onOpenChange={setEffortOpen}
-          onValueChange={(effort) => void chooseEffort(effort)}
+          variant={ButtonVariant.Ghost}
+          content={isMobile ? ButtonContent.Icon : ButtonContent.Text}
+          className={isMobile ? "min-h-11 min-w-11" : undefined}
+          aria-label="Retry settings refresh"
+          disabled={snapshot.isFetching}
+          onClick={() => void snapshot.refetch()}
+        >
+          {isMobile ? <Icon iconName={IconName.Retry} /> : "Retry settings refresh"}
+        </Button>
+      ) : null}
+      {!(snapshot.isError && isMobile) ? (
+        <SpeedControl
+          tiers={
+            metadata?.backend === "chatgpt-codex-responses"
+              ? discoveredSpeed(resolved.model, currentModel)
+              : null
+          }
+          value={currentSpeed}
+          disabled={controlsDisabled}
+          onChange={(speed) => void chooseSpeed(speed)}
         />
-      </Tooltip>
+      ) : null}
     </div>
   );
 }

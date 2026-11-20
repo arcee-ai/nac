@@ -354,6 +354,7 @@ async fn admission_reconciles_a_snapshot_left_stale_by_a_prior_repair() {
     // which still serves the discarded dangling tool-call turn.
     let mut stale_blob = repaired_blob.clone();
     stale_blob.push(Message::Assistant {
+        service_tier_receipt: None,
         content: None,
         reasoning_text: None,
         reasoning_details: None,
@@ -450,6 +451,7 @@ async fn completed_run_reports_failure_when_snapshot_persistence_fails() {
             content: "prompt".to_string(),
         });
         agent.messages.push(Message::Assistant {
+            service_tier_receipt: None,
             content: Some("done".to_string()),
             reasoning_text: None,
             reasoning_details: None,
@@ -1004,6 +1006,7 @@ async fn failed_run_persists_messages_without_recording_new_duration() {
         content: "old prompt".to_string(),
     });
     agent.messages.push(Message::Assistant {
+        service_tier_receipt: None,
         content: Some("old response".to_string()),
         reasoning_text: None,
         reasoning_details: None,

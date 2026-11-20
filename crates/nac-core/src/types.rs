@@ -63,6 +63,9 @@ pub enum Message {
         /// OpenAI Responses) and legacy messages.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reasoning_field: Option<String>,
+        /// Local receipt metadata; provider history adapters must not replay it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        service_tier_receipt: Option<ServiceTierReceipt>,
     },
     #[serde(rename = "tool")]
     Tool {
@@ -70,6 +73,13 @@ pub enum Message {
         #[cfg_attr(feature = "openapi", schema(value_type = ToolContentSchema))]
         content: ToolContent,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ServiceTierReceipt {
+    pub requested: Option<crate::model::ServiceTier>,
+    pub served: Option<String>,
 }
 
 /// Identifies the model that produced an assistant message (S5 reasoning
@@ -122,6 +132,7 @@ mod tests {
     #[test]
     fn test_assistant_content_null() {
         let msg = Message::Assistant {
+            service_tier_receipt: None,
             content: None,
             reasoning_text: Some("thinking".to_string()),
             reasoning_details: Some(serde_json::json!([{"type": "reasoning"}])),
@@ -247,6 +258,7 @@ mod tests {
     #[test]
     fn stamped_assistant_origin_round_trips() {
         let msg = Message::Assistant {
+            service_tier_receipt: None,
             content: Some("a".to_string()),
             reasoning_text: Some("t".to_string()),
             reasoning_details: None,

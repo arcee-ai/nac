@@ -126,3 +126,93 @@ async fn unknown_pricing_yields_zero_cost_not_an_error() {
     assert_eq!(usage.input_tokens, 100);
     assert_eq!(usage.cost, TokenCostMicros::default());
 }
+
+fn codex_completion(tier: Option<&str>) -> String {
+    let mut response = json!({"status":"completed", "output":[], "usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15}});
+    if let Some(tier) = tier {
+        response["service_tier"] = json!(tier);
+    }
+    format!(
+        "data: {}\n\n",
+        json!({"type":"response.completed", "response":response})
+    )
+}
+
+#[tokio::test]
+async fn codex_wire_captures_speed_independent_of_reasoning_and_served_receipt() {
+    for effort in [None, Some(ReasoningEffort::High)] {
+        for (preference, wire) in [
+            (None, None),
+            (Some(crate::model::ServiceTier::Standard), None),
+            (Some(crate::model::ServiceTier::Fast), Some("priority")),
+            (
+                Some(crate::model::ServiceTier::Ultrafast),
+                Some("ultrafast"),
+            ),
+        ] {
+            let server = ScriptedServer::start(vec![ScriptedResponse::json(
+                "200 OK",
+                codex_completion(Some("default")),
+            )
+            .with_header("Content-Type", "text/event-stream")]);
+            let mut client =
+                ModelClient::new_for_codex_test_server(server.base_url.clone(), "gpt-5.5");
+            // Neither an inherited selection nor explicit Standard may inject
+            // an account catalog default into the outgoing legacy request.
+            client.resolved_model.default_service_tier = Some("priority".into());
+            client.service_tier = preference;
+            client.reasoning_effort = effort;
+            let response = client.send_turn(vec![], vec![]).await.unwrap();
+            let requests = server.finish();
+            assert_eq!(requests.len(), 1);
+            let body: Value = serde_json::from_slice(&requests[0].body).unwrap();
+            assert_eq!(body.get("service_tier").and_then(Value::as_str), wire);
+            assert_eq!(
+                body["reasoning"].get("effort").and_then(Value::as_str),
+                effort.map(|value| value.as_str())
+            );
+            assert_eq!(response.served_service_tier.as_deref(), Some("default"));
+            assert_eq!(response.effective_service_tier.as_deref(), wire);
+            assert_eq!(
+                response.usage.unwrap().speed_tier_charges_excluded,
+                wire.is_some()
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn codex_missing_or_unknown_served_tier_stays_unknown_and_warns_for_standard() {
+    for reported in [None, Some("future-unrecognized-tier")] {
+        let server = ScriptedServer::start(vec![ScriptedResponse::json(
+            "200 OK",
+            codex_completion(reported),
+        )
+        .with_header("Content-Type", "text/event-stream")]);
+        let mut client = ModelClient::new_for_codex_test_server(server.base_url.clone(), "gpt-5.5");
+        client.service_tier = Some(crate::model::ServiceTier::Standard);
+        let response = client.send_turn(vec![], vec![]).await.unwrap();
+        assert_eq!(server.finish().len(), 1);
+        assert_eq!(response.served_service_tier, None);
+        assert!(response.usage.unwrap().speed_tier_charges_excluded);
+    }
+}
+
+#[tokio::test]
+async fn codex_permanent_tier_denial_does_not_retry_or_fall_back() {
+    let server = ScriptedServer::start(vec![
+        ScriptedResponse::json(
+            "403 Forbidden",
+            r#"{"error":{"message":"tier unavailable"}}"#,
+        ),
+        ScriptedResponse::json("200 OK", codex_completion(Some("default")))
+            .with_header("Content-Type", "text/event-stream"),
+    ]);
+    let mut client = ModelClient::new_for_codex_test_server(server.base_url.clone(), "gpt-5.5");
+    client.service_tier = Some(crate::model::ServiceTier::Fast);
+    assert!(client.send_turn(vec![], vec![]).await.is_err());
+    let requests = server.stop_and_finish();
+    assert_eq!(requests.len(), 1);
+    let body: Value = serde_json::from_slice(&requests[0].body).unwrap();
+    assert_eq!(body["service_tier"], "priority");
+}

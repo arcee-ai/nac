@@ -46,6 +46,8 @@ export function useUsageReadings(
       ? formatTokensCompact(metrics.usage.cache_read_tokens)
       : null,
     cost: formatCostMicros(metrics.usage?.cost?.total),
+    speedTierChargesExcluded: Boolean(metrics.usage?.speed_tier_charges_excluded),
+    subscriptionEstimate: snapshot?.metadata?.backend === "chatgpt-codex-responses",
     running,
     startedAt: runStartedAt,
     lastElapsedMs: lastElapsedMs ?? metrics.lastResponseMs,

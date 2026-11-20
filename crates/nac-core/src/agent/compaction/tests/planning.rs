@@ -25,6 +25,7 @@ fn boundary_projection_preserves_systems_and_exact_weighted_suffix() {
         },
         user("recent user"),
         Message::Assistant {
+            service_tier_receipt: None,
             content: None,
             reasoning_text: Some("reasoning".to_string()),
             reasoning_details: Some(serde_json::json!([{"type":"reasoning","id":"r1"}])),
@@ -182,6 +183,7 @@ fn weighted_boundary_counts_complete_tool_groups_atomically() {
     let messages = vec![
         user("small prefix"),
         Message::Assistant {
+            service_tier_receipt: None,
             content: None,
             reasoning_text: Some("opaque reasoning".to_string()),
             reasoning_details: Some(serde_json::json!({"opaque": true})),
@@ -218,6 +220,7 @@ fn weighted_boundary_preserves_exact_reasoning_suffix_and_snaps_huge_message_to_
             content: "system two".to_string(),
         },
         Message::Assistant {
+            service_tier_receipt: None,
             content: Some("signed content".to_string()),
             reasoning_text: Some("reasoning text".to_string()),
             reasoning_details: Some(serde_json::json!([
@@ -252,6 +255,7 @@ fn safe_boundary_scanner_rejects_duplicate_unknown_orphan_missing_and_interleave
         },
     };
     let calls = |ids: &[&str]| Message::Assistant {
+        service_tier_receipt: None,
         content: None,
         reasoning_text: None,
         reasoning_details: None,

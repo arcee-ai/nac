@@ -54,6 +54,7 @@ export function ModelSetupSection({
           next.allow_insecure_http === previous.allow_insecure_http &&
           next.api_key_env === previous.api_key_env &&
           next.reasoning_effort === previous.reasoning_effort &&
+          next.service_tier === previous.service_tier &&
           JSON.stringify(next.extra_headers) === JSON.stringify(previous.extra_headers);
         next = {
           ...next,
