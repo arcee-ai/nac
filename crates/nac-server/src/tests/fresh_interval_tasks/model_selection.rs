@@ -127,7 +127,8 @@ async fn frozen_model_choices_survive_replay_for_git_and_shared_tasks() {
             let _env = ScopedModelEnv::isolated(&home, Some("fixture-key"));
             let manager = test_manager(&root);
             let primary = catch_fixture_panic(async {
-                let prepared = reservation(&root, &manager, git_project, explicit, false, None).await;
+                let prepared =
+                    reservation(&root, &manager, git_project, explicit, false, None).await;
                 let original = prepared.receipt().clone();
                 let source_before = git_project.then(|| {
                     (
