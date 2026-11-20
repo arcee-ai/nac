@@ -75,7 +75,7 @@ const sessions = [
   { summary: { session_id: "s", project_id: "p2", updated_at: "2026-11-16T10:00:00Z" } },
 ] as ManagedSessionSummary[];
 
-function mount(path = "/", _orchestration = true) {
+function mount(path = "/") {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <>
@@ -156,7 +156,7 @@ describe("Home composer", () => {
 
   it("routes an isolated-checkout send through the isolated task form", () => {
     fakes.eligible = true;
-    mount("/", false);
+    mount("/");
     fireEvent.click(screen.getByRole("button", { name: "Choose a model" }));
     fireEvent.click(screen.getByRole("button", { name: "Choose test model" }));
     fireEvent.click(screen.getByRole("button", { name: "Isolated checkout" }));
