@@ -275,7 +275,11 @@ enum StartupAXWitnessMode {
                 let ended = DispatchTime.now().uptimeNanoseconds
                 try StartupObserver.need(ended >= began && ended < deadline)
                 if ended - began > 1_000_000_000 {
-                    refusals += 1; observed = nil; stage = "sample_deadline"
+                    refusals += 1
+                    // Preserve an actual predicate failure, even if its rich
+                    // diagnostic is unavailable. A slow successful read is a
+                    // distinct deadline refusal and grants no authority.
+                    if observed != nil { observed = nil; stage = "sample_deadline" }
                 }
                 diagnosticStage = .receipt_publication
                 try StartupAXFiles.publish(receipt(observed == nil ? "refused" : "ready", began: began,

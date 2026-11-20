@@ -122,6 +122,12 @@ class AXFailureDiagnosticsTests(unittest.TestCase):
         self.assertIn('$0.count < 2048',source)
         self.assertIn('exit(1)',source)
 
+    def test_slow_predicate_failure_is_not_mislabeled_as_slow_success(self):
+        source = Path(__file__).with_name('CIStartupAXWitness.swift').read_text()
+        block = source.split('if ended - began > 1_000_000_000 {', 1)[1].split('diagnosticStage = .receipt_publication', 1)[0]
+        self.assertIn('if observed != nil { observed = nil; stage = "sample_deadline" }', block)
+        self.assertEqual(block.count('stage = "sample_deadline"'), 1)
+
     def test_held_and_post_action_failures_identify_the_guard_that_rejected(self):
         source = Path(__file__).with_name('CIStartupAXWitness.swift').read_text()
         for stage, predicate in {
