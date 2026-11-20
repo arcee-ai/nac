@@ -128,11 +128,14 @@ impl<'a> SessionConfigurationApplication<'a> {
 
         let behavior = sessions::load_session_behavior(&self.manager.inner.store_path, session_id)?;
         let current = sessions::load_session_config(&self.manager.inner.store_path, session_id)?;
-        if let Some(expected_version) = request.expected_config_version {
-            anyhow::ensure!(
-                current.config_version == expected_version,
-                "conflict: the session configuration changed; reload it before editing"
-            );
+        if request
+            .expected_config_version
+            .is_some_and(|expected| current.config_version != expected)
+        {
+            return Err(sessions::SessionConfigUpdateError::Conflict(
+                "The session configuration changed; reload it before editing".to_string(),
+            )
+            .into());
         }
         let mut prospective = current.clone();
         let light_field = std::mem::take(&mut request.light_model);

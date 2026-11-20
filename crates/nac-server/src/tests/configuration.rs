@@ -87,7 +87,7 @@ async fn custom_public_https_endpoints_persist_for_primary_and_light_models() {
         )
         .await
         .unwrap_err();
-    assert!(stale_edit.to_string().contains("session configuration changed"));
+    assert_eq!(ApiError::from(stale_edit).status, StatusCode::CONFLICT);
     let current = sessions::load_session_config(&store_path, &session_id).unwrap();
     assert_eq!(current.config_version, reviewed_config.config_version + 1);
     assert_eq!(current.base_url, updated_primary);
