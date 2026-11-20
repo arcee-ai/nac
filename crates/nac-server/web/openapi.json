@@ -19297,7 +19297,7 @@
           },
           {
             "type": "object",
-            "description": "Live-only signal that the orchestrator transcript log gained rows\n(DB-direct transcript workset, step 3). `transcript_len` is the raw\nmerged transcript length after the append. Emitted at each transcript\ncommit point so subscribers refetch the store-backed transcript\nmid-run. Never persisted: the bus persists only Agent events.",
+            "description": "Live-only signal that the session transcript log gained rows\n(DB-direct transcript workset, step 3). `transcript_len` is the raw\nmerged transcript length after the append. Emitted at each transcript\ncommit point so subscribers refetch the store-backed transcript\nmid-run. Never persisted: the bus persists only Agent events.",
             "required": [
               "transcript_len",
               "type"
