@@ -39,10 +39,6 @@ export interface RuntimeState {
      * the renderer drops whichever part the snapshot already covers.
      */
     streamSettled: boolean;
-    /**
-     * The buffers hold output from before the prompt sent last, and its run has
-     * neither started nor streamed since, so none of that output answers it.
-     */
     streamPredatesPrompt: boolean;
     /**
      * Prompt shown in the chat from the moment Send is pressed until the
@@ -162,10 +158,7 @@ export declare function createRuntimeStore(_storage?: Pick<Storage, "getItem" | 
         reason: import("../types/openapi.generated").components["schemas"]["CompactionReason"];
         type: "orchestrator_compaction_completed";
     } | {
-        cause: import("../types/openapi.generated").components["schemas"] /**
-         * The buffers hold output from before the prompt sent last, and its run has
-         * neither started nor streamed since, so none of that output answers it.
-         */["CompactionSkipReason"];
+        cause: import("../types/openapi.generated").components["schemas"]["CompactionSkipReason"];
         compaction_id: string;
         reason: import("../types/openapi.generated").components["schemas"]["CompactionReason"];
         type: "orchestrator_compaction_skipped";
@@ -275,10 +268,7 @@ export declare const release: () => void, runtimeStore: import("../lib/store").S
     reason: import("../types/openapi.generated").components["schemas"]["CompactionReason"];
     type: "orchestrator_compaction_completed";
 } | {
-    cause: import("../types/openapi.generated").components["schemas"] /**
-     * The buffers hold output from before the prompt sent last, and its run has
-     * neither started nor streamed since, so none of that output answers it.
-     */["CompactionSkipReason"];
+    cause: import("../types/openapi.generated").components["schemas"]["CompactionSkipReason"];
     compaction_id: string;
     reason: import("../types/openapi.generated").components["schemas"]["CompactionReason"];
     type: "orchestrator_compaction_skipped";
