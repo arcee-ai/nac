@@ -524,3 +524,79 @@ for (const mobile of [false, true]) {
     }
   });
 }
+
+test("composer fences configuration writes after uncertain settlement or a newer revision", async ({
+  harness,
+  page,
+  request,
+}) => {
+  const project = await createProject(request, harness);
+  const id = await createSession(request, harness, "direct", project);
+  const resource = `/sessions/${id}/config`;
+  const configUrl = `${harness.baseUrl}${resource}`;
+  const config = async (): Promise<{ config_version: number; reasoning_effort: string }> =>
+    (await request.get(configUrl)).json();
+  const initial = await config();
+  expect(initial.reasoning_effort).toBe("high");
+  const fixture = await startHostedFixture(harness, id);
+  const chip = page.getByRole("button", { name: /^Model: / });
+  const notices = page.getByRole("region", { name: "Notifications", exact: true });
+  const openEffort = async () => {
+    await chip.click();
+    await page
+      .getByRole("menu", { name: "Model settings", exact: true })
+      .getByRole("menuitem", { name: /^Effort / })
+      .click();
+    return page.getByRole("menu", { name: "Effort", exact: true });
+  };
+  const writes = () =>
+    fixture.calls.filter((call) => call.method === "PATCH" && call.path === resource);
+
+  try {
+    await page.goto(fixture.baseUrl);
+    const effort = await openEffort();
+    fixture.loseNextResponse("PATCH", resource);
+    const sent = page.waitForRequest(
+      (req) => req.method() === "PATCH" && req.url().endsWith(resource),
+    );
+    await effort.getByRole("menuitemradio", { name: "Medium", exact: true }).click();
+    expect((await sent).postDataJSON()).toMatchObject({
+      expected_config_version: initial.config_version,
+      reasoning_effort: "medium",
+    });
+    await expect(
+      notices.getByRole("alert").filter({ hasText: "save outcome is unknown" }),
+    ).toBeVisible();
+    const accepted = await config();
+    expect(accepted).toMatchObject({
+      config_version: initial.config_version + 1,
+      reasoning_effort: "medium",
+    });
+    expect(fixture.lostResponses).toHaveLength(1);
+    expect(writes()).toHaveLength(1);
+    await expect(chip).toHaveAccessibleName(/Medium reasoning/);
+    await expect(chip).toBeDisabled();
+    await page.keyboard.press("Escape");
+
+    await page.getByRole("button", { name: "Replace runtime", exact: true }).click();
+    await expect(chip).toHaveAccessibleName(/Medium reasoning/);
+    await openEffort();
+    const newer = await request.patch(configUrl, {
+      data: { expected_config_version: accepted.config_version, reasoning_effort: "low" },
+    });
+    expect(newer.ok()).toBe(true);
+    await effort.getByRole("menuitemradio", { name: "High", exact: true }).click();
+    await expect(
+      notices.getByRole("alert").filter({ hasText: "changed or is busy" }),
+    ).toBeVisible();
+    expect(await config()).toMatchObject({
+      config_version: accepted.config_version + 1,
+      reasoning_effort: "low",
+    });
+    await expect(chip).toHaveAccessibleName(/Low reasoning/);
+    await expect(chip).toBeDisabled();
+    expect(writes()).toHaveLength(2);
+  } finally {
+    await fixture.stop();
+  }
+});

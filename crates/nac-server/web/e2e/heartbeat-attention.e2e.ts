@@ -152,6 +152,7 @@ test("pending withdrawal preserves quiet list projection and production project 
   await harness.restart("1"); // Normal shutdown also cleans the owned terminal.
   await page.goto(`${harness.baseUrl}/#/`);
   await expect(card).toBeVisible();
+  if ((await card.getAttribute("aria-expanded")) === "true") await card.click();
   await expect(card).toHaveAttribute("aria-expanded", "false");
   await expect(finishedDot).toHaveCount(0);
   const restarted = await listing();
