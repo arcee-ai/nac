@@ -222,12 +222,15 @@ for (const orchestration of [null, "0"] as const) {
         { kind: "text", text: "first chat response", stream: "request" },
       );
       await page.keyboard.type("POLICY_FIRST_TOKEN");
+      const start = page.getByRole("button", { name: "Start session", exact: true });
+      await expect(start).toBeEnabled();
+      await start.focus();
+      await expect(start).toBeFocused();
       const created = page.waitForResponse(
         (response) =>
           response.url() === `${harness.baseUrl}/sessions` &&
           response.request().method() === "POST",
       );
-      await page.getByRole("button", { name: "Start session", exact: true }).focus();
       await page.keyboard.press("Enter");
       const response = await created;
       // The project's first primary session converges under concurrent submits.
