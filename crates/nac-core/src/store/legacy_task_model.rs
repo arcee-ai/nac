@@ -192,6 +192,179 @@ fn parsed(raw: &str, owner: Owner) -> Result<(serde_json::Value, bool, String)> 
     Ok((value, legacy, digest))
 }
 
+// A marker grants the bounded v54 decoder access to durable authority. Bind
+// every identity that the original writer duplicated in the owning row and
+// receipt before recording that provenance. Never infer missing owners.
+fn verify_owner(
+    conn: &Connection,
+    owner: Owner,
+    key1: &str,
+    key2: &str,
+    value: &serde_json::Value,
+) -> Result<()> {
+    fn same(value: &serde_json::Value, path: &str, expected: &str) -> Result<()> {
+        anyhow::ensure!(
+            value.pointer(path).and_then(serde_json::Value::as_str) == Some(expected),
+            "legacy task receipt ownership differs at {path}"
+        );
+        Ok(())
+    }
+    fn project<'a>(value: &'a serde_json::Value, path: &str) -> Result<&'a str> {
+        value
+            .pointer(path)
+            .and_then(serde_json::Value::as_str)
+            .context("legacy task receipt has no project identity")
+    }
+    match owner {
+        Owner::Task => {
+            let id: String = conn.query_row(
+                "SELECT project_id FROM task_launches WHERE request_id=?1",
+                [key1],
+                |r| r.get(0),
+            )?;
+            same(value, "/request_id", key1)?;
+            same(value, "/project_id", &id)?;
+        }
+        Owner::Native => {
+            let id: String = conn.query_row(
+                "SELECT project_id FROM native_task_launches WHERE request_id=?1",
+                [key1],
+                |r| r.get(0),
+            )?;
+            same(value, "/request_id", key1)?;
+            if let Some(project_id) = value.pointer("/project_id").filter(|v| !v.is_null()) {
+                anyhow::ensure!(
+                    project_id.as_str() == Some(id.as_str()),
+                    "legacy native project binding differs"
+                );
+            }
+        }
+        Owner::Schedule => {
+            let session: Option<String> = conn.query_row(
+                "SELECT session_id FROM heartbeat_schedules WHERE schedule_id=?1",
+                [key1],
+                |r| r.get(0),
+            )?;
+            anyhow::ensure!(
+                session.is_none(),
+                "legacy fresh schedule has a session owner"
+            );
+            let id = project(value, "/fresh_task/project_id")?;
+            same(value, "/project_id", id)?;
+        }
+        Owner::Launch => {
+            let (schedule, request, project_id, session): (String,String,String,Option<String>) = conn.query_row("SELECT schedule_id,request_id,project_id,session_id FROM heartbeat_task_launches WHERE occurrence_id=?1", [key1], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?;
+            same(value, "/receipt/occurrence_id", key1)?;
+            same(value, "/receipt/schedule_id", &schedule)?;
+            same(value, "/receipt/request/request_id", &request)?;
+            for path in [
+                "/receipt/request/project_id",
+                "/receipt/destination/project_id",
+                "/receipt/binding/project_id",
+                "/receipt/binding/fresh_task/project_id",
+            ] {
+                same(value, path, &project_id)?;
+            }
+            if let Some(session) = session {
+                same(value, "/receipt/session_id", &session)?;
+            }
+        }
+        Owner::Command => {
+            let schedule: String = conn.query_row(
+                "SELECT schedule_id FROM heartbeat_commands WHERE session_id=?1 AND request_id=?2",
+                params![key1, key2],
+                |r| r.get(0),
+            )?;
+            same(value, "/request_id", key2)?;
+            same(value, "/schedule/schedule_id", &schedule)?;
+            anyhow::ensure!(
+                value
+                    .pointer("/schedule/session_id")
+                    .is_none_or(|v| v.is_null()),
+                "legacy fresh command has a session-owned schedule"
+            );
+            for path in ["/occurrence", "/active_occurrence"] {
+                if value.pointer(path).is_some_and(|v| !v.is_null()) {
+                    same(value, &format!("{path}/schedule_id"), &schedule)?;
+                }
+            }
+            if let Some(id) = key1.strip_prefix("project:") {
+                same(value, "/schedule/binding/fresh_task/project_id", id)?;
+                same(value, "/schedule/binding/project_id", id)?;
+            }
+        }
+        Owner::Destination | Owner::DestinationBinding => {
+            let (id, creator, destination_raw, binding_raw): (String,Option<String>,String,String) = conn.query_row("SELECT project_id,creator_session_id,destination_json,binding_json FROM heartbeat_fresh_destinations WHERE schedule_id=?1", [key1], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?;
+            if matches!(owner, Owner::Destination) {
+                same(value, "/project_id", &id)?;
+            } else {
+                same(value, "/project_id", &id)?;
+                same(value, "/fresh_task/project_id", &id)?;
+                let recorded = value
+                    .pointer("/creator_session_id")
+                    .and_then(serde_json::Value::as_str);
+                anyhow::ensure!(
+                    recorded == creator.as_deref(),
+                    "legacy fresh destination creator differs"
+                );
+            }
+            let (destination, destination_legacy, _) =
+                parsed(&destination_raw, Owner::Destination)?;
+            let (binding, binding_legacy, _) = parsed(&binding_raw, Owner::DestinationBinding)?;
+            anyhow::ensure!(
+                destination_legacy
+                    && binding_legacy
+                    && binding.pointer("/fresh_task") == Some(&destination),
+                "legacy fresh destination copies disagree"
+            );
+            same(&binding, "/project_id", &id)?;
+            same(&binding, "/fresh_task/project_id", &id)?;
+            anyhow::ensure!(
+                binding
+                    .pointer("/creator_session_id")
+                    .and_then(serde_json::Value::as_str)
+                    == creator.as_deref(),
+                "legacy fresh destination creator differs"
+            );
+        }
+    }
+    Ok(())
+}
+
+fn verify_shape(owner: Owner, value: &serde_json::Value) -> Result<()> {
+    match owner {
+        Owner::Task => {
+            let _: TaskLaunchRequest = serde_json::from_value(value.clone())?;
+        }
+        Owner::Native => {
+            let mut request = value.clone();
+            request
+                .as_object_mut()
+                .context("legacy native request is not an object")?
+                .remove("_nac_model_selection");
+            let _: crate::task_launch_control::NativeTaskRequest = serde_json::from_value(request)?;
+        }
+        Owner::Schedule | Owner::DestinationBinding => {
+            let _: HeartbeatBinding = serde_json::from_value(value.clone())?;
+        }
+        Owner::Launch => {
+            let _: FreshTaskLaunchReceipt = serde_json::from_value(
+                value
+                    .pointer("/receipt")
+                    .cloned()
+                    .context("legacy launch has no receipt")?,
+            )?;
+        }
+        Owner::Command => {
+            let _: HeartbeatReceipt = serde_json::from_value(value.clone())?;
+        }
+        Owner::Destination => {
+            let _: FreshTaskDestination = serde_json::from_value(value.clone())?;
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn decode<T: DeserializeOwned>(
     conn: &Connection,
     owner: Owner,
@@ -281,6 +454,8 @@ fn capture_v54(conn: &Connection) -> Result<()> {
             let raw: String = row.get(2)?;
             let (value, legacy, digest) = parsed(&raw, owner)?;
             if legacy {
+                verify_owner(conn, owner, &key1, &key2, &value)?;
+                verify_shape(owner, &value).context("malformed legacy task receipt")?;
                 let identity = match owner {
                     Owner::Task | Owner::Native => Some(("/request_id", key1.as_str())),
                     Owner::Command => Some(("/request_id", key2.as_str())),
@@ -321,216 +496,24 @@ pub(super) fn create_schema(conn: &Connection) -> Result<()> {
         CREATE TRIGGER task_model_v54_task_delete AFTER DELETE ON task_launches BEGIN DELETE FROM task_model_v54_provenance WHERE owner='task' AND key1=OLD.request_id AND key2=''; END;
         CREATE TRIGGER task_model_v54_native_update AFTER UPDATE OF request_json ON native_task_launches WHEN OLD.request_json IS NOT NEW.request_json BEGIN DELETE FROM task_model_v54_provenance WHERE owner='native' AND key1=OLD.request_id AND key2=''; END;
         CREATE TRIGGER task_model_v54_native_delete AFTER DELETE ON native_task_launches BEGIN DELETE FROM task_model_v54_provenance WHERE owner='native' AND key1=OLD.request_id AND key2=''; END;
-        CREATE TRIGGER task_model_v54_schedule_update AFTER UPDATE OF binding_json ON heartbeat_schedules WHEN CASE WHEN EXISTS(SELECT 1 FROM task_model_v54_provenance WHERE owner='schedule' AND key1=OLD.schedule_id AND key2='') THEN json_extract(OLD.binding_json,'$.fresh_task') IS NOT json_extract(NEW.binding_json,'$.fresh_task') ELSE 0 END BEGIN DELETE FROM task_model_v54_provenance WHERE owner='schedule' AND key1=OLD.schedule_id AND key2=''; END;
+        CREATE TRIGGER task_model_v54_schedule_update AFTER UPDATE OF binding_json ON heartbeat_schedules WHEN CASE WHEN EXISTS(SELECT 1 FROM task_model_v54_provenance WHERE owner='schedule' AND key1=OLD.schedule_id AND key2='') THEN (json_extract(OLD.binding_json,'$.fresh_task') IS NOT json_extract(NEW.binding_json,'$.fresh_task') OR json_extract(OLD.binding_json,'$.project_id') IS NOT json_extract(NEW.binding_json,'$.project_id') OR json_extract(OLD.binding_json,'$.creator_session_id') IS NOT json_extract(NEW.binding_json,'$.creator_session_id')) ELSE 0 END BEGIN DELETE FROM task_model_v54_provenance WHERE owner='schedule' AND key1=OLD.schedule_id AND key2=''; END;
         CREATE TRIGGER task_model_v54_schedule_delete AFTER DELETE ON heartbeat_schedules BEGIN DELETE FROM task_model_v54_provenance WHERE owner='schedule' AND key1=OLD.schedule_id AND key2=''; END;
         CREATE TRIGGER task_model_v54_launch_update AFTER UPDATE OF launch_json ON heartbeat_task_launches WHEN CASE WHEN EXISTS(SELECT 1 FROM task_model_v54_provenance WHERE owner='launch' AND key1=OLD.occurrence_id AND key2='') THEN json_extract(OLD.launch_json,'$.receipt') IS NOT json_extract(NEW.launch_json,'$.receipt') ELSE 0 END BEGIN DELETE FROM task_model_v54_provenance WHERE owner='launch' AND key1=OLD.occurrence_id AND key2=''; END;
         CREATE TRIGGER task_model_v54_launch_delete AFTER DELETE ON heartbeat_task_launches BEGIN DELETE FROM task_model_v54_provenance WHERE owner='launch' AND key1=OLD.occurrence_id AND key2=''; END;
         CREATE TRIGGER task_model_v54_command_update AFTER UPDATE OF response_json,canonical_digest ON heartbeat_commands WHEN OLD.response_json IS NOT NEW.response_json OR OLD.canonical_digest IS NOT NEW.canonical_digest BEGIN DELETE FROM task_model_v54_provenance WHERE owner='command' AND key1=OLD.session_id AND key2=OLD.request_id; END;
         CREATE TRIGGER task_model_v54_command_delete AFTER DELETE ON heartbeat_commands BEGIN DELETE FROM task_model_v54_provenance WHERE owner='command' AND key1=OLD.session_id AND key2=OLD.request_id; END;
         CREATE TRIGGER task_model_v54_destination_update AFTER UPDATE OF destination_json ON heartbeat_fresh_destinations WHEN OLD.destination_json IS NOT NEW.destination_json BEGIN DELETE FROM task_model_v54_provenance WHERE owner='destination' AND key1=OLD.schedule_id AND key2=''; END;
-        CREATE TRIGGER task_model_v54_binding_update AFTER UPDATE OF binding_json ON heartbeat_fresh_destinations WHEN CASE WHEN EXISTS(SELECT 1 FROM task_model_v54_provenance WHERE owner='destination_binding' AND key1=OLD.schedule_id AND key2='') THEN json_extract(OLD.binding_json,'$.fresh_task') IS NOT json_extract(NEW.binding_json,'$.fresh_task') ELSE 0 END BEGIN DELETE FROM task_model_v54_provenance WHERE owner='destination_binding' AND key1=OLD.schedule_id AND key2=''; END;
+        CREATE TRIGGER task_model_v54_binding_update AFTER UPDATE OF binding_json ON heartbeat_fresh_destinations WHEN CASE WHEN EXISTS(SELECT 1 FROM task_model_v54_provenance WHERE owner='destination_binding' AND key1=OLD.schedule_id AND key2='') THEN (json_extract(OLD.binding_json,'$.fresh_task') IS NOT json_extract(NEW.binding_json,'$.fresh_task') OR json_extract(OLD.binding_json,'$.project_id') IS NOT json_extract(NEW.binding_json,'$.project_id') OR json_extract(OLD.binding_json,'$.creator_session_id') IS NOT json_extract(NEW.binding_json,'$.creator_session_id')) ELSE 0 END BEGIN DELETE FROM task_model_v54_provenance WHERE owner='destination_binding' AND key1=OLD.schedule_id AND key2=''; END;
         CREATE TRIGGER task_model_v54_destination_delete AFTER DELETE ON heartbeat_fresh_destinations BEGIN DELETE FROM task_model_v54_provenance WHERE owner IN ('destination','destination_binding') AND key1=OLD.schedule_id AND key2=''; END;")?;
+    conn.execute_batch("CREATE TRIGGER task_model_v54_task_owner AFTER UPDATE OF request_id,project_id,session_id,source_json,workspace_path ON task_launches WHEN OLD.request_id IS NOT NEW.request_id OR OLD.project_id IS NOT NEW.project_id OR OLD.session_id IS NOT NEW.session_id OR OLD.source_json IS NOT NEW.source_json OR OLD.workspace_path IS NOT NEW.workspace_path BEGIN DELETE FROM task_model_v54_provenance WHERE owner='task' AND key1=OLD.request_id AND key2=''; END;
+        CREATE TRIGGER task_model_v54_native_owner AFTER UPDATE OF request_id,project_id,caller_session_id,source_cwd,session_id,retained ON native_task_launches WHEN OLD.request_id IS NOT NEW.request_id OR OLD.project_id IS NOT NEW.project_id OR OLD.caller_session_id IS NOT NEW.caller_session_id OR OLD.source_cwd IS NOT NEW.source_cwd OR OLD.session_id IS NOT NEW.session_id OR OLD.retained IS NOT NEW.retained BEGIN DELETE FROM task_model_v54_provenance WHERE owner='native' AND key1=OLD.request_id AND key2=''; END;
+        CREATE TRIGGER task_model_v54_schedule_owner AFTER UPDATE OF schedule_id,session_id ON heartbeat_schedules WHEN OLD.schedule_id IS NOT NEW.schedule_id OR OLD.session_id IS NOT NEW.session_id BEGIN DELETE FROM task_model_v54_provenance WHERE owner='schedule' AND key1=OLD.schedule_id AND key2=''; END;
+        CREATE TRIGGER task_model_v54_launch_owner AFTER UPDATE OF occurrence_id,schedule_id,request_id,project_id,session_id ON heartbeat_task_launches WHEN OLD.occurrence_id IS NOT NEW.occurrence_id OR OLD.schedule_id IS NOT NEW.schedule_id OR OLD.request_id IS NOT NEW.request_id OR OLD.project_id IS NOT NEW.project_id OR OLD.session_id IS NOT NEW.session_id BEGIN DELETE FROM task_model_v54_provenance WHERE owner='launch' AND key1=OLD.occurrence_id AND key2=''; END;
+        CREATE TRIGGER task_model_v54_command_owner AFTER UPDATE OF session_id,request_id,schedule_id ON heartbeat_commands WHEN OLD.session_id IS NOT NEW.session_id OR OLD.request_id IS NOT NEW.request_id OR OLD.schedule_id IS NOT NEW.schedule_id BEGIN DELETE FROM task_model_v54_provenance WHERE owner='command' AND key1=OLD.session_id AND key2=OLD.request_id; END;
+        CREATE TRIGGER task_model_v54_destination_owner AFTER UPDATE OF schedule_id,project_id,creator_session_id ON heartbeat_fresh_destinations WHEN OLD.schedule_id IS NOT NEW.schedule_id OR OLD.project_id IS NOT NEW.project_id OR OLD.creator_session_id IS NOT NEW.creator_session_id BEGIN DELETE FROM task_model_v54_provenance WHERE owner IN ('destination','destination_binding') AND key1=OLD.schedule_id AND key2=''; END;")?;
     Ok(())
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    fn fixture() -> Connection {
-        let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch("CREATE TABLE task_launches(request_id TEXT PRIMARY KEY,request_json TEXT NOT NULL);
-        CREATE TABLE native_task_launches(request_id TEXT PRIMARY KEY,request_json TEXT NOT NULL);
-        CREATE TABLE heartbeat_schedules(schedule_id TEXT PRIMARY KEY,binding_json TEXT NOT NULL);
-        CREATE TABLE heartbeat_task_launches(occurrence_id TEXT PRIMARY KEY,launch_json TEXT NOT NULL);
-        CREATE TABLE heartbeat_commands(session_id TEXT,request_id TEXT,response_json TEXT NOT NULL,canonical_digest TEXT NOT NULL DEFAULT '',PRIMARY KEY(session_id,request_id));
-        CREATE TABLE heartbeat_fresh_destinations(schedule_id TEXT PRIMARY KEY,destination_json TEXT NOT NULL,binding_json TEXT NOT NULL);").unwrap();
-        create_schema(&conn).unwrap();
-        conn
-    }
-    fn model(threshold: Option<u64>) -> serde_json::Value {
-        serde_json::json!({"backend":"openai-responses","model":"gpt","base_url":"https://example.invalid","allow_insecure_http":false,"api_key_env":null,"reasoning_effort":null,"extra_headers":null,"orchestrator_compaction_threshold":threshold})
-    }
-    fn request(threshold: Option<u64>) -> String {
-        serde_json::json!({"request_id":"request","project_id":"project","invoking_session_id":null,"model_selection":model(threshold),"git_ref":null,"default_ref":null,"title":"title","prompt":"literal orchestrator_compaction_threshold in user prose"}).to_string()
-    }
-    #[test]
-    fn v54_marker_preserves_receipt_bytes_and_fences_current_records() {
-        for threshold in [None, Some(8192)] {
-            let conn = fixture();
-            let raw = request(threshold);
-            conn.execute("INSERT INTO task_launches VALUES('request',?1)", [&raw])
-                .unwrap();
-            assert!(decode::<TaskLaunchRequest>(&conn, Owner::Task, "request", "", &raw).is_err());
-            capture_v54(&conn).unwrap();
-            let (value, legacy) =
-                decode::<TaskLaunchRequest>(&conn, Owner::Task, "request", "", &raw).unwrap();
-            assert!(legacy);
-            assert_eq!(
-                value.model_selection.unwrap().compaction_threshold,
-                threshold
-            );
-            assert_eq!(
-                conn.query_row::<String, _, _>("SELECT request_json FROM task_launches", [], |r| r
-                    .get(0))
-                    .unwrap(),
-                raw
-            );
-            // Public/current DTO decoding never accepts the retired name.
-            assert!(serde_json::from_str::<TaskLaunchRequest>(&raw).is_err());
-            let modified = raw.replace(
-                "literal orchestrator_compaction_threshold",
-                "changed literal",
-            );
-            conn.execute(
-                "UPDATE task_launches SET request_json=?1 WHERE request_id='request'",
-                [&modified],
-            )
-            .unwrap();
-            assert!(
-                decode::<TaskLaunchRequest>(&conn, Owner::Task, "request", "", &modified).is_err()
-            );
-            assert_eq!(
-                conn.query_row::<i64, _, _>(
-                    "SELECT count(*) FROM task_model_v54_provenance",
-                    [],
-                    |r| r.get(0)
-                )
-                .unwrap(),
-                0
-            );
-        }
-    }
-    #[test]
-    fn v54_marker_survives_unrelated_progress_and_rejects_model_rebinding() {
-        let conn = fixture();
-        let raw=serde_json::json!({"fresh_task":{"model_selection":model(Some(42))},"other":"unchanged"}).to_string();
-        conn.execute(
-            "INSERT INTO heartbeat_schedules VALUES('schedule',?1)",
-            [&raw],
-        )
-        .unwrap();
-        capture_v54(&conn).unwrap();
-        conn.execute(
-            "UPDATE heartbeat_schedules SET binding_json=json_set(binding_json,'$._attention',1)",
-            [],
-        )
-        .unwrap();
-        let raw: String = conn
-            .query_row("SELECT binding_json FROM heartbeat_schedules", [], |r| {
-                r.get(0)
-            })
-            .unwrap();
-        let (_, legacy): (serde_json::Value, bool) =
-            decode(&conn, Owner::Schedule, "schedule", "", &raw).unwrap();
-        assert!(legacy);
-        conn.execute("UPDATE heartbeat_schedules SET binding_json=json_set(binding_json,'$.fresh_task.model_selection.model','other')",[]).unwrap();
-        let raw: String = conn
-            .query_row("SELECT binding_json FROM heartbeat_schedules", [], |r| {
-                r.get(0)
-            })
-            .unwrap();
-        assert_eq!(
-            conn.query_row::<i64, _, _>(
-                "SELECT count(*) FROM task_model_v54_provenance",
-                [],
-                |r| r.get(0)
-            )
-            .unwrap(),
-            0
-        );
-        // Generic Value is permissive; strict public typed decoders reject the key.
-        assert!(decode::<TaskLaunchRequest>(&conn, Owner::Schedule, "schedule", "", &raw).is_err());
-    }
-    #[test]
-    fn duplicate_keys_collisions_and_invalid_legacy_shapes_fail_closed() {
-        let conn = fixture();
-        let both = request(None).replace(
-            "\"orchestrator_compaction_threshold\":null",
-            "\"orchestrator_compaction_threshold\":null,\"compaction_threshold\":null",
-        );
-        conn.execute("INSERT INTO task_launches VALUES('request',?1)", [&both])
-            .unwrap();
-        assert!(capture_v54(&conn).is_err());
-        let duplicate = request(None).replace(
-            "\"orchestrator_compaction_threshold\":null",
-            "\"orchestrator_compaction_threshold\":null,\"orchestrator_compaction_threshold\":3",
-        );
-        conn.execute("UPDATE task_launches SET request_json=?1", [&duplicate])
-            .unwrap();
-        assert!(capture_v54(&conn).is_err());
-        let invalid = request(None).replace(
-            "\"orchestrator_compaction_threshold\":null",
-            "\"orchestrator_compaction_threshold\":\"bad\"",
-        );
-        conn.execute("UPDATE task_launches SET request_json=?1", [&invalid])
-            .unwrap();
-        assert!(capture_v54(&conn).is_err());
-    }
-
-    #[test]
-    fn legacy_receipt_identity_and_scheduled_model_copies_must_agree() {
-        let conn = fixture();
-        conn.execute(
-            "INSERT INTO task_launches VALUES('other',?1)",
-            [request(None)],
-        )
-        .unwrap();
-        assert!(capture_v54(&conn).is_err());
-        conn.execute("DELETE FROM task_launches", []).unwrap();
-        let launch = serde_json::json!({"receipt":{"occurrence_id":"occurrence","request":{"model_selection":model(None)},"destination":{"model_selection":model(Some(7))},"binding":{"fresh_task":{"model_selection":model(None)}}}}).to_string();
-        conn.execute(
-            "INSERT INTO heartbeat_task_launches VALUES('occurrence',?1)",
-            [launch],
-        )
-        .unwrap();
-        assert!(capture_v54(&conn).is_err());
-        conn.execute("DELETE FROM heartbeat_task_launches", [])
-            .unwrap();
-        let mut current = model(None);
-        current.as_object_mut().unwrap().remove(OLD);
-        current
-            .as_object_mut()
-            .unwrap()
-            .insert(NEW.into(), serde_json::Value::Null);
-        let mixed = serde_json::json!({"receipt":{"occurrence_id":"occurrence","request":{"model_selection":model(None)},"destination":{"model_selection":current},"binding":{"fresh_task":{"model_selection":model(None)}}}}).to_string();
-        conn.execute(
-            "INSERT INTO heartbeat_task_launches VALUES('occurrence',?1)",
-            [mixed],
-        )
-        .unwrap();
-        assert!(capture_v54(&conn).is_err());
-    }
-
-    #[test]
-    fn malformed_later_evidence_rolls_back_all_prior_marks() {
-        let conn = fixture();
-        conn.execute(
-            "INSERT INTO task_launches VALUES('request',?1)",
-            [request(Some(8192))],
-        )
-        .unwrap();
-        let invalid = request(None)
-            .replace("\"model_selection\":", "\"_nac_model_selection\":")
-            .replace(
-                "\"orchestrator_compaction_threshold\":null",
-                "\"orchestrator_compaction_threshold\":\"bad\"",
-            );
-        conn.execute(
-            "INSERT INTO native_task_launches VALUES('bad',?1)",
-            [invalid],
-        )
-        .unwrap();
-        conn.execute_batch("BEGIN IMMEDIATE").unwrap();
-        assert!(capture_v54(&conn).is_err());
-        conn.execute_batch("ROLLBACK").unwrap();
-        assert_eq!(
-            conn.query_row::<i64, _, _>(
-                "SELECT count(*) FROM task_model_v54_provenance",
-                [],
-                |row| row.get(0)
-            )
-            .unwrap(),
-            0
-        );
-    }
-}
+#[path = "legacy_task_model_tests.rs"]
+mod tests;
