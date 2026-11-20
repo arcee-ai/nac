@@ -64,10 +64,8 @@ export interface RuntimeState {
    * the renderer drops whichever part the snapshot already covers.
    */
   streamSettled: boolean;
-  /**
-   * The buffers hold output from before the prompt sent last, and its run has
-   * neither started nor streamed since, so none of that output answers it.
-   */
+  // The buffers hold output from before the prompt sent last, and its run has
+  // neither started nor streamed since, so none of that output answers it.
   streamPredatesPrompt: boolean;
   /**
    * Prompt shown in the chat from the moment Send is pressed until the
