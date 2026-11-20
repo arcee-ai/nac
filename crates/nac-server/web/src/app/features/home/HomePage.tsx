@@ -5,6 +5,7 @@ import { LeftSidebar } from "@/app/components/LeftSidebar";
 import { ProjectsEmptyState } from "@/app/components/projects/ProjectsEmptyState";
 import { useManagedHost } from "@/app/features/managed/controller/useManagedHost";
 import { SessionListBody, SessionListSwitch } from "@/app/features/inbox/SessionLists";
+import { useSetupLifetime } from "@/app/features/setup/lifetime";
 import { SidebarToggle } from "@/app/features/sidebar/SidebarToggle";
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { visibleSessions } from "@/app/features/ui-policy/policy";
@@ -45,6 +46,7 @@ export function HomePage() {
   const projectsQuery = useProjects();
   const { data: storeInfo } = useStoreInfo();
   const createProject = useCreateProject();
+  const launchProjectLifetime = useSetupLifetime();
   const creatingLaunchProject = useRef(false);
   const [launchProjectError, setLaunchProjectError] = useState<string | null>(null);
   const sessions = useMemo(
@@ -67,16 +69,15 @@ export function HomePage() {
   const projectsKnown = !loading && !projectsQuery.error;
   const launchFolder = managed.status?.managed === false ? storeInfo?.root_cwd : undefined;
   const useLaunchFolder = async () => {
-    if (!launchFolder || creatingLaunchProject.current) return;
+    const lease = launchProjectLifetime.current;
+    if (!lease?.current() || !launchFolder || creatingLaunchProject.current) return;
     creatingLaunchProject.current = true;
     setLaunchProjectError(null);
     try {
       const project = await createProject.mutateAsync({ cwd: launchFolder });
-      await projectActions.newChat(project.project_id);
+      if (lease.current()) await projectActions.newChat(project.project_id);
     } catch (cause) {
-      // Another tab may have created the project while this request was running.
-      await projectsQuery.refetch();
-      setLaunchProjectError(errorMessage(toRunError(cause)));
+      if (lease.current()) setLaunchProjectError(errorMessage(toRunError(cause)));
     } finally {
       creatingLaunchProject.current = false;
     }

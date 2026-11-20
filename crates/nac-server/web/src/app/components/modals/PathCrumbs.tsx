@@ -14,17 +14,15 @@ const MAX_CRUMBS = 4;
 
 function crumbsFor(path: string, home: string | null): Crumb[] {
   const homeRoot = home?.replace(/\/+$/, "") ?? "";
-  const underHome = Boolean(homeRoot) && (path === homeRoot || path.startsWith(`${homeRoot}/`));
-  const root: Crumb = underHome
-    ? { label: "Home", path: homeRoot, home: true }
-    : { label: "/", path: "/" };
-  let trail = underHome ? homeRoot : "";
-  const rest = (underHome ? path.slice(homeRoot.length) : path).split("/").filter(Boolean);
+  let trail = "";
+  const rest = path.split("/").filter(Boolean);
   return [
-    root,
+    { label: "/", path: "/" },
     ...rest.map((segment) => {
       trail = `${trail}/${segment}`;
-      return { label: segment, path: trail };
+      return trail === homeRoot
+        ? { label: "Home", path: trail, home: true }
+        : { label: segment, path: trail };
     }),
   ];
 }
@@ -63,14 +61,15 @@ export function PathCrumbs({
             <button
               type="button"
               disabled={last}
+              title={crumb.path}
               aria-current={last ? "location" : undefined}
               onClick={() => onOpen(crumb.path)}
               className={cn(
-                "type-body-chrome flex h-8 min-w-0 items-center gap-1.5 rounded-md px-1.5 outline-none",
+                "type-body-chrome flex h-11 min-w-0 items-center gap-1.5 rounded-md px-1.5 outline-none md:h-8",
                 "focus-visible:ring-2 focus-visible:ring-[var(--f-focus)]",
                 last
                   ? "font-medium text-basic-primary"
-                  : "shrink-0 text-basic-tertiary hover:bg-[var(--f-wash-1)] hover:text-basic-primary",
+                  : "text-basic-tertiary hover:bg-[var(--f-wash-1)] hover:text-basic-primary",
               )}
             >
               {crumb.home ? <Icon iconName={IconName.Home} size={14} className="shrink-0" /> : null}

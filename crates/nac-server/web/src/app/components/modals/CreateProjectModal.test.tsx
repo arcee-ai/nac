@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
@@ -203,6 +203,44 @@ it("creates nothing when closed without submitting", async () => {
     fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(api.createProject).not.toHaveBeenCalled();
+  } finally {
+    view.unmount();
+    client.clear();
+  }
+});
+
+it("does not reopen the composer after closing the dialog during a pending create", async () => {
+  const result = Promise.withResolvers<ProjectRecord>();
+  vi.mocked(api.createProject).mockReturnValue(result.promise);
+  const onClose = vi.fn();
+  const { client, view } = renderModal(onClose);
+  try {
+    fireEvent.click(create());
+    await waitFor(() => expect(api.createProject).toHaveBeenCalledOnce());
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    await act(async () => result.resolve({ project_id: "created-project" } as ProjectRecord));
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(screen.getByTestId("location").textContent).toBe("/");
+    expect(screen.queryByText("Project created")).toBeNull();
+  } finally {
+    view.unmount();
+    client.clear();
+  }
+});
+
+it("requires review of an uncertain create before retrying", async () => {
+  vi.mocked(api.createProject).mockRejectedValue(new Error("Connection lost"));
+  const { client, view } = renderModal();
+  try {
+    fireEvent.click(create());
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "check Projects before trying again",
+    );
+    fireEvent.change(screen.getByRole("textbox", { name: "Project name" }), {
+      target: { value: "Retry" },
+    });
+    expect((create() as HTMLButtonElement).disabled).toBe(true);
+    expect(api.createProject).toHaveBeenCalledOnce();
   } finally {
     view.unmount();
     client.clear();
