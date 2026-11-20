@@ -17,11 +17,11 @@ from ci_startup_process import capture, package_contract
 from ci_startup_environment import resolve_environment
 from ci_xctest_attachments import bounded_file
 
-DEFAULT_PRODUCT = '6a2d77392b82037424dca755bb58cad399249726'
+DEFAULT_PRODUCT = '1638a9f36b4978bfe790859d0d42ce3bea96a5cf'
 PRODUCT = os.environ.get('NAC_STARTUP_PRODUCT_SHA') or DEFAULT_PRODUCT
 if not re.fullmatch('[0-9a-f]{40}', PRODUCT):
     raise RuntimeError('Startup product must be an exact immutable commit SHA')
-TEST_SOURCE = 'ca129e087de0b8899741662756fc3dfb0c619023'
+TEST_SOURCE = '6a7cafdeff6a73ae6c96365b03bc0a48b291bbc8'
 BASELINE = 'ec4f3a9a8ab2e80d98ff76ca8c536e1e41b413c8'
 SCHEMA = 'nac342-startup-xctest-v1'
 CASES = ('onboarding', 'configuredLocal', 'invalidConfig', 'futureStore')

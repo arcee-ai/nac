@@ -12,12 +12,12 @@ from ci_startup_fixture import FUTURE_MESSAGE, PRODUCT, canonical, digest
 from ci_xctest_attachments import bounded_file
 from ci_support import COMPLETE_LOG_LIMIT
 
-REVISION = '6a2d77392b82037424dca755bb58cad399249726'
+REVISION = '1638a9f36b4978bfe790859d0d42ce3bea96a5cf'
 FILES = {'Cargo.lock': '018d1117cb054541ccc62a72d7c535efb08a281071800e5061e0515ed9595277',
          'crates/nac-server/Cargo.toml': 'f59a3763521df4303c927b425ed8d0b3a804f4952248b10f4b08192e55f6f1bf',
          'crates/nac-server/tests/desktop_schema_contract.rs': '869a863cc8d67c9707ac4f43d5cbdb58adcc827ae41f0c597dff3816dbe7439d'}
 SCHEMA_PATH = 'crates/nac-core/src/store/schema.rs'
-SCHEMA_SHA256 = 'a50d036f47e34be0f1c10bd1473245409e4d64aa8e2752599ca81b66a863fa8a'
+SCHEMA_SHA256 = 'ab4f4bdcc88501b4bb9b26f9177d9c69e2b8c1e50c272778976a4161332cc81f'
 TESTS = ('future_main_store_is_selected_then_rejected_with_guidance',
          'future_wal_store_is_selected_then_rejected_without_pager_changes',
          'owned_future_store_retains_store_owned_priority', 'unrelated_invalid_store_retains_generic_failure')

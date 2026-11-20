@@ -22,7 +22,7 @@ class StartupFixtureTests(unittest.TestCase):
 
     def test_ax_pin_and_complete_inventory_reject_tamper_before_contract_import(self):
         import ci_startup_fixture as fixture
-        self.assertEqual(TEST_SOURCE, 'ca129e087de0b8899741662756fc3dfb0c619023')
+        self.assertEqual(TEST_SOURCE, '6a7cafdeff6a73ae6c96365b03bc0a48b291bbc8')
         self.assertEqual(fixture.TEST_FILES, {
             'README.md': '23a181bf5ddff1dcce0a06b22e438026646d55b267f0b7205c5f58d9e22dfb54',
             'StartupJourneys.swift': 'ba30886fcde8e1245baff4bc3f372e3c51a07d1872725612c0d4a04b9484eaa1',
@@ -128,7 +128,7 @@ class StartupFixtureTests(unittest.TestCase):
 
     def test_product_pin_rejects_legacy_before_package_or_resolver(self):
         from ci_startup_environment import PRODUCT as RESOLVER_PRODUCT
-        self.assertEqual(PRODUCT, '6a2d77392b82037424dca755bb58cad399249726')
+        self.assertEqual(PRODUCT, '1638a9f36b4978bfe790859d0d42ce3bea96a5cf')
         self.assertEqual(RESOLVER_PRODUCT, PRODUCT)
         with patch('ci_startup_fixture.require_checkout', side_effect=RuntimeError('legacy product rejected')) as checkout, \
                 patch('ci_startup_fixture.test_contract') as contract, \

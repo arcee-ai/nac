@@ -11,7 +11,7 @@ from ci_qualifications import require_checkout
 from ci_startup_process import capture
 from ci_xctest_attachments import bounded_file
 
-PRODUCT = os.environ.get('NAC_STARTUP_PRODUCT_SHA') or '6a2d77392b82037424dca755bb58cad399249726'
+PRODUCT = os.environ.get('NAC_STARTUP_PRODUCT_SHA') or '1638a9f36b4978bfe790859d0d42ce3bea96a5cf'
 if not re.fullmatch('[0-9a-f]{40}', PRODUCT):
     raise RuntimeError('Startup product must be an exact immutable commit SHA')
 SOURCE = 'desktop/macos/CommandEnvironment.swift'

@@ -11,9 +11,9 @@ const YAML = require("yaml");
 const workflow = name => { const value = YAML.parse(readFileSync(`.github/workflows/${name}.yml`, "utf8")); if (name === "stable-release") reverseAdmission(value); return value; };
 // Exact reviewed nomination; file digests checked against immutable Q and R sources.
 const reviewedStartupSupplier = {
-  "source_sha": "6a2d77392b82037424dca755bb58cad399249726",
-  "test_source_sha": "ca129e087de0b8899741662756fc3dfb0c619023",
-  "protocol_source_sha": "6a2d77392b82037424dca755bb58cad399249726",
+  "source_sha": "1638a9f36b4978bfe790859d0d42ce3bea96a5cf",
+  "test_source_sha": "6a7cafdeff6a73ae6c96365b03bc0a48b291bbc8",
+  "protocol_source_sha": "1638a9f36b4978bfe790859d0d42ce3bea96a5cf",
   "profile": "macos26",
   "suite": "startup",
   "scenario_count": 4,

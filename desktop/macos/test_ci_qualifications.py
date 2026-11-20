@@ -23,9 +23,9 @@ class ExactSourceTests(unittest.TestCase):
         terminal = select_target('all-352-macos26')
         self.assertEqual(terminal['source_sha'], 'a02f0c06b3c75c8f8fd62b6c233d1cfd923be6e1')
         startup = select_target('all-342-startup-macos26')
-        self.assertEqual(startup['source_sha'], '6a2d77392b82037424dca755bb58cad399249726')
-        self.assertEqual(startup['test_source_sha'], 'ca129e087de0b8899741662756fc3dfb0c619023')
-        self.assertEqual(startup['protocol_source_sha'], '6a2d77392b82037424dca755bb58cad399249726')
+        self.assertEqual(startup['source_sha'], '1638a9f36b4978bfe790859d0d42ce3bea96a5cf')
+        self.assertEqual(startup['test_source_sha'], '6a7cafdeff6a73ae6c96365b03bc0a48b291bbc8')
+        self.assertEqual(startup['protocol_source_sha'], '1638a9f36b4978bfe790859d0d42ce3bea96a5cf')
         self.assertEqual(startup['scenarios'], ['onboarding', 'configuredLocal', 'invalidConfig', 'futureStore'])
         self.assertEqual(terminal['suite'], 'terminal')
         self.assertEqual(terminal['phase_count'], 6)
@@ -62,7 +62,7 @@ class ExactSourceTests(unittest.TestCase):
         import subprocess
         import sys
         program = "from ci_qualifications import select_target; print(select_target('all-342-startup-macos26')['source_sha'])"
-        for sha in ('a' * 40, '6a2d77392b82037424dca755bb58cad399249726'):
+        for sha in ('a' * 40, '1638a9f36b4978bfe790859d0d42ce3bea96a5cf'):
             result = subprocess.run([sys.executable, '-B', '-c', program], capture_output=True, text=True,
                 env={**os.environ, 'PYTHONPATH': 'desktop/macos', 'NAC_STARTUP_PRODUCT_SHA': sha})
             self.assertEqual(result.returncode, 0, result.stderr)

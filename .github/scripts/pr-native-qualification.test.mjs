@@ -225,8 +225,8 @@ test("startup catalog binds an exact direct candidate and interaction supplier",
   assert.equal(read("stable-release").jobs["native-qualification"].with["startup-product-sha"],
     "${{ inputs.startup_product_sha }}");
   const startup = JSON.parse(readFileSync("desktop/macos/ci-qualifications.json", "utf8"))["all-342-startup-macos26"];
-  assert.equal(startup.source_sha, "6a2d77392b82037424dca755bb58cad399249726");
-  assert.equal(startup.test_source_sha, "ca129e087de0b8899741662756fc3dfb0c619023");
+  assert.equal(startup.source_sha, "1638a9f36b4978bfe790859d0d42ce3bea96a5cf");
+  assert.equal(startup.test_source_sha, "6a7cafdeff6a73ae6c96365b03bc0a48b291bbc8");
   assert.deepEqual(startup.test_files, {
   "README.md": "23a181bf5ddff1dcce0a06b22e438026646d55b267f0b7205c5f58d9e22dfb54",
   "StartupJourneys.swift": "ba30886fcde8e1245baff4bc3f372e3c51a07d1872725612c0d4a04b9484eaa1",
@@ -239,6 +239,6 @@ test("startup catalog binds an exact direct candidate and interaction supplier",
   "AGENTS.md": "3e24e5b29e32356d08895b2c162407a1be5cf9d71c1740d1dcc50fc566bc89e6",
   "test_title_assertion.py": "e4389c84259f0f8dbbd3b42eef153757b8f9da26d337010b8affd1719f415cef"
 });
-  assert.equal(startup.protocol_source_sha, "6a2d77392b82037424dca755bb58cad399249726");
+  assert.equal(startup.protocol_source_sha, "1638a9f36b4978bfe790859d0d42ce3bea96a5cf");
   assert.deepEqual(startup.scenarios, ["onboarding", "configuredLocal", "invalidConfig", "futureStore"]);
 });
