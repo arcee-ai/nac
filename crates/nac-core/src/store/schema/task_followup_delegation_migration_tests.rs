@@ -241,7 +241,7 @@ fn followup_schema47_upgrades_each_allocated_predecessor_without_inventing_autho
                 .unwrap(),
             STORE_SCHEMA_VERSION
         );
-        assert_eq!(STORE_SCHEMA_VERSION, 55);
+        assert_eq!(STORE_SCHEMA_VERSION, 56);
         assert_eq!(
             heartbeat_layout(&conn),
             current_heartbeat_layout,
@@ -277,6 +277,15 @@ fn followup_schema47_upgrades_each_allocated_predecessor_without_inventing_autho
             } else {
                 definition
             };
+            let expected = expected
+                .replace(
+                    "CHECK (behavior IN ('orchestrator', 'direct', 'direct-with-orchestrator'))",
+                    "CHECK (behavior = 'direct')",
+                )
+                .replace(
+                    "CHECK (completion_source IN ('traditional_child', 'managed_orchestrator'))",
+                    "CHECK (completion_source = 'traditional_child')",
+                );
             assert_eq!(
                 conn.query_row(
                     "SELECT sql FROM sqlite_master WHERE type='table' AND name=?1",

@@ -496,7 +496,7 @@ fn v16_store_purges_pre_behavior_sessions_and_establishes_downgrade_barrier() {
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
     assert_eq!(version, STORE_SCHEMA_VERSION);
-    assert_eq!(STORE_SCHEMA_VERSION, 55);
+    assert_eq!(STORE_SCHEMA_VERSION, 56);
     drop(migrated);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }

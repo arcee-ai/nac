@@ -219,7 +219,7 @@ CREATE TABLE provider_connections (
 CREATE TABLE session_completion_bindings (
              session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
              run_id TEXT NOT NULL, submitted_message_id INTEGER NOT NULL REFERENCES "session_events"(id) ON DELETE CASCADE,
-             behavior TEXT NOT NULL CHECK(behavior IN ('orchestrator','direct','direct-with-orchestrator')),
+             behavior TEXT NOT NULL CHECK(behavior = 'direct'),
              eligible INTEGER NOT NULL CHECK(eligible IN (0,1)),
              goal_participated INTEGER NOT NULL DEFAULT 0 CHECK(goal_participated IN (0,1)),
              question_yield INTEGER NOT NULL DEFAULT 0 CHECK(question_yield IN (0,1)),
@@ -238,7 +238,7 @@ CREATE TABLE session_completion_occurrences (
              sequence INTEGER PRIMARY KEY AUTOINCREMENT,
              session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
              run_id TEXT NOT NULL,
-             behavior TEXT NOT NULL CHECK(behavior IN ('orchestrator','direct','direct-with-orchestrator')),
+             behavior TEXT NOT NULL CHECK(behavior = 'direct'),
              kind TEXT NOT NULL CHECK(kind IN ('request','goal')),
              goal_id TEXT, mark_version INTEGER,
              committed_at TEXT NOT NULL,
@@ -322,7 +322,7 @@ CREATE TABLE session_inbox (
              updated_at TEXT NOT NULL,
              delivered_at TEXT,
              cancelled_at TEXT,
-             version INTEGER NOT NULL DEFAULT 0 CHECK (version >= 0), admission_id TEXT CHECK (admission_id IS NULL OR length(admission_id)=36), admission_digest TEXT CHECK ((admission_digest IS NULL) = (admission_id IS NULL)) CHECK (admission_digest IS NULL OR (length(admission_digest)=64 AND admission_digest NOT GLOB '*[^0-9a-f]*')), child_execution_mode TEXT CHECK (child_execution_mode IN ('foreground', 'background')), child_wait_id TEXT CHECK (child_wait_id IS NULL OR length(child_wait_id) = 36), review_intent TEXT, completion_source TEXT CHECK (completion_source IN ('traditional_child', 'managed_orchestrator')), completion_session_id TEXT CHECK ((completion_session_id IS NULL) = (completion_source IS NULL)), completion_generation INTEGER CHECK ((completion_generation IS NULL) = (completion_source IS NULL)) CHECK (completion_generation IS NULL OR completion_generation > 0),
+             version INTEGER NOT NULL DEFAULT 0 CHECK (version >= 0), admission_id TEXT CHECK (admission_id IS NULL OR length(admission_id)=36), admission_digest TEXT CHECK ((admission_digest IS NULL) = (admission_id IS NULL)) CHECK (admission_digest IS NULL OR (length(admission_digest)=64 AND admission_digest NOT GLOB '*[^0-9a-f]*')), child_execution_mode TEXT CHECK (child_execution_mode IN ('foreground', 'background')), child_wait_id TEXT CHECK (child_wait_id IS NULL OR length(child_wait_id) = 36), review_intent TEXT, completion_source TEXT CHECK (completion_source = 'traditional_child'), completion_session_id TEXT CHECK ((completion_session_id IS NULL) = (completion_source IS NULL)), completion_generation INTEGER CHECK ((completion_generation IS NULL) = (completion_source IS NULL)) CHECK (completion_generation IS NULL OR completion_generation > 0),
              CHECK (delivery = 'steer' OR target_run_id IS NULL),
              CHECK (
                  (status = 'pending' AND delivered_run_id IS NULL AND delivered_at IS NULL AND cancelled_at IS NULL)
@@ -376,7 +376,7 @@ CREATE TABLE session_run_recovery (
 CREATE TABLE sessions (
              session_id TEXT PRIMARY KEY,
              behavior TEXT NOT NULL DEFAULT 'direct'
-                 CHECK (behavior IN ('orchestrator', 'direct', 'direct-with-orchestrator')),
+                 CHECK (behavior = 'direct'),
              permission_approval_mode TEXT NOT NULL DEFAULT 'manual'
                  CHECK (permission_approval_mode IN ('manual', 'auto_approve')),
              permission_auto_approve_generation INTEGER NOT NULL DEFAULT 0
@@ -634,10 +634,5 @@ CREATE INDEX idx_heartbeat_history ON heartbeat_occurrences(schedule_id,due_last
 CREATE INDEX idx_heartbeat_run ON heartbeat_occurrences(session_id,run_id);
 CREATE INDEX idx_provider_connections_backend
              ON provider_connections(backend, updated_at);
-CREATE TRIGGER session_direct_only_update BEFORE UPDATE OF behavior ON sessions
-         WHEN NEW.behavior <> 'direct' BEGIN SELECT RAISE(ABORT, 'retired session behavior'); END;
-CREATE TRIGGER session_direct_inbox_origin_insert BEFORE INSERT ON session_inbox WHEN NEW.completion_source = 'managed_orchestrator' BEGIN SELECT RAISE(ABORT, 'retired inbox origin'); END;
-CREATE TRIGGER session_direct_inbox_origin_update BEFORE UPDATE OF completion_source ON session_inbox WHEN NEW.completion_source = 'managed_orchestrator' BEGIN SELECT RAISE(ABORT, 'retired inbox origin'); END;
-CREATE TRIGGER session_direct_only_insert BEFORE INSERT ON sessions WHEN NEW.behavior <> 'direct' BEGIN SELECT RAISE(ABORT, 'retired session behavior'); END;
 CREATE INDEX idx_session_events_session_target_id ON session_events(session_id, event_target, id DESC);
 CREATE INDEX idx_session_compaction_checkpoints_latest ON session_compaction_checkpoints(session_id, id DESC);

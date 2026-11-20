@@ -187,6 +187,8 @@ fn unaffected_catalog(conn: &Connection) -> TableRows {
         for value in row {
             if let Value::Text(text) = value {
                 *text = text
+                    .replace("CHECK(behavior IN ('orchestrator','direct','direct-with-orchestrator'))", "CHECK(behavior = 'direct')")
+                    .replace("CHECK (completion_source IN ('traditional_child', 'managed_orchestrator'))", "CHECK (completion_source = 'traditional_child')")
                     .replace(
                         "idx_thread_events_session_thread_id",
                         "idx_session_events_session_target_id",
