@@ -342,9 +342,41 @@ fn v0_explicit_direct_session_survives_with_appended_behavior_column() {
         messages_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
         ALTER TABLE sessions ADD COLUMN behavior TEXT NOT NULL DEFAULT 'orchestrator' CHECK (behavior IN ('orchestrator', 'direct', 'direct-with-orchestrator'));
         INSERT INTO sessions(session_id,cwd,store_path,model,base_url,messages_json,created_at,updated_at,behavior) VALUES('retained','/tmp','/tmp/store','m','https://example.invalid','[]','now','now','direct');").unwrap();
+    conn.execute("INSERT INTO sessions(session_id,cwd,store_path,model,base_url,messages_json,created_at,updated_at,behavior) VALUES('child','/tmp','/tmp/child','m','https://example.invalid','[{\"role\":\"user\",\"content\":\"private transcript\"}]','now','now','direct')", []).unwrap();
+    create_session_inbox_table(&conn).unwrap();
+    create_traditional_children_table(&conn).unwrap();
+    conn.execute("INSERT INTO traditional_children(child_session_id,parent_session_id,root_session_id,profile,description,nesting_depth,created_at,updated_at) VALUES('child','retained','retained','general','child',1,'now','now')", []).unwrap();
     drop(conn);
     initialize(&path).unwrap();
     let conn = Connection::open(&path).unwrap();
+    let retained: (i64, String) = conn
+        .query_row(
+            "SELECT rowid,messages_json FROM sessions WHERE session_id='child'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        retained,
+        (
+            2,
+            "[{\"role\":\"user\",\"content\":\"private transcript\"}]".into()
+        )
+    );
+    let parent: String = conn
+        .query_row(
+            "SELECT parent_session_id FROM traditional_children WHERE child_session_id='child'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(parent, "retained");
+    let fk_errors: i64 = conn
+        .query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(fk_errors, 0);
     assert_eq!(
         conn.query_row::<String, _, _>(
             "SELECT behavior FROM sessions WHERE session_id='retained'",
@@ -361,7 +393,7 @@ fn v0_explicit_direct_session_survives_with_appended_behavior_column() {
         .unwrap()
         .map(Result::unwrap)
         .collect();
-    assert_ne!(names.iter().position(|name| name == "behavior"), Some(1));
+    assert_eq!(names.iter().position(|name| name == "behavior"), Some(1));
     drop(conn);
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -524,4 +556,122 @@ fn ada_origin_columns_keep_physical_order_on_upgrade() {
         .is_none());
     drop((conn, fresh));
     std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn v0_upgrade_catalog_matches_fresh() {
+    let root = std::env::temp_dir().join(format!("nac-v0-catalog-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let old_path = root.join("old.db");
+    let old = Connection::open(&old_path).unwrap();
+    old.execute_batch(
+        "CREATE TABLE sessions (
+        session_id TEXT PRIMARY KEY, cwd TEXT NOT NULL, store_path TEXT NOT NULL,
+        model TEXT NOT NULL, base_url TEXT NOT NULL, sandbox_json TEXT,
+        messages_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);",
+    )
+    .unwrap();
+    drop(old);
+    let fresh_path = root.join("fresh.db");
+    initialize(&old_path).unwrap();
+    initialize(&fresh_path).unwrap();
+    let old = Connection::open(old_path).unwrap();
+    let fresh = Connection::open(fresh_path).unwrap();
+    let old_catalog = catalog(&old);
+    let fresh_catalog = catalog(&fresh);
+    let old_map: std::collections::BTreeMap<_, _> = old_catalog
+        .iter()
+        .map(|(kind, name, sql)| ((kind, name), sql))
+        .collect();
+    let fresh_map: std::collections::BTreeMap<_, _> = fresh_catalog
+        .iter()
+        .map(|(kind, name, sql)| ((kind, name), sql))
+        .collect();
+    let differences: Vec<_> = old_map
+        .keys()
+        .chain(fresh_map.keys())
+        .filter(|key| old_map.get(key) != fresh_map.get(key))
+        .collect();
+    assert!(
+        differences.is_empty(),
+        "catalog differences: {differences:?}"
+    );
+    drop((old, fresh));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn session_reordering_faults_roll_back_every_boundary() {
+    for phase in 1..=4 {
+        let root = std::env::temp_dir().join(format!("nac-v0-fault-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("store.db");
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch("CREATE TABLE sessions (
+          session_id TEXT PRIMARY KEY, cwd TEXT NOT NULL, store_path TEXT NOT NULL,
+          model TEXT NOT NULL, base_url TEXT NOT NULL, sandbox_json TEXT,
+          messages_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+          ALTER TABLE sessions ADD COLUMN behavior TEXT NOT NULL DEFAULT 'orchestrator' CHECK (behavior IN ('orchestrator', 'direct', 'direct-with-orchestrator'));
+          INSERT INTO sessions VALUES('retained','/tmp','/tmp/store','m','https://example.invalid',NULL,'[\"secret\"]','now','now','direct');").unwrap();
+        let before = catalog(&conn);
+        drop(conn);
+        session_layout::FAIL_PHASE.with(|failure| failure.set(phase));
+        let result = initialize(&path);
+        session_layout::FAIL_PHASE.with(|failure| failure.set(0));
+        assert!(result.is_err(), "phase {phase} unexpectedly passed");
+        let conn = Connection::open(&path).unwrap();
+        assert_eq!(catalog(&conn), before, "phase {phase} catalog");
+        assert_eq!(
+            conn.pragma_query_value::<i64, _>(None, "user_version", |row| row.get(0))
+                .unwrap(),
+            0
+        );
+        let retained: (i64, String, String) = conn
+            .query_row(
+                "SELECT rowid,messages_json,behavior FROM sessions WHERE session_id='retained'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(retained, (1, "[\"secret\"]".into(), "direct".into()));
+        drop(conn);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[test]
+fn session_reordering_rejects_unknown_dependencies_atomically() {
+    for dependency in [
+        "CREATE INDEX custom_session_model ON sessions(model);",
+        "CREATE TRIGGER custom_session_write AFTER UPDATE ON sessions BEGIN SELECT 1; END;",
+        "PRAGMA writable_schema=ON; UPDATE sqlite_schema SET sql=replace(sql, 'model TEXT NOT NULL', 'model TEXT NOT NULL DEFAULT ''unsupported''') WHERE name='sessions'; PRAGMA writable_schema=OFF;",
+    ] {
+        let root = std::env::temp_dir().join(format!("nac-v0-dependency-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("store.db");
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch("CREATE TABLE sessions (
+          session_id TEXT PRIMARY KEY, cwd TEXT NOT NULL, store_path TEXT NOT NULL,
+          model TEXT NOT NULL, base_url TEXT NOT NULL, sandbox_json TEXT,
+          messages_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+          ALTER TABLE sessions ADD COLUMN behavior TEXT NOT NULL DEFAULT 'orchestrator' CHECK (behavior IN ('orchestrator', 'direct', 'direct-with-orchestrator'));
+          INSERT INTO sessions VALUES('retained','/tmp','/tmp/store','m','https://example.invalid',NULL,'[\"private\"]','now','now','direct');").unwrap();
+        conn.execute_batch(dependency).unwrap();
+        let before = catalog(&conn);
+        drop(conn);
+        assert!(initialize(&path).is_err());
+        let conn = Connection::open(&path).unwrap();
+        assert_eq!(catalog(&conn), before);
+        assert_eq!(
+            conn.pragma_query_value::<i64, _>(None, "user_version", |row| row.get(0))
+                .unwrap(),
+            0
+        );
+        let value: String = conn
+            .query_row("SELECT messages_json FROM sessions", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(value, "[\"private\"]");
+        drop(conn);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

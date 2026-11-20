@@ -6,6 +6,9 @@
 //! transaction, preventing earlier retirement migrations from cascading.
 use super::*;
 
+#[path = "session_layout.rs"]
+mod session_layout;
+
 const SESSION_CHECK: &str =
     "CHECK (behavior IN ('orchestrator', 'direct', 'direct-with-orchestrator'))";
 const COMPLETION_COLUMN: &str = "behavior TEXT NOT NULL CHECK(behavior IN ('orchestrator','direct','direct-with-orchestrator'))";
@@ -268,6 +271,7 @@ pub(super) fn tighten(conn: &Connection) -> Result<()> {
     if normalize_inbox {
         normalize_inbox_columns(conn)?;
     }
+    session_layout::normalize(conn)?;
     let integrity: String = conn.query_row("PRAGMA integrity_check", [], |r| r.get(0))?;
     if integrity != "ok" {
         anyhow::bail!("SQLite integrity check failed: {integrity}");
@@ -362,10 +366,12 @@ fn normalize_inbox_columns(conn: &Connection) -> Result<()> {
             |row| row.get(0),
         )
         .optional()?;
+    // Store the temporary snapshot in the same protected database and transaction:
+    // review intent can contain sensitive content, so avoid a separate temp file.
     conn.execute_batch(
-        "CREATE TEMP TABLE nac_v56_inbox_columns AS
+        "CREATE TABLE nac_v56_inbox_columns AS
            SELECT id,admission_id,admission_digest,child_execution_mode,child_wait_id,review_intent,completion_source,completion_session_id,completion_generation FROM main.session_inbox;
-         CREATE UNIQUE INDEX temp.nac_v56_inbox_columns_id ON nac_v56_inbox_columns(id);
+         CREATE UNIQUE INDEX nac_v56_inbox_columns_id ON nac_v56_inbox_columns(id);
          DROP INDEX idx_session_inbox_admission;
          ALTER TABLE session_inbox DROP COLUMN completion_generation;
          ALTER TABLE session_inbox DROP COLUMN completion_session_id;
@@ -384,13 +390,13 @@ fn normalize_inbox_columns(conn: &Connection) -> Result<()> {
          ALTER TABLE session_inbox ADD COLUMN completion_session_id TEXT CHECK ((completion_session_id IS NULL) = (completion_source IS NULL));
          ALTER TABLE session_inbox ADD COLUMN completion_generation INTEGER CHECK ((completion_generation IS NULL) = (completion_source IS NULL)) CHECK (completion_generation IS NULL OR completion_generation > 0);
          UPDATE session_inbox SET (admission_id,admission_digest,child_execution_mode,child_wait_id,review_intent,completion_source,completion_session_id,completion_generation) =
-           (SELECT admission_id,admission_digest,child_execution_mode,child_wait_id,review_intent,completion_source,completion_session_id,completion_generation FROM temp.nac_v56_inbox_columns WHERE id=session_inbox.id);
+           (SELECT admission_id,admission_digest,child_execution_mode,child_wait_id,review_intent,completion_source,completion_session_id,completion_generation FROM main.nac_v56_inbox_columns WHERE id=session_inbox.id);
          CREATE UNIQUE INDEX idx_session_inbox_admission ON session_inbox(session_id,admission_id) WHERE admission_id IS NOT NULL;",
     )?;
     let mismatches: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM session_inbox i LEFT JOIN temp.nac_v56_inbox_columns o ON o.id=i.id
-          WHERE o.id IS NULL OR i.admission_id IS NOT o.admission_id OR i.admission_digest IS NOT o.admission_digest OR i.child_execution_mode IS NOT o.child_execution_mode OR i.child_wait_id IS NOT o.child_wait_id OR i.review_intent IS NOT o.review_intent OR i.completion_source IS NOT o.completion_source OR i.completion_session_id IS NOT o.completion_session_id OR i.completion_generation IS NOT o.completion_generation)
-          OR (SELECT count(*) FROM session_inbox) <> (SELECT count(*) FROM temp.nac_v56_inbox_columns)", [], |row| row.get(0),
+        "SELECT EXISTS(SELECT 1 FROM session_inbox i LEFT JOIN main.nac_v56_inbox_columns o ON o.id=i.id
+          WHERE o.id IS NULL OR i.admission_id IS NOT o.admission_id OR i.admission_digest IS NOT o.admission_digest OR i.child_execution_mode IS NOT o.child_execution_mode OR i.child_wait_id IS NOT o.child_wait_id OR i.review_intent IS NOT o.review_intent OR i.completion_source IS NOT o.completion_source OR i.completion_session_id IS NOT o.completion_session_id OR i.completion_generation IS NOT o.completion_generation OR typeof(i.admission_id) <> typeof(o.admission_id) OR typeof(i.admission_digest) <> typeof(o.admission_digest) OR typeof(i.child_execution_mode) <> typeof(o.child_execution_mode) OR typeof(i.child_wait_id) <> typeof(o.child_wait_id) OR typeof(i.review_intent) <> typeof(o.review_intent) OR typeof(i.completion_source) <> typeof(o.completion_source) OR typeof(i.completion_session_id) <> typeof(o.completion_session_id) OR typeof(i.completion_generation) <> typeof(o.completion_generation))
+          OR (SELECT count(*) FROM session_inbox) <> (SELECT count(*) FROM main.nac_v56_inbox_columns)", [], |row| row.get(0),
     )?;
     let after_sequence: Option<i64> = conn
         .query_row(
@@ -409,7 +415,7 @@ fn normalize_inbox_columns(conn: &Connection) -> Result<()> {
     {
         anyhow::bail!("session inbox columns or identity changed during normalization");
     }
-    conn.execute_batch("DROP TABLE temp.nac_v56_inbox_columns")?;
+    conn.execute_batch("DROP TABLE main.nac_v56_inbox_columns")?;
     Ok(())
 }
 
