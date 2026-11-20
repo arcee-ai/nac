@@ -52,6 +52,7 @@ import Foundation
 import CoreFoundation
 import CoreGraphics
 import Darwin
+__PRODUCER_DIAGNOSTIC_STAGE__
 
 // Test-only syscall ports. The one-shot read hook runs after the REAL open
 // and before the unmodified canonical reader performs its own metadata check.
@@ -511,6 +512,7 @@ func producerHoldRun(_ mode: String) -> [String: Any] {
         let binary = "/inert/helper", configPath = "/inert/config", digest = String(repeating:"b",count:64)
         let frame = CGRect(x:10,y:20,width:100,height:30), window = 7
         var postAction: StartupAXActionHandoff?, postRequest: StartupAXInteractionRequest?
+        var diagnosticStage = StartupAXDiagnosticStage.configuration
         func getppid() -> Int32 { ["parent_lost", "post_parent_lost"].contains(mode) ? 201 : 200 }
         func ownedFrame(_ pid: Int32, _ window: Int) throws -> CGRect { mode == "frame" ? .zero : frame }
         func process(_ pid: Int32) throws -> StartupAXProcess {
@@ -1264,10 +1266,11 @@ class ReceiptControls(unittest.TestCase):
         recheck = '                func namedTargetMatches(' + journey.split('                func namedTargetMatches(', 1)[1].split('                let semanticName:', 1)[0]
         guard_catch = '            } catch {' + journey.split('        func guardTarget() throws {', 1)[1].split('        func dispatch(', 1)[0].split('            } catch {', 1)[1].rsplit('\n        }', 1)[0]
         producer = Path(os.environ.get('NAC342_ACTION_PRODUCER_SOURCE', str(Path(__file__).resolve().parents[1] / 'CIStartupAXWitness.swift'))).read_text()
+        diagnostic_stage = 'enum StartupAXDiagnosticStage:' + producer.split('enum StartupAXDiagnosticStage:', 1)[1].split('\nenum StartupAXFailureDiagnostic', 1)[0]
         producer_hold = '                    var lease = StartupAXActionLease' + producer.split('                    var lease = StartupAXActionLease', 1)[1].split('                } else if let completed', 1)[0]
         producer_post = producer.split('                } else if let completed = postAction, let original = postRequest {', 1)[1].split('                RunLoop.current.run(until: Date().addingTimeInterval(0.05))', 1)[0].rsplit('                }', 1)[0]
         action_handoff = '            failureEvidence.step = .input' + journey.split('            failureEvidence.step = .input', 1)[1].split('            failureEvidence.step = .after_record', 1)[0]
-        driver.write_text(DRIVER.replace('__PRODUCER_POST_HOLD__', producer_post).replace('__PRODUCER_ACTION_HOLD__', producer_hold).replace('__JOURNEY_ACTION_HANDOFF__', action_handoff).replace('__JOURNEY_GUARD_CATCH__', guard_catch).replace('        __JOURNEY_FAILURE_CATCH__', catch).replace('        __JOURNEY_TEARDOWN__', teardown)
+        driver.write_text(DRIVER.replace('__PRODUCER_DIAGNOSTIC_STAGE__', diagnostic_stage).replace('__PRODUCER_POST_HOLD__', producer_post).replace('__PRODUCER_ACTION_HOLD__', producer_hold).replace('__JOURNEY_ACTION_HANDOFF__', action_handoff).replace('__JOURNEY_GUARD_CATCH__', guard_catch).replace('        __JOURNEY_FAILURE_CATCH__', catch).replace('        __JOURNEY_TEARDOWN__', teardown)
                           .replace('__JOURNEY_REQUEST_NAME__', request_name)
                           .replace('__JOURNEY_SEMANTIC_RECHECK__', recheck))
         cls.binary = root / 'inert-client'
