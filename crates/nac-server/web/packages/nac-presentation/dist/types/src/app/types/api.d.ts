@@ -4,7 +4,6 @@ export type BackendKind = ApiSchema<"BackendKind">;
 /** `nac_core::model::types::ReasoningEffort`, serialized lowercase. */
 export type ReasoningEffort = ApiSchema<"ReasoningEffort">;
 /** Dispatch weight class when a light model is configured, serialized lowercase. */
-export type DispatchWeight = "light" | "heavy";
 /** Immutable execution topology selected when a session is created. */
 export type SessionBehavior = ApiSchema<"SessionBehavior">;
 export type SessionMcpRefreshStatus = ApiSchema<"SessionMcpRefreshStatus">;
