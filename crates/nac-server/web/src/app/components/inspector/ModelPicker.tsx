@@ -149,25 +149,31 @@ export function ModelPicker({
     const version = config.data?.config_version;
     if (!canChange || version == null) return;
     try {
-      const refreshed = await action.run((lease) =>
-        setupSequence(
+      const refreshed = await action.run((lease) => {
+        const reconcile = setupReconciliation(client, sessionId);
+        let readback: Promise<boolean> | undefined;
+        return setupSequence(
           {
             current: lease.current,
             classify: classifySetupFailure,
-            reconcile: setupReconciliation(client, sessionId),
+            reconcile: (phase) => {
+              const invalidation = reconcile(phase);
+              // An accepted write's deadline also covers the invalidation GETs.
+              return readback ? Promise.race([invalidation, readback]) : invalidation;
+            },
           },
           (step) =>
             Effect.gen(function* () {
-              const checkpoint = yield* step("configuration", async () => {
+              const confirmation = yield* step("configuration", async () => {
                 await api.updateConfig(sessionId, {
                   ...patch,
                   expected_config_version: version,
                 });
-                return captureReadback(client, sessionId);
+                const checkpoint = captureReadback(client, sessionId);
+                readback = waitForModelReadback(client, checkpoint, lease.signal);
+                return { readback };
               });
-              const ready = yield* Effect.promise(() =>
-                waitForModelReadback(client, checkpoint, lease.signal),
-              );
+              const ready = yield* Effect.promise(() => confirmation.readback);
               if (!ready) {
                 return yield* Effect.fail(
                   new SetupFailure({
@@ -180,8 +186,8 @@ export function ModelPicker({
               }
               return true;
             }),
-        ),
-      );
+        );
+      });
       if (refreshed) toast.success(success);
     } catch (error) {
       toast.error(

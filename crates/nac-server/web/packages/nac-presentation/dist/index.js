@@ -13723,22 +13723,32 @@ function ng({ sessionId: e, metadata: t, label: n, disabled: r }) {
 	}), [x, S]), w = async (t, n) => {
 		let r = c.data?.config_version;
 		if (b && r != null) try {
-			await u.run((n) => Js({
-				current: n.current,
-				classify: $s,
-				reconcile: tc(s, e)
-			}, (i) => ht(function* () {
-				let a = yield* i("configuration", async () => (await d.updateConfig(e, {
-					...t,
-					expected_config_version: r
-				}), eg(s, e)));
-				return (yield* et(() => tg(s, a, n.signal))) ? !0 : yield* ft(new Ks({
-					phase: "configuration",
-					kind: "rejected",
-					cause: $h,
-					completed: ["configuration"]
+			await u.run((n) => {
+				let i = tc(s, e), a;
+				return Js({
+					current: n.current,
+					classify: $s,
+					reconcile: (e) => {
+						let t = i(e);
+						return a ? Promise.race([t, a]) : t;
+					}
+				}, (i) => ht(function* () {
+					let o = yield* i("configuration", async () => {
+						await d.updateConfig(e, {
+							...t,
+							expected_config_version: r
+						});
+						let i = eg(s, e);
+						return a = tg(s, i, n.signal), { readback: a };
+					});
+					return (yield* et(() => o.readback)) ? !0 : yield* ft(new Ks({
+						phase: "configuration",
+						kind: "rejected",
+						cause: $h,
+						completed: ["configuration"]
+					}));
 				}));
-			}))) && i.success(n);
+			}) && i.success(n);
 		} catch (e) {
 			i.error(e instanceof Ks && e.cause === $h ? $h.message : ec(e));
 		}
