@@ -18438,6 +18438,14 @@
               "null"
             ]
           },
+          "fast_input_tokens_below": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
           "id": {
             "type": "string"
           },
@@ -18547,6 +18555,29 @@
           "provider_default",
           "fallback"
         ]
+      },
+      "NativeSpeedProfile": {
+        "type": "object",
+        "description": "Reviewed native API support, independent of model limits and account access.",
+        "required": [
+          "tiers"
+        ],
+        "properties": {
+          "fast_input_tokens_below": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "tiers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServiceTier"
+            }
+          }
+        }
       },
       "OpenLocalPathResult": {
         "type": "object",
@@ -19429,6 +19460,18 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/ModelEntry"
+            }
+          },
+          "speed_profiles": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "$ref": "#/components/schemas/NativeSpeedProfile"
+            },
+            "propertyNames": {
+              "type": "string"
             }
           }
         }

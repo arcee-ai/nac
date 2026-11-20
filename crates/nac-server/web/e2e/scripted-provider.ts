@@ -17,7 +17,7 @@ export type ScriptedResponse =
       arguments: Record<string, unknown>;
       stream?: boolean | "request";
     }
-  | { kind: "http_error"; status: number; body: string };
+  | { kind: "http_error"; status: number; body: string | Record<string, unknown> };
 
 export type ScriptMatch = {
   token?: string;
@@ -163,7 +163,7 @@ export class ScriptedProvider {
       response.writeHead(304).end();
       return;
     }
-    if (method !== "POST" || path !== "/responses") {
+    if (method !== "POST" || !["/responses", "/v1/responses"].includes(path)) {
       this.writeJson(response, 404, { error: `unexpected provider route ${method} ${path}` });
       return;
     }

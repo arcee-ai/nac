@@ -1283,6 +1283,7 @@ export interface components {
             cost: components["schemas"]["ModelCostRates"];
             default_service_tier?: string | null;
             display_name: string | null;
+            fast_input_tokens_below?: number | null;
             id: string;
             limits?: components["schemas"]["ResolvedLimits"] | null;
             max_tokens: number;
@@ -1305,6 +1306,10 @@ export interface components {
             name: string;
         };
         ModelSource: "baseline" | "overlay" | "user_override" | "provider_default" | "fallback";
+        NativeSpeedProfile: {
+            fast_input_tokens_below?: number | null;
+            tiers: components["schemas"]["ServiceTier"][];
+        };
         OpenLocalPathResult: {
             fell_back_to_parent: boolean;
             opened: string;
@@ -1474,6 +1479,7 @@ export interface components {
             id: components["schemas"]["BackendKind"];
             managed_base_url: string | null;
             models: components["schemas"]["ModelEntry"][];
+            speed_profiles?: Record<string, components["schemas"]["NativeSpeedProfile"]> | null;
         };
         ProviderModel: {
             display_name: string | null;

@@ -1,0 +1,74 @@
+{
+  "retrieved_on": "2026-11-18",
+  "purpose": "Recorded source facts for review; pricing rows alone do not establish endpoint, protocol, snapshot, or account eligibility.",
+  "sources": {
+    "fast_guide": "https://developers.openai.com/api/docs/guides/fast-mode",
+    "ultrafast_guide": "https://developers.openai.com/api/docs/guides/ultrafast-mode",
+    "pricing": "https://developers.openai.com/api/docs/pricing.md"
+  },
+  "fast": {
+    "protocols_documented_by_guide": [
+      "responses",
+      "chat_completions"
+    ],
+    "flagship_pricing_model_ids": [
+      "gpt-6.2-astra",
+      "gpt-6.2-sol",
+      "gpt-6-astra",
+      "gpt-6.1-sol",
+      "gpt-6.1-terra",
+      "gpt-6-luna",
+      "gpt-6-sol",
+      "gpt-5.6-sol",
+      "gpt-5.6-terra",
+      "gpt-5.6-luna",
+      "gpt-5.5",
+      "gpt-5.4",
+      "gpt-5.4-mini",
+      "gpt-5.2",
+      "gpt-5.1",
+      "gpt-5",
+      "gpt-5-mini",
+      "gpt-4.1",
+      "gpt-4.1-mini",
+      "gpt-4o",
+      "gpt-4o-mini",
+      "o3"
+    ],
+    "specialized_pricing_model_ids": [
+      "gpt-5.3-codex"
+    ],
+    "pricing_qualifications": {
+      "gpt-5.5": "Pricing row specifies <272K context length.",
+      "gpt-5.4": "Pricing row specifies <272K context length."
+    },
+    "request_aliases": [
+      "fast",
+      "priority"
+    ],
+    "model_pages": {
+      "url_pattern": "https://developers.openai.com/api/docs/models/{model_id}.md",
+      "reviewed_endpoints": {
+        "responses": "Supported",
+        "chat_completions": "Supported"
+      },
+      "applies_to": "flagship_pricing_model_ids"
+    },
+    "specialized_model_pages": {
+      "gpt-5.3-codex": {
+        "url": "https://developers.openai.com/api/docs/models/gpt-5.3-codex.md",
+        "responses": "Supported",
+        "chat_completions": "Not supported"
+      }
+    }
+  },
+  "ultrafast": {
+    "guide_model_ids": [
+      "gpt-6.2-astra",
+      "gpt-6.2-sol",
+      "gpt-6-astra",
+      "gpt-6.1-sol"
+    ],
+    "protocol_documented_by_guide": "responses"
+  }
+}

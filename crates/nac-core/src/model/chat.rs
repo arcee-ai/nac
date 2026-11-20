@@ -98,7 +98,10 @@ pub(super) fn parse_completions_response(
         .map(ToString::to_string);
     Ok(ModelTurnResponse {
         effective_service_tier: None,
-        served_service_tier: None,
+        served_service_tier: value
+            .get("service_tier")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
         assistant: AssistantTurn {
             content: message
                 .get("content")

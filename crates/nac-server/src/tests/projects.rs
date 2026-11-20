@@ -1,7 +1,7 @@
 use super::*;
 
 #[tokio::test]
-async fn inherited_codex_speed_requires_explicit_reconciliation_for_another_route() {
+async fn inherited_speed_retains_compatible_native_route_and_requires_repair_elsewhere() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let root = temp_root("project_speed_reconciliation");
     let workspace = root.join("workspace");
@@ -55,12 +55,31 @@ async fn inherited_codex_speed_requires_explicit_reconciliation_for_another_rout
             request["service_tier"] = tier;
         }
         let response = post_json(app.clone(), "/sessions", request).await;
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let created: serde_json::Value =
+            serde_json::from_slice(&response_body(response).await).unwrap();
+        let id = created["metadata"]["session_id"].as_str().unwrap();
+        assert_eq!(
+            sessions::load_session(&store_path, id)
+                .unwrap()
+                .service_tier,
+            Some(nac_core::model::ServiceTier::Fast)
+        );
+    }
+    let mut unsupported = base;
+    unsupported["base_url"] = serde_json::json!("https://example.com/v1");
+    for tier in [None, Some(serde_json::json!("fast"))] {
+        let mut request = unsupported.clone();
+        if let Some(tier) = tier {
+            request["service_tier"] = tier;
+        }
+        let response = post_json(app.clone(), "/sessions", request).await;
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
         let body = String::from_utf8(response_body(response).await.to_vec()).unwrap();
         assert!(body.contains("clear the speed preference"), "{body}");
     }
-    assert!(sessions::list_sessions(&store_path).unwrap().is_empty());
-    let mut repaired = base;
+    assert_eq!(sessions::list_sessions(&store_path).unwrap().len(), 2);
+    let mut repaired = unsupported;
     repaired["service_tier"] = serde_json::Value::Null;
     let response = post_json(app, "/sessions", repaired).await;
     assert_eq!(response.status(), StatusCode::CREATED);

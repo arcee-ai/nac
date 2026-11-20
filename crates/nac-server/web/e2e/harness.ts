@@ -485,7 +485,11 @@ async function startHarness(
         // available to the unified model picker without placing either value
         // in browser state. The scripted tests never send model traffic to
         // these public endpoints.
-        OPENAI_API_KEY: "nac-e2e-openai-dummy-only",
+        OPENAI_API_KEY:
+          process.env.NAC_E2E_OPENAI_FIXTURE === "1" ? "e2e-only" : "nac-e2e-openai-dummy-only",
+        ...(process.env.NAC_E2E_OPENAI_FIXTURE === "1"
+          ? { NAC_OPENAI_E2E_FIXTURE_BASE_URL: `${provider.baseUrl}/v1` }
+          : {}),
         DEEPSEEK_API_KEY: "nac-e2e-deepseek-dummy-only",
         MODELS_DEV_URL: `${provider.baseUrl}/models-dev`,
         ...(codexCatalogFixture && process.env.NAC_E2E_CODEX_FIXTURE === "1"

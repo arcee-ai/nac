@@ -1,4 +1,4 @@
-.PHONY: test-capture-qualification all setup build dev run install-dev release install ci test test-rust test-web test-release test-stable-binary test-source-workflow test-source-binary test-source-size lint-workflows test-workflow-lint test-mcp-conformance test-nightly-portability test-terminal-browser generate-api-contract test-api-contract test-assets test-e2e test-e2e-review test-e2e-remote test-durability test-managed-load test-managed-fault-fixture test-managed-image-contract managed-image test-managed-image check lint fix format-check fmt crate-check crate-test crate-build clean help
+.PHONY: test-capture-qualification all setup build dev run install-dev release install ci test test-rust test-web test-release test-stable-binary test-source-workflow test-source-binary test-source-size lint-workflows test-workflow-lint test-mcp-conformance test-nightly-portability test-terminal-browser generate-api-contract test-api-contract test-assets test-e2e test-e2e-review test-e2e-openai test-e2e-remote test-durability test-managed-load test-managed-fault-fixture test-managed-image-contract managed-image test-managed-image check lint fix format-check fmt crate-check crate-test crate-build clean help
 
 CARGO ?= cargo
 PKG := nac-server
@@ -191,6 +191,12 @@ test-e2e-review:
 	$(CARGO) build --locked -p $(PKG) --bin $(BIN) --features review-fixture --target-dir target/review-fixture
 	NAC_E2E_REVIEW_FIXTURE=1 NAC_E2E_BINARY="$(CURDIR)/target/review-fixture/debug/$(BIN)" npm --prefix $(WEB_DIR) run test:e2e -- review.e2e.ts
 
+## Exercise native OpenAI receipt and rejection recovery with an isolated fixture build
+test-e2e-openai:
+	npm --prefix $(WEB_DIR) run build
+	$(CARGO) build --locked -p $(PKG) --bin $(BIN) --features openai-e2e-fixture --target-dir target/openai-e2e-fixture
+	NAC_E2E_OPENAI_FIXTURE=1 NAC_E2E_ARTIFACTS="$(CURDIR)/target/openai-e2e-fixture/artifacts" NAC_E2E_BINARY="$(CURDIR)/target/openai-e2e-fixture/debug/$(BIN)" npm --prefix $(WEB_DIR) run test:e2e -- openai-speed.e2e.ts
+
 ## Exercise Codex receipt persistence with an isolated loopback fixture build
 test-e2e-codex:
 	npm --prefix $(WEB_DIR) run build
@@ -350,6 +356,7 @@ help:
 		'  test-source-size Enforce the 2,000-line human-source ceiling' \
 		'  test-assets  Lint, typecheck and rebuild the web app' \
 		'  test-e2e     Run production-embedded Playwright tests' \
+		'  test-e2e-openai Run native OpenAI speed fixture journeys' \
 		'  test-durability Run focused lifecycle/crash-window regressions' \
 		'  test-managed-image-contract Check managed image/workflow statically' \
 		'  managed-image Build the linux/amd64 managed developer image' \

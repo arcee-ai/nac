@@ -17,6 +17,7 @@ path = "src/main.rs"
 managed-fault-fixture = ["nac-core/managed-fault-fixture"]
 review-fixture = ["nac-core/review-fixture"]
 codex-e2e-fixture = ["nac-core/codex-e2e-fixture"]
+openai-e2e-fixture = ["nac-core/openai-e2e-fixture"]
 native-auth-fixture = ["nac-core/test-support"]
 
 [dependencies]

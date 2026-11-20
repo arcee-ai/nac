@@ -1193,3 +1193,375 @@ async fn anthropic_root_shaped_base_url_appends_v1_messages_exactly_once() {
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].path, "/v1/messages");
 }
+
+fn native_speed_client(
+    backend: BackendKind,
+    url: &str,
+    tier: Option<crate::model::ServiceTier>,
+) -> ModelClient {
+    let mut client = test_model_client(backend, format!("test-openai:{url}"), Default::default());
+    client.model = "gpt-6.1-sol".into();
+    client.resolved_model = catalog::resolve(backend, &client.model);
+    client.reasoning_effort = Some(ReasoningEffort::High);
+    client.service_tier = tier;
+    client
+}
+
+#[tokio::test]
+async fn native_speed_requests_preserve_reasoning_and_omit_only_unset() {
+    use crate::model::ServiceTier;
+    for backend in [
+        BackendKind::OpenAiResponses,
+        BackendKind::OpenAiChatCompletions,
+    ] {
+        for effort in [
+            None,
+            Some(ReasoningEffort::None),
+            Some(ReasoningEffort::Minimal),
+            Some(ReasoningEffort::Low),
+            Some(ReasoningEffort::Medium),
+            Some(ReasoningEffort::High),
+            Some(ReasoningEffort::Xhigh),
+        ] {
+            let mut baseline_body = None;
+            for (tier, expected) in [
+                (None, None),
+                (Some(ServiceTier::Standard), Some("default")),
+                (Some(ServiceTier::Fast), Some("priority")),
+                (Some(ServiceTier::Ultrafast), Some("ultrafast")),
+            ] {
+                if backend == BackendKind::OpenAiChatCompletions
+                    && tier == Some(ServiceTier::Ultrafast)
+                {
+                    continue;
+                }
+                let response = if backend == BackendKind::OpenAiResponses {
+                    s5_openai_response()
+                } else {
+                    s5_completions_response()
+                };
+                let server = ScriptedServer::start(vec![response]);
+                let mut client = native_speed_client(backend, &server.base_url, tier);
+                client.reasoning_effort = effort;
+                client
+                    .send_turn(
+                        vec![Message::User {
+                            content: "hello".into(),
+                        }],
+                        vec![],
+                    )
+                    .await
+                    .unwrap();
+                let requests = server.finish();
+                assert_eq!(requests.len(), 1);
+                let path = if backend == BackendKind::OpenAiResponses {
+                    "/responses"
+                } else {
+                    "/chat/completions"
+                };
+                assert_eq!(requests[0].path, path, "{backend} {effort:?} {tier:?}");
+                let mut body: Value = serde_json::from_slice(&requests[0].body).unwrap();
+                assert_eq!(body["model"], "gpt-6.1-sol");
+                assert_eq!(
+                    body.get("service_tier").and_then(Value::as_str),
+                    expected,
+                    "{backend} {effort:?} {tier:?}"
+                );
+                let wire_effort = if backend == BackendKind::OpenAiResponses {
+                    body.pointer("/reasoning/effort").and_then(Value::as_str)
+                } else {
+                    body.get("reasoning_effort").and_then(Value::as_str)
+                };
+                assert_eq!(
+                    wire_effort,
+                    effort.map(ReasoningEffort::as_str),
+                    "{backend} {effort:?} {tier:?}"
+                );
+                body.as_object_mut().unwrap().remove("service_tier");
+                if let Some(ref previous) = baseline_body {
+                    assert_eq!(
+                        &body, previous,
+                        "speed changed another request field: {backend} {effort:?} {tier:?}"
+                    );
+                } else {
+                    baseline_body = Some(body);
+                }
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn native_chat_ultrafast_is_rejected_before_http() {
+    let server = ScriptedServer::start(vec![]);
+    let client = native_speed_client(
+        BackendKind::OpenAiChatCompletions,
+        &server.base_url,
+        Some(crate::model::ServiceTier::Ultrafast),
+    );
+    let error = client
+        .send_turn(vec![], vec![])
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("unavailable"), "{error}");
+    assert!(server.finish().is_empty());
+}
+
+#[tokio::test]
+async fn native_service_tier_policy_error_is_actionable_and_scoped() {
+    for (backend, status, body, actionable) in [
+        (
+            BackendKind::OpenAiResponses,
+            "400 Bad Request",
+            json!({"error":{"type":"invalid_request_error","param":"service_tier","message":"selected-provider-credential"}}),
+            true,
+        ),
+        (
+            BackendKind::OpenAiResponses,
+            "400 Bad Request",
+            json!({"error":{"type":"invalid_request_error","param":"model"}}),
+            false,
+        ),
+        (
+            BackendKind::AnthropicMessages,
+            "400 Bad Request",
+            json!({"error":{"type":"invalid_request_error","param":"service_tier"}}),
+            false,
+        ),
+    ] {
+        let server = ScriptedServer::start(vec![ScriptedResponse::json(status, body.to_string())]);
+        let mut client = native_speed_client(backend, &server.base_url, None);
+        if backend == BackendKind::AnthropicMessages {
+            client.base_url = server.base_url.clone();
+        }
+        let result = client
+            .post_json_with_retry(&format!("{}/test", server.base_url), &json!({}))
+            .await
+            .unwrap_err()
+            .to_string();
+        assert_eq!(result.contains("Choose Standard"), actionable, "{result}");
+        assert!(!result.contains("selected-provider-credential"));
+        assert_eq!(server.finish().len(), 1);
+    }
+}
+
+#[tokio::test]
+async fn native_transient_rate_limit_retries_without_changing_requested_tier() {
+    let server = ScriptedServer::start(vec![
+        ScriptedResponse::json(
+            "429 Too Many Requests",
+            json!({"error": {"type": "rate_limit_error", "param": "service_tier"}}).to_string(),
+        )
+        .with_header("Retry-After", "0"),
+        s5_openai_response(),
+    ]);
+    let client = native_speed_client(
+        BackendKind::OpenAiResponses,
+        &server.base_url,
+        Some(crate::model::ServiceTier::Fast),
+    );
+    client
+        .send_turn(
+            vec![Message::User {
+                content: "hello".into(),
+            }],
+            vec![],
+        )
+        .await
+        .unwrap();
+    assert_eq!(client.service_tier(), Some(crate::model::ServiceTier::Fast));
+    let requests = server.finish();
+    assert_eq!(requests.len(), 2);
+    for request in requests {
+        let body: Value = serde_json::from_slice(&request.body).unwrap();
+        assert_eq!(body["service_tier"], "priority");
+    }
+}
+
+#[cfg(feature = "openai-e2e-fixture")]
+#[test]
+fn openai_e2e_fixture_requires_exact_loopback_and_native_tuple() {
+    let model = catalog::resolve(BackendKind::OpenAiResponses, "gpt-6.1-sol");
+    let validate = |url, backend, metadata: &ModelMetadata, base, key| {
+        validate_openai_e2e_fixture(url, backend, metadata, base, key, &Default::default())
+    };
+    assert_eq!(
+        validate(
+            Some("http://127.0.0.1:8081/v1"),
+            BackendKind::OpenAiResponses,
+            &model,
+            "https://api.openai.com/v1",
+            "e2e-only"
+        )
+        .unwrap()
+        .as_deref(),
+        Some("http://127.0.0.1:8081/v1")
+    );
+    for url in [
+        "http://127.0.0.1/v1",
+        "https://127.0.0.1:8081/v1",
+        "http://localhost:8081/v1",
+        "http://127.0.0.2:8081/v1",
+        "http://user@127.0.0.1:8081/v1",
+        "http://127.0.0.1:0/v1",
+        "http://127.0.0.1:8081/v1/",
+        "http://127.0.0.1:8081/v1?x=1",
+        "http://127.0.0.1:8081/v1#x",
+        "http://127.0.0.1:8081/v1/responses",
+        "http://127.0.0.1:65536/v1",
+    ] {
+        assert!(
+            validate(
+                Some(url),
+                BackendKind::OpenAiResponses,
+                &model,
+                "https://api.openai.com/v1",
+                "e2e-only"
+            )
+            .is_err(),
+            "accepted {url}"
+        );
+    }
+    assert!(validate(
+        Some("http://127.0.0.1:8081/v1"),
+        BackendKind::OpenAiResponses,
+        &model,
+        "https://api.openai.com/v1",
+        "real-key"
+    )
+    .is_err());
+    assert!(validate(
+        None,
+        BackendKind::OpenAiResponses,
+        &model,
+        "https://api.openai.com/v1",
+        "e2e-only"
+    )
+    .is_err());
+    assert_eq!(
+        validate(
+            None,
+            BackendKind::OpenAiResponses,
+            &model,
+            "https://api.openai.com/v1",
+            "real-key"
+        )
+        .unwrap(),
+        None
+    );
+    assert!(validate(
+        Some("http://127.0.0.1:8081/v1"),
+        BackendKind::OpenAiResponses,
+        &model,
+        "https://compatible.example/v1",
+        "e2e-only"
+    )
+    .is_err());
+    assert!(validate(
+        Some("http://127.0.0.1:8081/v1"),
+        BackendKind::OpenAiChatCompletions,
+        &model,
+        "https://api.openai.com/v1",
+        "e2e-only"
+    )
+    .is_err());
+    let mut mismatched = model.clone();
+    mismatched.provider = BackendKind::ArceeApi;
+    assert!(validate(
+        Some("http://127.0.0.1:8081/v1"),
+        BackendKind::OpenAiResponses,
+        &mismatched,
+        "https://api.openai.com/v1",
+        "e2e-only"
+    )
+    .is_err());
+    let chat = catalog::resolve(BackendKind::OpenAiChatCompletions, "gpt-6.1-sol");
+    assert!(validate(
+        Some("http://127.0.0.1:8081/v1"),
+        BackendKind::OpenAiChatCompletions,
+        &chat,
+        "https://api.openai.com/v1",
+        "e2e-only"
+    )
+    .is_ok());
+}
+
+// Spawned in a separate process so fixture environment changes cannot race other tests.
+#[cfg(feature = "openai-e2e-fixture")]
+#[tokio::test]
+#[ignore = "run by openai_e2e_fixture_rejects_extra_headers_before_request"]
+async fn openai_fixture_extra_headers_child() {
+    let reject = std::env::var_os("NAC_TEST_EXTRA_HEADER").is_some();
+    let mut client = test_model_client(
+        BackendKind::OpenAiResponses,
+        "https://api.openai.com/v1".into(),
+        Default::default(),
+    );
+    client.model = "gpt-6.1-sol".into();
+    client.resolved_model = catalog::resolve(client.backend, &client.model);
+    client.api_key = "e2e-only".into();
+    if reject {
+        client
+            .extra_headers
+            .insert("x-private-token".into(), "private-secret".into());
+    }
+    let result = client
+        .send_turn(
+            vec![Message::User {
+                content: "hello".into(),
+            }],
+            vec![],
+        )
+        .await;
+    if reject {
+        let error = result.unwrap_err().to_string();
+        assert!(error.contains("does not permit extra headers"), "{error}");
+        assert!(!error.contains("private-secret"));
+    } else {
+        result.unwrap();
+    }
+}
+
+#[cfg(feature = "openai-e2e-fixture")]
+#[test]
+fn openai_e2e_fixture_rejects_extra_headers_before_request() {
+    for reject in [true, false] {
+        let server = ScriptedServer::start(vec![s5_openai_response()]);
+        let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+        command
+            .args([
+                "--exact",
+                "model::client::tests::http_contract::openai_fixture_extra_headers_child",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env(
+                "NAC_OPENAI_E2E_FIXTURE_BASE_URL",
+                format!("{}/v1", server.base_url),
+            )
+            .env_remove("NAC_TEST_EXTRA_HEADER");
+        if reject {
+            command.env("NAC_TEST_EXTRA_HEADER", "1");
+        }
+        let output = command.output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        let requests = if reject {
+            server.stop_and_finish()
+        } else {
+            server.finish()
+        };
+        assert_eq!(requests.len(), usize::from(!reject));
+        if let Some(request) = requests.first() {
+            assert_eq!(request.path, "/v1/responses");
+            assert_eq!(
+                request.headers.get("authorization").map(String::as_str),
+                Some("Bearer e2e-only")
+            );
+        }
+    }
+}

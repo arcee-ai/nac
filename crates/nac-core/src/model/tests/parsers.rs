@@ -485,3 +485,27 @@ fn speed_estimate_scope_is_sticky_and_old_usage_decodes() {
         serde_json::from_str(&serde_json::to_string(&aggregate).unwrap()).unwrap();
     assert!(round_trip.speed_tier_charges_excluded);
 }
+
+#[test]
+fn completions_retains_reported_service_tier_without_interpreting_it() {
+    for (tier, expected) in [
+        (json!("default"), Some("default")),
+        (json!("fast"), Some("fast")),
+        (json!("priority"), Some("priority")),
+        (json!("ultrafast"), Some("ultrafast")),
+        (json!("future-tier"), Some("future-tier")),
+        (Value::Null, None),
+        (json!(42), None),
+    ] {
+        let value = json!({"choices": [{"message": {"content": "done"}}], "service_tier": tier});
+        let response = parse_completions_response(&value, "fixture", "reasoning_content").unwrap();
+        assert_eq!(response.served_service_tier.as_deref(), expected);
+    }
+    let value = json!({"choices": [{"message": {"content": "done"}}]});
+    assert!(
+        parse_completions_response(&value, "fixture", "reasoning_content")
+            .unwrap()
+            .served_service_tier
+            .is_none()
+    );
+}

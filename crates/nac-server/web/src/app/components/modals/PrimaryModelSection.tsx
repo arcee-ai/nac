@@ -10,7 +10,12 @@ import {
 import { ConfigRow } from "@/app/components/modals/ConfigRow";
 import { EFFORT_LEVEL_OPTIONS, reasoningOptionsFor } from "@/app/components/modals/options";
 import { SpeedControl } from "@/app/components/modals/SpeedControl";
-import { discoveredSpeed, supportsSpeed, type ServiceTier } from "@/app/lib/serviceTier";
+import {
+  providerSpeedProfiles,
+  speedForRoute,
+  supportsSpeed,
+  type ServiceTier,
+} from "@/app/lib/serviceTier";
 import { SmallSelect } from "@/app/components/modals/SmallSelect";
 import { type CatalogPick, defaultCatalogPick, resolveCatalogModel } from "@/app/lib/catalog";
 import { providerLabel, providerUsesApiKey } from "@/app/lib/providers";
@@ -63,7 +68,10 @@ export function PrimaryModelSection({
     () =>
       suppliedInitial ??
       (latest
-        ? { ...savedModelSelection(latest), extra_headers: latest.extra_headers }
+        ? {
+            ...savedModelSelection(latest),
+            extra_headers: latest.extra_headers,
+          }
         : undefined),
     [suppliedInitial, latest],
   );
@@ -201,6 +209,13 @@ export function PrimaryModelSection({
     effective?.effort ?? "",
     PRIMARY_EFFORT_OPTIONS,
   );
+  const speedCapability = speedForRoute(
+    resolveCatalogModel(catalog.data, effective?.pick.backend, effective?.pick.model).model,
+    effective?.pick.model ?? "",
+    effective?.pick.backend,
+    preservesInitialRoute ? initial?.base_url : effective?.pick.baseUrl,
+    providerSpeedProfiles(provider),
+  );
 
   return (
     <FormSection
@@ -227,11 +242,17 @@ export function PrimaryModelSection({
               ).supportedEfforts;
               const current = effective?.effort ?? "";
               const oldSpeed = effective?.speed;
-              const tiers = discoveredSpeed(
+              const target = speedForRoute(
                 resolveCatalogModel(catalog.data, pick.backend, pick.model).model,
                 pick.model,
+                pick.backend,
+                initial && pick.backend === initial.backend ? initial.base_url : pick.baseUrl,
+                providerSpeedProfiles(
+                  catalog.data?.providers.find((entry) => entry.id === pick.backend),
+                ),
               );
-              if (oldSpeed && pick.backend !== "chatgpt-codex-responses") {
+              const tiers = target.tiers;
+              if (oldSpeed && pick.backend !== "chatgpt-codex-responses" && !target.openAiApi) {
                 setSpeedNotice("Clear the speed preference before choosing this model.");
                 return;
               }
@@ -261,12 +282,17 @@ export function PrimaryModelSection({
             disabled={!effective}
             onValueChange={(effort) => {
               if (!effective) return;
-              setChosen({ ...effective, effort: effort as ReasoningEffort | "" });
+              setChosen({
+                ...effective,
+                effort: effort as ReasoningEffort | "",
+              });
             }}
           />
         }
       />
-      {effective?.pick.backend === "chatgpt-codex-responses" || effective?.speed ? (
+      {effective?.pick.backend === "chatgpt-codex-responses" ||
+      speedCapability.openAiApi ||
+      effective?.speed ? (
         <ConfigRow
           presentation="form"
           label="Speed"
@@ -274,18 +300,9 @@ export function PrimaryModelSection({
           control={
             <SpeedControl
               form
-              tiers={
-                effective?.pick.backend === "chatgpt-codex-responses"
-                  ? discoveredSpeed(
-                      resolveCatalogModel(
-                        catalog.data,
-                        effective.pick.backend,
-                        effective.pick.model,
-                      ).model,
-                      effective.pick.model,
-                    )
-                  : null
-              }
+              tiers={speedCapability.tiers}
+              openAiApi={speedCapability.openAiApi}
+              fastContextLimit={speedCapability.fastContextLimit}
               value={effective?.speed ?? null}
               onChange={(speed) => {
                 if (effective) setChosen({ ...effective, speed });

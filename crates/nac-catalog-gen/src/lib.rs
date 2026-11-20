@@ -193,6 +193,14 @@ pub struct ModelDoc {
     pub thinking_level_map: BTreeMap<String, Option<String>>,
 }
 
+/// Documented support, not an account entitlement or a token-count check.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ServiceTierProfile {
+    pub tiers: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fast_input_tokens_below: Option<u64>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProviderDoc {
     /// The provider's conventional credential environment variable name
@@ -210,6 +218,9 @@ pub struct ProviderDoc {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_base_url: Option<String>,
     pub models: BTreeMap<String, ModelDoc>,
+    /// Reviewed exact model IDs; unlike model metadata, these never inherit snapshots.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub service_tiers: BTreeMap<String, ServiceTierProfile>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -239,6 +250,8 @@ pub struct ManifestDoc {
 pub struct OverridesDoc {
     #[serde(default)]
     providers: BTreeMap<String, ProviderOverride>,
+    #[serde(default)]
+    service_tiers: BTreeMap<String, BTreeMap<String, ServiceTierProfile>>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -295,6 +308,38 @@ impl OverridesDoc {
                     validate_levels(levels).with_context(|| {
                         format!("overrides.toml: providers.{provider}.models.{model}")
                     })?;
+                }
+            }
+        }
+        for (provider, models) in &self.service_tiers {
+            for (model, profile) in models {
+                let tiers = &profile.tiers;
+                if !matches!(
+                    provider.as_str(),
+                    "openai-responses" | "openai-chat-completions"
+                ) || model.trim().is_empty()
+                    || profile.fast_input_tokens_below == Some(0)
+                    || (profile.fast_input_tokens_below.is_some()
+                        && !tiers.iter().any(|tier| tier == "fast"))
+                    || tiers.is_empty()
+                    || tiers
+                        .iter()
+                        .any(|tier| !matches!(tier.as_str(), "standard" | "fast" | "ultrafast"))
+                    || tiers
+                        .iter()
+                        .filter(|tier| tier.as_str() == "standard")
+                        .count()
+                        != 1
+                    || (provider == "openai-chat-completions"
+                        && tiers.iter().any(|tier| tier == "ultrafast"))
+                {
+                    bail!("overrides.toml: invalid service tiers for {provider}/{model}");
+                }
+                let mut unique = tiers.clone();
+                unique.sort();
+                unique.dedup();
+                if unique.len() != tiers.len() {
+                    bail!("overrides.toml: duplicate service tier for {provider}/{model}");
                 }
             }
         }
@@ -703,6 +748,11 @@ pub fn generate(api_json: &str, overrides_toml: &str) -> Result<Generation> {
                 },
                 default_base_url,
                 models,
+                service_tiers: overrides
+                    .service_tiers
+                    .get(nac_id)
+                    .cloned()
+                    .unwrap_or_default(),
             },
         );
     }

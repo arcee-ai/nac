@@ -27,7 +27,7 @@ import { LightModelSection, type LightSelection } from "@/app/components/modals/
 import { reasoningOptionsFor } from "@/app/components/modals/options";
 import { SshConnectionBox } from "@/app/components/modals/SshConnectionBox";
 import { SpeedControl } from "@/app/components/modals/SpeedControl";
-import { discoveredSpeed, type ServiceTier } from "@/app/lib/serviceTier";
+import { providerSpeedProfiles, speedForRoute, type ServiceTier } from "@/app/lib/serviceTier";
 import { SmallSelect } from "@/app/components/modals/SmallSelect";
 import { observeSettingsFieldVisibility } from "@/app/components/modals/settingsFieldVisibility";
 import { matchesManagedModelPick } from "@/app/features/managed/model";
@@ -267,7 +267,7 @@ function SettingsForm({
   const [backend, setBackend] = useState(initial.backend);
   const [reasoning, setReasoning] = useState(initial.reasoning_effort ?? "");
   const [speed, setSpeed] = useState<ServiceTier | null>(initial.service_tier ?? null);
-  const [, setBaseUrl] = useState(initial.base_url);
+  const [baseUrl, setBaseUrl] = useState(initial.base_url);
   const [headers, setHeaders] = useState(headersToText(initial.extra_headers));
   const [compaction, setCompaction] = useState(
     initial.orchestrator_compaction_threshold != null
@@ -362,6 +362,13 @@ function SettingsForm({
   // Only the levels this model actually accepts: the backend rejects the rest,
   // so offering them would only produce a save that fails.
   const catalog = useModelCatalog();
+  const speedCapability = speedForRoute(
+    resolveCatalogModel(catalog.data, backend, model).model,
+    model,
+    backend,
+    baseUrl,
+    providerSpeedProfiles(catalog.data?.providers.find((entry) => entry.id === backend)),
+  );
   const reasoningItems = reasoningOptionsFor(
     resolveCatalogModel(catalog.data, backend, model).supportedEfforts,
     reasoning,
@@ -776,7 +783,7 @@ function SettingsForm({
                   }
                 />
                 <Separator />
-                {backend === "chatgpt-codex-responses" || speed ? (
+                {backend === "chatgpt-codex-responses" || speedCapability.openAiApi || speed ? (
                   <ConfigRow
                     presentation="form"
                     label="Speed"
@@ -784,14 +791,9 @@ function SettingsForm({
                     control={
                       <SpeedControl
                         form
-                        tiers={
-                          backend === "chatgpt-codex-responses"
-                            ? discoveredSpeed(
-                                resolveCatalogModel(catalog.data, backend, model).model,
-                                model,
-                              )
-                            : null
-                        }
+                        tiers={speedCapability.tiers}
+                        openAiApi={speedCapability.openAiApi}
+                        fastContextLimit={speedCapability.fastContextLimit}
                         value={speed}
                         onChange={setSpeed}
                       />

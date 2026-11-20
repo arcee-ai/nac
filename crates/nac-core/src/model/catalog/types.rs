@@ -467,6 +467,8 @@ pub struct ModelEntry {
     pub service_tiers: Option<Vec<ModelServiceTier>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_service_tier: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fast_input_tokens_below: Option<u64>,
     pub context_window: u64,
     pub max_tokens: u64,
     pub cost: ModelCostRates,
@@ -486,6 +488,15 @@ pub struct ProviderConnection {
     pub base_url: String,
     #[cfg_attr(feature = "openapi", schema(required))]
     pub api_key_env: Option<String>,
+}
+
+/// Reviewed native API support, independent of model limits and account access.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct NativeSpeedProfile {
+    pub tiers: Vec<crate::model::ServiceTier>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fast_input_tokens_below: Option<u64>,
 }
 
 /// One provider group in the `GET /models` listing.
@@ -516,6 +527,8 @@ pub struct ProviderListing {
     #[cfg_attr(feature = "openapi", schema(required))]
     pub default_base_url: Option<String>,
     pub default_limits: DefaultLimits,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub speed_profiles: Option<std::collections::BTreeMap<String, NativeSpeedProfile>>,
     pub models: Vec<ModelEntry>,
 }
 
