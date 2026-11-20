@@ -137,6 +137,25 @@ describe("sidebar session tree", () => {
     expect(current?.getAttribute("aria-label")).toBe("Write docs");
   });
 
+  it("shows unseen completion on the folded project and clears it when opened", () => {
+    const { attentionStore } = fakes.stores as {
+      attentionStore: ReturnType<typeof createAttentionStore>;
+    };
+    attentionStore.attentionStore.setState({ flagged: { a: true } });
+    mount([session("a", "Fix the parser")]);
+    const project = screen.getByRole("button", { name: "Atlas, 1 session" });
+
+    fireEvent.click(project);
+    expect(project.getAttribute("aria-description")).toBe("Done");
+    expect(within(project).getByText("Done")).toBeTruthy();
+
+    fireEvent.click(project);
+    fireEvent.click(screen.getByRole("button", { name: "Fix the parser" }));
+    fireEvent.click(project);
+    expect(project.hasAttribute("aria-description")).toBe(false);
+    expect(within(project).queryByText("Done")).toBeNull();
+  });
+
   it("folds subagents under their parent until the count pill is opened", () => {
     mount([
       session("parent", "Plan the release"),

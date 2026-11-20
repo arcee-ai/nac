@@ -9,7 +9,7 @@ import { cn } from "@/app/lib/cn";
 import { parseStoreTime } from "@/app/lib/format";
 import { routes } from "@/app/lib/routes";
 import { sessionBehaviorPresentation } from "@/app/lib/sessionBehavior";
-import { needsYou, type SessionStatus } from "@/app/lib/sessionStatus";
+import { mostUrgent, needsYou, type SessionStatus } from "@/app/lib/sessionStatus";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
@@ -312,8 +312,9 @@ export function SessionTree({
         {(projectsOpen ? projects : []).map((project) => {
           const roots = byProject.get(project.project_id) ?? [];
           const expanded = !collapsed.includes(project.project_id);
-          const rolled = roots.map((entry) => statuses.rolled(entry.summary.session_id));
-          const urgent = rolled.find(needsYou) ?? rolled.find((status) => status === "working");
+          const status = mostUrgent(
+            roots.map((entry) => statuses.rolled(entry.summary.session_id)),
+          );
           return (
             <section
               key={project.project_id}
@@ -324,7 +325,7 @@ export function SessionTree({
                 project={project}
                 count={roots.length}
                 expanded={expanded}
-                status={urgent ?? "idle"}
+                status={status}
                 touch={touch}
                 onToggle={() => toggleProjectCollapsed(project.project_id)}
                 onNavigate={onNavigate}

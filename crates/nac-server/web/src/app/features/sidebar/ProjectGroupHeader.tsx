@@ -16,7 +16,7 @@ import {
 } from "@/app/atoms";
 import { cn } from "@/app/lib/cn";
 import { routes } from "@/app/lib/routes";
-import type { SessionStatus } from "@/app/lib/sessionStatus";
+import { SESSION_STATUS_LABEL, type SessionStatus } from "@/app/lib/sessionStatus";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
 import type { ProjectRecord } from "@/app/types/api";
 
@@ -65,6 +65,7 @@ export function ProjectGroupHeader({
       <button
         type="button"
         aria-expanded={expanded}
+        aria-description={!expanded && status !== "idle" ? SESSION_STATUS_LABEL[status] : undefined}
         aria-label={`${project.name}, ${count} ${count === 1 ? "session" : "sessions"}`}
         title={project.cwd}
         onClick={onToggle}
