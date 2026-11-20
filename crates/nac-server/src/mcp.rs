@@ -176,6 +176,19 @@ struct UpdateSessionParams {
     extra: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
+fn contains_retired_session_field(
+    extra: &std::collections::BTreeMap<String, serde_json::Value>,
+) -> bool {
+    const RETIRED: &[&str] = &[
+        "light_model",
+        "light_model_json",
+        "model_config_id",
+        "worker_executable",
+        "orchestrator_compaction_threshold",
+    ];
+    RETIRED.iter().any(|key| extra.contains_key(*key))
+}
+
 // ---------------------------------------------------------------------------
 // Tool router
 // ---------------------------------------------------------------------------
@@ -268,7 +281,7 @@ impl NacMcpService {
                 "Only direct session behavior is supported",
             )]));
         }
-        if !params.extra.is_empty() {
+        if contains_retired_session_field(&params.extra) {
             return Ok(CallToolResult::error(vec![Content::text(
                 "Unsupported session fields",
             )]));
@@ -527,7 +540,7 @@ impl NacMcpService {
         &self,
         Parameters(params): Parameters<UpdateSessionParams>,
     ) -> Result<CallToolResult, ErrorData> {
-        if !params.extra.is_empty() {
+        if contains_retired_session_field(&params.extra) {
             return Ok(CallToolResult::error(vec![Content::text(
                 "Unsupported session fields",
             )]));
