@@ -455,12 +455,12 @@
     {"path":"desktop/macos/engine_contract.py","disposition":"pending"},
     {"path":"docs/README.md","disposition":"neutralized"},
     {"path":"docs/api/http.md","disposition":"neutralized"},
-    {"path":"docs/architecture/0001-dependency-boundaries.md","disposition":"pending"},
-    {"path":"docs/architecture/0004-persistence-ownership.md","disposition":"pending"},
-    {"path":"docs/architecture/0005-direct-session-workflows.md","disposition":"pending"},
-    {"path":"docs/ci/evidence/all-582/S19-driver-selection/README.md","disposition":"pending"},
-    {"path":"docs/ci/evidence/all-582/browser-binary-strategy.json","disposition":"pending"},
-    {"path":"docs/ci/evidence/all-582/server-nextest-strategy.json","disposition":"pending"},
+    {"path":"docs/architecture/0001-dependency-boundaries.md","disposition":"historical","reason":"Historical architecture decision records predecessor topology and distinguishes unrelated managed workflow coordination; ADR 0009 supersedes its retired topology claims."},
+    {"path":"docs/architecture/0004-persistence-ownership.md","disposition":"historical","reason":"Historical architecture decision records the incident and former settlement ownership when it was accepted."},
+    {"path":"docs/architecture/0005-direct-session-workflows.md","disposition":"historical","reason":"Historical architecture decision records former workflow behavior; ADR 0009 supersedes its retired topology claims."},
+    {"path":"docs/ci/evidence/all-582/S19-driver-selection/README.md","disposition":"historical","reason":"Immutable ALL-582 image workflow evidence describes CI job orchestration, unrelated to session topology."},
+    {"path":"docs/ci/evidence/all-582/browser-binary-strategy.json","disposition":"historical","reason":"Immutable ALL-582 strategy evidence records the exact predecessor CI job and test inventory."},
+    {"path":"docs/ci/evidence/all-582/server-nextest-strategy.json","disposition":"historical","reason":"Immutable ALL-582 strategy evidence records the exact predecessor CI job and test inventory."},
     {"path":"docs/configuration/example.md","disposition":"neutralized"},
     {"path":"docs/configuration/model.md","disposition":"neutralized"},
     {"path":"docs/managed/README.md","disposition":"neutralized"},
@@ -481,7 +481,7 @@
     {"path":"docs/usage/traditional-children.md","disposition":"neutralized"},
     {"path":"docs/usage/web-retrieval.md","disposition":"neutralized"},
     {"path":"docs/usage/workspaces.md","disposition":"neutralized"},
-    {"path":"scripts/nac-guide/sources.json","disposition":"pending"},
-    {"path":"scripts/security/image-workflow.test.mjs","disposition":"pending"}
+    {"path":"scripts/nac-guide/sources.json","disposition":"historical","reason":"Stable published guide section identity is retained across the renamed compaction heading; it is not a runtime configuration key."},
+    {"path":"scripts/security/image-workflow.test.mjs","disposition":"historical","reason":"Image workflow orchestration means CI job coordination, unrelated to retired session topology."}
   ]
 }
