@@ -38,3 +38,17 @@ original failure. Correlate cells cautiously; the combined cell has substantiall
 longer setup and cannot isolate the panel. A dedicated panel-only actual-app
 probe would require a separately reviewed actor or product hook and is not
 provided by these sources.
+
+The combined cell additionally reads only the exact H-exported private
+configuredLocal case and named failed-test attachment, requiring the fixed
+P/Q/R/H case identity, Q test identity, unique inventory and bounded
+no-follow file/hash matches. Apple Vision reads the selected PNG via a pipe;
+only `ocr_title_match` is emitted for an exact normalized title match. This
+is inferred image text, not proof of system-dialog identity or provenance;
+the independent AX modal field is unchanged. OCR failure, mismatch or timeout
+stays unknown. The same bound dispatch records can report that the
+folder operation's before or after receipt was observed, never that input was
+delivered. Only the existing positive owner process-settlement proof yields
+`positive_owner_proof`; false, absent or mismatched evidence remains unknown.
+All of these fields remain diagnostic and do not grant acceptance or cleanup
+authority.

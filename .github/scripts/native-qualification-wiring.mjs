@@ -34,7 +34,7 @@ export function reverseNativeQualification(workflow) {
   if (workflow.jobs['local-network-diagnostic']) {
     // The experimental branch-only dispatch is an exact additive overlay.
     // Refuse every change before projecting it out of ordinary-CI proofs.
-    assert.equal(digest(workflow.jobs['local-network-diagnostic']), '2164469badae91d715dc30b453ba7dc6aee7a4ff4e13baf4f425087d6329528c');
+    assert.equal(digest(workflow.jobs['local-network-diagnostic']), '9130ca7d09fccc60f1ee6a80b8862e7692dfc76fabc00368cc546f88794746b1');
     delete workflow.jobs['local-network-diagnostic'];
     const admission = "github.event_name == 'workflow_dispatch' && inputs['native-qualification'] != '' && inputs['native-qualification'] != 'none'";
     assert.equal(workflow.jobs['native-admission'].if, '${{ ' + admission + " && !(github.ref == 'refs/heads/codex/all616-local-network-diagnostic' && inputs['native-paths-custody'] == 'local-network-diagnostic-v1') }}");

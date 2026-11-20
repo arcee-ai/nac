@@ -1,4 +1,12 @@
 import unittest
+import contextlib
+import io
+import json
+import sys
+import tempfile
+from pathlib import Path
+from unittest.mock import patch
+import summarize as summarize_module
 from urllib.error import HTTPError
 from probe import exercise
 from summarize import summarize
@@ -39,6 +47,20 @@ class Tests(unittest.TestCase):
         self.assertEqual(result['operation'], 'unavailable')
         self.assertTrue(instance.stopped)
         self.assertNotIn('secret', str(result))
+
+    def test_ocr_evidence_does_not_promote_modal(self):
+        with tempfile.TemporaryDirectory() as root:
+            observation = Path(root) / 'observer'
+            observation.write_text('other_frontmost\n')
+            extra = {'image_observation': 'ocr_title_match', 'phase': 'unknown',
+                     'process_settlement': 'unknown', 'input_completion': 'unknown'}
+            args = ['summarize.py', 'combined_journey', str(observation), 'unused', root, 'unused']
+            out = io.StringIO()
+            with patch.object(sys, 'argv', args), patch('postprocess.postprocess', return_value=extra), contextlib.redirect_stdout(out):
+                summarize_module.main()
+            result = json.loads(out.getvalue())
+            self.assertEqual(result['image_observation'], 'ocr_title_match')
+            self.assertEqual(result['modal'], 'unknown')
 
     def test_observation_cannot_prove_modal_absent(self):
         self.assertEqual(summarize('idle', ['other_frontmost', 'private'], 'completed')['modal'], 'unknown')

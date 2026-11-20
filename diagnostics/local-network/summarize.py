@@ -18,11 +18,16 @@ def summarize(cell, lines, operation, settlement='unknown'):
 
 
 def main():
-    cell, observation_path, result_path = sys.argv[1:]
+    cell, observation_path, result_path, *private = sys.argv[1:]
     lines = Path(observation_path).read_text().splitlines()
     if cell == 'combined_journey':
         # No status from this reproduction is an acceptance result.
         data = summarize(cell, lines, 'finished_or_failed')
+        data.update({'image_observation': 'unknown', 'phase': 'unknown', 'process_settlement': 'unknown', 'input_completion': 'unknown'})
+        if len(private) == 2:
+            from postprocess import postprocess, ocr
+            extra = postprocess(private[0], lambda image: ocr(private[1], image))
+            data.update({key: extra[key] for key in ('image_observation', 'phase', 'process_settlement', 'input_completion')})
     else:
         raw = json.loads(Path(result_path).read_text())
         data = summarize(cell, lines, raw['operation'], raw['owned_provider_settlement'])

@@ -1298,6 +1298,8 @@ jobs:
           mkdir "$RUNNER_TEMP/diagnostic-result"
           xcrun swiftc diagnostic/diagnostics/local-network/observe.swift -o "$RUNNER_TEMP/passive-observer"
           "$RUNNER_TEMP/passive-observer" --self-test
+          xcrun swiftc diagnostic/diagnostics/local-network/ocr.swift -o "$RUNNER_TEMP/private-ocr"
+          "$RUNNER_TEMP/private-ocr" --self-test
           "$RUNNER_TEMP/passive-observer" > "$RUNNER_TEMP/observation-private" 2>/dev/null &
           observer=$!
           trap 'kill "$observer" 2>/dev/null || true; wait "$observer" 2>/dev/null || true' EXIT
@@ -1314,7 +1316,7 @@ jobs:
           kill "$observer" 2>/dev/null || true
           wait "$observer" 2>/dev/null || true
           trap - EXIT
-          python3 -B diagnostic/diagnostics/local-network/summarize.py "$CELL" "$RUNNER_TEMP/observation-private" "$RUNNER_TEMP/probe-private.json" > "$RUNNER_TEMP/diagnostic-result/result.json"
+          python3 -B diagnostic/diagnostics/local-network/summarize.py "$CELL" "$RUNNER_TEMP/observation-private" "$RUNNER_TEMP/probe-private.json" "$RUNNER_TEMP/qualification-private" "$RUNNER_TEMP/private-ocr" > "$RUNNER_TEMP/diagnostic-result/result.json"
       - name: Retain diagnostic categories only
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
