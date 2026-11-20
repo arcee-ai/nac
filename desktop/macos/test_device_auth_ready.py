@@ -18,13 +18,18 @@ const fs = require('node:fs');
 const run = new Function('document', 'title', 'inCard', fs.readFileSync(0, 'utf8'));
 let clicked = 0, buttons = [];
 const card = {textContent:'Arcee sign-in Checking authorization',querySelectorAll:()=>buttons};
-const section = {children:[card]};
-const document = {querySelector:()=>section};
+let account = card;
+const document = {querySelector(selector) {
+  assert.equal(selector, '[role=group][aria-label="Arcee account"]');
+  return account;
+}};
 const sample = () => run(document, 'Sign in with Arcee', true);
 assert.equal(card.textContent.includes('Arcee sign-in'), true);
 assert.equal(sample(), false); assert.equal(clicked, 0);
 const action = {textContent:'Sign in with Arcee',disabled:true,click(){clicked++;}};
 buttons = [action]; assert.equal(sample(), false); assert.equal(clicked, 0);
+account=null; action.disabled=false; assert.equal(sample(), false); assert.equal(clicked, 0);
+account=card;
 action.disabled=false; assert.equal(sample(), true); assert.equal(clicked, 1);
 console.log('actual predicate waited for the enabled action and clicked once');
 '''
