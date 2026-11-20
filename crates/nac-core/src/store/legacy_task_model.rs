@@ -120,10 +120,9 @@ impl Owner {
     }
     fn paths(self) -> &'static [&'static str] {
         match self {
-            Self::Task => &["/model_selection"],
+            Self::Task | Self::Destination => &["/model_selection"],
             Self::Native => &["/_nac_model_selection"],
             Self::Schedule | Self::DestinationBinding => &["/fresh_task/model_selection"],
-            Self::Destination => &["/model_selection"],
             Self::Launch => &[
                 "/receipt/request/model_selection",
                 "/receipt/destination/model_selection",
@@ -278,7 +277,10 @@ fn verify_owner(
             }
         }
         Owner::Schedule => {
-            if value.pointer("/fresh_task").is_none_or(|v| v.is_null()) {
+            if value
+                .pointer("/fresh_task")
+                .is_none_or(serde_json::Value::is_null)
+            {
                 return Ok(());
             }
             let session: Option<String> = conn.query_row(
@@ -358,7 +360,7 @@ fn verify_owner(
                 anyhow::ensure!(
                     value
                         .pointer("/schedule/session_id")
-                        .is_none_or(|v| v.is_null()),
+                        .is_none_or(serde_json::Value::is_null),
                     "legacy fresh command has a session-owned schedule"
                 );
                 let id = project(value, "/schedule/binding/fresh_task/project_id")?;
