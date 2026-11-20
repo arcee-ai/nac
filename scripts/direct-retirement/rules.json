@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "id": "retired_topology",
+      "pattern": "(?i)orchestrat|direct.with.orchestrator"
+    },
+    {
+      "id": "retired_symbols",
+      "pattern": "ManagedWorker|WorkerDispatch|WorkerEnvironment|worker_executable|worker_cli_args|worker_environment|worker_usage|worker_tool_definitions|worker_stderr_prefixed|ScheduledForWorkers|DispatchWeight|light_model|light_client|trusted_light|thread_timeout_secs|source_threads|steering_dispatch_id|steering_append_pending|__worker|__orchestrator__|__NAC_COMPLETION|__NAC_COMMIT_ACK|__NAC_HISTORY_READY|__NAC_CANCEL_ACK|__NAC_NATIVE_CREDENTIALS"
+    },
+    {
+      "id": "retired_surfaces",
+      "pattern": "get_thread_episodes|get_thread_events|steerThread|steerOrchestrator|WorksetsView|SessionBehaviorPicker|thread_dispatches|worker_dispatches|thread_episodes|thread_steering|workset_define|workset_read|workset_list"
+    },
+    {
+      "id": "retired_endpoints",
+      "pattern": "/model-configs|/ui-config"
+    },
+    {
+      "id": "retired_presets",
+      "pattern": "default_model_config_id|model_configurations"
+    }
+  ],
+  "exceptions": [
+    {
+      "path": "crates/nac-core/src/store/schema/fixtures/v53-fresh.sql",
+      "rule": "retired_topology",
+      "sha256": "6e571dd848a6d6072cb5f52943c5e0ce40fcafcd5c1647162d76f016bcc317a8",
+      "count": 36,
+      "reason": "Exact immutable v53 predecessor fixture used to prove version-bounded upgrades."
+    },
+    {
+      "path": "crates/nac-core/src/store/schema/fixtures/v53-fresh.sql",
+      "rule": "retired_symbols",
+      "sha256": "6e571dd848a6d6072cb5f52943c5e0ce40fcafcd5c1647162d76f016bcc317a8",
+      "count": 4,
+      "reason": "Exact immutable v53 predecessor fixture used to prove version-bounded upgrades."
+    },
+    {
+      "path": "crates/nac-core/src/store/schema/fixtures/v53-fresh.sql",
+      "rule": "retired_surfaces",
+      "sha256": "6e571dd848a6d6072cb5f52943c5e0ce40fcafcd5c1647162d76f016bcc317a8",
+      "count": 6,
+      "reason": "Exact immutable v53 predecessor fixture used to prove version-bounded upgrades."
+    },
+    {
+      "path": "crates/nac-core/src/store/schema/fixtures/v53-fresh.sql",
+      "rule": "retired_presets",
+      "sha256": "6e571dd848a6d6072cb5f52943c5e0ce40fcafcd5c1647162d76f016bcc317a8",
+      "count": 7,
+      "reason": "Exact immutable v53 predecessor fixture used to prove version-bounded upgrades."
+    }
+  ]
+}

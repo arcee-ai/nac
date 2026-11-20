@@ -906,7 +906,7 @@ jobs:
       - name: Preserve source, size, and lifecycle contracts on every PR
         run: |
           make test-nac-guide
-          make test-source-size test-source-workflow test-source-binary
+          make test-source-size test-direct-retirement test-source-workflow test-source-binary
           make test-durability test-managed-load test-managed-image-contract
       - name: Retain direct load evidence
         if: always() && steps.evidence_cleanup.outcome == 'success'

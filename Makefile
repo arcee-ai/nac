@@ -71,7 +71,7 @@ install:
 ci: lint-workflows test-workflow-lint format-check lint test
 
 ## Run workspace Rust tests, frontend tests, source-size, and web asset checks
-test: test-nac-guide test-capture-qualification test-source-size test-source-workflow test-source-binary test-rust test-web test-release test-assets test-managed-load test-managed-image-contract test-manual-stack-override
+test: test-nac-guide test-capture-qualification test-source-size test-direct-retirement test-source-workflow test-source-binary test-rust test-web test-release test-assets test-managed-load test-managed-image-contract test-manual-stack-override
 
 .PHONY: generate-nac-guide test-nac-guide
 ## Rebuild release-local documentation from canonical maintained Markdown
@@ -146,6 +146,12 @@ test-capture-qualification:
 ## Keep tracked human-authored files within the agent-context budget
 test-source-size:
 	bash scripts/check-source-size.sh
+
+.PHONY: test-direct-retirement
+## Fail on unclassified retired source, shipped surfaces and baseline paths
+test-direct-retirement:
+	python3 -B -m unittest discover -s scripts/direct-retirement -p 'test_*.py' -v
+	python3 -B scripts/direct-retirement/check.py
 
 .PHONY: test-manual-stack-override
 ## Exercise the maintainer-authorized stack override without GitHub mutations
