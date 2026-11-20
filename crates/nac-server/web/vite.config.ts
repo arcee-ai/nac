@@ -31,7 +31,7 @@ export const API_PREFIXES = [
   "/fs",
   "/ssh",
   "/providers",
-  "/model-configs",
+  "/provider-connections",
   "/ssh-configs",
   "/models",
   "/commands",
