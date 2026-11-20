@@ -13,6 +13,20 @@ def journey_failure_catch():
 
 
 class FailureScopeTests(unittest.TestCase):
+    def test_direct_model_actions_keep_bounded_guard_and_interaction_counts(self):
+        root = Path(__file__).parent
+        journey = (root / 'StartupJourneys.swift').read_text()
+        receipt = (root / 'StartupAXReceipt.swift').read_text()
+        guard = (root / 'StartupAXGuard.swift').read_text()
+        for operation in ('click:session-model', 'click:Search models',
+                          'type:model-query', 'key:return-model-query'):
+            self.assertEqual(journey.count('dispatch("' + operation + '"'), 1)
+        self.assertIn('axClient.evidence.count == 34 && axClient.interactions.count == 15', journey)
+        self.assertIn('interactions.count < 15', receipt)
+        self.assertIn('evidence.count < 34', receipt)
+        self.assertIn('values.count < 15', guard)
+        self.assertIn('StartupInteractionPolicy.targetKey(kind: request.kind, label: request.label)', guard)
+
     def test_journey_keeps_nested_guards_in_the_main_actor_method_and_catches_before_outer_teardown(self):
         source = Path(__file__).with_name('StartupJourneys.swift').read_text()
         method = source.split('    @MainActor\n    func testOrdinaryStartup() throws {', 1)[1]
@@ -868,6 +882,11 @@ func interactionPolicyRun(_ name: String) -> [String: Any] {
             })
         var binding = StartupInteractionPolicy.Binding<Int>()
         var targets = StartupInteractionPolicy.Targets<Int>()
+        let search = StartupInteractionPolicy.targetKey(kind:"message",label:"Search models")
+        let composer = StartupInteractionPolicy.targetKey(kind:"message",label:"Message")
+        try StartupAXFiles.need(search != composer && targets.accept(search,target:20)
+            && targets.accept(search,target:20) && !targets.accept(search,target:21)
+            && targets.accept(composer,target:21))
         let retained = binding.accept("one",target:selected)
             && binding.accept("one",target:mode == "replaced" ? 9 : selected)
             && targets.accept("field",target:selected)

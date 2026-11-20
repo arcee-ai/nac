@@ -40,7 +40,7 @@ private String value (<=4096 UTF-8 bytes).
 
 ## Bound public interaction point
 
-Before each of the eleven configured inputs, Q selects a public XCUICoordinate
+Before each of the fifteen configured inputs, Q selects a public XCUICoordinate
 from the intended element and reads its screenPoint. The point must be finite,
 exactly representable by the public AX Float API and inside the anchor frame.
 Q publishes one closed request at the fixed derived path
@@ -99,9 +99,9 @@ alone is never an interaction proof.
 
 ## Evidence and cleanup
 
-Keep the original 27 exported console observations plus eleven immediate
-pre-dispatch console rechecks, 26 canonical guard receipts, 11
-inputs and 22 dispatch records. Eleven additional private-text-free interaction
+Keep 35 exported console observations plus fifteen immediate
+pre-dispatch console rechecks, 34 canonical guard receipts, 15
+inputs and 30 dispatch records. Fifteen private-text-free interaction
 proofs record request/target tokens, intent, point/anchor and sequence/times,
 including final freshness. H verifies each lies between its existing before and
 after guard. Missing, replayed, stale, changed-intent or private-field proof fails

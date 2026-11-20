@@ -1,5 +1,12 @@
 # Current interaction preflight supplier
 
+The direct-only configured journey adds four guarded session-model inputs:
+open the model picker, focus its search, type the fixed model query and commit
+it. Its exact trace is fifteen inputs, 35 exported console observations, 34
+witness receipts and 30 dispatch records. Historical counts below describe the
+predecessor supplier, not this successor. Hosted full-Xcode and Aqua execution
+remain required for any native acceptance claim.
+
 The current ten-file test supplier contains StartupJourneys.swift and the shared
 StartupAXGuard.swift/StartupAXReceipt.swift actor and client, with its guides,
 contract and controls. H compiles those same two shared Swift files with its

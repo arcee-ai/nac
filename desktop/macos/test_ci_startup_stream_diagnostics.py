@@ -310,7 +310,7 @@ class StreamDiagnosticsTests(unittest.TestCase):
         details += [dict(predicate='native_argv', argv0_matches=False, helper_present=False, serving_present=False),
                     dict(predicate='engine_argv', argv0_matches=True, helper_present=True, serving_present=True)]
         details += [dict(predicate='controlled_value', field=field, difference=difference)
-                    for field in ('HOME', 'NAC_HOME', 'PATH', 'LANG', 'NAC_TELEMETRY', 'NAC_ORCHESTRATION',
+                    for field in ('HOME', 'NAC_HOME', 'PATH', 'LANG', 'NAC_TELEMETRY',
                                   'GIT_CONFIG_NOSYSTEM', 'GIT_CONFIG_GLOBAL', 'BROWSER', 'MODELS_DEV_URL', 'other')
                     for difference in ('absent', 'different')]
         for detail in details:

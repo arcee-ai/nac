@@ -22,16 +22,16 @@ class StartupFixtureTests(unittest.TestCase):
 
     def test_ax_pin_and_complete_inventory_reject_tamper_before_contract_import(self):
         import ci_startup_fixture as fixture
-        self.assertEqual(TEST_SOURCE, 'f671fd15f002e3bda4df5040df998e80be1f6dd8')
+        self.assertEqual(TEST_SOURCE, 'ca129e087de0b8899741662756fc3dfb0c619023')
         self.assertEqual(fixture.TEST_FILES, {
-            'README.md': 'eeb6d84c341b0e68ad6af24d08f6a7a2493bf8c0d7071efc2cd67a53d3db2f00',
-            'StartupJourneys.swift': '90ccceb82d6593c5714e43078a2f35a74f7d57f890883e0ba08f4c65505738b3',
-            'contract.py': 'd159672bb8eda5d3bf4e5d462813452c83a673974749ed4f7f07b3bb9341b91b',
-            'test_contract.py': 'c33ac0f526d8213758970c2f671ab71b08afa2fc4fd9287f9e56942012735f5e',
-            'StartupAXGuard.swift': '266e73c6362b12f6df51ef3f4d349b3d22b71a1eab5139e71e2336b1d4c3778d',
-            'StartupAXReceipt.swift': '94e3f3512a9caaebc42841d8cffc34e8a1275cdff2bc4d43501e5deaba202247',
-            'AX-WITNESS-CONTRACT.md': '67ef84950affed7cf3ab5cff9df9127a5081b3a93d1dff1469e67a83fddb0191',
-            'test_ax_witness.py': '4400ffed7d2b30ed1613e3829d0e2d61b740f7a3fd352a092f22eac9f7fee878',
+            'README.md': '23a181bf5ddff1dcce0a06b22e438026646d55b267f0b7205c5f58d9e22dfb54',
+            'StartupJourneys.swift': 'ba30886fcde8e1245baff4bc3f372e3c51a07d1872725612c0d4a04b9484eaa1',
+            'contract.py': 'e9e5b9e477ab975acedeecdef7a8ab58da2222377630644e0d5e649009c8192e',
+            'test_contract.py': '99449dbae247c877b2a8960b4a1147c45d0c133e585cdbeec2cb4c6b57e53046',
+            'StartupAXGuard.swift': '2fe55f60fa7331ab5a1842ea6f38108433ad0e4a6ad9d7e4589505a55fd7420a',
+            'StartupAXReceipt.swift': 'cec1858eb9f28e20c5c2d91eed3e8f2531bb3a9d223686631b77b413744a7ef6',
+            'AX-WITNESS-CONTRACT.md': '71e7052a425069226506ade5273a19d9a878d66ebc2c541da5079f41857a7fc5',
+            'test_ax_witness.py': '6d57cfacff77a8e8a7c151dba3d6ed034f6eb946f26bf5ba39a710fc17d7816e',
             'AGENTS.md': '3e24e5b29e32356d08895b2c162407a1be5cf9d71c1740d1dcc50fc566bc89e6',
             'test_title_assertion.py': 'e4389c84259f0f8dbbd3b42eef153757b8f9da26d337010b8affd1719f415cef',
         })
@@ -128,7 +128,7 @@ class StartupFixtureTests(unittest.TestCase):
 
     def test_product_pin_rejects_legacy_before_package_or_resolver(self):
         from ci_startup_environment import PRODUCT as RESOLVER_PRODUCT
-        self.assertEqual(PRODUCT, '4b7a1f3e0bf6175a77c5ebf627fe965860e99976')
+        self.assertEqual(PRODUCT, '6a2d77392b82037424dca755bb58cad399249726')
         self.assertEqual(RESOLVER_PRODUCT, PRODUCT)
         with patch('ci_startup_fixture.require_checkout', side_effect=RuntimeError('legacy product rejected')) as checkout, \
                 patch('ci_startup_fixture.test_contract') as contract, \

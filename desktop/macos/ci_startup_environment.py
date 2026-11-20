@@ -1,5 +1,7 @@
 """Resolve controlled child expectations using immutable P's production source."""
 import hashlib
+import os
+import re
 import json
 from pathlib import Path
 import subprocess
@@ -9,7 +11,9 @@ from ci_qualifications import require_checkout
 from ci_startup_process import capture
 from ci_xctest_attachments import bounded_file
 
-PRODUCT = '4b7a1f3e0bf6175a77c5ebf627fe965860e99976'
+PRODUCT = os.environ.get('NAC_STARTUP_PRODUCT_SHA') or '6a2d77392b82037424dca755bb58cad399249726'
+if not re.fullmatch('[0-9a-f]{40}', PRODUCT):
+    raise RuntimeError('Startup product must be an exact immutable commit SHA')
 SOURCE = 'desktop/macos/CommandEnvironment.swift'
 SOURCE_SHA256 = 'c4b64f8bed76285c9455c48256180ff5cec5e775eabb832cf326ab4da3ca14a2'
 

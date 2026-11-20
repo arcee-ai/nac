@@ -271,7 +271,7 @@ def retain_first_failure(selected, entries, index, config, configuration_sha256,
                     'consume_no_focus', 'consume_proof_presence', 'consume_proof_binding',
                     'consume_freshness', 'consume_pending', 'consume_target_identity',
                     'consume_evidence_limit', 'read_cutoff'} and type(row['operation_index']) is int
-                and 0 <= row['operation_index'] <= 11 and type(row['error_family']) is str
+                and 0 <= row['operation_index'] <= 15 and type(row['error_family']) is str
                 and row['error_family'] in {'receipt_missing', 'receipt_invalid', 'receipt_refused',
                     'receipt_expired', 'decoding', 'foundation', 'other'}, 'first_projection')
         descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
@@ -380,7 +380,7 @@ def require_observation(row, config, configuration_sha256, witness, png):
         require(type(row['expected_private_failure'].get('version')) is int, 'declared_failure_version')
     console = row['console']
     # Successful normal cases also guard the value-title verifier once.
-    expected_console = {'onboarding': 5, 'configuredLocal': 27, 'invalidConfig': 4, 'futureStore': 4}
+    expected_console = {'onboarding': 5, 'configuredLocal': 35, 'invalidConfig': 4, 'futureStore': 4}
     require(isinstance(console, list) and len(console) == expected_console[config['scenario']], 'console_count')
     for item in console:
         require(isinstance(item, dict) and set(item) == {'on_console', 'login_done', 'root_locked',

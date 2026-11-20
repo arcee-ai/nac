@@ -50,7 +50,7 @@ class ResolverAdmissionTests(unittest.TestCase):
 
     def test_legacy_product_is_rejected_before_source_or_compiler(self):
         from ci_startup_environment import PRODUCT
-        self.assertEqual(PRODUCT, '4b7a1f3e0bf6175a77c5ebf627fe965860e99976')
+        self.assertEqual(PRODUCT, '6a2d77392b82037424dca755bb58cad399249726')
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
             with patch('ci_startup_environment.require_checkout', side_effect=RuntimeError('legacy product rejected')) as checkout, \

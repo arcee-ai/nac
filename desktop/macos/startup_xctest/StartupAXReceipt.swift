@@ -759,7 +759,7 @@ final class StartupAXClient {
             lastSurface = observed
             if let request {
                 diagnostic?.step = .consume_pending
-                try StartupAXFiles.need(pendingInteraction == request && interactions.count < 11)
+                try StartupAXFiles.need(pendingInteraction == request && interactions.count < 15)
                 let proof = observed.interaction!
                 let key = ["field", "message", "panel"].contains(request.kind) ? request.kind : request.kind + ":" + request.label
                 diagnostic?.step = .consume_target_identity
@@ -774,7 +774,7 @@ final class StartupAXClient {
                 return observed
             }
             diagnostic?.step = .consume_evidence_limit
-            try StartupAXFiles.need(evidence.count < 26)
+            try StartupAXFiles.need(evidence.count < 34)
             if actionCompleted {
                 try StartupAXFiles.need(pendingInteraction != nil)
                 let path = try StartupAXFiles.requestPath(declaration.path)

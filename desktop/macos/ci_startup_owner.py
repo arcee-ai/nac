@@ -28,7 +28,7 @@ _PRODUCER_FAILURE_KINDS = frozenset((
     'process_probe', 'ownership_invalid', 'arguments_unavailable', 'other',
 ))
 _ENVIRONMENT_FIELDS = frozenset((
-    'HOME', 'NAC_HOME', 'PATH', 'LANG', 'NAC_TELEMETRY', 'NAC_ORCHESTRATION',
+    'HOME', 'NAC_HOME', 'PATH', 'LANG', 'NAC_TELEMETRY',
     'GIT_CONFIG_NOSYSTEM', 'GIT_CONFIG_GLOBAL', 'BROWSER', 'MODELS_DEV_URL', 'other',
 ))
 

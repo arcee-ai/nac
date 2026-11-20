@@ -151,7 +151,7 @@ enum StartupEnvironmentCheck {
         }
         let expected = kind == "app" ? launcher : child
         let fields: Set<String> = ["HOME", "NAC_HOME", "PATH", "LANG", "NAC_TELEMETRY",
-            "NAC_ORCHESTRATION", "GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL", "BROWSER", "MODELS_DEV_URL"]
+            "GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL", "BROWSER", "MODELS_DEV_URL"]
         for key in expected.keys.sorted() where environment[key] != expected[key] {
             throw rejection("controlled_value", ["field": fields.contains(key) ? key : "other",
                 "difference": environment[key] == nil ? "absent" : "different"])

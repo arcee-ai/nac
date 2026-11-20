@@ -169,7 +169,7 @@ class AXFailureDiagnosticsTests(unittest.TestCase):
 
     def test_malformed_private_unbound_or_duplicate_first_failure_is_dropped(self):
         for change in [dict(acceptance=True), dict(step='PRIVATE-CANARY'), dict(operation_index=True),
-                       dict(operation_index=12), dict(error_family='PRIVATE-CANARY'), dict(nonce='b'*64),
+                       dict(operation_index=16), dict(error_family='PRIVATE-CANARY'), dict(nonce='b'*64),
                        dict(configuration_sha256='f'*64), dict(raw='PRIVATE-CANARY')]:
             with self.subTest(change=change):
                 self.preflight(change)

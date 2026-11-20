@@ -232,7 +232,7 @@ enum StartupAXWitnessMode {
                     request = nil // The action is over; never re-prove or replay its old intent.
                 }
                 if let request {
-                    try StartupObserver.need(!usedRequests.contains(request.id) && usedRequests.count < 11)
+                    try StartupObserver.need(!usedRequests.contains(request.id) && usedRequests.count < 15)
                     let ack = declaration.path + ".handoff"
                     do { _ = try StartupAXActionHandoff.read(ack); try StartupObserver.need(unlink(ack) == 0) }
                     catch StartupAXReceiptError.missing { }

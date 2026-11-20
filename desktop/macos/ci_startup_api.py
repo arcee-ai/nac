@@ -33,7 +33,7 @@ entry_document_bound entry_document_position entry_document_json entry_document_
 entry_document_shape entry_document_identity entry_document_scope entry_document_uuid
 entry_document_release live_app_api_evidence_missing owned_store_cardinality
 local_project_workspace local_session_model_and_project selected_store_session_metadata
-saved_dummy_model_configuration transcript_schema canonical_transcript unexpected_tool_or_message unexpected_tool_request
+session_model_configuration transcript_schema canonical_transcript unexpected_tool_or_message unexpected_tool_request
 persisted_transcript_matches_snapshot unexpected_terminal event_schema canonical_completed_run
 '''.split())
 
@@ -316,9 +316,16 @@ def setup_engine(profile, config, log):
 
 def seed_model(base, provider_base):
     require(request(base, '/projects').get('projects') == [] and request(base, '/sessions') == [], 'empty_seed_store')
-    saved = request(base, '/model-configs', {'name': 'Finder configured fixture', 'backend': 'openai-responses',
-        'model': 'gpt-5.6-sol', 'base_url': endpoint(provider_base), 'api_key': 'preview-dummy-only',
-        'extra_headers': {}, 'orchestrator_compaction_threshold': 0})
-    require(isinstance(saved.get('config_id'), str) and saved['config_id'], 'configured_dummy_model')
+    saved = request(base, '/provider-connections', {'backend': 'openai-responses',
+        'base_url': endpoint(provider_base), 'api_key': 'preview-dummy-only'})
+    require(isinstance(saved.get('connection_id'), str) and saved['connection_id'], 'configured_dummy_model')
+    providers = request(base, '/models').get('providers', [])
+    selected = [entry for entry in providers if entry.get('id') == 'openai-responses']
+    require(len(selected) == 1 and selected[0].get('auth_status') == 'ready', 'configured_dummy_model')
+    connection = selected[0].get('connection') or {}
+    require(connection.get('base_url') == endpoint(provider_base)
+            and isinstance(connection.get('api_key_env'), str) and connection['api_key_env']
+            and 'api_key' not in connection, 'configured_dummy_model')
     require(request(base, '/projects').get('projects') == [] and request(base, '/sessions') == [], 'no_seeded_project_or_run')
-    return {'config_id': saved['config_id'], 'configured_dummy_only': True, 'project_seeded': False}
+    return {'connection_id': saved['connection_id'], 'api_key_env': connection['api_key_env'],
+            'configured_dummy_only': True, 'project_seeded': False}

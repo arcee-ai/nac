@@ -321,7 +321,7 @@ class AXCompanion:
                     'consume_no_focus', 'consume_proof_presence', 'consume_proof_binding',
                     'consume_freshness', 'consume_pending', 'consume_target_identity',
                     'consume_evidence_limit', 'read_cutoff'} and type(row['operation_index']) is int
-                    and 0 <= row['operation_index'] <= 11 and type(row['error_family']) is str
+                    and 0 <= row['operation_index'] <= 15 and type(row['error_family']) is str
                     and row['error_family'] in {'receipt_missing', 'receipt_invalid', 'receipt_refused',
                     'receipt_expired', 'decoding', 'foundation', 'other'}, 'Preflight diagnostic projection')
             return row
@@ -392,7 +392,7 @@ class AXCompanion:
 
 def guard_phases():
     phases, current = ['form', 'form'], 'form'
-    for operation in range(1, 12):
+    for operation in range(1, 16):
         phases.append(current)
         current = {2: 'panel', 3: 'goTo', 6: 'panel', 7: 'form'}.get(operation, current)
         phases.append(current)
@@ -400,7 +400,7 @@ def guard_phases():
 
 
 def require_guard_proof(row, config, configuration_sha256, witness):
-    """Validate the exact26 consumed receipts; never export private field values."""
+    """Validate the exact 34 consumed receipts; never export private field values."""
     import uuid
     expected = {key: config[key] for key in ('source_sha', 'test_source_sha', 'harness_sha')}
     expected.update({key: witness[key] for key in ('app_pid', 'app_launch_epoch', 'window_number')})
@@ -409,7 +409,7 @@ def require_guard_proof(row, config, configuration_sha256, witness):
     require(type(row) is dict and set(row) == set(expected) | {'rows', 'interactions'}
         and all(row[k] == v and type(row[k]) is type(v) for k, v in expected.items() if k != 'app_launch_epoch')
         and type(row['app_launch_epoch']) in (int, float) and row['app_launch_epoch'] == witness['app_launch_epoch'], 'AX guard header')
-    require(type(row['rows']) is list and len(row['rows']) == 26, 'AX guard count')
+    require(type(row['rows']) is list and len(row['rows']) == 34, 'AX guard count')
     previous = 0
     identities = {}
     def number(text):
@@ -438,12 +438,12 @@ def require_guard_proof(row, config, configuration_sha256, witness):
 
 
 def require_interaction_proof(interactions, guards):
-    """Eleven private-text-free point proofs between the existing input fences."""
+    """Fifteen private-text-free point proofs between the existing input fences."""
     import math
     import uuid
-    require(type(interactions) is list and len(interactions) == 11, 'AX interaction count')
+    require(type(interactions) is list and len(interactions) == 15, 'AX interaction count')
     ids, targets = set(), {}
-    kinds = ['button', 'button', 'panel', 'field', 'field', 'field', 'button', 'button', 'message', 'message', 'button']
+    kinds = ['button', 'button', 'panel', 'field', 'field', 'field', 'button', 'button', 'message', 'message', 'message', 'button', 'message', 'message', 'button']
     def number(text):
         require(type(text) is str and re.fullmatch(r'0|[1-9][0-9]{0,19}', text) and int(text) < 2**64,
                 'AX interaction clock')
@@ -457,11 +457,12 @@ def require_interaction_proof(interactions, guards):
             require(type(value) is str and len(value) == 36 and str(uuid.UUID(value)) == value.lower()
                 and (key != 'request_id' or value not in ids), 'AX interaction identity')
             if key == 'request_id': ids.add(value)
-        target_key = kind if kind != 'button' else str(index)
+        target_key = ('search' if 8 <= index <= 10 else 'composer' if 12 <= index <= 13
+                      else kind if kind != 'button' else str(index))
         require(targets.get(target_key, entry['target_id']) == entry['target_id'], 'AX interaction retained target')
         targets[target_key] = entry['target_id']
         before, after = guards[2 + index * 2:4 + index * 2]
-        keyboard = index in (2, 3, 4, 5, 9)
+        keyboard = index in (2, 3, 4, 5, 9, 10, 13)
         require(entry['kind'] == kind and entry['surface'] == before['surface']
             and type(entry['keyboard']) is bool and entry['keyboard'] == keyboard
             and type(entry['focus_checked']) is bool and entry['focus_checked'] == keyboard,

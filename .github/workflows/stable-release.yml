@@ -26,6 +26,11 @@ on:
           - all-342-startup-macos26
           - all-344-lifecycle-macos26
           - all-347-paths-macos26
+      startup_product_sha:
+        description: Exact direct-only startup product SHA; empty selects the initial proof candidate
+        type: string
+        required: false
+        default: ""
       lifecycle_custody:
         description: Root-admitted ALL-344 custody JSON; required only for its fixed three-case qualification
         type: string
@@ -1182,6 +1187,7 @@ jobs:
     with:
       harness-sha: ${{ needs.prepare.outputs.sha }}
       target: ${{ inputs.native_qualification }}
+      startup-product-sha: ${{ inputs.startup_product_sha }}
       lifecycle-custody: ${{ inputs.lifecycle_custody || '' }}
       paths-custody: ${{ inputs.paths_custody || '' }}
 

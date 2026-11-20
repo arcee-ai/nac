@@ -208,7 +208,16 @@ teardown/abort coupling, not a proven Actual16 cause or native acceptance.
 
 ## Ordinary startup supplier binding
 
-This private P12 nomination binds product
+The active direct-only successor initially selects product and protocol source
+`6a2d77392b82037424dca755bb58cad399249726` and separately pinned test supplier
+`ca129e087de0b8899741662756fc3dfb0c619023`. The optional `startup_product_sha`
+dispatch input binds an exact selected candidate to its clean checkout, package
+identity and executable digests. Protocol schema equality remains fail-closed;
+a newer schema needs a separately matching protocol supplier. Hosted full-Xcode,
+Aqua, entitlement, witness and four-case proof has not yet passed for this tuple.
+Historical evidence below describes its original candidates only.
+
+The earlier private P12 nomination bound product
 `4b7a1f3e0bf6175a77c5ebf627fe965860e99976`, direct parent
 `1cd48f95fbd239a43ef091c43b92649207fc86f5`, composed from Native
 `8685729343c0ab806a9ab9cbdb5b6bf72e0c522c` and dev
@@ -221,7 +230,7 @@ historical startup/SDK results keep their original source and consumed counters.
 
 The H plus canonical Q observer inputs come from `observer_sources`; callers
 must compile all four, retaining the original guards/receipt/custody contracts.
-All four ordinary startup cases and independent R7325 remain required. R's actual
+All four ordinary startup cases and the selected protocol source remain required. R's actual
 compiler/typed-protocol/source/engine/schema/integrity/retirement checks must run
 under a separate Root admission; schema50 alone is insufficient. No runtime or
 publication is authorized by this nomination. Configured-local pointer input now uses the accepted public-coordinate/global

@@ -8,13 +8,13 @@ def interaction_facts(guards):
     """Synthetic private-text-free proof fixtures, never native acceptance."""
     for index, entry in enumerate(guards, 1):
         entry['sequence'] = str(index * 10)
-    kinds = ['button', 'button', 'panel', 'field', 'field', 'field', 'button', 'button', 'message', 'message', 'button']
+    kinds = ['button', 'button', 'panel', 'field', 'field', 'field', 'button', 'button', 'message', 'message', 'message', 'button', 'message', 'message', 'button']
     result = []
     for index, kind in enumerate(kinds):
         before = guards[2 + index * 2]
         entered = int(before['consumed_ns']) + 1
-        keyboard = index in (2, 3, 4, 5, 9)
-        result.append(dict(request_id=str(uuid.UUID(int=100 + index)), target_id=str(uuid.UUID(int=203 if kind == 'field' else 208 if kind == 'message' else 200 + index)),
+        keyboard = index in (2, 3, 4, 5, 9, 10, 13)
+        result.append(dict(request_id=str(uuid.UUID(int=100 + index)), target_id=str(uuid.UUID(int=203 if kind == 'field' else 208 if 8 <= index <= 10 else 212 if 12 <= index <= 13 else 200 + index)),
             kind=kind, surface=before['surface'], point=[20, 25], anchor_frame=[10, 20, 100, 30],
             keyboard=keyboard, focus_checked=keyboard, sequence=str(int(before['sequence']) + 1),
             entered_ns=str(entered), began_ns=str(entered + 1), ended_ns=str(entered + 2),
@@ -28,7 +28,7 @@ class InteractionExportControls(unittest.TestCase):
         from test_ci_startup_ax import GuardProofControls
         return GuardProofControls().fixture()
 
-    def test_new_point_proofs_are_required_in_addition_to_all_26_existing_guards(self):
+    def test_new_point_proofs_are_required_in_addition_to_all_34_existing_guards(self):
         from ci_startup_ax import require_guard_proof
         config, witness, row = self.fixture()
         self.assertIs(require_guard_proof(row, config, 'e' * 64, witness), row)

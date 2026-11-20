@@ -412,11 +412,10 @@ final class StartupJourneys: XCTestCase {
         try require(forbidden.isEmpty, "Runner inherited credentials or managed launch configuration")
         try require(fixture.environment["HOME"] == fixture.home
             && fixture.environment["NAC_HOME"] == fixture.nac_home
-            && fixture.environment["NAC_ORCHESTRATION"] == "0"
             && fixture.environment["NAC_MANAGED_CONFIG"] == nil,
             "Fixture launch isolation differs")
         let names: Set<String> = ["HOME", "NAC_HOME", "PATH", "LANG", "NAC_TELEMETRY",
-            "NAC_ORCHESTRATION", "GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL", "BROWSER", "MODELS_DEV_URL"]
+            "GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL", "BROWSER", "MODELS_DEV_URL"]
         try require(Set(fixture.environment.keys) == names
             && fixture.environment["PATH"] == "/usr/bin:/bin:/usr/sbin:/sbin"
             && fixture.environment["LANG"] == "en_US.UTF-8"
@@ -881,6 +880,40 @@ final class StartupJourneys: XCTestCase {
                 let filled = try folderControl(fixture.workspace)
                 try require(StartupNativeFolderPolicy.selected(filled.element.label, workspace: fixture.workspace),
                     "Exact declared workspace did not reach the normal project form")
+                // The project has no saved model default. Select the session
+                // model through the public picker using the same guarded
+                // coordinate and keyboard handoff as the other UI inputs.
+                let model = ui.webViews.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Arcee API"))
+                try require(model.firstMatch.waitForExistence(timeout: 30) && model.count == 1
+                    && model.firstMatch.isHittable && model.firstMatch.isEnabled,
+                    "Unique initial session model picker absent")
+                let modelName = model.firstMatch.label
+                let namedModel = ui.webViews.buttons.matching(identifier: modelName)
+                try dispatch("click:session-model", target: model.firstMatch,
+                    semantic: (modelName, namedModel)) { coordinate in
+                    try XCTUnwrap(coordinate).click()
+                }
+                let search = ui.webViews.textFields.matching(identifier: "Search models")
+                try require(search.firstMatch.waitForExistence(timeout: 20) && search.count == 1
+                    && search.firstMatch.isHittable && search.firstMatch.isEnabled,
+                    "Unique model search absent")
+                let searchField = search.firstMatch
+                try dispatch("click:Search models", target: searchField, kind: "message",
+                    semantic: ("Search models", search)) { coordinate in
+                    try XCTUnwrap(coordinate).click()
+                }
+                try dispatch("type:model-query", target: searchField, kind: "message", keyboard: true,
+                    semantic: ("Search models", search)) { _ in
+                    searchField.typeText("gpt-5.6-sol")
+                    try require(searchField.value as? String == "gpt-5.6-sol", "Model query differs")
+                }
+                try dispatch("key:return-model-query", target: searchField, kind: "message", keyboard: true,
+                    semantic: ("Search models", search)) { _ in
+                    searchField.typeKey(.return, modifierFlags: [])
+                }
+                let selectedModel = ui.webViews.buttons.matching(identifier: "GPT-5.6 Sol OpenAI Responses")
+                try require(selectedModel.firstMatch.waitForExistence(timeout: 20) && selectedModel.count == 1,
+                    "Expected session model and provider not selected")
                 try click(ui.webViews.buttons, "Create Project")
                 let message = ui.webViews.descendants(matching: .any).matching(identifier: "Message")
                 try require(message.firstMatch.waitForExistence(timeout: 30) && message.count == 1
@@ -911,7 +944,7 @@ final class StartupJourneys: XCTestCase {
         captured = true
         try guardTarget()
         if let axClient {
-            try require(axClient.evidence.count == 26 && axClient.interactions.count == 11, "External AX guard/interaction trace incomplete")
+            try require(axClient.evidence.count == 34 && axClient.interactions.count == 15, "External AX guard/interaction trace incomplete")
             let rows = try JSONSerialization.jsonObject(with: JSONEncoder().encode(axClient.evidence))
             let interactions = try JSONSerialization.jsonObject(with: JSONEncoder().encode(axClient.interactions))
             try attachment(["schema": "nac342-ax-guards-v1", "configuration_sha256": digest(bytes),

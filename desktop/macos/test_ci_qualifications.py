@@ -23,9 +23,9 @@ class ExactSourceTests(unittest.TestCase):
         terminal = select_target('all-352-macos26')
         self.assertEqual(terminal['source_sha'], 'a02f0c06b3c75c8f8fd62b6c233d1cfd923be6e1')
         startup = select_target('all-342-startup-macos26')
-        self.assertEqual(startup['source_sha'], '4b7a1f3e0bf6175a77c5ebf627fe965860e99976')
-        self.assertEqual(startup['test_source_sha'], 'f671fd15f002e3bda4df5040df998e80be1f6dd8')
-        self.assertEqual(startup['protocol_source_sha'], '7325c48b3c9ec7036e255a6bd92f31c1a98c1607')
+        self.assertEqual(startup['source_sha'], '6a2d77392b82037424dca755bb58cad399249726')
+        self.assertEqual(startup['test_source_sha'], 'ca129e087de0b8899741662756fc3dfb0c619023')
+        self.assertEqual(startup['protocol_source_sha'], '6a2d77392b82037424dca755bb58cad399249726')
         self.assertEqual(startup['scenarios'], ['onboarding', 'configuredLocal', 'invalidConfig', 'futureStore'])
         self.assertEqual(terminal['suite'], 'terminal')
         self.assertEqual(terminal['phase_count'], 6)
@@ -56,6 +56,21 @@ class ExactSourceTests(unittest.TestCase):
             (root / 'subdirectory').mkdir()
             with self.assertRaisesRegex(RuntimeError, 'exact repository root'):
                 require_checkout(root / 'subdirectory', sha)
+
+    def test_startup_candidate_is_bound_to_exact_explicit_ci_sha(self):
+        import os
+        import subprocess
+        import sys
+        program = "from ci_qualifications import select_target; print(select_target('all-342-startup-macos26')['source_sha'])"
+        for sha in ('a' * 40, '6a2d77392b82037424dca755bb58cad399249726'):
+            result = subprocess.run([sys.executable, '-B', '-c', program], capture_output=True, text=True,
+                env={**os.environ, 'PYTHONPATH': 'desktop/macos', 'NAC_STARTUP_PRODUCT_SHA': sha})
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), sha)
+        for invalid in ('HEAD', 'a' * 39, 'A' * 40):
+            result = subprocess.run([sys.executable, '-B', '-c', program], capture_output=True, text=True,
+                env={**os.environ, 'PYTHONPATH': 'desktop/macos', 'NAC_STARTUP_PRODUCT_SHA': invalid})
+            self.assertNotEqual(result.returncode, 0)
 
     def test_startup_contract_cannot_substitute_sources_cases_or_file_rosters(self):
         selected = select_target('all-342-startup-macos26')

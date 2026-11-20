@@ -128,10 +128,13 @@ enum StartupInteractionPolicy {
             id = request; target = candidate; return true
         }
     }
+    static func targetKey(kind: String, label: String) -> String {
+        ["field", "panel"].contains(kind) ? kind : kind + ":" + label
+    }
     struct Targets<Token: Equatable> {
         private var values: [String: Token] = [:]
         mutating func accept(_ key: String, target: Token) -> Bool {
-            guard values.count < 11 || values[key] != nil, values[key] == nil || values[key] == target else { return false }
+            guard values.count < 15 || values[key] != nil, values[key] == nil || values[key] == target else { return false }
             values[key] = target; return true
         }
     }
@@ -479,7 +482,7 @@ final class StartupAXReader {
     func interaction(_ request: StartupAXInteractionRequest, pid: pid_t) throws -> StartupAXInteraction {
         try request.validate()
         let target = try hitTarget(request, pid: pid)
-        let key = ["field", "message", "panel"].contains(request.kind) ? request.kind : request.kind + ":" + request.label
+        let key = StartupInteractionPolicy.targetKey(kind: request.kind, label: request.label)
         guard inputTargets.accept(key, target: AXIdentity(element: target)),
               interactionBinding.accept(request.id, target: AXIdentity(element: target)) else { throw StartupAXReceiptError.refused }
         if inputTargetIDs[key] == nil { inputTargetIDs[key] = UUID().uuidString }

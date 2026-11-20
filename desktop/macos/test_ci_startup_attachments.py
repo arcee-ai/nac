@@ -39,7 +39,7 @@ class StartupAttachmentTests(unittest.TestCase):
                 if mutation == 'raw_path': value['path'] = '/PRIVATE-CANARY/request'
                 if mutation == 'family': value['error_family'] = 'PRIVATE-CANARY'
                 if mutation == 'bool_index': value['operation_index'] = True
-                if mutation == 'large_index': value['operation_index'] = 12
+                if mutation == 'large_index': value['operation_index'] = 16
                 data = json.dumps(value).encode()
                 if mutation == 'duplicate_key': data = data[:-1] + b',"acceptance":false}'
                 if mutation == 'oversize': data += b' ' * 2048
@@ -115,7 +115,7 @@ class StartupAttachmentTests(unittest.TestCase):
         observation.update({key: witness[key] for key in IDENTITY})
         observation.update(schema=SCHEMA, scenario=case, configuration_sha256=config_hash,
             bundle_id=config['bundle_id'], ordinary_compile_mode='LOCAL_APP', smoke_instrumentation=False,
-            operations=operations(config), console=[console] * {'onboarding': 5, 'configuredLocal': 27, 'invalidConfig': 4, 'futureStore': 4}[case],
+            operations=operations(config), console=[console] * {'onboarding': 5, 'configuredLocal': 35, 'invalidConfig': 4, 'futureStore': 4}[case],
             capture='public-XCTest-window-screenshot', png_sha256=digest(png), visible_paint='requires_actual_image_review',
             input_method='public-XCTest', physical_keyboard_or_ime_claim=False, external_cleanup_required=True,
             future_schema_G2_assertion=('exact_unique_message_observed_producer_binding_required'
@@ -132,8 +132,8 @@ class StartupAttachmentTests(unittest.TestCase):
                      (f'nac342-cleanup-v1-{case}', json.dumps(cleanup).encode())])
         if case == 'configuredLocal':
             config['ax_witness'] = {'helper_sha256': 'e' * 64, 'support_sha256': {'StartupAXGuard.swift': 'f' * 64}}
-            phases = ['form','form','form','form','form','panel','panel','goTo','goTo','goTo','goTo','goTo',
-                      'goTo','panel','panel','form','form','form','form','form','form','form','form','form','form','form']
+            from ci_startup_ax import guard_phases
+            phases = guard_phases()
             facts = []
             for i, phase in enumerate(phases, 1):
                 fact = dict(sequence=str(i), entered_ns=str(i * 100), began_ns=str(i * 100 + 1),
@@ -501,7 +501,7 @@ class StartupAttachmentTests(unittest.TestCase):
         swapped = [original[1], original[0], *original[2:]]
         orders = [original, list(reversed(original)), swapped, original[::2] + original[1::2]]
         declared = [json.loads(data) for name, data in original if name.startswith('nac342-dispatch-v1-')]
-        self.assertEqual(len(declared), 22)
+        self.assertEqual(len(declared), 30)
         for number, rows in enumerate(orders):
             with self.subTest(order=number), tempfile.TemporaryDirectory() as tmp:
                 raw = Path(tmp); output = raw / 'selected'
@@ -515,8 +515,8 @@ class StartupAttachmentTests(unittest.TestCase):
                 expected_inventory = [(json.loads(data)['operation_index'], json.loads(data)['stage'])
                                       for name, data in rows if name.startswith('nac342-dispatch-v1-')]
                 self.assertEqual(actual_inventory, expected_inventory)
-                self.assertEqual(index['ax_guards']['count'], 26)
-                self.assertEqual(index['ax_guards']['interaction_count'], 11)
+                self.assertEqual(index['ax_guards']['count'], 34)
+                self.assertEqual(index['ax_guards']['interaction_count'], 15)
                 png_name, png = next((name, data) for name, data in original if name == 'nac342-ordinary-configuredLocal')
                 self.assertEqual((output / (png_name + '.png')).read_bytes(), png)
 
@@ -558,7 +558,7 @@ class StartupAttachmentTests(unittest.TestCase):
                 config, config_hash, witness, rows = self.fixture(case)
                 index = collect(self.tool(raw, rows), raw / 'unit.xcresult', config, config_hash, witness, raw / 'selected')
                 self.assertTrue(index['complete'])
-                self.assertEqual(len(index['dispatches']), 22 if case == 'configuredLocal' else 0)
+                self.assertEqual(len(index['dispatches']), 30 if case == 'configuredLocal' else 0)
                 image = (raw / 'selected' / f'nac342-ordinary-{case}.png').read_bytes()
                 self.assertGreater(len(image), 256 * 1024)
                 self.assertEqual(digest(image), index['observation']['png_sha256'])

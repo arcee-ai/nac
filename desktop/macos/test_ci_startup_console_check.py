@@ -32,8 +32,8 @@ class ConsoleRecordingSourceTests(unittest.TestCase):
 
     def test_checked_default_and_nonrecorded_input_checks_keep_exact_export_counts(self):
         source = self.source()
-        self.assertEqual(len(fixture.operations({'scenario': 'configuredLocal', 'home': '/private/owned home'})), 11)
-        for case, expected in (('onboarding', 5), ('configuredLocal', 27), ('invalidConfig', 4), ('futureStore', 4)):
+        self.assertEqual(len(fixture.operations({'scenario': 'configuredLocal', 'home': '/private/owned home'})), 15)
+        for case, expected in (('onboarding', 5), ('configuredLocal', 35), ('invalidConfig', 4), ('futureStore', 4)):
             with self.subTest(case=case):
                 self.assertEqual(len(self.trace(source, case)), expected)
 
