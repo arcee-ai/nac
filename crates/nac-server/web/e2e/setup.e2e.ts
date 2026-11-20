@@ -128,10 +128,11 @@ for (const mobile of [false, true]) {
       await route.abort("failed");
     });
     await chooseEffort("High");
-    await expect(page.getByText(/Reasoning was not changed/)).toBeVisible();
+    await expect(page.getByText(/configuration save outcome is unknown/i)).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(modelChip).toBeDisabled();
     expect(attempts).toBe(1);
     expect(await (await request.get(configUrl)).json()).toEqual(saved);
-    await page.keyboard.press("Escape");
   });
 
   test(`connects Codex alongside Arcee and updates available models without changing project (${mobile ? "mobile" : "desktop"})`, async ({
