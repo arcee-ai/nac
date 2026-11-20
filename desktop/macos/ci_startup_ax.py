@@ -18,7 +18,11 @@ SUPPORT = ('StartupAXGuard.swift', 'StartupAXReceipt.swift')
 DIAGNOSTIC_STAGES = {'configuration', 'admission', 'initial_snapshot', 'trust', 'helper_identity',
     'waiting_publication', 'deadline', 'configuration_integrity', 'snapshot', 'lifetime',
     'app_window', 'owned_frame', 'ax_observation', 'closing_snapshot', 'closing_lifetime',
-    'closing_integrity', 'receipt_publication', 'parent_lost'}
+    'closing_integrity', 'receipt_publication', 'parent_lost', 'request_observation',
+    'held_request', 'held_parent', 'held_deadline', 'held_resources', 'held_target', 'held_helper',
+    'held_helper_hash', 'held_frame', 'held_config', 'held_handoff', 'held_lease', 'held_ack',
+    'post_request', 'post_handoff', 'post_parent', 'post_deadline', 'post_resources', 'post_target',
+    'post_helper', 'post_helper_hash', 'post_frame', 'post_config', 'post_drain'}
 DIAGNOSTIC_CODES = {'ownership_invalid', 'ownership_arguments_unavailable', 'process_probe_unavailable',
                     'decoding_failure', 'foundation_failure', 'other', 'sample_refused'}
 

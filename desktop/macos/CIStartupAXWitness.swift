@@ -41,6 +41,10 @@ enum StartupAXDiagnosticStage: String, CaseIterable {
     case waiting_publication, deadline, configuration_integrity, snapshot, lifetime
     case app_window, owned_frame, ax_observation, closing_snapshot, closing_lifetime
     case closing_integrity, receipt_publication, parent_lost
+    case request_observation, held_request, held_parent, held_deadline, held_resources
+    case held_target, held_helper, held_helper_hash, held_frame, held_config, held_handoff, held_lease, held_ack
+    case post_request, post_handoff, post_parent, post_deadline, post_resources
+    case post_target, post_helper, post_helper_hash, post_frame, post_config, post_drain
 }
 
 enum StartupAXFailureDiagnostic {
@@ -285,6 +289,7 @@ enum StartupAXWitnessMode {
                             "refusal_generation": $0.refusal_generation] }, failure: failure)
                 }
                 if let request {
+                    diagnosticStage = .request_observation
                     try StartupObserver.need(observed?.interaction != nil)
                     usedRequests.insert(request.id)
                     var lease = StartupAXActionLease(request: request, target: observed!.interaction!.target_id)
@@ -292,22 +297,37 @@ enum StartupAXWitnessMode {
                         if let stop = try? StartupAXFiles.read(declaration.path + ".stop"), stop == Data(declaration.nonce.utf8) { return }
                         let stamp = DispatchTime.now().uptimeNanoseconds
                         let path = try StartupAXFiles.requestPath(declaration.path)
+                        diagnosticStage = .held_request
                         try StartupObserver.need(try StartupAXInteractionRequest.read(path) == request)
-                        try StartupObserver.need(getppid() == declaration.owner_pid
-                            && stamp < StartupAXFiles.number(request.deadline_ns)
-                            && resources.intact() && process(target.pid) == target && process(getpid()) == me
-                            && StartupAXPreflight.hash(try StartupAXPreflight.file(binary, limit: 16 * 1024 * 1024)) == declaration.helper_sha256
-                            && ownedFrame(target.pid, window) == frame
-                            && StartupAXPreflight.hash(try StartupAXPreflight.file(configPath, limit: 32768)) == digest)
+                        diagnosticStage = .held_parent
+                        try StartupObserver.need(getppid() == declaration.owner_pid)
+                        diagnosticStage = .held_deadline
+                        try StartupObserver.need(stamp < StartupAXFiles.number(request.deadline_ns))
+                        diagnosticStage = .held_resources
+                        try StartupObserver.need(resources.intact())
+                        diagnosticStage = .held_target
+                        try StartupObserver.need(process(target.pid) == target)
+                        diagnosticStage = .held_helper
+                        try StartupObserver.need(process(getpid()) == me)
+                        diagnosticStage = .held_helper_hash
+                        try StartupObserver.need(StartupAXPreflight.hash(try StartupAXPreflight.file(binary, limit: 16 * 1024 * 1024)) == declaration.helper_sha256)
+                        diagnosticStage = .held_frame
+                        try StartupObserver.need(ownedFrame(target.pid, window) == frame)
+                        diagnosticStage = .held_config
+                        try StartupObserver.need(StartupAXPreflight.hash(try StartupAXPreflight.file(configPath, limit: 32768)) == digest)
+                        diagnosticStage = .held_handoff
                         do {
                             let claim = try StartupAXActionHandoff.read(path + ".handoff")
                             if claim.completed_ns == nil {
                                 if lease.armed == nil {
+                                    diagnosticStage = .held_lease
                                     try lease.arm(claim, now: DispatchTime.now().uptimeNanoseconds)
                                     // Acknowledgment is NOT a new AX sample or freshness grant.
+                                    diagnosticStage = .held_ack
                                     try StartupAXFiles.publish(claim, to: declaration.path + ".handoff")
                                 } else { try StartupObserver.need(claim == lease.armed) }
                             } else {
+                                diagnosticStage = .held_lease
                                 try lease.complete(claim, now: DispatchTime.now().uptimeNanoseconds)
                                 postAction = claim; postRequest = request
                                 break
@@ -320,19 +340,32 @@ enum StartupAXWitnessMode {
                     while true {
                         if let stop = try? StartupAXFiles.read(declaration.path + ".stop"), stop == Data(declaration.nonce.utf8) { return }
                         let path = try StartupAXFiles.requestPath(declaration.path)
+                        diagnosticStage = .post_request
                         do { try StartupObserver.need(try StartupAXInteractionRequest.read(path) == original) }
                         catch StartupAXReceiptError.missing {
                             // Explicit drain ACK prevents the next request overtaking this held phase.
+                            diagnosticStage = .post_drain
                             try StartupAXFiles.publish(completed, to: declaration.path + ".handoff")
                             postAction = nil; postRequest = nil; break
                         }
+                        diagnosticStage = .post_handoff
                         try StartupObserver.need(try StartupAXActionHandoff.read(path + ".handoff") == completed)
-                        try StartupObserver.need(getppid() == declaration.owner_pid
-                            && DispatchTime.now().uptimeNanoseconds < StartupAXFiles.number(original.deadline_ns)
-                            && resources.intact() && process(target.pid) == target && process(getpid()) == me
-                            && ownedFrame(target.pid, window) == frame
-                            && StartupAXPreflight.hash(try StartupAXPreflight.file(binary, limit: 16 * 1024 * 1024)) == declaration.helper_sha256
-                            && StartupAXPreflight.hash(try StartupAXPreflight.file(configPath, limit: 32768)) == digest)
+                        diagnosticStage = .post_parent
+                        try StartupObserver.need(getppid() == declaration.owner_pid)
+                        diagnosticStage = .post_deadline
+                        try StartupObserver.need(DispatchTime.now().uptimeNanoseconds < StartupAXFiles.number(original.deadline_ns))
+                        diagnosticStage = .post_resources
+                        try StartupObserver.need(resources.intact())
+                        diagnosticStage = .post_target
+                        try StartupObserver.need(process(target.pid) == target)
+                        diagnosticStage = .post_helper
+                        try StartupObserver.need(process(getpid()) == me)
+                        diagnosticStage = .post_frame
+                        try StartupObserver.need(ownedFrame(target.pid, window) == frame)
+                        diagnosticStage = .post_helper_hash
+                        try StartupObserver.need(StartupAXPreflight.hash(try StartupAXPreflight.file(binary, limit: 16 * 1024 * 1024)) == declaration.helper_sha256)
+                        diagnosticStage = .post_config
+                        try StartupObserver.need(StartupAXPreflight.hash(try StartupAXPreflight.file(configPath, limit: 32768)) == digest)
                         RunLoop.current.run(until: Date().addingTimeInterval(0.01))
                     }
                 }

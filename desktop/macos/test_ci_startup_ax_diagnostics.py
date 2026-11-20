@@ -122,6 +122,22 @@ class AXFailureDiagnosticsTests(unittest.TestCase):
         self.assertIn('$0.count < 2048',source)
         self.assertIn('exit(1)',source)
 
+    def test_held_and_post_action_failures_identify_the_guard_that_rejected(self):
+        source = Path(__file__).with_name('CIStartupAXWitness.swift').read_text()
+        for stage, predicate in {
+            'request_observation': 'observed?.interaction != nil',
+            'held_request': 'StartupAXInteractionRequest.read(path) == request',
+            'held_deadline': 'stamp < StartupAXFiles.number(request.deadline_ns)',
+            'held_lease': 'lease.arm(claim, now:',
+            'post_request': 'StartupAXInteractionRequest.read(path) == original',
+            'post_handoff': 'StartupAXActionHandoff.read(path + ".handoff") == completed',
+            'post_deadline': 'DispatchTime.now().uptimeNanoseconds < StartupAXFiles.number(original.deadline_ns)',
+            'post_drain': 'StartupAXFiles.publish(completed, to:',
+        }.items():
+            with self.subTest(stage=stage):
+                following = source.split('diagnosticStage = .' + stage, 1)[1].split('diagnosticStage = .', 1)[0]
+                self.assertIn(predicate, following)
+
     def preflight(self, change=None, data=None):
         directory = self.folder / 'owned-port'
         directory.mkdir(mode=0o700, exist_ok=True)
@@ -205,7 +221,7 @@ class ProductionFailureClassifierTests(unittest.TestCase):
         # inert adapters; there is no app, AX call, process query or input actor.
         lifecycle = 'var firstRefusedSample:' + companion.split('var firstRefusedSample:', 1)[1].split('        do {', 1)[0]
         publish_start = '                diagnosticStage = .receipt_publication\n                try StartupAXFiles.publish(receipt(observed'
-        publication_end = '                if let request {\n                    try StartupObserver.need(observed?.interaction != nil)'
+        publication_end = '                if let request {\n                    diagnosticStage = .request_observation\n                    try StartupObserver.need(observed?.interaction != nil)'
         assert companion.count(publish_start) == 1
         publication_tail = companion.split(publish_start, 1)[1]
         assert publication_tail.count(publication_end) == 1
