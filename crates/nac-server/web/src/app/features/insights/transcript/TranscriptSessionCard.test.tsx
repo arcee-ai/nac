@@ -89,11 +89,9 @@ function mount(
   launch: InsightSessionEntry | InsightSessionEntry[],
   {
     children,
-    orchestration: _orchestration = true,
     interactive = true,
   }: {
     children?: TraditionalChildRecord[];
-    orchestration?: boolean;
     interactive?: boolean;
   } = {},
 ) {

@@ -45,7 +45,6 @@ afterEach(() => {
 function renderReadySettings({
   threshold = 111,
   headersJson = "{}",
-  orchestration: _orchestration = true,
   projectId = null,
   diagnostics = [],
   providerBackend = "openai-responses",
@@ -57,7 +56,6 @@ function renderReadySettings({
   projectId?: string | null;
   threshold?: number | null;
   headersJson?: string;
-  orchestration?: boolean;
 } = {}) {
   const initial = {
     backend: providerBackend,
@@ -175,7 +173,6 @@ it("saves a manually edited automatic threshold even if restored to its original
   vi.spyOn(api, "listManagedAuth").mockResolvedValue({ providers: [] });
   const { client, update, view } = renderReadySettings({
     automaticCompaction: true,
-    orchestration: false,
   });
   try {
     await waitFor(() =>
@@ -202,7 +199,7 @@ it("saves a manually edited automatic threshold even if restored to its original
 
 it("names native headers and retains edits while opening provider connections", async () => {
   vi.spyOn(api, "listManagedAuth").mockResolvedValue({ providers: [] });
-  const { client, update, view } = renderReadySettings({ orchestration: false });
+  const { client, update, view } = renderReadySettings({});
   try {
     await waitFor(() =>
       expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(
@@ -275,15 +272,14 @@ it("names native headers and retains edits while opening provider connections", 
 });
 
 it.each([
-  { threshold: 111, context: "444", headers: '{"X-Manual":"draft"}', orchestration: false },
-  { threshold: null, context: "444", headers: '{"X-Manual":"draft"}', orchestration: false },
-  { threshold: 111, context: "", headers: "", orchestration: false },
+  { threshold: 111, context: "444", headers: '{"X-Manual":"draft"}' },
+  { threshold: null, context: "444", headers: '{"X-Manual":"draft"}' },
+  { threshold: 111, context: "", headers: "" },
 ])(
   "keeps local Advanced edits when changing the primary model (%j)",
-  async ({ threshold, context, headers, orchestration }) => {
+  async ({ threshold, context, headers }) => {
     vi.spyOn(api, "listManagedAuth").mockResolvedValue({ providers: [] });
     const { client, update, view } = renderReadySettings({
-      orchestration,
       threshold,
       headersJson: '{"X-Saved":"old"}',
     });
@@ -293,19 +289,12 @@ it.each([
           false,
         ),
       );
-      if (!orchestration) fireEvent.click(screen.getByText("Advanced execution settings"));
+      fireEvent.click(screen.getByText("Advanced execution settings"));
       fireEvent.click(screen.getByRole("button", { name: "Advanced Configurations" }));
       fireEvent.change(document.querySelector("textarea")!, { target: { value: headers } });
       fireEvent.change(screen.getByRole("textbox", { name: "Context limit" }), {
         target: { value: context },
       });
-      if (orchestration) {
-        fireEvent.click(screen.getByRole("button", { name: "Single" }));
-        fireEvent.click(screen.getByRole("button", { name: "Back to unified models" }));
-        expect(screen.getByRole("button", { name: "Single" }).getAttribute("aria-pressed")).toBe(
-          "true",
-        );
-      }
       fireEvent.click(screen.getByRole("button", { name: /GPT-5.2/ }));
       fireEvent.click(await screen.findByText("GPT-5.3"));
       await waitFor(() => expect(screen.getByRole("button", { name: /GPT-5.3/ })).toBeTruthy());
@@ -338,7 +327,7 @@ it.each(["chatgpt-codex-responses", "arcee-auth"] as const)(
     const title = vi
       .spyOn(api, "updatePresentation")
       .mockResolvedValue({} as Awaited<ReturnType<typeof api.updatePresentation>>);
-    const { client, update, view } = renderReadySettings({ orchestration: false, providerBackend });
+    const { client, update, view } = renderReadySettings({ providerBackend });
     try {
       await waitFor(() =>
         expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(

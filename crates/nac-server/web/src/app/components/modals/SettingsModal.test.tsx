@@ -77,7 +77,6 @@ afterEach(() => {
 function renderReadySettings({
   threshold = 111,
   headersJson = "{}",
-  orchestration: _orchestration = true,
   projectId = null,
   diagnostics = [],
 }: {
@@ -85,7 +84,6 @@ function renderReadySettings({
   projectId?: string | null;
   threshold?: number | null;
   headersJson?: string;
-  orchestration?: boolean;
 } = {}) {
   const initial = {
     backend: "openai-responses",
@@ -311,7 +309,6 @@ it("repairs malformed stored extra headers to an explicit empty object", async (
 
 it("saving direct settings keeps disabled compaction intact", async () => {
   const { client, view, update } = renderReadySettings({
-    orchestration: false,
     threshold: null,
     headersJson: "{not-json}",
   });
@@ -390,7 +387,7 @@ it("reports configuration saved but title rejected instead of closing with a fal
 });
 
 it("does not expose legacy light settings", async () => {
-  const { client, view } = renderReadySettings({ orchestration: false, threshold: null });
+  const { client, view } = renderReadySettings({ threshold: null });
   try {
     fireEvent.click(await screen.findByRole("button", { name: "Keep current configuration" }));
     fireEvent.click(screen.getByText("Advanced execution settings"));

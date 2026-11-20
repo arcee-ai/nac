@@ -114,7 +114,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function renderModal(_orchestration = true) {
+function renderModal() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(queryKeys.storeInfo, { root_cwd: "/workspace" } as StoreInfo);
   const view = render(
@@ -167,7 +167,7 @@ it("leaves an untouched Codex suggestion automatic when creating the first chat"
 });
 
 it("project creation uses the selected direct session model", async () => {
-  const { client, view } = renderModal(false);
+  const { client, view } = renderModal();
   try {
     expect(screen.queryByRole("radiogroup")).toBeNull();
     fireEvent.click(await screen.findByRole("button", { name: "Choose model" }));
@@ -192,7 +192,7 @@ it("allows a new folder after a known duplicate-project rejection without replay
   vi.mocked(api.createProject).mockRejectedValueOnce(
     new ApiError(409, "POST", "/projects", "A project already uses this folder", "duplicate"),
   );
-  const { client, view } = renderModal(false);
+  const { client, view } = renderModal();
   try {
     fireEvent.click(await screen.findByRole("button", { name: "Choose model" }));
     fireEvent.click(screen.getByRole("button", { name: "Create Project" }));
@@ -295,7 +295,7 @@ it("launches once through the connected SSH project without restating location o
 });
 
 it("reopens and submits the exact selected local folder with trailing whitespace", async () => {
-  const { client, view } = renderModal(false);
+  const { client, view } = renderModal();
   try {
     fireEvent.click(await screen.findByRole("button", { name: "Choose model" }));
     fireEvent.click(screen.getByText("/workspace"));

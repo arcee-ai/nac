@@ -36,9 +36,6 @@ vi.mock("@/app/features/insights/presentation/InsightsView", () => ({
     </div>
   ),
 }));
-vi.mock("@/app/components/inspector/WorksetsView", () => ({
-  WorksetsView: () => <div>worksets</div>,
-}));
 
 const snapshot = {
   metadata: { behavior: "direct" },
