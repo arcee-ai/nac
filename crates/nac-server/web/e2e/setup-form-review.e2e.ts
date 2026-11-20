@@ -79,6 +79,7 @@ for (const zoomed of [false, true]) {
         return route.continue();
       });
       await page.goto(`${harness.baseUrl}/#/settings/accounts`);
+      await page.reload();
       await page.getByRole("button", { name: "Add Fireworks key" }).click();
       const key = page.getByLabel("Fireworks API key");
       await expect(key).toBeFocused();

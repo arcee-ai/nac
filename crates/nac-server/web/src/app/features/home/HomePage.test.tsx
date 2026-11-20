@@ -19,6 +19,7 @@ const fakes = vi.hoisted(() => ({
   sessions: { data: [] as unknown[], isPending: false, error: null as Error | null },
   mobile: false,
   managed: false,
+  hostStatusUnavailable: false,
   create: vi.fn(),
   createProject: vi.fn(),
   newChat: vi.fn(),
@@ -36,6 +37,7 @@ vi.mock("@/app/hooks/useMediaQuery", () => ({ useIsMobile: () => fakes.mobile })
 vi.mock("@/app/features/managed/controller/useManagedHost", () => ({
   useManagedHost: () => ({
     isManaged: fakes.managed,
+    isUnmanaged: !fakes.managed && !fakes.hostStatusUnavailable,
     addRepository: fakes.addRepository,
     openSettings: vi.fn(),
     status: { managed: fakes.managed, model_ready: true, github_status: "connected" },
@@ -80,6 +82,7 @@ beforeEach(() => {
   fakes.sessions = { data: [], isPending: false, error: null };
   fakes.mobile = false;
   fakes.managed = false;
+  fakes.hostStatusUnavailable = false;
   fakes.create.mockReset();
   fakes.createProject.mockReset();
   fakes.newChat.mockReset();
@@ -168,6 +171,15 @@ describe("Home below the composer", () => {
     fakes.managed = true;
     fakes.projects = { data: { projects: [] }, isPending: false, error: null };
     mount();
+    expect(screen.queryByRole("button", { name: "Use launch folder" })).toBeNull();
+    expect(fakes.createProject).not.toHaveBeenCalled();
+  });
+
+  it("leaves the launch-folder shortcut unavailable if host status cannot be confirmed", () => {
+    fakes.hostStatusUnavailable = true;
+    fakes.projects = { data: { projects: [] }, isPending: false, error: null };
+    mount();
+    expect(screen.getByRole("button", { name: "Get Started" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Use launch folder" })).toBeNull();
     expect(fakes.createProject).not.toHaveBeenCalled();
   });

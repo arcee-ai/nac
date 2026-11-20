@@ -67,7 +67,7 @@ export function HomePage() {
   const empty = !loading && !error && items.length === 0;
   // Without the project list, neither "no projects" nor a project choice is true.
   const projectsKnown = !loading && !projectsQuery.error;
-  const launchFolder = managed.status?.managed === false ? storeInfo?.root_cwd : undefined;
+  const launchFolder = managed.isUnmanaged ? storeInfo?.root_cwd : undefined;
   const useLaunchFolder = async () => {
     const lease = launchProjectLifetime.current;
     if (!lease?.current() || !launchFolder || creatingLaunchProject.current) return;

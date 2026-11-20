@@ -5,6 +5,7 @@ import type { ManagedHostStatus } from "@/app/types/api";
 export interface ManagedHostActions {
   status: ManagedHostStatus | null;
   isManaged: boolean;
+  isUnmanaged: boolean;
   openSettings: () => void;
   addRepository: () => void;
 }

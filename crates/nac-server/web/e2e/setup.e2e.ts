@@ -10,7 +10,7 @@ test("offers the launch folder without creating projects until the user chooses 
   request,
 }) => {
   await page.goto(harness.baseUrl);
-  await expect(page.getByText("No projects yet", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Add a project", exact: true })).toBeVisible();
   const launch = page.getByRole("button", { name: "Use launch folder", exact: true });
   await expect(launch).toBeVisible();
   const projectsUrl = `${harness.baseUrl}/projects`;
