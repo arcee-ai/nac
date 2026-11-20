@@ -50,7 +50,10 @@ class ConsoleRecordingSourceTests(unittest.TestCase):
             'missing-recording': (record, '_ = state'),
             'unconditional-recording': (record, 'observations.append(state)'),
             'duplicate-recording': (record, record + '\n        observations.append(state)'),
-            'ordinary-not-recorded': (ordinary, immediate),
+            'ordinary-not-recorded': ('func capturePostActionGuard() throws {\n            ' + ordinary,
+                                      'func capturePostActionGuard() throws {\n            ' + immediate),
+            'baseline-not-recorded': ('} else {\n                    ' + ordinary,
+                                      '} else {\n                    ' + immediate),
             'immediate-recorded': (immediate, ordinary[:-1] + ', record: true)'),
             'missing-immediate-check': (immediate, '_ = number'),
         }

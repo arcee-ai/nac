@@ -35,11 +35,16 @@ class StartupConsoleTests(unittest.TestCase):
         guard = main.split('func guardTarget() throws {', 1)[1].split('func dispatch(', 1)[0]
         self.assertEqual(guard.count('try guardWindow('), 1)
         self.assertIn('try guardWindow(ui, running: running, paths: paths, launch: launch, number: number)\n', guard)
+        post = main.split('func capturePostActionGuard() throws {', 1)[1].split('var guardTicket:', 1)[0]
+        self.assertEqual(post.count('try guardWindow('), 1)
+        self.assertIn('try guardWindow(ui, running: running, paths: paths, launch: launch, number: number)\n', post)
         dispatch = main.split('func dispatch(', 1)[1].split('func text(', 1)[0]
         self.assertEqual(dispatch.count('try guardTarget()'), 2)
+        self.assertEqual(dispatch.count('try capturePostActionGuard()'), 1)
+        self.assertLess(dispatch.index('try capturePostActionGuard()'), dispatch.index('completeInteraction(request)'))
         # Each of the fifteen configured-local inputs repeats the checked console
         # guard immediately before dispatch without adding an exported observation.
-        self.assertEqual(main.count('try guardWindow('), 2)
+        self.assertEqual(main.count('try guardWindow('), 3)
         self.assertEqual(main.count('record: false'), 1)
         self.assertIn('try guardWindow(ui, running: running, paths: paths, launch: launch, number: number, record: false)\n', dispatch)
         for anchor in ('try guardTarget()\n        if ["invalidConfig", "futureStore"]',
