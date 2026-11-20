@@ -1,4 +1,4 @@
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { Effect } from "effect";
 import { useCallback } from "react";
 
@@ -12,7 +12,7 @@ import {
   setupReconciliation,
 } from "@/app/features/setup/browserAdapters";
 import { useSetupAction } from "@/app/features/setup/useSetupAction";
-import { setupSequence } from "@/app/features/setup/workflow";
+import { SetupFailure, setupSequence } from "@/app/features/setup/workflow";
 import { catalogBaseUrl, resolveCatalogModel, type CatalogPick } from "@/app/lib/catalog";
 import {
   speedForCatalogRoute,
@@ -31,6 +31,62 @@ import type {
   SessionMetadata,
   UpdateConfigRequest,
 } from "@/app/types/api";
+
+const READBACK_FAILED = new Error(
+  "Settings were saved, but the latest session could not be loaded. Reload before editing again.",
+);
+
+function captureReadback(client: QueryClient, sessionId: string) {
+  return [queryKeys.sessionConfig(sessionId), queryKeys.sessionSnapshot(sessionId)].flatMap(
+    (key) => {
+      const query = client.getQueryCache().find({ queryKey: key, exact: true });
+      return query?.isActive()
+        ? [{ key, updates: query.state.dataUpdateCount + query.state.errorUpdateCount }]
+        : [];
+    },
+  );
+}
+
+function waitForModelReadback(
+  client: QueryClient,
+  checkpoint: ReturnType<typeof captureReadback>,
+  signal: AbortSignal,
+) {
+  return new Promise<boolean>((resolve) => {
+    let done = false;
+    const finish = (ready: boolean) => {
+      if (done) return;
+      done = true;
+      clearTimeout(deadline);
+      unsubscribe();
+      signal.removeEventListener("abort", abort);
+      resolve(ready);
+    };
+    const abort = () => finish(false);
+    const check = () => {
+      if (signal.aborted) return abort();
+      const observed = checkpoint.map(({ key, updates }) => ({
+        state: client.getQueryState(key),
+        updates,
+      }));
+      if (
+        observed.some(
+          ({ state, updates }) =>
+            !state ||
+            state.fetchStatus !== "idle" ||
+            state.dataUpdateCount + state.errorUpdateCount <= updates,
+        )
+      )
+        return;
+      finish(!observed.some(({ state }) => state?.status === "error"));
+    };
+    // Stream reconciliation can cancel and immediately replace the awaited readback.
+    const unsubscribe = client.getQueryCache().subscribe(() => queueMicrotask(check));
+    const deadline = setTimeout(abort, 10_000);
+    signal.addEventListener("abort", abort, { once: true });
+    queueMicrotask(check);
+  });
+}
 
 /**
  * The session's model, reasoning, and speed, directly switchable beside the
@@ -93,7 +149,7 @@ export function ModelPicker({
     const version = config.data?.config_version;
     if (!canChange || version == null) return;
     try {
-      const confirmed = await action.run((lease) =>
+      const refreshed = await action.run((lease) =>
         setupSequence(
           {
             current: lease.current,
@@ -102,30 +158,37 @@ export function ModelPicker({
           },
           (step) =>
             Effect.gen(function* () {
-              yield* step("configuration", () =>
-                api.updateConfig(sessionId, {
+              const checkpoint = yield* step("configuration", async () => {
+                await api.updateConfig(sessionId, {
                   ...patch,
                   expected_config_version: version,
-                }),
+                });
+                return captureReadback(client, sessionId);
+              });
+              const ready = yield* Effect.promise(() =>
+                waitForModelReadback(client, checkpoint, lease.signal),
               );
+              if (!ready) {
+                return yield* Effect.fail(
+                  new SetupFailure({
+                    phase: "configuration",
+                    kind: "rejected",
+                    cause: READBACK_FAILED,
+                    completed: ["configuration"],
+                  }),
+                );
+              }
               return true;
             }),
         ),
       );
-      if (!confirmed) return;
-      if (
-        [queryKeys.sessionConfig(sessionId), queryKeys.sessionSnapshot(sessionId)].some(
-          (key) => client.getQueryState(key)?.status === "error",
-        )
-      ) {
-        toast.error(
-          "Settings were saved, but the latest session could not be loaded. Reload before editing again.",
-        );
-      } else {
-        toast.success(success);
-      }
+      if (refreshed) toast.success(success);
     } catch (error) {
-      toast.error(setupFailureMessage(error));
+      toast.error(
+        error instanceof SetupFailure && error.cause === READBACK_FAILED
+          ? READBACK_FAILED.message
+          : setupFailureMessage(error),
+      );
     }
   };
 

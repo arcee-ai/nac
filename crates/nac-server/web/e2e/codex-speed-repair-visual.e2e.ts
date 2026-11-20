@@ -44,17 +44,29 @@ for (const mobile of [false, true]) {
       await route.fulfill({ status: 503, json: { error: "Fixture refresh unavailable" } });
     };
     await page.route(snapshotPattern, failSnapshot);
+    const configUrl = `${harness.baseUrl}/sessions/${sessionId}/config`;
+    const isConfigWrite = (write: import("@playwright/test").Request) =>
+      write.url() === configUrl && write.method() === "PATCH";
+    let writes = 0;
+    page.on("request", (write) => {
+      if (isConfigWrite(write)) writes++;
+    });
     await speed.click();
+    const saved = page.waitForResponse((response) => isConfigWrite(response.request()));
     await page.getByRole("menuitemradio", { name: "Fast", exact: true }).click();
+    expect((await saved).status()).toBe(200);
     await expect(page.getByText(/Reload before editing again/)).toBeVisible({
       timeout: 20_000,
     });
+    await expect(page.getByText("Speed set to Fast", { exact: true })).toHaveCount(0);
     await expect(modelChip(page)).toBeDisabled();
     await expect(page.getByRole("dialog", { name: "Model settings" })).toBeHidden();
+    expect(writes).toBe(1);
     await capture("reload-needed");
     await page.unroute(snapshotPattern, failSnapshot);
     await page.reload();
     await expect(modelChip(page)).toBeEnabled();
+    await expect(modelChip(page)).toHaveAccessibleName(/Fast speed/);
 
     const presetResponse = await request.post(`${harness.baseUrl}/model-configs`, {
       data: {
