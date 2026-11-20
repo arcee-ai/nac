@@ -8,6 +8,8 @@
     {"id":"retired_presets","pattern":"default_model_config_id|model_configurations"}
   ],
   "exceptions": [
+    {"kind":"line","path":"crates/nac-core/src/runtime_tests/construction.rs","rule":"retired_topology","sha256":"1bb3b23ca142f866d5a11c4e3683760fba55f523a46f58fa57854f40e4108c14","count":2,"reason":"Runtime boundary tests reject retired behavior values and confirm direct prompts omit retired agent guidance."},
+    {"kind":"line","path":"crates/nac-core/src/runtime_tests/construction.rs","rule":"retired_topology","sha256":"d19a0cabb72f43814a660f90384f722258263f87528d7a441271eba35994f7aa","count":1,"reason":"Runtime boundary tests reject retired behavior values and confirm direct prompts omit retired agent guidance."},
     {"kind":"line","path":"desktop/electron/e2e/workflow.spec.ts","rule":"retired_topology","sha256":"9e0d62d255309e723f70f85b08199bd4898a899a2c7f4265b99d7ba5012df03b","count":2,"reason":"Native workflow explicitly rejects both retired session behavior values."},
     {"kind":"line","path":"desktop/electron/e2e/pr-visual.spec.ts","rule":"retired_topology","sha256":"3719f2b82237d926a0cd8e020c8bb6c4c74a33ded572dccb763cc0dfddbbd9ee","count":1,"reason":"The before arm is tied to a pinned pre-retirement binary and uses its historical API contract only."},
     {"kind":"line","path":"desktop/electron/e2e/pr-visual.spec.ts","rule":"retired_endpoints","sha256":"aee377ca65be80f05fb1ddef3f79d46c5108d4938102766536fb8879ff0b9357","count":1,"reason":"The before arm is tied to a pinned pre-retirement binary and uses its historical API contract only."},

@@ -38,11 +38,7 @@ fn finder_and_terminal_profiles_keep_existing_config_store_and_credential_owners
             _ => bootstrap.join("unused"),
         };
         fs::create_dir_all(&expected_home).unwrap();
-        fs::write(
-            expected_home.join("config.toml"),
-            "[worker]\nthread_timeout_secs = 342\n",
-        )
-        .unwrap();
+        fs::write(expected_home.join("config.toml"), "[storage]\n").unwrap();
         let credential = expected_home.join("credentials.json");
         fs::write(
             &credential,
@@ -182,11 +178,7 @@ fn finder_profile_child() {
         ),
         bootstrap.join("configured store.db")
     );
-    fs::write(
-        expected_home.join("config.toml"),
-        "[worker]\nthread_timeout_secs = 342\n",
-    )
-    .unwrap();
+    fs::write(expected_home.join("config.toml"), "[storage]\n").unwrap();
     // The ordinary hardened reader, including its mode policy, remains active.
     fs::set_permissions(
         expected_home.join("credentials.json"),
