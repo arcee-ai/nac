@@ -36,7 +36,7 @@ async function expectReachableWithoutScrolling(page: Page, target: Locator) {
 }
 
 for (const viewport of VIEWPORTS) {
-  test(`connects a provider from the top of configuration management at ${viewport.width}px`, async ({
+  test(`connects a provider from Accounts & keys at ${viewport.width}px`, async ({
     harness,
     page,
     context,
@@ -51,29 +51,15 @@ for (const viewport of VIEWPORTS) {
         path: testInfo.outputPath(`after-${viewport.width}-${stage}.png`),
       });
 
-    await page.goto(harness.baseUrl);
-    // Settings › Models & providers holds the saved-configuration manager.
-    await openSettingsSection(page, "Models & providers");
-    const dialog = page.getByRole("region", {
-      name: "Configurations",
-      exact: true,
-    });
-    await dialog
-      .getByRole("textbox", { name: "Configuration name", exact: true })
-      .fill("Draft survives sign-in");
-
-    // The account list has not answered yet, so nothing may claim signed out.
+    // Hold the account check before opening Settings so no sign-in action can
+    // appear until the service confirms the accounts are signed out.
     auth.holdCheck();
-    await dialog.getByRole("button", { name: "OpenAI Responses", exact: true }).click();
-    await page.getByRole("button", { name: "ChatGPT Codex Responses", exact: true }).click();
-    await expect(page.getByRole("button", { name: "Arcee API (Key)", exact: true })).toHaveCount(0);
-    const account = dialog.getByRole("region", {
-      name: "Provider account",
-      exact: true,
-    });
-    await expect(account.getByText("Checking connection…", { exact: true })).toBeVisible();
+    await page.goto(harness.baseUrl);
+    const account = await openSettingsSection(page, "Accounts & keys");
+    await expect(account.getByText("ChatGPT sign-in", { exact: true })).toBeVisible();
+    await expect(account.getByText("Checking connection…", { exact: true }).first()).toBeVisible();
     await expect(account.getByRole("button", { name: /Sign in/ })).toHaveCount(0);
-    await expectReachableWithoutScrolling(page, account.getByRole("status"));
+    await expectReachableWithoutScrolling(page, account.getByRole("status").first());
     await shot("1-checking");
 
     auth.releaseCheck();
@@ -108,15 +94,6 @@ for (const viewport of VIEWPORTS) {
     });
     await expect(account.getByTestId("provider-device-code")).toHaveCount(0);
     await expectReachableWithoutScrolling(page, account.getByText("Signed in", { exact: true }));
-    await expect(
-      dialog.getByRole("textbox", { name: "Configuration name", exact: true }),
-    ).toHaveValue("Draft survives sign-in");
-    await expect(
-      dialog.getByRole("button", {
-        name: "ChatGPT Codex Responses",
-        exact: true,
-      }),
-    ).toBeVisible();
     await shot("4-signed-in");
     expect(auth.starts).toEqual(["codex"]);
     expect(auth.logouts).toEqual([]);

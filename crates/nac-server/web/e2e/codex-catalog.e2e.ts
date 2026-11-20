@@ -1,7 +1,7 @@
 import path from "node:path";
 
 import { createDirectSession, expect, test, waitForRunIdle } from "./harness";
-import { openSessionSettings } from "./nav-focus-helpers";
+import { openModelList } from "./focus-embedded-helpers";
 
 test.use({ orchestration: "0", codexCatalogFixture: true });
 
@@ -55,9 +55,13 @@ test("selects a discovered Codex model and agrees with runtime input budget", as
     });
   });
   await page.goto(`${harness.baseUrl}/#/session/${sessionId}/delegated`);
-  await page.getByRole("button", { name: "Model" }).click();
-  await page.getByPlaceholder("Search models…").fill("gpt-6.1-sol");
-  await page.getByRole("button", { name: /GPT-6\.1-Sol gpt-6\.1-sol/ }).click();
+  const sol = await openModelList(page);
+  await page.getByRole("textbox", { name: "Search models", exact: true }).fill("gpt-6.1-sol");
+  await sol
+    .getByText("ChatGPT", { exact: true })
+    .locator("..")
+    .getByRole("menuitemradio", { name: /GPT-6\.1[- ]Sol/ })
+    .click();
   await expect
     .poll(
       async () =>
@@ -69,9 +73,13 @@ test("selects a discovered Codex model and agrees with runtime input budget", as
     page.getByText("9% of the model's effective input budget (provider profile)"),
   ).toBeVisible();
   await page.keyboard.press("Escape");
-  await page.getByRole("button", { name: "Model" }).click();
-  await page.getByPlaceholder("Search models…").fill("gpt-6-astra");
-  await page.getByRole("button", { name: /GPT-6-Astra gpt-6-astra/ }).click();
+  const astraModel = await openModelList(page);
+  await page.getByRole("textbox", { name: "Search models", exact: true }).fill("gpt-6-astra");
+  await astraModel
+    .getByText("ChatGPT", { exact: true })
+    .locator("..")
+    .getByRole("menuitemradio", { name: /GPT-6[- ]Astra/ })
+    .click();
   await expect
     .poll(
       async () =>
@@ -107,23 +115,15 @@ test("selects a discovered Codex model and agrees with runtime input budget", as
   );
   expect(switchedConfig.automatic_compaction).toBe(true);
   expect((await request.patch(configUrl, { data: { model: "gpt-6.1-sol" } })).ok()).toBeTruthy();
-  await page.goto(`${harness.baseUrl}/#/session/${newId}/delegated`);
-  await openSessionSettings(page);
-  const settings = page.getByRole("dialog", { name: "Session settings", exact: true });
-  await settings.getByText("Advanced execution settings", { exact: true }).click();
-  await settings.getByRole("button", { name: "Advanced Configurations", exact: true }).click();
-  await expect(settings.getByRole("textbox", { name: "Context limit", exact: true })).toHaveValue(
-    "332500",
-  );
-  await settings.getByRole("textbox", { name: "Context limit", exact: true }).fill("123456");
-  await settings.getByRole("button", { name: "Save", exact: true }).click();
-  await expect(settings).toBeHidden();
+  const setThreshold = await request.patch(configUrl, {
+    data: { orchestrator_compaction_threshold: 123_456 },
+  });
+  expect(setThreshold.ok()).toBeTruthy();
   await expect
     .poll(
       async () => (await (await request.get(configUrl)).json()).orchestrator_compaction_threshold,
     )
     .toBe(123_456);
-  await page.reload();
   expect((await (await request.get(configUrl)).json()).orchestrator_compaction_threshold).toBe(
     123_456,
   );

@@ -697,10 +697,9 @@ test("running full-name headings keep their visible shimmer text", async ({
   }
 });
 
-// Phones show no tiles (Home is their session list), so the narrow case is the
-// smallest width that still has them.
+// Desktop Home delegates unassigned session navigation to the sidebar.
 for (const width of [1440, 768])
-  test(`orphan cards disclose names without nested controls ${width}`, async ({
+  test(`unassigned rows disclose names without nested controls ${width}`, async ({
     harness,
     page,
     request,
@@ -717,44 +716,39 @@ for (const width of [1440, 768])
     }
     await page.setViewportSize({ width, height: 900 });
     await page.goto(harness.baseUrl);
+    const sidebar = await showSidebar(page);
+    const unassigned = sidebar.getByRole("region", { name: "Unassigned", exact: true });
     const url = page.url();
-    for (const [at, name] of names.slice(0, 2).entries()) {
-      // The tile opens the session under its full name.
-      const card = page.locator(`[data-item-id="${ids[at]}"]`);
-      const open = card
-        .locator("xpath=self::*[@role='button'] | .//*[self::button or @role='button']")
-        .and(page.getByRole("button", { name, exact: true }))
-        .first();
+    for (const name of names.slice(0, 2)) {
+      const open = unassigned.getByRole("button", {
+        name: new RegExp(`^${escapeRegExp(name)}(?:, Agent)?$`),
+      });
+      const row = unassigned.locator("[data-session-row]").filter({ has: open });
       await expect(open).toBeVisible();
-      // No interactive control nests inside another, the tile itself included.
-      const nested = await card.evaluate((root) => {
+      const nested = await row.evaluate((root) => {
         const interactive = 'button, a[href], [role="button"], input, select, textarea';
-        const controls = [root, ...root.querySelectorAll(interactive)].filter((node) =>
-          node.matches(interactive),
-        );
-        return controls
+        return [...root.querySelectorAll(interactive)]
           .filter((node) => node.querySelector(interactive))
           .map((node) => node.getAttribute("aria-label") ?? node.tagName);
       });
       expect(nested).toEqual([]);
-      if (width >= 768) {
-        await open.hover();
-        await expect(page.getByRole("tooltip")).toHaveText(name);
-        await page.keyboard.press("Escape");
-      }
-      await viewName(page, card.getByRole("button", { name: "View full name", exact: true }), name);
+      await open.hover();
+      await expect(page.getByRole("tooltip")).toHaveText(name);
+      await page.keyboard.press("Escape");
+      const { trigger, action } = await openSessionRowAction(
+        unassigned,
+        page,
+        name,
+        "View full name",
+      );
+      await viewName(page, action, name, trigger);
       expect(page.url()).toBe(url);
     }
-    await capture(page, info, `orphan-cards-${width}`);
-    const open = page
-      .locator(`[data-item-id="${ids[1]}"]`)
-      .locator("xpath=self::*[@role='button'] | .//*[self::button or @role='button']")
-      .and(page.getByRole("button", { name: names[1], exact: true }))
-      .first();
-    if (width >= 768) {
-      await open.focus();
-      await page.keyboard.press("Enter");
-    } else await open.tap();
+    await capture(page, info, `unassigned-rows-${width}`);
+    const open = unassigned.getByRole("button", {
+      name: new RegExp(`^${escapeRegExp(names[1])}(?:, Agent)?$`),
+    });
+    await open.press("Enter");
     await expect(page).toHaveURL(new RegExp(`/session/${ids[1]}/`));
   });
 

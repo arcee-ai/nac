@@ -106,16 +106,21 @@ async function retainedJourney(
   const brokenBody = broken.ok() ? await broken.json() : null;
   // Either the read fails or it reports the source ineligible; neither offers isolation.
   expect(brokenBody?.eligible ?? false).toBe(false);
-  const isolated = page.getByRole("button", { name: "Isolated checkout" });
-  await expect(isolated).toHaveCount(0);
+  const additional = page.getByRole("button", { name: "Additional settings", exact: true });
+  const isolated = page.getByRole("switch", { name: "Isolated checkout", exact: true });
+  await additional.click();
+  await expect(isolated).toBeDisabled();
   expect((await (await request.get(`${harness.baseUrl}/sessions`)).json()).length).toBe(1);
   await fs.unlink(path.join(repo, ".git"));
   await fs.rename(metadata, path.join(repo, ".git"));
   await page.reload();
   await chooseAgent();
-  // An eligible source offers the opt-in isolated checkout.
+  // An eligible source permits the opt-in isolated checkout.
+  await additional.click();
   await isolated.click();
-  await expect(isolated).toHaveAttribute("aria-pressed", "true");
+  await expect(isolated).toBeChecked();
+  await page.keyboard.press("Escape");
+  await expect(isolated).toHaveCount(0);
   await prompt.fill("FIRST_RETAINED_BRIEF");
   await page.getByRole("button", { name: "Set up isolated task", exact: true }).click();
   const dialog = page.getByRole("dialog").filter({ hasText: "New isolated task" });

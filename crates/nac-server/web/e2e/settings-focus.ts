@@ -84,7 +84,7 @@ export async function leaveSettings(page: Page): Promise<void> {
 }
 
 /** Opens the session header's ⋯ menu (desktop) or panel sheet (phone). */
-export async function openSessionMenu(page: Page): Promise<Locator> {
+export async function openSessionMenu(page: Page | Locator): Promise<Locator> {
   const phone = page.getByRole("button", { name: "Open panel", exact: true });
   const desktop = page.getByRole("button", { name: "Session menu", exact: true });
   // Wait for the header to render before choosing which trigger this width draws.
@@ -101,6 +101,15 @@ export async function openSessionSettings(page: Page): Promise<Locator> {
   const menu = await openSessionMenu(page);
   await menu.getByRole("button", { name: "Session settings", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Session settings", exact: true });
+  await expect(dialog).toBeVisible();
+  return dialog;
+}
+
+/** Opens the revision-checked title form from the current session's menu. */
+export async function openSessionRename(scope: Page | Locator): Promise<Locator> {
+  const menu = await openSessionMenu(scope);
+  await menu.getByRole("button", { name: "Rename", exact: true }).click();
+  const dialog = scope.getByRole("dialog", { name: "Rename session", exact: true });
   await expect(dialog).toBeVisible();
   return dialog;
 }

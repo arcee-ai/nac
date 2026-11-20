@@ -26,7 +26,7 @@ for (const width of [1440, 1024, 920, 390]) {
     await page.goto(`${harness.baseUrl}/#/session/${session}/insights`);
     const composer = page.getByRole("combobox", { name: "Message", exact: true });
     await composer.fill("Keep the exact native return draft");
-    await openSettingsSection(page, "Models & providers");
+    await openSettingsSection(page, "Accounts & keys");
     await expect(
       page.getByRole("button", { name: width < 1024 ? "Settings" : "Back", exact: true }),
     ).toBeVisible();

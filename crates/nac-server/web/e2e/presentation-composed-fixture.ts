@@ -108,6 +108,7 @@ export async function installComposedFixture(
     projectAttempts: 0,
     sessionCreates: 0,
     configWrites: 0,
+    presentationWrites: 0,
     secretWrites: 0,
     loginStarts: 0,
     cloneStarts: 0,
@@ -228,6 +229,14 @@ export async function installComposedFixture(
           return route.fulfill({
             status: 400,
             json: { error: "Configured Deny: review this setting before retrying." },
+          });
+      }
+      if (/^\/sessions\/[^/]+\/presentation$/.test(name) && method === "PUT") {
+        state.presentationWrites += 1;
+        if (width === 768 && state.presentationWrites === 1)
+          return route.fulfill({
+            status: 400,
+            json: { error: "Configured Deny: review this fixture title before retrying." },
           });
       }
       if (name === "/mcp_library/library" && method === "GET")
@@ -590,8 +599,8 @@ export async function openSessionSettings(
   );
 }
 
-/** Opens Insights as the session drawer (desktop) or sheet (phone). */
-export async function openInsightsPanel(
+/** Opens the title form from either session-header layout. */
+export async function openComposedRename(
   j: Journey,
   press: Press = (control) => activate(j, control),
 ) {
@@ -601,13 +610,43 @@ export async function openInsightsPanel(
       exact: true,
     }),
   );
-  const sheet = j.root.getByRole("dialog", { name: "Session", exact: true });
   await press(
-    j.width < 768
-      ? sheet.getByRole("button").filter({ hasText: /^Insights/ })
-      : sheet.getByRole("button", { name: "Insights", exact: true }),
+    j.root
+      .getByRole("dialog", { name: "Session", exact: true })
+      .getByRole("button", { name: "Rename", exact: true }),
   );
-  const panel = j.root.getByRole("dialog", { name: "Insights", exact: true });
+  const dialog = j.root.getByRole("dialog", { name: "Rename session", exact: true });
+  await expect(dialog).toBeVisible();
+  return dialog;
+}
+
+/** Opens Insights as the session drawer (desktop) or sheet (phone). */
+export async function openInsightsPanel(
+  j: Journey,
+  press: Press = (control) => activate(j, control),
+) {
+  const floating = j.root.getByRole("dialog", { name: "Insights", exact: true });
+  const panel = floating.or(j.root.getByRole("complementary", { name: "Insights", exact: true }));
+  if (j.width < 768) {
+    await press(j.root.getByRole("button", { name: "Open panel", exact: true }));
+    const sheet = j.root.getByRole("dialog", { name: "Session", exact: true });
+    await press(sheet.getByRole("button").filter({ hasText: /^Insights/ }));
+  } else {
+    const toggle = j.root.getByRole("button", { name: "Session panel", exact: true });
+    if (await toggle.isVisible()) {
+      if ((await toggle.getAttribute("aria-pressed")) !== "true") await press(toggle);
+      const insights = j.root.getByRole("tab", { name: "Insights", exact: true });
+      if ((await insights.getAttribute("aria-selected")) !== "true") await press(insights);
+    } else {
+      // The archived visual baseline still reaches the old drawer through its menu.
+      await press(j.root.getByRole("button", { name: "Session menu", exact: true }));
+      await press(
+        j.root
+          .getByRole("dialog", { name: "Session", exact: true })
+          .getByRole("button", { name: "Insights", exact: true }),
+      );
+    }
+  }
   await expect(panel).toBeVisible();
   return panel;
 }

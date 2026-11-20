@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { expect, test } from "./harness";
+import { openSettingsSection } from "./settings-focus";
 
 test.use({ orchestration: "0" });
 
@@ -39,9 +40,8 @@ test("native device fixture waits for the auth check before issuing one sign-in"
   });
   try {
     await page.goto(`${harness.baseUrl}/#/`);
-    await page.getByRole("button", { name: "Get Started", exact: true }).click();
-    await page.getByRole("button", { name: "Provider connections", exact: true }).click();
-    const accounts = page.getByRole("region", { name: "Provider connections", exact: true });
+    const section = await openSettingsSection(page, "Accounts & keys");
+    const accounts = section.getByRole("group", { name: "Arcee account", exact: true });
     await expect(accounts.getByText("Arcee sign-in", { exact: true })).toBeVisible();
     await expect(accounts.getByText("Checking connection…", { exact: true }).first()).toBeVisible();
     const input = { title: "Sign in with Arcee", inCard: true };

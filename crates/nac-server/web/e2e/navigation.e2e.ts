@@ -14,6 +14,7 @@ import {
   openPhonePanel,
   openSessionRowAction,
   sessionRowMenu,
+  showSidebar,
 } from "./nav-focus-helpers";
 import { ScriptGate } from "./scripted-provider";
 
@@ -286,6 +287,7 @@ test("project navigation, overflow, phone actions and notification feedback", as
           ).toBeAttached();
         } else {
           // Desktop Home has no project tiles; projects stay in the sidebar.
+          await showSidebar(page);
           await expect(page.getByRole("region", { name: "Projects", exact: true })).toHaveCount(0);
           await expect(
             nav.getByRole("button", {

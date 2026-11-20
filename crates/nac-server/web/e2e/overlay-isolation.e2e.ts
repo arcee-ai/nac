@@ -1,3 +1,4 @@
+import { openModelList } from "./focus-embedded-helpers";
 import { createProject, createSession, expect, test } from "./harness";
 import { startHostedFixture } from "./hosted-fixture";
 
@@ -19,7 +20,7 @@ test("embedded dialogs retain local Tab, dismissal, hints and shortcuts across t
     const left = page.getByRole("region", { name: "Left presentation", exact: true });
     const right = page.getByRole("region", { name: "Right presentation", exact: true });
     const views = [left, right];
-    // Session settings lives in the header's session menu; dismissing the
+    // Rename lives in the header's session menu; dismissing the
     // dialog hands focus back to that menu's trigger.
     const openers = views.map((view) =>
       view.getByRole("button", { name: "Session menu", exact: true }),
@@ -28,18 +29,18 @@ test("embedded dialogs retain local Tab, dismissal, hints and shortcuts across t
       await openers[index].click();
       await views[index]
         .getByRole("dialog", { name: "Session", exact: true })
-        .getByRole("button", { name: "Session settings", exact: true })
+        .getByRole("button", { name: "Rename", exact: true })
         .click();
     };
     const dialogs = views.map((view) =>
-      view.getByRole("dialog", { name: "Session settings", exact: true }),
+      view.getByRole("dialog", { name: "Rename session", exact: true }),
     );
     for (let index = 0; index < views.length; index += 1) {
       await openSettings(index);
       await expect(dialogs[index]).toBeVisible();
       // A local unsaved draft enables the last footer control without sending a write.
       await dialogs[index]
-        .getByRole("textbox", { name: "Session title", exact: true })
+        .getByRole("textbox", { name: "Title", exact: true })
         .fill(`${index === 0 ? "Left" : "Right"} unsaved title`);
       await expect(dialogs[index].getByRole("button", { name: "Save", exact: true })).toBeEnabled();
       await expect(views[index].locator("[data-nac-content]")).toHaveAttribute("inert", "");
@@ -61,25 +62,7 @@ test("embedded dialogs retain local Tab, dismissal, hints and shortcuts across t
     }
     await page.screenshot({ path: info.outputPath("two-instance-dialogs.png") });
 
-    // The existing model picker is a real nested atom popover, not a test-only overlay.
-    const models = dialogs[0].getByRole("button").filter({ hasText: "GPT-5.6 Sol" }).first();
-    await models.click();
-    const search = left.getByPlaceholder("Search models…");
-    await expect(search).toBeVisible();
-    await search.focus();
-    await page.keyboard.press("Escape");
-    await expect(search).toHaveCount(0);
-    await expect(dialogs[0]).toBeVisible();
-    await expect(dialogs[1]).toBeVisible();
-    await models.click();
-    await expect(search).toBeVisible();
-    // A press in the other instance may close the menu but must not dismiss either dialog.
-    await dialogs[1].getByText("Session settings", { exact: true }).click();
-    await expect(search).toHaveCount(0);
-    await expect(dialogs[0]).toBeVisible();
-    await expect(dialogs[1]).toBeVisible();
-
-    await dialogs[0].getByRole("textbox", { name: "Session title", exact: true }).focus();
+    await dialogs[0].getByRole("textbox", { name: "Title", exact: true }).focus();
     await page.keyboard.press("Escape");
     await expect(dialogs[0]).toHaveCount(0);
     await expect(openers[0]).toBeFocused();
@@ -87,7 +70,19 @@ test("embedded dialogs retain local Tab, dismissal, hints and shortcuts across t
     await expect(dialogs[1]).toBeVisible();
     await expect(right.locator("[data-nac-content]")).toHaveAttribute("inert", "");
 
+    // The composer list stays local even while the sibling has an open dialog.
+    await openModelList(left);
+    const search = left.getByRole("textbox", { name: "Search models", exact: true });
+    await search.press("Escape");
+    await expect(search).toHaveCount(0);
+    await expect(dialogs[1]).toBeVisible();
+    await openModelList(left);
+    await dialogs[1].getByText("Rename session", { exact: true }).click();
+    await expect(search).toHaveCount(0);
+    await expect(dialogs[1]).toBeVisible();
+
     const hide = left.getByRole("button", { name: "Hide sidebar", exact: true });
+    await hide.hover();
     await hide.focus();
     // The hint keyboard focus showed on the returned opener may still be fading out.
     await expect(left.getByRole("tooltip", { name: /Hide sidebar/ })).toBeVisible();
@@ -126,7 +121,7 @@ test("embedded dialogs retain local Tab, dismissal, hints and shortcuts across t
         viewport: page.viewportSize(),
         focusTrace,
         proof:
-          "Two production NativePresentationRoot runtimes/routers; local first/last Tab, nested model picker Escape/outside press, owned dismissal/focus return, scoped inertness/portals, tooltip accessible description and sidebar shortcut isolation. Unsaved settings cancelled without writes.",
+          "Two production NativePresentationRoot runtimes/routers; local first/last Tab, composer model list Escape/outside press, owned dismissal/focus return, scoped inertness/portals, tooltip accessible description and sidebar shortcut isolation. Unsaved title cancelled without writes.",
         limitation:
           "Chromium keyboard/AX evidence; no real screen reader, physical touch device or OS IME.",
       }),

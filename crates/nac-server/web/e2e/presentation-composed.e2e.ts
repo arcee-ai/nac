@@ -19,7 +19,6 @@ import { finishPresentation } from "./presentation-lifetime";
 import { ownComposedCleanup, ownPackedCapturePage } from "./presentation-capture-page";
 import {
   activate,
-  activatePacked390Model,
   recordPackedOverflow,
   captureComposed,
   composedBranch,
@@ -27,8 +26,7 @@ import {
   installComposedFixture,
   menuAction,
   openInsightsPanel,
-  openSessionSettings,
-  primaryModelTrigger,
+  openComposedRename,
   revealDesktopSidebar,
   type ComposedFixture,
   type Journey,
@@ -48,35 +46,18 @@ test.skip(
 
 async function launchComposed(j: Journey) {
   const { root, fixture, page } = j;
-  const start = root.getByRole("button", { name: "Get Started", exact: true });
-  if (await start.isVisible()) await activate(j, start);
-  else await menuAction(j, /^New project$/i);
+  const openProject = async () => {
+    const start = root.getByRole("button", { name: "Get Started", exact: true });
+    if (await start.isVisible()) await activate(j, start);
+    else await menuAction(j, /^New project$/i);
+  };
+  await openProject();
   const form = root.getByRole("dialog", { name: "New Project", exact: true });
-  const model = primaryModelTrigger(form);
-  if (j.width === 768) {
-    await expect
-      .poll(() => fixture.calls.some((call) => call.method === "GET" && call.path === "/models"))
-      .toBe(true);
-    await expect(model).toBeDisabled();
-  }
-  fixture.catalogGate.release();
-  if (j.transport === "packed" && j.width === 390) await activatePacked390Model(j, form, model);
-  else await activate(j, model);
-  await root.getByPlaceholder("Search models…").fill("gpt-5.6-sol");
-  await root.getByPlaceholder("Search models…").press("ArrowDown");
-  await root.getByPlaceholder("Search models…").press("Enter");
-  await expect(model).toHaveAttribute("aria-expanded", "false");
   const title = form.getByRole("textbox", { name: "Project name", exact: true });
   await title.fill("Composed launch / preserve long selected context");
-  const folder = form
-    .getByRole("button", {
-      name: new RegExp(`Working Folder|${fixture.folder.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
-    })
-    .first();
+  const folder = form.getByRole("button", { name: /^Choose Working Folder/ });
   await activate(j, folder);
-  await expect(
-    root.getByRole("dialog", { name: "Select Working Folder", exact: true }),
-  ).toBeVisible();
+  await expect(root.getByRole("dialog", { name: "Choose a folder", exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(folder).toBeFocused();
   await expect(title).toHaveValue("Composed launch / preserve long selected context");
@@ -84,35 +65,15 @@ async function launchComposed(j: Journey) {
   await expect(form).toHaveCount(0);
   expect(fixture.state.projectAttempts).toBe(0);
   expect(fixture.state.sessionCreates).toBe(0);
-  if (await start.isVisible()) await activate(j, start);
-  else await menuAction(j, /^New project$/i);
-  if (j.transport === "packed" && j.width === 390) await activatePacked390Model(j, form, model);
-  else await activate(j, model);
-  await root.getByPlaceholder("Search models…").fill("gpt-5.6-sol");
-  await root.getByPlaceholder("Search models…").press("ArrowDown");
-  await root.getByPlaceholder("Search models…").press("Enter");
-  await expect(model).toHaveAttribute("aria-expanded", "false");
+
+  await openProject();
   await title.fill("Composed qualification project");
   const launch = form.getByRole("button", { name: "Create Project", exact: true });
   if (j.width === 768) {
     await activate(j, launch);
-    await expect(form.getByRole("alert")).toHaveText(
-      "Choose a valid Git working folder. (HTTP 400)",
-    );
-    // The prior request error clears only after an actual public edit.
+    await expect(form.getByRole("alert")).toContainText("Choose a valid Git working folder.");
     await title.fill("Composed qualification project / retry");
   }
-  await expect(launch).toBeEnabled();
-  const created = page
-    .waitForResponse(
-      (response) =>
-        fixture.resource(new URL(response.url())) === "/sessions" &&
-        response.request().method() === "POST",
-    )
-    .then(
-      (response) => ({ response }),
-      (error: unknown) => ({ error }),
-    );
   await activate(j, launch);
   try {
     await expect.poll(() => fixture.state.projectPending).toBe(true);
@@ -124,27 +85,56 @@ async function launchComposed(j: Journey) {
   } finally {
     fixture.projectGate.release();
   }
-  const observed = await created;
-  if ("error" in observed) throw observed.error;
-  const accepted = observed.response;
+  await expect(form).toHaveCount(0);
+  expect(fixture.state.sessionCreates).toBe(0);
+  expect(fixture.state.projectAttempts).toBe(j.width === 768 ? 2 : 1);
+
+  const model = root.getByRole("button", { name: /^(Model: |Choose a model$)/ });
+  const start = root.getByRole("button", { name: "Start session", exact: true });
+  if (j.width === 768) {
+    await expect
+      .poll(() => fixture.calls.some((call) => call.method === "GET" && call.path === "/models"))
+      .toBe(true);
+    await expect(start).toBeDisabled();
+  }
+  fixture.catalogGate.release();
+  await model.click();
+  await root
+    .getByRole("menu", { name: "Model settings", exact: true })
+    .getByRole("menuitem", { name: /^Model / })
+    .click();
+  const search = root.getByRole("textbox", { name: "Search models", exact: true });
+  await search.fill("gpt-5.6-sol");
+  await search.press("Enter");
+  await expect(model).toHaveAttribute("aria-expanded", "false");
+
+  const prompt = "COMPOSED_BROWSER_LAUNCH";
+  j.harness.provider.enqueue(
+    "composed-launch",
+    { token: prompt },
+    { kind: "text", text: "Ready for the qualification journey.", stream: "request" },
+  );
+  await root.getByRole("textbox", { name: "What should we work on?", exact: true }).fill(prompt);
+  const created = page.waitForResponse(
+    (response) =>
+      fixture.resource(new URL(response.url())) === "/sessions" &&
+      response.request().method() === "POST",
+  );
+  await activate(j, start);
+  const accepted = await created;
   expect(accepted.ok()).toBe(true);
-  const body = (await accepted.json()) as { metadata: { session_id: string } };
+  const body = (await accepted.json()) as { metadata: { session_id: string; behavior: string } };
   const id = body.metadata.session_id;
   expect(id).toBeTruthy();
-  expect(body.metadata).toMatchObject({ behavior: "direct" });
+  expect(body.metadata.behavior).toBe("direct");
   expect(fixture.state.sessionCreates).toBe(1);
-  expect(fixture.state.projectAttempts).toBe(j.width === 768 ? 2 : 1);
-  await expect(form).toHaveCount(0);
-  const config = (await (
-    await j.request.get(`${j.harness.baseUrl}/sessions/${id}/config`)
-  ).json()) as { base_url: string; model: string };
+  await expect(
+    root.getByText("Ready for the qualification journey.", { exact: true }),
+  ).toBeVisible();
+  await waitForRunIdle(j.request, j.harness, id);
+  const config = await (await j.request.get(`${j.harness.baseUrl}/sessions/${id}/config`)).json();
   expect(new URL(config.base_url).origin).toBe(new URL(j.harness.provider.baseUrl).origin);
   expect(config.model).toBe("gpt-5.6-sol");
-  await expect(
-    j.root
-      .getByRole("region", { name: "Notifications", exact: true })
-      .getByText("Project created", { exact: true }),
-  ).toHaveCount(0);
   return id;
 }
 
@@ -201,7 +191,9 @@ async function conversationComposed(j: Journey, id: string) {
     gate.release();
   }
   // Insights opened as a drawer (sheet on phones); close it to return to the chat.
-  const insights = j.root.getByRole("dialog", { name: "Insights", exact: true });
+  const insights = j.root
+    .getByRole("dialog", { name: "Insights", exact: true })
+    .or(j.root.getByRole("complementary", { name: "Insights", exact: true }));
   if (await insights.isVisible()) {
     // A phone sheet's detail screen leads back to its list, whose header closes the sheet.
     const openList = insights.getByRole("button", { name: "Open list", exact: true });
@@ -224,35 +216,28 @@ async function conversationComposed(j: Journey, id: string) {
 }
 
 async function settingsComposed(j: Journey) {
-  const settings = j.root.getByRole("dialog", { name: "Session settings", exact: true });
   const notifications = j.root.getByRole("region", { name: "Notifications", exact: true });
-  await openSessionSettings(j);
-  const title = settings.getByRole("textbox", { name: "Session title", exact: true });
+  const settings = await openComposedRename(j);
+  const title = settings.getByRole("textbox", { name: "Title", exact: true });
   await title.fill("Discard this settings draft");
   await activate(j, settings.getByRole("button", { name: "Cancel", exact: true }));
   await expect(settings).toHaveCount(0);
-  await openSessionSettings(j);
+  await openComposedRename(j);
   await expect(title).not.toHaveValue("Discard this settings draft");
   await title.fill("Composed settings saved");
-  await settings.getByText("Advanced execution settings", { exact: true }).click();
-  await activate(j, settings.getByRole("button", { name: "Advanced Configurations", exact: true }));
-  await settings.getByRole("textbox", { name: "Context limit", exact: true }).fill("48000");
   if (j.width === 768) {
     await activate(j, settings.getByRole("button", { name: "Save", exact: true }));
-    await expect(settings.getByRole("alert")).toContainText("Configured Deny");
+    await expect(
+      notifications.getByRole("alert").filter({ hasText: "Configured Deny" }),
+    ).toBeVisible();
   }
   await captureComposed(j, "settings-draft");
   await activate(j, settings.getByRole("button", { name: "Save", exact: true }));
   await expect(settings).toHaveCount(0);
-  await openSessionSettings(j);
+  await openComposedRename(j);
   await expect(title).toHaveValue("Composed settings saved");
   await activate(j, settings.getByRole("button", { name: "Cancel", exact: true }));
   await expect(settings).toHaveCount(0);
-  await expect(
-    j.root
-      .getByRole("region", { name: "Notifications", exact: true })
-      .getByText("Session settings saved", { exact: true }),
-  ).toHaveCount(0);
 
   await menuAction(j, /^MCP servers/);
   await activate(

@@ -580,21 +580,13 @@ test("completes the managed first-run, write-only secret, and clone journey", as
   await expect(page.getByTestId("managed-empty-status")).toContainText("Arcee model");
   await expect(page.getByTestId("managed-empty-status")).toContainText("Not connected");
   await page.getByRole("button", { name: "Create from an existing path" }).click();
-  await expect(page.getByRole("dialog")).toContainText("New Project");
-  await expect(page.getByRole("button", { name: /Trinity-Large-Thinking/ })).toBeVisible();
-  await expect(page.getByText("Detected", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: /Trinity-Large-Thinking/ }).click();
-  await page.getByRole("button", { name: /Kimi K3/ }).click();
-  await expect(page.getByRole("button", { name: /Kimi K3/ })).toBeVisible();
-  await expect
-    .poll(() => state.providerRequests)
-    .toEqual([
-      {
-        backend: "arcee-api",
-        base_url: "https://api.arcee.ai/api/v1",
-      },
-    ]);
-  await page.getByRole("button", { name: "Close" }).click();
+  const project = page.getByRole("dialog", { name: "New Project", exact: true });
+  await expect(project.getByRole("button", { name: /^Choose Working Folder/ })).toBeVisible();
+  await expect(project.getByRole("button", { name: /Trinity-Large-Thinking|Kimi K3/ })).toHaveCount(
+    0,
+  );
+  expect(state.providerRequests).toEqual([]);
+  await project.getByRole("button", { name: "Close", exact: true }).click();
   await page.getByRole("button", { name: "Add repository" }).first().click();
   await expect(page.getByTestId("managed-github-settings")).toBeVisible();
   await page

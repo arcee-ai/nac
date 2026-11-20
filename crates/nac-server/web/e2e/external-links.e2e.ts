@@ -1,7 +1,7 @@
 import type { APIRequestContext, Locator, Page, TestInfo } from "@playwright/test";
 
 import { createDirectSession, createProject, expect, test, type EmbeddedHarness } from "./harness";
-import { openSessionSettings } from "./settings-focus";
+import { openSettingsSection } from "./settings-focus";
 
 test.use({ orchestration: "0" });
 
@@ -215,9 +215,7 @@ for (const viewport of [
     });
     const id = await linkSession(request, harness);
     await page.goto(`${harness.baseUrl}/#/session/${id}/insights`);
-    const settings = await openSessionSettings(page);
-    await settings.getByRole("button", { name: "Provider connections", exact: true }).click();
-    const accounts = settings.getByRole("region", { name: "Provider connections" });
+    const accounts = await openSettingsSection(page, "Accounts & keys");
     // This is browser fallback, using controlled HTTP UI responses. Native
     // auth-owner and actual system-browser acceptance remain separate lanes.
     const automatic = page.waitForEvent("popup");
@@ -241,7 +239,7 @@ for (const viewport of [
       accounts.getByRole("button", { name: "Sign in with Arcee", exact: true }),
     ).toBeVisible();
     expect(starts).toBe(1);
-    await expect(page).toHaveURL(new RegExp(`/#/session/${id}/insights$`));
+    await expect(page).toHaveURL(`${harness.baseUrl}/#/settings/accounts`);
     await attachLinkBrowserEvents(info, browserEvents);
   });
 

@@ -98,7 +98,7 @@ for (const mobile of [false, true]) {
     if (!baselineAssets) {
       // The project fixture explicitly configures high effort; wait for the
       // canonical snapshot rather than accepting the pre-snapshot placeholder.
-      await expect(page.getByRole("button", { name: "High", exact: true })).toBeVisible();
+      await expect(page.getByRole("button", { name: /^Model: .+, High reasoning$/ })).toBeVisible();
       if (!mobile) {
         // Usage readings live in the header's Session menu.
         const menu = page.getByRole("button", { name: "Session menu", exact: true });
