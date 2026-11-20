@@ -20,18 +20,19 @@ test("Select applies the typed working folder without pressing Enter", async ({
   const workspaceCanonical = await fs.realpath(path.join(harness.runRoot, "workspace"));
 
   await page.goto(harness.baseUrl);
-  await page.getByRole("button", { name: "Get Started", exact: true }).click();
+  await page.getByRole("button", { name: /^New project$/i }).click();
   const form = page.getByRole("dialog", { name: "New Project" });
   // The control's accessible name carries the current folder ("Choose Working Folder: <path>").
   const folderButton = form.getByRole("button", { name: /^Choose Working Folder(?::|$)/ });
   await expect(folderButton).toHaveText(workspaceCanonical);
-  const picker = page.getByRole("dialog", { name: "Select Working Folder" });
-  const draft = picker.getByPlaceholder("/path/to/directory");
-  const select = picker.getByRole("button", { name: "Select", exact: true });
+  const picker = page.getByRole("dialog", { name: "Choose a folder" });
+  const draft = picker.getByRole("textbox", { name: "Folder path", exact: true });
+  const select = picker.getByRole("button", { name: /^Choose “/ });
 
   // An absolute path with spaces and Unicode, typed and selected directly.
   await folderButton.click();
   await expect(picker).toBeVisible();
+  await picker.getByRole("button", { name: "Type a path", exact: true }).click();
   await draft.fill(spaced);
   await select.click();
   await expect(picker).toBeHidden();
@@ -40,6 +41,7 @@ test("Select applies the typed working folder without pressing Enter", async ({
 
   // A home-relative path resolves on the server, not in the browser.
   await folderButton.click();
+  await picker.getByRole("button", { name: "Type a path", exact: true }).click();
   await draft.fill("~/dev projects/nac ü");
   await select.click();
   await expect(picker).toBeHidden();
@@ -48,6 +50,7 @@ test("Select applies the typed working folder without pressing Enter", async ({
   // A folder that does not exist is reported and never created.
   const missing = path.join(harness.runRoot, "no such folder");
   await folderButton.click();
+  await picker.getByRole("button", { name: "Type a path", exact: true }).click();
   await draft.fill(missing);
   await select.click();
   const alert = picker.getByRole("alert");

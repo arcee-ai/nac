@@ -1,5 +1,7 @@
 import { expect, type Locator, type Page } from "@playwright/test";
 
+import { showSidePanel } from "./harness";
+
 /**
  * Navigation-area helpers for the Focus shell. Phones have no persistent
  * sidebar: a session's header goes back Home, and Home's header opens the
@@ -123,22 +125,18 @@ async function isPhoneWidth(page: Page): Promise<boolean> {
   );
 }
 
-/**
- * Opens a session panel by its label ("Insights", "Subagents", "Files"…) and
- * returns its drawer (desktop) or sheet (phone). Desktop opens the header's
- * single Session menu and picks the panel's row ("Subagents 1", "Insights").
- */
+/** Opens a session panel as a docked column, a floating drawer or a phone sheet. */
 export async function openSessionPanel(page: Page, label: string): Promise<Locator> {
   if (await isPhoneWidth(page)) return openPhonePanel(page, label);
-  const panel = page.getByRole("dialog", { name: label, exact: true });
-  if (await panel.isVisible()) return panel;
-  await page.getByRole("button", { name: "Session menu", exact: true }).click();
-  // Rows render once their data lands; a row may carry its live fact after the name.
-  await page
-    .getByRole("dialog", { name: "Session", exact: true })
-    .getByRole("button", { name: new RegExp(`^${escapeRegExp(label)}(?![A-Za-z])`) })
-    .first()
-    .click();
+  await showSidePanel(page);
+  const tab = page
+    .getByRole("tablist", { name: "Session panels", exact: true })
+    .getByRole("tab", { name: label, exact: true });
+  if ((await tab.getAttribute("aria-selected")) !== "true") await tab.click();
+  await expect(tab).toHaveAttribute("aria-selected", "true");
+  const panel = page
+    .getByRole("dialog", { name: label, exact: true })
+    .or(page.getByRole("complementary", { name: label, exact: true }));
   await expect(panel).toBeVisible();
   return panel;
 }

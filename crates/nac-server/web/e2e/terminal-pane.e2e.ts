@@ -5,7 +5,6 @@ import { createNacApi } from "../packages/nac-client/dist/api.js";
 import { NacClient } from "../packages/nac-client/dist/nacClient.js";
 import {
   createDirectSession,
-  expandSidePanel,
   expect,
   showPhonePanel,
   showRoutePanel,
@@ -62,10 +61,10 @@ for (const mobile of [false, true]) {
     await page.keyboard.press("Enter");
     await expect(accessible).toContainText("CTRL-OK");
     if (!mobile) {
-      // Full width is the floating drawer's; the terminal stays attached and
-      // painted there, and closing the drawer never ends the shell.
-      await expandSidePanel(page);
-      await expect(page.getByRole("dialog", { name: "Terminal", exact: true })).toBeVisible();
+      // The attached terminal remains alive when its docked panel closes.
+      await expect(
+        page.getByRole("complementary", { name: "Terminal", exact: true }),
+      ).toBeVisible();
       await expect(accessible).toContainText("CTRL-OK");
       await page.getByRole("button", { name: "Hide panel", exact: true }).click();
       await expect(pane).toHaveCount(0);
@@ -223,8 +222,7 @@ test.describe("full-screen terminal at browser scale 1.25", () => {
     await fs.writeFile(file, "SCREEN-ONLY-FIRST\n" + "screen body\n".repeat(40));
     const api = createNacApi(new NacClient({ endpoint: harness.baseUrl, credentials: "omit" }));
     await page.goto(`${harness.baseUrl}/#/session/${session}/terminal`);
-    // This journey resizes below the docking width; keep the floating drawer.
-    await showSidePanel(page, { dock: false });
+    await showSidePanel(page);
     const pane = page.getByRole("region", { name: "Session terminal", exact: true });
     await pane.getByRole("button", { name: /^New shell$/i }).click();
     await expect(pane.getByText("Connected", { exact: true })).toBeVisible();

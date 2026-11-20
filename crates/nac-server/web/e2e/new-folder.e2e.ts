@@ -18,18 +18,18 @@ test("New folder creates one folder that Select then applies", async ({
   const workspaceCanonical = await fs.realpath(path.join(harness.runRoot, "workspace"));
 
   await page.goto(harness.baseUrl);
-  // An empty install opens New Project from Home's empty state.
-  await page.getByRole("button", { name: "Get Started", exact: true }).click();
+  await page.getByRole("button", { name: /^New project$/i }).click();
   const form = page.getByRole("dialog", { name: "New Project" });
   const folderButton = form.getByRole("button", { name: /^Choose Working Folder(?::|$)/ });
   await expect(folderButton).toHaveText(workspaceCanonical);
-  const picker = page.getByRole("dialog", { name: "Select Working Folder" });
-  const draft = picker.getByPlaceholder("/path/to/directory");
+  const picker = page.getByRole("dialog", { name: "Choose a folder" });
+  const draft = picker.getByRole("textbox", { name: "Folder path", exact: true });
   const newFolder = picker.getByRole("group", { name: "New folder" });
   const nameField = newFolder.getByLabel("New folder name");
   const create = newFolder.getByRole("button", { name: "Create", exact: true });
 
   await folderButton.click();
+  await picker.getByRole("button", { name: "Type a path", exact: true }).click();
   await draft.fill(parentCanonical);
   await draft.press("Enter");
   await expect(picker.getByRole("button", { name: "taken" })).toBeVisible();
@@ -59,16 +59,20 @@ test("New folder creates one folder that Select then applies", async ({
   // Spaces and Unicode: exactly that folder is made, browsed into and drafted.
   await nameField.fill("café ü 项目");
   await create.click();
-  await expect(draft).toHaveValue(created);
+  const crumbs = picker.getByRole("navigation", { name: "Folder path" });
+  await expect(crumbs.getByRole("button", { name: "café ü 项目" })).toHaveAttribute(
+    "aria-current",
+    "location",
+  );
   await expect(newFolder).toBeHidden();
-  await expect(picker.getByText("No subdirectories here.", { exact: false })).toBeVisible();
+  await expect(picker.getByText("No folders inside. You can still choose this one.")).toBeVisible();
   expect((await fs.readdir(parent)).sort()).toEqual(["café ü 项目", "taken"]);
   expect(await fs.readdir(created)).toEqual([]);
   await picker.screenshot({ path: testInfo.outputPath("new-folder-created.png") });
   // Creating is not selecting: the form still has its old folder until Select.
   await expect(folderButton).toHaveText(workspaceCanonical);
 
-  await picker.getByRole("button", { name: "Select", exact: true }).click();
+  await picker.getByRole("button", { name: /^Choose “/ }).click();
   await expect(picker).toBeHidden();
   await expect(folderButton).toHaveText(created);
   await form.screenshot({ path: testInfo.outputPath("new-folder-selected.png") });
@@ -76,8 +80,9 @@ test("New folder creates one folder that Select then applies", async ({
   // Typing a path that does not exist still never creates it.
   const typed = path.join(parentCanonical, "typed only");
   await folderButton.click();
+  await picker.getByRole("button", { name: "Type a path", exact: true }).click();
   await draft.fill(typed);
-  await picker.getByRole("button", { name: "Select", exact: true }).click();
+  await picker.getByRole("button", { name: /^Choose “/ }).click();
   await expect(picker.getByRole("alert")).toContainText("does not exist");
   await expect(fs.access(typed)).rejects.toThrow();
   await picker.getByRole("button", { name: "Cancel", exact: true }).click();

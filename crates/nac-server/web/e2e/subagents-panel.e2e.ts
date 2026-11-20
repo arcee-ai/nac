@@ -3,7 +3,6 @@ import type { Page } from "@playwright/test";
 import { waitForDelegatedInput } from "./delegation-observation";
 import {
   createSession,
-  expandSidePanel,
   expect,
   showSubagents,
   startForegroundChild,
@@ -20,7 +19,7 @@ function subagentList(page: Page, mobile: boolean) {
     : page.locator("body");
 }
 
-test("keeps the parent conversation while selecting siblings, closing and focusing the panel", async ({
+test("keeps the parent conversation while selecting siblings, closing and resizing the panel", async ({
   harness,
   page,
   request,
@@ -99,10 +98,10 @@ test("keeps the parent conversation while selecting siblings, closing and focusi
   await expect(parentDraft).toHaveValue("Parent draft stays here");
   await showSubagents(page, false);
   await expect(page.getByText("Second child conversation", { exact: true })).toBeVisible();
-  await expandSidePanel(page);
-  await expect(page.getByText("Second child conversation", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Exit full width", exact: true }).click();
-  await expect(page.getByText("Second child conversation", { exact: true })).toBeVisible();
+  const resize = panel.getByRole("separator", { name: "Resize session panel" });
+  await resize.press("End");
+  await expect(panel.getByText("Second child conversation", { exact: true })).toBeVisible();
+  await expect(parentDraft).toHaveValue("Parent draft stays here");
   await hideSessionDrawer(page);
   await expect(parent).toBeVisible();
   await expect(parentDraft).toHaveValue("Parent draft stays here");

@@ -52,13 +52,10 @@ async function command(page: Page, text: string) {
   await page.keyboard.type(text);
   await page.keyboard.press("Enter");
 }
-async function show(page: Page, base: string, session: string, dock = false) {
+async function show(page: Page, base: string, session: string) {
   await page.goto(base + "/#/session/" + session + "/terminal");
   const pane = page.getByRole("region", { name: "Session terminal", exact: true });
-  // Document load can precede the session query and React's panel controls.
-  // These journeys resize the window, so keep the terminal in the floating
-  // drawer instead of a dock that the app moves away below 1280px.
-  await showSidePanel(page, { dock });
+  await showSidePanel(page);
   await expect(pane).toBeVisible();
   return pane;
 }
@@ -338,7 +335,7 @@ test("pane disposal releases observer seats and connected OSC52/OSC8 stays withi
   const session = await createDirectSession(request, harness);
   const api = createNacApi(new NacClient({ endpoint: harness.baseUrl, credentials: "omit" }));
   await api.setPermissionApprovalMode(session, "auto_approve");
-  let pane = await show(page, harness.baseUrl, session, true);
+  let pane = await show(page, harness.baseUrl, session);
   await prepareNewShell(pane);
   await pane.getByRole("button", { name: /^New shell$/i }).click();
   await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
