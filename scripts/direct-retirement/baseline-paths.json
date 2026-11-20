@@ -452,7 +452,7 @@
     {"path":"crates/nac-server/web/src/app/types/openapi.generated.ts","disposition":"neutralized"},
     {"path":"desktop/macos/FixtureBootstrap.swift","disposition":"neutralized"},
     {"path":"desktop/macos/PreviewProfile.swift","disposition":"pending"},
-    {"path":"desktop/macos/engine_contract.py","disposition":"pending"},
+    {"path":"desktop/macos/engine_contract.py","disposition":"historical","reason":"Native engine contract verifies store responses omit worker executable and retired worker CLI invocation fails."},
     {"path":"docs/README.md","disposition":"neutralized"},
     {"path":"docs/api/http.md","disposition":"neutralized"},
     {"path":"docs/architecture/0001-dependency-boundaries.md","disposition":"historical","reason":"Historical architecture decision records predecessor topology and distinguishes unrelated managed workflow coordination; ADR 0009 supersedes its retired topology claims."},
