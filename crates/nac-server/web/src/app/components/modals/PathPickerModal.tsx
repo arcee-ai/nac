@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import {
   Button,
@@ -110,6 +110,12 @@ function PathPicker({
   const selectDisabled = !chosen || checking !== null;
   const [typingPath, setTyping] = useState(false);
   const typing = typingPath || failure !== null;
+  const editButton = useRef<HTMLButtonElement>(null);
+  const exitPathEdit = () => {
+    picker.setDraft(picker.directory);
+    setTyping(false);
+    editButton.current?.focus();
+  };
   const chosenName = chosen ? chosen.replace(/\/+$/, "").split("/").pop() || chosen : "";
   const selectLabel = pickingFile || !chosenName ? "Select" : `Choose “${chosenName}”`;
   // Only a working-folder picker offers to make one. The folder goes in the
@@ -226,33 +232,38 @@ function PathPicker({
               aria-invalid={failure !== null}
               autoFocus={typing}
               value={draft}
-              onChange={(event) => picker.setDraft(event.target.value)}
+              onChange={(event) => {
+                setTyping(true);
+                picker.setDraft(event.target.value);
+              }}
               onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+                if (event.nativeEvent.isComposing) return;
+                if (event.key === "Enter") {
                   picker.goTo(draft);
                   setTyping(false);
                 }
-                if (event.key === "Escape" && typing) {
+                if (event.key === "Escape" && typing && data?.path) {
                   event.stopPropagation();
-                  setTyping(false);
+                  exitPathEdit();
                 }
               }}
             />
           ) : (
-            <>
-              <PathCrumbs path={data.path} home={data.home ?? null} onOpen={picker.goTo} />
-              <Button
-                variant={ButtonVariant.Ghost}
-                size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
-                content={ButtonContent.Icon}
-                onClick={() => setTyping(true)}
-                aria-label="Type a path"
-                title="Type a path"
-              >
-                <Icon iconName={IconName.Edit} />
-              </Button>
-            </>
+            <PathCrumbs path={data.path} home={data.home ?? null} onOpen={picker.goTo} />
           )}
+          {data?.path ? (
+            <Button
+              ref={editButton}
+              variant={ButtonVariant.Ghost}
+              size={isMobile ? ButtonSize.Large : ButtonSize.Medium}
+              content={ButtonContent.Icon}
+              onClick={typing ? exitPathEdit : () => setTyping(true)}
+              aria-label={typing ? "Cancel path edit" : "Type a path"}
+              title={typing ? "Cancel path edit" : "Type a path"}
+            >
+              <Icon iconName={typing ? IconName.Close : IconName.Edit} />
+            </Button>
+          ) : null}
           {creating ? (
             <Button
               variant={newFolder.open ? ButtonVariant.SecondaryHighlighted : ButtonVariant.Ghost}
