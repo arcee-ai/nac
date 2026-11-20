@@ -226,16 +226,16 @@ test("startup catalog binds an exact direct candidate and interaction supplier",
     "${{ inputs.startup_product_sha }}");
   const startup = JSON.parse(readFileSync("desktop/macos/ci-qualifications.json", "utf8"))["all-342-startup-macos26"];
   assert.equal(startup.source_sha, "1638a9f36b4978bfe790859d0d42ce3bea96a5cf");
-  assert.equal(startup.test_source_sha, "51c27fe42854f110a58f5105b50a93669cce8a53");
+  assert.equal(startup.test_source_sha, "5306800fd6ea70471ecd372a4f495621e0f74695");
   assert.deepEqual(startup.test_files, {
   "README.md": "23a181bf5ddff1dcce0a06b22e438026646d55b267f0b7205c5f58d9e22dfb54",
-  "StartupJourneys.swift": "0f2312db60a17adc560011ccd14d0a981120847cae70df472ade22665eda9189",
+  "StartupJourneys.swift": "acb6f7157225cffbc8e1fd0d4f4ebd3cb22a198cf6fa7bdb66ed0725a00122e1",
   "contract.py": "e9e5b9e477ab975acedeecdef7a8ab58da2222377630644e0d5e649009c8192e",
   "test_contract.py": "99449dbae247c877b2a8960b4a1147c45d0c133e585cdbeec2cb4c6b57e53046",
-  "StartupAXGuard.swift": "2fe55f60fa7331ab5a1842ea6f38108433ad0e4a6ad9d7e4589505a55fd7420a",
-  "StartupAXReceipt.swift": "43674941b96a14eec66cc0baec1c2909811daa71fd8e1ba625db9580f224e619",
-  "AX-WITNESS-CONTRACT.md": "9457cbc9bd0fb0d610996ec3e50f637d496c988cd0639b541890eb8533cf2b9d",
-  "test_ax_witness.py": "4b129e610b7be76159ea53501467160935655c6a35be90d7a3f40d2fe116ae0d",
+  "StartupAXGuard.swift": "4c13fb3fd042d55d209228186f40991e78c53506e743efb29491bb7840e0c50b",
+  "StartupAXReceipt.swift": "01521dec562cd322152f17b4578585bbca5c6edb9cd87240c97303b56393e035",
+  "AX-WITNESS-CONTRACT.md": "1c7527943668bc5731db633ef5f23c85c527be54b96c71ac0b569718f55f0837",
+  "test_ax_witness.py": "3da894fd6e8c029b41d5bd602f0f0aa56c836161765c524890c6c68d4c91898f",
   "AGENTS.md": "3e24e5b29e32356d08895b2c162407a1be5cf9d71c1740d1dcc50fc566bc89e6",
   "test_title_assertion.py": "e4389c84259f0f8dbbd3b42eef153757b8f9da26d337010b8affd1719f415cef"
 });

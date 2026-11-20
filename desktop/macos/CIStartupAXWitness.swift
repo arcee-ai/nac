@@ -40,7 +40,7 @@ enum StartupAXDiagnosticStage: String, CaseIterable {
     case configuration, admission, initial_snapshot, trust, helper_identity
     case waiting_publication, deadline, configuration_integrity, snapshot, lifetime
     case app_window, owned_frame, ax_observation, closing_snapshot, closing_lifetime
-    case closing_integrity, receipt_publication, parent_lost
+    case closing_integrity, closing_panel_proof, receipt_publication, parent_lost
     case request_observation, held_request, held_parent, held_deadline, held_resources
     case held_target, held_helper, held_helper_hash, held_frame, held_config, held_handoff, held_lease, held_ack
     case post_request, post_handoff, post_parent, post_deadline, post_resources
@@ -251,6 +251,7 @@ enum StartupAXWitnessMode {
                 do {
                     observed = try reader.observe(pid: target.pid, frame: frame)
                     if let request { observed?.interaction = try reader.interaction(request, pid: target.pid) }
+                    else if observed?.surface == "panel" { observed?.panel_proof = try reader.panelProof(pid: target.pid, rootFrame: frame) }
                 }
                 catch { observed = nil; refusals += 1; stage = "ax_predicate_refused"; failure = reader.failureData }
                 diagnosticStage = .closing_snapshot
@@ -270,6 +271,9 @@ enum StartupAXWitnessMode {
                     // A second global hit must resolve to the SAME retained AX
                     // target after the resource/incarnation/frame bookend.
                     observed?.interaction = try reader.interaction(request, pid: target.pid)
+                } else if let proof = observed?.panel_proof {
+                    diagnosticStage = .closing_panel_proof
+                    try StartupObserver.need(try reader.panelProof(pid: target.pid, rootFrame: frame) == proof)
                 }
                 sequence += 1
                 let ended = DispatchTime.now().uptimeNanoseconds

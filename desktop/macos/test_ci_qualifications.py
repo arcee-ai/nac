@@ -26,7 +26,7 @@ class ExactSourceTests(unittest.TestCase):
         startup = select_target('all-342-startup-macos26')
         self.assertEqual(startup['source_sha'], os.environ.get('NAC_STARTUP_PRODUCT_SHA') or
                          '1638a9f36b4978bfe790859d0d42ce3bea96a5cf')
-        self.assertEqual(startup['test_source_sha'], '51c27fe42854f110a58f5105b50a93669cce8a53')
+        self.assertEqual(startup['test_source_sha'], '5306800fd6ea70471ecd372a4f495621e0f74695')
         self.assertEqual(startup['protocol_source_sha'], '1638a9f36b4978bfe790859d0d42ce3bea96a5cf')
         self.assertEqual(startup['scenarios'], ['onboarding', 'configuredLocal', 'invalidConfig', 'futureStore'])
         self.assertEqual(terminal['suite'], 'terminal')
@@ -78,7 +78,7 @@ class ExactSourceTests(unittest.TestCase):
             result = subprocess.run([sys.executable, '-B', '-c', program], capture_output=True, text=True, env=run_env)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(json.loads(result.stdout), [selected, selected, selected,
-                '51c27fe42854f110a58f5105b50a93669cce8a53', default])
+                '5306800fd6ea70471ecd372a4f495621e0f74695', default])
         for invalid in ('HEAD', 'a' * 39, 'A' * 40):
             result = subprocess.run([sys.executable, '-B', '-c', program], capture_output=True, text=True,
                 env={**os.environ, 'PYTHONPATH': 'desktop/macos', 'NAC_STARTUP_PRODUCT_SHA': invalid})
