@@ -171,9 +171,9 @@ async function conversationComposed(j: Journey, id: string) {
     await insight.press("Enter", { timeout: 10_000 });
     const detail = j.root.getByRole("region", { name: "Insights detail", exact: true });
     const disclosure = detail.getByRole("button", { name: "Thinking…", exact: true });
+    await expect(detail).toBeFocused();
     await expect(disclosure).toHaveAttribute("aria-expanded", "true");
-    await disclosure.focus();
-    await j.page.keyboard.press("Enter");
+    await disclosure.press("Enter");
     await expect(disclosure).toHaveAttribute("aria-expanded", "false");
     gate.release();
     await waitForRunIdle(j.request, j.harness, id);
@@ -211,7 +211,10 @@ async function conversationComposed(j: Journey, id: string) {
     await expect(insights).toHaveCount(0);
   }
   await expect(composer).toBeVisible();
-  await activate(j, j.root.getByRole("button", { name: "Copy message", exact: true }).last());
+  const responseTurn = j.root.locator("[data-turn]").filter({
+    has: j.page.getByText(answer, { exact: true }),
+  });
+  await activate(j, responseTurn.getByRole("button", { name: "Copy message", exact: true }));
   await expect
     .poll(() =>
       j.page.evaluate(() =>

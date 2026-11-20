@@ -67,11 +67,11 @@ class QualificationTests(unittest.TestCase):
                 qualify_toolchain({**actual, field: 'unexpected'}, pinned)
 
     def test_current_host_pair_preserves_historical_envelopes_and_rejects_cross_pairs(self):
-        # Hosted run43943344168/job133566876365 observes the November12 image.
-        # Official inventory: actions/runner-images@9f64e04519c5a6918e21eeae02c3aba8ecbc960a.
+        # Hosted run 44761554194, job 136376202964 observes the November 17 image.
+        # Official inventory: actions/runner-images@6ae22b7fe1e9897ad8220e69f154a603cbd4b0ab.
         expected = json.loads(Path(__file__).with_name('ci-toolchain.json').read_text())
         common = {key: expected[key] for key in ('developer_directory', 'xcode', 'sdk', 'swift')}
-        for current_image in ('20261102.0473.1', '20261112.0504.1'):
+        for current_image in ('20261102.0473.1', '20261112.0504.1', '20261117.0516.1'):
             current = {**common, 'image': current_image, 'os_version': '26.7.2', 'os_build': '25G332'}
             with self.subTest(image=current_image):
                 self.assertTrue(qualify_toolchain(current, expected))
