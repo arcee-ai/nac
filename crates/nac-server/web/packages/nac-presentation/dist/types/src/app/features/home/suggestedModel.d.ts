@@ -12,4 +12,5 @@ export declare function useSuggestedModel(enabled: boolean): {
     override: ModelOverride | null;
     pending: boolean;
     noProviders: boolean;
+    error: Error | null;
 };

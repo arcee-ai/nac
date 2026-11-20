@@ -74,7 +74,7 @@ export declare function useTaskLaunch(projectId: string): {
         title: string;
     } | null;
     error: Error | null;
-    launch: (request: Omit<TaskLaunchRequest, "request_id">) => void;
+    launch: (request: Omit<TaskLaunchRequest, "request_id">, onAccepted?: () => void) => void;
     retry: (request: TaskLaunchRequest) => void;
     newRequest: () => void;
 };

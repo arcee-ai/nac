@@ -3174,10 +3174,6 @@
     background-color: var(--color-bg-accent-primary);
   }
 
-[data-nac-runtime]:is(.bg-brand-450), [data-nac-runtime] .bg-brand-450 {
-    background-color: var(--brand-450);
-  }
-
 [data-nac-runtime]:is(.bg-btn-ghost), [data-nac-runtime] .bg-btn-ghost {
     background-color: var(--color-bg-btn-ghost);
   }
