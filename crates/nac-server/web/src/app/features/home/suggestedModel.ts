@@ -69,14 +69,19 @@ export function useSuggestedModel(enabled: boolean): {
   override: ModelOverride | null;
   pending: boolean;
   noProviders: boolean;
+  error: Error | null;
 } {
   const catalog = useModelCatalog(enabled);
   const live = useReadyProviderModels(enabled ? catalog.data : undefined);
   if (!enabled || !catalog.data) {
-    return { override: null, pending: enabled && catalog.isPending, noProviders: false };
+    return {
+      override: null,
+      pending: enabled && catalog.isPending,
+      noProviders: false,
+      error: enabled ? catalog.error : null,
+    };
   }
   const { pick, pending } = suggestedPick(catalog.data, live);
   const override = pick ? catalogOverride(catalog.data, pick) : null;
-  const noProviders = !catalog.data.providers.some((entry) => entry.auth_status === "ready");
-  return { override, pending, noProviders };
+  return { override, pending, noProviders: !pick && !pending, error: null };
 }

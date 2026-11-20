@@ -39,7 +39,6 @@ import { useStartSession } from "./useStartSession";
 
 const MAX_TITLE = 120;
 
-/** Offered when the catalog says nothing about a model's reasoning levels. */
 /** A task title from the prompt's first line, for the isolated-task form. */
 function titleFrom(prompt: string): string {
   const line = prompt.trim().split("\n")[0]?.trim() ?? "";
@@ -96,16 +95,10 @@ export function HomeComposer({
   }
   const fallback = useMemo(() => recentProjectId(projects, sessions), [projects, sessions]);
 
-  const candidate = chosen ?? requested ?? fallback;
-  // A requested project that no longer exists leaves the choice to the user
-  // rather than quietly starting somewhere else.
-  const requestedMissing =
-    !chosen && requested != null && !projects.some((entry) => entry.project_id === requested);
-  const project = requestedMissing
-    ? null
-    : (projects.find((entry) => entry.project_id === candidate) ??
-      projects.find((entry) => entry.project_id === fallback) ??
-      null);
+  const explicitProject = chosen ?? requested;
+  const project =
+    projects.find((entry) => entry.project_id === (explicitProject ?? fallback)) ?? null;
+  const requestedMissing = explicitProject != null && project == null;
   const projectId = project?.project_id ?? null;
 
   const draft = useNativeRuntime().stores.homeDraftStore;
@@ -128,8 +121,15 @@ export function HomeComposer({
   const setOverride = (value: ModelOverride | null) =>
     setOverrideFor(value ? { projectId, value } : null);
   const [modelOpen, setModelOpen] = useState(false);
-  const [isolated, setIsolated] = useState(false);
-  const [isolatedTask, setIsolatedTask] = useState<{ prompt: string } | null>(null);
+  const [isolatedProjectId, setIsolatedProjectId] = useState<string | null>(null);
+  const [isolatedTask, setIsolatedTask] = useState<{
+    projectId: string;
+    prompt: string;
+    model: ModelOverride | null;
+    revision: number;
+    gitRef: string;
+    defaultRef: string | null;
+  } | null>(null);
   // A ref belongs to the project it was typed for.
   const [refFor, setRefFor] = useState<{ projectId: string | null; ref: string } | null>(null);
   const gitRef = refFor?.projectId === projectId ? refFor.ref : "";
@@ -161,9 +161,10 @@ export function HomeComposer({
       : chosenModel;
   const modelPending = model.pending || suggestion.pending;
   const needsProvider = !override && !model.inherited && suggestion.noProviders;
+  const modelError = !override && !model.inherited ? (model.error ?? suggestion.error) : null;
   const source = useTaskLaunchSource(projectId, effectiveBehavior === "direct");
   const isolationAvailable = effectiveBehavior === "direct" && source.data?.eligible === true;
-  const useIsolation = isolated && isolationAvailable;
+  const useIsolation = projectId != null && isolatedProjectId === projectId;
   const starter = useStartSession();
 
   // "New session" from anywhere (sidebar, ⌘⇧O, a project's +) lands here.
@@ -191,16 +192,25 @@ export function HomeComposer({
     !busy &&
     !starter.needsReview &&
     !needsProvider &&
-    !suggestion.pending;
+    !modelError &&
+    (!useIsolation || isolationAvailable) &&
+    (!modelPending || override != null);
 
   const send = async () => {
     if (!canSend || !projectId) return;
+    const revision = draft.get().revision;
     if (useIsolation) {
-      setIsolatedTask({ prompt: prompt.trim() });
+      setIsolatedTask({
+        projectId,
+        prompt: prompt.trim(),
+        model: sessionModel,
+        revision,
+        gitRef,
+        defaultRef: source.data?.default_ref ?? null,
+      });
       return;
     }
     const text = prompt;
-    const revision = draft.get().revision;
     const started = await starter.start({
       projectId,
       behavior: effectiveBehavior,
@@ -294,7 +304,10 @@ export function HomeComposer({
                 disabled={busy}
                 onPick={(pick) => catalog.data && setOverride(catalogOverride(catalog.data, pick))}
                 onEffort={setEffortChoice}
-                onUseInherited={() => setOverride(null)}
+                onUseInherited={() => {
+                  setOverride(null);
+                  setEffortChoice(null);
+                }}
                 onAdvanced={policy.orchestrationEnabled ? () => setModelOpen(true) : undefined}
               />
             ) : null}
@@ -339,7 +352,7 @@ export function HomeComposer({
               <WorkspaceSettings
                 isolated={useIsolation}
                 available={isolationAvailable}
-                onIsolatedChange={setIsolated}
+                onIsolatedChange={(isolated) => setIsolatedProjectId(isolated ? projectId : null)}
                 gitRef={gitRef}
                 defaultRef={source.data?.default_ref ?? null}
                 onRefChange={(ref) => setRefFor({ projectId, ref })}
@@ -353,6 +366,10 @@ export function HomeComposer({
         {project && needsProvider ? (
           <p className="type-meta text-basic-tertiary">
             Connect a model provider in Settings to start a session.
+          </p>
+        ) : modelError ? (
+          <p role="alert" className="type-meta text-error-primary">
+            Could not load the launch model. Choose a model before starting a session.
           </p>
         ) : starter.error ? (
           <p role="alert" className="type-meta text-error-primary">
@@ -386,23 +403,27 @@ export function HomeComposer({
         onReset={() => setOverride(null)}
         onClose={() => setModelOpen(false)}
       />
-      {isolatedTask && projectId ? (
+      {isolatedTask && isolatedTask.projectId === projectId ? (
         <TaskLaunchModal
-          projectId={projectId}
-          defaultRef={source.data?.default_ref ?? null}
-          initialGitRef={gitRef}
+          projectId={isolatedTask.projectId}
+          defaultRef={isolatedTask.defaultRef}
+          initialGitRef={isolatedTask.gitRef}
           initialPrompt={isolatedTask.prompt}
           initialTitle={titleFrom(isolatedTask.prompt)}
           onClose={() => setIsolatedTask(null)}
-          onExistingCheckout={() => {
-            const text = isolatedTask.prompt;
-            const revision = draft.get().revision;
+          onLaunchAccepted={() => draft.acknowledge(isolatedTask.revision)}
+          onExistingCheckout={(text) => {
             setIsolatedTask(null);
             void starter
-              .start({ projectId, behavior: "direct", prompt: text, model: sessionModel })
+              .start({
+                projectId: isolatedTask.projectId,
+                behavior: "direct",
+                prompt: text,
+                model: isolatedTask.model,
+              })
               .then((started) => {
                 if (started) {
-                  draft.acknowledge(revision);
+                  draft.acknowledge(isolatedTask.revision);
                 }
               });
           }}

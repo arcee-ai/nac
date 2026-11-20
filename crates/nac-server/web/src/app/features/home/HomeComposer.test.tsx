@@ -17,6 +17,8 @@ const fakes = vi.hoisted(() => ({
   addRepository: vi.fn(),
   managed: false,
   eligible: false,
+  inheritedPending: false,
+  inheritedError: null as Error | null,
   inheritedEffort: "high" as string | null,
   inheritedModel: "glm-5",
 }));
@@ -33,17 +35,19 @@ vi.mock("./useStartSession", () => ({
 vi.mock("./modelChoice", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./modelChoice")>()),
   useInheritedModel: () => ({
-    inherited: {
-      initial: {
-        model: fakes.inheritedModel,
-        reasoning_effort: fakes.inheritedEffort,
-        backend: "arcee-api",
-      },
-      light: null,
-      source: "project-default",
-    },
-    pending: false,
-    error: null,
+    inherited: fakes.inheritedError
+      ? null
+      : {
+          initial: {
+            model: fakes.inheritedModel,
+            reasoning_effort: fakes.inheritedEffort,
+            backend: "arcee-api",
+          },
+          light: null,
+          source: "project-default",
+        },
+    pending: fakes.inheritedPending,
+    error: fakes.inheritedError,
   }),
 }));
 vi.mock("./ModelOverrideModal", () => ({ ModelOverrideModal: () => null }));
@@ -77,12 +81,15 @@ vi.mock("@/app/features/task-launches/TaskLaunchModal", () => ({
   TaskLaunchModal: ({
     initialPrompt,
     initialGitRef,
+    onExistingCheckout,
   }: {
     initialPrompt: string;
     initialGitRef: string;
+    onExistingCheckout: (text: string) => void;
   }) => (
     <div role="dialog" aria-label="New isolated task" data-ref={initialGitRef}>
       {initialPrompt}
+      <button onClick={() => onExistingCheckout("Edited task brief")}>Use existing checkout</button>
     </div>
   ),
 }));
@@ -124,6 +131,8 @@ beforeEach(() => {
   fakes.addRepository.mockReset();
   fakes.managed = false;
   fakes.eligible = false;
+  fakes.inheritedPending = false;
+  fakes.inheritedError = null;
   fakes.inheritedEffort = "high";
   fakes.inheritedModel = "glm-5";
   standaloneHomeDraftStore.update("", null);
@@ -251,6 +260,26 @@ describe("Home composer", () => {
     expect(screen.queryByRole("button", { name: /^Project: (Atlas|Borealis)/ })).toBeNull();
   });
 
+  it("waits for inherited model settings before sending", () => {
+    fakes.inheritedPending = true;
+    mount();
+    fireEvent.change(prompt(), { target: { value: "Run with the model shown" } });
+    fireEvent.keyDown(prompt(), { key: "Enter" });
+    expect(
+      (screen.getByRole("button", { name: "Start session" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(fakes.start).not.toHaveBeenCalled();
+  });
+
+  it("surfaces an unavailable inherited model without silently sending", () => {
+    fakes.inheritedError = new Error("Model settings unavailable");
+    mount();
+    fireEvent.change(prompt(), { target: { value: "Try again later" } });
+    fireEvent.keyDown(prompt(), { key: "Enter" });
+    expect(screen.getByRole("alert").textContent).toContain("Choose a model");
+    expect(fakes.start).not.toHaveBeenCalled();
+  });
+
   it("says where a kept draft will start when New session points it at another project", () => {
     mount("/?project=p1");
     fireEvent.change(prompt(), { target: { value: "Plan the release" } });
@@ -288,9 +317,29 @@ describe("Home composer", () => {
     fireEvent.change(prompt(), { target: { value: "Upgrade the toolchain" } });
     fireEvent.click(screen.getByRole("button", { name: "Set up isolated task" }));
     const form = screen.getByRole("dialog", { name: "New isolated task" });
-    expect(form.textContent).toBe("Upgrade the toolchain");
+    expect(form.textContent).toContain("Upgrade the toolchain");
     expect(form.getAttribute("data-ref")).toBe("");
     expect(fakes.start).not.toHaveBeenCalled();
+  });
+
+  it("uses the edited isolated-task brief and keeps newer Home text when falling back", async () => {
+    fakes.eligible = true;
+    mount("/", false);
+    fireEvent.click(screen.getByRole("button", { name: "Additional settings" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Isolated checkout" }));
+    fireEvent.change(prompt(), { target: { value: "Initial task brief" } });
+    fireEvent.click(screen.getByRole("button", { name: "Set up isolated task" }));
+    fireEvent.change(prompt(), { target: { value: "New Home draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Use existing checkout" }));
+    await vi.waitFor(() =>
+      expect(fakes.start).toHaveBeenCalledWith({
+        projectId: "p2",
+        behavior: "direct",
+        prompt: "Edited task brief",
+        model: null,
+      }),
+    );
+    expect((prompt() as HTMLTextAreaElement).value).toBe("New Home draft");
   });
 
   it("starts an isolated checkout from a typed ref", () => {

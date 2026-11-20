@@ -63,7 +63,7 @@ export function WorkspaceSettings({
               <Switch
                 aria-label="Isolated checkout"
                 checked={isolated}
-                disabled={!available}
+                disabled={!available && !isolated}
                 onChange={onIsolatedChange}
               />
             </SettingRow>
@@ -74,7 +74,7 @@ export function WorkspaceSettings({
             )}
             <button
               type="button"
-              disabled={!isolated}
+              disabled={!isolated || !available}
               onClick={() => {
                 setDraft(gitRef);
                 setView("ref");

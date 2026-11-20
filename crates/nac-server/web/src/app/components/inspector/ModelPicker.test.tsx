@@ -224,15 +224,12 @@ it("keeps managed mounted credentials server-side while selecting another entitl
   }
 });
 
-it("gives a session without a level its standard one and offers only real levels", async () => {
+it("keeps an unset level until the user chooses a supported level", async () => {
   const update = vi.spyOn(api, "updateConfig").mockResolvedValue(undefined);
   const { client, view } = renderPicker({ ...trinity, reasoning_effort: null } as SessionMetadata);
   try {
-    // The fixture model has Low and High, so its standard level is Low.
-    await waitFor(() =>
-      expect(update).toHaveBeenCalledExactlyOnceWith("session", { reasoning_effort: "low" }),
-    );
-    await openChip("Model: Trinity, Low reasoning");
+    await openChip("Model: Trinity");
+    expect(update).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("menuitem", { name: /^Effort/ }));
     expect(screen.getAllByRole("menuitemradio").map((item) => item.textContent)).toEqual([
       "Low",
@@ -240,7 +237,7 @@ it("gives a session without a level its standard one and offers only real levels
     ]);
     fireEvent.click(screen.getByRole("menuitemradio", { name: "High" }));
     await waitFor(() =>
-      expect(update).toHaveBeenLastCalledWith("session", { reasoning_effort: "high" }),
+      expect(update).toHaveBeenCalledExactlyOnceWith("session", { reasoning_effort: "high" }),
     );
   } finally {
     view.unmount();
@@ -248,19 +245,19 @@ it("gives a session without a level its standard one and offers only real levels
   }
 });
 
-it("waits for the run to end before giving a session its standard level", async () => {
+it("does not write a reasoning level when a run ends", async () => {
   const update = vi.spyOn(api, "updateConfig").mockResolvedValue(undefined);
   const { client, view, setBusy } = renderPicker(
     { ...trinity, reasoning_effort: null } as SessionMetadata,
     true,
   );
   try {
-    await screen.findByRole("button", { name: "Model: Trinity, Low reasoning" });
+    const chip = await screen.findByRole("button", { name: "Model: Trinity" });
+    expect((chip as HTMLButtonElement).disabled).toBe(true);
     expect(update).not.toHaveBeenCalled();
     setBusy(false);
-    await waitFor(() =>
-      expect(update).toHaveBeenCalledExactlyOnceWith("session", { reasoning_effort: "low" }),
-    );
+    await waitFor(() => expect((chip as HTMLButtonElement).disabled).toBe(false));
+    expect(update).not.toHaveBeenCalled();
   } finally {
     view.unmount();
     client.clear();

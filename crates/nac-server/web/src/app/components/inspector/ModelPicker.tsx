@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback } from "react";
 
 import { PopoverPlacement } from "@/app/atoms";
 import { standardEffort } from "@/app/components/modals/options";
@@ -35,9 +35,6 @@ export function ModelPicker({
   const currentModel = metadata?.model ?? label;
   const currentEffort = metadata?.reasoning_effort ?? "";
   const resolved = resolveCatalogModel(catalog.data, metadata?.backend, currentModel);
-  const defaultEffort = standardEffort(resolved.supportedEfforts);
-  // Shown while a session without a level is being given its standard one.
-  const shownEffort = currentEffort || defaultEffort || "";
   const { credentialReady: managedReady, matches: managedMatches } = managedModel;
   // A managed host's mounted model is usable before its account reads as connected.
   const usableProvider = useCallback(
@@ -52,28 +49,6 @@ export function ModelPicker({
     [managedReady, managedMatches],
   );
 
-  // A session with no level, on a model that accepts levels, runs at the
-  // standard one. Applied once per session, and only while it is idle.
-  // TODO(backend): the server should store this level when the session is created.
-  const { mutate: applyConfig, isPending: configPending } = updateConfig;
-  const defaulted = useRef<string | null>(null);
-  useEffect(() => {
-    if (!metadata || !catalog.data || currentEffort || !defaultEffort) return;
-    if (disabled || configPending) return;
-    if (defaulted.current === sessionId) return;
-    defaulted.current = sessionId;
-    applyConfig({ id: sessionId, patch: { reasoning_effort: defaultEffort } });
-  }, [
-    metadata,
-    catalog.data,
-    currentEffort,
-    defaultEffort,
-    disabled,
-    configPending,
-    sessionId,
-    applyConfig,
-  ]);
-
   const chooseModel = async (pick: CatalogPick) => {
     if (!metadata || (pick.backend === metadata.backend && pick.model === metadata.model)) return;
     const provider = catalog.data?.providers.find((entry) => entry.id === pick.backend);
@@ -83,11 +58,11 @@ export function ModelPicker({
       (managedModel.matches(pick) && managedModel.credentialReady),
     );
     if (!preservesRoute && !providerReady) {
-      toast.error(`Connect ${pick.backend} in session settings before switching to this model.`);
+      toast.error(`Connect ${pick.backend} in Settings › Accounts & keys to switch to this model.`);
       return;
     }
     if (!preservesRoute && !pick.baseUrl) {
-      toast.error(`Configure an endpoint for ${pick.backend} in session settings first.`);
+      toast.error(`The catalog did not provide an endpoint for ${pick.backend}.`);
       return;
     }
 
@@ -137,7 +112,7 @@ export function ModelPicker({
       fallbackLabel={currentModel}
       pending={!metadata}
       value={metadata ? { backend: metadata.backend as BackendKind, model: metadata.model } : null}
-      effort={shownEffort}
+      effort={currentEffort}
       supportedEfforts={resolved.supportedEfforts}
       disabled={disabled || !metadata || updateConfig.isPending}
       placement={PopoverPlacement.TopRight}

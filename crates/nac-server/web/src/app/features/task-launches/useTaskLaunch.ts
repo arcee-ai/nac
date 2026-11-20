@@ -54,12 +54,12 @@ export function useTaskLaunch(projectId: string) {
     receipt,
     intent,
     error: identityError ?? start.error,
-    launch: (request: Omit<TaskLaunchRequest, "request_id">) => {
+    launch: (request: Omit<TaskLaunchRequest, "request_id">, onAccepted?: () => void) => {
       try {
         const canonical = intent ?? { ...request, request_id: secureRequestId() };
         setIdentityError(null);
         setIntent(canonical);
-        start.mutate(canonical);
+        start.mutate(canonical, { onSuccess: onAccepted });
       } catch (error) {
         setIdentityError(
           error instanceof Error ? error : new Error("Could not securely create a task request."),

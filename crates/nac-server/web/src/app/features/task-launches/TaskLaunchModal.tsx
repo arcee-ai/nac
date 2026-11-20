@@ -18,6 +18,7 @@ export function TaskLaunchModal({
   defaultRef,
   onClose,
   onExistingCheckout,
+  onLaunchAccepted,
   initialPrompt = "",
   initialTitle = "",
   initialGitRef = "",
@@ -25,7 +26,8 @@ export function TaskLaunchModal({
   projectId: string;
   defaultRef: string | null;
   onClose: () => void;
-  onExistingCheckout: () => void;
+  onExistingCheckout: (prompt: string) => void;
+  onLaunchAccepted?: () => void;
   /** Home's composer text, carried in as the brief. */
   initialPrompt?: string;
   initialTitle?: string;
@@ -100,14 +102,17 @@ export function TaskLaunchModal({
             loading={launch.start.isPending}
             disabled={!title.trim() || !prompt.trim() || !branch.trim() || launch.start.isPending}
             onClick={() =>
-              launch.launch({
-                project_id: projectId,
-                invoking_session_id: sessionIdFromPath(location.pathname),
-                git_ref: gitRef.trim() || null,
-                default_ref: defaultRef ? null : branch.trim(),
-                title: title.trim(),
-                prompt: prompt.trim(),
-              })
+              launch.launch(
+                {
+                  project_id: projectId,
+                  invoking_session_id: sessionIdFromPath(location.pathname),
+                  git_ref: gitRef.trim() || null,
+                  default_ref: defaultRef ? null : branch.trim(),
+                  title: title.trim(),
+                  prompt: prompt.trim(),
+                },
+                onLaunchAccepted,
+              )
             }
           >
             {frozen ? "Retry same request" : "Start isolated task"}
@@ -116,7 +121,10 @@ export function TaskLaunchModal({
         {launch.intent && (launch.receipt || launch.start.error) && (
           <Button onClick={launch.newRequest}>Start another intentional task</Button>
         )}
-        <Button onClick={onExistingCheckout} disabled={launch.start.isPending}>
+        <Button
+          onClick={() => onExistingCheckout(prompt.trim())}
+          disabled={frozen || (initialPrompt.length > 0 && !prompt.trim())}
+        >
           Use existing checkout
         </Button>
         <div aria-label="Retained task inventory" className="flex flex-col gap-3">
