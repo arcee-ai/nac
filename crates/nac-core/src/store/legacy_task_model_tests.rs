@@ -307,6 +307,92 @@ fn contradictory_row_owners_abort_without_persisting_any_markers() {
 }
 
 #[test]
+fn fresh_command_scope_and_complete_launch_bindings_fail_atomically() {
+    let selection = model(Some(42));
+    for (path, replacement) in [
+        (
+            "/receipt/binding/fresh_task/retained_limit",
+            serde_json::json!(3),
+        ),
+        (
+            "/receipt/request/git_ref",
+            serde_json::json!("unexpected-ref"),
+        ),
+        (
+            "/receipt/request/default_ref",
+            serde_json::json!("unexpected-default"),
+        ),
+        (
+            "/receipt/request/invoking_session_id",
+            serde_json::json!("unexpected-caller"),
+        ),
+    ] {
+        let conn = fixture();
+        let prior = request(None);
+        conn.execute(
+            "INSERT INTO task_launches(request_id,request_json) VALUES('request',?1)",
+            [&prior],
+        )
+        .unwrap();
+        let mut payload = launch(&selection);
+        *payload.pointer_mut(path).unwrap() = replacement;
+        let raw = payload.to_string();
+        conn.execute("INSERT INTO heartbeat_task_launches(occurrence_id,launch_json) VALUES('occurrence',?1)", [&raw]).unwrap();
+        conn.execute_batch("BEGIN IMMEDIATE").unwrap();
+        assert!(capture_v54(&conn).is_err(), "{path}");
+        conn.execute_batch("ROLLBACK").unwrap();
+        assert_eq!(
+            conn.query_row::<i64, _, _>(
+                "SELECT count(*) FROM task_model_v54_provenance",
+                [],
+                |r| r.get(0)
+            )
+            .unwrap(),
+            0
+        );
+        assert_eq!(
+            conn.query_row::<String, _, _>(
+                "SELECT launch_json FROM heartbeat_task_launches",
+                [],
+                |r| r.get(0)
+            )
+            .unwrap(),
+            raw
+        );
+        assert_eq!(
+            conn.query_row::<String, _, _>("SELECT request_json FROM task_launches", [], |r| r
+                .get(0))
+                .unwrap(),
+            prior
+        );
+    }
+    let conn = fixture();
+    let prior = request(None);
+    conn.execute(
+        "INSERT INTO task_launches(request_id,request_json) VALUES('request',?1)",
+        [&prior],
+    )
+    .unwrap();
+    let raw = command(&selection).to_string();
+    conn.execute("INSERT INTO heartbeat_commands(session_id,request_id,response_json) VALUES('caller','command',?1)", [&raw]).unwrap();
+    conn.execute_batch("BEGIN IMMEDIATE").unwrap();
+    assert!(capture_v54(&conn).is_err());
+    conn.execute_batch("ROLLBACK").unwrap();
+    assert_eq!(
+        conn.query_row::<i64, _, _>("SELECT count(*) FROM task_model_v54_provenance", [], |r| r
+            .get(0))
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        conn.query_row::<String, _, _>("SELECT response_json FROM heartbeat_commands", [], |r| r
+            .get(0))
+            .unwrap(),
+        raw
+    );
+}
+
+#[test]
 fn modifying_owner_revokes_marker_without_rewriting_receipt() {
     let conn = fixture();
     let raw = request(None);

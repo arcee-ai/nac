@@ -268,6 +268,34 @@ fn verify_owner(
             if let Some(session) = session {
                 same(value, "/receipt/session_id", &session)?;
             }
+            let destination: FreshTaskDestination = serde_json::from_value(
+                value
+                    .pointer("/receipt/destination")
+                    .cloned()
+                    .context("legacy launch has no destination")?,
+            )?;
+            let bound: FreshTaskDestination = serde_json::from_value(
+                value
+                    .pointer("/receipt/binding/fresh_task")
+                    .cloned()
+                    .context("legacy launch has no bound destination")?,
+            )?;
+            let request: TaskLaunchRequest = serde_json::from_value(
+                value
+                    .pointer("/receipt/request")
+                    .cloned()
+                    .context("legacy launch has no request")?,
+            )?;
+            anyhow::ensure!(
+                destination == bound,
+                "legacy scheduled destination binding differs"
+            );
+            anyhow::ensure!(
+                request.invoking_session_id.is_none()
+                    && request.git_ref == destination.pinned_commit
+                    && request.default_ref == destination.default_ref,
+                "legacy scheduled request source binding differs"
+            );
         }
         Owner::Command => {
             let schedule: String = conn.query_row(
@@ -288,10 +316,12 @@ fn verify_owner(
                     same(value, &format!("{path}/schedule_id"), &schedule)?;
                 }
             }
-            if let Some(id) = key1.strip_prefix("project:") {
-                same(value, "/schedule/binding/fresh_task/project_id", id)?;
-                same(value, "/schedule/binding/project_id", id)?;
-            }
+            let id = project(value, "/schedule/binding/fresh_task/project_id")?;
+            anyhow::ensure!(
+                key1 == format!("project:{id}"),
+                "legacy fresh command owner scope differs"
+            );
+            same(value, "/schedule/binding/project_id", id)?;
         }
         Owner::Destination | Owner::DestinationBinding => {
             let (id, creator, destination_raw, binding_raw): (String,Option<String>,String,String) = conn.query_row("SELECT project_id,creator_session_id,destination_json,binding_json FROM heartbeat_fresh_destinations WHERE schedule_id=?1", [key1], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?;
