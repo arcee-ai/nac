@@ -5,20 +5,14 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 
 import { api } from "@/app/services/api";
-import {
-  useMcpRuntimeAction,
-  useMcpRuntimeStatus,
-  useModelConfigs,
-} from "@/app/services/queries/configuration";
+import { useMcpRuntimeAction, useMcpRuntimeStatus } from "@/app/services/queries/configuration";
 
-function Harness({ modelsEnabled }: { modelsEnabled: boolean }) {
-  const models = useModelConfigs(modelsEnabled);
+function Harness() {
   const runtime = useMcpRuntimeStatus();
   const action = useMcpRuntimeAction();
   return (
     <>
       <output>{runtime.isSuccess ? "Runtime ready" : "Runtime loading"}</output>
-      <output>{models.isSuccess ? "Models ready" : "Models deferred"}</output>
       <button onClick={() => action.mutate({ serverName: "peer", action: "reload" })}>
         Reload MCP
       </button>
@@ -28,8 +22,7 @@ function Harness({ modelsEnabled }: { modelsEnabled: boolean }) {
 
 afterEach(() => vi.restoreAllMocks());
 
-it("keeps MCP runtime reload live while setup defers model discovery", async () => {
-  const models = vi.spyOn(api, "listModelConfigs").mockResolvedValue({ configurations: [] });
+it("keeps MCP runtime reload live independently of model selection", async () => {
   const runtime = vi.spyOn(api, "listMcpRuntimeStatus").mockResolvedValue({ servers: [] });
   const reload = vi.spyOn(api, "reloadMcpServer").mockResolvedValue({
     name: "peer",
@@ -40,24 +33,18 @@ it("keeps MCP runtime reload live while setup defers model discovery", async () 
     tool_count: 0,
   });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const view = (modelsEnabled: boolean) => (
+  const view = () => (
     <QueryClientProvider client={client}>
-      <Harness modelsEnabled={modelsEnabled} />
+      <Harness />
     </QueryClientProvider>
   );
-  const rendered = render(view(false));
+  const rendered = render(view());
   try {
     await screen.findByText("Runtime ready");
-    expect(models).not.toHaveBeenCalled();
     expect(runtime.mock.calls[0][0]).toBeInstanceOf(AbortSignal);
     fireEvent.click(screen.getByRole("button", { name: "Reload MCP" }));
     await waitFor(() => expect(reload).toHaveBeenCalledExactlyOnceWith("peer"));
     await waitFor(() => expect(runtime).toHaveBeenCalledTimes(2));
-    expect(models).not.toHaveBeenCalled();
-    rendered.rerender(view(true));
-    await screen.findByText("Models ready");
-    expect(models).toHaveBeenCalledTimes(1);
-    expect(models.mock.calls[0][0]).toBeInstanceOf(AbortSignal);
   } finally {
     rendered.unmount();
     client.clear();

@@ -1,7 +1,6 @@
 export declare function useStoreInfo(): import("@tanstack/react-query").UseQueryResult<NoInfer<{
     root_cwd: string;
     store_path: string;
-    worker_executable: string;
 }>, Error>;
 /** Probing starts Podman subprocesses, so only check after selecting Sandbox. */
 export declare function useSandboxAvailability(enabled: boolean): import("@tanstack/react-query").UseQueryResult<NoInfer<{

@@ -146,10 +146,7 @@ async fn reference_search_defaults_to_the_callers_project_and_reports_every_atte
 async fn exact_reads_distinguish_found_missing_deleted_foreign_and_other_topologies() {
     let runtime = runtime(Vec::new());
     let path = runtime.store_path.clone();
-    for (session_id, project_id) in [
-        ("orchestrator-session", "p1"),
-        ("foreign-orchestrator", "p2"),
-    ] {
+    for (session_id, project_id) in [("child-session", "p1"), ("foreign-child", "p2")] {
         crate::store::insert_test_session(&path, session_id);
         crate::store::open_runtime_connection(&path)
             .unwrap()
@@ -160,6 +157,23 @@ async fn exact_reads_distinguish_found_missing_deleted_foreign_and_other_topolog
             .unwrap();
         crate::store::assign_session_to_project(&path, project_id, session_id).unwrap();
     }
+
+    crate::store::create_traditional_child_relationship(
+        &path,
+        "peer-a",
+        "child-session",
+        crate::store::GENERAL_CHILD_PROFILE,
+        "child",
+    )
+    .unwrap();
+    crate::store::create_traditional_child_relationship(
+        &path,
+        "foreign",
+        "foreign-child",
+        crate::store::GENERAL_CHILD_PROFILE,
+        "child",
+    )
+    .unwrap();
 
     let found = value(&runtime, "read_task", json!({"session_id":"peer-a"})).await;
     assert_eq!(found["status"], "found");
@@ -192,19 +206,14 @@ async fn exact_reads_distinguish_found_missing_deleted_foreign_and_other_topolog
     let other = value(
         &runtime,
         "find_tasks",
-        json!({"session_id":"orchestrator-session"}),
+        json!({"session_id":"child-session"}),
     )
     .await;
     assert_eq!(other["status"], "not_independent_task");
-    assert_eq!(other["kind"], "orchestrator");
+    assert_eq!(other["kind"], "traditional_child");
     assert!(other.get("task").is_none());
     // Another project's non-task is reported out of scope before its kind is disclosed.
-    let hidden = value(
-        &runtime,
-        "read_task",
-        json!({"session_id":"foreign-orchestrator"}),
-    )
-    .await;
+    let hidden = value(&runtime, "read_task", json!({"session_id":"foreign-child"})).await;
     assert_eq!(hidden["status"], "outside_scope");
     assert!(hidden.get("kind").is_none());
 

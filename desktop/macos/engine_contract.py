@@ -104,7 +104,7 @@ def run_contract(binary, destination):
                         with urllib.request.urlopen(receipt['endpoint'] + '/store', timeout=3) as response:
                             actual = json.load(response)
                         assert actual['store_path'] == str(store)
-                        assert Path(actual['worker_executable']).resolve() == binary
+                        assert 'worker_executable' not in actual
                         if scenario == 'channel-loss':
                             parent.close()
                         elif scenario == 'duplicate-hello':

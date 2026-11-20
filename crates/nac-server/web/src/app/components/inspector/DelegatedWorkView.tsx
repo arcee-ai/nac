@@ -1,6 +1,5 @@
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import SessionNameDisclosure from "@/app/atoms/session-name-disclosure";
-import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -29,23 +28,16 @@ import { usePanelListMarksOpen } from "@/app/hooks/usePanelListMarksOpen";
 import { useNow } from "@/app/hooks/useNow";
 import { cn } from "@/app/lib/cn";
 import { routes } from "@/app/lib/routes";
-import { sessionBehaviorIcon } from "@/app/lib/sessionBehavior";
-import {
-  useManagedOrchestrators,
-  useSessions,
-  useTraditionalChildren,
-} from "@/app/services/queries";
+import { useSessions, useTraditionalChildren } from "@/app/services/queries";
 import type {
-  ManagedOrchestratorRecord,
   SessionBehavior,
-  SessionLineage,
   TraditionalChildRecord,
   TraditionalChildStatus,
 } from "@/app/types/api";
 
 interface SubagentRow {
   key: string;
-  mode: "child" | "orchestrator";
+  mode: "child";
   id: string;
   description: string;
   status: TraditionalChildStatus;
@@ -55,11 +47,6 @@ interface SubagentRow {
   updatedAt: string;
   fallbackText: string | null;
 }
-
-const MODE_LINEAGE = {
-  child: "traditional-child",
-  orchestrator: "managed-orchestrator",
-} as const satisfies Record<SubagentRow["mode"], SessionLineage["kind"]>;
 
 function nonempty(value: string | null | undefined): string | null {
   const trimmed = value?.trim();
@@ -85,28 +72,7 @@ function rowFromChild(child: TraditionalChildRecord): SubagentRow {
   };
 }
 
-function rowFromOrchestrator(orchestrator: ManagedOrchestratorRecord): SubagentRow {
-  return {
-    key: `orchestrator:${orchestrator.orchestrator_session_id}`,
-    mode: "orchestrator",
-    id: orchestrator.orchestrator_session_id,
-    description: orchestrator.description,
-    status: orchestrator.status,
-    generation: orchestrator.generation,
-    runId: orchestrator.run_id ?? null,
-    background: orchestrator.execution_mode !== "foreground",
-    updatedAt: orchestrator.updated_at,
-    fallbackText: nonempty(orchestrator.failure) ?? nonempty(orchestrator.report),
-  };
-}
-
-export function DelegatedWorkView({
-  sessionId,
-  behavior,
-}: {
-  sessionId: string;
-  behavior: SessionBehavior;
-}) {
+export function DelegatedWorkView({ sessionId }: { sessionId: string; behavior: SessionBehavior }) {
   const {
     showSidePanelList,
     selectSubagent,
@@ -123,22 +89,13 @@ export function DelegatedWorkView({
 
   const navigate = useNavigate();
   const expanded = useSidePanelExpanded();
-  const supportsOrchestrators =
-    useUiPolicy().orchestrationEnabled && behavior === "direct-with-orchestrator";
   const children = useTraditionalChildren(sessionId, true);
-  const orchestrators = useManagedOrchestrators(sessionId, supportsOrchestrators);
   const sessions = useSessions();
   const now = useNow(60_000);
   const selectedKey = useSelectedSubagent(sessionId);
   const [foldChoices] = useState(() => new Map<string, boolean>());
 
-  const rows = useMemo(() => {
-    const childRows = (children.data ?? []).map(rowFromChild);
-    const orchestratorRows = supportsOrchestrators
-      ? (orchestrators.data ?? []).map(rowFromOrchestrator)
-      : [];
-    return [...childRows, ...orchestratorRows];
-  }, [children.data, orchestrators.data, supportsOrchestrators]);
+  const rows = useMemo(() => (children.data ?? []).map(rowFromChild), [children.data]);
 
   const newestKey =
     [...rows].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0]?.key ?? null;
@@ -173,8 +130,8 @@ export function DelegatedWorkView({
   );
   const rowTitle = (row: SubagentRow) => nonempty(summaries.get(row.id)?.title) ?? row.description;
 
-  const failed = children.isError || (supportsOrchestrators && orchestrators.isError);
-  const loaded = children.isSuccess && (!supportsOrchestrators || orchestrators.isSuccess);
+  const failed = children.isError;
+  const loaded = children.isSuccess;
   const groups = useMemo(() => {
     const ordered = [...rows].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
     const active = ordered.filter((row) => row.status === "running");
@@ -216,7 +173,6 @@ export function DelegatedWorkView({
         variant={ButtonVariant.Secondary}
         onClick={() => {
           void children.refetch();
-          if (supportsOrchestrators) void orchestrators.refetch();
         }}
       >
         Try again
@@ -250,7 +206,7 @@ export function DelegatedWorkView({
                 status={row.status}
                 stateLine={subagentStateLine({
                   status: row.status,
-                  orchestrator: row.mode === "orchestrator",
+                  orchestrator: false,
                   background: row.background,
                   detail: row.fallbackText,
                 })}
@@ -347,7 +303,6 @@ export function DelegatedWorkView({
                 title={rowTitle(selected)}
                 fallbackText={selected.fallbackText}
                 relationship={selected}
-                icon={sessionBehaviorIcon(null, MODE_LINEAGE[selected.mode])}
                 header={!narrow}
                 phoneHeaderInFlow={isMobile}
                 onOpen={() => openDetail(selected.id)}
@@ -359,7 +314,7 @@ export function DelegatedWorkView({
                 parentSessionId={sessionId}
                 target={selected}
                 permissionSessionId={selected.id}
-                permissionBehavior={selected.mode === "orchestrator" ? "orchestrator" : "direct"}
+                permissionBehavior="direct"
                 showPermissions={false}
                 floating
               />

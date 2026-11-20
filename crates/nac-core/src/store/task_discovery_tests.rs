@@ -109,13 +109,12 @@ fn reference_search_returns_every_attempt_as_whole_token_matches() {
 }
 
 #[test]
-fn search_is_project_scoped_excludes_other_topologies_and_reports_missing_projects() {
+fn search_is_project_scoped_excludes_children_and_reports_missing_projects() {
     let path = test_path("scope");
     initialize(&path).unwrap();
     project(&path, "p1", "/tmp/project");
     project(&path, "p2", "/tmp/other");
     task(&path, "p1", "mine", "x", "", "2026-01-01T00:00:01Z");
-    task(&path, "p1", "caller", "x", "", "2026-01-01T00:00:02Z");
     task(&path, "p1", "child", "x", "", "2026-01-01T00:00:03Z");
     let conn = open_runtime_connection(&path).unwrap();
     conn.execute(
@@ -123,11 +122,6 @@ fn search_is_project_scoped_excludes_other_topologies_and_reports_missing_projec
          (child_session_id, parent_session_id, root_session_id, profile, description,
           nesting_depth, created_at, updated_at)
          VALUES ('child', 'mine', 'mine', 'general', 'helper', 1, 'now', 'now')",
-        [],
-    )
-    .unwrap();
-    conn.execute(
-        "UPDATE sessions SET behavior = 'orchestrator' WHERE session_id = 'caller'",
         [],
     )
     .unwrap();
@@ -149,10 +143,6 @@ fn search_is_project_scoped_excludes_other_topologies_and_reports_missing_projec
     assert_eq!(
         load_direct_task(&path, "child").unwrap(),
         TaskLookup::NotIndependentTask(NonTaskSession::TraditionalChild)
-    );
-    assert_eq!(
-        load_direct_task(&path, "caller").unwrap(),
-        TaskLookup::NotIndependentTask(NonTaskSession::Orchestrator)
     );
     assert_eq!(
         load_direct_task(&path, "deleted").unwrap(),

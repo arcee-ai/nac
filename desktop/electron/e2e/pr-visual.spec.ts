@@ -298,16 +298,22 @@ test("public PR comparison captures baseline browser and actual Electron shared 
           await info.attach(filename, { path: file, contentType: "image/png" });
         };
         await capture("workspace");
-        const model = await api("/model-configs", {
-          name: "Visual fixture model",
-          backend: "openai-responses",
-          model: "gpt-5.6-sol",
-          base_url: provider.baseUrl,
-          api_key: "visual-fixture-only",
-          reasoning_effort: "high",
-          extra_headers: {},
-          orchestrator_compaction_threshold: 0,
-        });
+        const model = arm === "before"
+          ? await api("/model-configs", {
+              name: "Visual fixture model",
+              backend: "openai-responses",
+              model: "gpt-5.6-sol",
+              base_url: provider.baseUrl,
+              api_key: "visual-fixture-only",
+              reasoning_effort: "high",
+              extra_headers: {},
+              orchestrator_compaction_threshold: 0,
+            })
+          : await api("/provider-connections", {
+              backend: "openai-responses",
+              base_url: provider.baseUrl,
+              api_key: "visual-fixture-only",
+            });
         await page.reload();
         await expect(page.getByText("No projects yet", { exact: true })).toBeVisible();
         // Focus shows the store under Settings › About, not on Home; read the
@@ -330,11 +336,15 @@ test("public PR comparison captures baseline browser and actual Electron shared 
         const project = await api("/projects", {
           name: "Desktop review workspace",
           cwd: workspace,
-          default_model_config_id: model.config_id,
+          ...(arm === "before" ? { default_model_config_id: model.config_id } : {}),
         });
         const session = await api("/sessions", {
           behavior: "direct",
           project_id: project.project_id,
+          ...(arm === "after"
+            ? { backend: "openai-responses", model: "gpt-5.6-sol", base_url: provider.baseUrl,
+                api_key_env: "NAC_E2E_API_KEY" }
+            : {}),
         });
         await page.reload();
         await page.evaluate((id) => {

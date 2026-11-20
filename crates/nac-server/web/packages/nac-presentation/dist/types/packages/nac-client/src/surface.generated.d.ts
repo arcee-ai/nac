@@ -52,7 +52,6 @@ export declare const NAC_API_SURFACE: {
     readonly "POST /sessions/{session_id}/user-terminals/{terminal_id}/input": "api.inputUserTerminal";
     readonly "POST /sessions/{session_id}/user-terminals/{terminal_id}/resize": "api.resizeUserTerminal";
     readonly "GET /sessions/{session_id}/messages": "api.getMessages";
-    readonly "GET /sessions/{session_id}/threads/{thread_name}/events": "api.getThreadEvents";
     readonly "GET /sessions/{session_id}/tool-calls/{call_id}": "api.getToolCallContent";
     readonly "GET /auth": "api.listManagedAuth";
     readonly "DELETE /auth/{provider}": "api.managedLogout";
@@ -99,14 +98,9 @@ export declare const NAC_API_SURFACE: {
     readonly "POST /mcp_library/servers/{server_name}/oauth/logout": "api.logoutMcpOAuth";
     readonly "GET /mcp_library/servers/{server_name}/oauth/status": "api.getMcpOAuthStatus";
     readonly "POST /mcp_library/servers/{server_name}/reload": "api.reloadMcpServer";
-    readonly "GET /model-configs": "api.listModelConfigs";
-    readonly "POST /model-configs": "api.createModelConfig";
-    readonly "POST /model-configs/from-file": "api.resolveConfigFile";
-    readonly "DELETE /model-configs/{config_id}": "api.deleteModelConfig";
-    readonly "PATCH /model-configs/{config_id}": "api.updateModelConfig";
-    readonly "POST /model-configs/{config_id}/models": "api.resolveModelConfig";
     readonly "GET /models": "api.getModelCatalog";
     readonly "GET /projects": "api.listProjects";
+    readonly "GET /projects/{project_id}/session-model-sources/{session_id}": "api.getProjectSessionModelSource";
     readonly "POST /projects": "api.createProject";
     readonly "PUT /projects/order": "api.reorderProjects";
     readonly "DELETE /projects/{project_id}": "api.deleteProject";
@@ -118,7 +112,6 @@ export declare const NAC_API_SURFACE: {
     readonly "GET /sandbox/availability": "api.getSandboxAvailability";
     readonly "GET /sessions": "api.listSessions";
     readonly "POST /sessions": "api.createSession";
-    readonly "POST /sessions/launch-defaults": "api.launchDefaults";
     readonly "PUT /sessions/order": "api.reorderSessions";
     readonly "GET /sessions/{session_id}": "api.getSession";
     readonly "DELETE /sessions/{session_id}": "api.deleteSession";
@@ -143,10 +136,7 @@ export declare const NAC_API_SURFACE: {
     readonly "POST /sessions/{session_id}/inbox": "api.createInboxItem";
     readonly "DELETE /sessions/{session_id}/inbox/{item_id}": "api.cancelInboxItem";
     readonly "PATCH /sessions/{session_id}/inbox/{item_id}": "api.updateInboxItem";
-    readonly "GET /sessions/{session_id}/orchestrators": "api.listManagedOrchestrators";
-    readonly "POST /sessions/{session_id}/orchestrators": "api.startManagedOrchestrator";
-    readonly "GET /sessions/{session_id}/orchestrators/{orchestrator_session_id}": "api.getManagedOrchestrator";
-    readonly "POST /sessions/{session_id}/orchestrators/{orchestrator_session_id}/cancel": "api.cancelManagedOrchestrator";
+    readonly "POST /provider-connections": "api.createProviderConnection";
     readonly "GET /sessions/{session_id}/permissions": "api.getPermissions";
     readonly "DELETE /sessions/{session_id}/permissions/grants/{grant_id}": "api.deletePermissionGrant";
     readonly "PUT /sessions/{session_id}/permissions/mode": "api.setPermissionApprovalMode";
@@ -159,9 +149,7 @@ export declare const NAC_API_SURFACE: {
     readonly "POST /sessions/{session_id}/runs": "api.submitRun";
     readonly "POST /sessions/{session_id}/runs/{run_id}/cancel": "api.cancelExactRun";
     readonly "GET /sessions/{session_id}/skills": "api.listSessionSkills";
-    readonly "POST /sessions/{session_id}/steering": "api.steerOrchestrator";
     readonly "DELETE /sessions/{session_id}/terminals/{terminal_id}": "api.terminateTerminal";
-    readonly "POST /sessions/{session_id}/threads/{thread_name}/steering": "api.steerThread";
     readonly "GET /sessions/{session_id}/workspace/branches": "api.getBranches";
     readonly "POST /sessions/{session_id}/workspace/branches": "api.switchBranch";
     readonly "POST /sessions/{session_id}/workspace/commit": "api.commitWorkspace";
@@ -179,5 +167,4 @@ export declare const NAC_API_SURFACE: {
     readonly "POST /ssh/folders": "api.createSshFolder";
     readonly "GET /ssh/aliases": "api.listSshAliases";
     readonly "GET /store": "api.getStore";
-    readonly "GET /ui-config": "client.getUiConfiguration";
 };

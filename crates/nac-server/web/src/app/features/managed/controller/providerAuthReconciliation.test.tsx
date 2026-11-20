@@ -20,7 +20,11 @@ function catalog(ready: boolean): ModelCatalog {
         auth_status: ready ? "ready" : "no_credential",
         auth_hint: ready ? null : "Sign in with ChatGPT",
         connection: ready
-          ? { base_url: "https://chatgpt.com/backend-api", api_key_env: null }
+          ? {
+              base_url: "https://chatgpt.com/backend-api",
+              allow_insecure_http: false,
+              api_key_env: null,
+            }
           : null,
         default_base_url: null,
         managed_base_url: "https://chatgpt.com/backend-api/codex",

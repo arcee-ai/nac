@@ -64,10 +64,10 @@ final class StartupSmoke {
                     evidence["launch_incarnation"] = receipt.incarnation
                     evidence["onboarding"] = true
                     evidence["workspace_activated"] = true
-                    let policy = try await js("return await (await fetch('/ui-config')).json();") as! [String: Any]
-                    evidence["ui_policy"] = policy
-                    guard policy["orchestration_enabled"] as? Bool == (ProcessInfo.processInfo.environment["NAC_ORCHESTRATION"] == "1") else {
-                        throw DesktopStartupError.message("Numeric orchestration policy changed")
+                    let retiredPolicyStatus = try await js("return (await fetch('/ui-config')).status;") as? Int
+                    evidence["retired_ui_policy_status"] = retiredPolicyStatus
+                    guard retiredPolicyStatus == 404 else {
+                        throw DesktopStartupError.message("Retired UI policy endpoint remains available")
                     }
                     if ["startup-missing-ssh", "startup-missing-podman", "startup-missing-mcp", "startup-custom-mcp"].contains(scenario) {
                         try await commandJourney()
@@ -215,11 +215,13 @@ final class StartupSmoke {
     private func scriptedLaunchModel() async throws -> LaunchModel {
         let provider = value("--smoke-provider")!
         let saved = try await js("""
-        const response = await fetch('/model-configs', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-          name:'Finder configured fixture', backend:'openai-responses', model:'gpt-5.6-sol',
-          base_url:\(json(provider)), api_key:'preview-dummy-only', extra_headers:{}, orchestrator_compaction_threshold:0})});
+        const response = await fetch('/provider-connections', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+          backend:'openai-responses', base_url:\(json(provider)), api_key:'preview-dummy-only'})});
         if (!response.ok) throw new Error(await response.text());
-        return await response.json();
+        const catalog = await (await fetch('/models')).json();
+        const route = catalog.providers.find(p => p.id === 'openai-responses')?.connection;
+        if (!route || route.base_url !== \(json(provider))) throw new Error('Scripted provider route is missing');
+        return route;
         """) as! [String: Any]
         guard let credential = saved["api_key_env"] as? String,
               let endpoint = saved["base_url"] as? String else {

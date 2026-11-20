@@ -37,8 +37,8 @@ extension WorkspaceSmoke {
 
     func directJourney() async {
         await check("orchestration-opt-in") {
-            try await self.require("Direct-only policy or behavior choices changed", "return !(await (await fetch('/ui-config')).json()).orchestration_enabled && !!document.getElementById('home-composer') && !document.querySelector('button[aria-label^=\"Behavior: \"]');")
-            return "NAC_ORCHESTRATION=0, no behavior chip on Home's composer"
+            try await self.require("Direct-only policy or behavior choices changed", "return (await fetch('/ui-config')).status === 404 && !!document.getElementById('home-composer') && !document.querySelector('button[aria-label^=\"Behavior: \"]');")
+            return "Retired policy endpoint returns 404 and Home's direct composer is visible"
         }
         await check("direct") {
             try await self.createChat("direct", prompt: "WK_RICH")
@@ -384,14 +384,16 @@ extension WorkspaceSmoke {
             try await waitJS("Escape closes layer", "return !document.querySelector('[role=dialog]');")
             try await waitJS("modal focus return", "return document.activeElement === window.__wkModalOpener;")
             try await waitJS("model chip", "return !!document.querySelector('button[aria-label^=\"Model: \"]:not(:disabled)');")
-            _ = try await js("const chip=document.querySelector('button[aria-label^=\"Model: \"]'); window.__wkPopoverOpener=chip; chip.focus(); chip.click(); return true;")
+            _ = try await js("const chip=document.querySelector('button[aria-label^=\"Model: \"]'); window.__wkModelChip=chip; chip.focus(); chip.click(); return true;")
             let modelList = "document.querySelector('[role=dialog][aria-label=\"Model settings\"] button[aria-label^=\"Choose model\"]')"
             try await waitJS("model settings dialog", "return !!(\(modelList));")
-            _ = try await js("\(modelList).click(); return true;")
+            _ = try await js("window.__wkPopoverOpener=\(modelList); window.__wkPopoverOpener.focus(); window.__wkPopoverOpener.click(); return true;")
             try await waitJS("production model popover", "return !!document.querySelector('input[aria-label=\"Search models\"]') && window.__wkPopoverOpener.getAttribute('aria-expanded') === 'true';")
             try await require("Popover overflows viewport", "const input=document.querySelector('input[aria-label=\"Search models\"]');const panel=input.closest('[data-radix-popper-content-wrapper]');if(!panel)return false;const r=panel.getBoundingClientRect();return r.left>=-1 && r.right<=innerWidth+1;")
             _ = try await js("document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));return true;")
             try await waitJS("popover dismissed and focus restored", "return !document.querySelector('input[aria-label=\"Search models\"]') && document.activeElement === window.__wkPopoverOpener && window.__wkPopoverOpener.getAttribute('aria-expanded') === 'false';")
+            _ = try await js("document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));return true;")
+            try await waitJS("model settings dismissed and focus restored", "return !document.querySelector('[role=dialog][aria-label=\"Model settings\"]') && document.activeElement === window.__wkModelChip;")
             layouts.append(["sidebar": collapsed ? "collapsed" : "expanded", "modal_focus_return": true, "popover_focus_return": true])
             record(["overlay_layouts": layouts])
             if collapsed { try await button("Show sidebar") }

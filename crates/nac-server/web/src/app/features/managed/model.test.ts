@@ -75,6 +75,7 @@ describe("managed feature model", () => {
           auth: "api_key_env",
           auth_status: "ready",
           connection: {
+            allow_insecure_http: false,
             base_url: "https://api.openai.com/v1",
             api_key_env: "NAC_CONFIG_saved",
           },
@@ -88,6 +89,7 @@ describe("managed feature model", () => {
       {
         backend: "openai-responses",
         base_url: "https://api.openai.com/v1",
+        allow_insecure_http: false,
         api_key_env: "NAC_CONFIG_saved",
       },
       { backend: "arcee-auth" },
@@ -96,6 +98,7 @@ describe("managed feature model", () => {
       {
         backend: "openai-responses",
         base_url: "https://api.openai.com/v1",
+        allow_insecure_http: false,
         api_key_env: "NAC_CONFIG_saved",
       },
       { backend: "arcee-auth" },
@@ -106,6 +109,7 @@ describe("managed feature model", () => {
       {
         backend: "openai-responses",
         base_url: "https://api.openai.com/v1",
+        allow_insecure_http: false,
         api_key_env: "NAC_CONFIG_saved",
       },
       { backend: "arcee-auth" },

@@ -1294,25 +1294,6 @@ async fn direct_inbox_steer_is_consumed_at_the_next_model_boundary() {
 }
 
 #[tokio::test]
-async fn orchestrator_sessions_reject_the_direct_inbox() {
-    let (parts, store_path) =
-        test_active_service("orchestrator_inbox_rejected", "orchestrator-inbox");
-    let error = parts
-        .service
-        .enqueue_direct_input(
-            crate::store::InboxDelivery::Queue,
-            "not allowed",
-            None,
-            None,
-        )
-        .await
-        .unwrap_err();
-    assert!(error.to_string().contains("only for direct behaviors"));
-    assert!(parts.service.list_direct_inbox().is_err());
-    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
-}
-
-#[tokio::test]
 async fn steering_requires_an_active_run_and_active_target_thread() {
     let (parts, store_path) = test_active_service("steering", "session-steering");
     let service = parts.service;

@@ -32,7 +32,7 @@ OS/browser matrix. Default ignored cases remain ignored during that phase.
 ## Reviewed ignored inventory
 
 The exact names, package, disposition, reason and required capabilities live in
-[the inventory](../../.github/scripts/nightly-portability.json). All thirty-one
+[the inventory](../../.github/scripts/nightly-portability.json). All twenty-eight
 ignored tests discovered by the native workspace harness must match that file;
 new, renamed or removed entries fail before any selected execution. Review the
 owning test and its nearest AGENTS guide before changing that inventory.
@@ -40,9 +40,7 @@ owning test and its nearest AGENTS guide before changing that inventory.
 | Selection / owner | Cases | Capabilities and reason |
 |---|---:|---|
 | Included: core `tools::discovery::tests` local fake-SSH parity and no-external-search tests | 2 | Local executable shims, system OpenSSH `sftp-server`, no remote connection or credentials. Both mutate process PATH. |
-| Included: server `tests::persistence_load` owned-store multi-thread and current-thread variants | 2 | Built `nac-web` worker, scripted local provider, SQLite and local processes. These exercise serving-store ownership and executor variants omitted by legacy managed-load. |
 | Included: direct parents and traditional children | 9 | Offline 1/2/4 ordered and four-way concurrent cases, SQLite contention, child transcript append failure, model and native-process cancellation with reconstruction, plus a built-candidate loopback workload and current-thread and multi-thread owned-store variants. Direct evidence is retained separately. |
-| Already covered: server `tests::managed_load::managed_load_scenario` | 1 | Required `test-workspace` invokes `make test-managed-load`; managed quality also runs it. Not duplicated as a nightly ignored selection. |
 | Excluded: core `agent::live_tests` | 2 | Paid/live provider API key and network calls. |
 | Excluded: process admission, core projection, Responses SSE latency, task-wait maximum timeout and server heartbeat measurements | 6 | Manual quiet-host/exclusive-window timing or resource qualification. Task-wait measures the real 60-second maximum; interval and calendar heartbeat cases measure two real scheduler owners at 1/10/100 schedules. |
 | Excluded: live reviewer calibration, corpus and two smokes | 4 | Authorized Arcee credentials, network and potentially paid reviewer requests; the default-profile smoke and calibration require the approved dev2 origin. |
@@ -133,7 +131,7 @@ Each included ignored case runs in its own harness process, with exact filter,
 `--ignored --exact --test-threads=1`; commands run sequentially after the default
 suite. The runner verifies the exact success line, rejecting zero-test or
 still-ignored results. There is no blanket include-ignored invocation and no
-retry. A missing SFTP server, worker, inventory or failed command fails the lane.
+retry. A missing SFTP server, candidate binary, inventory or failed command fails the lane.
 
 The shared test HTTP reader clears accepted-socket nonblocking mode before its
 existing five-second read timeout. Darwin can inherit `O_NONBLOCK` from the

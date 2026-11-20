@@ -1,6 +1,5 @@
 use super::http_listener::HttpListener;
 use super::presentation_bootstrap::{PresentationBinding, PresentationDocument};
-use super::ui_configuration::{self, UiConfiguration};
 use crate::*;
 use nac_core::commands::{slash_command_definitions, SlashCommandDefinition};
 use tower_http::cors::{AllowHeaders, AllowOrigin, CorsLayer};
@@ -276,7 +275,6 @@ fn remains_available_during_maintenance(method: &axum::http::Method, path: &str)
                     | "/healthz"
                     | "/readyz"
                     | "/managed/status"
-                    | "/ui-config"
                     | "/openapi.json"
             ) || path.starts_with("/assets/")
                 || path.starts_with("/docs")))
@@ -300,8 +298,8 @@ fn maintenance_allowlist_keeps_only_completion_and_recovery_mutations_available(
     use axum::http::Method;
 
     for (method, path) in [
-        (Method::GET, "/ui-config"),
-        (Method::HEAD, "/ui-config"),
+        (Method::GET, "/healthz"),
+        (Method::HEAD, "/healthz"),
         (Method::GET, "/mcp_library/servers/slack/oauth/callback"),
         (Method::POST, "/sessions/s/cancel-active-run"),
         (Method::POST, "/sessions/s/children/c/cancel"),
@@ -330,10 +328,7 @@ fn maintenance_allowlist_keeps_only_completion_and_recovery_mutations_available(
         );
     }
     for (method, path) in [
-        (Method::POST, "/ui-config"),
-        (Method::PUT, "/ui-config"),
-        (Method::DELETE, "/ui-config"),
-        (Method::GET, "/ui-config/extra"),
+        (Method::GET, "/ui-config"),
         (Method::HEAD, "/mcp_library/servers/slack/oauth/callback"),
         (
             Method::GET,
@@ -688,7 +683,6 @@ fn documented_api() -> OpenApiRouter<SessionManager> {
         .routes(routes!(delivery::attention::events))
         .routes(routes!(delivery::fleet_attention::snapshot))
         .routes(routes!(delivery::fleet_attention::stream))
-        .routes(routes!(ui_configuration::get_ui_configuration))
         .routes(routes!(delivery::product_context::read))
         .routes(routes!(delivery::product_context::resolve))
         .routes(routes!(managed_status::healthz_handler))
@@ -703,10 +697,6 @@ fn documented_api() -> OpenApiRouter<SessionManager> {
         .routes(routes!(delivery::project_folders::create_ssh_handler))
         .routes(routes!(provider_models_handler))
         .routes(routes!(
-            delivery::model_configurations::list_handler,
-            delivery::model_configurations::create_handler
-        ))
-        .routes(routes!(
             delivery::projects::list_handler,
             delivery::projects::create_handler
         ))
@@ -716,16 +706,6 @@ fn documented_api() -> OpenApiRouter<SessionManager> {
             delivery::projects::delete_handler
         ))
         .routes(routes!(delivery::projects::assign_session_handler))
-        .routes(routes!(
-            delivery::model_configurations::resolve_file_handler
-        ))
-        .routes(routes!(
-            delivery::model_configurations::update_handler,
-            delivery::model_configurations::delete_handler
-        ))
-        .routes(routes!(
-            delivery::model_configurations::resolve_saved_handler
-        ))
         .routes(routes!(
             delivery::ssh_configurations::list_handler,
             delivery::ssh_configurations::create_handler
@@ -788,6 +768,7 @@ fn documented_api() -> OpenApiRouter<SessionManager> {
             delivery::managed_secrets::put_handler,
             delivery::managed_secrets::delete_handler
         ))
+        .routes(routes!(delivery::provider_connections::create_handler))
         .routes(routes!(
             delivery::credentials::list_handler,
             delivery::credentials::generate_handler
@@ -796,7 +777,6 @@ fn documented_api() -> OpenApiRouter<SessionManager> {
             delivery::credentials::put_handler,
             delivery::credentials::delete_handler
         ))
-        .routes(routes!(launch_model_defaults_handler))
         .routes(routes!(models_handler))
         .routes(routes!(commands_handler))
         .routes(routes!(
@@ -855,12 +835,6 @@ fn documented_api() -> OpenApiRouter<SessionManager> {
         .routes(routes!(
             delivery::delegation::authorize_child_permission_review_retry
         ))
-        .routes(routes!(
-            delivery::delegation::list_managed_orchestrators,
-            delivery::delegation::start_managed_orchestrator
-        ))
-        .routes(routes!(delivery::delegation::get_managed_orchestrator))
-        .routes(routes!(delivery::delegation::cancel_managed_orchestrator))
         .routes(routes!(delivery::session_state::permission_state))
         .routes(routes!(
             delivery::session_state::update_permission_approval_mode
@@ -870,7 +844,6 @@ fn documented_api() -> OpenApiRouter<SessionManager> {
             delivery::session_state::authorize_permission_review_retry
         ))
         .routes(routes!(delivery::session_state::delete_permission_grant))
-        .routes(routes!(delivery::session_state::thread_events))
         .routes(routes!(delivery::workspace::workspace_diff))
         .routes(routes!(delivery::workspace::workspace_files))
         .routes(routes!(delivery::workspace::workspace_file))
@@ -891,6 +864,9 @@ fn documented_api() -> OpenApiRouter<SessionManager> {
             delivery::session_lifecycle::session_config_handler,
             delivery::session_lifecycle::update_config_handler
         ))
+        .routes(routes!(
+            delivery::session_lifecycle::project_session_model_source
+        ))
         .routes(routes!(delivery::session_lifecycle::session_skills_handler))
         .routes(routes!(
             delivery::session_lifecycle::session_commands_handler
@@ -901,12 +877,6 @@ fn documented_api() -> OpenApiRouter<SessionManager> {
         .routes(routes!(revert::regenerate_handler))
         .routes(routes!(fork::handler))
         .routes(routes!(fork::dismiss_handler))
-        .routes(routes!(
-            delivery::session_runs::queue_orchestrator_steering_handler
-        ))
-        .routes(routes!(
-            delivery::session_runs::queue_thread_steering_handler
-        ))
         .routes(routes!(delivery::session_runs::recent_events))
         .routes(routes!(delivery::session_runs::stream_events))
         .routes(routes!(delivery::session_runs::cancel_active_run))
@@ -986,9 +956,7 @@ fn api_router(manager: SessionManager) -> (Router, utoipa::openapi::OpenApi) {
     let documented = documented_api().with_state(manager.clone());
     let (router, openapi) = documented.split_for_parts();
     (
-        router
-            .nest_service("/mcp", mcp::streamable_http_service(manager))
-            .layer(axum::Extension(UiConfiguration::from_environment())),
+        router.nest_service("/mcp", mcp::streamable_http_service(manager)),
         openapi,
     )
 }
@@ -1640,22 +1608,6 @@ async fn provider_models_handler(
     Ok(Json(ProviderModelList { base_url, models }))
 }
 
-#[utoipa::path(
-    post,
-    path = "/sessions/launch-defaults",
-    operation_id = "post_sessions_launch_defaults",
-    tag = "sessions",
-    request_body(content = LaunchModelDefaultsRequest, content_type = "application/json"),
-    responses((status = 200, description = "Success", body = LaunchModelDefaults, content_type = "application/json"), (status = 400, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
-)]
-async fn launch_model_defaults_handler(
-    State(manager): State<SessionManager>,
-    payload: std::result::Result<Json<LaunchModelDefaultsRequest>, JsonRejection>,
-) -> std::result::Result<Json<LaunchModelDefaults>, ApiError> {
-    let Json(request) = payload.map_err(ApiError::from)?;
-    Ok(Json(manager.launch_model_defaults(request)?))
-}
-
 /// The model catalog listing for the frontend picker: every provider with
 /// auth requirements, managed base URL, catalog endpoint default,
 /// `_default` limits and real entries. Reads the process-global catalog;
@@ -1669,8 +1621,14 @@ async fn launch_model_defaults_handler(
     tag = "models",
     responses((status = 200, description = "Success", body = ModelListing, content_type = "application/json"))
 )]
-async fn models_handler(State(manager): State<SessionManager>) -> Json<ModelListing> {
-    Json(manager.model_catalog().listing())
+async fn models_handler(
+    State(manager): State<SessionManager>,
+) -> Result<Json<ModelListing>, ApiError> {
+    let listing = nac_core::store::spawn_blocking_store_caller(move || {
+        Ok::<_, anyhow::Error>(manager.model_catalog().listing())
+    })
+    .await??;
+    Ok(Json(listing))
 }
 
 #[utoipa::path(

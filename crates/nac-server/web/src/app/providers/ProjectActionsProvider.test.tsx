@@ -4,8 +4,6 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { UiPolicyContext } from "@/app/features/ui-policy/UiPolicyContext";
-import { DIRECT_UI_POLICY, ORCHESTRATION_UI_POLICY } from "@/app/features/ui-policy/policy";
 import { chatTabsStore, dismissChatTab, setChatTabOrder } from "@/app/store/chatTabsStore";
 import {
   sessionNavigationStore,
@@ -52,18 +50,19 @@ function Harness() {
       <button onClick={() => void actions.newChat("project-1")}>New session</button>
       <button onClick={() => void actions.newChat("project-1", true)}>Replace with composer</button>
       <output data-testid="location">{`${location.pathname}${location.search}`}</output>
+      <output data-testid="navigation-state">{JSON.stringify(location.state)}</output>
     </>
   );
 }
 
-function tree(orchestration = false, path = "/project/project-1") {
+function tree(_orchestration = false, path = "/project/project-1") {
   return (
     <MemoryRouter initialEntries={[path]}>
-      <UiPolicyContext.Provider value={orchestration ? ORCHESTRATION_UI_POLICY : DIRECT_UI_POLICY}>
+      <>
         <ProjectActionsProvider>
           <Harness />
         </ProjectActionsProvider>
-      </UiPolicyContext.Provider>
+      </>
     </MemoryRouter>
   );
 }
@@ -89,6 +88,19 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+});
+
+it.each([
+  [{ summary: { session_id: "s", project_id: "project-1" }, lineage: null }, "s"],
+  [{ summary: { session_id: "s", project_id: "other" }, lineage: null }, null],
+  [{ summary: { session_id: "s", project_id: "project-1" }, lineage: {} }, null],
+])("binds the current session source only within its project and ownership", (entry, expected) => {
+  fakes.sessions = [entry];
+  render(tree(false, "/session/s/delegated"));
+  fireEvent.click(screen.getByRole("button", { name: "New session" }));
+  const state = JSON.parse(screen.getByTestId("navigation-state").textContent!);
+  expect(state.sourceSessionId ?? null).toBe(expected);
+  expect(state.sourceProjectId ?? null).toBe(expected ? "project-1" : null);
 });
 
 describe("project actions", () => {

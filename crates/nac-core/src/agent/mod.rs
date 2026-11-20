@@ -41,9 +41,15 @@ mod terminal_selection_delivery_tests;
 mod transcript_log_tests;
 
 #[cfg(test)]
-pub(crate) use compaction::checkpoint_digests as compaction_checkpoint_digests_for_test;
+pub(crate) const DIRECT_COMPACTION_PROMPT_POLICY_VERSION_FOR_TEST: u32 =
+    compaction::DIRECT_PROMPT_POLICY_VERSION;
 #[cfg(test)]
-pub(crate) const COMPACTION_PROMPT_POLICY_VERSION_FOR_TEST: u32 = compaction::PROMPT_POLICY_VERSION;
+pub(crate) fn direct_compaction_checkpoint_digests_for_test(
+    messages: &[crate::types::Message],
+    boundary: usize,
+) -> ([u8; 32], [u8; 32]) {
+    compaction::checkpoint_digests_for_policy(messages, boundary, CompactionPolicy::Direct)
+}
 pub(crate) use compaction::{
     CompactionCompletion, CompactionError, CompactionLifecycle, CompactionResult,
 };

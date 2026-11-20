@@ -9,7 +9,7 @@ fn fixture(label: &str) -> PathBuf {
         ))
         .join("store.db");
     initialize(&path).unwrap();
-    for session in ["parent", "child-a", "child-b", "orchestrator"] {
+    for session in ["parent", "child-a", "child-b"] {
         crate::store::insert_test_session(&path, session);
     }
     let connection = open_runtime_connection(&path).unwrap();
@@ -24,13 +24,6 @@ fn fixture(label: &str) -> PathBuf {
         create_traditional_child_relationship(&path, "parent", child, GENERAL_CHILD_PROFILE, child)
             .unwrap();
     }
-    connection
-        .execute(
-            "UPDATE sessions SET behavior = 'direct-with-orchestrator' WHERE session_id = 'parent'",
-            [],
-        )
-        .unwrap();
-    create_managed_orchestrator_relationship(&path, "parent", "orchestrator", "work").unwrap();
     path
 }
 
@@ -131,37 +124,25 @@ fn settlement_pins_completions_to_the_active_parent_run_or_queues_one_successor(
     finish_parent_run(&path, "parent-run");
 
     // An idle parent receives one queued successor item, never a steer.
-    begin_managed_orchestrator_run(
+    begin_traditional_child_run(
         &path,
-        "orchestrator",
-        "run-o",
+        "child-b",
+        "run-b",
         TraditionalChildExecutionMode::Background,
     )
     .unwrap();
-    let managed = settle_managed_orchestrator_run(
-        &path,
-        "orchestrator",
-        "run-o",
-        ManagedOrchestratorTerminal {
-            status: TraditionalChildStatus::Failed,
-            report: None,
-            failure: Some("orchestrator failed".to_owned()),
-        },
-    )
-    .unwrap();
-    let queued = load_session_inbox_item(
-        &path,
-        "parent",
-        managed.orchestrator.completion_inbox_id.unwrap(),
-    )
-    .unwrap();
+    let settled =
+        settle_traditional_child_run(&path, "child-b", "run-b", child_terminal()).unwrap();
+    let queued =
+        load_session_inbox_item(&path, "parent", settled.child.completion_inbox_id.unwrap())
+            .unwrap();
     assert_eq!(queued.delivery, InboxDelivery::Queue);
     assert_eq!(queued.target_run_id, None);
     assert_eq!(
         queued.internal_completion,
         Some(origin(
-            InternalCompletionSource::ManagedOrchestrator,
-            "orchestrator",
+            InternalCompletionSource::TraditionalChild,
+            "child-b",
             1
         ))
     );

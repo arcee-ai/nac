@@ -5,40 +5,31 @@ import { Icon, IconName, Loader, LoaderSize, Tooltip } from "@/app/atoms";
 import { useManagedHost } from "@/app/features/managed/controller/useManagedHost";
 import { TaskLaunchModal } from "@/app/features/task-launches/TaskLaunchModal";
 import { useTaskLaunchSource } from "@/app/features/task-launches/useTaskLaunch";
-import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { useMediaQuery } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
+import { standardEffort } from "@/app/components/modals/options";
 import { routes } from "@/app/lib/routes";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
 import { resolveCatalogModel, type CatalogPick } from "@/app/lib/catalog";
-import { standardEffort } from "@/app/components/modals/options";
 import { speedForCatalogRoute, supportsSpeed } from "@/app/lib/serviceTier";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useModelCatalog, useSandboxAvailability } from "@/app/services/queries";
-import type {
-  ManagedSessionSummary,
-  ProjectRecord,
-  ReasoningEffort,
-  SessionBehavior,
-} from "@/app/types/api";
+import type { ManagedSessionSummary, ProjectRecord, ReasoningEffort } from "@/app/types/api";
 
-import { defaultBehavior } from "./behaviors";
 import { Chip } from "./Chip";
 import { ModelPicker } from "./ComposerModelPickers";
-import { BehaviorPicker, ProjectPicker } from "./ComposerPickers";
+import { ProjectPicker } from "./ComposerPickers";
 import { WorkspaceSettings } from "./WorkspaceSettings";
 import {
   modelChipLabel,
   sessionRoute,
-  useConfiguredLaunchModel,
-  useInheritedModel,
   withEffort,
   withSpeed,
   type ModelOverride,
 } from "./modelChoice";
-import { ModelOverrideModal } from "./ModelOverrideModal";
 import { catalogOverride, useSuggestedModel } from "./suggestedModel";
 import { useStartSession } from "./useStartSession";
+import { requireCurrentSource, useSourceSessionModel } from "./sourceSessionModel";
 import type { SandboxOptions } from "./workspaceSandbox";
 
 const MAX_TITLE = 120;
@@ -80,7 +71,6 @@ export function HomeComposer({
   /** Phones: no hero heading spacing. */
   compact?: boolean;
 }) {
-  const policy = useUiPolicy();
   const managed = useManagedHost();
   const projectActions = useProjectActions();
   const location = useLocation();
@@ -105,7 +95,8 @@ export function HomeComposer({
   const requestedMissing = explicitProject != null && project == null;
   const projectId = project?.project_id ?? null;
 
-  const draft = useNativeRuntime().stores.homeDraftStore;
+  const runtime = useNativeRuntime();
+  const draft = runtime.stores.homeDraftStore;
   const prompt = draft.usePrompt();
   const draftProjectId = draft.useProjectId();
   const setPrompt = (text: string) => draft.update(text, projectId);
@@ -114,7 +105,6 @@ export function HomeComposer({
     prompt.trim() && project && draftProjectId && draftProjectId !== project.project_id
       ? (projects.find((entry) => entry.project_id === draftProjectId)?.name ?? null)
       : undefined;
-  const [behavior, setBehavior] = useState<SessionBehavior>(() => defaultBehavior(policy));
   // An override belongs to the project it was chosen for; another project
   // inherits its own model.
   const [overrideFor, setOverrideFor] = useState<{
@@ -124,7 +114,6 @@ export function HomeComposer({
   const override = overrideFor?.projectId === projectId ? overrideFor.value : null;
   const setOverride = (value: ModelOverride | null) =>
     setOverrideFor(value ? { projectId, value } : null);
-  const [modelOpen, setModelOpen] = useState(false);
   const [isolatedProjectId, setIsolatedProjectId] = useState<string | null>(null);
   const [sandboxFor, setSandboxFor] = useState<{
     projectId: string | null;
@@ -133,33 +122,39 @@ export function HomeComposer({
   const [isolatedTask, setIsolatedTask] = useState<{
     projectId: string;
     prompt: string;
-    model: ModelOverride | null;
+    model: ModelOverride;
     revision: number;
     gitRef: string;
     defaultRef: string | null;
   } | null>(null);
   // A ref belongs to the project it was typed for.
-  const [refFor, setRefFor] = useState<{ projectId: string | null; ref: string } | null>(null);
+  const [refFor, setRefFor] = useState<{
+    projectId: string | null;
+    ref: string;
+  } | null>(null);
   const gitRef = refFor?.projectId === projectId ? refFor.ref : "";
-  const effectiveBehavior = policy.orchestrationEnabled ? behavior : "direct";
-
-  const model = useInheritedModel(projectId);
-  const noInherited = Boolean(projectId) && !model.pending && !model.inherited && !model.error;
-  const configured = useConfiguredLaunchModel(project, noInherited);
-  const suggestion = useSuggestedModel(
-    noInherited && !configured.model && !configured.pending && !configured.error,
-  );
-  // Nothing picked and nothing inherited: start on the suggested model rather
-  // than leaving the server without one.
-  const chosenModel = override ?? (model.inherited ? null : suggestion.override);
-  const route = sessionRoute(chosenModel, model.inherited);
-  const catalog = useModelCatalog(Boolean(route));
+  const sourceState = location.state as {
+    sourceSessionId?: string;
+    sourceProjectId?: string;
+  } | null;
+  const preferredSource =
+    sourceState?.sourceProjectId === projectId ? (sourceState.sourceSessionId ?? null) : null;
+  const sourceModel = useSourceSessionModel(project, sessions, preferredSource);
+  const suggestion = useSuggestedModel(Boolean(projectId) && !override && !sourceModel.hasSource);
+  const chosenModel = override ?? sourceModel.model ?? suggestion.override;
+  const route = sessionRoute(chosenModel);
+  const catalog = useModelCatalog();
   const speedCapability = speedForCatalogRoute(catalog.data, route);
   const supported = route
     ? resolveCatalogModel(catalog.data, route.backend, route.model).supportedEfforts
     : [];
   // A level picked for one model carries over to the next one that accepts it.
-  const [effortChoice, setEffortChoice] = useState<string | null>(null);
+  const [effortFor, setEffortFor] = useState<{
+    projectId: string | null;
+    value: string;
+  } | null>(null);
+  const effortChoice = effortFor?.projectId === projectId ? effortFor.value : null;
+  const setEffortChoice = (value: string) => setEffortFor({ projectId, value });
   const effortAllowed = (effort: string) => supported.includes(effort as ReasoningEffort);
   const effort = !route
     ? ""
@@ -167,12 +162,20 @@ export function HomeComposer({
       ? effortChoice
       : route.effort || (standardEffort(supported) ?? "");
   const sessionModel =
-    route && effort !== route.effort
-      ? withEffort(chosenModel, model.inherited, effort)
-      : chosenModel;
-  const modelPending = model.pending || configured.pending || suggestion.pending;
+    route && effort !== route.effort ? withEffort(chosenModel, effort) : chosenModel;
+  const modelPending =
+    catalog.isPending || (override == null && (sourceModel.pending || suggestion.pending));
   const chooseModel = (pick: CatalogPick, clearIncompatibleSpeed: boolean) => {
-    if (!catalog.data || (route?.backend === pick.backend && route.model === pick.model)) return;
+    if (!catalog.data) return;
+    const next = catalogOverride(catalog.data, pick);
+    if (
+      route?.backend === pick.backend &&
+      route.model === pick.model &&
+      route.baseUrl === pick.baseUrl &&
+      next.selection.allow_insecure_http === chosenModel?.selection.allow_insecure_http &&
+      next.selection.api_key_env === chosenModel?.selection.api_key_env
+    )
+      return;
     const targetSpeed = speedForCatalogRoute(catalog.data, pick);
     const incompatible = Boolean(route?.speed) && !targetSpeed.explicitTiersAllowed;
     if (incompatible && !clearIncompatibleSpeed)
@@ -180,7 +183,16 @@ export function HomeComposer({
         error: "This model does not accept the selected speed.",
         confirmSpeedClear: true,
       };
-    const next = catalogOverride(catalog.data, pick);
+    if (
+      chosenModel?.source &&
+      next &&
+      next.selection.backend === chosenModel.selection.backend &&
+      next.selection.base_url === chosenModel.selection.base_url &&
+      next.selection.allow_insecure_http === chosenModel.selection.allow_insecure_http &&
+      next.selection.api_key_env === chosenModel.selection.api_key_env
+    ) {
+      next.source = chosenModel.source;
+    }
     if (route?.speed === undefined) {
       setOverride(next);
     } else {
@@ -189,16 +201,16 @@ export function HomeComposer({
         : route.speed && !supportsSpeed(targetSpeed.tiers, route.speed)
           ? "standard"
           : route.speed;
-      setOverride(withSpeed(next, null, speed));
+      setOverride(withSpeed(next, speed));
       if (incompatible) return { notice: "Speed preference cleared for this model." };
       if (speed !== route.speed) return { notice: "Speed changed to Standard for this model." };
     }
   };
-  const needsProvider = !override && !model.inherited && suggestion.noProviders;
-  const modelError =
-    !override && !model.inherited ? (model.error ?? configured.error ?? suggestion.error) : null;
-  const source = useTaskLaunchSource(projectId, effectiveBehavior === "direct");
-  const isolationAvailable = effectiveBehavior === "direct" && source.data?.eligible === true;
+  const needsProvider =
+    !override && !sourceModel.hasSource && suggestion.noProviders && !managed.status?.model_ready;
+  const modelError = override ? null : sourceModel.error || suggestion.error || catalog.error;
+  const source = useTaskLaunchSource(projectId, true);
+  const isolationAvailable = source.data?.eligible === true;
   const useIsolation = projectId != null && isolatedProjectId === projectId;
   const sandboxAllowed = Boolean(project && !project.ssh_host && managed.isUnmanaged);
   const sandbox = sandboxFor?.projectId === projectId ? sandboxFor.options : null;
@@ -234,10 +246,10 @@ export function HomeComposer({
     prompt.trim().length > 0 &&
     !busy &&
     !starter.needsReview &&
-    !needsProvider &&
     !modelError &&
     (!useIsolation || isolationAvailable) &&
     (!sandbox || sandboxReady) &&
+    Boolean(sessionModel) &&
     (!modelPending || override != null);
 
   const sendLabel = useIsolation
@@ -247,7 +259,7 @@ export function HomeComposer({
       : "Start session";
 
   const send = async () => {
-    if (!canSend || !projectId) return;
+    if (!canSend || !projectId || !sessionModel) return;
     const revision = draft.get().revision;
     if (useIsolation) {
       setIsolatedTask({
@@ -263,7 +275,6 @@ export function HomeComposer({
     const text = prompt;
     const started = await starter.start({
       projectId,
-      behavior: effectiveBehavior,
       prompt: text,
       model: sessionModel,
       ...(sandbox ? { sandbox } : {}),
@@ -329,9 +340,6 @@ export function HomeComposer({
           />
           <div className="flex items-end gap-2 px-3 pt-1 pb-3">
             <div className="flex min-w-0 flex-1 flex-wrap items-center gap-0.5 max-md:-ml-1 max-md:flex-nowrap max-md:overflow-x-auto max-md:[&>*]:shrink-0 max-md:[scrollbar-width:none] max-md:[mask-image:linear-gradient(to_right,black_85%,transparent)] max-md:pr-6">
-              {policy.orchestrationEnabled ? (
-                <BehaviorPicker value={behavior} onChange={setBehavior} disabled={busy} />
-              ) : null}
               {project && needsProvider ? (
                 <Chip
                   icon={IconName.Key}
@@ -345,7 +353,7 @@ export function HomeComposer({
             </div>
             {project && !needsProvider ? (
               <ModelPicker
-                fallbackLabel={modelChipLabel(chosenModel, model.inherited) ?? configured.model}
+                fallbackLabel={modelChipLabel(chosenModel)}
                 pending={modelPending}
                 value={route}
                 effort={effort}
@@ -353,12 +361,11 @@ export function HomeComposer({
                 speed={{
                   ...speedCapability,
                   value: route?.speed ?? null,
-                  onChange: (speed) => setOverride(withSpeed(sessionModel, model.inherited, speed)),
+                  onChange: (speed) => setOverride(withSpeed(sessionModel, speed)),
                 }}
                 disabled={busy}
                 onPick={chooseModel}
                 onEffort={setEffortChoice}
-                onAdvanced={policy.orchestrationEnabled ? () => setModelOpen(true) : undefined}
               />
             ) : null}
             <Tooltip title={sendLabel} sticky>
@@ -441,10 +448,6 @@ export function HomeComposer({
           <p role="status" className="type-meta text-basic-secondary">
             {starter.sandboxProgress}
           </p>
-        ) : project && needsProvider ? (
-          <p className="type-meta text-basic-tertiary">
-            Connect a model provider in Settings to start a session.
-          </p>
         ) : modelError ? (
           <p role="alert" className="type-meta text-error-primary">
             Could not load the launch model. Choose a model before starting a session.
@@ -465,37 +468,25 @@ export function HomeComposer({
         ) : null}
       </div>
 
-      <ModelOverrideModal
-        open={modelOpen && policy.orchestrationEnabled}
-        behavior={effectiveBehavior}
-        inherited={model.inherited}
-        inheritancePending={model.pending}
-        inheritanceError={model.error}
-        current={sessionModel}
-        overridden={override != null}
-        onApply={(next) => {
-          setOverride(next);
-          setEffortChoice(null);
-          setModelOpen(false);
-        }}
-        onReset={() => setOverride(null)}
-        onClose={() => setModelOpen(false)}
-      />
       {isolatedTask && isolatedTask.projectId === projectId ? (
         <TaskLaunchModal
           projectId={isolatedTask.projectId}
+          model={isolatedTask.model.selection}
+          modelSource={isolatedTask.model.source}
           defaultRef={isolatedTask.defaultRef}
           initialGitRef={isolatedTask.gitRef}
           initialPrompt={isolatedTask.prompt}
           initialTitle={titleFrom(isolatedTask.prompt)}
           onClose={() => setIsolatedTask(null)}
           onLaunchAccepted={() => draft.acknowledge(isolatedTask.revision)}
+          validateModel={(signal) =>
+            requireCurrentSource(runtime.api, isolatedTask.projectId, isolatedTask.model, signal)
+          }
           onExistingCheckout={(text) => {
             setIsolatedTask(null);
             void starter
               .start({
                 projectId: isolatedTask.projectId,
-                behavior: "direct",
                 prompt: text,
                 model: isolatedTask.model,
               })

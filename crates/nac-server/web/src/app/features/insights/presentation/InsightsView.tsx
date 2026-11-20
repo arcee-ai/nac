@@ -1,17 +1,8 @@
-import { useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, type ReactNode } from "react";
 
-import { Button, ButtonSize, ButtonVariant } from "@/app/atoms";
 import { PanelEmptyState } from "@/app/components/inspector/PanelMessages";
 import { PanelLoading, PanelSplit } from "@/app/components/inspector/PanelSplit";
 import { PanelQuiet } from "@/app/components/inspector/PanelQuiet";
-import { TaskButton, TaskPill } from "@/app/components/inspector/TaskPreview";
-import { ThreadSteeringModal } from "@/app/components/inspector/ThreadSteeringModal";
-import { ThreadDetail } from "@/app/components/inspector/threads/ThreadDetail";
-import {
-  ThreadViewSelect,
-  type ThreadDetailView,
-} from "@/app/components/inspector/threads/ThreadViewControls";
-import { useThreadRunState } from "@/app/components/inspector/threads/useThreadRunState";
 import { useTranscriptModelContext } from "@/app/components/inspector/transcript/TranscriptModelContext";
 import {
   buildInsightTimeline,
@@ -48,17 +39,11 @@ import {
 } from "@/app/features/insights/presentation/selection";
 import { useDelegatedSessions } from "@/app/features/insights/presentation/useDelegatedSessions";
 import {
-  useInsightsThreadPane,
-  useThreadOwnership,
-} from "@/app/features/insights/presentation/useInsightsThread";
-import {
   INSIGHTS_DETAIL_ID,
   useInsightsDetailFocus,
   useInsightsNavigation,
 } from "@/app/features/insights/useInsightsNavigation";
-import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { usePanelListMarksOpen } from "@/app/hooks/usePanelListMarksOpen";
-import { cn } from "@/app/lib/cn";
 import { useSharedValue, useStructuralSharing } from "@/app/lib/useSharedValue";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import type { SessionSnapshotResponse } from "@/app/types/api";
@@ -67,8 +52,6 @@ export interface InsightsViewProps {
   sessionId: string;
   snapshot: SessionSnapshotResponse | null;
   topology: InsightsTopology;
-  /** Only a user-owned classic orchestrator may steer its workers from a thread. */
-  canSteerWorkers: boolean;
 }
 
 /**
@@ -76,29 +59,20 @@ export interface InsightsViewProps {
  * for it, beside the detail of the picked action. Until a row is picked the
  * detail follows the newest action.
  */
-export function InsightsView({
-  sessionId,
-  snapshot,
-  topology,
-  canSteerWorkers,
-}: InsightsViewProps) {
+export function InsightsView({ sessionId, snapshot, topology }: InsightsViewProps) {
   const {
     useInsightsFilter,
     useSelectedInsight,
-    useSelectedThread,
-    useSelectedThreadEpisode,
     useInsightFocusNonce,
     useExpandedInsightGroups,
     selectInsight,
     selectInsightsFilter,
-    selectThread,
     showSidePanelList,
     toggleInsightGroup,
     rememberInsightsReturn,
   } = useNativeRuntime().stores.sessionLayoutStore;
   const model = useTranscriptModelContext();
   const navigation = useInsightsNavigation();
-  const runState = useThreadRunState(snapshot);
 
   const options = useMemo(() => insightFilterOptions(topology), [topology]);
   const storedFilter = useInsightsFilter();
@@ -110,23 +84,14 @@ export function InsightsView({
     useMemo(() => buildInsightTimeline(model.turns), [model.turns]),
   );
   const sections = useMemo(() => filterInsightTimeline(timeline, filter), [timeline, filter]);
-  const ownsThread = useThreadOwnership(snapshot, timeline, runState.liveThreads);
   const resolveSession = useDelegatedSessions(sessionId, snapshot, timeline);
 
   const selection = useSelectedInsight();
-  const storedThread = useSelectedThread();
-  const storedEpisode = useSelectedThreadEpisode();
   const focusNonce = useInsightFocusNonce();
   const expanded = useExpandedInsightGroups();
   const picked = useMemo(
-    () =>
-      resolveStoredInsight(
-        selection,
-        { name: storedThread, episode: storedEpisode },
-        timeline,
-        ownsThread,
-      ),
-    [selection, storedThread, storedEpisode, timeline, ownsThread],
+    () => resolveStoredInsight(selection, { name: null, episode: null }, timeline, () => false),
+    [selection, timeline],
   );
   const shown = useMemo(
     () => picked ?? newestShownInsight(sections, timeline),
@@ -168,14 +133,8 @@ export function InsightsView({
               groupId: highlighted.entry.id,
               segmentKey: highlighted.segmentKey,
             }
-          : highlighted?.kind === "thread"
-            ? { kind: "thread" as const }
-            : null;
-      rememberInsightsReturn(
-        sessionId,
-        origin,
-        highlighted?.kind === "thread" ? highlighted : undefined,
-      );
+          : null;
+      rememberInsightsReturn(sessionId, origin);
       navigation.openSubagent(rowKey);
     },
     [navigation, rememberInsightsReturn, sessionId, highlighted],
@@ -183,10 +142,6 @@ export function InsightsView({
 
   const controller = useMemo<InsightsRowController>(() => {
     const segmentAction = (entry: InsightGroupEntry, segment: InsightSegment) => {
-      if (segment.kind === "workset") {
-        const { worksetId } = segment;
-        return worksetId ? () => navigation.openWorkset(worksetId) : null;
-      }
       return () => {
         selectInsight({
           kind: "group",
@@ -197,12 +152,7 @@ export function InsightsView({
       };
     };
     const entryAction = (entry: InsightEntry) => {
-      if (entry.kind === "thread") {
-        return () => {
-          selectThread(entry.thread.name, entry.id);
-          selectInsight({ kind: "thread" });
-        };
-      }
+      if (entry.kind === "thread") return null;
       if (entry.kind === "session") {
         const session = resolveSession(entry.rowKey);
         return session ? () => openSubagent(session.rowKey) : null;
@@ -230,11 +180,9 @@ export function InsightsView({
     sources,
     marked,
     highlighted,
-    navigation,
     openSubagent,
     resolveSession,
     selectInsight,
-    selectThread,
     showSidePanelList,
     toggleInsightGroup,
   ]);
@@ -248,7 +196,6 @@ export function InsightsView({
       sessionId,
       resolveSession,
       openSubagent,
-      openWorkset: navigation.openWorkset,
       workspaceRoots: [hostRoot, workspaceHostPath, cwd],
       filePathPrefix,
       openFile: navigation.openFile,
@@ -263,15 +210,6 @@ export function InsightsView({
       workspaceHostPath,
       cwd,
     ],
-  );
-  const [threadView, setThreadView] = useState<ThreadDetailView>("log");
-  const [steeringThread, setSteeringThread] = useState<string | null>(null);
-  const isMobile = useIsMobile();
-  const threadPane = useInsightsThreadPane(
-    snapshot,
-    shown?.kind === "thread" ? shown.name : null,
-    runState,
-    canSteerWorkers,
   );
   // A resolved pick is what the detail shows; list rows never ask for focus.
   const detailRef = useInsightsDetailFocus(selection, snapshot != null && picked != null);
@@ -316,33 +254,7 @@ export function InsightsView({
 
   let title: ReactNode;
   let detail: ReactNode;
-  if (shown?.kind === "thread" && threadPane) {
-    const { thread, eventLog } = threadPane;
-    // The panel truncates the title on its own box, which leaves this one free
-    // to shimmer.
-    title = <span className={cn(threadPane.running && "text-shimmer-basic")}>{thread.name}</span>;
-    detail = (
-      <ThreadDetail
-        key={`${sessionId}:${thread.name}`}
-        thread={thread}
-        action={threadPane.action}
-        episodes={threadPane.episodes}
-        events={eventLog.events}
-        liveLog={threadPane.liveLog}
-        running={threadPane.running}
-        hasOlder={eventLog.hasOlder}
-        loadingOlder={eventLog.loadingOlder}
-        loadingInitial={eventLog.loadingInitial}
-        historyError={eventLog.historyError}
-        onLoadOlder={eventLog.loadOlder}
-        onRetry={eventLog.retry}
-        view={threadView}
-        canSteer={threadPane.canSteer}
-        onSteer={() => setSteeringThread(thread.name)}
-        onViewChange={setThreadView}
-      />
-    );
-  } else if (shown?.kind === "group") {
+  if (shown?.kind === "group") {
     title = entryRowView(shown.entry, sources).label;
     detail = (
       <InsightsDetail
@@ -371,30 +283,6 @@ export function InsightsView({
         listToolbar={<InsightsFilter options={options} value={filter} onChange={changeFilter} />}
         listClassName="p-2"
         title={title}
-        titleAction={
-          threadPane?.action && !isMobile ? <TaskButton action={threadPane.action} /> : null
-        }
-        actions={
-          // A phone's thread detail floats Steer and the view switch itself.
-          isMobile ? (
-            threadPane?.action ? (
-              <TaskPill action={threadPane.action} />
-            ) : null
-          ) : threadPane ? (
-            <div className="flex items-center gap-2">
-              {threadPane.canSteer ? (
-                <Button
-                  size={ButtonSize.Small}
-                  variant={ButtonVariant.Secondary}
-                  onClick={() => setSteeringThread(threadPane.thread.name)}
-                >
-                  Steer
-                </Button>
-              ) : null}
-              <ThreadViewSelect view={threadView} onChange={setThreadView} />
-            </div>
-          ) : null
-        }
         list={
           <InsightsList
             sessionId={sessionId}
@@ -418,13 +306,6 @@ export function InsightsView({
           {detail}
         </div>
       </PanelSplit>
-      {steeringThread ? (
-        <ThreadSteeringModal
-          sessionId={sessionId}
-          threadName={steeringThread}
-          onClose={() => setSteeringThread(null)}
-        />
-      ) : null}
     </>
   );
 }

@@ -1,13 +1,12 @@
 import { BoxSurface, ChatLoader, CodeBlock } from "@/app/atoms";
 
 const SAMPLE_CODE = `pub enum AgentEvent {
-    RunStarted { thread_name: Option<String> },
+    RunStarted { run_id: String },
     AssistantMessage {
-        thread_name: Option<String>,
         content: String,
         usage: Option<TokenUsage>,
     },
-    RunFinished { thread_name: Option<String> },
+    RunFinished { run_id: String },
 }`;
 
 export function CodeBlockSection() {

@@ -1,17 +1,13 @@
 import { formatStoreTime } from "@/app/lib/format";
-import type {
-  ManagedOrchestratorRecord,
-  TraditionalChildRecord,
-  TraditionalChildStatus,
-} from "@/app/types/api";
+import type { TraditionalChildRecord, TraditionalChildStatus } from "@/app/types/api";
 
-export type DelegatedSessionKind = "coding-agent" | "nac-orchestrator";
+export type DelegatedSessionKind = "coding-agent";
 
 export interface DelegatedSessionPresentation {
   kind: DelegatedSessionKind;
   id: string;
   description: string;
-  typeLabel: "Subagent" | "Managed orchestrator";
+  typeLabel: "Subagent";
   status: TraditionalChildStatus;
   statusLabel: string;
   statusTone: "neutral" | "active" | "success" | "danger" | "warning";
@@ -44,7 +40,7 @@ function nonempty(value: string | null | undefined): string | null {
 }
 
 function common(
-  record: TraditionalChildRecord | ManagedOrchestratorRecord,
+  record: TraditionalChildRecord,
   kind: DelegatedSessionKind,
   id: string,
 ): Omit<DelegatedSessionPresentation, "outcomeLabel" | "outcome"> {
@@ -54,7 +50,7 @@ function common(
     kind,
     id,
     description: record.description,
-    typeLabel: kind === "coding-agent" ? "Subagent" : "Managed orchestrator",
+    typeLabel: "Subagent",
     status: record.status,
     statusLabel: status.label,
     statusTone: status.tone,
@@ -92,17 +88,5 @@ export function presentTraditionalChild(
             ? "Verification"
             : null,
     outcome: failure ?? report ?? changes ?? verification,
-  };
-}
-
-export function presentManagedOrchestrator(
-  orchestrator: ManagedOrchestratorRecord,
-): DelegatedSessionPresentation {
-  const failure = nonempty(orchestrator.failure);
-  const report = nonempty(orchestrator.report);
-  return {
-    ...common(orchestrator, "nac-orchestrator", orchestrator.orchestrator_session_id),
-    outcomeLabel: failure ? "Error" : report ? "Outcome" : null,
-    outcome: failure ?? report,
   };
 }

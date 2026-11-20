@@ -12,6 +12,10 @@ impl FreshTaskPreparationPort for TaskLaunchApplication<'_> {
                 self.manager.managed_host().is_none(),
                 "scheduled tasks require an unmanaged Local host"
             );
+            anyhow::ensure!(
+                launch.receipt().destination.model_selection.is_some() || launch.legacy_frozen_model()?.is_some(),
+                "scheduled task predates explicit model selection; create a new schedule with a selected model"
+            );
             let admission = self.manager.inner.task_preparations.admit().await?;
             let manager = self.manager.clone();
             // Accepted preparation keeps its serving-lifetime reader even when
@@ -34,7 +38,8 @@ impl FreshTaskPreparationPort for TaskLaunchApplication<'_> {
                     anyhow::ensure!(
                         current.receipt().request == expected.request
                             && current.receipt().session_id == expected.session_id
-                            && current.receipt().destination == expected.destination,
+                            && current.receipt().destination == expected.destination
+                            && current.model_defaults() == launch.model_defaults(),
                         "conflict: scheduled preparation arguments changed"
                     );
                     if current.receipt().stop_requested

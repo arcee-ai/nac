@@ -13,7 +13,6 @@ async fn traditional_child_http_api_runs_foreground_then_delivers_background_com
         "parent received child completion",
     ]);
     seed_direct_session_with_base_url(&root, "direct", base_url);
-    seed_editable_session(&root, "orchestrator");
     let manager = test_manager(&root);
     let app = router(manager.clone());
 
@@ -148,8 +147,8 @@ async fn traditional_child_http_api_runs_foreground_then_delivers_background_com
     assert_eq!(lineage_json["lineage"]["parent_session_id"], "direct");
     assert_eq!(lineage_json["lineage"]["description"], "inspect child flow");
 
-    let rejected = get_response(app, "/sessions/orchestrator/children", None).await;
-    assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
+    let rejected = get_response(app, "/sessions/missing/children", None).await;
+    assert_eq!(rejected.status(), StatusCode::NOT_FOUND);
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -426,11 +425,6 @@ async fn parent_repair_recovers_suppression_after_deletion_owner_disappears() {
     std::fs::create_dir_all(&nac_home).unwrap();
     let _env = ScopedModelEnv::isolated(&nac_home, Some("suppression-repair-key"));
     seed_direct_session(&root, "direct");
-    seed_direct_with_orchestrator_session_with_base_url(
-        &root,
-        "delegating",
-        "https://api.openai.com/v1".to_string(),
-    );
     let store_path = root.join("store.db");
     let manager = test_manager(&root);
 
@@ -508,76 +502,6 @@ async fn parent_repair_recovers_suppression_after_deletion_owner_disappears() {
     .unwrap();
     assert_eq!(child_generation_two.generation, 2);
 
-    let orchestrator_session_id = manager
-        .create_managed_orchestrator_session("delegating", "repair orchestrator delivery")
-        .await
-        .unwrap();
-    nac_core::store::begin_managed_orchestrator_run(
-        &store_path,
-        &orchestrator_session_id,
-        "orchestrator-run",
-        ManagedOrchestratorExecutionMode::Background,
-    )
-    .unwrap();
-    nac_core::store::suppress_managed_orchestrator_completion(
-        &store_path,
-        &orchestrator_session_id,
-    )
-    .unwrap();
-    nac_core::store::settle_managed_orchestrator_run(
-        &store_path,
-        &orchestrator_session_id,
-        "orchestrator-run",
-        nac_core::store::ManagedOrchestratorTerminal {
-            status: ManagedOrchestratorStatus::Cancelled,
-            report: None,
-            failure: Some("deletion interrupted".to_string()),
-        },
-    )
-    .unwrap();
-    let orchestrator_lease =
-        sessions::SessionRelationshipLease::try_acquire(&store_path, &orchestrator_session_id)
-            .unwrap();
-    manager
-        .repair_orphaned_completion_suppressions("delegating")
-        .unwrap();
-    assert!(
-        nac_core::store::list_session_inbox(&store_path, "delegating")
-            .unwrap()
-            .is_empty()
-    );
-    let admission_error = nac_core::store::begin_managed_orchestrator_run(
-        &store_path,
-        &orchestrator_session_id,
-        "orchestrator-run-2",
-        ManagedOrchestratorExecutionMode::Background,
-    )
-    .unwrap_err();
-    assert!(admission_error
-        .to_string()
-        .contains("completion delivery is suppressed"));
-    drop(orchestrator_lease);
-    manager
-        .repair_orphaned_completion_suppressions("delegating")
-        .unwrap();
-    manager
-        .repair_orphaned_completion_suppressions("delegating")
-        .unwrap();
-    assert_eq!(
-        nac_core::store::list_session_inbox(&store_path, "delegating")
-            .unwrap()
-            .len(),
-        1
-    );
-    let orchestrator_generation_two = nac_core::store::begin_managed_orchestrator_run(
-        &store_path,
-        &orchestrator_session_id,
-        "orchestrator-run-2",
-        ManagedOrchestratorExecutionMode::Background,
-    )
-    .unwrap();
-    assert_eq!(orchestrator_generation_two.generation, 2);
-
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -613,24 +537,10 @@ async fn wrong_parent_relationship_reads_are_opaque_not_found() {
     let root = temp_root("relationship_ownership_opaque");
     seed_direct_session(&root, "parent-a");
     seed_direct_session(&root, "parent-b");
-    seed_direct_with_orchestrator_session_with_base_url(
-        &root,
-        "delegating-a",
-        "https://api.openai.com/v1".to_string(),
-    );
-    seed_direct_with_orchestrator_session_with_base_url(
-        &root,
-        "delegating-b",
-        "https://api.openai.com/v1".to_string(),
-    );
     let manager = test_manager(&root);
     let store_path = root.join("store.db");
     let child = manager
         .create_traditional_child_session("parent-a", "general", "owned child")
-        .await
-        .unwrap();
-    let orchestrator = manager
-        .create_managed_orchestrator_session("delegating-a", "owned orchestrator")
         .await
         .unwrap();
 
@@ -640,11 +550,6 @@ async fn wrong_parent_relationship_reads_are_opaque_not_found() {
         .find(|entry| entry.summary.session_id == child)
         .and_then(|entry| entry.lineage.as_ref())
         .is_some_and(|lineage| lineage.kind == SessionLineageKind::TraditionalChild));
-    assert!(summaries
-        .iter()
-        .find(|entry| entry.summary.session_id == orchestrator)
-        .and_then(|entry| entry.lineage.as_ref())
-        .is_some_and(|lineage| lineage.kind == SessionLineageKind::ManagedOrchestrator));
 
     let inbox_error = manager.list_direct_inbox(&child).await.unwrap_err();
     assert!(inbox_error
@@ -663,21 +568,7 @@ async fn wrong_parent_relationship_reads_are_opaque_not_found() {
     assert!(run_error
         .to_string()
         .contains("accept work only through their parent"));
-    let managed_run_error = manager
-        .submit_prompt(
-            &orchestrator,
-            SubmitPromptRequest {
-                prompt: "bypass parent ownership".to_string(),
-            },
-            nac_core::store::InputOrigin::Automation,
-        )
-        .await
-        .unwrap_err();
-    assert!(managed_run_error
-        .to_string()
-        .contains("accept work only through their parent"));
-
-    for delegated in [&child, &orchestrator] {
+    for delegated in [&child] {
         let branch_error = manager
             .workspace()
             .switch_workspace_branch(
@@ -718,19 +609,6 @@ async fn wrong_parent_relationship_reads_are_opaque_not_found() {
             .contains("accept work only through their parent"));
         assert_eq!(manager.session_config(delegated).unwrap(), before);
 
-        let steering_error = manager
-            .queue_orchestrator_steering(
-                delegated,
-                OrchestratorSteeringRequest {
-                    instruction: "bypass parent steering".to_string(),
-                },
-                nac_core::store::InputOrigin::Automation,
-            )
-            .await
-            .unwrap_err();
-        assert!(steering_error
-            .to_string()
-            .contains("accept work only through their parent"));
         let cancellation_error = manager.cancel_active_run(delegated).await.unwrap_err();
         assert!(cancellation_error
             .to_string()
@@ -758,7 +636,7 @@ async fn wrong_parent_relationship_reads_are_opaque_not_found() {
     }
 
     let app = router(manager.clone());
-    for delegated in [&child, &orchestrator] {
+    for delegated in [&child] {
         for (path, body) in [
             (
                 "workspace/branches",
@@ -793,19 +671,6 @@ async fn wrong_parent_relationship_reads_are_opaque_not_found() {
             .await
             .unwrap();
         assert_eq!(config.status(), StatusCode::CONFLICT);
-        let steering = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri(format!("/sessions/{delegated}/steering"))
-                    .header(header::CONTENT_TYPE, "application/json")
-                    .body(Body::from(r#"{"instruction":"bypass"}"#))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(steering.status(), StatusCode::CONFLICT);
         let cancel = app
             .clone()
             .oneshot(
@@ -902,234 +767,11 @@ async fn wrong_parent_relationship_reads_are_opaque_not_found() {
         "traditional child was not found"
     );
 
-    let orchestrator_error = ApiError::from(
-        manager
-            .delegation()
-            .managed_orchestrator("delegating-b", &orchestrator)
-            .unwrap_err(),
-    );
-    assert_eq!(orchestrator_error.status, StatusCode::NOT_FOUND);
-    assert_eq!(
-        orchestrator_error.message,
-        "managed orchestrator was not found"
-    );
-    assert!(!orchestrator_error.message.contains(&orchestrator));
-    let orchestrator_cancel_error = ApiError::from(
-        manager
-            .delegation()
-            .cancel_managed_orchestrator("delegating-b", &orchestrator)
-            .await
-            .unwrap_err(),
-    );
-    assert_eq!(orchestrator_cancel_error.status, StatusCode::NOT_FOUND);
-    assert_eq!(
-        orchestrator_cancel_error.message,
-        "managed orchestrator was not found"
-    );
-    assert!(!orchestrator_cancel_error.message.contains(&orchestrator));
     let _ = std::fs::remove_dir_all(root);
 }
 
 #[tokio::test]
-async fn foreground_orchestrator_steering_preserves_exact_generation_result() {
-    let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
-    let root = temp_root("managed_concurrent_input");
-    let nac_home = root.join("nac-home");
-    std::fs::create_dir_all(&nac_home).unwrap();
-    let _env = ScopedModelEnv::isolated(&nac_home, Some("managed-steering-key"));
-    let (base_url, requests, arrived, release) = scripted_direct_responses_holding(
-        &["first answer", "steering executed", "later generation"],
-        0,
-    );
-    seed_direct_with_orchestrator_session_with_base_url(&root, "delegating", base_url);
-    let manager = test_manager(&root);
-    let id = manager
-        .create_managed_orchestrator_session("delegating", "steered orchestrator")
-        .await
-        .unwrap();
-    let app = router(manager.clone());
-    let post = |prompt: &str, background: bool| {
-        app.clone().oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/sessions/delegating/orchestrators")
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(
-                    serde_json::json!({"description":"steered orchestrator", "prompt":prompt,
-            "background":background, "orchestrator_session_id":id})
-                    .to_string(),
-                ))
-                .unwrap(),
-        )
-    };
-    let foreground = tokio::spawn(post("original input", false));
-    tokio::task::spawn_blocking(move || arrived.recv_timeout(Duration::from_secs(5)).unwrap())
-        .await
-        .unwrap();
-    let steering = post("actual concurrent steering", true).await.unwrap();
-    assert_eq!(
-        steering.status(),
-        StatusCode::CREATED,
-        "{}",
-        String::from_utf8_lossy(&response_body(steering).await)
-    );
-    release.send(()).unwrap();
-    let response = tokio::time::timeout(Duration::from_secs(5), foreground)
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::CREATED);
-    let original: ManagedOrchestratorRecord =
-        serde_json::from_slice(&response_body(response).await).unwrap();
-    assert_eq!(original.generation, 1);
-    assert_eq!(original.report.as_deref(), Some("steering executed"));
-    let connection = rusqlite::Connection::open(root.join("store.db")).unwrap();
-    let steering_ids = connection
-        .prepare("SELECT id FROM thread_steering WHERE session_id = ?1")
-        .unwrap()
-        .query_map([&id], |row| row.get::<_, i64>(0))
-        .unwrap()
-        .collect::<rusqlite::Result<Vec<_>>>()
-        .unwrap();
-    assert_eq!(steering_ids.len(), 1);
-    let steering =
-        nac_core::store::load_thread_steering(&root.join("store.db"), &id, steering_ids[0])
-            .unwrap()
-            .unwrap();
-    assert_eq!(steering.status, "delivered");
-    assert_eq!(steering.instruction, "actual concurrent steering");
-    drop(connection);
-    let response = post("next generation", false).await.unwrap();
-    assert_eq!(response.status(), StatusCode::CREATED);
-    let next: ManagedOrchestratorRecord =
-        serde_json::from_slice(&response_body(response).await).unwrap();
-    assert_eq!(next.generation, 2);
-    assert_eq!(
-        manager
-            .monitor_managed_orchestrator(&id, original.generation)
-            .await
-            .unwrap(),
-        original
-    );
-    let missing = manager
-        .monitor_managed_orchestrator("missing-orchestrator", 1)
-        .await
-        .unwrap_err();
-    assert!(missing.to_string().contains("was not found"), "{missing}");
-    tokio::task::spawn_blocking(move || {
-        for index in 0..3 {
-            assert_eq!(
-                requests.recv_timeout(Duration::from_secs(5)).unwrap(),
-                index
-            );
-        }
-    })
-    .await
-    .unwrap();
-    let _ = std::fs::remove_dir_all(root);
-}
-
-#[tokio::test]
-async fn managed_monitor_treats_peer_lease_as_live() {
-    let root = temp_root("managed_peer_lease_live");
-    seed_direct_with_orchestrator_session_with_base_url(
-        &root,
-        "delegating",
-        "https://api.openai.com/v1".to_string(),
-    );
-    let manager = test_manager(&root);
-    let orchestrator = manager
-        .create_managed_orchestrator_session("delegating", "foreign live run")
-        .await
-        .unwrap();
-    let store_path = root.join("store.db");
-    let relation = nac_core::store::begin_managed_orchestrator_run(
-        &store_path,
-        &orchestrator,
-        "peer-run",
-        ManagedOrchestratorExecutionMode::Background,
-    )
-    .unwrap();
-    nac_core::store::TranscriptLogWriter::new(&store_path)
-        .unwrap()
-        .append_run_prompt(
-            &orchestrator,
-            0,
-            &Message::User {
-                content: "peer is working".to_string(),
-            },
-            "peer-run",
-        )
-        .unwrap();
-    let ready_path = root.join("managed-peer-ready");
-    let mut peer = std::process::Command::new(std::env::current_exe().unwrap())
-        .args([
-            "--exact",
-            "tests::managed_monitor_peer_lease_process_helper",
-            "--nocapture",
-        ])
-        .env("NAC_TEST_MANAGED_PEER_STORE", &store_path)
-        .env("NAC_TEST_MANAGED_PEER_SESSION", &orchestrator)
-        .env("NAC_TEST_MANAGED_PEER_READY", &ready_path)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .unwrap();
-    for _ in 0..200 {
-        if ready_path.exists() {
-            break;
-        }
-        assert!(
-            peer.try_wait().unwrap().is_none(),
-            "peer helper exited early"
-        );
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    assert!(ready_path.exists(), "peer helper never acquired the lease");
-
-    let steering = manager
-        .queue_managed_orchestrator_steering(
-            "delegating",
-            &orchestrator,
-            "steer the peer-owned generation",
-        )
-        .expect("peer ownership must not block durable steering");
-    let claimed =
-        nac_core::store::claim_thread_steering(&store_path, &orchestrator, "peer-run").unwrap();
-    assert_eq!(claimed.len(), 1);
-    assert_eq!(claimed[0].id, steering.steering_id);
-
-    let peer_observed = manager.inner.managed_monitor_peer_observed.notified();
-    let monitor_manager = manager.clone();
-    let monitor_orchestrator = orchestrator.clone();
-    let monitor = tokio::spawn(async move {
-        monitor_manager
-            .monitor_managed_orchestrator(&monitor_orchestrator, relation.generation)
-            .await
-    });
-
-    tokio::time::timeout(Duration::from_secs(5), peer_observed)
-        .await
-        .expect("monitor must observe the peer-owned operation lease");
-    assert!(!monitor.is_finished());
-    assert_eq!(
-        nac_core::store::load_managed_orchestrator(&store_path, &orchestrator)
-            .unwrap()
-            .unwrap()
-            .status,
-        ManagedOrchestratorStatus::Running
-    );
-    monitor.abort();
-    let _ = monitor.await;
-    peer.kill().unwrap();
-    peer.wait().unwrap();
-    let _ = std::fs::remove_dir_all(root);
-}
-
-#[tokio::test]
-async fn peer_owned_direct_and_managed_cancellation_fail_fast() {
+async fn peer_owned_direct_cancellation_fails_fast() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let direct_root = temp_root("direct_peer_cancel_conflict");
     let _env =
@@ -1154,57 +796,7 @@ async fn peer_owned_direct_and_managed_cancellation_fail_fast() {
     );
     drop(direct_lease);
 
-    let managed_root = temp_root("managed_peer_cancel_conflict");
-    seed_direct_with_orchestrator_session_with_base_url(
-        &managed_root,
-        "delegating",
-        "https://api.openai.com/v1".to_string(),
-    );
-    let managed_manager = test_manager(&managed_root);
-    let orchestrator = managed_manager
-        .create_managed_orchestrator_session("delegating", "peer work")
-        .await
-        .unwrap();
-    let store_path = managed_root.join("store.db");
-    nac_core::store::begin_managed_orchestrator_run(
-        &store_path,
-        &orchestrator,
-        "peer-run",
-        ManagedOrchestratorExecutionMode::Background,
-    )
-    .unwrap();
-    nac_core::store::TranscriptLogWriter::new(&store_path)
-        .unwrap()
-        .append_run_prompt(
-            &orchestrator,
-            0,
-            &Message::User {
-                content: "peer is working".to_string(),
-            },
-            "peer-run",
-        )
-        .unwrap();
-    let managed_lease =
-        sessions::SessionOperationLease::try_acquire(&store_path, &orchestrator).unwrap();
-    let managed_error = tokio::time::timeout(
-        Duration::from_secs(1),
-        managed_manager
-            .delegation()
-            .cancel_managed_orchestrator("delegating", &orchestrator),
-    )
-    .await
-    .expect("peer-owned managed cancellation must not hang")
-    .unwrap_err();
-    assert!(
-        managed_error
-            .to_string()
-            .contains("running in another process"),
-        "unexpected managed cancellation error: {managed_error:#}"
-    );
-    drop(managed_lease);
-
     let _ = std::fs::remove_dir_all(direct_root);
-    let _ = std::fs::remove_dir_all(managed_root);
 }
 
 #[tokio::test]
@@ -1535,135 +1127,5 @@ async fn child_http_input_at_terminal_commit_waits_for_real_admission_release() 
     })
     .await
     .unwrap();
-    let _ = std::fs::remove_dir_all(root);
-}
-
-#[tokio::test]
-async fn foreground_managed_steering_reports_exact_expired_input() {
-    let root = temp_root("managed_expired_steering_receipt");
-    seed_direct_with_orchestrator_session_with_base_url(
-        &root,
-        "delegating",
-        "https://example.invalid/v1".to_owned(),
-    );
-    let manager = test_manager(&root);
-    let id = manager
-        .create_managed_orchestrator_session("delegating", "expired steering")
-        .await
-        .unwrap();
-    let path = root.join("store.db");
-    nac_core::store::begin_managed_orchestrator_run(
-        &path,
-        &id,
-        "finished-dispatch",
-        ManagedOrchestratorExecutionMode::Foreground,
-    )
-    .unwrap();
-    let expired = nac_core::store::queue_managed_orchestrator_steering(
-        &path,
-        "delegating",
-        &id,
-        "recover this exact message",
-    )
-    .unwrap();
-    nac_core::store::expire_thread_steering(&path, &id, "finished-dispatch").unwrap();
-    let error = crate::delegation_runtime::wait_for_managed_steering(&manager, &id, expired.id)
-        .await
-        .unwrap_err();
-    assert!(error
-        .to_string()
-        .contains("before this steering message was delivered"));
-    let receipt = nac_core::store::load_thread_steering(&path, &id, expired.id)
-        .unwrap()
-        .unwrap();
-    assert_eq!(receipt.status, "expired");
-    assert_eq!(receipt.instruction, "recover this exact message");
-    let missing =
-        crate::delegation_runtime::wait_for_managed_steering(&manager, "wrong-session", expired.id)
-            .await
-            .unwrap_err();
-    assert!(missing.to_string().contains("not found"));
-    let _ = std::fs::remove_dir_all(root);
-}
-
-#[tokio::test]
-async fn foreground_managed_steering_recovers_after_peer_lease_disappears() {
-    let _env_lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
-    let root = temp_root("managed_steering_peer_recovery");
-    let nac_home = root.join("nac-home");
-    std::fs::create_dir_all(&nac_home).unwrap();
-    let _env = ScopedModelEnv::isolated(&nac_home, Some("managed-steering-recovery-key"));
-    seed_direct_with_orchestrator_session_with_base_url(
-        &root,
-        "delegating",
-        "https://example.invalid/v1".to_owned(),
-    );
-    let manager = test_manager(&root);
-    let id = manager
-        .create_managed_orchestrator_session("delegating", "peer recovery")
-        .await
-        .unwrap();
-    let path = root.join("store.db");
-    let relation = nac_core::store::begin_managed_orchestrator_run(
-        &path,
-        &id,
-        "peer-steering-run",
-        ManagedOrchestratorExecutionMode::Foreground,
-    )
-    .unwrap();
-    nac_core::store::TranscriptLogWriter::new(&path)
-        .unwrap()
-        .append_run_prompt(
-            &id,
-            0,
-            &Message::User {
-                content: "peer input".to_owned(),
-            },
-            "peer-steering-run",
-        )
-        .unwrap();
-    let lease = sessions::SessionOperationLease::try_acquire(&path, &id).unwrap();
-    let input = nac_core::store::queue_managed_orchestrator_steering(
-        &path,
-        "delegating",
-        &id,
-        "not consumed by the peer",
-    )
-    .unwrap();
-    nac_core::store::claim_thread_steering(&path, &id, "peer-steering-run").unwrap();
-    let peer_observed = manager.inner.managed_monitor_peer_observed.notified();
-    let wait_manager = manager.clone();
-    let wait_id = id.clone();
-    let wait = tokio::spawn(async move {
-        crate::delegation_runtime::wait_for_managed_steering(&wait_manager, &wait_id, input.id)
-            .await
-    });
-    tokio::time::timeout(Duration::from_secs(5), peer_observed)
-        .await
-        .unwrap();
-    assert!(!wait.is_finished());
-    drop(lease);
-    let error = tokio::time::timeout(Duration::from_secs(5), wait)
-        .await
-        .expect("foreground steering must drive recovery after the peer disappears")
-        .unwrap()
-        .unwrap_err();
-    assert!(
-        error
-            .to_string()
-            .contains("before this steering message was delivered"),
-        "{error:#}"
-    );
-    let settled = nac_core::store::load_managed_orchestrator(&path, &id)
-        .unwrap()
-        .unwrap();
-    assert_eq!(settled.generation, relation.generation);
-    assert_eq!(settled.run_id.as_deref(), Some("peer-steering-run"));
-    assert!(settled.status.is_terminal());
-    let receipt = nac_core::store::load_thread_steering(&path, &id, input.id)
-        .unwrap()
-        .unwrap();
-    assert_ne!(receipt.status, "delivered");
-    assert_eq!(receipt.instruction, "not consumed by the peer");
     let _ = std::fs::remove_dir_all(root);
 }

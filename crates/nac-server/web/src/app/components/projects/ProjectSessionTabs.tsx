@@ -1,6 +1,4 @@
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
-import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
-import { useSessionBehaviorIconVisible } from "@/app/features/ui-policy/useSessionBehaviorIconVisible";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -23,7 +21,6 @@ import { useSessionTitle } from "@/app/hooks/useSessionTitle";
 import { cn } from "@/app/lib/cn";
 import { isActiveRun, NEW_CHAT_TITLE } from "@/app/lib/format";
 import { routes } from "@/app/lib/routes";
-import { sessionBehaviorPresentation } from "@/app/lib/sessionBehavior";
 import type { DropEdge } from "@/app/lib/sessionOrder";
 import { applyTabOrder, placeIdAt, targetIndexInGroup } from "@/app/lib/sessionOrder";
 import { useNewSessionKeys } from "@/app/features/desktop-commands/nativeMenu";
@@ -78,8 +75,6 @@ export function ProjectSessionTabs({
   const { useDismissedChatTabs, useChatTabOrder, setChatTabOrder, restoreChatTab, dismissChatTab } =
     useNativeRuntime().stores.chatTabsStore;
 
-  const policy = useUiPolicy();
-  const showBehaviorIcon = useSessionBehaviorIconVisible();
   const navigate = useNavigate();
   const projectActions = useProjectActions();
   const newSessionKeys = useNewSessionKeys();
@@ -222,7 +217,6 @@ export function ProjectSessionTabs({
         ) : (
           visible.map((entry) => {
             const sessionId = entry.summary.session_id;
-            const behavior = sessionBehaviorPresentation(entry.summary.behavior);
             return (
               <div
                 key={sessionId}
@@ -273,8 +267,6 @@ export function ProjectSessionTabs({
                 <ChatSessionTab
                   title={sessionTitle(entry.summary)}
                   behavior={entry.summary.behavior}
-                  showBehaviorIcon={showBehaviorIcon}
-                  behaviorLabel={policy.orchestrationEnabled ? behavior.label : undefined}
                   active={sessionId === activeSessionId}
                   running={isActiveRun(entry.active_run)}
                   forkedFromTitle={entry.summary.forked_from?.title}

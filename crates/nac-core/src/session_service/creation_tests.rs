@@ -8,6 +8,7 @@ async fn command(label: &str) -> (CreateSessionWithSnapshot, PathBuf) {
     response.metadata.session_id = Some(snapshot.session_id.clone());
     (
         CreateSessionWithSnapshot {
+            model_source: None,
             snapshot,
             launch_id: None,
             response,
@@ -76,6 +77,57 @@ fn resource_worktree(path: &Path) -> crate::sandbox::SandboxWorktree {
         branch: "nac/fresh".into(),
         fork_point,
     }
+}
+
+#[tokio::test]
+async fn model_source_is_rechecked_at_the_session_insert_boundary() {
+    let _environment = crate::TEST_ENV_LOCK.lock().unwrap();
+    let (mut command, path) = command("creation_source_changed").await;
+    let worktree = resource_worktree(&path);
+    let checkout = worktree.path.clone();
+    command.resources = Arc::new(StdMutex::new(Some(
+        crate::runtime::PreparedSessionResources::for_test(Some(worktree)),
+    )));
+    crate::store::insert_project(
+        &path,
+        crate::store::NewProject {
+            project_id: "source-project".into(),
+            name: None,
+            description: None,
+            cwd: command.snapshot.cwd.clone(),
+            ssh_host: None,
+            ssh_port: None,
+            ssh_identity_file: None,
+            default_model_config_id: None,
+        },
+    )
+    .unwrap();
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute("INSERT INTO session_projects (session_id, project_id) VALUES ('baseline', 'source-project')", []).unwrap();
+    let source = sessions::load_project_session_model_source(&path, "source-project", "baseline")
+        .unwrap()
+        .unwrap();
+    command.snapshot.project_id = Some("source-project".into());
+    command.model_source = Some(sessions::ProjectModelSourceRef {
+        project_id: "source-project".into(),
+        session_id: "baseline".into(),
+        config_version: source.config_version,
+    });
+    // This committed change occurs after preparation but before admission.
+    db.execute(
+        "UPDATE sessions SET config_version=config_version+1 WHERE session_id='baseline'",
+        [],
+    )
+    .unwrap();
+    let error = command.execute(&path).unwrap_err().to_string();
+    assert!(error.contains("source session changed or moved"));
+    assert!(!sessions::session_exists(&path, "fresh").unwrap());
+    assert!(
+        !checkout.exists(),
+        "a rejected source must release its prepared worktree"
+    );
+    drop(db);
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
 }
 
 #[tokio::test]
@@ -190,9 +242,11 @@ async fn retained_command(label: &str) -> (CreateSessionWithSnapshot, PathBuf, S
     )
     .unwrap();
     let request = crate::store::TaskLaunchRequest {
+        model_source: None,
         request_id: uuid::Uuid::new_v4().to_string(),
         project_id: "retained-project".into(),
         invoking_session_id: None,
+        model_selection: None,
         git_ref: Some("dev".into()),
         default_ref: Some("dev".into()),
         title: "é".repeat(120),

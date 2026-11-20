@@ -15,34 +15,14 @@ export interface SessionBehaviorPresentation {
 
 export const SESSION_BEHAVIORS: readonly SessionBehaviorPresentation[] = [
   {
-    id: "orchestrator",
-    label: "Orchestrator",
-    navigationLabel: "Orchestrator",
-    topLevel: "A planner handles the top-level conversation.",
-    editsDirectly: false,
-    editing: "The planner does not edit directly.",
-    delegation: "It delegates coding to retained NAC worker threads.",
-    inspection: "Insights and Worksets show the plan and worker progress.",
-  },
-  {
     id: "direct",
     label: "Agent",
     navigationLabel: "Agent",
     topLevel: "One persistent coding agent handles the top-level conversation.",
     editsDirectly: true,
-    editing: "The top-level agent edits files and runs commands directly.",
-    delegation: "It can launch fresh-context traditional coding agents.",
-    inspection: "Subagents shows those traditional child sessions.",
-  },
-  {
-    id: "direct-with-orchestrator",
-    label: "Agent + Orchestrator",
-    navigationLabel: "Agent + Orchestrator",
-    topLevel: "One persistent coding agent handles the top-level conversation.",
-    editsDirectly: true,
-    editing: "The top-level agent edits files and runs commands directly.",
-    delegation: "It can launch traditional coding agents and separate NAC orchestrator sessions.",
-    inspection: "Subagents keeps both delegated topologies distinct.",
+    editing: "The agent edits files and runs commands directly.",
+    delegation: "It can launch child coding agents.",
+    inspection: "Subagents shows child sessions.",
   },
 ];
 
@@ -62,29 +42,17 @@ export function sessionBehaviorLabel(behavior: SessionBehavior): string {
  * Subagents rows know only which topology they launched.
  */
 export function sessionBehaviorIcon(
-  behavior: SessionBehavior | null | undefined,
-  lineage?: SessionLineage["kind"] | null,
+  _behavior: SessionBehavior | null | undefined,
+  _lineage?: SessionLineage["kind"] | null,
 ): IconName {
-  if (lineage === "managed-orchestrator") return IconName.Orchestrator;
-  if (lineage === "traditional-child") return IconName.Plane;
-  switch (behavior) {
-    case "direct":
-      return IconName.Plane;
-    case "direct-with-orchestrator":
-      return IconName.PlaneAdd;
-    default:
-      return IconName.Orchestrator;
-  }
+  return IconName.Plane;
 }
 
-/** What `sessionBehaviorIcon` draws, for the accessible name beside the glyph. */
 export function sessionBehaviorName(
-  behavior: SessionBehavior | null | undefined,
+  _behavior: SessionBehavior | null | undefined,
   lineage?: SessionLineage["kind"] | null,
 ): string {
-  if (lineage === "managed-orchestrator") return "Managed orchestrator";
-  if (lineage === "traditional-child") return "Subagent";
-  return sessionBehaviorPresentation(behavior).label;
+  return lineage === "traditional-child" ? "Subagent" : "Agent";
 }
 
 export interface SessionPanelPolicy {
@@ -93,13 +61,6 @@ export interface SessionPanelPolicy {
   defaultPanel: SessionPanel;
   readOnly: boolean;
 }
-
-const ORCHESTRATOR_PANELS: SessionPanelPolicy = {
-  widePanels: ["insights", "files", "worksets"],
-  mobilePanels: ["insights", "files", "worksets", "history"],
-  defaultPanel: "insights",
-  readOnly: false,
-};
 
 const DIRECT_PANELS: SessionPanelPolicy = {
   widePanels: ["insights", "delegated", "files", "terminal"],
@@ -121,26 +82,10 @@ const TRADITIONAL_CHILD_PANELS: SessionPanelPolicy = {
   readOnly: true,
 };
 
-const MANAGED_ORCHESTRATOR_PANELS: SessionPanelPolicy = {
-  ...ORCHESTRATOR_PANELS,
-  readOnly: true,
-};
-
-/**
- * Session ownership and panel topology are related but distinct. Every
- * delegated transcript is read-only, while the durable relationship kind says
- * whether that transcript owns an orchestrator's Worksets or is a traditional
- * child with Insights, Files and History only.
- */
+/** Child sessions have a read-only transcript; primary sessions expose the direct panels. */
 export function sessionPanelPolicy(
-  behavior: SessionBehavior | null | undefined,
+  _behavior: SessionBehavior | null | undefined,
   lineageKind: SessionLineage["kind"] | null | undefined,
 ): SessionPanelPolicy {
-  if (lineageKind === "traditional-child") return TRADITIONAL_CHILD_PANELS;
-  if (lineageKind === "managed-orchestrator") return MANAGED_ORCHESTRATOR_PANELS;
-  return sessionBehaviorPresentation(behavior).id === "orchestrator"
-    ? ORCHESTRATOR_PANELS
-    : behavior === "direct"
-      ? HEARTBEAT_PANELS
-      : DIRECT_PANELS;
+  return lineageKind === "traditional-child" ? TRADITIONAL_CHILD_PANELS : HEARTBEAT_PANELS;
 }

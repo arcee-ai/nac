@@ -1,37 +1,12 @@
 # Model configuration
 
-Config lives at `~/.config/nac/config.toml`, or at `$NAC_HOME/config.toml` when `NAC_HOME` is set. A new session merges explicit CLI or web launch values over `[model]` in that file. `[model]` keeps only `model`, `reasoning_effort`, and `extra_headers`; the removed `backend`, `base_url`, and `api_key_env` keys in an older config are ignored with a one-time warning. The resulting `backend` and `model` must be present and nonblank before the session is created: the backend is explicit or resolved from the model id through the catalog. Model-only OpenAI inference remains `openai-responses` even though official OpenAI metadata is also presented under `openai-chat-completions`; selecting Chat Completions is always explicit. An unknown id therefore needs an explicit backend, but never needs catalog membership. An absent `base_url` materializes from the selected provider's endpoint default; a present value is validated rather than replaced.
+Choose a model for each new session in the web client or pass it explicitly when starting a session through the CLI or API. NAC stores the effective backend, model, endpoint and credential selector with that session; resume uses the stored selection. Provider credentials are managed independently and can be reused across sessions. Saved model presets and project model defaults are no longer supported. Existing `[model]` defaults in `config.toml` are ignored with a diagnostic.
 
-Model selection is config-first, not environment-driven:
-
-- NAC never reads `OPENAI_MODEL` or `OPENAI_BASE_URL` and does not infer a backend, model, or endpoint from provider conventions.
-- A created session persists its complete effective model settings. Resume and server attachment use that stored snapshot rather than re-resolving the model tuple or credential selector from ambient config. Non-model runtime settings can still come from the current config.
+NAC never reads `OPENAI_MODEL` or `OPENAI_BASE_URL`. An explicit backend may be selected or resolved from the selected model through the catalog. An unknown model ID requires an explicit backend. If no endpoint is supplied, the provider's endpoint is used; an explicitly supplied endpoint is validated.
 
 Persisted session settings remain editable. In `nac-web`, open a session's **Settings** dialog; the equivalent API is `GET /sessions/{session_id}/config` and `PATCH /sessions/{session_id}/config`. PATCH validates the complete prospective model settings and current credentials before committing and leaves the previous snapshot unchanged on failure. Omitted fields are preserved; `null` clears `reasoning_effort` or `api_key_env`, `null` or `{}` clears `extra_headers`, `null` or `false` disables `allow_insecure_http`, and `null` or `0` disables `orchestrator_compaction_threshold`. Required `backend`, `model`, and `base_url` cannot be cleared. Settings can be opened and repaired even when an invalid or incomplete persisted snapshot cannot resume. A session with an active run must be cancelled before editing its settings; an active manual compaction must be allowed to finish.
 
-The new-session form and `POST /sessions` share one tri-state rule: omitting a model field inherits its new-session config value, and `null` clears it. So `api_key_env: null` removes a configured selector and `reasoning_effort: null` omits the effort, while `"none"` is a concrete effort value rather than a way to clear it; `extra_headers: {}` replaces configured headers with an empty map. An omitted `orchestrator_compaction_threshold` defaults to 70% of the planning budget; Codex uses its effective input budget, capped by any lower provider auto-compaction limit. `null` or `0` disables compaction. New Codex sessions with an automatic threshold refresh it at the next operation boundary and on resume. Explicit thresholds and existing sessions keep their saved values, since older records do not distinguish automatic defaults from intentional settings.
-
-## Project defaults
-
-A project's optional saved model configuration is a new-session inheritance
-layer. Precedence is: explicit `POST /sessions` field, project configuration,
-working-directory configuration, then built-in resolution. A saved
-configuration supplies `model`, `backend`, `base_url`, `allow_insecure_http`, `reasoning_effort`,
-`api_key_env`, `extra_headers`, `light_model`, and an explicit compaction
-threshold. Its absent reasoning or credential selector clears the
-working-directory value; an empty header map clears working-directory headers;
-an absent light model selects single-model operation. An absent saved
-compaction threshold leaves normal working-directory/built-in behavior.
-`initial_prompt` is not used by session creation.
-
-The ordinary create-request tri-state remains authoritative over the project
-layer: omission inherits, required model/backend/base URL fields reject
-`null`, optional selector/effort/header fields clear on `null`, light-model
-`null` disables it, and compaction `null` or `0` disables it. The merged result
-is persisted in the session. Project edits affect later sessions only; resume
-and session Settings PATCH never reread project defaults. A referenced saved
-configuration cannot be deleted until the project clears or changes its
-reference.
+A new session requires its own model selection. Optional `reasoning_effort`, credential selector and headers are chosen for that session; `null` clears an optional value. A provider connection stores a credential independently and makes its endpoint available when selecting a session model. A project supplies its working location, not model settings.
 
 ## Compaction threshold
 

@@ -8,8 +8,8 @@ use nac_core::session_service::{
 use serde_json::{json, Value};
 
 use crate::{
-    CreateSessionRequest, OrchestratorSteeringRequest, SessionManager, SubmitPromptRequest,
-    SubmitPromptResponse, ThreadSteeringRequest, UpdateConfigRequest,
+    CreateInboxItemRequest, CreateSessionRequest, SessionManager, SubmitPromptRequest,
+    SubmitPromptResponse, UpdateConfigRequest,
 };
 
 #[derive(Clone)]
@@ -57,40 +57,19 @@ impl OrchestrationOperations {
             .await
     }
 
-    pub(crate) async fn steer(
-        &self,
-        session_id: &str,
-        instruction: String,
-        thread_name: Option<String>,
-    ) -> Result<Value> {
-        if let Some(thread_name) = thread_name {
-            let response = self
-                .manager
-                .queue_thread_steering(
-                    session_id,
-                    &thread_name,
-                    ThreadSteeringRequest { instruction },
-                    nac_core::store::InputOrigin::Automation,
-                )
-                .await?;
-            Ok(json!({
-                "steering_id": response.steering_id,
-                "status": response.status,
-            }))
-        } else {
-            let response = self
-                .manager
-                .queue_orchestrator_steering(
-                    session_id,
-                    OrchestratorSteeringRequest { instruction },
-                    nac_core::store::InputOrigin::Automation,
-                )
-                .await?;
-            Ok(json!({
-                "steering_id": response.steering_id,
-                "status": response.status,
-            }))
-        }
+    pub(crate) async fn steer(&self, session_id: &str, instruction: String) -> Result<Value> {
+        let response = self
+            .manager
+            .create_direct_inbox_item(
+                session_id,
+                CreateInboxItemRequest {
+                    delivery: nac_core::store::InboxDelivery::Steer,
+                    prompt: instruction,
+                },
+                nac_core::store::InputOrigin::Automation,
+            )
+            .await?;
+        Ok(serde_json::to_value(response)?)
     }
 
     pub(crate) async fn messages_page(

@@ -4,9 +4,7 @@ use axum::{
     Json,
 };
 use nac_core::{
-    session_service::{
-        FrontendSnapshotLoadOptions, FrontendSnapshotMessages, MessagePageRequest, ThreadEventPage,
-    },
+    session_service::{FrontendSnapshotLoadOptions, FrontendSnapshotMessages, MessagePageRequest},
     store::SessionGoalRecord,
 };
 
@@ -14,9 +12,9 @@ use crate::{
     ApiError, ApiErrorBody, CancelInboxItemRequest, ClearGoalRequest, CreateGoalRequest,
     CreateInboxItemRequest, InboxItemResponse, MessagesPageResponse, MessagesQuery,
     PermissionStateResponse, ReplyPermissionRequest, SessionManager, SessionSnapshotQuery,
-    SessionSnapshotResponse, ThreadEventsQuery, ToolCallContentResponse, UpdateGoalRequest,
-    UpdateInboxItemRequest, UpdatePermissionApprovalModeRequest, DEFAULT_MESSAGE_PAGE_LIMIT,
-    DEFAULT_THREAD_EVENT_PAGE_LIMIT, MAX_MESSAGE_PAGE_LIMIT, MAX_THREAD_EVENT_PAGE_LIMIT,
+    SessionSnapshotResponse, ToolCallContentResponse, UpdateGoalRequest, UpdateInboxItemRequest,
+    UpdatePermissionApprovalModeRequest, DEFAULT_MESSAGE_PAGE_LIMIT, MAX_MESSAGE_PAGE_LIMIT,
+    MAX_THREAD_EVENT_PAGE_LIMIT,
 };
 
 #[utoipa::path(
@@ -375,32 +373,4 @@ pub(crate) async fn delete_permission_grant(
         .delete_permission_grant(&session_id, &grant_id)
         .await?;
     Ok(StatusCode::NO_CONTENT)
-}
-
-#[utoipa::path(
-    get,
-    path = "/sessions/{session_id}/threads/{thread_name}/events",
-    operation_id = "get_sessions_session_id_threads_thread_name_events",
-    tag = "conversation",
-    params(ThreadEventsQuery, ("session_id" = String, Path), ("thread_name" = String, Path)),
-    responses((status = 200, description = "Success", body = ThreadEventPage, content_type = "application/json"), (status = 400, description = "Bad request or rejected path/query/body extraction", content((ApiErrorBody = "application/json"), (String = "text/plain"))), (status = 404, description = "Request failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
-)]
-pub(crate) async fn thread_events(
-    State(manager): State<SessionManager>,
-    AxumPath((session_id, thread_name)): AxumPath<(String, String)>,
-    Query(query): Query<ThreadEventsQuery>,
-) -> std::result::Result<Json<ThreadEventPage>, ApiError> {
-    Ok(Json(
-        manager
-            .thread_events(
-                &session_id,
-                &thread_name,
-                query.before_id,
-                query
-                    .limit
-                    .unwrap_or(DEFAULT_THREAD_EVENT_PAGE_LIMIT)
-                    .clamp(1, MAX_THREAD_EVENT_PAGE_LIMIT),
-            )
-            .await?,
-    ))
 }

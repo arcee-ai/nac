@@ -1,10 +1,9 @@
-import { IconName } from "../../atoms";
 /**
  * The subagent's own conversation, the same turns the chat transcript draws,
  * including the load shimmer and the live model pill. The parent's runtime
  * store is left alone: this view reads the child's snapshot and its own stream.
  */
-export declare function SubagentPreview({ sessionId, title, fallbackText, relationship, icon, header, phoneHeaderInFlow, onOpen, }: {
+export declare function SubagentPreview({ sessionId, title, fallbackText, relationship, header, phoneHeaderInFlow, onOpen, }: {
     sessionId: string;
     title: string;
     fallbackText: string | null;
@@ -13,7 +12,6 @@ export declare function SubagentPreview({ sessionId, title, fallbackText, relati
         generation: number;
         runId: string | null;
     };
-    icon: IconName;
     /** Below the desktop width the panel's own header names it and carries Open. */
     header?: boolean;
     /** The selected phone detail reserves its header outside this scroll viewport. */

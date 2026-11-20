@@ -1,17 +1,13 @@
-import type { SessionBehavior } from "../../types/api";
 import { type ModelOverride } from "./modelChoice";
 import { type SandboxOptions } from "./workspaceSandbox";
 export interface StartRequest {
     projectId: string;
-    behavior: SessionBehavior;
     prompt: string;
-    /** Null: the server inherits the project's model, as for any plain create. */
-    model: ModelOverride | null;
+    model: ModelOverride;
     sandbox?: SandboxOptions;
 }
 /**
- * Home's send: create the session (inheriting, or with the composer's model
- * override), deliver the prompt as its first message, then open it.
+ * Create a session with the chosen model, deliver the prompt, and open it.
  *
  * The runtime-only first-message intent is consumed by the owning composer
  * after its interactive stream is live. Reload/replacement retains text only,

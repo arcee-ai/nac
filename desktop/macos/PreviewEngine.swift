@@ -217,7 +217,7 @@ private final class EngineRun {
         var environment = configuration.environment
         environment["NAC_DESKTOP_CHANNEL_FD"] = "3"
         let arguments = [executable.path, "--bind", "127.0.0.1:0", "--directory", configuration.cwd.path,
-                         "--store-path", configuration.store.path, "--worker-executable", executable.path, "--no-open"]
+                         "--store-path", configuration.store.path, "--no-open"]
         let argv = arguments.map { strdup($0) } + [nil]
         let envp = environment.sorted(by: { $0.key < $1.key }).map { strdup("\($0.key)=\($0.value)") } + [nil]
         defer { argv.forEach { free($0) }; envp.forEach { free($0) } }

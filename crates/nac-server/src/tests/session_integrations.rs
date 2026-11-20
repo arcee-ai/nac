@@ -7,7 +7,6 @@ async fn session_integration_refresh_is_passive_scoped_revision_checked_and_rest
     let _env = ScopedModelEnv::isolated(&root.join("nac-home"), None);
     seed_direct_session(&root, "direct");
     seed_direct_session(&root, "separate");
-    seed_session(&root, "orchestrator", "2026-10-30T00:00:00Z");
     let manager = test_manager(&root);
     let app = router(manager.clone());
     let initial = get_response(app.clone(), "/sessions/direct/integrations", None).await;
@@ -80,25 +79,6 @@ async fn session_integration_refresh_is_passive_scoped_revision_checked_and_rest
         response_json(get_response(app.clone(), "/sessions/separate/integrations", None).await)
             .await;
     assert_eq!(separate["revision"], 0);
-    let no_worker_request =
-        response_json(get_response(app.clone(), "/sessions/orchestrator/integrations", None).await)
-            .await;
-    assert_eq!(no_worker_request["state"], "not_requested");
-    let workers = response_json(
-        post_json(
-            app.clone(),
-            "/sessions/orchestrator/integrations/refresh",
-            serde_json::json!({"expected_revision": 0}),
-        )
-        .await,
-    )
-    .await;
-    assert_eq!(workers["state"], "scheduled_for_workers");
-    assert!(
-        workers["applied_revision"].is_null(),
-        "workers have no aggregate acknowledgement"
-    );
-    assert!(workers["incarnation_id"].is_null());
     drop((app, manager));
     let restarted = test_manager(&root);
     let durable = response_json(

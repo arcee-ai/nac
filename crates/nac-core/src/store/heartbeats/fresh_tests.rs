@@ -40,6 +40,17 @@ impl Fixture {
             &path,
             &FreshTaskDestination {
                 project_id: "project".into(),
+                model_selection: Some(crate::store::TaskModelSelection {
+                    service_tier: None,
+                    backend: "openai-responses".into(),
+                    model: "fixture-model".into(),
+                    base_url: "https://fixture.invalid/v1".into(),
+                    allow_insecure_http: false,
+                    api_key_env: None,
+                    reasoning_effort: None,
+                    extra_headers: None,
+                    orchestrator_compaction_threshold: None,
+                }),
                 pinned_commit: None,
                 default_ref: Some("refs/heads/dev".into()),
                 model: None,
@@ -110,6 +121,38 @@ pub(super) fn prepared_shared_snapshot(
     snapshot.behavior = crate::sessions::SessionBehavior::Direct;
     snapshot.project_id = Some("project".into());
     snapshot
+}
+
+#[test]
+fn scheduled_model_selection_is_frozen_in_the_durable_launch_receipt() {
+    let mut f = Fixture::new();
+    let selection = crate::store::TaskModelSelection {
+        service_tier: None,
+        backend: "openai-responses".into(),
+        model: "fixture-model".into(),
+        base_url: "https://fixture.invalid/v1".into(),
+        allow_insecure_http: false,
+        api_key_env: Some("FIXTURE_API_KEY".into()),
+        reasoning_effort: Some("high".into()),
+        extra_headers: None,
+        orchestrator_compaction_threshold: None,
+    };
+    f.binding.fresh_task.as_mut().unwrap().model_selection = Some(selection.clone());
+    f.create();
+    let pending = f.pending();
+    let first =
+        reserve_fresh_heartbeat_launch(&f.path, &pending.occurrence_id, pending.revision, 61_000)
+            .unwrap()
+            .unwrap();
+    assert_eq!(
+        first.receipt().request.model_selection,
+        Some(selection.clone())
+    );
+    assert!(first.model_defaults().is_none());
+    let reloaded = read_fresh_heartbeat_launch(&f.path, &pending.occurrence_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(reloaded.receipt().request.model_selection, Some(selection));
 }
 
 #[test]
@@ -659,7 +702,7 @@ fn deleted_project_disables_pending_launch_and_changed_control_arguments_conflic
 }
 
 #[test]
-fn each_launch_reservation_freezes_destination_defaults_without_exposing_configuration_headers() {
+fn selected_model_ignores_project_defaults_and_keeps_configuration_headers_private() {
     let mut f = Fixture::new();
     insert_model_configuration(
         &f.path,
@@ -701,7 +744,17 @@ fn each_launch_reservation_freezes_destination_defaults_without_exposing_configu
         reserve_fresh_heartbeat_launch(&f.path, &pending.occurrence_id, pending.revision, 61_000)
             .unwrap()
             .unwrap();
-    assert_eq!(reserved.model_defaults().unwrap().model, "fixture-first");
+    assert!(reserved.model_defaults().is_none());
+    assert_eq!(
+        reserved
+            .receipt()
+            .request
+            .model_selection
+            .as_ref()
+            .unwrap()
+            .model,
+        "fixture-model"
+    );
     open_runtime_connection(&f.path).unwrap().execute("UPDATE model_configurations SET model='fixture-later' WHERE config_id='fixture-config'",[]).unwrap();
     let replay =
         reserve_fresh_heartbeat_launch(&f.path, &pending.occurrence_id, pending.revision, 99_000)

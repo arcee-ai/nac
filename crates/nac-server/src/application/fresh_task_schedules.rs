@@ -109,26 +109,70 @@ impl<'a> FreshTaskScheduleApplication<'a> {
         let path = self.manager.inner.store_path.clone();
         let target = project.clone();
         let action = operation.clone();
+        let request_id = request.clone();
         let binding = store::spawn_blocking_store_caller(move || {
-            let prior = action
-                .target()
-                .map(|(id, _)| store::read_heartbeat(&path, &format!("project:{target}"), id))
-                .transpose()?;
+            let replay = store::read_heartbeat_command_receipt(
+                &path,
+                &format!("project:{target}"),
+                &request_id,
+            )?;
+            let prior = if replay.is_some() {
+                None
+            } else {
+                action
+                    .target()
+                    .map(|(id, _)| store::read_heartbeat(&path, &format!("project:{target}"), id))
+                    .transpose()?
+            };
             if matches!(
                 action,
                 HeartbeatAction::Pause { .. }
                     | HeartbeatAction::Stop { .. }
                     | HeartbeatAction::Delete { .. }
             ) {
-                return Ok(prior.context("standalone schedule was not found")?.binding);
+                return Ok(replay
+                    .or(prior.map(|schedule| HeartbeatReceipt {
+                        request_id: request_id.clone(),
+                        schedule,
+                        occurrence: None,
+                        active_occurrence: None,
+                    }))
+                    .context("standalone schedule was not found")?
+                    .schedule
+                    .binding);
             }
-            let selected = destination
-                .or_else(|| {
-                    prior
-                        .as_ref()
-                        .and_then(|prior| prior.binding.fresh_task.clone())
-                })
-                .context("fresh task destination is required")?;
+            let selected = if let Some(destination) = destination {
+                destination
+            } else if let Some(receipt) = &replay {
+                match &action {
+                    HeartbeatAction::Edit {
+                        schedule_id,
+                        expected_version,
+                        ..
+                    } => store::read_heartbeat_destination_at_version(
+                        &path,
+                        &format!("project:{target}"),
+                        schedule_id,
+                        *expected_version,
+                    )?
+                    .context("original schedule destination is unavailable")?,
+                    // Resume and RunNow bind only their action in the historical
+                    // command digest; recover the saved project binding rather
+                    // than requiring a newly supplied model.
+                    HeartbeatAction::Resume { .. } | HeartbeatAction::RunNow { .. } => receipt
+                        .schedule
+                        .binding
+                        .fresh_task
+                        .clone()
+                        .context("original schedule destination is unavailable")?,
+                    _ => anyhow::bail!("fresh task destination is required"),
+                }
+            } else {
+                prior
+                    .as_ref()
+                    .and_then(|prior| prior.binding.fresh_task.clone())
+                    .context("fresh task destination is required")?
+            };
             ensure!(
                 selected.project_id == target,
                 "conflict: schedule destination project changed"

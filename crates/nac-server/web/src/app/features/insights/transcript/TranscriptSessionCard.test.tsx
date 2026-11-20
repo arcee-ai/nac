@@ -8,19 +8,16 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { InsightSessionEntry } from "@/app/features/insights/model/types";
 import { TranscriptSessionCard, TranscriptSessionGroup } from "./TranscriptSessionCard";
 import { InsightsNavigationContext } from "@/app/features/insights/useInsightsNavigation";
-import { UiPolicyContext } from "@/app/features/ui-policy/UiPolicyContext";
 import { presentToolCall } from "@/app/lib/toolPresentation";
 import { api } from "@/app/services/api";
 import { queryKeys } from "@/app/services/queries/keys";
-import type { ManagedOrchestratorRecord, TraditionalChildRecord } from "@/app/types/api";
+import type { TraditionalChildRecord } from "@/app/types/api";
 
 const listChildren = vi.spyOn(api, "listTraditionalChildren");
-const listOrchestrators = vi.spyOn(api, "listManagedOrchestrators");
 const clients: QueryClient[] = [];
 
 beforeEach(() => {
   listChildren.mockReset().mockResolvedValue([]);
-  listOrchestrators.mockReset().mockResolvedValue([]);
 });
 afterEach(() => {
   cleanup();
@@ -28,7 +25,7 @@ afterEach(() => {
 });
 
 function entry(
-  name: "subagent" | "orchestrator_launch" = "subagent",
+  name: "subagent" = "subagent",
   status: InsightSessionEntry["status"] = "failed",
   childId?: string,
 ): InsightSessionEntry {
@@ -69,7 +66,7 @@ function entry(
   return {
     kind: "session",
     id: "launch",
-    action: name === "subagent" ? "spawn-agent" : "spawn-orchestrator",
+    action: "spawn-agent",
     rowKey: childId ? `child:${childId}` : null,
     title: "Audit persistence",
     status,
@@ -93,7 +90,7 @@ function mount(
   launch: InsightSessionEntry | InsightSessionEntry[],
   {
     children,
-    orchestration = true,
+    orchestration: _orchestration = true,
     interactive = true,
   }: {
     children?: TraditionalChildRecord[];
@@ -108,7 +105,7 @@ function mount(
   if (children) client.setQueryData(queryKeys.traditionalChildren("parent"), children);
   render(
     <QueryClientProvider client={client}>
-      <UiPolicyContext.Provider value={{ orchestrationEnabled: orchestration }}>
+      <>
         <MemoryRouter initialEntries={["/session/parent/insights"]}>
           <Location />
           <InsightsNavigationContext.Provider
@@ -133,7 +130,7 @@ function mount(
             </Routes>
           </InsightsNavigationContext.Provider>
         </MemoryRouter>
-      </UiPolicyContext.Provider>
+      </>
     </QueryClientProvider>,
   );
   return client;
@@ -188,25 +185,17 @@ it("shows an ambiguous settled outcome without claiming interruption", () => {
   expect(screen.queryByText(/Interrupted|No result was recorded/)).toBeNull();
 });
 
-it.each(["subagent", "orchestrator_launch"] as const)(
+it.each(["subagent"] as const)(
   "keeps a failed %s launch's bounded diagnostic without a child",
   async (name) => {
     const launch = entry(name);
     mount(launch);
-    if (name === "subagent") {
-      expect(launch.presentation.resultPreview).toBeNull();
-      expect(screen.getByText("Subagent request failed")).toBeTruthy();
-    } else {
-      const diagnostic = screen.getByText(launch.presentation.resultPreview!, { exact: true });
-      expect(diagnostic.textContent).toBe(launch.presentation.resultPreview);
-      expect([...diagnostic.textContent!].length).toBeLessThanOrEqual(180);
-    }
+    expect(launch.presentation.resultPreview).toBeNull();
+    expect(screen.getByText("Subagent request failed")).toBeTruthy();
     expect(document.body.textContent).not.toMatch(/RAW_SECRET|RAW_RESULT_BODY/);
     expect(screen.queryByRole("link")).toBeNull();
     expect(screen.queryByRole("button")).toBeNull();
-    await waitFor(() =>
-      expect(name === "subagent" ? listChildren : listOrchestrators).toHaveBeenCalled(),
-    );
+    await waitFor(() => expect(listChildren).toHaveBeenCalled());
   },
 );
 
@@ -364,25 +353,16 @@ it("reports an unavailable invocation and retries without showing a cached resul
   getContent.mockRestore();
 });
 
-it("keeps a disabled-policy orchestrator launch's own title rather than claiming it was not found", () => {
-  mount(entry("orchestrator_launch", "ready", "orchestrator"), {
-    orchestration: false,
-  });
-  expect(screen.getByText("Audit persistence")).toBeTruthy();
-  expect(screen.queryByText("Not found")).toBeNull();
-  expect(listOrchestrators).not.toHaveBeenCalled();
-});
-
 it("keeps polling when a settled launch's child has not appeared in the first list", async () => {
   const record = {
-    orchestrator_session_id: "orchestrator",
-    description: "New orchestrator",
+    child_session_id: "child",
+    description: "New child",
     status: "completed",
     generation: 1,
     version: 1,
-  } as ManagedOrchestratorRecord;
-  listOrchestrators.mockResolvedValueOnce([]).mockResolvedValue([record]);
-  mount(entry("orchestrator_launch", "ready", "orchestrator"));
+  } as TraditionalChildRecord;
+  listChildren.mockResolvedValueOnce([]).mockResolvedValue([record]);
+  mount(entry("subagent", "ready", "child"));
   await waitFor(
     () =>
       expect(
@@ -392,15 +372,15 @@ it("keeps polling when a settled launch's child has not appeared in the first li
       ).toBeTruthy(),
     { timeout: 2500 },
   );
-  expect(listOrchestrators).toHaveBeenCalledTimes(2);
+  expect(listChildren).toHaveBeenCalledTimes(2);
 });
 
 it("stops polling after a delegation list fetch fails", async () => {
-  listOrchestrators.mockRejectedValue(new Error("offline"));
-  mount(entry("orchestrator_launch", "ready", "orchestrator"));
-  await waitFor(() => expect(listOrchestrators).toHaveBeenCalledTimes(1));
+  listChildren.mockRejectedValue(new Error("offline"));
+  mount(entry("subagent", "ready", "child"));
+  await waitFor(() => expect(listChildren).toHaveBeenCalledTimes(1));
   await new Promise((resolve) => setTimeout(resolve, 1200));
-  expect(listOrchestrators).toHaveBeenCalledTimes(1);
+  expect(listChildren).toHaveBeenCalledTimes(1);
   expect(screen.queryByText("Not found")).toBeNull();
 });
 

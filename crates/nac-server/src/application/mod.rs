@@ -8,7 +8,6 @@ pub(crate) mod heartbeat_scheduler;
 pub(crate) mod heartbeats;
 pub(crate) mod managed;
 pub(crate) mod model_catalog;
-pub(crate) mod model_configurations;
 pub(crate) mod persistence;
 pub(crate) mod project_folders;
 pub(crate) mod projects;

@@ -21,7 +21,6 @@ import {
   sessionPanelTabs,
   settledWorkFold,
   stepAwaitingApproval,
-  workFoldOf,
 } from "./focus-embedded-helpers";
 import { ScriptGate } from "./scripted-provider";
 
@@ -231,7 +230,7 @@ test("terminates one exact live terminal through the ordinary session API", asyn
   harness.provider.assertConsumed();
 });
 
-for (const behavior of ["direct", "direct-with-orchestrator"] as const) {
+for (const behavior of ["direct"] as const) {
   test(`keeps rich ${behavior} primary tool details through live settlement and reload`, async ({
     harness,
     page,
@@ -303,7 +302,7 @@ for (const behavior of ["direct", "direct-with-orchestrator"] as const) {
   });
 }
 
-for (const behavior of ["direct", "direct-with-orchestrator"] as const) {
+for (const behavior of ["direct"] as const) {
   test(`retains a background subagent acknowledgement in ${behavior} after reload`, async ({
     harness,
     page,
@@ -737,7 +736,6 @@ test("applies parent auto-approval to child agents and identifies manual child r
   await expect(permissions).toContainText(
     "The mode governs this session and all existing or future owned child agents",
   );
-  await expect(permissions).toContainText("Separately managed orchestrators are not included");
   await selectApprovalMode(page, sessionId, "auto_approve");
   await page.keyboard.press("Escape");
 
@@ -930,57 +928,6 @@ test("steers an active direct run from the ordinary composer", async ({
   expect(JSON.stringify(steeredRequest?.body)).toContain("change course safely");
 });
 
-test("steers an active classic orchestrator from the ordinary composer", async ({
-  harness,
-  page,
-  request,
-}) => {
-  const boundary = new ScriptGate();
-  const steeredBoundary = new ScriptGate();
-  harness.provider.enqueue(
-    "classic-active-boundary",
-    { token: "E2E_CLASSIC_STEER_TOKEN" },
-    {
-      kind: "function_call",
-      name: "unknown_alpha",
-      callId: "classic-steer-boundary-1",
-      arguments: {},
-      stream: true,
-    },
-    boundary,
-  );
-  harness.provider.enqueue(
-    "classic-steered-continuation",
-    { token: "retarget the active orchestrator" },
-    { kind: "text", text: "classic steering complete", stream: true },
-    steeredBoundary,
-  );
-  const sessionId = await createSession(request, harness, "orchestrator");
-  await page.goto(`${harness.baseUrl}/#/session/${sessionId}/insights`);
-
-  const composer = page.getByRole("combobox", { name: "Message" });
-  await composer.fill("E2E_CLASSIC_STEER_TOKEN");
-  await page.getByRole("button", { name: "Send" }).click();
-  await boundary.accepted;
-  await expect(page.getByRole("button", { name: "Stop run" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Queue Next" })).toHaveCount(0);
-
-  await composer.fill("retarget the active orchestrator");
-  await page.getByRole("button", { name: "Steer active run" }).click();
-  await expect(composer).toHaveValue("");
-
-  boundary.release();
-  await harness.provider.waitForRequestCount(2);
-  await steeredBoundary.accepted;
-  const steeredRequest = harness.provider.requests.find(
-    (entry) => entry.matchedStep === "classic-steered-continuation",
-  );
-  expect(JSON.stringify(steeredRequest?.body)).toContain("retarget the active orchestrator");
-  steeredBoundary.release();
-  await waitForRunIdle(request, harness, sessionId);
-  harness.provider.assertConsumed();
-});
-
 test("queues, edits, cancels pending input, and stops an active direct run", async ({
   harness,
   page,
@@ -1085,6 +1032,9 @@ test("interprets literal goal commands before launching goal continuation", asyn
     })
     .toBeNull();
   await page.getByRole("button", { name: "Close goal editor" }).click();
+  // A restored draft can contain the command after reload; an empty composer
+  // exposes Stop rather than the active-run Steer action.
+  await composer.fill("");
   await page.getByRole("button", { name: "Stop run" }).click();
   await waitForRunIdle(request, harness, sessionId);
   continuation.release();
@@ -1408,79 +1358,13 @@ test("shows live background delegated work, terminal events, cancellation, and g
   harness.provider.assertConsumed();
 });
 
-test("navigates to read-only child and managed-orchestrator transcripts", async ({
-  harness,
-  page,
-  request,
-}) => {
-  const orchestratorCompletion = new ScriptGate();
+test("navigates to a read-only child transcript", async ({ harness, page, request }) => {
   harness.provider.enqueue(
     "child-completion",
     { token: "E2E_CHILD_TOKEN" },
     { kind: "text", text: "child completed" },
   );
-  harness.provider.enqueue(
-    "orchestrator-workset",
-    {
-      token: "E2E_ORCHESTRATOR_TOKEN",
-      requiredTools: ["thread", "workset_define"],
-    },
-    {
-      kind: "function_call",
-      name: "workset_define",
-      callId: "managed-workset-1",
-      arguments: {
-        id: "managed-release",
-        goal: "Verify the managed transcript topology",
-        status: "running",
-        summary: "Managed transcript topology",
-        verification_recipe: "Open the managed transcript panels",
-        workset_items: [
-          {
-            title: "Verify managed panels",
-            scope: "web session UI",
-            description: "Create one retained worker episode for panel navigation.",
-            role: "verification",
-            depends_on: [],
-            acceptance: "The managed transcript exposes its own thread and workset.",
-          },
-        ],
-      },
-    },
-  );
-  harness.provider.enqueue(
-    "orchestrator-thread",
-    { functionOutputCallId: "managed-workset-1" },
-    {
-      kind: "function_call",
-      name: "thread",
-      callId: "managed-thread-1",
-      arguments: {
-        name: "managed-ui",
-        action: "E2E_MANAGED_THREAD_TOKEN verify the managed transcript UI",
-      },
-    },
-  );
-  harness.provider.enqueue(
-    "managed-worker-completion",
-    { token: "E2E_MANAGED_THREAD_TOKEN", requiredTools: ["read"] },
-    { kind: "text", text: "managed worker completed" },
-  );
-  harness.provider.enqueue(
-    "orchestrator-completion",
-    { functionOutputCallId: "managed-thread-1" },
-    { kind: "text", text: "orchestrator completed" },
-    orchestratorCompletion,
-  );
-  harness.provider.enqueue(
-    "orchestrator-parent-observation",
-    {
-      token: "Coordinate the compatibility audit",
-      afterStep: "orchestrator-completion",
-    },
-    { kind: "text", text: "managed completion acknowledged" },
-  );
-  const parentId = await createSession(request, harness, "direct-with-orchestrator");
+  const parentId = await createSession(request, harness, "direct");
   const childResponse = await request.post(`${harness.baseUrl}/sessions/${parentId}/children`, {
     data: {
       profile: "general",
@@ -1493,24 +1377,6 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
   expect(childResponse.ok()).toBe(true);
   const childId = ((await childResponse.json()) as { child_session_id?: string }).child_session_id;
   expect(childId).toBeTruthy();
-
-  const orchestratorResponse = await request.post(
-    `${harness.baseUrl}/sessions/${parentId}/orchestrators`,
-    {
-      data: {
-        description: "Coordinate the compatibility audit",
-        prompt: "E2E_ORCHESTRATOR_TOKEN",
-        background: true,
-      },
-      timeout: 15_000,
-    },
-  );
-  expect(orchestratorResponse.ok()).toBe(true);
-  const orchestratorId = (
-    (await orchestratorResponse.json()) as { orchestrator_session_id?: string }
-  ).orchestrator_session_id;
-  expect(orchestratorId).toBeTruthy();
-  await orchestratorCompletion.accepted;
 
   await page.goto(`${harness.baseUrl}/#/session/${parentId}/delegated`);
   // Docked, the Subagents panel stays beside the transcript it opens children from.
@@ -1556,110 +1422,7 @@ test("navigates to read-only child and managed-orchestrator transcripts", async 
 
   await parentCrumb.click();
   await expect(page).toHaveURL(new RegExp(`/session/${parentId}/delegated$`));
-  await openSessionPanel(page, "Subagents");
-  await page
-    .getByRole("button", { name: "Coordinate the compatibility audit", exact: true })
-    .click();
-  const orchestratorComposer = page.locator("form").filter({
-    has: page.getByRole("textbox", { name: "Send a message" }),
-  });
-  await expect(
-    orchestratorComposer.locator("span", { hasText: "Running in the background" }),
-  ).toBeVisible();
-  await expect(orchestratorComposer.getByRole("button", { name: "Stop" })).toBeVisible();
-  orchestratorCompletion.release();
-  await expect(
-    orchestratorComposer.getByRole("button", { name: "Send", exact: true }),
-  ).toBeVisible();
-  await expect(page.getByLabel("Managed orchestrator completed")).toContainText(
-    "Coordinate the compatibility audit",
-  );
   harness.provider.assertConsumed();
-  // An unsent draft must come back after the transcript round trip below.
-  const panelComposer = page.locator("form").filter({
-    has: page.getByRole("switch", { name: "Run in the background" }),
-  });
-  await panelComposer
-    .getByRole("textbox", { name: "Send a message" })
-    .fill("Unsent follow-up for the orchestrator");
-  await page.getByRole("button", { name: "Open", exact: true }).click();
-  await expect(page).toHaveURL(new RegExp(`/session/${orchestratorId}/`));
-  await expect(page.getByText(/^Managed orchestrator\b/).first()).toBeVisible();
-  await expect(page.getByRole("textbox", { name: "Send a message" })).toBeVisible();
-  await openSessionDrawer(page);
-  await expect(tabs.getByRole("tab", { name: "Insights" })).toBeVisible();
-  await expect(tabs.getByRole("tab", { name: "Files" })).toBeVisible();
-  await expect(tabs.getByRole("tab", { name: "Worksets" })).toBeVisible();
-
-  // Auto-follow can move a transcript row between pointer-down and up.
-  // Native keyboard activation also verifies these retained links are accessible.
-  // The workset definition sits in the turn's work, whose Insights details link the workset.
-  const worksetWork = settledWorkFold(page, "Defined 1 workset");
-  await worksetWork.focus();
-  await page.keyboard.press("Enter");
-  await expect(worksetWork).toHaveAttribute("aria-expanded", "true");
-  await workFoldOf(page, worksetWork)
-    .getByRole("button", { name: "Open in Insights", exact: true })
-    .focus();
-  await page.keyboard.press("Enter");
-  await expect(page).toHaveURL(new RegExp(`/session/${orchestratorId}/insights$`));
-  // A keyboard open moves focus into the detail a frame later; let it land before moving on.
-  await expect(page.getByRole("region", { name: "Insights detail" })).toBeFocused();
-  await page.getByRole("button", { name: "Worksets_managed-release", exact: true }).focus();
-  await page.keyboard.press("Enter");
-  await expect(page).toHaveURL(new RegExp(`/session/${orchestratorId}/worksets$`));
-  await expect(
-    page.getByText("Verify the managed transcript topology", { exact: true }),
-  ).toBeVisible();
-  await page.getByRole("button", { name: /managed-ui/i }).focus();
-  await page.keyboard.press("Enter");
-  await expect(page).toHaveURL(new RegExp(`/session/${orchestratorId}/insights$`));
-  await expect(page.getByRole("group", { name: "Thread detail view" })).toBeVisible();
-  await expect(page.getByText("managed worker completed", { exact: true })).toBeVisible();
-
-  await expect(page.getByRole("button", { name: /^Branch:/ })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Commit", exact: true })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Regenerate from original prompt" })).toHaveCount(
-    0,
-  );
-  await expect(page.getByRole("button", { name: "Revert to this snapshot" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Create fork" })).toHaveCount(0);
-
-  await hideSessionDrawer(page);
-  await page.setViewportSize({ width: 390, height: 844 });
-  const managedMobilePanel = await openPhonePanelSheet(page);
-  const managedRow = (name: string) =>
-    managedMobilePanel.getByRole("button", { name: new RegExp(`^${name}(?: |$)`) });
-  await expect(managedRow("Sessions")).toHaveCount(0);
-  await expect(managedRow("Insights")).toBeVisible();
-  await expect(managedRow("Files")).toBeVisible();
-  await expect(managedRow("Worksets")).toBeVisible();
-  await expect(managedRow("History")).toBeVisible();
-  await managedRow("History").click();
-  await expect(page).toHaveURL(new RegExp(`/session/${orchestratorId}/history$`));
-  await expect(page.getByRole("button", { name: /^Branch:/ })).toHaveCount(0);
-  const historySheet = page.getByRole("dialog", { name: "History", exact: true });
-  await expect(historySheet).toBeVisible();
-  await expect(historySheet).toHaveCSS("translate", "0px");
-  await historySheet.getByRole("button", { name: "Close", exact: true }).click();
-  await expect(historySheet).toBeHidden();
-  await parentCrumb.click();
-  await expect(page).toHaveURL(new RegExp(`/session/${parentId}/delegated$`));
-  // The exact child→parent round trip restores the parent's Subagents panel,
-  // on the orchestrator it opened; its list is one step back.
-  const subagents = page.getByRole("dialog", { name: "Subagents", exact: true });
-  await expect(subagents).toBeVisible();
-  await subagents.getByRole("button", { name: "Open list", exact: true }).click();
-  await expect(
-    subagents.getByText("Coordinate the compatibility audit", { exact: true }).first(),
-  ).toBeVisible();
-  // A phone opens the panel on its list; the row brings back its composer and draft.
-  await subagents
-    .getByRole("button", { name: "Coordinate the compatibility audit", exact: true })
-    .click();
-  await expect(panelComposer.getByRole("textbox", { name: "Send a message" })).toHaveValue(
-    "Unsent follow-up for the orchestrator",
-  );
 });
 
 test("resizes and restores the dock beside the conversation", async ({

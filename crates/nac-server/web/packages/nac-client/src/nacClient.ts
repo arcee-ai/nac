@@ -1,5 +1,4 @@
 import type {
-  UiConfiguration,
   ReadinessResponse,
   RecentEventsResponse,
   SessionEventBoundary,
@@ -355,10 +354,6 @@ export class NacClient {
 
   constructor(options: NacClientOptions | NacHttpTransport = {}) {
     this.transport = "request" in options ? options : new NacTransport(options);
-  }
-
-  getUiConfiguration(signal?: AbortSignal): Promise<UiConfiguration> {
-    return this.transport.request<UiConfiguration>("GET", "/ui-config", { signal });
   }
 
   getReadiness(signal?: AbortSignal): Promise<ReadinessResponse> {

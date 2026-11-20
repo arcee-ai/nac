@@ -1,5 +1,26 @@
 use super::*;
 
+#[cfg(test)]
+pub(super) static ON_CONTROL_BUSY: std::sync::Mutex<Option<(String, std::sync::mpsc::Sender<()>)>> =
+    std::sync::Mutex::new(None);
+
+#[cfg(test)]
+fn observe_control_busy(attempt: i32) -> bool {
+    let signal = ON_CONTROL_BUSY
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|(_, signal)| signal.clone());
+    if let Some(signal) = signal {
+        let _ = signal.send(());
+    }
+    if attempt >= 5_000 {
+        return false;
+    }
+    std::thread::sleep(std::time::Duration::from_millis(1));
+    true
+}
+
 fn control_binding(
     conn: &Connection,
     scope: &str,
@@ -24,6 +45,49 @@ fn withdraw_pending(conn: &Connection, id: &str, now: i64) -> Result<()> {
 }
 
 coordinated_command! {
+/// Read a previously committed command response for reconstructing its binding.
+/// The control transaction still verifies the original canonical digest.
+pub fn read_heartbeat_command_receipt(path: &Path, scope: &str, request_id: &str) -> Result<Option<HeartbeatReceipt>> {
+    let conn = open_runtime_connection(path)?;
+    let response: Option<String> = conn.query_row(
+        "SELECT response_json FROM heartbeat_commands WHERE session_id=?1 AND request_id=?2",
+        params![scope, request_id], |row| row.get(0),
+    ).optional()?;
+    response.map(|value| serde_json::from_str(&value).map_err(Into::into)).transpose()
+}
+command ReadHeartbeatCommandReceiptCommand { scope:String=scope.to_owned(), request_id:String=request_id.to_owned() }
+call |c| (&c.scope,&c.request_id)
+correlation |c| crate::telemetry::Correlation::session(Some(&c.scope));
+port public;
+}
+
+coordinated_command! {
+/// Reconstruct an edit's pre-edit destination from immutable command responses.
+/// Missing or contradictory history is unknown, never the resulting binding.
+pub fn read_heartbeat_destination_at_version(path: &Path, scope: &str, schedule_id: &str, version: i64) -> Result<Option<FreshTaskDestination>> {
+    let conn = open_runtime_connection(path)?;
+    let mut statement = conn.prepare("SELECT response_json FROM heartbeat_commands WHERE session_id=?1 AND schedule_id=?2")?;
+    let rows = statement.query_map(params![scope, schedule_id], |row| row.get::<_, String>(0))?;
+    let mut destination = None;
+    for row in rows {
+        let receipt: HeartbeatReceipt = serde_json::from_str(&row?)?;
+        ensure!(receipt.schedule.schedule_id == schedule_id, "historical schedule identity mismatch");
+        if receipt.schedule.version == version {
+            let candidate = receipt.schedule.binding.fresh_task.context("historical fresh destination missing")?;
+            if let Some(existing) = &destination {
+                ensure!(existing == &candidate, "conflicting historical fresh destinations");
+            } else { destination = Some(candidate); }
+        }
+    }
+    Ok(destination)
+}
+command ReadHeartbeatDestinationAtVersionCommand { scope:String=scope.to_owned(), schedule_id:String=schedule_id.to_owned(), version:i64=version }
+call |c| (&c.scope,&c.schedule_id,c.version)
+correlation |c| crate::telemetry::Correlation::session(Some(&c.scope));
+port public;
+}
+
+coordinated_command! {
 /// A control command and its original response commit together. Replay is
 /// receipt-first, including after deletion, configuration change or stop.
 pub fn control_heartbeat(path:&Path,session_id:&str,request_id:&str,action:&HeartbeatAction,scheduling_request:&str,expected_binding:&HeartbeatBinding,now_ms:i64) -> Result<HeartbeatReceipt> {
@@ -34,6 +98,12 @@ pub fn control_heartbeat(path:&Path,session_id:&str,request_id:&str,action:&Hear
     } else {encode(action)?};
     let digest=format!("{:x}",Sha256::digest(canonical.as_bytes()));
     let mut conn=open_runtime_connection(path)?;
+    #[cfg(test)]
+    {
+        let observe = ON_CONTROL_BUSY.lock().unwrap().as_ref()
+            .is_some_and(|(id, _)| id == request_id);
+        if observe { conn.busy_handler(Some(observe_control_busy))?; }
+    }
     let tx=conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     let prior:Option<(String,String)>=tx.query_row("SELECT canonical_digest,response_json FROM heartbeat_commands WHERE session_id=?1 AND request_id=?2",params![session_id,request_id],|row| Ok((row.get(0)?,row.get(1)?))).optional()?;
     if let Some((prior_digest,response))=prior {
@@ -41,6 +111,11 @@ pub fn control_heartbeat(path:&Path,session_id:&str,request_id:&str,action:&Hear
         return Ok(serde_json::from_str(&response)?);
     }
     let relinquishing=matches!(action,HeartbeatAction::Pause{..}|HeartbeatAction::Stop{..}|HeartbeatAction::Delete{..});
+    if !relinquishing {
+        if let Some(destination) = &expected_binding.fresh_task {
+            ensure!(destination.model_selection.is_some(), "select a model for each scheduled task session");
+        }
+    }
     let current=if relinquishing && expected_binding.fresh_task.is_some() {
         let (id,_)=action.target().context("missing standalone control target")?;
         load_schedule(&tx,session_id,id)?.binding

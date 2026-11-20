@@ -2,13 +2,7 @@ import type { SessionFacts } from "./useSessionFacts";
 import type { SessionPanel } from "../../lib/routes";
 /** What a Session menu row opens: one of the drawer's panels, or the goal. */
 export type SessionPanelTarget = SessionPanel | "goal";
-/**
- * The panels the Session menu lists. A wide screen reaches the drawer's panels
- * from the header's panel toggle and the drawer's own tabs, so it lists only
- * the goal, which has a drawer of its own. A phone has neither, so its sheet
- * lists every panel the behavior allows. The goal is listed only while one
- * exists.
- */
+/** On desktop, the drawer's tabs open the panels. The menu still opens goals. */
 export declare function sessionPanelEntries(facts: SessionFacts, phone: boolean): SessionPanelTarget[];
 /**
  * What is live in the session's background, as short phrases for the Session

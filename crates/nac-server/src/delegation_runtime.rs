@@ -23,20 +23,6 @@ use crate::{
     SubmitPromptRequest, ThreadSteeringRequest,
 };
 
-#[cfg(test)]
-static INJECTED_MANAGED_MONITOR_FAILURES: std::sync::atomic::AtomicUsize =
-    std::sync::atomic::AtomicUsize::new(0);
-
-#[cfg(test)]
-pub(crate) fn inject_managed_monitor_failures(count: usize) {
-    INJECTED_MANAGED_MONITOR_FAILURES.store(count, std::sync::atomic::Ordering::SeqCst);
-}
-
-#[cfg(test)]
-pub(crate) fn pending_managed_monitor_failures() -> usize {
-    INJECTED_MANAGED_MONITOR_FAILURES.load(std::sync::atomic::Ordering::SeqCst)
-}
-
 pub(crate) fn load_managed_monitor_record(
     store_path: &std::path::Path,
     orchestrator_session_id: &str,
@@ -51,19 +37,6 @@ pub(crate) fn load_managed_monitor_record(
     )? {
         return Err(anyhow!(
             "private fixture injected managed monitor read failure"
-        ));
-    }
-    #[cfg(test)]
-    if INJECTED_MANAGED_MONITOR_FAILURES
-        .fetch_update(
-            std::sync::atomic::Ordering::SeqCst,
-            std::sync::atomic::Ordering::SeqCst,
-            |remaining| remaining.checked_sub(1),
-        )
-        .is_ok()
-    {
-        return Err(anyhow!(
-            "injected deterministic managed orchestrator monitor failure"
         ));
     }
     let correlation = nac_core::telemetry::Correlation::session(Some(orchestrator_session_id))

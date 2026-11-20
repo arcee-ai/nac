@@ -3,7 +3,10 @@ import type { NotificationSessionTarget, SessionTargetOutcome } from "../desktop
 export interface ProductNavigationAdapter {
     currentSession(): string | null;
     open(resolution: ProductNavigationResolution): boolean;
-    openNotificationSessionTarget?(sessionId: string): void;
+}
+export interface NotificationNavigationAdapter {
+    currentSession(): string | null;
+    openNotificationSessionTarget(sessionId: string): void;
 }
 /** One runtime owns this explicit-action bridge. Nothing reads Markdown or
  * subscribes to answers. Connecting a browser never replays headless requests. */
@@ -13,8 +16,11 @@ export declare class ProductNavigation {
     private readonly inspect?;
     private adapter;
     private version;
+    private notificationAdapter;
+    private notificationVersion;
     constructor(resolve: (request: ProductNavigationRequest) => Promise<ProductNavigationResolution>, closed: () => boolean, inspect?: ((sessionId: string | null, signal?: AbortSignal) => Promise<ProductContext>) | undefined);
     connect(adapter: ProductNavigationAdapter): () => void;
+    connectNotification(adapter: NotificationNavigationAdapter): () => void;
     close(): void;
     /** Reuse the normal full-chat lifecycle. It may resume already authorized
      * durable intent; this request carries no new intent or permission action. */

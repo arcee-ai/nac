@@ -46,8 +46,6 @@ class Engine extends EventEmitter {
         config.cwd,
         "--store-path",
         config.store,
-        "--worker-executable",
-        this.executable,
         "--no-open",
       ],
       {

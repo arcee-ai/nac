@@ -17,18 +17,8 @@ max_bytes = 4194304
 [storage]
 store_path = ".nac/store.db"
 
-# New sessions merge CLI/web launch values over this section. Live keys are
-# model, reasoning_effort, and extra_headers. Removed keys (backend, base_url,
-# api_key_env) in an older file are ignored with a one-time warning. A
-# [compaction] section still parses but is ignored.
-[model]
-# Catalog id; backend and default base URL resolve from it (gpt-5.5 → openai-responses).
-model = "gpt-5.5"
-# Optional. Omitted means NAC sends no effort. gpt-5.5 accepts none, minimal,
-# low, medium, high, xhigh. Other backends: see Reasoning effort.
-reasoning_effort = "xhigh"
-# [model.extra_headers]
-# X-Custom = "value"   # cannot set Host, Authorization, Proxy-Authorization, or x-api-key
+# Choose a model for each new session in the UI, CLI or API. Model defaults
+# in config.toml are no longer used.
 
 # Applied when tools run under --sandbox. CLI flags override these values.
 [sandbox]
@@ -36,22 +26,6 @@ image = "python:3.13-bookworm"  # default
 # backend = "podman"            # only supported value; default
 # cpus = 2                      # default
 # memory_mib = 2048             # default
-
-# Current config spelling for command output retention; ALL-615 owns its neutral rename.
-[worker]
-# In-memory retention for the producing session only. exec_command keeps stdout
-# and stderr separate, returns status/exit_code plus concise previews, and
-# supplies an output_id once the process starts. read_command_output pages
-# combined (emission order), stdout, or stderr; PTY is combined-only.
-# Empty write_stdin polls (and explicit retention) advance a preview cursor
-# without deleting retained bytes. Nonempty input requires a separate once-only
-# approval that displays the exact input and binds it to the terminal handle.
-# Oldest bytes roll over; reads report overflowed and the retained range.
-# Output is process-local and bounded; retained output can survive run settlement.
-# Cleanup, eviction, or process restart can make an output ID unavailable.
-# Short commands fit in their previews and need no follow-up read.
-command_output_max_bytes = 8388608           # per command/PTY; 1..=1 GiB; default 8 MiB
-command_output_session_max_bytes = 67108864  # per session; >= per-command, <= 4 GiB; default 64 MiB
 
 # How long a Codex token refresh, sign-in, or logout, or an Arcee token refresh,
 # waits for another NAC process that holds the same credential lock before

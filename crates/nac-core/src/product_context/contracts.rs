@@ -53,7 +53,7 @@ impl ProductDestination {
         match self {
             Self::Projects => "Projects",
             Self::McpSettings => "MCP settings",
-            Self::Configurations => "Configurations",
+            Self::Configurations => "Models & providers",
             Self::ModelAuthentication => "Model authentication",
             Self::SshConfigurations => "SSH configurations",
             Self::SessionSubagents => "Subagents",

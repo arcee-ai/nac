@@ -119,10 +119,6 @@ export type TraditionalChildStatus = ApiSchema<"TraditionalChildStatus">;
 export type TraditionalChildExecutionMode = ApiSchema<"TraditionalChildExecutionMode">;
 export type TraditionalChildRecord = ApiSchema<"TraditionalChildRecord">;
 export type StartTraditionalChildRequest = ApiSchema<"StartTraditionalChildRequest">;
-export type ManagedOrchestratorStatus = TraditionalChildStatus;
-export type ManagedOrchestratorExecutionMode = TraditionalChildExecutionMode;
-export type ManagedOrchestratorRecord = ApiSchema<"ManagedOrchestratorRecord">;
-export type StartManagedOrchestratorRequest = ApiSchema<"StartManagedOrchestratorRequest">;
 export type SessionEventBoundary = ApiSchema<"SessionEventBoundary">;
 export type SessionEventEnvelope = ApiSchema<"SessionEventEnvelope">;
 export type ReplayBoundaryEvent = ApiSchema<"ReplayBoundaryEvent">;
@@ -135,8 +131,6 @@ export type LaggedEvent = ApiSchema<"LaggedEvent">;
  */
 export type AssistantStreamDelta = ApiSchema<"AssistantStreamDelta">;
 export type RunFailure = ApiSchema<"RunFailure">;
-export type ThreadEventRecord = ApiSchema<"ThreadEventPageItem">;
-export type ThreadEventPage = ApiSchema<"ThreadEventPage">;
 export type MessagePageMetadata = ApiSchema<"MessagePageMetadata">;
 export type MessageCycleMetadata = ApiSchema<"MessageCycleMetadata">;
 export type MessagesPageResponse = ApiSchema<"MessagesPageResponse">;
@@ -154,8 +148,7 @@ export type FleetAttentionFrame = ApiSchema<"FleetAttentionFrame">;
 export type AttentionFacet = ApiSchema<"AttentionFacetDto">;
 /** `GET /sessions/{id}/config` — the raw persisted row, not the effective config. */
 export type RawSessionConfig = ApiSchema<"RawSessionConfig">;
-export type LaunchModelDefaults = ApiSchema<"LaunchModelDefaults">;
-export type LaunchModelDefaultsRequest = ApiSchema<"LaunchModelDefaultsRequest">;
+export type ProjectSessionModelSource = ApiSchema<"ProjectSessionModelSource">;
 /**
  * An API key kept in NAC home. The value itself never leaves the server, so
  * only the selector name and a short suffix are available to the UI.
@@ -248,17 +241,12 @@ export type ModelCatalog = ApiSchema<"ModelListing">;
  * A saved provider setup. The key itself is not here: `api_key_env` names the
  * credential the server files it under.
  */
-export type ModelConfigurationRecord = ApiSchema<"ModelConfigurationRecord">;
-export type ModelConfigurationList = ApiSchema<"ModelConfigurationList">;
-export type CreateModelConfigurationRequest = ApiSchema<"CreateModelConfigurationRequest">;
 /**
  * Every field is tri-state: omit it to keep what is stored, send null to clear
  * it, send a value to replace it. `api_key` cannot be read back, so omitting it
  * keeps the credential the configuration already points at.
  */
-export type UpdateModelConfigurationRequest = ApiSchema<"UpdateModelConfigurationRequest">;
 /** A configuration the server checked end to end, with the models it allows. */
-export type ResolvedModelConfiguration = ApiSchema<"ResolvedModelConfiguration">;
 /**
  * Tri-state field of the create/patch config endpoints: omit the key to keep
  * the current value, send null to clear it, send a value to set it.
@@ -295,8 +283,6 @@ export type RevertSessionResponse = ApiSchema<"RevertSessionResponse">;
 export type RegenerateSessionRequest = ApiSchema<"RegenerateSessionRequest">;
 export type ForkSessionRequest = ApiSchema<"ForkSessionRequest">;
 export type ForkSessionResponse = ApiSchema<"ForkSessionResponse">;
-export type OrchestratorSteeringResponse = ApiSchema<"OrchestratorSteeringResponse">;
-export type ThreadSteeringResponse = ApiSchema<"ThreadSteeringResponse">;
 export type RecentEventsResponse = ApiSchema<"RecentEventsResponse">;
 export type TerminalSelectionPreviewResponse = ApiSchema<"TerminalSelectionPreviewResponse">;
 export type TerminalSelectionSubmissionRequest = ApiSchema<"TerminalSelectionSubmissionRequest">;

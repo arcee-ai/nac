@@ -5,11 +5,10 @@ import type { SessionPanel } from "@/app/lib/routes";
 /** What a Session menu row opens: one of the drawer's panels, or the goal. */
 export type SessionPanelTarget = SessionPanel | "goal";
 
-/** The Session menu's panel rows on a phone, in one fixed order. */
+/** The Session menu's panel rows, in one fixed order on phones. */
 const ORDER: readonly SessionPanelTarget[] = [
   "files",
   "delegated",
-  "worksets",
   "terminal",
   "goal",
   "heartbeats",
@@ -17,13 +16,7 @@ const ORDER: readonly SessionPanelTarget[] = [
   "history",
 ];
 
-/**
- * The panels the Session menu lists. A wide screen reaches the drawer's panels
- * from the header's panel toggle and the drawer's own tabs, so it lists only
- * the goal, which has a drawer of its own. A phone has neither, so its sheet
- * lists every panel the behavior allows. The goal is listed only while one
- * exists.
- */
+/** On desktop, the drawer's tabs open the panels. The menu still opens goals. */
 export function sessionPanelEntries(facts: SessionFacts, phone: boolean): SessionPanelTarget[] {
   const allowed = phone ? (facts.policy?.mobilePanels ?? []) : [];
   return ORDER.filter((target) =>

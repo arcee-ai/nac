@@ -10,7 +10,6 @@ import {
   useLoadOlderMessages,
   useSessionsWithWorkspaceStats,
   useSessionSkills,
-  useThreadEventPages,
 } from "@/app/services/queries";
 import { fenceSessionSnapshot, sessionRefreshKey } from "@/app/services/sessionRefresh";
 import type {
@@ -18,7 +17,6 @@ import type {
   MessagesPageResponse,
   SessionSnapshotResponse,
   SkillCatalogEntry,
-  ThreadEventPage,
 } from "@/app/types/api";
 
 // The real api object is the seam: spies on its methods delegate to the
@@ -28,7 +26,6 @@ const requests = {
   listSessions: vi.fn(),
   listSessionSkills: vi.fn(),
   getMessages: vi.fn(),
-  getThreadEvents: vi.fn(),
 };
 
 vi.spyOn(api, "listSessions").mockImplementation((...args) => requests.listSessions(...args));
@@ -36,7 +33,6 @@ vi.spyOn(api, "listSessionSkills").mockImplementation((...args) =>
   requests.listSessionSkills(...args),
 );
 vi.spyOn(api, "getMessages").mockImplementation((...args) => requests.getMessages(...args));
-vi.spyOn(api, "getThreadEvents").mockImplementation((...args) => requests.getThreadEvents(...args));
 
 function deferred<T>() {
   return Promise.withResolvers<T>();
@@ -111,13 +107,6 @@ function OlderMessagesHarness({
 }) {
   const loadOlder = useLoadOlderMessages(id);
   return <button onClick={() => void loadOlder.mutateAsync().then(onResult)}>Load</button>;
-}
-
-function ThreadPageHarness({ id, threadName }: { id: string; threadName: string }) {
-  const result = useThreadEventPages(id, threadName);
-  return (
-    <output data-testid="thread-page">{result.data?.pages[0]?.events[0]?.id ?? "loading"}</output>
-  );
 }
 
 function SkillHarness({ id }: { id: string }) {
@@ -237,71 +226,6 @@ describe("paged read fencing", () => {
         .getQueryData<SessionSnapshotResponse>(queryKeys.sessionSnapshot(id))
         ?.messages.map((message) => message.content),
     ).toEqual(["kept-old", "kept-new"]);
-    renderer.unmount();
-  });
-
-  it("keeps a late page for thread A out of selected thread B", async () => {
-    const pageA = deferred<ThreadEventPage>();
-    const pageB = deferred<ThreadEventPage>();
-    requests.getThreadEvents.mockImplementation((_id: string, threadName: string) =>
-      threadName === "A" ? pageA.promise : pageB.promise,
-    );
-    const client = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
-    const renderer = render(
-      <QueryClientProvider client={client}>
-        <ThreadPageHarness id="session" threadName="A" />
-      </QueryClientProvider>,
-    );
-    await waitFor(() => expect(requests.getThreadEvents).toHaveBeenCalledOnce());
-    renderer.rerender(
-      <QueryClientProvider client={client}>
-        <ThreadPageHarness id="session" threadName="B" />
-      </QueryClientProvider>,
-    );
-    await waitFor(() => expect(requests.getThreadEvents).toHaveBeenCalledTimes(2));
-
-    await act(async () => {
-      pageB.resolve({
-        events: [
-          {
-            id: 20,
-            created_at: "new",
-            event: {
-              type: "thread_finished",
-              name: "B",
-              exit_code: 0,
-              timed_out: false,
-            },
-          },
-        ],
-        has_older: false,
-        next_before_id: null,
-      });
-      await pageB.promise;
-    });
-    await waitFor(() => expect(renderer.getByTestId("thread-page").textContent).toBe("20"));
-    await act(async () => {
-      pageA.resolve({
-        events: [
-          {
-            id: 10,
-            created_at: "old",
-            event: {
-              type: "thread_finished",
-              name: "A",
-              exit_code: 0,
-              timed_out: false,
-            },
-          },
-        ],
-        has_older: false,
-        next_before_id: null,
-      });
-      await pageA.promise;
-    });
-    expect(renderer.getByTestId("thread-page").textContent).toBe("20");
     renderer.unmount();
   });
 });

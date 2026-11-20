@@ -292,16 +292,16 @@ fn terminal_union_migration_34_preserves_fresh_and_each_predecessor() {
         let fixture = fixture(predecessor);
         let connection = Connection::open(&fixture.path).unwrap();
         let before = retained(&connection);
-        // Schema migration must not revoke or replace a session operation lease.
+        // Retirement must refuse an active operation without revoking its lease.
         let lease = SessionOperationLease::try_acquire(&fixture.path, "session").unwrap();
+        assert!(initialize(&fixture.path).is_err());
+        assert_eq!(before, retained(&connection), "{predecessor:?}");
+        lease.validate(&fixture.path, "session").unwrap();
+        drop(lease);
         initialize(&fixture.path).unwrap();
         assert_union(&connection);
         assert_eq!(before, retained(&connection), "{predecessor:?}");
-        lease.validate(&fixture.path, "session").unwrap();
-        assert!(matches!(
-            SessionOperationLease::try_acquire(&fixture.path, "session"),
-            Err(crate::sessions::SessionOperationLeaseError::Busy(_))
-        ));
+        assert!(SessionOperationLease::try_acquire(&fixture.path, "session").is_ok());
         assert_receipts(&fixture);
         // All three hooks are unreachable for the now-current read-only fastpath.
         connection.execute_batch("BEGIN IMMEDIATE").unwrap();
@@ -313,7 +313,6 @@ fn terminal_union_migration_34_preserves_fresh_and_each_predecessor() {
         )
         .unwrap();
         connection.execute_batch("ROLLBACK").unwrap();
-        drop(lease);
         drop(connection);
         std::fs::remove_dir_all(fixture.path.parent().unwrap()).unwrap();
     }

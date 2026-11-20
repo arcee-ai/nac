@@ -120,7 +120,21 @@ function mockRawConfig(metadata: SessionMetadata) {
     orchestrator_compaction_threshold: null,
     config_version: 7,
   };
-  vi.spyOn(api, "getConfig").mockResolvedValue(config);
+  vi.spyOn(api, "getConfig").mockImplementation(async () => {
+    const patch = vi.isMockFunction(api.updateConfig)
+      ? vi.mocked(api.updateConfig).mock.calls.at(-1)?.[1]
+      : undefined;
+    if (!patch) return config;
+    return {
+      ...config,
+      ...patch,
+      extra_headers_json:
+        patch.extra_headers === undefined
+          ? config.extra_headers_json
+          : JSON.stringify(patch.extra_headers ?? {}),
+      config_version: config.config_version + 1,
+    } as RawSessionConfig;
+  });
 }
 
 function renderPicker(metadata: SessionMetadata, disabled = false) {
@@ -167,6 +181,34 @@ const trinity = {
   api_key_env: null,
 } as const;
 
+it("switches the same model to a new endpoint without carrying old credentials", async () => {
+  const update = vi.spyOn(api, "updateConfig").mockResolvedValue(undefined);
+  const { client, view } = renderPicker({
+    ...trinity,
+    base_url: "https://old.example/v1",
+    api_key_env: "OLD_KEY",
+    reasoning_effort: "high",
+  } as SessionMetadata);
+  try {
+    await pickModel("Model: Trinity, High reasoning", "Trinity");
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledExactlyOnceWith("session", {
+        backend: "arcee-auth",
+        model: "trinity-large-thinking",
+        base_url: "https://api.arcee.ai/api/v1",
+        allow_insecure_http: false,
+        api_key_env: null,
+        reasoning_effort: "high",
+        extra_headers: null,
+        expected_config_version: 7,
+      }),
+    );
+  } finally {
+    view.unmount();
+    client.clear();
+  }
+});
+
 it("switches from an Arcee account to Codex through one catalog mutation", async () => {
   const update = vi.spyOn(api, "updateConfig").mockResolvedValue(undefined);
   const { client, view } = renderPicker({
@@ -180,6 +222,7 @@ it("switches from an Arcee account to Codex through one catalog mutation", async
         backend: "chatgpt-codex-responses",
         model: "gpt-5.6-sol",
         base_url: "https://chatgpt.com/backend-api",
+        allow_insecure_http: false,
         api_key_env: null,
         reasoning_effort: "high",
         extra_headers: null,
@@ -279,7 +322,9 @@ it("does not write a reasoning level when a run ends", async () => {
     true,
   );
   try {
-    const chip = await screen.findByRole("button", { name: "Model: Trinity" });
+    const chip = await screen.findByRole("button", {
+      name: "Model: Trinity",
+    });
     expect((chip as HTMLButtonElement).disabled).toBe(true);
     expect(update).not.toHaveBeenCalled();
     setBusy(false);
@@ -441,6 +486,7 @@ it("requires explicit confirmation to switch to a model that does not accept spe
     await waitFor(() =>
       expect(update).toHaveBeenCalledExactlyOnceWith("session", {
         ...trinity,
+        allow_insecure_http: false,
         reasoning_effort: "high",
         service_tier: null,
         expected_config_version: 7,
@@ -496,7 +542,7 @@ it("keeps controls locked when the accepted change cannot refresh the snapshot",
     await pickModel(/^Model: Trinity/, "GPT-5.6 Sol");
     await waitFor(() => expect(update).toHaveBeenCalledOnce());
     await screen.findByText(/Reload before editing again/);
-    const chip = screen.getByRole<HTMLButtonElement>("button", { name: /^Model: Trinity/ });
+    const chip = screen.getByRole<HTMLButtonElement>("button", { name: /^Model:/ });
     expect(chip.disabled).toBe(true);
     expect(screen.queryByRole("dialog", { name: "Model settings" })).toBeNull();
     expect(
@@ -572,5 +618,74 @@ it("preserves snapshot retry behavior with the passive guard mounted", async () 
     client.clear();
     fetch.mockRestore();
     update.mockRestore();
+  }
+});
+
+it("waits through stale successful readback until the accepted revision and model arrive", async () => {
+  const update = vi.spyOn(api, "updateConfig").mockResolvedValue(undefined);
+  const metadata = {
+    backend: "arcee-auth",
+    model: "trinity-large-thinking",
+    base_url: "https://api.arcee.ai/api/v1",
+    api_key_env: null,
+    reasoning_effort: "high",
+  } as SessionMetadata;
+  const { client, view } = renderPicker(metadata);
+  try {
+    await screen.findByRole("button", { name: /^Model: Trinity/ });
+    const initial = client.getQueryData<RawSessionConfig>(queryKeys.sessionConfig("session"))!;
+    vi.mocked(api.getConfig).mockResolvedValue(initial);
+    await pickModel(/^Model: Trinity/, "GPT-5.6 Sol");
+    await waitFor(() => expect(api.getConfig).toHaveBeenCalledTimes(2));
+    expect(
+      screen.getByRole<HTMLButtonElement>("button", { name: /^Model: Trinity/ }).disabled,
+    ).toBe(true);
+    expect(screen.queryByText(/Model switched/)).toBeNull();
+    client.setQueryData(queryKeys.sessionConfig("session"), {
+      ...initial,
+      backend: "chatgpt-codex-responses",
+      model: "gpt-5.6-sol",
+      base_url: "https://chatgpt.com/backend-api",
+      api_key_env: null,
+      allow_insecure_http: false,
+      extra_headers_json: "{}",
+      config_version: initial.config_version + 1,
+    });
+    await waitFor(() =>
+      expect(
+        screen.getByRole<HTMLButtonElement>("button", { name: /^Model: GPT-5.6 Sol/ }).disabled,
+      ).toBe(false),
+    );
+    expect(update).toHaveBeenCalledOnce();
+  } finally {
+    view.unmount();
+    client.clear();
+  }
+});
+
+it("requires review when a newer readback does not match the accepted model change", async () => {
+  vi.spyOn(api, "updateConfig").mockResolvedValue(undefined);
+  const metadata = {
+    backend: "arcee-auth",
+    model: "trinity-large-thinking",
+    base_url: "https://api.arcee.ai/api/v1",
+    api_key_env: null,
+    reasoning_effort: "high",
+  } as SessionMetadata;
+  const { client, view } = renderPicker(metadata);
+  try {
+    await screen.findByRole("button", { name: /^Model: Trinity/ });
+    const initial = client.getQueryData<RawSessionConfig>(queryKeys.sessionConfig("session"))!;
+    vi.mocked(api.getConfig).mockResolvedValue({
+      ...initial,
+      config_version: initial.config_version + 1,
+    });
+    await pickModel(/^Model: Trinity/, "GPT-5.6 Sol");
+    await screen.findByText(/Reload before editing again/);
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: /^Model:/ }).disabled).toBe(true);
+    expect(screen.queryByText(/Model switched/)).toBeNull();
+  } finally {
+    view.unmount();
+    client.clear();
   }
 });

@@ -115,10 +115,33 @@ function Probe() {
       ) : null}
       <button onClick={owner.openMcp}>Sidebar MCP</button>
       <button onClick={() => navigate("/session/other/insights")}>Switch chat</button>
+      <button onClick={() => navigate({ pathname: location.pathname, search: "?noise=1" })}>
+        Change decoration
+      </button>
+      <button onClick={() => navigate("/?project=other")}>Switch project</button>
+      <button onClick={() => navigate("/?project=first&noise=1")}>Decorate project</button>
+      <button onClick={() => navigate("/settings/capabilities?session=other")}>
+        Switch context
+      </button>
+      {[
+        "permission_request",
+        "question_request",
+        "review_request",
+        "heartbeat",
+        "occurrence",
+        "schedule",
+      ].map((key) => (
+        <button
+          key={key}
+          onClick={() => navigate({ pathname: location.pathname, search: `?${key}=other` })}
+        >
+          Select {key}
+        </button>
+      ))}
     </>
   );
 }
-function fixture() {
+function fixture(initialPath = "/session/session/insights") {
   const fetch = vi.fn<typeof globalThis.fetch>(async (url, init) => {
     if (String(url).includes("product-context")) return Response.json(context);
     const request = JSON.parse(String(init?.body));
@@ -150,7 +173,7 @@ function fixture() {
   const tree = () => (
     <RuntimeContext.Provider value={runtime}>
       <QueryClientProvider client={runtime.queryClient}>
-        <MemoryRouter initialEntries={["/session/session/insights"]}>
+        <MemoryRouter initialEntries={[initialPath]}>
           <ProductNavigationProvider>
             <Probe />
           </ProductNavigationProvider>
@@ -284,5 +307,111 @@ it.each([false, true])(
     expect(screen.getByTestId("route").textContent).toBe(
       hidden ? "/session/session/insights" : "/settings/mcp",
     );
+  },
+);
+
+it.each([false, true])(
+  "keeps an explicit notification click through passive session hydration (initially known=%s)",
+  async (known) => {
+    state.known = known;
+    const { runtime, fetch, refresh } = fixture();
+    let release!: (response: Response) => void;
+    let arrived!: () => void;
+    const pending = new Promise<Response>((done) => {
+      release = done;
+    });
+    const inspected = new Promise<void>((done) => {
+      arrived = done;
+    });
+    fetch.mockImplementation(async (url) => {
+      if (String(url).includes("product-context")) {
+        arrived();
+        return pending;
+      }
+      throw new Error("unexpected request");
+    });
+    const action = runtime.productNavigation.openNotificationSessionTarget(
+      { session_id: "session", occurrence_id: "historical" },
+      new AbortController().signal,
+      () => true,
+    );
+    await inspected;
+    state.known = !known;
+    refresh();
+    await act(async () => {
+      release(Response.json(context));
+      expect(await action).toBe("opened");
+    });
+  },
+);
+
+it("retires a notification when the source route changes during inspection", async () => {
+  const { runtime, fetch } = fixture();
+  let release!: (response: Response) => void;
+  let arrived!: () => void;
+  const pending = new Promise<Response>((done) => {
+    release = done;
+  });
+  const inspected = new Promise<void>((done) => {
+    arrived = done;
+  });
+  fetch.mockImplementation(async () => {
+    arrived();
+    return pending;
+  });
+  const action = runtime.productNavigation.openNotificationSessionTarget(
+    { session_id: "session", occurrence_id: "historical" },
+    new AbortController().signal,
+    () => true,
+  );
+  await inspected;
+  fireEvent.click(screen.getByRole("button", { name: "Switch chat" }));
+  await act(async () => {
+    release(Response.json(context));
+    expect(await action).toBe("stale");
+  });
+  expect(screen.getByTestId("route").textContent).toBe("/session/other/insights");
+});
+
+it.each([
+  ["/session/session/insights", "Change decoration", "opened"],
+  ["/?project=first", "Decorate project", "opened"],
+  ["/?project=first", "Switch project", "stale"],
+  ["/settings/capabilities?session=session", "Switch context", "stale"],
+  ...[
+    "permission_request",
+    "question_request",
+    "review_request",
+    "heartbeat",
+    "occurrence",
+    "schedule",
+  ].map((key) => ["/session/session/insights", `Select ${key}`, "stale"] as const),
+] as const)(
+  "fences only meaningful notification source changes from %s",
+  async (initial, button, outcome) => {
+    const { runtime, fetch } = fixture(initial);
+    let release!: (response: Response) => void;
+    let arrived!: () => void;
+    const pending = new Promise<Response>((done) => {
+      release = done;
+    });
+    const inspected = new Promise<void>((done) => {
+      arrived = done;
+    });
+    fetch.mockImplementation(async () => {
+      arrived();
+      return pending.then((response) => response.clone());
+    });
+    const action = runtime.productNavigation.openNotificationSessionTarget(
+      { session_id: "session", occurrence_id: "historical" },
+      new AbortController().signal,
+      () => true,
+    );
+    await inspected;
+    fireEvent.click(screen.getByRole("button", { name: button }));
+    await act(async () => {
+      release(Response.json(context));
+      expect(await action).toBe(outcome);
+    });
   },
 );

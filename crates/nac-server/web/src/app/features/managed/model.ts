@@ -77,6 +77,7 @@ export function readyProviderModelRequests(
         {
           backend: provider.id,
           base_url: connection.base_url,
+          allow_insecure_http: connection.allow_insecure_http,
           ...(connection.api_key_env ? { api_key_env: connection.api_key_env } : {}),
         },
       ];

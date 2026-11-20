@@ -68,13 +68,12 @@ export function createChat<T>(ports: {
   }).pipe(Effect.tap((created) => Effect.sync(() => ports.accept(created))));
 }
 
-/** Direct input is durable inbox steering/queueing; classic running input remains steering. */
+/** Running input uses the durable inbox for steering and queueing. */
 export function deliverPrompt(ports: {
-  mode: "idle" | "direct-running" | "classic-running";
+  mode: "idle" | "direct-running";
   delivery?: "steer" | "queue";
   submit: () => Promise<unknown>;
   inbox: (delivery: "steer" | "queue") => Promise<unknown>;
-  steer: () => Promise<unknown>;
 }): Effect.Effect<"submitted" | "steered" | "queued", CommandFailure> {
   if (ports.mode === "direct-running" || ports.delivery) {
     const delivery = ports.delivery ?? "steer";
@@ -83,11 +82,10 @@ export function deliverPrompt(ports: {
       catch: (cause) => new CommandFailure({ operation: delivery, cause }),
     }).pipe(Effect.as(delivery === "queue" ? ("queued" as const) : ("steered" as const)));
   }
-  const steering = ports.mode === "classic-running";
   return Effect.tryPromise({
-    try: steering ? ports.steer : ports.submit,
-    catch: (cause) => new CommandFailure({ operation: steering ? "steer" : "submit", cause }),
-  }).pipe(Effect.as(steering ? ("steered" as const) : ("submitted" as const)));
+    try: ports.submit,
+    catch: (cause) => new CommandFailure({ operation: "submit", cause }),
+  }).pipe(Effect.as("submitted" as const));
 }
 
 /** Unwrap only expected workflow failures; defects retain Effect's diagnostics. */

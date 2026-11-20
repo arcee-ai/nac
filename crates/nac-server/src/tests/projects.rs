@@ -1,7 +1,7 @@
 use super::*;
 
 #[tokio::test]
-async fn inherited_speed_retains_compatible_native_route_and_requires_repair_elsewhere() {
+async fn project_defaults_do_not_override_explicit_session_speed() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let root = temp_root("project_speed_reconciliation");
     let workspace = root.join("workspace");
@@ -49,7 +49,13 @@ async fn inherited_speed_retains_compatible_native_route_and_requires_repair_els
         "backend": "openai-responses", "model": "gpt-5.2",
         "base_url": "https://api.openai.com/v1", "api_key_env": "OPENAI_API_KEY"
     });
-    for tier in [None, Some(serde_json::json!("fast"))] {
+    for (tier, expected) in [
+        (None, None),
+        (
+            Some(serde_json::json!("fast")),
+            Some(nac_core::model::ServiceTier::Fast),
+        ),
+    ] {
         let mut request = base.clone();
         if let Some(tier) = tier {
             request["service_tier"] = tier;
@@ -63,22 +69,29 @@ async fn inherited_speed_retains_compatible_native_route_and_requires_repair_els
             sessions::load_session(&store_path, id)
                 .unwrap()
                 .service_tier,
-            Some(nac_core::model::ServiceTier::Fast)
+            expected
         );
     }
     let mut unsupported = base;
     unsupported["base_url"] = serde_json::json!("https://example.com/v1");
-    for tier in [None, Some(serde_json::json!("fast"))] {
-        let mut request = unsupported.clone();
-        if let Some(tier) = tier {
-            request["service_tier"] = tier;
-        }
-        let response = post_json(app.clone(), "/sessions", request).await;
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-        let body = String::from_utf8(response_body(response).await.to_vec()).unwrap();
-        assert!(body.contains("clear the speed preference"), "{body}");
-    }
-    assert_eq!(sessions::list_sessions(&store_path).unwrap().len(), 2);
+    let mut explicit_fast = unsupported.clone();
+    explicit_fast["service_tier"] = serde_json::json!("fast");
+    let response = post_json(app.clone(), "/sessions", explicit_fast).await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = String::from_utf8(response_body(response).await.to_vec()).unwrap();
+    assert!(body.contains("clear the speed preference"), "{body}");
+    let response = post_json(app.clone(), "/sessions", unsupported.clone()).await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let created: serde_json::Value =
+        serde_json::from_slice(&response_body(response).await).unwrap();
+    let id = created["metadata"]["session_id"].as_str().unwrap();
+    assert_eq!(
+        sessions::load_session(&store_path, id)
+            .unwrap()
+            .service_tier,
+        None
+    );
+    assert_eq!(sessions::list_sessions(&store_path).unwrap().len(), 3);
     let mut repaired = unsupported;
     repaired["service_tier"] = serde_json::Value::Null;
     let response = post_json(app, "/sessions", repaired).await;
@@ -214,25 +227,6 @@ async fn literal_local_path_project_and_first_chat_keep_the_selected_inode() {
     let endpoint = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     endpoint.set_nonblocking(true).unwrap();
     let base_url = format!("http://{}/v1", endpoint.local_addr().unwrap());
-    model_configurations::insert_model_configuration(
-        &store_path,
-        "literal-path-default",
-        model_configurations::NewModelConfiguration {
-            service_tier: None,
-            name: "Literal path default".into(),
-            backend: "openai-responses".into(),
-            model: "gpt-5.2".into(),
-            base_url: base_url.clone(),
-            allow_insecure_http: true,
-            api_key_env: Some("OPENAI_API_KEY".into()),
-            reasoning_effort: None,
-            extra_headers: BTreeMap::new(),
-            orchestrator_compaction_threshold: None,
-            initial_prompt: None,
-            light_model: None,
-        },
-    )
-    .unwrap();
     let app = router(manager.clone());
     // Registering the unspaced sibling first must not steal the selected path.
     let sibling_response = post_json(
@@ -246,7 +240,7 @@ async fn literal_local_path_project_and_first_chat_keep_the_selected_inode() {
         app.clone(),
         "/projects",
         serde_json::json!({
-            "cwd": selected, "default_model_config_id": "literal-path-default"
+            "cwd": selected
         }),
     )
     .await;
@@ -272,7 +266,9 @@ async fn literal_local_path_project_and_first_chat_keep_the_selected_inode() {
         app,
         "/sessions",
         serde_json::json!({
-            "first_chat": true, "project_id": project.project_id
+            "first_chat": true, "project_id": project.project_id,
+            "model": "gpt-5.2", "backend": "openai-responses",
+            "base_url": base_url, "allow_insecure_http": true, "api_key_env": "OPENAI_API_KEY"
         }),
     )
     .await;
@@ -397,7 +393,7 @@ async fn literal_local_path_browse_and_project_never_fall_back_to_a_sibling() {
 }
 
 #[tokio::test]
-async fn project_session_materializes_defaults_and_filters_membership() {
+async fn project_session_uses_explicit_model_and_filters_membership() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let root = temp_root("project_session");
     let workspace = root.join("workspace");
@@ -408,25 +404,6 @@ async fn project_session_materializes_defaults_and_filters_membership() {
     let manager = test_manager(&root);
     let store_path = root.join("store.db");
 
-    model_configurations::insert_model_configuration(
-        &store_path,
-        "project-default",
-        model_configurations::NewModelConfiguration {
-            service_tier: None,
-            name: "Project default".to_string(),
-            backend: "openai-responses".to_string(),
-            model: "gpt-5.2".to_string(),
-            base_url: "http://project-gateway.example/v1".to_string(),
-            allow_insecure_http: true,
-            api_key_env: Some("OPENAI_API_KEY".to_string()),
-            reasoning_effort: Some("high".to_string()),
-            extra_headers: BTreeMap::from([("X-Project".to_string(), "selected".to_string())]),
-            orchestrator_compaction_threshold: Some(64_000),
-            initial_prompt: Some("ignored during creation".to_string()),
-            light_model: None,
-        },
-    )
-    .unwrap();
     let project = manager
         .projects()
         .create(application::projects::CreateProject {
@@ -436,7 +413,7 @@ async fn project_session_materializes_defaults_and_filters_membership() {
             ssh_host: None,
             ssh_port: None,
             ssh_identity_file: None,
-            default_model_config_id: Some("project-default".to_string()),
+            default_model_config_id: None,
         })
         .await
         .unwrap();
@@ -444,7 +421,11 @@ async fn project_session_materializes_defaults_and_filters_membership() {
     let first_chat = CreateSessionRequest {
         first_chat: true,
         project_id: Some(project.project_id.clone()),
+        model: RequestField::Value("gpt-5.3".to_string()),
+        backend: RequestField::Value("openai-responses".to_string()),
+        base_url: RequestField::Value("https://session-gateway.example/v1".to_string()),
         reasoning_effort: RequestField::Value("low".to_string()),
+        orchestrator_compaction_threshold: RequestField::Value(32_000),
         ..CreateSessionRequest::default()
     };
     let (created, duplicate) = tokio::join!(
@@ -465,15 +446,12 @@ async fn project_session_materializes_defaults_and_filters_membership() {
     let stored = sessions::load_session(&store_path, &session_id).unwrap();
     assert_eq!(stored.project_id, Some(project.project_id.clone()));
     assert_eq!(stored.cwd, workspace.canonicalize().unwrap());
-    assert_eq!(stored.model, "gpt-5.2");
-    assert_eq!(stored.base_url, "http://project-gateway.example/v1");
-    assert!(stored.allow_insecure_http);
+    assert_eq!(stored.model, "gpt-5.3");
+    assert_eq!(stored.base_url, "https://session-gateway.example/v1");
+    assert!(!stored.allow_insecure_http);
     assert_eq!(stored.reasoning_effort, Some(ReasoningEffort::Low));
-    assert_eq!(
-        stored.extra_headers.get("X-Project").map(String::as_str),
-        Some("selected")
-    );
-    assert_eq!(stored.orchestrator_compaction_threshold, Some(64_000));
+    assert!(!stored.extra_headers.contains_key("X-Project"));
+    assert_eq!(stored.orchestrator_compaction_threshold, Some(32_000));
 
     let filtered = manager
         .session_catalog()
@@ -527,44 +505,15 @@ async fn project_session_materializes_defaults_and_filters_membership() {
         1
     );
 
-    let deletion = delivery::model_configurations::delete_handler(
-        State(manager.clone()),
-        AxumPath("project-default".to_string()),
-    )
-    .await
-    .unwrap_err();
-    assert_eq!(deletion.status, StatusCode::CONFLICT);
-    assert!(model_configurations::load_model_configuration(&store_path, "project-default").is_ok());
-    manager
-        .projects()
-        .update(
-            &project.project_id,
-            application::projects::UpdateProject {
-                name: application::Field::Unchanged,
-                description: application::Field::Unchanged,
-                default_model_config_id: application::Field::Clear,
-                pinned: application::Field::Unchanged,
-            },
-        )
-        .unwrap();
-    assert_eq!(
-        delivery::model_configurations::delete_handler(
-            State(manager.clone()),
-            AxumPath("project-default".to_string()),
-        )
-        .await
-        .unwrap(),
-        StatusCode::NO_CONTENT
-    );
     let reloaded = sessions::load_session(&store_path, &session_id).unwrap();
-    assert_eq!(reloaded.model, "gpt-5.2");
+    assert_eq!(reloaded.model, "gpt-5.3");
     assert_eq!(reloaded.project_id, Some(project.project_id));
 
     let _ = std::fs::remove_dir_all(root);
 }
 
 #[tokio::test]
-async fn project_sibling_inherits_public_http_opt_in() {
+async fn project_sibling_requires_its_own_model_and_http_opt_in() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let root = temp_root("project_sibling_http_policy");
     let workspace = root.join("workspace");
@@ -600,15 +549,37 @@ async fn project_sibling_inherits_public_http_opt_in() {
         })
         .await
         .unwrap();
-    let inherited = manager
+    let missing = manager
         .create_session(CreateSessionRequest {
-            project_id: Some(project.project_id),
+            project_id: Some(project.project_id.clone()),
             ..CreateSessionRequest::default()
         })
         .await
-        .expect("a later project chat should inherit its sibling's HTTP policy");
+        .unwrap_err();
+    assert!(missing.to_string().contains("backend"), "{missing:#}");
+    let request = CreateSessionRequest {
+        project_id: Some(project.project_id),
+        model: RequestField::Value("custom-model".into()),
+        backend: RequestField::Value("openai-responses".into()),
+        base_url: RequestField::Value("http://sibling-gateway.example/v1".into()),
+        api_key_env: RequestField::Value("OPENAI_API_KEY".into()),
+        ..CreateSessionRequest::default()
+    };
+    assert!(manager
+        .create_session(request.clone())
+        .await
+        .unwrap_err()
+        .to_string()
+        .contains("requires HTTPS"));
+    let selected = manager
+        .create_session(CreateSessionRequest {
+            allow_insecure_http: RequestField::Value(true),
+            ..request
+        })
+        .await
+        .unwrap();
     let stored =
-        sessions::load_session(&store_path, &inherited.metadata.session_id.unwrap()).unwrap();
+        sessions::load_session(&store_path, &selected.metadata.session_id.unwrap()).unwrap();
     assert_eq!(stored.base_url, "http://sibling-gateway.example/v1");
     assert!(stored.allow_insecure_http);
 
@@ -616,7 +587,7 @@ async fn project_sibling_inherits_public_http_opt_in() {
 }
 
 #[tokio::test]
-async fn first_chat_same_behavior_is_additive_and_concurrent_direct_admission_is_unique() {
+async fn concurrent_direct_first_chat_admission_is_unique() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let root = temp_root("first_chat_behavior");
     let workspace = root.join("workspace");
@@ -638,20 +609,13 @@ async fn first_chat_same_behavior_is_additive_and_concurrent_direct_admission_is
         })
         .await
         .unwrap();
-    let legacy = manager
-        .create_session(CreateSessionRequest {
-            project_id: Some(project.project_id.clone()),
-            model: RequestField::Value("gpt-5.2".into()),
-            backend: RequestField::Value("openai-responses".into()),
-            ..Default::default()
-        })
-        .await
-        .unwrap();
     let request = CreateSessionRequest {
         project_id: Some(project.project_id.clone()),
         behavior: sessions::SessionBehavior::Direct,
         first_chat: true,
         first_chat_same_behavior: true,
+        model: RequestField::Value("gpt-5.2".into()),
+        backend: RequestField::Value("openai-responses".into()),
         ..Default::default()
     };
     let (left, right) = tokio::join!(
@@ -661,14 +625,9 @@ async fn first_chat_same_behavior_is_additive_and_concurrent_direct_admission_is
     let left = left.unwrap();
     let right = right.unwrap();
     assert_eq!(left.metadata.session_id, right.metadata.session_id);
-    assert_ne!(left.metadata.session_id, legacy.metadata.session_id);
     assert_eq!(left.metadata.behavior, sessions::SessionBehavior::Direct);
-    assert_eq!(
-        legacy.metadata.behavior,
-        sessions::SessionBehavior::Orchestrator
-    );
-    // Legacy callers still receive the newest primary regardless of requested behavior.
-    let legacy_caller = manager
+    // A repeated first-chat request reuses the committed direct session.
+    let repeated = manager
         .create_session(CreateSessionRequest {
             project_id: Some(project.project_id),
             first_chat: true,
@@ -676,7 +635,415 @@ async fn first_chat_same_behavior_is_additive_and_concurrent_direct_admission_is
         })
         .await
         .unwrap();
-    assert_eq!(legacy_caller.metadata.session_id, left.metadata.session_id);
+    assert_eq!(repeated.metadata.session_id, left.metadata.session_id);
     manager.cancel_local_active_runs_for_shutdown().await;
     let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn first_chat_matching_selection_is_opt_in_and_refuses_changed_routes() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("first_chat_matching_selection");
+    let workspace = root.join("workspace");
+    let nac_home = root.join("nac-home");
+    std::fs::create_dir_all(&workspace).unwrap();
+    std::fs::create_dir_all(&nac_home).unwrap();
+    let _env = ScopedModelEnv::isolated(&nac_home, Some("project-test-key"));
+    let manager = test_manager(&root);
+    let project = manager
+        .projects()
+        .create(application::projects::CreateProject {
+            name: None,
+            description: None,
+            cwd: workspace,
+            ssh_host: None,
+            ssh_port: None,
+            ssh_identity_file: None,
+            default_model_config_id: None,
+        })
+        .await
+        .unwrap();
+    let app = router(manager.clone());
+    let request = serde_json::json!({
+        "project_id": project.project_id, "behavior": "direct", "first_chat": true,
+        "first_chat_same_behavior": true, "first_chat_require_matching_model": true,
+        "backend": "openai-responses", "model": "gpt-6.1-sol",
+        "base_url": "https://api.openai.com/v1", "allow_insecure_http": false,
+        "api_key_env": null, "reasoning_effort": null, "service_tier": null,
+        "extra_headers": null,
+    });
+    let (first, same) = tokio::join!(
+        post_json(app.clone(), "/sessions", request.clone()),
+        post_json(app.clone(), "/sessions", request.clone()),
+    );
+    assert_eq!(first.status(), StatusCode::CREATED);
+    let first: serde_json::Value = serde_json::from_slice(&response_body(first).await).unwrap();
+    let id = first["metadata"]["session_id"].as_str().unwrap().to_owned();
+    let before = sessions::load_session(&manager.inner.store_path, &id).unwrap();
+    assert_eq!(before.api_key_env.as_deref(), Some("OPENAI_API_KEY"));
+    assert_eq!(same.status(), StatusCode::CREATED);
+    let same: serde_json::Value = serde_json::from_slice(&response_body(same).await).unwrap();
+    assert_eq!(same["metadata"]["session_id"], id);
+    for (field, value) in [
+        ("model", serde_json::json!("gpt-5.2")),
+        ("service_tier", serde_json::json!("fast")),
+        ("base_url", serde_json::json!("https://other.example/v1")),
+        ("allow_insecure_http", serde_json::json!(true)),
+        ("api_key_env", serde_json::json!("DIFFERENT_KEY")),
+        ("extra_headers", serde_json::json!({"x-test": "other"})),
+        ("orchestrator_compaction_threshold", serde_json::json!(0)),
+        ("orchestrator_compaction_threshold", serde_json::Value::Null),
+    ] {
+        let mut different = request.clone();
+        different[field] = value;
+        let response = post_json(app.clone(), "/sessions", different).await;
+        assert_eq!(response.status(), StatusCode::CONFLICT, "field {field}");
+    }
+    let after = sessions::load_session(&manager.inner.store_path, &id).unwrap();
+    assert_eq!(before.config_version, after.config_version);
+    assert_eq!(
+        serde_json::to_value(&before.messages).unwrap(),
+        serde_json::to_value(&after.messages).unwrap()
+    );
+    assert_eq!(
+        sessions::list_sessions(&manager.inner.store_path)
+            .unwrap()
+            .len(),
+        1
+    );
+    let mut legacy = request.clone();
+    legacy["first_chat_require_matching_model"] = serde_json::json!(false);
+    legacy["model"] = serde_json::json!("gpt-5.2");
+    let response = post_json(app.clone(), "/sessions", legacy).await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let legacy: serde_json::Value = serde_json::from_slice(&response_body(response).await).unwrap();
+    assert_eq!(legacy["metadata"]["session_id"], id);
+
+    let second_workspace = root.join("second-workspace");
+    std::fs::create_dir_all(&second_workspace).unwrap();
+    let second_project = manager
+        .projects()
+        .create(application::projects::CreateProject {
+            name: None,
+            description: None,
+            cwd: second_workspace,
+            ssh_host: None,
+            ssh_port: None,
+            ssh_identity_file: None,
+            default_model_config_id: None,
+        })
+        .await
+        .unwrap();
+    let mut competing_a = request.clone();
+    competing_a["project_id"] = serde_json::json!(second_project.project_id);
+    competing_a["first_chat_require_matching_model"] = serde_json::json!(true);
+    let mut competing_b = competing_a.clone();
+    competing_b["model"] = serde_json::json!("gpt-5.2");
+    let (a, b) = tokio::join!(
+        post_json(app.clone(), "/sessions", competing_a),
+        post_json(app.clone(), "/sessions", competing_b),
+    );
+    let mut statuses = [a.status().as_u16(), b.status().as_u16()];
+    statuses.sort();
+    assert_eq!(
+        statuses,
+        [StatusCode::CREATED.as_u16(), StatusCode::CONFLICT.as_u16()]
+    );
+    assert_eq!(
+        sessions::list_sessions(&manager.inner.store_path)
+            .unwrap()
+            .len(),
+        2
+    );
+    drop(app);
+    manager.quiesce_persistence_callers().await;
+    manager.drain_persistence().await.unwrap();
+    drop(manager);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn project_model_source_is_passive_and_bound_to_current_durable_owner() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("project_model_source");
+    let workspace = root.join("workspace");
+    let other_workspace = root.join("other");
+    std::fs::create_dir_all(&workspace).unwrap();
+    std::fs::create_dir_all(&other_workspace).unwrap();
+    let _env = ScopedModelEnv::isolated(&root.join("nac-home"), Some("source-secret-canary"));
+    let manager = owned_test_manager(&root).unwrap();
+    let make_project = |cwd| application::projects::CreateProject {
+        name: None,
+        description: None,
+        cwd,
+        ssh_host: None,
+        ssh_port: None,
+        ssh_identity_file: None,
+        default_model_config_id: None,
+    };
+    let project = manager
+        .projects()
+        .create(make_project(workspace.clone()))
+        .await
+        .unwrap();
+    let other = manager
+        .projects()
+        .create(make_project(other_workspace))
+        .await
+        .unwrap();
+    let app = router(manager.clone());
+    let response = post_json(
+        app.clone(),
+        "/sessions",
+        serde_json::json!({
+            "project_id": project.project_id, "behavior": "direct", "backend": "openai-responses",
+            "model": "gpt-5.2", "base_url": "https://api.openai.com/v1", "api_key_env": null,
+            "extra_headers": {"X-Private": "private-header-canary"},
+        }),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let created: serde_json::Value =
+        serde_json::from_slice(&response_body(response).await).unwrap();
+    let id = created["metadata"]["session_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    manager.inner.active_sessions.write().await.remove(&id);
+    let url = format!(
+        "/projects/{}/session-model-sources/{id}",
+        project.project_id
+    );
+    let response = get_response(app.clone(), &url, None).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let text = String::from_utf8(response_body(response).await.to_vec()).unwrap();
+    assert!(!text.contains("source-secret-canary"));
+    assert!(!text.contains("private-header-canary"));
+    let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(value["session_id"], id);
+    assert_eq!(value["api_key_env"], "OPENAI_API_KEY");
+    assert!(value.get("extra_headers_json").is_none());
+    let copied = post_json(app.clone(), "/sessions", serde_json::json!({
+        "project_id": project.project_id, "backend": "openai-responses",
+        "model": "gpt-5.2", "base_url": "https://api.openai.com/v1",
+        "allow_insecure_http": false,
+        "api_key_env": "OPENAI_API_KEY",
+        "model_source": {"project_id": project.project_id, "session_id": id, "config_version": value["config_version"]}
+    })).await;
+    assert_eq!(copied.status(), StatusCode::CREATED);
+    let copied: serde_json::Value = serde_json::from_slice(&response_body(copied).await).unwrap();
+    let copied_id = copied["metadata"]["session_id"].as_str().unwrap();
+    let stored = sessions::load_session_config(&manager.inner.store_path, copied_id).unwrap();
+    assert!(stored
+        .extra_headers_json
+        .unwrap()
+        .contains("private-header-canary"));
+    let gate = Arc::new(application::session_creation::CreationProjectionGate::default());
+    struct ReleaseGate(Arc<application::session_creation::CreationProjectionGate>);
+    impl Drop for ReleaseGate {
+        fn drop(&mut self) {
+            self.0.resume.notify_one();
+        }
+    }
+    let _release_gate = ReleaseGate(gate.clone());
+    *manager
+        .inner
+        .session_creation_before_projection
+        .lock()
+        .unwrap() = Some(gate.clone());
+    let racing_app = app.clone();
+    let racing_project = project.project_id.clone();
+    let racing_id = id.clone();
+    let revision = value["config_version"].as_i64().unwrap();
+    let racing = tokio::spawn(async move {
+        post_json(racing_app, "/sessions", serde_json::json!({
+            "project_id": racing_project, "backend": "openai-responses", "model": "gpt-5.2",
+            "base_url": "https://api.openai.com/v1", "allow_insecure_http": false,
+            "api_key_env": "OPENAI_API_KEY", "model_source": {
+                "project_id": racing_project, "session_id": racing_id, "config_version": revision
+            }
+        })).await
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(10), gate.reached.notified())
+        .await
+        .unwrap();
+    let race_db = rusqlite::Connection::open(&manager.inner.store_path).unwrap();
+    let before: i64 = race_db
+        .query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get(0))
+        .unwrap();
+    race_db
+        .execute(
+            "UPDATE sessions SET config_version=config_version+1 WHERE session_id=?1",
+            [&id],
+        )
+        .unwrap();
+    gate.resume.notify_one();
+    let racing_response = racing.await.unwrap();
+    assert!(!racing_response.status().is_success());
+    assert!(
+        !String::from_utf8_lossy(&response_body(racing_response).await)
+            .contains("private-header-canary")
+    );
+    let after: i64 = race_db
+        .query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(before, after);
+    race_db
+        .execute(
+            "UPDATE sessions SET config_version=?1 WHERE session_id=?2",
+            rusqlite::params![revision, id],
+        )
+        .unwrap();
+    *manager
+        .inner
+        .session_creation_before_projection
+        .lock()
+        .unwrap() = None;
+    for (target_project, route, version) in [
+        (
+            project.project_id.as_str(),
+            "https://other.example/v1",
+            value["config_version"].as_i64().unwrap(),
+        ),
+        (
+            project.project_id.as_str(),
+            "https://api.openai.com/v1",
+            value["config_version"].as_i64().unwrap() + 1,
+        ),
+        (
+            other.project_id.as_str(),
+            "https://api.openai.com/v1",
+            value["config_version"].as_i64().unwrap(),
+        ),
+    ] {
+        let rejected = post_json(app.clone(), "/sessions", serde_json::json!({
+            "project_id": target_project, "backend": "openai-responses",
+            "model": "gpt-5.2", "base_url": route, "allow_insecure_http": false, "api_key_env": "OPENAI_API_KEY",
+            "model_source": {"project_id": target_project, "session_id": id, "config_version": version}
+        })).await;
+        assert!(!rejected.status().is_success());
+        assert!(!String::from_utf8_lossy(&response_body(rejected).await)
+            .contains("private-header-canary"));
+    }
+    assert!(!manager.inner.active_sessions.read().await.contains_key(&id));
+    let path = manager.inner.store_path.clone();
+    let db = rusqlite::Connection::open(&path).unwrap();
+    let stored_cwd: String = db
+        .query_row(
+            "SELECT cwd FROM projects WHERE project_id=?1",
+            [&project.project_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    for (mutation, restore) in [
+        (
+            "UPDATE sessions SET cwd='/different' WHERE session_id=?1",
+            "UPDATE sessions SET cwd=?2 WHERE session_id=?1",
+        ),
+        (
+            "UPDATE sessions SET sandbox_json='{}' WHERE session_id=?1",
+            "UPDATE sessions SET sandbox_json=NULL WHERE session_id=?1",
+        ),
+        (
+            "UPDATE sessions SET host_id='other' WHERE session_id=?1",
+            "UPDATE sessions SET host_id=NULL WHERE session_id=?1",
+        ),
+        (
+            "UPDATE sessions SET ssh_port=2222 WHERE session_id=?1",
+            "UPDATE sessions SET ssh_port=NULL WHERE session_id=?1",
+        ),
+        (
+            "UPDATE sessions SET ssh_identity_file='/other' WHERE session_id=?1",
+            "UPDATE sessions SET ssh_identity_file=NULL WHERE session_id=?1",
+        ),
+    ] {
+        db.execute(mutation, rusqlite::params![id]).unwrap();
+        assert_eq!(
+            get_response(app.clone(), &url, None).await.status(),
+            StatusCode::NOT_FOUND,
+            "{mutation}"
+        );
+        if restore.contains("?2") {
+            db.execute(restore, rusqlite::params![id, stored_cwd])
+                .unwrap();
+        } else {
+            db.execute(restore, rusqlite::params![id]).unwrap();
+        }
+        assert_eq!(
+            get_response(app.clone(), &url, None).await.status(),
+            StatusCode::OK,
+            "restore {restore}"
+        );
+    }
+    // An uncommitted move is invisible; the committed move immediately revokes the source.
+    db.execute_batch("BEGIN IMMEDIATE").unwrap();
+    db.execute(
+        "UPDATE session_projects SET project_id=?1 WHERE session_id=?2",
+        rusqlite::params![other.project_id, id],
+    )
+    .unwrap();
+    assert_eq!(
+        get_response(app.clone(), &url, None).await.status(),
+        StatusCode::OK
+    );
+    db.execute_batch("COMMIT").unwrap();
+    assert_eq!(
+        get_response(app.clone(), &url, None).await.status(),
+        StatusCode::NOT_FOUND
+    );
+    db.execute(
+        "UPDATE session_projects SET project_id=?1 WHERE session_id=?2",
+        rusqlite::params![project.project_id, id],
+    )
+    .unwrap();
+    let parent_response = post_json(
+        app.clone(),
+        "/sessions",
+        serde_json::json!({
+            "project_id": project.project_id, "behavior": "direct", "backend": "openai-responses",
+            "model": "gpt-5.2", "base_url": "https://api.openai.com/v1", "api_key_env": null,
+        }),
+    )
+    .await;
+    assert_eq!(parent_response.status(), StatusCode::CREATED);
+    let parent: serde_json::Value =
+        serde_json::from_slice(&response_body(parent_response).await).unwrap();
+    let parent_id = parent["metadata"]["session_id"].as_str().unwrap();
+    db.execute("INSERT INTO traditional_children(child_session_id,parent_session_id,root_session_id,profile,description,nesting_depth,created_at,updated_at) VALUES(?1,?2,?2,'general','fixture',1,'2026-01-01','2026-01-01')", rusqlite::params![id, parent_id]).unwrap();
+    assert_eq!(
+        get_response(app.clone(), &url, None).await.status(),
+        StatusCode::NOT_FOUND
+    );
+    db.execute(
+        "DELETE FROM traditional_children WHERE child_session_id=?1",
+        rusqlite::params![id],
+    )
+    .unwrap();
+    let foreign_host = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(&url)
+                .header(header::HOST, "attacker.invalid")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_ne!(foreign_host.status(), StatusCode::OK);
+    db.execute(
+        "DELETE FROM sessions WHERE session_id=?1",
+        rusqlite::params![id],
+    )
+    .unwrap();
+    assert_eq!(
+        get_response(app.clone(), &url, None).await.status(),
+        StatusCode::NOT_FOUND
+    );
+    drop(db);
+    drop(app);
+    manager.quiesce_persistence_callers().await;
+    manager.drain_persistence().await.unwrap();
+    drop(manager);
+    std::fs::remove_dir_all(root).unwrap();
 }

@@ -104,10 +104,6 @@
     "title": "Model configuration",
     "sections": [
       {
-        "section_id": "project-defaults",
-        "heading": "Project defaults"
-      },
-      {
         "section_id": "orchestrator-compaction-threshold",
         "heading": "Compaction threshold"
       },

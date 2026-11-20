@@ -85,29 +85,15 @@ impl ProductContextApplication {
                 .map_err(|_| anyhow!("product context is unavailable"))?;
             let backend = execution_backend(summary.sandboxed, summary.ssh.is_some());
             let direct = summary.behavior != sessions::SessionBehavior::Orchestrator;
-            for (feature, label, supported) in [
-                (
-                    ProductFeatureKind::TraditionalSubagents,
-                    "Traditional subagents",
-                    direct && !lineage,
-                ),
-                (
-                    ProductFeatureKind::ManagedOrchestrators,
-                    "Managed orchestrators",
-                    summary.behavior == sessions::SessionBehavior::DirectWithOrchestrator
-                        && !lineage,
-                ),
-            ] {
-                features.push(ProductFeature {
-                    feature,
-                    label: label.into(),
-                    availability: if supported {
-                        ProductAvailability::Available
-                    } else {
-                        ProductAvailability::Unavailable
-                    },
-                });
-            }
+            features.push(ProductFeature {
+                feature: ProductFeatureKind::TraditionalSubagents,
+                label: "Traditional subagents".into(),
+                availability: if direct && !lineage {
+                    ProductAvailability::Available
+                } else {
+                    ProductAvailability::Unavailable
+                },
+            });
             let cached = self
                 .manager
                 .inner
@@ -267,9 +253,9 @@ fn destination(
     let steps = match target {
         ProductDestination::Projects => "Open All projects in the sidebar or phone menu.",
         ProductDestination::McpSettings => "Open MCP in the sidebar or phone menu.",
-        ProductDestination::Configurations => "Open Configurations in the sidebar or phone menu.",
+        ProductDestination::Configurations => "Open Models & providers in Settings.",
         ProductDestination::ModelAuthentication => {
-            "Open Configurations, choose a provider, then use its authentication controls."
+            "Open Models & providers in Settings, then use its authentication controls."
         }
         ProductDestination::SshConfigurations => "Open SSH in the sidebar or phone menu.",
         ProductDestination::SessionSubagents => "Open Subagents in the current chat.",

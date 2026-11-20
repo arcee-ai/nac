@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, expect, it, vi } from "vitest";
 import { RuntimeContext } from "@/app/runtime/RuntimeContext";
@@ -17,7 +17,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function modal() {
+function modal(validateModel?: (signal: AbortSignal) => Promise<void>) {
   const requests: TaskLaunchRequest[] = [];
   const fetch = vi.fn<typeof globalThis.fetch>(async (_url, init) => {
     if (init?.method === "POST") {
@@ -53,9 +53,21 @@ function modal() {
         <MemoryRouter initialEntries={["/session/invoking"]}>
           <TaskLaunchModal
             projectId="destination"
+            modelSource={{ projectId: "destination", sessionId: "source", configVersion: 7 }}
+            model={{
+              kind: "resolved",
+              backend: "openai-responses",
+              model: "gpt-5.3",
+              base_url: "https://api.openai.com/v1",
+              allow_insecure_http: false,
+              api_key_env: "OPENAI_API_KEY",
+              reasoning_effort: null,
+              extra_headers: null,
+            }}
             defaultRef="dev"
             onClose={vi.fn()}
             onExistingCheckout={vi.fn()}
+            validateModel={validateModel}
           />
         </MemoryRouter>
       </QueryClientProvider>
@@ -79,6 +91,10 @@ it("uses real Web Crypto without randomUUID, retries frozen intent and separates
   await screen.findByRole("alert");
   expect(requests).toHaveLength(1);
   const first = structuredClone(requests[0]);
+  expect(first).toMatchObject({
+    model_source: { project_id: "destination", session_id: "source", config_version: 7 },
+    model_selection: { extra_headers: null },
+  });
   expect(first.request_id).toMatch(
     /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
   );
@@ -114,4 +130,37 @@ it("renders unavailable secure entropy without sending a request and permits rec
   });
   fireEvent.click(screen.getByRole("button", { name: "Start isolated task" }));
   await waitFor(() => expect(requests).toHaveLength(1));
+});
+
+it("does not launch an isolated task when source verification fails", async () => {
+  const validate = vi.fn().mockRejectedValue(new Error("The source session changed or moved."));
+  const requests = modal(validate);
+  fireEvent.click(screen.getByRole("button", { name: "Start isolated task" }));
+  expect((await screen.findByRole("alert")).textContent).toContain(
+    "source session changed or moved",
+  );
+  expect(requests).toHaveLength(0);
+});
+
+it("does not launch after the task dialog closes during source verification", async () => {
+  const pending = Promise.withResolvers<void>();
+  const requests = modal(() => pending.promise);
+  fireEvent.click(screen.getByRole("button", { name: "Start isolated task" }));
+  cleanup();
+  await act(async () => pending.resolve());
+  expect(requests).toHaveLength(0);
+});
+
+it("retries a frozen task without changing its retained request after source invalidation", async () => {
+  const validate = vi.fn().mockResolvedValue(undefined);
+  const requests = modal(validate);
+  fireEvent.click(screen.getByRole("button", { name: "Start isolated task" }));
+  await screen.findByRole("alert");
+  expect(requests).toHaveLength(1);
+  const first = structuredClone(requests[0]);
+  validate.mockRejectedValue(new Error("source moved"));
+  fireEvent.click(screen.getByRole("button", { name: "Retry same request" }));
+  await waitFor(() => expect(requests).toHaveLength(2));
+  expect(requests[1]).toEqual(first);
+  expect(validate).toHaveBeenCalledOnce();
 });

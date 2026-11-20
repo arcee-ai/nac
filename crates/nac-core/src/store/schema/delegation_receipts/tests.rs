@@ -6,7 +6,7 @@ fn migration_35_seeds_only_available_terminal_generations_and_is_restartable() {
         .join(format!("nac-delegation-migration-{}", uuid::Uuid::new_v4()))
         .join("store.db");
     initialize(&path).unwrap();
-    for session in ["parent", "child", "running-child", "orchestrator"] {
+    for session in ["parent", "child", "running-child"] {
         insert_test_session(&path, session);
     }
     let connection = open_runtime_connection(&path).unwrap();
@@ -21,14 +21,6 @@ fn migration_35_seeds_only_available_terminal_generations_and_is_restartable() {
         )
         .unwrap();
     }
-    connection
-        .execute(
-            "UPDATE sessions SET behavior = 'direct-with-orchestrator' WHERE session_id = 'parent'",
-            [],
-        )
-        .unwrap();
-    create_managed_orchestrator_relationship(&path, "parent", "orchestrator", "work").unwrap();
-
     let terminal = || TraditionalChildTerminal {
         status: TraditionalChildStatus::Failed,
         report: None,
@@ -61,25 +53,6 @@ fn migration_35_seeds_only_available_terminal_generations_and_is_restartable() {
         TraditionalChildExecutionMode::Foreground,
     )
     .unwrap();
-    begin_managed_orchestrator_run(
-        &path,
-        "orchestrator",
-        "managed-current",
-        ManagedOrchestratorExecutionMode::Foreground,
-    )
-    .unwrap();
-    let orchestrator = settle_managed_orchestrator_run(
-        &path,
-        "orchestrator",
-        "managed-current",
-        ManagedOrchestratorTerminal {
-            status: ManagedOrchestratorStatus::Cancelled,
-            report: None,
-            failure: Some("cancelled before migration".to_owned()),
-        },
-    )
-    .unwrap()
-    .orchestrator;
     connection.execute_batch("DROP TABLE traditional_child_terminal_receipts; DROP TABLE managed_orchestrator_terminal_receipts; PRAGMA user_version = 34;").unwrap();
     drop(connection);
 
@@ -119,10 +92,6 @@ fn migration_35_seeds_only_available_terminal_generations_and_is_restartable() {
         load_traditional_child_terminal_receipt(&path, "running-child", 1).unwrap(),
         None
     );
-    assert_eq!(
-        load_managed_orchestrator_terminal_receipt(&path, "orchestrator", 1).unwrap(),
-        Some(orchestrator)
-    );
     let connection = open_runtime_connection(&path).unwrap();
     assert_eq!(
         connection
@@ -138,16 +107,10 @@ fn migration_35_seeds_only_available_terminal_generations_and_is_restartable() {
         .next()
         .unwrap()
         .is_none());
-    for (table, owner) in [
-        (
-            "traditional_child_terminal_receipts",
-            "traditional_children",
-        ),
-        (
-            "managed_orchestrator_terminal_receipts",
-            "managed_orchestrators",
-        ),
-    ] {
+    for (table, owner) in [(
+        "traditional_child_terminal_receipts",
+        "traditional_children",
+    )] {
         let on_delete: String = connection
             .query_row(
                 &format!(

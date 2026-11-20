@@ -16,21 +16,21 @@
       "scenario": "workspace-direct"
     },
     {
-      "id": "hybrid",
-      "owner": "features/delegation",
-      "requirement": "direct-with-orchestrator creation and managed orchestrator topology",
+      "id": "new-session",
+      "owner": "features/home/HomeComposer.tsx",
+      "requirement": "sidebar creates another direct session with its own model",
       "scenario": "workspace-legacy"
     },
     {
-      "id": "legacy",
-      "owner": "features/ui-policy",
-      "requirement": "opt-in legacy orchestrator creation, preserved defaults and panels",
+      "id": "retired-controls",
+      "owner": "features/home/HomeComposer.tsx",
+      "requirement": "retired controls stay absent even with the old environment value",
       "scenario": "workspace-legacy"
     },
     {
-      "id": "orchestration-opt-in",
-      "owner": "features/ui-policy",
-      "requirement": "orchestration absent when disabled",
+      "id": "direct-only",
+      "owner": "features/home/HomeComposer.tsx",
+      "requirement": "direct sessions and no mode selection",
       "scenario": "workspace-direct"
     },
     {
@@ -41,8 +41,8 @@
     },
     {
       "id": "provider",
-      "owner": "components/modals/ConfigurationsModal.tsx",
-      "requirement": "saved local provider configuration; dummy fixture never qualifies vendor authentication",
+      "owner": "features/managed/presentation/ProviderConnections.tsx",
+      "requirement": "provider credentials are separate from each session model",
       "scenario": "workspace-direct"
     },
     {
@@ -78,7 +78,7 @@
     {
       "id": "delegation",
       "owner": "features/delegation",
-      "requirement": "traditional child and managed-orchestrator transcript navigation",
+      "requirement": "traditional child transcript navigation and read-only controls",
       "scenario": "workspace-legacy"
     },
     {

@@ -50,6 +50,14 @@ async fn native_same_project_retry_and_non_git_launch_publish_independent_goal_f
         .session_creation()
         .create_session(application::session_creation::SessionCreationCommand {
             behavior: sessions::SessionBehavior::Direct,
+            model: application::Field::Set("gpt-5.2".into()),
+            backend: application::Field::Set("openai-responses".into()),
+            base_url: application::Field::Set("http://127.0.0.1:9/v1".into()),
+            api_key_env: application::Field::Set("OPENAI_API_KEY".into()),
+            extra_headers: application::Field::Set(BTreeMap::from([(
+                "X-Private-Context".into(),
+                "native-private-header-canary".into(),
+            )])),
             project_id: Some(fixture.project_id.clone()),
             ..Default::default()
         })
@@ -81,6 +89,9 @@ async fn native_same_project_retry_and_non_git_launch_publish_independent_goal_f
     .await
     .unwrap();
     let ready = controller.status(&caller, &input.request_id).await.unwrap();
+    let visible = serde_json::to_string(&ready).unwrap();
+    assert!(!visible.contains("native-private-header-canary"));
+    assert!(!visible.contains("OPENAI_API_KEY"));
     assert_eq!(ready.launch.phase, "ready", "{:?}", ready.launch.error);
     assert_eq!(ready.launch.session_id, first.launch.session_id);
     assert!(

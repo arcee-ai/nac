@@ -21,28 +21,12 @@ interface ActionSample {
 }
 
 const ACTION_SAMPLES: ActionSample[] = [
-  { type: "Thread", icon: IconName.Chat, label: "impl/calendar", meta: "Thread, 3" },
   {
     type: "Thoughts",
     icon: IconName.Brain,
     label: "Thoughts",
     meta: "13.8 s",
     runningLabel: "Thinking…",
-  },
-  {
-    type: "Define Workset",
-    icon: IconName.Checklist,
-    label: "calendar-sync",
-    meta: "Workset",
-    failedLabel: "Define Workset",
-    runningLabel: "Defining Workset…",
-  },
-  {
-    type: "Delete Workset",
-    icon: IconName.Trash,
-    label: "Deleted: impl/calendar",
-    failedLabel: "Delete thread",
-    runningLabel: "Deleting…",
   },
   {
     type: "Read File",
@@ -133,14 +117,6 @@ const ACTION_SAMPLES: ActionSample[] = [
     runningLabel: "Spawn Agent…",
   },
   {
-    type: "Spawn Session - Orchestrator",
-    icon: IconName.Orchestrator,
-    label: "Calendar rollout",
-    meta: "Spawn",
-    failedLabel: "Spawn Orchestrator",
-    runningLabel: "Spawn Orchestrator…",
-  },
-  {
     type: "Check session status",
     icon: IconName.Info,
     label: "Calendar sync agent",
@@ -219,15 +195,13 @@ const STATUS_COLUMNS = [
 ];
 
 /** Repeated as active rows; an active group row is also the expanded one. */
-const ACTIVE_TYPES = ["Thread", "Read File", "ToolsSegment"];
+const ACTIVE_TYPES = ["Read File", "ToolsSegment"];
 
 const GROUP_CHILDREN = [
   { key: "thoughts", icon: IconName.Brain, label: "Thoughts", meta: "13.8 s" },
   { key: "read", icon: IconName.ReadFile, label: "index.tsx", meta: "Read" },
   { key: "write", icon: IconName.FileUpload, label: "index.tsx", meta: "Write" },
 ];
-
-const WAVE_THREADS = ["impl/calendar", "impl/recurring-events", "review/calendar", "docs/calendar"];
 
 /** A side panel list column: 252px rows on the panel ground. */
 const LIST_COLUMN = "flex w-[268px] flex-col gap-1 bg-elevation-ground p-2";
@@ -241,11 +215,11 @@ function sampleLabel(sample: ActionSample, status: ActionListButtonStatus): stri
   return sample.label;
 }
 
-/** As the list fills it: only a thread keeps its meta while running or after failing. */
+/** Running and failed actions hide their completed metadata. */
 function sampleMeta(sample: ActionSample, status: ActionListButtonStatus): string | undefined {
   const live =
     status === ActionListButtonStatus.Running || status === ActionListButtonStatus.Failed;
-  return live && sample.type !== "Thread" ? undefined : sample.meta;
+  return live ? undefined : sample.meta;
 }
 
 function ActionStatesGrid() {
@@ -333,12 +307,6 @@ function GroupSegmentPreview() {
         expanded={false}
       />
       <ActionListButton
-        icon={IconName.Orchestrator}
-        label="Calendar rollout"
-        meta="Spawn"
-        onClick={() => {}}
-      />
-      <ActionListButton
         icon={IconName.Brain}
         label="Thoughts"
         meta="2.1 s"
@@ -349,46 +317,16 @@ function GroupSegmentPreview() {
   );
 }
 
-/** The orchestrator list: each wave of threads shares one segment line. */
-function ThreadWavePreview() {
-  const [selected, setSelected] = useState(WAVE_THREADS[0]);
-  const thread = (name: string) => (
-    <ActionListButton
-      key={name}
-      icon={IconName.Chat}
-      label={name}
-      meta="Thread, 3"
-      selected={selected === name}
-      onClick={() => setSelected(name)}
-    />
-  );
-
-  return (
-    <div className={LIST_COLUMN}>
-      <ActionListButton icon={IconName.Brain} label="Thoughts" meta="13.8 s" />
-      <ActionListSegment>{WAVE_THREADS.map(thread)}</ActionListSegment>
-      <ActionListButton
-        icon={IconName.Right}
-        label="Total activity: 13.3s"
-        meta="12"
-        expanded={false}
-      />
-      <ActionListSegment>{thread("impl/time-zones")}</ActionListSegment>
-      <ActionListButton icon={IconName.Brain} label="Thoughts" meta="2.1 s" />
-    </div>
-  );
-}
-
 function LongLabelsPreview() {
   return (
     <div className={LIST_COLUMN}>
       <ActionListButton
         icon={IconName.Chat}
         label="impl/calendar-sync-recurring-events-and-time-zones"
-        meta="Thread, 12"
+        meta="Read"
       />
       <ActionListButton
-        icon={IconName.Orchestrator}
+        icon={IconName.Plane}
         label="Roll the recurring-events fix out to every calendar provider"
         meta="Spawn"
       />
@@ -403,7 +341,7 @@ function LongLabelsPreview() {
   );
 }
 
-/** A phone's list: Large rows, a wave in every status and an open group. */
+/** A phone list with large rows in every status and an open group. */
 function PhoneListPreview() {
   const [expanded, setExpanded] = useState(true);
   const [selected, setSelected] = useState("review/calendar");
@@ -417,28 +355,28 @@ function PhoneListPreview() {
           size={large}
           icon={IconName.Chat}
           label="impl/calendar"
-          meta="Thread, 3"
+          meta="Read"
           status={ActionListButtonStatus.Running}
         />
         <ActionListButton
           size={large}
           icon={IconName.Chat}
           label="impl/recurring-events"
-          meta="Thread, 2"
+          meta="Edit"
           status={ActionListButtonStatus.Failed}
         />
         <ActionListButton
           size={large}
           icon={IconName.Chat}
           label="docs/calendar"
-          meta="Thread, 1"
+          meta="Write"
           status={ActionListButtonStatus.Pending}
         />
         <ActionListButton
           size={large}
           icon={IconName.Chat}
           label="review/calendar"
-          meta="Thread, 3"
+          meta="Read"
           selected={selected === "review/calendar"}
           onClick={() => setSelected("review/calendar")}
         />
@@ -477,7 +415,6 @@ export function InsightsAtomsSection() {
         <ActionStatesGrid />
         <div className="flex flex-wrap items-start gap-6">
           <GroupSegmentPreview />
-          <ThreadWavePreview />
           <LongLabelsPreview />
           <PhoneListPreview />
         </div>

@@ -334,6 +334,46 @@ final class PreviewSmoke {
         // Home's composer is the one new-session flow. Start session creates
         // the direct session and sends the typed prompt as its first run.
         try await waitJS("production Home composer", "const f = document.getElementById('home-composer'); return !!f && !f.disabled && [...f.labels].some(l => l.textContent.trim() === 'What should we work on?');")
+        // The fixture connection is seeded before loading Home; select its
+        // model through the same picker a person uses for the first session.
+        try await waitJS("Home model control", #"""
+        const chip = document.querySelector('button[aria-label="Choose a model"], button[aria-label^="Model: "]');
+        if (!chip || chip.disabled) return false;
+        chip.click();
+        return true;
+        """#)
+        try await waitJS("Home model search", #"""
+        const settings = document.querySelector('[role=dialog][aria-label="Model settings"]');
+        const search = settings?.querySelector('input[aria-label="Search models"]');
+        if (search) {
+          Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(search, 'gpt-5.6-sol');
+          search.dispatchEvent(new Event('input', {bubbles:true}));
+          return true;
+        }
+        const chooser = settings?.querySelector('button[aria-label^="Choose model"]');
+        if (chooser && !chooser.disabled) chooser.click();
+        return false;
+        """#)
+        try await waitJS("fixture OpenAI model", #"""
+        const row = [...document.querySelectorAll('[role=menu][aria-label="Model"] [role=group][aria-label="OpenAI"] [role=menuitemradio]')]
+          .find(button => button.firstElementChild?.textContent.trim().toLowerCase().startsWith('gpt-5.6'));
+        if (!row || row.disabled) return false;
+        row.click();
+        return true;
+        """#)
+        try await waitJS("selected model dropdown owns Escape", #"""
+        const settings = document.querySelector('[role=dialog][aria-label="Model settings"]');
+        const chooser = settings?.querySelector('button[aria-label^="Choose model"]');
+        const chip = document.querySelector('button[aria-label="Choose a model"], button[aria-label^="Model: "]');
+        if (!chooser || settings?.querySelector('input[aria-label="Search models"]') || !chip?.getAttribute('aria-label')?.startsWith('Model: ')) return false;
+        chooser.focus();
+        if (document.activeElement !== chooser) throw Error('Home model chooser did not own focus');
+        chooser.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape', bubbles:true}));
+        return true;
+        """#)
+        try await waitJS("Home model settings closed", #"""
+        return !document.querySelector('[role=dialog][aria-label="Model settings"]') && document.querySelector('button[aria-label="Choose a model"], button[aria-label^="Model: "]')?.getAttribute('aria-expanded') === 'false';
+        """#)
         _ = try await js("""
         const input = document.getElementById('home-composer');
         Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input, '\(FixtureProvider.sessionStartPrompt)');
@@ -345,15 +385,15 @@ final class PreviewSmoke {
         try await waitJS("production-created direct session", "return location.hash.includes('/session/') && !!document.querySelector('[role=combobox][aria-label=Message]');")
         let sessionID = try await js("return location.hash.split('/')[2];") as! String
         evidence["session_id"] = sessionID
+        // The first-run handoff waits for the interactive stream. Its distinct
+        // short reply precedes the controlled incremental streaming journey.
+        try await waitJS("Home first-run response", "return document.body.innerText.includes('\(FixtureProvider.sessionStartAnswer)') && ![...document.querySelectorAll('button')].some(b => b.getAttribute('aria-label') === 'Stop run');")
         let snapshot = try await js("return await (await fetch('/sessions/' + location.hash.split('/')[2])).json();")
         guard let record = snapshot as? [String: Any], let metadata = record["metadata"] as? [String: Any],
               metadata["behavior"] as? String == "direct" else {
             throw PreviewError.message("UI did not create a direct fixture session: \(snapshot)")
         }
         evidence["behavior"] = "direct"
-        // The first-run handoff waits for the interactive stream. Its distinct
-        // short reply precedes the controlled incremental streaming journey.
-        try await waitJS("Home first-run response", "return document.body.innerText.includes('\(FixtureProvider.sessionStartAnswer)') && ![...document.querySelectorAll('button')].some(b => b.getAttribute('aria-label') === 'Stop run');")
         try await sendPrompt("MAC_PREVIEW_STREAM")
         try await waitJS("incremental streamed response", "return __previewEvidence.partial;")
         try await waitJS("completed response", "return document.body.innerText.includes('Hello from the isolated NAC Mac preview.') && ![...document.querySelectorAll('button')].some(b => b.getAttribute('aria-label') === 'Stop run');")

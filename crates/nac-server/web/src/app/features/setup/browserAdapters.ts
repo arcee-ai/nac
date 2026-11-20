@@ -49,7 +49,7 @@ export function setupReconciliation(client: QueryClient, sessionId?: string) {
   return async (phase: SetupPhase) => {
     const keys =
       phase === "preset"
-        ? [queryKeys.modelConfigs, queryKeys.modelCatalog, queryKeys.credentials]
+        ? [queryKeys.modelCatalog, queryKeys.credentials]
         : phase === "project" || phase === "default"
           ? [queryKeys.projects]
           : sessionId

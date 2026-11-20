@@ -977,7 +977,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(snapshot.title, None);
-        assert_eq!(snapshot.behavior, sessions::SessionBehavior::Orchestrator);
+        assert_eq!(snapshot.behavior, sessions::SessionBehavior::Direct);
         assert!(!snapshot.pinned);
         assert_eq!(snapshot.sort_order, 0);
         assert_eq!(snapshot.presentation_version, 0);

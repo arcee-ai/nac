@@ -178,6 +178,7 @@ fn managed_providers_read_ready_only_with_a_parseable_stored_credential() {
         arcee.connection,
         Some(ProviderConnection {
             base_url: "https://api.arcee.ai/api/v1".to_string(),
+            allow_insecure_http: false,
             api_key_env: None,
         })
     );
@@ -194,6 +195,7 @@ fn managed_providers_read_ready_only_with_a_parseable_stored_credential() {
         codex.connection,
         Some(ProviderConnection {
             base_url: "https://chatgpt.com/backend-api".to_string(),
+            allow_insecure_http: false,
             api_key_env: None,
         })
     );

@@ -7,8 +7,7 @@ import {
   useInsightsNavigation,
 } from "@/app/features/insights/useInsightsNavigation";
 import { useTranscriptSessionId } from "@/app/features/insights/transcript/transcriptTurns";
-import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
-import { queryKeys, useManagedOrchestrators, useTraditionalChildren } from "@/app/services/queries";
+import { queryKeys, useTraditionalChildren } from "@/app/services/queries";
 import type { DelegatedCompletionTurn } from "@/app/lib/transcript";
 import type { DelegatedRowKey } from "@/app/features/insights/model/types";
 
@@ -26,7 +25,6 @@ export function DelegatedCompletionCard({
   const parent = useTranscriptSessionId();
   const navigation = useContext(InsightsNavigationContext);
   const { openSubagent } = useInsightsNavigation();
-  const policy = useUiPolicy();
   const cache = useQueryClient();
   const parentId = parent ?? "";
   const eligible =
@@ -34,20 +32,12 @@ export function DelegatedCompletionCard({
     !!parent &&
     parent === navigation.sessionId &&
     navigation.panels.includes("delegated") &&
-    (child || policy.orchestrationEnabled);
-  const key = child
-    ? queryKeys.traditionalChildren(parentId)
-    : queryKeys.managedOrchestrators(parentId);
-  const known = cache.getQueryState(key);
-  // A completed receipt needs one inventory read, not indefinite polling for a deleted child.
+    child;
+  const known = cache.getQueryState(queryKeys.traditionalChildren(parentId));
   const fetch = eligible && known?.data === undefined && known?.status !== "error";
-  const children = useTraditionalChildren(parentId, child && fetch);
-  const orchestrators = useManagedOrchestrators(parentId, !child && fetch);
-  const query = child ? children : orchestrators;
-  const exists = child
-    ? children.data?.some((record) => record.child_session_id === completion.sessionId)
-    : orchestrators.data?.some((record) => record.orchestrator_session_id === completion.sessionId);
-  const rowKey: DelegatedRowKey = `${child ? "child" : "orchestrator"}:${completion.sessionId}`;
+  const query = useTraditionalChildren(parentId, fetch);
+  const exists = query.data?.some((record) => record.child_session_id === completion.sessionId);
+  const rowKey: DelegatedRowKey = `child:${completion.sessionId}`;
   const title = completion.description.trim() || type;
   const availability =
     eligible && !exists

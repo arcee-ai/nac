@@ -76,7 +76,7 @@ function segmentContent(
   segment: Exclude<InsightSegment, { kind: "reasoning" }>,
   context: ItemContext,
 ): ItemContent {
-  if (segment.kind === "workset") return worksetContent(segment, context);
+  if (segment.kind === "workset") return worksetContent(segment);
   return toolContent(segment, context);
 }
 

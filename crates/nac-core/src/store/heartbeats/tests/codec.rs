@@ -180,7 +180,12 @@ fn legacy_retained_request_replays_original_bytes_after_reopen_and_delete() {
 #[test]
 fn calendar_durable_controls_use_real_private50_format_and_retain_explicit_rule() {
     let f = Fixture::new();
-    assert_eq!(schema_version(), 53);
+    let conn = open_runtime_connection(&f.path).unwrap();
+    let version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    assert_eq!(version, schema_version());
+    drop(conn);
     let now = "2026-11-02T12:00:00Z"
         .parse::<jiff::Timestamp>()
         .unwrap()

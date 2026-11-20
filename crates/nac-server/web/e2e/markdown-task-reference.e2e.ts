@@ -138,8 +138,23 @@ for (const packed of [false, true]) {
       } else await page.goto(`${harness.baseUrl}/#/session/${caller}/insights`);
       await expect(page.getByRole("link", { name: "Open research", exact: true })).toBeVisible();
       expect((await request.delete(`${harness.baseUrl}/sessions/${target}`)).ok()).toBe(true);
-      await page.getByRole("link", { name: "Open research", exact: true }).click();
+      // Inventory may already have removed the link by the time deletion
+      // returns. If it is still present, activate that stale reference.
+      await page.evaluate(() => {
+        const { document } = globalThis as unknown as {
+          document: {
+            querySelectorAll(
+              selector: string,
+            ): Iterable<{ textContent: string | null; click(): void }>;
+          };
+        };
+        const link = [...document.querySelectorAll('a[role="link"]')].find(
+          (item) => item.textContent?.trim() === "Open research",
+        );
+        link?.click();
+      });
       await expect(page.getByText(/Task unavailable/)).toBeVisible();
+      await expectCaller();
     } finally {
       releaseFailure?.();
       await fixture?.stop();

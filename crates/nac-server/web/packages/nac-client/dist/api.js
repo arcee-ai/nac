@@ -63,6 +63,7 @@ export function createNacApi(nacClient, options = {}) {
         }),
         // Credentials are write-only: the value is sent to the server and never
         // read back, so the UI only ever learns which names have a key stored.
+        createProviderConnection: (payload) => request("POST", "/provider-connections", { body: payload }),
         listCredentials: (signal) => request("GET", "/credentials", { signal }),
         storeCredential: (name, value) => request("PUT", `/credentials/${encodeURIComponent(name)}`, {
             body: { value },
@@ -121,12 +122,6 @@ export function createNacApi(nacClient, options = {}) {
         listSessionSkills: (sessionId, signal) => request("GET", `/sessions/${encodeURIComponent(sessionId)}/skills`, {
             signal,
         }),
-        listModelConfigs: (signal) => request("GET", "/model-configs", { signal }),
-        createModelConfig: (payload) => request("POST", "/model-configs", { body: payload }),
-        updateModelConfig: (configId, payload) => request("PATCH", `/model-configs/${encodeURIComponent(configId)}`, {
-            body: payload,
-        }),
-        deleteModelConfig: (configId) => request("DELETE", `/model-configs/${encodeURIComponent(configId)}`),
         listSshConfigs: (signal) => request("GET", "/ssh-configs", { signal }),
         createSshConfig: (payload) => request("POST", "/ssh-configs", { body: payload }),
         updateSshConfig: (configId, payload) => request("PATCH", `/ssh-configs/${encodeURIComponent(configId)}`, {
@@ -159,12 +154,6 @@ export function createNacApi(nacClient, options = {}) {
         connectMcpServer: (serverName) => request("POST", `/mcp_library/servers/${encodeURIComponent(serverName)}/connect`),
         disconnectMcpServer: (serverName) => request("POST", `/mcp_library/servers/${encodeURIComponent(serverName)}/disconnect`),
         reloadMcpServer: (serverName) => request("POST", `/mcp_library/servers/${encodeURIComponent(serverName)}/reload`),
-        /** Resolves a saved configuration's credential and lists its models. */
-        resolveModelConfig: (configId, signal) => request("POST", `/model-configs/${encodeURIComponent(configId)}/models`, { signal }),
-        resolveConfigFile: (path, signal) => request("POST", "/model-configs/from-file", {
-            body: { path },
-            signal,
-        }),
         listProjects: (signal) => request("GET", "/projects", { signal }),
         createProject: (payload) => request("POST", "/projects", { body: payload }),
         updateProject: (projectId, payload) => request("PATCH", `/projects/${encodeURIComponent(projectId)}`, {
@@ -188,10 +177,6 @@ export function createNacApi(nacClient, options = {}) {
         getSession: (id, options = {}) => nacClient.getSession(id, options),
         createSession: (payload) => request("POST", "/sessions", { body: payload }),
         deleteSession: (id) => request("DELETE", sessionPath(id)),
-        launchDefaults: (payload, signal) => request("POST", "/sessions/launch-defaults", {
-            body: payload,
-            signal,
-        }),
         updatePresentation: (id, payload) => request("PUT", `${sessionPath(id)}/presentation`, {
             body: payload,
         }),
@@ -199,6 +184,7 @@ export function createNacApi(nacClient, options = {}) {
             body: payload,
         }),
         getConfig: (id, signal) => request("GET", `${sessionPath(id)}/config`, { signal }),
+        getProjectSessionModelSource: (projectId, sessionId, signal) => request("GET", `/projects/${encodeURIComponent(projectId)}/session-model-sources/${encodeURIComponent(sessionId)}`, { signal }),
         getPermissions: (id, signal) => request("GET", `${sessionPath(id)}/permissions`, { signal }),
         replyPermission: (id, requestId, reply) => request("POST", `${sessionPath(id)}/permissions/${encodeURIComponent(requestId)}`, {
             body: { reply },
@@ -231,12 +217,6 @@ export function createNacApi(nacClient, options = {}) {
         startTraditionalChild: (id, payload) => request("POST", `${sessionPath(id)}/children`, { body: payload }),
         getTraditionalChild: (id, childId, signal) => request("GET", `${sessionPath(id)}/children/${encodeURIComponent(childId)}`, { signal }),
         cancelTraditionalChild: (id, childId) => request("POST", `${sessionPath(id)}/children/${encodeURIComponent(childId)}/cancel`),
-        listManagedOrchestrators: (id, signal) => request("GET", `${sessionPath(id)}/orchestrators`, { signal }),
-        startManagedOrchestrator: (id, payload) => request("POST", `${sessionPath(id)}/orchestrators`, {
-            body: payload,
-        }),
-        getManagedOrchestrator: (id, orchestratorId, signal) => request("GET", `${sessionPath(id)}/orchestrators/${encodeURIComponent(orchestratorId)}`, { signal }),
-        cancelManagedOrchestrator: (id, orchestratorId) => request("POST", `${sessionPath(id)}/orchestrators/${encodeURIComponent(orchestratorId)}/cancel`),
         updateConfig: (id, payload) => request("PATCH", `${sessionPath(id)}/config`, { body: payload }),
         getMessages: (id, options = {}) => {
             const params = new URLSearchParams();
@@ -248,16 +228,6 @@ export function createNacApi(nacClient, options = {}) {
                 params.set("include_system", "true");
             const query = params.toString();
             return request("GET", `${sessionPath(id)}/messages${query ? `?${query}` : ""}`, { signal: options.signal });
-        },
-        getThreadEvents: (id, threadName, options = {}) => {
-            const params = new URLSearchParams();
-            if (options.beforeId !== undefined) {
-                params.set("before_id", String(options.beforeId));
-            }
-            if (options.limit !== undefined)
-                params.set("limit", String(options.limit));
-            const query = params.toString();
-            return request("GET", `${sessionPath(id)}/threads/${encodeURIComponent(threadName)}/events${query ? `?${query}` : ""}`, { signal: options.signal });
         },
         getToolCallContent: (id, callId, signal, occurrence) => {
             const query = occurrence ? `?${new URLSearchParams({ occurrence })}` : "";
@@ -323,10 +293,6 @@ export function createNacApi(nacClient, options = {}) {
             body: { message_idx: messageIdx },
         }),
         dismissSessionFork: (id, forkId) => request("DELETE", `${sessionPath(id)}/forks/${encodeURIComponent(forkId)}`),
-        steerOrchestrator: (id, instruction) => request("POST", `${sessionPath(id)}/steering`, {
-            body: { instruction },
-        }),
-        steerThread: (id, threadName, instruction) => request("POST", `${sessionPath(id)}/threads/${encodeURIComponent(threadName)}/steering`, { body: { instruction } }),
         getRecentEvents: (id, options = {}) => nacClient.getRecentEvents(id, options),
     };
 }

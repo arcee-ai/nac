@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import { constants } from "node:fs";
 import path from "node:path";
-import type { Locator, Page, Route } from "@playwright/test";
+import type { Locator, Page, Request, Route } from "@playwright/test";
 import { createNacApi } from "../packages/nac-client/dist/api.js";
 import { NacClient } from "../packages/nac-client/dist/nacClient.js";
 import { createDirectSession, expect, showSidePanel, test, waitForRunIdle } from "./harness";
@@ -225,15 +225,46 @@ test("connected native shell, less resize, and trusted browser bracketed UTF-8 p
     );
     await expect(accessible).toContainText("LESS-REAL-CONTENT");
     const before = await api.getUserTerminal(session, terminal);
-    await page.setViewportSize({ width: 970, height: 600 });
-    await expect
-      .poll(async () => {
-        const after = await api.getUserTerminal(session, terminal!);
-        return after.cols !== before.cols || after.rows !== before.rows;
-      })
-      .toBe(true);
-    await expect(accessible).toContainText("LESS-REAL-CONTENT");
-    await page.keyboard.press("q");
+    const pendingResizes = new Set<Request>();
+    let lastResize = Date.now();
+    const resizeStarted = (request: Request) => {
+      if (
+        request.method() !== "POST" ||
+        !request.url().endsWith(`/user-terminals/${terminal}/resize`)
+      )
+        return;
+      pendingResizes.add(request);
+      lastResize = Date.now();
+    };
+    const resizeFinished = (request: Request) => {
+      if (pendingResizes.delete(request)) lastResize = Date.now();
+    };
+    page.on("request", resizeStarted);
+    page.on("requestfinished", resizeFinished);
+    page.on("requestfailed", resizeFinished);
+    try {
+      await page.setViewportSize({ width: 970, height: 600 });
+      await expect
+        .poll(async () => {
+          const after = await api.getUserTerminal(session, terminal!);
+          return after.cols !== before.cols || after.rows !== before.rows;
+        })
+        .toBe(true);
+      // The responsive dock and drawer can overlap during their exit animation.
+      // Wait for their resize requests to settle before sending the pager key.
+      await expect
+        .poll(() => pendingResizes.size === 0 && Date.now() - lastResize >= 300)
+        .toBe(true);
+      await expect(accessible).toContainText("LESS-REAL-CONTENT");
+      const input = pane.locator(".xterm-helper-textarea");
+      await expect(input).toBeEditable();
+      await expect(input).toBeFocused();
+      await page.keyboard.press("q");
+    } finally {
+      page.off("request", resizeStarted);
+      page.off("requestfinished", resizeFinished);
+      page.off("requestfailed", resizeFinished);
+    }
     // Wait for the foreground pager to surrender the terminal before typing into the shell.
     await expect(accessible).toContainText("PAGER-RETURNED");
     await command(

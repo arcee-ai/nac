@@ -513,7 +513,7 @@ async fn run_case(wal: bool, owned: bool, invalid: bool, scenario: &str) -> Resu
         let fd = child.as_raw_fd();
         let mut launch = target.command(root)?;
         launch.args(["--bind","127.0.0.1:0","--directory"]).arg(root).arg("--store-path").arg(&store)
-            .arg("--worker-executable").arg(&target.engine).arg("--no-open").env("NAC_DESKTOP_CHANNEL_FD",fd.to_string());
+            .arg("--no-open").env("NAC_DESKTOP_CHANNEL_FD",fd.to_string());
         // SAFETY: inherit only this connected child endpoint. The engine sets
         // CLOEXEC again during its ordinary private-channel adoption.
         unsafe { launch.pre_exec(move || {

@@ -88,7 +88,11 @@ export async function installComposedFixture(
       {
         ...provider,
         auth_status: "ready",
-        connection: { base_url: harness.provider.baseUrl, api_key_env: "NAC_E2E_API_KEY" },
+        connection: {
+          base_url: harness.provider.baseUrl,
+          allow_insecure_http: false,
+          api_key_env: "NAC_E2E_API_KEY",
+        },
         default_base_url: harness.provider.baseUrl,
         managed_base_url: null,
         models,

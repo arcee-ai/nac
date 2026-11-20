@@ -4,9 +4,6 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { UiPolicyContext } from "@/app/features/ui-policy/UiPolicyContext";
-import { DIRECT_UI_POLICY } from "@/app/features/ui-policy/policy";
-
 import { HomePage } from "./HomePage";
 
 const fakes = vi.hoisted(() => ({
@@ -63,9 +60,7 @@ const orphan = {
 function mount() {
   return render(
     <MemoryRouter>
-      <UiPolicyContext.Provider value={DIRECT_UI_POLICY}>
-        <HomePage />
-      </UiPolicyContext.Provider>
+      <HomePage />
     </MemoryRouter>,
   );
 }

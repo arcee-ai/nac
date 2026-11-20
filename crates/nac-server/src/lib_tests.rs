@@ -842,25 +842,7 @@ pub(crate) fn seed_direct_session(root: &std::path::Path, session_id: &str) {
     seed_direct_session_with_base_url(root, session_id, "https://api.openai.com/v1".to_string());
 }
 
-fn seed_direct_session_with_base_url(root: &std::path::Path, session_id: &str, base_url: String) {
-    let mut snapshot = sessions::new_snapshot(
-        session_id.to_string(),
-        root.to_path_buf(),
-        "model-a".to_string(),
-        base_url,
-        BackendKind::OpenAiResponses,
-        Some(ReasoningEffort::Medium),
-        None,
-        None,
-        Vec::new(),
-        Some("OPENAI_API_KEY".to_string()),
-        BTreeMap::new(),
-    );
-    snapshot.behavior = sessions::SessionBehavior::Direct;
-    sessions::create_session(&root.join("store.db"), &snapshot).expect("seed direct session");
-}
-
-fn seed_direct_with_orchestrator_session_with_base_url(
+pub(crate) fn seed_direct_session_with_base_url(
     root: &std::path::Path,
     session_id: &str,
     base_url: String,
@@ -878,9 +860,8 @@ fn seed_direct_with_orchestrator_session_with_base_url(
         Some("OPENAI_API_KEY".to_string()),
         BTreeMap::new(),
     );
-    snapshot.behavior = sessions::SessionBehavior::DirectWithOrchestrator;
-    sessions::create_session(&root.join("store.db"), &snapshot)
-        .expect("seed direct-with-orchestrator session");
+    snapshot.behavior = sessions::SessionBehavior::Direct;
+    sessions::create_session(&root.join("store.db"), &snapshot).expect("seed direct session");
 }
 
 fn scripted_direct_response() -> (String, std::sync::mpsc::Receiver<()>) {
@@ -1081,11 +1062,6 @@ mod internal_completions;
 mod lifecycle;
 #[path = "tests/managed_delivery.rs"]
 mod managed_delivery;
-#[cfg(feature = "managed-fault-fixture")]
-#[path = "tests/managed_fault_fixture.rs"]
-mod managed_fault_fixture;
-#[path = "tests/managed_gate_order.rs"]
-mod managed_gate_order;
 #[path = "tests/managed_load.rs"]
 mod managed_load;
 #[path = "tests/managed_topology.rs"]

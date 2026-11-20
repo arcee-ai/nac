@@ -52,7 +52,7 @@ fn is_sensitive_model_header(name: &str) -> bool {
         .any(|sensitive| name.eq_ignore_ascii_case(sensitive))
 }
 
-fn validate_extra_headers(
+pub(crate) fn validate_extra_headers(
     extra_headers: &std::collections::BTreeMap<String, String>,
 ) -> Result<()> {
     for (name, value) in extra_headers {

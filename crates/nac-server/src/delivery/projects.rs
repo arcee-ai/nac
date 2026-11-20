@@ -27,7 +27,9 @@ pub struct CreateProjectRequest {
     pub ssh_port: Option<u16>,
     #[serde(default)]
     pub ssh_identity_file: Option<String>,
-    pub default_model_config_id: Option<String>,
+    #[serde(default)]
+    #[schema(ignore)]
+    pub default_model_config_id: RequestField<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, utoipa::ToSchema)]
@@ -37,6 +39,7 @@ pub struct UpdateProjectRequest {
     #[serde(default)]
     pub description: RequestField<String>,
     #[serde(default)]
+    #[schema(ignore)]
     pub default_model_config_id: RequestField<String>,
     /// Toggling this moves the project to the end of the target pin group and
     /// bumps `presentation_version`.
@@ -117,13 +120,20 @@ pub(crate) async fn list_handler(
     operation_id = "post_projects",
     tag = "projects",
     request_body(content = CreateProjectRequest, content_type = "application/json"),
-    responses((status = 201, description = "Success", body = ProjectRecord, content_type = "application/json"), (status = 400, description = "Invalid project metadata or location", body = ApiErrorBody, content_type = "application/json"), (status = 403, description = "Remote directory is unreadable", body = ApiErrorBody, content_type = "application/json"), (status = 404, description = "Directory or default model configuration was not found", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "A project already uses this canonical location", body = ApiErrorBody, content_type = "application/json"), (status = 502, description = "Remote host or command failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+    responses((status = 201, description = "Success", body = ProjectRecord, content_type = "application/json"), (status = 400, description = "Invalid project metadata or location", body = ApiErrorBody, content_type = "application/json"), (status = 403, description = "Remote directory is unreadable", body = ApiErrorBody, content_type = "application/json"), (status = 404, description = "Directory was not found", body = ApiErrorBody, content_type = "application/json"), (status = 409, description = "A project already uses this canonical location", body = ApiErrorBody, content_type = "application/json"), (status = 502, description = "Remote host or command failed", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
 )]
 pub(crate) async fn create_handler(
     State(manager): State<SessionManager>,
     payload: Result<Json<CreateProjectRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<ProjectRecord>), ApiError> {
     let Json(request) = payload.map_err(ApiError::from)?;
+    if !matches!(request.default_model_config_id, RequestField::Omitted) {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "Project model defaults are no longer supported; choose a model for each session"
+                .to_string(),
+        ));
+    }
     let command = application::projects::CreateProject {
         name: request.name,
         description: request.description,
@@ -131,7 +141,7 @@ pub(crate) async fn create_handler(
         ssh_host: request.ssh_host,
         ssh_port: request.ssh_port,
         ssh_identity_file: request.ssh_identity_file,
-        default_model_config_id: request.default_model_config_id,
+        default_model_config_id: None,
     };
     Ok((
         StatusCode::CREATED,
@@ -146,7 +156,7 @@ pub(crate) async fn create_handler(
     tag = "projects",
     params(("project_id" = String, Path)),
     request_body(content = UpdateProjectRequest, content_type = "application/json"),
-    responses((status = 200, description = "Success", body = ProjectRecord, content_type = "application/json"), (status = 400, description = "Invalid project metadata", body = ApiErrorBody, content_type = "application/json"), (status = 404, description = "Project or default model configuration was not found", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
+    responses((status = 200, description = "Success", body = ProjectRecord, content_type = "application/json"), (status = 400, description = "Invalid project metadata", body = ApiErrorBody, content_type = "application/json"), (status = 404, description = "Project was not found", body = ApiErrorBody, content_type = "application/json"), (status = 500, description = "Request failed", body = ApiErrorBody, content_type = "application/json"))
 )]
 pub(crate) async fn update_handler(
     State(manager): State<SessionManager>,
@@ -154,12 +164,19 @@ pub(crate) async fn update_handler(
     payload: Result<Json<UpdateProjectRequest>, JsonRejection>,
 ) -> Result<Json<ProjectRecord>, ApiError> {
     let Json(request) = payload.map_err(ApiError::from)?;
+    if !matches!(request.default_model_config_id, RequestField::Omitted) {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "Project model defaults are no longer supported; choose a model for each session"
+                .to_string(),
+        ));
+    }
     Ok(Json(manager.projects().update(
         &project_id,
         application::projects::UpdateProject {
             name: project_field(request.name),
             description: project_field(request.description),
-            default_model_config_id: project_field(request.default_model_config_id),
+            default_model_config_id: application::Field::Unchanged,
             pinned: project_field(request.pinned),
         },
     )?))

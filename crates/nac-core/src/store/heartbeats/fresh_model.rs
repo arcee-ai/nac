@@ -13,6 +13,8 @@ pub struct FreshTaskDestination {
     /// Used only to establish an unbound project's saved default branch.
     /// An existing binding cannot be silently replaced by this value.
     pub default_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_selection: Option<crate::store::TaskModelSelection>,
     pub model: Option<String>,
     pub reasoning_effort: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -22,6 +24,9 @@ pub struct FreshTaskDestination {
 
 impl FreshTaskDestination {
     pub fn validate(&self) -> Result<()> {
+        if let Some(selection) = &self.model_selection {
+            selection.validate()?;
+        }
         ensure!(
             !self.project_id.trim().is_empty() && self.project_id.len() <= 256,
             "fresh tasks require an exact saved project identity"
@@ -96,6 +101,122 @@ impl PreparedFreshTaskLaunch {
         &self.receipt
     }
 
+    /// Recover only the immutable model snapshot already bound to an unpublished
+    /// historical reservation. This never reads project presets or rewrites intent.
+    pub fn legacy_frozen_model(&self) -> Result<Option<crate::store::TaskModelSelection>> {
+        let receipt = &self.receipt;
+        if receipt.destination.model_selection.is_some()
+            || receipt.request.model_selection.is_some()
+        {
+            return Ok(None);
+        }
+        let Some(frozen) = &self.model_defaults else {
+            return Ok(None);
+        };
+        ensure!(
+            !receipt.stop_requested
+                && receipt.first_input_id.is_none()
+                && receipt.initial_run_id.is_none()
+                && receipt.initial_outcome.is_none(),
+            "conflict: historical scheduled launch is no longer unpublished"
+        );
+        ensure!(
+            receipt.request.project_id == receipt.destination.project_id
+                && receipt.binding.project_id.as_deref()
+                    == Some(receipt.destination.project_id.as_str())
+                && receipt.binding.fresh_task.as_ref() == Some(&receipt.destination)
+                && match receipt.binding.model_configuration_id.as_deref() {
+                    Some(id) => id == frozen.config_id,
+                    None =>
+                        frozen.config_id == format!("scheduled-defaults:{}", receipt.occurrence_id),
+                },
+            "conflict: historical scheduled model receipt does not match its binding"
+        );
+        // The predecessor's persisted model configurations and session snapshots
+        // only stored positive thresholds; zero represented disabled and was NULL.
+        ensure!(
+            frozen.orchestrator_compaction_threshold != Some(0),
+            "conflict: historical scheduled model receipt is invalid"
+        );
+        let mut selection = crate::store::TaskModelSelection {
+            backend: frozen.backend.clone(),
+            model: receipt
+                .destination
+                .model
+                .clone()
+                .unwrap_or_else(|| frozen.model.clone()),
+            base_url: frozen.base_url.clone(),
+            allow_insecure_http: frozen.allow_insecure_http,
+            api_key_env: frozen.api_key_env.clone(),
+            reasoning_effort: receipt
+                .destination
+                .reasoning_effort
+                .clone()
+                .or_else(|| frozen.reasoning_effort.clone()),
+            service_tier: receipt
+                .destination
+                .service_tier
+                .clone()
+                .or_else(|| frozen.service_tier.clone()),
+            extra_headers: Some(frozen.extra_headers.clone()),
+            orchestrator_compaction_threshold: frozen.orchestrator_compaction_threshold,
+        };
+        selection
+            .validate()
+            .map_err(|_| anyhow!("conflict: historical scheduled model receipt is invalid"))?;
+        // The predecessor revalidated an inherited speed when an explicit model
+        // override changed its route, falling back to Standard only for Codex.
+        if receipt
+            .destination
+            .model
+            .as_ref()
+            .is_some_and(|model| model != &frozen.model)
+            && receipt.destination.service_tier.is_none()
+        {
+            if let Some(tier) = selection.service_tier.as_deref() {
+                let backend: crate::model::BackendKind = selection
+                    .backend
+                    .parse()
+                    .map_err(|_| anyhow!("invalid historical model backend"))?;
+                let tier: crate::model::ServiceTier = tier
+                    .parse()
+                    .map_err(|_| anyhow!("invalid historical model tier"))?;
+                let effort = selection
+                    .reasoning_effort
+                    .as_ref()
+                    .map(|value| serde_json::from_value(serde_json::Value::String(value.clone())))
+                    .transpose()
+                    .map_err(|_| anyhow!("invalid historical reasoning effort"))?;
+                let effective =
+                    crate::model::EffectiveModelSettings::from_optional_with_http_policy(
+                        Some(backend),
+                        Some(selection.model.clone()),
+                        Some(selection.base_url.clone()),
+                        effort,
+                        selection.api_key_env.clone(),
+                        selection.extra_headers.clone().unwrap_or_default(),
+                        selection.allow_insecure_http,
+                    )
+                    .map_err(|_| {
+                        anyhow!("conflict: historical scheduled model receipt is invalid")
+                    })?;
+                if effective.clone().with_service_tier(Some(tier)).is_err() {
+                    ensure!(
+                        backend == crate::model::BackendKind::ChatGptCodexResponses,
+                        "conflict: historical scheduled model tier is unavailable"
+                    );
+                    effective
+                        .with_service_tier(Some(crate::model::ServiceTier::Standard))
+                        .map_err(|_| {
+                            anyhow!("conflict: historical scheduled model tier is unavailable")
+                        })?;
+                    selection.service_tier = Some("standard".into());
+                }
+            }
+        }
+        Ok(Some(selection))
+    }
+
     /// Saved defaults are preparation input, excluded from passive inventory.
     pub fn model_defaults(&self) -> Option<&ModelConfigurationRecord> {
         self.model_defaults.as_ref()
@@ -119,6 +240,7 @@ mod tests {
     fn destination_retains_explicit_choices_and_rejects_mutable_pins_and_unbounded_resources() {
         let mut destination = FreshTaskDestination {
             project_id: "saved-project".into(),
+            model_selection: None,
             pinned_commit: None,
             default_ref: None,
             model: None,

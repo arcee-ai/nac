@@ -44,7 +44,7 @@ describe("single prompt admission", () => {
   }
 });
 
-it("routes direct durable input, classic steering and idle submission independently", async () => {
+it("routes durable input and idle submission independently", async () => {
   const inbox = vi.fn(async () => undefined);
   const steer = vi.fn(async () => undefined);
   const submit = vi.fn(async () => undefined);
@@ -53,9 +53,8 @@ it("routes direct durable input, classic steering and idle submission independen
   expect(
     await runCommand(deliverPrompt({ ...ports, mode: "direct-running", delivery: "queue" })),
   ).toBe("queued");
-  expect(await runCommand(deliverPrompt({ ...ports, mode: "classic-running" }))).toBe("steered");
   expect(await runCommand(deliverPrompt({ ...ports, mode: "idle" }))).toBe("submitted");
   expect(inbox.mock.calls).toEqual([["steer"], ["queue"]]);
-  expect(steer).toHaveBeenCalledOnce();
+  expect(steer).not.toHaveBeenCalled();
   expect(submit).toHaveBeenCalledOnce();
 });

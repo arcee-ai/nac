@@ -5,17 +5,11 @@ import Foundation
 enum FixtureBootstrap {
     static func seed(base: URL, profile: PreviewProfile, provider: FixtureProvider,
                      seedModel: Bool = true, session: URLSession? = nil) async throws -> String {
-        var projectBody: [String: Any] = ["name": "Disposable Mac preview", "cwd": profile.workspace.path]
+        let projectBody: [String: Any] = ["name": "Disposable Mac preview", "cwd": profile.workspace.path]
         if seedModel {
-            let configuration = try await post(base, "model-configs", [
-                "name": "Mac preview — deterministic local fixture", "backend": "openai-responses",
-                "model": "gpt-5.6-sol", "base_url": provider.baseURL.absoluteString,
-                "api_key": "preview-dummy-only", "reasoning_effort": "high", "extra_headers": [:],
-                "orchestrator_compaction_threshold": 0], session: session)
-            guard let configID = configuration["config_id"] as? String else {
-                throw PreviewError.message("Fixture configuration returned no identifier")
-            }
-            projectBody["default_model_config_id"] = configID
+            _ = try await post(base, "provider-connections", [
+                "backend": "openai-responses", "base_url": provider.baseURL.absoluteString,
+                "api_key": "preview-dummy-only"], session: session)
         }
         let project = try await post(base, "projects", projectBody, session: session)
         guard let projectID = project["project_id"] as? String else {

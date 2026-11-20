@@ -84,8 +84,6 @@ function fixture(name: string, delayed = false) {
       .slice(name.length + 1)
       .split("?")[0];
     if (path === "/sessions") return delayed ? summary.promise : Response.json(sessions);
-    if (path === "/ui-config")
-      return Response.json({ orchestration_enabled: false, diagnostic: null });
     if (path === "/projects") return Response.json({ projects: [] });
     if (path === "/managed/status") return Response.json({}, { status: 404 });
     if (path.endsWith("/heartbeats/attention") && init?.method === "POST") {

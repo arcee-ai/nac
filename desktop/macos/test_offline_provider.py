@@ -13,7 +13,7 @@ def receipt():
     launch, view, old, new = (str(uuid.uuid4()) for _ in range(4))
     return {'engine_pid': 42, 'launch_incarnation': launch, 'provider_responses': 1,
         'offline_provider': {
-            'scope': 'ordinary-production-engine-local-API-key; DOM-driven; HTTP(S)-outage-only',
+            'scope': 'ordinary-production-engine-local-API-key; API-seeded endpoint, UI-selected model; HTTP(S)-outage-only',
             'offline_supported_local_provider': True, 'whole_machine_offline': False,
             'physical_input_qualified': False, 'real_vendor_qualified': False,
             'setup_saved_read_back': True, 'streamed_response': True, 'persisted_transcript': True,

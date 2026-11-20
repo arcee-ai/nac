@@ -125,14 +125,14 @@ async function runCase(source, destination, scenario) {
           return port && `http://127.0.0.1:${port}`;
         } catch { return null; }
       });
-      const policy = await until("shared workspace policy", async () => {
+      const policyStatus = await until("retired workspace policy", async () => {
         try {
           const response = await fetch(base + "/ui-config", {signal:AbortSignal.timeout(1000)});
-          return response.ok && response.json();
+          return response.status;
         } catch { return null; }
       });
-      assert.equal(policy.orchestration_enabled, true);
-      evidence.ui_policy = policy;
+      assert.equal(policyStatus, 404);
+      evidence.retired_ui_policy_status = policyStatus;
       Object.assign(evidence, await exerciseOwnedWorker({provider, base, workspace, store, executable, enginePID:childPID}));
     }
     const stoppedAt = Date.now();

@@ -118,6 +118,7 @@ export async function installSetupFixture(
         ...provider,
         auth_status: "ready",
         connection: {
+          allow_insecure_http: false,
           base_url: "https://provider.example.test/v1",
           api_key_env: "NAC_E2E_API_KEY",
         },

@@ -133,6 +133,17 @@ fn spawn_cancellation_listener(
 }
 
 pub async fn run_managed_worker(
+    _run_config: ManagedWorkerRunConfig,
+    _credential_receiver: ManagedWorkerCredentialReceiver,
+) -> Result<()> {
+    anyhow::bail!("retired worker execution is unavailable")
+}
+
+#[expect(
+    dead_code,
+    reason = "retired worker execution is unreachable until ALL-614 removes it"
+)]
+async fn run_retired_managed_worker(
     run_config: ManagedWorkerRunConfig,
     credential_receiver: ManagedWorkerCredentialReceiver,
 ) -> Result<()> {
