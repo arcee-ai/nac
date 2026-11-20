@@ -232,6 +232,26 @@ fn references(
     session: &str,
     start: u64,
     end: u64,
+    accept: impl FnMut(TerminalSelectionReference) -> Result<()>,
+) -> Result<()> {
+    references_for_target(
+        conn,
+        session,
+        TRANSCRIPT_EVENT_TARGET,
+        "SELECT event_json FROM session_events WHERE session_id=?1 AND event_target=?2 AND json_extract(event_json,'$.nac_transcript_message.idx')>=?3 AND json_extract(event_json,'$.nac_transcript_message.idx')<?4 AND json_extract(event_json,'$.nac_transcript_message.terminal_selection_attribution') IS NOT NULL ORDER BY id ASC",
+        start,
+        end,
+        accept,
+    )
+}
+
+fn references_for_target(
+    conn: &Connection,
+    session: &str,
+    target: &str,
+    query_sql: &str,
+    start: u64,
+    end: u64,
     mut accept: impl FnMut(TerminalSelectionReference) -> Result<()>,
 ) -> Result<()> {
     // Merge two ordered cursors. A per-annotation json_extract on a large
@@ -242,8 +262,8 @@ fn references(
     let mut snapshot_current = None;
     let mut snapshot_initialized = false;
     let mut snapshot_expected = start;
-    let mut query=conn.prepare("SELECT event_json FROM session_events WHERE session_id=?1 AND event_target=?2 AND json_extract(event_json,'$.nac_transcript_message.idx')>=?3 AND json_extract(event_json,'$.nac_transcript_message.idx')<?4 AND json_extract(event_json,'$.nac_transcript_message.terminal_selection_attribution') IS NOT NULL ORDER BY id ASC")?;
-    let mut rows = query.query(params![session, TRANSCRIPT_EVENT_TARGET, start, end])?;
+    let mut query = conn.prepare(query_sql)?;
+    let mut rows = query.query(params![session, target, start, end])?;
     let mut prior = None;
     while let Some(row) = rows.next()? {
         let json: String = row.get(0)?;
@@ -287,6 +307,28 @@ fn references(
         })?;
     }
     Ok(())
+}
+
+// The v54 migration runs before the transcript target is renamed. Keep its
+// attribution verification inside the same SQLite transaction and fixed to
+// the historical target; it must not open a second runtime connection.
+pub(super) fn v54_provenance(
+    conn: &Connection,
+    session: &str,
+    boundary: u64,
+    query_sql: &str,
+) -> Result<TerminalSelectionProvenance> {
+    let mut state = Accumulator::new();
+    references_for_target(
+        conn,
+        session,
+        "__orchestrator__",
+        query_sql,
+        0,
+        boundary,
+        |reference| state.push(reference),
+    )?;
+    Ok(state.finish())
 }
 coordinated_command! {
 pub fn load_terminal_selection_references(path:&Path,session:&str,start:u64,end:u64)->Result<Vec<TerminalSelectionReference>> {
