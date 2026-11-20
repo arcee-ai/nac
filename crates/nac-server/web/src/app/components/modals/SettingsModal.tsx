@@ -244,9 +244,7 @@ function SettingsForm({
   const [, setBaseUrl] = useState(initial.base_url);
   const [headers, setHeaders] = useState(headersToText(initial.extra_headers));
   const [compaction, setCompaction] = useState(
-    initial.compaction_threshold != null
-      ? String(initial.compaction_threshold)
-      : "",
+    initial.compaction_threshold != null ? String(initial.compaction_threshold) : "",
   );
   // Track whether the compaction value was auto-suggested (vs. user-entered)
   // so model changes don't clobber a manual value. The ref mirrors the state

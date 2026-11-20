@@ -93,18 +93,14 @@ test("selects a discovered Codex model and agrees with runtime input budget", as
   expect(created.ok()).toBeTruthy();
   const newId = (await created.json()).metadata.session_id;
   const configUrl = `${harness.baseUrl}/sessions/${newId}/config`;
-  expect((await (await request.get(configUrl)).json()).compaction_threshold).toBe(
-    332_500,
-  );
+  expect((await (await request.get(configUrl)).json()).compaction_threshold).toBe(332_500);
   expect((await (await request.get(configUrl)).json()).automatic_compaction).toBe(true);
   expect((await request.patch(configUrl, { data: { model: "gpt-6-astra" } })).ok()).toBeTruthy();
   const switchedConfig = await (await request.get(configUrl)).json();
   const astra = catalog.providers
     .find((provider: { id: string }) => provider.id === "chatgpt-codex-responses")
     .models.find((entry: { id: string }) => entry.id === "gpt-6-astra");
-  expect(switchedConfig.compaction_threshold).toBe(
-    astra.limits.automatic_compaction_threshold,
-  );
+  expect(switchedConfig.compaction_threshold).toBe(astra.limits.automatic_compaction_threshold);
   expect(switchedConfig.automatic_compaction).toBe(true);
   expect((await request.patch(configUrl, { data: { model: "gpt-6.1-sol" } })).ok()).toBeTruthy();
   await page.goto(`${harness.baseUrl}/#/session/${newId}/delegated`);
@@ -119,14 +115,10 @@ test("selects a discovered Codex model and agrees with runtime input budget", as
   await settings.getByRole("button", { name: "Save", exact: true }).click();
   await expect(settings).toBeHidden();
   await expect
-    .poll(
-      async () => (await (await request.get(configUrl)).json()).compaction_threshold,
-    )
+    .poll(async () => (await (await request.get(configUrl)).json()).compaction_threshold)
     .toBe(123_456);
   await page.reload();
-  expect((await (await request.get(configUrl)).json()).compaction_threshold).toBe(
-    123_456,
-  );
+  expect((await (await request.get(configUrl)).json()).compaction_threshold).toBe(123_456);
 
   const another = await request.post(`${harness.baseUrl}/sessions`, {
     data: {
@@ -159,7 +151,5 @@ test("selects a discovered Codex model and agrees with runtime input budget", as
   );
   expect((await (await request.get(configUrl)).json()).automatic_compaction).toBe(false);
   expect((await request.patch(configUrl, { data: { model: "gpt-6-astra" } })).ok()).toBeTruthy();
-  expect((await (await request.get(configUrl)).json()).compaction_threshold).toBe(
-    123_456,
-  );
+  expect((await (await request.get(configUrl)).json()).compaction_threshold).toBe(123_456);
 });

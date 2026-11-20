@@ -111,8 +111,7 @@ export function TaskLaunchModal({
                   api_key_env: model.api_key_env,
                   reasoning_effort: model.reasoning_effort,
                   extra_headers: model.extra_headers,
-                  compaction_threshold:
-                    model.compaction_threshold ?? null,
+                  compaction_threshold: model.compaction_threshold ?? null,
                 },
                 git_ref: gitRef.trim() || null,
                 default_ref: defaultRef ? null : branch.trim(),
