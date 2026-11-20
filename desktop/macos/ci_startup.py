@@ -374,7 +374,7 @@ def qualify(raw, product, tests, protocol, harness_sha, run, command, native_rep
     engine = raw / 'startup-engine'
     package = raw / 'startup-package'
     run([sys.executable, '-B', str(owner), 'prepare-engine', '--track', 'dev', '--output', str(engine)],
-        raw / 'startup-engine-build.log', 900, cwd=product)
+        raw / 'startup-engine-build.log', 1800, cwd=product)
     run([sys.executable, '-B', str(owner), 'normal', '--engine-receipt', str(engine / 'engine-build.json'),
          '--output', str(package)], raw / 'startup-package-build.log', 240, cwd=product)
     app, manifest = package / 'NAC.app', package / 'manifest.json'

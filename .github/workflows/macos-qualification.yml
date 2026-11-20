@@ -50,7 +50,7 @@ jobs:
     needs: resolve
     name: Exact supplier AppKit and WKWebView
     runs-on: ${{ needs.resolve.outputs.runner }}
-    timeout-minutes: 40
+    timeout-minutes: ${{ inputs.target == 'all-342-startup-macos26' && 70 || 40 }}
     env:
       DEVELOPER_DIR: ${{ needs.resolve.outputs.developer_directory }}
       CARGO_BUILD_JOBS: ${{ inputs.target == 'all-347-paths-macos26' && '2' || '4' }}

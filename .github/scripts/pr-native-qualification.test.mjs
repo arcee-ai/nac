@@ -127,7 +127,7 @@ test("native call binds this exact reviewed dispatch commit and keeps read-only 
   assert.equal(call.secrets, undefined);
   assert.equal(call.permissions, undefined);
   assert.equal(reuse.jobs.resolve["timeout-minutes"], 5);
-  assert.equal(reuse.jobs.native["timeout-minutes"], 40);
+  assert.equal(reuse.jobs.native["timeout-minutes"], "${{ inputs.target == 'all-342-startup-macos26' && 70 || 40 }}");
   assert.equal(stable.jobs["native-admission"]["timeout-minutes"], 5);
 });
 

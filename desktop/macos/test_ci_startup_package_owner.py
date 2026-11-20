@@ -9,6 +9,13 @@ from ci_startup import product_package_owner
 
 
 class StartupPackageOwnerTests(unittest.TestCase):
+    def test_startup_deadline_reserves_ten_minutes_of_hosted_cleanup(self):
+        from ci import qualification_deadline
+        started = 1234.0
+        self.assertEqual(qualification_deadline(started, 'startup'), started + 60 * 60)
+        self.assertEqual(qualification_deadline(started, 'paths'), started + 30 * 60)
+        self.assertEqual(qualification_deadline(started, None), started + 30 * 60)
+
     def test_exact_committed_writer_required(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
