@@ -143,6 +143,78 @@ fn v55_upgrade_preserves_rows_sequences_cascades_and_catalog() {
 }
 
 #[test]
+fn v55_marked_task_receipt_and_provenance_triggers_survive_v56() {
+    use crate::store::legacy_task_model::{decode, Owner};
+    use sha2::{Digest, Sha256};
+
+    let (root, path) = setup();
+    let request_id = "00000000-0000-4000-8000-000000000001";
+    let raw = serde_json::json!({
+        "request_id": request_id,
+        "project_id": "project",
+        "invoking_session_id": null,
+        "model_selection": {
+            "backend": "openai-responses", "model": "model", "base_url": "https://example.invalid",
+            "allow_insecure_http": false, "api_key_env": null, "reasoning_effort": null,
+            "extra_headers": null, "orchestrator_compaction_threshold": 8192
+        },
+        "git_ref": null, "default_ref": null, "title": "Task", "prompt": "retained user text"
+    })
+    .to_string();
+    let digest = format!("{:x}", Sha256::digest(raw.as_bytes()));
+    let conn = Connection::open(&path).unwrap();
+    conn.execute("INSERT INTO task_launches(request_id,project_id,session_id,request_json,source_json,workspace_path,phase,created_at,updated_at) VALUES(?1,'project','task',?2,'{}','/workspace','pinned','now','now')", params![request_id, raw]).unwrap();
+    conn.execute(
+        "INSERT INTO task_model_v54_provenance VALUES('task',?1,'',?2)",
+        params![request_id, digest],
+    )
+    .unwrap();
+    drop(conn);
+
+    initialize(&path).unwrap();
+    let conn = Connection::open(&path).unwrap();
+    let retained: String = conn
+        .query_row(
+            "SELECT request_json FROM task_launches WHERE request_id=?1",
+            [request_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(retained, raw);
+    let marker: String = conn
+        .query_row(
+            "SELECT evidence_sha256 FROM task_model_v54_provenance WHERE owner='task' AND key1=?1",
+            [request_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(marker, digest);
+    let (request, legacy): (crate::store::TaskLaunchRequest, bool) =
+        decode(&conn, Owner::Task, request_id, "", &retained).unwrap();
+    assert!(legacy);
+    assert_eq!(
+        request.model_selection.unwrap().compaction_threshold,
+        Some(8192)
+    );
+    conn.execute(
+        "UPDATE task_launches SET request_json=?2 WHERE request_id=?1",
+        params![request_id, format!("{retained} ")],
+    )
+    .unwrap();
+    assert_eq!(
+        conn.query_row::<i64, _, _>(
+            "SELECT count(*) FROM task_model_v54_provenance WHERE owner='task' AND key1=?1",
+            [request_id],
+            |row| row.get(0)
+        )
+        .unwrap(),
+        0
+    );
+    drop(conn);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn failure_rolls_back_catalog_and_rows_and_retry_works() {
     let (root, path) = setup();
     let before = Connection::open(&path).unwrap();
