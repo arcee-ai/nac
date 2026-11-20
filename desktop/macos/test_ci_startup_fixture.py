@@ -1,5 +1,6 @@
 """Private fixture tests: no app, engine, provider or XCTest is launched."""
 import json
+import os
 from contextlib import closing
 from pathlib import Path
 import sqlite3
@@ -128,7 +129,8 @@ class StartupFixtureTests(unittest.TestCase):
 
     def test_product_pin_rejects_legacy_before_package_or_resolver(self):
         from ci_startup_environment import PRODUCT as RESOLVER_PRODUCT
-        self.assertEqual(PRODUCT, '1638a9f36b4978bfe790859d0d42ce3bea96a5cf')
+        self.assertEqual(PRODUCT, os.environ.get('NAC_STARTUP_PRODUCT_SHA') or
+                         '1638a9f36b4978bfe790859d0d42ce3bea96a5cf')
         self.assertEqual(RESOLVER_PRODUCT, PRODUCT)
         with patch('ci_startup_fixture.require_checkout', side_effect=RuntimeError('legacy product rejected')) as checkout, \
                 patch('ci_startup_fixture.test_contract') as contract, \
