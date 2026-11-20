@@ -1492,9 +1492,8 @@ impl SessionManager {
         }
     }
 
-    /// Deletes a session and all related data (threads, episodes, worksets,
-    /// workset_items) from the store. If the session is currently active in
-    /// memory, any running task is gracefully cancelled before removal.
+    /// Deletes the session, its traditional children, and session-owned records.
+    /// Active work is cancelled and owned resources are cleaned up before removal.
     pub async fn delete_session(&self, session_id: &str) -> Result<()> {
         self.session_lifecycle().delete(session_id).await
     }
