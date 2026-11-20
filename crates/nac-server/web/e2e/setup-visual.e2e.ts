@@ -33,10 +33,8 @@ for (const width of [1440, 768, 390]) {
       const dialog = page.getByRole("dialog", { name: "New Project", exact: true });
       const launch = dialog.getByRole("button", { name: "Create Project", exact: true });
       const pickBaselineModel = async () => {
-        if (setupBaseline()) {
-          await dialog.getByRole("button", { name: "Select a model", exact: true }).click();
-          await page.getByRole("button").filter({ hasText: "GPT-5.6 Sol" }).first().click();
-        }
+        await dialog.getByRole("button", { name: "Select a model", exact: true }).click();
+        await page.getByRole("button").filter({ hasText: "GPT-5.6 Sol" }).first().click();
       };
       if (setupBaseline()) {
         await expect(
@@ -171,8 +169,10 @@ test("setup controls remain reachable at actual 200 percent tab zoom", async ({
         await page.getByRole("button", { name: "Get Started", exact: true }).click();
         const dialog = page.getByRole("dialog", { name: "New Project", exact: true });
         const launch = dialog.getByRole("button", { name: "Create Project", exact: true });
-        await dialog.getByRole("button", { name: "Select a model", exact: true }).click();
-        await page.getByRole("button").filter({ hasText: "GPT-5.6 Sol" }).first().click();
+        if (setupBaseline()) {
+          await dialog.getByRole("button", { name: "Select a model", exact: true }).click();
+          await page.getByRole("button").filter({ hasText: "GPT-5.6 Sol" }).first().click();
+        }
         await expect(launch).toBeEnabled();
         await expect(launch).toBeInViewport();
         if (!setupBaseline()) {
