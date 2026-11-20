@@ -256,10 +256,10 @@ async fn maintenance_lease_contention_cannot_wait_for_settlement_on_the_executor
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn async_thread_event_waits_for_commit_before_publication_without_blocking_timers() {
+async fn async_session_event_waits_for_commit_before_publication_without_blocking_timers() {
     let path = path();
     let owner = seed(&path).await;
-    let bus = crate::events::SessionEventBus::with_thread_event_store(
+    let bus = crate::events::SessionEventBus::with_session_event_store(
         Some("session".into()),
         path.clone(),
     );
@@ -294,7 +294,7 @@ async fn async_thread_event_waits_for_commit_before_publication_without_blocking
     let published = receiver.recv().await.unwrap();
     assert_eq!(published.sequence_id, 1);
     let events = owner
-        .load_all_thread_events("session".into(), 10)
+        .load_all_session_events("session".into(), 10)
         .await
         .unwrap();
     assert_eq!(events.len(), 1);

@@ -36,7 +36,7 @@ async fn direct(home: &TestHome) -> Agent {
                 store_path: Some(home.path.join("store.db")),
             },
             model: model_options(),
-            orchestrator_compaction_threshold: Some(32_000),
+            compaction_threshold: Some(32_000),
             sandbox: Default::default(),
             ssh: Default::default(),
         },

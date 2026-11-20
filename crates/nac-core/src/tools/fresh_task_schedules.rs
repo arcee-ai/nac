@@ -304,8 +304,8 @@ impl NativeTool for ControlFreshTaskScheduleTool {
                                 session.reasoning_effort.map(|v| v.as_str().to_owned())
                             }),
                             extra_headers: Some(session.extra_headers),
-                            orchestrator_compaction_threshold: session
-                                .orchestrator_compaction_threshold,
+                            compaction_threshold: session
+                                .compaction_threshold,
                         });
                     }
                     let target =

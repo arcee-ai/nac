@@ -20,7 +20,7 @@ async fn live_observed_managed_terminal_excludes_config_eviction_and_keeps_upgra
         &app,
         "PATCH",
         "/sessions/session/config",
-        json!({"orchestrator_compaction_threshold":1}),
+        json!({"compaction_threshold":1}),
     )
     .await;
     let persisted_version = fixture

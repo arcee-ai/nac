@@ -61,9 +61,9 @@ async fn resume_config_restores_messages_without_changing_process_cwd() {
     sessions::create_session(&store_path, &snapshot).unwrap();
     let (source, policy) =
         crate::agent::direct_compaction_checkpoint_digests_for_test(&snapshot.messages, 2);
-    crate::store::orchestrator_compaction::append_orchestrator_compaction_checkpoint(
+    crate::store::session_compaction::append_session_compaction_checkpoint(
         &store_path,
-        &crate::store::orchestrator_compaction::NewOrchestratorCompactionCheckpoint {
+        &crate::store::session_compaction::NewSessionCompactionCheckpoint {
             session_id: snapshot.session_id.clone(),
             previous_checkpoint_id: None,
             summary:
@@ -455,7 +455,7 @@ async fn create_remote_session_with_ssh_host_skips_local_checks_and_persists_tar
                 store_path: Some(store_path.clone()),
             },
             model,
-            orchestrator_compaction_threshold: None,
+            compaction_threshold: None,
             sandbox: SandboxOptions::default(),
             ssh: SshOptions {
                 host: Some("build-box".to_string()),
@@ -548,7 +548,7 @@ async fn ssh_fresh_run_resume_base_and_resume_control_socket_use_local_config_cw
 
             store: StoreOptions::default(),
             model: test_openai_model_options(),
-            orchestrator_compaction_threshold: None,
+            compaction_threshold: None,
             sandbox: SandboxOptions::default(),
             ssh: SshOptions {
                 host: Some("build-box".to_string()),
@@ -630,7 +630,7 @@ async fn invalid_ssh_sandbox_configs_do_not_initialize_store() {
                 store_path: Some(run_store_path.clone()),
             },
             model: test_openai_model_options(),
-            orchestrator_compaction_threshold: None,
+            compaction_threshold: None,
             sandbox: SandboxOptions {
                 sandbox: true,
                 ..SandboxOptions::default()
@@ -679,7 +679,7 @@ async fn create_remote_session_defaults_blank_cwd_to_home_and_rejects_sandbox_co
             store_path: Some(store_path.clone()),
         },
         model: test_openai_model_options(),
-        orchestrator_compaction_threshold: None,
+        compaction_threshold: None,
         sandbox,
         ssh: SshOptions {
             host: Some("build-box".to_string()),

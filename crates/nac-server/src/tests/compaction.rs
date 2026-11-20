@@ -531,10 +531,10 @@ async fn compact_route_returns_success_without_run_or_snapshot_side_effects() {
             matches!(
                 envelope.event,
                 SessionEvent::Agent {
-                    event: AgentEvent::OrchestratorCompactionStarted { .. }
-                        | AgentEvent::OrchestratorCompactionCompleted { .. }
-                        | AgentEvent::OrchestratorCompactionSkipped { .. }
-                        | AgentEvent::OrchestratorCompactionFailed { .. }
+                    event: AgentEvent::CompactionStarted { .. }
+                        | AgentEvent::CompactionCompleted { .. }
+                        | AgentEvent::CompactionSkipped { .. }
+                        | AgentEvent::CompactionFailed { .. }
                 }
             )
         })
@@ -545,13 +545,13 @@ async fn compact_route_returns_success_without_run_or_snapshot_side_effects() {
     assert!(matches!(
         lifecycle[0].event,
         SessionEvent::Agent {
-            event: AgentEvent::OrchestratorCompactionStarted { .. }
+            event: AgentEvent::CompactionStarted { .. }
         }
     ));
     assert!(matches!(
         lifecycle[1].event,
         SessionEvent::Agent {
-            event: AgentEvent::OrchestratorCompactionCompleted { .. }
+            event: AgentEvent::CompactionCompleted { .. }
         }
     ));
 
@@ -1175,7 +1175,7 @@ async fn owned_current_thread_manual_compaction_acknowledges_checkpoint() {
     let conn = rusqlite::Connection::open(root.join("store.db")).unwrap();
     let count: i64 = conn
         .query_row(
-            "SELECT COUNT(*) FROM orchestrator_compaction_checkpoints WHERE session_id = 'session'",
+            "SELECT COUNT(*) FROM session_compaction_checkpoints WHERE session_id = 'session'",
             [],
             |row| row.get(0),
         )

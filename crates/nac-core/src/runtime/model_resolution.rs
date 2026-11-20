@@ -53,7 +53,7 @@ pub fn effective_model_settings(
 /// lower provider-derived automatic threshold. `Some(0)` explicitly
 /// disables compaction. Config.toml `[compaction].threshold_tokens` is no
 /// longer consulted — the section is silently ignored if present.
-pub fn effective_orchestrator_compaction_threshold(
+pub fn effective_compaction_threshold(
     requested: Option<u64>,
     context_window: u64,
 ) -> Result<Option<u64>> {

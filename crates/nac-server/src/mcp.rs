@@ -304,7 +304,7 @@ impl NacMcpService {
             reasoning_effort: field(params.reasoning_effort),
             api_key_env: field(params.api_key_env),
             extra_headers,
-            orchestrator_compaction_threshold: params
+            compaction_threshold: params
                 .compaction_threshold
                 .map(RequestField::Value)
                 .unwrap_or(RequestField::Omitted),
@@ -543,7 +543,7 @@ impl NacMcpService {
             reasoning_effort: field(params.reasoning_effort),
             api_key_env: RequestField::Omitted,
             extra_headers: RequestField::Omitted,
-            orchestrator_compaction_threshold: RequestField::Omitted,
+            compaction_threshold: RequestField::Omitted,
         };
         match self
             .operations

@@ -589,7 +589,7 @@ async fn finish_run_persists_token_usage() {
         cache_read_tokens: 80,
         cache_write_tokens: 15,
         reasoning_tokens: 0,
-        orchestrator_context_tokens: 715,
+        context_tokens: 715,
         cost: crate::model::TokenCostMicros::default(),
     };
     assert!(
@@ -611,7 +611,7 @@ async fn finish_run_persists_token_usage() {
     assert_eq!(persisted.output_tokens, 120);
     assert_eq!(persisted.cache_read_tokens, 80);
     assert_eq!(persisted.cache_write_tokens, 15);
-    assert_eq!(persisted.orchestrator_context_tokens, 715);
+    assert_eq!(persisted.context_tokens, 715);
 
     // Frontend snapshot should expose the usage
     let frontend = parts.service.frontend_snapshot().await.unwrap();
@@ -621,7 +621,7 @@ async fn finish_run_persists_token_usage() {
             .last_token_usage
             .as_ref()
             .unwrap()
-            .orchestrator_context_tokens,
+            .context_tokens,
         715
     );
     assert_eq!(
@@ -699,7 +699,7 @@ async fn failed_run_without_visible_response_round_trips_token_usage() {
         cache_read_tokens: 80,
         cache_write_tokens: 15,
         reasoning_tokens: 0,
-        orchestrator_context_tokens: 715,
+        context_tokens: 715,
         cost: crate::model::TokenCostMicros::default(),
     };
     assert!(
@@ -727,7 +727,7 @@ async fn failed_run_without_visible_response_round_trips_token_usage() {
     assert_eq!(persisted.output_tokens, 120);
     assert_eq!(persisted.cache_read_tokens, 80);
     assert_eq!(persisted.cache_write_tokens, 15);
-    assert_eq!(persisted.orchestrator_context_tokens, 715);
+    assert_eq!(persisted.context_tokens, 715);
 
     let frontend = parts.service.frontend_snapshot().await.unwrap();
     assert!(frontend.response_timing.token_usages.unwrap().is_empty());
@@ -766,7 +766,7 @@ fn successful_response_replaces_failed_run_context_gauge_after_round_trip() {
         output_tokens: 120,
         cache_read_tokens: 80,
         cache_write_tokens: 15,
-        orchestrator_context_tokens: 715,
+        context_tokens: 715,
         cost: crate::model::TokenCostMicros {
             input: 1_000,
             output: 480,
@@ -782,7 +782,7 @@ fn successful_response_replaces_failed_run_context_gauge_after_round_trip() {
         output_tokens: 200,
         cache_read_tokens: 100,
         cache_write_tokens: 0,
-        orchestrator_context_tokens: 1_000,
+        context_tokens: 1_000,
         cost: crate::model::TokenCostMicros {
             input: 1_400,
             output: 800,
@@ -813,7 +813,7 @@ fn successful_response_replaces_failed_run_context_gauge_after_round_trip() {
     assert_eq!(unattributed.cache_read_tokens, 80);
     assert_eq!(unattributed.cache_write_tokens, 15);
     assert_eq!(unattributed.cost.total, 1_480);
-    assert_eq!(unattributed.orchestrator_context_tokens, 0);
+    assert_eq!(unattributed.context_tokens, 0);
 
     let timing = ResponseTimingSnapshot::from(&loaded);
     assert_eq!(
@@ -821,7 +821,7 @@ fn successful_response_replaces_failed_run_context_gauge_after_round_trip() {
             .last_token_usage
             .as_ref()
             .unwrap()
-            .orchestrator_context_tokens,
+            .context_tokens,
         1_000
     );
     let cumulative = timing.cumulative_token_usage.unwrap();
@@ -830,7 +830,7 @@ fn successful_response_replaces_failed_run_context_gauge_after_round_trip() {
     assert_eq!(cumulative.cache_read_tokens, 180);
     assert_eq!(cumulative.cache_write_tokens, 15);
     assert_eq!(cumulative.cost.total, 3_680);
-    assert_eq!(cumulative.orchestrator_context_tokens, 1_000);
+    assert_eq!(cumulative.context_tokens, 1_000);
 
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
@@ -952,7 +952,7 @@ async fn failed_run_normalizes_the_dangling_tool_turn_for_the_next_run() {
     connection
         .execute_batch(
             "CREATE TRIGGER fail_tool_log_appends
-                 BEFORE INSERT ON thread_events
+                 BEFORE INSERT ON session_events
                  WHEN NEW.event_json LIKE '%\"kind\":\"tool\"%'
                  BEGIN
                      SELECT RAISE(ABORT, 'injected tool batch log failure');

@@ -650,7 +650,7 @@ fn native_and_scheduled_reservations_reject_shared_request_identity_in_both_orde
                         api_key_env: None,
                         reasoning_effort: None,
                         extra_headers: None,
-                        orchestrator_compaction_threshold: None,
+                        compaction_threshold: None,
                     }),
                     pinned_commit: None,
                     default_ref: None,

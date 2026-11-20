@@ -210,7 +210,7 @@ async fn arcee_inference_sends_expected_contract_and_parses_chat_response() {
     assert_eq!(usage.input_tokens, 8);
     assert_eq!(usage.cache_read_tokens, 3);
     assert_eq!(usage.output_tokens, 7);
-    assert_eq!(usage.orchestrator_context_tokens, 18);
+    assert_eq!(usage.context_tokens, 18);
 
     assert_eq!(requests.len(), 1);
     let request = &requests[0];

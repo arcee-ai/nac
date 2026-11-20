@@ -200,13 +200,13 @@ pub(super) fn test_agent_with_compaction_threshold(
     client: ModelClient,
     store_path: PathBuf,
     session_id: Option<String>,
-    orchestrator_compaction_threshold: Option<u64>,
+    compaction_threshold: Option<u64>,
 ) -> Agent {
     build_test_agent(
         client,
         store_path,
         session_id,
-        orchestrator_compaction_threshold,
+        compaction_threshold,
         None,
     )
 }
@@ -224,7 +224,7 @@ pub(super) fn build_test_agent(
     client: ModelClient,
     store_path: PathBuf,
     session_id: Option<String>,
-    orchestrator_compaction_threshold: Option<u64>,
+    compaction_threshold: Option<u64>,
     skills: Option<Arc<SkillRegistry>>,
 ) -> Agent {
     Agent::with_config(
@@ -232,7 +232,7 @@ pub(super) fn build_test_agent(
         AgentConfig {
             store_path,
             session_id,
-            orchestrator_compaction_threshold,
+            compaction_threshold,
             initial_messages: Vec::new(),
             event_sink: EventSink::none(),
             workspace_cwd: PathBuf::from("/repo"),
@@ -388,7 +388,7 @@ fn has_sandbox_reflects_the_agent_execution_backend() {
         AgentConfig {
             store_path: store_path.clone(),
             session_id: Some("has-sandbox-sandboxed".to_string()),
-            orchestrator_compaction_threshold: None,
+            compaction_threshold: None,
             initial_messages: Vec::new(),
             event_sink: EventSink::none(),
             workspace_cwd: PathBuf::from("/repo"),
@@ -538,7 +538,7 @@ async fn sandbox_container_destruction_preserves_worktree_until_durable_delete()
         AgentConfig {
             store_path: store_path.clone(),
             session_id: Some("destroy-preserves-worktree".to_string()),
-            orchestrator_compaction_threshold: None,
+            compaction_threshold: None,
             initial_messages: Vec::new(),
             event_sink: EventSink::none(),
             workspace_cwd: worktree.path.clone(),
@@ -719,7 +719,7 @@ pub(super) fn test_compaction_service(
     agent.last_usage = Some(crate::model::TokenUsage {
         input_tokens: 91,
         output_tokens: 7,
-        orchestrator_context_tokens: 123,
+        context_tokens: 123,
         ..crate::model::TokenUsage::default()
     });
     let mut snapshot = sessions::new_snapshot(
@@ -741,7 +741,7 @@ pub(super) fn test_compaction_service(
     snapshot.token_usages = vec![Some(crate::model::TokenUsage {
         input_tokens: 11,
         output_tokens: 2,
-        orchestrator_context_tokens: 13,
+        context_tokens: 13,
         ..crate::model::TokenUsage::default()
     })];
     sessions::create_session(&store_path, &snapshot).unwrap();

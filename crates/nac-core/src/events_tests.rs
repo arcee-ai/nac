@@ -185,20 +185,20 @@ fn test_compaction_id() -> Uuid {
 fn test_compaction_events() -> Vec<AgentEvent> {
     let compaction_id = test_compaction_id();
     vec![
-        AgentEvent::OrchestratorCompactionStarted {
+        AgentEvent::CompactionStarted {
             compaction_id,
             reason: CompactionReason::Auto,
         },
-        AgentEvent::OrchestratorCompactionCompleted {
+        AgentEvent::CompactionCompleted {
             compaction_id,
             reason: CompactionReason::Manual,
         },
-        AgentEvent::OrchestratorCompactionSkipped {
+        AgentEvent::CompactionSkipped {
             compaction_id,
             reason: CompactionReason::Auto,
             cause: CompactionSkipReason::NoEligibleBoundary,
         },
-        AgentEvent::OrchestratorCompactionFailed {
+        AgentEvent::CompactionFailed {
             compaction_id,
             reason: CompactionReason::Manual,
             failure: CompactionFailure::CheckpointPersistenceFailed,
@@ -279,7 +279,7 @@ fn compaction_agent_event_json_is_exact_and_nested_under_agent() {
         );
     }
 
-    let event = AgentEvent::OrchestratorCompactionStarted {
+    let event = AgentEvent::CompactionStarted {
         compaction_id: test_compaction_id(),
         reason: CompactionReason::Manual,
     };
@@ -342,11 +342,11 @@ async fn compaction_event_sink_supports_manual_and_automatic_context() {
         Some(automatic_client_id.clone()),
     );
 
-    manual_sink.emit(AgentEvent::OrchestratorCompactionStarted {
+    manual_sink.emit(AgentEvent::CompactionStarted {
         compaction_id: test_compaction_id(),
         reason: CompactionReason::Manual,
     });
-    automatic_sink.emit(AgentEvent::OrchestratorCompactionCompleted {
+    automatic_sink.emit(AgentEvent::CompactionCompleted {
         compaction_id: test_compaction_id(),
         reason: CompactionReason::Auto,
     });
@@ -357,7 +357,7 @@ async fn compaction_event_sink_supports_manual_and_automatic_context() {
     assert!(matches!(
         manual.event,
         SessionEvent::Agent {
-            event: AgentEvent::OrchestratorCompactionStarted {
+            event: AgentEvent::CompactionStarted {
                 reason: CompactionReason::Manual,
                 ..
             }
@@ -370,7 +370,7 @@ async fn compaction_event_sink_supports_manual_and_automatic_context() {
     assert!(matches!(
         automatic.event,
         SessionEvent::Agent {
-            event: AgentEvent::OrchestratorCompactionCompleted {
+            event: AgentEvent::CompactionCompleted {
                 reason: CompactionReason::Auto,
                 ..
             }
@@ -407,25 +407,25 @@ fn compaction_events_are_bounded_and_participate_in_replay() {
 }
 
 #[test]
-fn compaction_events_are_replayed_but_never_persisted_as_thread_events() {
+fn compaction_events_are_replayed_but_never_persisted_as_session_events() {
     let path = std::env::temp_dir()
         .join(format!("nac_compaction_events_{}", Uuid::new_v4()))
         .join("store.db");
     crate::store::initialize(&path).unwrap();
     crate::store::insert_test_session(&path, "session-compaction-events");
-    let bus = SessionEventBus::with_thread_event_store(
+    let bus = SessionEventBus::with_session_event_store(
         Some("session-compaction-events".to_string()),
         path.clone(),
     );
     let events = test_compaction_events();
 
     for event in &events {
-        assert_eq!(persisted_thread_event_name(event), None);
+        assert_eq!(persisted_session_event_name(event), None);
         bus.emit_agent(event.clone()).unwrap();
     }
 
     assert!(
-        crate::store::load_all_thread_events(&path, "session-compaction-events", events.len())
+        crate::store::load_all_session_events(&path, "session-compaction-events", events.len())
             .unwrap()
             .is_empty()
     );
@@ -939,7 +939,7 @@ fn external_tool_telemetry_is_fail_closed_before_channel_and_database() {
         .join("store.db");
     crate::store::initialize(&path).unwrap();
     crate::store::insert_test_session(&path, "session-safe-events");
-    let bus = SessionEventBus::with_thread_event_store(
+    let bus = SessionEventBus::with_session_event_store(
         Some("session-safe-events".to_string()),
         path.clone(),
     );
@@ -1025,7 +1025,7 @@ fn external_tool_telemetry_is_fail_closed_before_channel_and_database() {
     assert!(args_preview.contains("\"content_chars\":12"));
     assert!(!args_preview.contains("CANARY"));
 
-    let records = crate::store::load_all_thread_events(&path, "session-safe-events", 20).unwrap();
+    let records = crate::store::load_all_session_events(&path, "session-safe-events", 20).unwrap();
     assert_eq!(records[PRIMARY_TOOL_EVENT_TARGET].len(), 2);
     let serialized = records[PRIMARY_TOOL_EVENT_TARGET]
         .iter()
@@ -1051,7 +1051,7 @@ fn concurrent_emitters_linearize_persistence_replay_and_broadcast() {
     crate::store::initialize(&path).unwrap();
     crate::store::insert_test_session(&path, "session-order");
     let bus =
-        SessionEventBus::with_thread_event_store(Some("session-order".to_string()), path.clone());
+        SessionEventBus::with_session_event_store(Some("session-order".to_string()), path.clone());
     let mut receiver = bus.subscribe();
     let barrier = Arc::new(std::sync::Barrier::new(THREADS));
     let emitted = Arc::new(StdMutex::new(Vec::new()));
@@ -1095,7 +1095,7 @@ fn concurrent_emitters_linearize_persistence_replay_and_broadcast() {
         .iter()
         .cloned()
         .collect::<std::collections::HashMap<_, _>>();
-    let records = crate::store::load_all_thread_events(&path, "session-order", total).unwrap();
+    let records = crate::store::load_all_session_events(&path, "session-order", total).unwrap();
     let persisted_ids = records[PRIMARY_TOOL_EVENT_TARGET]
         .iter()
         .map(|record| {
@@ -1111,12 +1111,12 @@ fn concurrent_emitters_linearize_persistence_replay_and_broadcast() {
 }
 
 #[test]
-fn failed_thread_event_append_does_not_publish_or_advance_boundary() {
+fn failed_session_event_append_does_not_publish_or_advance_boundary() {
     let path = std::env::temp_dir()
         .join(format!("nac_event_writer_failure_{}", Uuid::new_v4()))
         .join("store.db");
     crate::store::initialize(&path).unwrap();
-    let bus = SessionEventBus::with_thread_event_store(
+    let bus = SessionEventBus::with_session_event_store(
         Some("session-writer-failure".to_string()),
         path.clone(),
     );
@@ -1129,8 +1129,8 @@ fn failed_thread_event_append_does_not_publish_or_advance_boundary() {
     assert!(receiver.try_recv().is_err());
     assert!(bus.recent_events(None, 10).1.is_empty());
     let (boundary, records) = bus
-        .thread_event_boundary(|| {
-            crate::store::load_all_thread_events(&path, "session-writer-failure", 10)
+        .session_event_boundary(|| {
+            crate::store::load_all_session_events(&path, "session-writer-failure", 10)
         })
         .unwrap();
     assert_eq!(boundary.sequence_id, 0);
@@ -1154,8 +1154,8 @@ fn failed_thread_event_append_does_not_publish_or_advance_boundary() {
         })
     );
     let (boundary, records) = bus
-        .thread_event_boundary(|| {
-            crate::store::load_all_thread_events(&path, "session-writer-failure", 10)
+        .session_event_boundary(|| {
+            crate::store::load_all_session_events(&path, "session-writer-failure", 10)
         })
         .unwrap();
     assert_eq!(boundary.sequence_id, 2);
@@ -1171,14 +1171,14 @@ fn failed_thread_event_append_does_not_publish_or_advance_boundary() {
 }
 
 #[test]
-fn thread_event_boundary_blocks_concurrent_emit() {
+fn session_event_boundary_blocks_concurrent_emit() {
     let bus = SessionEventBus::new(Some("session-boundary".to_string()));
     let query_bus = bus.clone();
     let (entered_sender, entered_receiver) = std::sync::mpsc::channel();
     let (release_sender, release_receiver) = std::sync::mpsc::channel();
     let query = std::thread::spawn(move || {
         query_bus
-            .thread_event_boundary(|| {
+            .session_event_boundary(|| {
                 entered_sender.send(()).unwrap();
                 release_receiver.recv().unwrap();
                 Ok(())
@@ -1259,7 +1259,7 @@ fn historical_direct_tool_event_decodes_without_worker_identity() {
     assert!(matches!(event, AgentEvent::ToolCallStarted { ref call_id, .. } if call_id == "old"));
     let sanitized = sanitize_external_agent_event(event).unwrap();
     assert_eq!(
-        persisted_thread_event_name(&sanitized),
+        persisted_session_event_name(&sanitized),
         Some(PRIMARY_TOOL_EVENT_TARGET)
     );
     assert!(!serde_json::to_string(&sanitized)
@@ -1278,7 +1278,7 @@ fn primary_tool_events_are_persisted_independently_of_tool_name() {
             *event_name = name.to_owned();
         }
         assert_eq!(
-            persisted_thread_event_name(&event),
+            persisted_session_event_name(&event),
             Some(PRIMARY_TOOL_EVENT_TARGET)
         );
     }

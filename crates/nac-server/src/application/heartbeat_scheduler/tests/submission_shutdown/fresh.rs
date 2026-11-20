@@ -117,7 +117,7 @@ async fn observe_fresh(boundary: Boundary, git: bool) -> Result<()> {
                 api_key_env: Some("OPENAI_API_KEY".into()),
                 reasoning_effort: None,
                 extra_headers: None,
-                orchestrator_compaction_threshold: None,
+                compaction_threshold: None,
             }),
             pinned_commit: None,
             default_ref: git.then(|| "refs/heads/dev".into()),

@@ -4,8 +4,8 @@ use super::{assistant, candidate, state, temp_store_path, user};
 use sha2::{Digest, Sha256};
 
 use crate::store;
-use crate::store::orchestrator_compaction::{
-    append_orchestrator_compaction_checkpoint, NewOrchestratorCompactionCheckpoint,
+use crate::store::session_compaction::{
+    append_session_compaction_checkpoint, NewSessionCompactionCheckpoint,
 };
 use crate::types::{FunctionCall, Message, ToolCall};
 
@@ -63,9 +63,9 @@ fn repeated_candidate_uses_previous_summary_and_only_newly_aged_messages() {
         user("current"),
     ];
     let (source, policy) = checkpoint_digests(&messages, 3);
-    let first = append_orchestrator_compaction_checkpoint(
+    let first = append_session_compaction_checkpoint(
         &path,
-        &NewOrchestratorCompactionCheckpoint {
+        &NewSessionCompactionCheckpoint {
             session_id: "session".to_string(),
             previous_checkpoint_id: None,
             summary: installed_summary("prior summary"),
@@ -108,9 +108,9 @@ fn repeated_candidate_uses_previous_summary_and_only_newly_aged_messages() {
     store::initialize(&end_path).unwrap();
     store::insert_test_session(&end_path, "session");
     let (end_source, end_policy) = checkpoint_digests(&end_messages, 1);
-    let end_parent = append_orchestrator_compaction_checkpoint(
+    let end_parent = append_session_compaction_checkpoint(
         &end_path,
-        &NewOrchestratorCompactionCheckpoint {
+        &NewSessionCompactionCheckpoint {
             session_id: "session".to_string(),
             previous_checkpoint_id: None,
             summary: installed_summary("parent summary"),
@@ -190,9 +190,9 @@ fn historical_orchestrator_digest_does_not_validate_as_direct() {
     let messages = vec![user("old"), assistant("answer"), user("current")];
     let (source, direct_policy) = checkpoint_digests(&messages, 2);
     assert_ne!(historical_policy, direct_policy);
-    append_orchestrator_compaction_checkpoint(
+    append_session_compaction_checkpoint(
         &path,
-        &NewOrchestratorCompactionCheckpoint {
+        &NewSessionCompactionCheckpoint {
             session_id: "session".to_string(),
             previous_checkpoint_id: None,
             summary: installed_summary("old policy summary"),
@@ -221,9 +221,9 @@ fn stale_policy_version_checkpoint_is_invalidated() {
     store::insert_test_session(&path, "session");
     let messages = vec![user("old"), assistant("answer"), user("current")];
     let (source, policy) = checkpoint_digests(&messages, 2);
-    append_orchestrator_compaction_checkpoint(
+    append_session_compaction_checkpoint(
         &path,
-        &NewOrchestratorCompactionCheckpoint {
+        &NewSessionCompactionCheckpoint {
             session_id: "session".to_string(),
             previous_checkpoint_id: None,
             summary: installed_summary("stale policy summary"),

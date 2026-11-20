@@ -141,7 +141,7 @@ pub struct RawSessionConfig {
     #[cfg_attr(feature = "openapi", schema(required))]
     pub extra_headers_json: Option<String>,
     #[cfg_attr(feature = "openapi", schema(required))]
-    pub orchestrator_compaction_threshold: Option<u64>,
+    pub compaction_threshold: Option<u64>,
     /// New sessions may follow the locally resolved model's automatic budget.
     /// Older sessions retain their saved threshold as an explicit setting.
     #[serde(default)]
@@ -219,7 +219,7 @@ pub struct SessionSnapshot {
     pub extra_headers: BTreeMap<String, String>,
     /// Absolute compaction threshold captured for this orchestrator session.
     /// `None` disables new checkpoint generation; valid stored checkpoints still project.
-    pub orchestrator_compaction_threshold: Option<u64>,
+    pub compaction_threshold: Option<u64>,
     pub automatic_compaction: bool,
     /// Monotonic revision for optimistic session-configuration updates.
     pub config_version: i64,

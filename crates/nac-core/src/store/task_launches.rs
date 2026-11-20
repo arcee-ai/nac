@@ -16,7 +16,7 @@ pub struct TaskModelSelection {
     pub api_key_env: Option<String>,
     pub reasoning_effort: Option<String>,
     pub extra_headers: Option<std::collections::BTreeMap<String, String>>,
-    pub orchestrator_compaction_threshold: Option<u64>,
+    pub compaction_threshold: Option<u64>,
 }
 
 impl TaskModelSelection {

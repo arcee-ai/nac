@@ -133,7 +133,7 @@ impl CompactionLifecycle {
         compaction_id: Uuid,
         reason: CompactionReason,
     ) -> Self {
-        event_sink.emit(AgentEvent::OrchestratorCompactionStarted {
+        event_sink.emit(AgentEvent::CompactionStarted {
             compaction_id,
             reason,
         });
@@ -160,7 +160,7 @@ impl CompactionLifecycle {
         };
         lifecycle
             .event_sink
-            .emit_lifecycle_async(AgentEvent::OrchestratorCompactionStarted {
+            .emit_lifecycle_async(AgentEvent::CompactionStarted {
                 compaction_id,
                 reason,
             })
@@ -180,13 +180,13 @@ impl CompactionLifecycle {
             // Acknowledged checkpoint activation is the compaction outcome even
             // if its caller is cancelled while publishing follow-up accounting.
             Some(CompactionResult::Compacted { .. }) => {
-                AgentEvent::OrchestratorCompactionCompleted {
+                AgentEvent::CompactionCompleted {
                     compaction_id: self.compaction_id,
                     reason: self.reason,
                 }
             }
             Some(CompactionResult::Unchanged { reason: cause, .. }) => {
-                AgentEvent::OrchestratorCompactionSkipped {
+                AgentEvent::CompactionSkipped {
                     compaction_id: self.compaction_id,
                     reason: self.reason,
                     cause,
@@ -194,13 +194,13 @@ impl CompactionLifecycle {
             }
             None => match result {
                 Ok(CompactionResult::Compacted { .. }) => {
-                    AgentEvent::OrchestratorCompactionCompleted {
+                    AgentEvent::CompactionCompleted {
                         compaction_id: self.compaction_id,
                         reason: self.reason,
                     }
                 }
                 Ok(CompactionResult::Unchanged { reason: cause, .. }) => {
-                    AgentEvent::OrchestratorCompactionSkipped {
+                    AgentEvent::CompactionSkipped {
                         compaction_id: self.compaction_id,
                         reason: self.reason,
                         cause: *cause,
@@ -214,7 +214,7 @@ impl CompactionLifecycle {
                             .unwrap_or(true),
                         "compaction lifecycle and result IDs differ"
                     );
-                    AgentEvent::OrchestratorCompactionFailed {
+                    AgentEvent::CompactionFailed {
                         compaction_id: self.compaction_id,
                         reason: self.reason,
                         failure: error.failure().unwrap_or(CompactionFailure::Cancelled),
@@ -233,19 +233,19 @@ impl Drop for CompactionLifecycle {
             self.terminal_selected = true;
             let event = match self.commit.result() {
                 Some(CompactionResult::Compacted { .. }) => {
-                    AgentEvent::OrchestratorCompactionCompleted {
+                    AgentEvent::CompactionCompleted {
                         compaction_id: self.compaction_id,
                         reason: self.reason,
                     }
                 }
                 Some(CompactionResult::Unchanged { reason: cause, .. }) => {
-                    AgentEvent::OrchestratorCompactionSkipped {
+                    AgentEvent::CompactionSkipped {
                         compaction_id: self.compaction_id,
                         reason: self.reason,
                         cause,
                     }
                 }
-                None => AgentEvent::OrchestratorCompactionFailed {
+                None => AgentEvent::CompactionFailed {
                     compaction_id: self.compaction_id,
                     reason: self.reason,
                     failure: CompactionFailure::Cancelled,

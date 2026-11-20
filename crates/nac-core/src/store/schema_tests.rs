@@ -102,7 +102,7 @@ fn insert_raw_checkpoint(
     new_estimate: i64,
 ) -> rusqlite::Result<usize> {
     conn.execute(
-        "INSERT INTO orchestrator_compaction_checkpoints
+        "INSERT INTO session_compaction_checkpoints
              (session_id, summary, tail_start_message_index,
               source_prefix_sha256, system_policy_sha256, prompt_policy_version,
               old_context_estimate, summary_prompt_tokens,
@@ -174,7 +174,7 @@ fn assert_current_schema(conn: &Connection) {
         "permission_approval_revision",
         "permission_reviewer",
         "allow_insecure_http",
-        "orchestrator_compaction_threshold",
+        "compaction_threshold",
         "visible_message_count",
         "last_user_prompt",
         "ssh_port",
@@ -202,11 +202,11 @@ fn assert_current_schema(conn: &Connection) {
         .iter()
         .any(|column| column == "light_model_json"));
     assert_eq!(
-        table_columns(conn, "thread_events"),
+        table_columns(conn, "session_events"),
         [
             "id",
             "session_id",
-            "thread_name",
+            "event_target",
             "event_json",
             "created_at"
         ]
@@ -327,7 +327,7 @@ fn assert_current_schema(conn: &Connection) {
         ["session_id", "pidfile", "created_at"]
     );
     for table in [
-        "thread_events",
+        "session_events",
         "session_inbox",
         "session_goals",
         "session_goal_outcomes",
@@ -337,7 +337,7 @@ fn assert_current_schema(conn: &Connection) {
         assert_session_cascade(conn, table);
     }
     assert_eq!(
-        table_columns(conn, "orchestrator_compaction_checkpoints"),
+        table_columns(conn, "session_compaction_checkpoints"),
         [
             "id",
             "session_id",
@@ -355,7 +355,7 @@ fn assert_current_schema(conn: &Connection) {
         ]
     );
     let checkpoint_foreign_keys = conn
-        .prepare("PRAGMA foreign_key_list(orchestrator_compaction_checkpoints)")
+        .prepare("PRAGMA foreign_key_list(session_compaction_checkpoints)")
         .unwrap()
         .query_map([], |row| {
             Ok((
@@ -378,7 +378,7 @@ fn assert_current_schema(conn: &Connection) {
     let self_foreign_keys = checkpoint_foreign_keys
         .iter()
         .filter(|(_, table, _, _, on_delete)| {
-            table == "orchestrator_compaction_checkpoints" && on_delete == "CASCADE"
+            table == "session_compaction_checkpoints" && on_delete == "CASCADE"
         })
         .map(|(id, _, from, to, _)| (*id, from.as_str(), to.as_str()))
         .collect::<Vec<_>>();
@@ -395,7 +395,7 @@ fn assert_current_schema(conn: &Connection) {
             "SELECT EXISTS(
                  SELECT 1 FROM sqlite_master
                  WHERE type = 'index'
-                   AND name = 'idx_orchestrator_compaction_checkpoints_latest'
+                   AND name = 'idx_session_compaction_checkpoints_latest'
              )",
             [],
             |row| row.get(0),
@@ -946,7 +946,7 @@ fn partial_v1_tables_are_rebuilt_then_retired() {
     let migrated = Connection::open(&path).unwrap();
     assert_current_schema(&migrated);
     let remaining: i64 = migrated
-        .query_row("SELECT COUNT(*) FROM thread_events", [], |row| row.get(0))
+        .query_row("SELECT COUNT(*) FROM session_events", [], |row| row.get(0))
         .unwrap();
     assert_eq!(remaining, 0);
     drop(migrated);
@@ -1014,7 +1014,7 @@ fn v1_to_current_retires_owned_and_orphan_rows_preserving_sequences() {
     let migrated = open_runtime_connection(&path).unwrap();
     assert_current_schema(&migrated);
 
-    for table in ["sessions", "thread_events"] {
+    for table in ["sessions", "session_events"] {
         let count: i64 = migrated
             .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
                 row.get(0)
@@ -1024,7 +1024,7 @@ fn v1_to_current_retires_owned_and_orphan_rows_preserving_sequences() {
     }
     let event_sequence: i64 = migrated
         .query_row(
-            "SELECT seq FROM sqlite_sequence WHERE name='thread_events'",
+            "SELECT seq FROM sqlite_sequence WHERE name='session_events'",
             [],
             |row| row.get(0),
         )
@@ -1035,7 +1035,7 @@ fn v1_to_current_retires_owned_and_orphan_rows_preserving_sequences() {
 }
 
 #[test]
-fn pre_behavior_transcript_rows_are_retired_after_thread_events_rebuild() {
+fn pre_behavior_transcript_rows_are_retired_after_session_events_rebuild() {
     // Pre-behavior identities are retired even when their older event table
     // first needs rebuilding. Direct transcript preservation has its own fixture.
     let path = temp_store_path("transcript_survival");
@@ -1101,7 +1101,7 @@ fn pre_behavior_transcript_rows_are_retired_after_thread_events_rebuild() {
     let migrated = open_runtime_connection(&path).unwrap();
     assert_current_schema(&migrated);
     let rows = migrated
-        .prepare("SELECT id, thread_name, event_json FROM thread_events ORDER BY id")
+        .prepare("SELECT id, event_target, event_json FROM session_events ORDER BY id")
         .unwrap()
         .query_map([], |row| {
             Ok((
@@ -1128,7 +1128,7 @@ fn v2_to_v4_adds_threshold_and_empty_checkpoint_storage() {
     let conn = open_runtime_connection(&path).unwrap();
     insert_legacy_session(&conn, "owned");
     conn.execute(
-        "INSERT INTO thread_events
+        "INSERT INTO session_events
              (session_id, thread_name, event_json, created_at)
          VALUES ('owned', 'worker', '{legacy-v2-event', 'created')",
         [],
@@ -1136,8 +1136,8 @@ fn v2_to_v4_adds_threshold_and_empty_checkpoint_storage() {
     .unwrap();
     let event_id = conn.last_insert_rowid();
     conn.execute_batch(
-        "DROP TABLE orchestrator_compaction_checkpoints;
-         ALTER TABLE sessions DROP COLUMN orchestrator_compaction_threshold;
+        "DROP TABLE session_compaction_checkpoints;
+         ALTER TABLE sessions DROP COLUMN compaction_threshold;
          PRAGMA user_version = 2;",
     )
     .unwrap();
@@ -1148,14 +1148,14 @@ fn v2_to_v4_adds_threshold_and_empty_checkpoint_storage() {
     let migrated = open_runtime_connection(&path).unwrap();
     assert_current_schema(&migrated);
     let event: (i64, String) = migrated
-        .query_row("SELECT id, event_json FROM thread_events", [], |row| {
+        .query_row("SELECT id, event_json FROM session_events", [], |row| {
             Ok((row.get(0)?, row.get(1)?))
         })
         .unwrap();
     assert_eq!(event, (event_id, "{legacy-v2-event".to_string()));
     let checkpoint_count: i64 = migrated
         .query_row(
-            "SELECT COUNT(*) FROM orchestrator_compaction_checkpoints",
+            "SELECT COUNT(*) FROM session_compaction_checkpoints",
             [],
             |row| row.get(0),
         )
@@ -1163,7 +1163,7 @@ fn v2_to_v4_adds_threshold_and_empty_checkpoint_storage() {
     assert_eq!(checkpoint_count, 0);
     let threshold: Option<i64> = migrated
         .query_row(
-            "SELECT orchestrator_compaction_threshold FROM sessions WHERE session_id = 'owned'",
+            "SELECT compaction_threshold FROM sessions WHERE session_id = 'owned'",
             [],
             |row| row.get(0),
         )
@@ -1173,7 +1173,7 @@ fn v2_to_v4_adds_threshold_and_empty_checkpoint_storage() {
         assert!(migrated
             .execute(
                 &format!(
-                    "UPDATE sessions SET orchestrator_compaction_threshold = {invalid} WHERE session_id = 'owned'"
+                    "UPDATE sessions SET compaction_threshold = {invalid} WHERE session_id = 'owned'"
                 ),
                 [],
             )
@@ -1181,19 +1181,19 @@ fn v2_to_v4_adds_threshold_and_empty_checkpoint_storage() {
     }
     assert!(migrated
         .execute(
-            "UPDATE sessions SET orchestrator_compaction_threshold = ?1 WHERE session_id = 'owned'",
+            "UPDATE sessions SET compaction_threshold = ?1 WHERE session_id = 'owned'",
             params![(crate::MAX_SUPPORTED_TOKEN_COUNT + 1) as i64],
         )
         .is_err());
     migrated
         .execute(
-            "UPDATE sessions SET orchestrator_compaction_threshold = ?1 WHERE session_id = 'owned'",
+            "UPDATE sessions SET compaction_threshold = ?1 WHERE session_id = 'owned'",
             params![crate::MAX_SUPPORTED_TOKEN_COUNT as i64],
         )
         .unwrap();
     migrated
         .execute(
-            "UPDATE sessions SET orchestrator_compaction_threshold = 8192 WHERE session_id = 'owned'",
+            "UPDATE sessions SET compaction_threshold = 8192 WHERE session_id = 'owned'",
             [],
         )
         .unwrap();
@@ -1244,9 +1244,9 @@ fn v3_to_v4_backfills_materialized_session_summaries() {
     )
     .unwrap();
     conn.execute(
-        "INSERT INTO thread_events (session_id, thread_name, event_json, created_at)
+        "INSERT INTO session_events (session_id, thread_name, event_json, created_at)
          VALUES ('owned', ?1, ?2, 'created')",
-        params![ORCHESTRATOR_STEERING_TARGET, covered_log_entry],
+        params![TRANSCRIPT_EVENT_TARGET, covered_log_entry],
     )
     .unwrap();
     let log_entry = encode_transcript_log_entry(
@@ -1257,9 +1257,9 @@ fn v3_to_v4_backfills_materialized_session_summaries() {
     )
     .unwrap();
     conn.execute(
-        "INSERT INTO thread_events (session_id, thread_name, event_json, created_at)
+        "INSERT INTO session_events (session_id, thread_name, event_json, created_at)
          VALUES ('owned', ?1, ?2, 'created')",
-        params![ORCHESTRATOR_STEERING_TARGET, log_entry],
+        params![TRANSCRIPT_EVENT_TARGET, log_entry],
     )
     .unwrap();
     conn.execute_batch(
@@ -1376,7 +1376,7 @@ fn checkpoint_table_enforces_completed_row_constraints() {
     }
     let row_count: i64 = conn
         .query_row(
-            "SELECT COUNT(*) FROM orchestrator_compaction_checkpoints",
+            "SELECT COUNT(*) FROM session_compaction_checkpoints",
             [],
             |row| row.get(0),
         )
@@ -1722,7 +1722,7 @@ fn opening_v4_store_is_idempotent() {
     let conn = open_runtime_connection(&path).unwrap();
     insert_legacy_session(&conn, "owned");
     conn.execute(
-        "INSERT INTO thread_events
+        "INSERT INTO session_events
              (session_id, thread_name, event_json, created_at)
          VALUES ('owned', 'worker', '{\"type\":\"thread_started\"}', 'created')",
         [],
@@ -1736,7 +1736,7 @@ fn opening_v4_store_is_idempotent() {
     let reopened = open_runtime_connection(&path).unwrap();
     assert_current_schema(&reopened);
     let stored_id: i64 = reopened
-        .query_row("SELECT id FROM thread_events", [], |row| row.get(0))
+        .query_row("SELECT id FROM session_events", [], |row| row.get(0))
         .unwrap();
     assert_eq!(stored_id, event_id);
     drop(reopened);

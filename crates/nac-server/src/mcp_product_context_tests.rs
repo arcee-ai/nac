@@ -15,7 +15,7 @@ async fn current_http_rejects_distinct_unknown_tools_and_keeps_catalog_available
     let manager = crate::tests::test_manager(&root);
     let service = streamable_http_service(manager.clone());
     let names = (0..16).map(|index| format!("unknown-{index}")).chain(
-        ["get_thread_episodes", "get_thread_events"]
+        ["get_thread_episodes", "get_session_events"]
             .into_iter()
             .map(str::to_owned),
     );

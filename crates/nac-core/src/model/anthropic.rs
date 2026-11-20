@@ -390,7 +390,7 @@ pub(super) fn parse_anthropic_messages_response(
             cache_read_tokens: cache_read,
             cache_write_tokens: cache_write,
             reasoning_tokens: 0,
-            orchestrator_context_tokens: input_tokens
+            context_tokens: input_tokens
                 .saturating_add(output_tokens)
                 .saturating_add(cache_read)
                 .saturating_add(cache_write),

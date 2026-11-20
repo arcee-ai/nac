@@ -42,7 +42,7 @@ pub use delivery::contracts::{
     ProviderModelList, ProviderModelsRequest, RecentEventsResponse, ReplayBoundaryEvent,
     ReplayGapEvent, ReplyPermissionRequest, RequestField, SandboxRequest, SessionLineageKind,
     SessionLineageSnapshot, SessionSnapshotQuery, SessionSnapshotResponse, SshBrowseRequest,
-    StoreInfo, SubmitPromptRequest, SubmitPromptResponse, ThreadEventsQuery,
+    StoreInfo, SubmitPromptRequest, SubmitPromptResponse, SessionEventsQuery,
     ToolCallContentResponse, UpdateConfigRequest, UpdateGoalRequest, UpdateInboxItemRequest,
     UpdatePermissionApprovalModeRequest,
 };
@@ -1575,7 +1575,7 @@ impl SessionManager {
         );
         child.behavior = sessions::SessionBehavior::Direct;
         child.project_id = parent.project_id;
-        child.orchestrator_compaction_threshold = parent.orchestrator_compaction_threshold;
+        child.compaction_threshold = parent.compaction_threshold;
         child.automatic_compaction = parent.automatic_compaction;
         let path = self.inner.store_path.clone();
         let parent_id = parent_session_id.to_owned();

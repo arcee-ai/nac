@@ -133,13 +133,13 @@ pub fn reserve_native_task_launch(path: &Path, caller: &str, project_id: &str, s
     }
     let (backend, model, base_url, allow_insecure_http, api_key_env, reasoning_effort, headers, threshold):
         SessionModelRow =
-        tx.query_row("SELECT backend,model,base_url,allow_insecure_http,api_key_env,reasoning_effort,extra_headers_json,orchestrator_compaction_threshold FROM sessions WHERE session_id=?1", params![caller], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?,row.get(6)?,row.get(7)?)))?;
+        tx.query_row("SELECT backend,model,base_url,allow_insecure_http,api_key_env,reasoning_effort,extra_headers_json,compaction_threshold FROM sessions WHERE session_id=?1", params![caller], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?,row.get(6)?,row.get(7)?)))?;
     let backend = backend.ok_or_else(|| anyhow!("stored session has no backend; session settings repair required: select an explicit backend"))?;
     let selection = TaskModelSelection {
         backend, model: request.model.clone().unwrap_or(model), base_url, allow_insecure_http,
         api_key_env, reasoning_effort: request.reasoning_effort.clone().or(reasoning_effort),
         extra_headers: headers.filter(|json| !json.is_empty()).map(|json| serde_json::from_str(&json)).transpose()?,
-        orchestrator_compaction_threshold: threshold,
+        compaction_threshold: threshold,
     };
     selection.validate()?;
     let mut durable_request = serde_json::to_value(&request)?;

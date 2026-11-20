@@ -21,7 +21,7 @@ pub(crate) struct SessionConfigPatch {
     pub(crate) reasoning_effort: Field<String>,
     pub(crate) api_key_env: Field<String>,
     pub(crate) extra_headers: Field<BTreeMap<String, String>>,
-    pub(crate) orchestrator_compaction_threshold: Field<u64>,
+    pub(crate) compaction_threshold: Field<u64>,
 }
 
 impl SessionConfigPatch {
@@ -33,7 +33,7 @@ impl SessionConfigPatch {
             && matches!(self.reasoning_effort, Field::Unchanged)
             && matches!(self.api_key_env, Field::Unchanged)
             && matches!(self.extra_headers, Field::Unchanged)
-            && matches!(self.orchestrator_compaction_threshold, Field::Unchanged)
+            && matches!(self.compaction_threshold, Field::Unchanged)
     }
 }
 
@@ -143,7 +143,7 @@ impl<'a> SessionConfigurationApplication<'a> {
         if prospective.automatic_compaction && backend != BackendKind::ChatGptCodexResponses {
             // A Codex automatic policy must not follow later non-Codex
             // catalog changes; freeze that provider's default on the switch.
-            prospective.orchestrator_compaction_threshold =
+            prospective.compaction_threshold =
                 nac_core::model::automatic_compaction_threshold(backend, &prospective.model);
             prospective.automatic_compaction = false;
         }
@@ -246,15 +246,15 @@ fn apply_patch(config: &mut sessions::RawSessionConfig, request: SessionConfigPa
             };
         }
     }
-    match request.orchestrator_compaction_threshold {
+    match request.compaction_threshold {
         Field::Unchanged => {}
         Field::Clear => {
-            config.orchestrator_compaction_threshold = None;
+            config.compaction_threshold = None;
             config.automatic_compaction = false;
         }
         Field::Set(threshold) => {
             let threshold = validated_compaction_threshold(threshold)?;
-            config.orchestrator_compaction_threshold = (threshold != 0).then_some(threshold);
+            config.compaction_threshold = (threshold != 0).then_some(threshold);
             config.automatic_compaction = false;
         }
     }

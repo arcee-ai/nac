@@ -82,7 +82,7 @@ fn test_agent(root: &std::path::Path, base_url: &str) -> Agent {
         AgentConfig {
             store_path: root.join("store.db"),
             session_id: None,
-            orchestrator_compaction_threshold: None,
+            compaction_threshold: None,
             initial_messages: Vec::new(),
             event_sink: EventSink::none(),
             workspace_cwd: root.to_path_buf(),
@@ -171,7 +171,7 @@ fn direct_topologies_expose_exact_capability_boundaries() {
             AgentConfig {
                 store_path: store_path.clone(),
                 session_id: Some(session_id.to_string()),
-                orchestrator_compaction_threshold: None,
+                compaction_threshold: None,
                 initial_messages: Vec::new(),
                 event_sink: EventSink::none(),
                 workspace_cwd: root.clone(),
@@ -322,7 +322,7 @@ fn restore_messages_refreshes_leading_system_prompt() {
         AgentConfig {
             store_path: crate::store::default_store_path(),
             session_id: None,
-            orchestrator_compaction_threshold: None,
+            compaction_threshold: None,
             initial_messages: Vec::new(),
             event_sink: EventSink::none(),
             workspace_cwd: PathBuf::from("/resolved/workspace"),
@@ -870,7 +870,7 @@ async fn cancelled_image_call_still_emits_one_typed_finished_event() {
         AgentConfig {
             store_path: root.join("store.db"),
             session_id: None,
-            orchestrator_compaction_threshold: None,
+            compaction_threshold: None,
             initial_messages: Vec::new(),
             event_sink: EventSink::channel(events_tx),
             workspace_cwd: root.clone(),

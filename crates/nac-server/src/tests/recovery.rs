@@ -121,7 +121,7 @@ async fn rebuilt_manager_recovers_interrupted_run_once_and_rotates_event_epoch()
             .count(),
         1
     );
-    let first_epoch = first.thread_event_boundary.epoch_id;
+    let first_epoch = first.session_event_boundary.epoch_id;
     drop(first_manager);
 
     let second_manager = test_manager(&root);
@@ -131,7 +131,7 @@ async fn rebuilt_manager_recovers_interrupted_run_once_and_rotates_event_epoch()
         first.transcript_recovery_warning
     );
     assert_eq!(second.run_failure, first.run_failure);
-    assert_ne!(second.thread_event_boundary.epoch_id, first_epoch);
+    assert_ne!(second.session_event_boundary.epoch_id, first_epoch);
     assert!(
         second_manager
             .recent_events("session", None, 64)

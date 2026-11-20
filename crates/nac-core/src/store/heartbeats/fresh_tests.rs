@@ -47,7 +47,7 @@ impl Fixture {
                     api_key_env: None,
                     reasoning_effort: None,
                     extra_headers: None,
-                    orchestrator_compaction_threshold: None,
+                    compaction_threshold: None,
                 }),
                 pinned_commit: None,
                 default_ref: Some("refs/heads/dev".into()),
@@ -131,7 +131,7 @@ fn scheduled_model_selection_is_frozen_in_the_durable_launch_receipt() {
         api_key_env: Some("FIXTURE_API_KEY".into()),
         reasoning_effort: Some("high".into()),
         extra_headers: None,
-        orchestrator_compaction_threshold: None,
+        compaction_threshold: None,
     };
     f.binding.fresh_task.as_mut().unwrap().model_selection = Some(selection.clone());
     f.create();

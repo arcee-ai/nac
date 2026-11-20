@@ -94,7 +94,7 @@ fn in_memory_exporter_redacts_content_and_correlates_four_direct_runs() {
     let store_path = root.join("store.db");
     crate::store::initialize(&store_path).unwrap();
     crate::store::insert_test_session(&store_path, canaries[0]);
-    crate::store::append_thread_event(
+    crate::store::append_session_event(
         &store_path,
         canaries[0],
         crate::events::PRIMARY_TOOL_EVENT_TARGET,

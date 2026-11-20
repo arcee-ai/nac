@@ -39,7 +39,7 @@ fn set_run(path: &Path, run: &str) {
     let conn = open_runtime_connection(path).unwrap();
     // The production lifecycle writes the same recovery record with its prompt.
     // This fixture's thread event supplies the canonical foreign-key target.
-    conn.execute("INSERT INTO thread_events(thread_name,session_id,event_json,created_at) VALUES('main','target','{}','now')", []).unwrap();
+    conn.execute("INSERT INTO session_events(event_target,session_id,event_json,created_at) VALUES('main','target','{}','now')", []).unwrap();
     let id = conn.last_insert_rowid();
     conn.execute("INSERT INTO session_run_recovery(session_id,run_id,submitted_message_id,status) VALUES('target',?1,?2,'active') ON CONFLICT(session_id) DO UPDATE SET run_id=excluded.run_id,status='active'", params![run,id]).unwrap();
 }

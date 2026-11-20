@@ -2,8 +2,8 @@ use super::super::*;
 use super::{assistant, candidate, state, temp_store_path, user};
 
 use crate::store;
-use crate::store::orchestrator_compaction::{
-    append_orchestrator_compaction_checkpoint, NewOrchestratorCompactionCheckpoint,
+use crate::store::session_compaction::{
+    append_session_compaction_checkpoint, NewSessionCompactionCheckpoint,
 };
 use crate::types::{FunctionCall, Message, ToolCall};
 
@@ -23,9 +23,9 @@ fn restore_falls_back_from_newest_invalid_checkpoint() {
         user("current"),
     ];
     let (source, policy) = checkpoint_digests(&messages, 2);
-    let valid = append_orchestrator_compaction_checkpoint(
+    let valid = append_session_compaction_checkpoint(
         &path,
-        &NewOrchestratorCompactionCheckpoint {
+        &NewSessionCompactionCheckpoint {
             session_id: "session".to_string(),
             previous_checkpoint_id: None,
             summary: installed_summary("valid"),
@@ -40,9 +40,9 @@ fn restore_falls_back_from_newest_invalid_checkpoint() {
         },
     )
     .unwrap();
-    append_orchestrator_compaction_checkpoint(
+    append_session_compaction_checkpoint(
         &path,
-        &NewOrchestratorCompactionCheckpoint {
+        &NewSessionCompactionCheckpoint {
             session_id: "session".to_string(),
             previous_checkpoint_id: Some(valid.id),
             summary: installed_summary("invalid newest"),
@@ -84,9 +84,9 @@ fn checkpoint_refresh_preserves_sample_for_same_projection_and_invalidates_chang
         user("current"),
     ];
     let (source, policy) = checkpoint_digests(&messages, 2);
-    let first = append_orchestrator_compaction_checkpoint(
+    let first = append_session_compaction_checkpoint(
         &path,
-        &NewOrchestratorCompactionCheckpoint {
+        &NewSessionCompactionCheckpoint {
             session_id: "session".to_string(),
             previous_checkpoint_id: None,
             summary: installed_summary("first summary"),
@@ -145,9 +145,9 @@ fn checkpoint_refresh_preserves_sample_for_same_projection_and_invalidates_chang
         Some(first.id),
     );
     let (source, policy) = checkpoint_digests(&messages, 3);
-    let second = append_orchestrator_compaction_checkpoint(
+    let second = append_session_compaction_checkpoint(
         &path,
-        &NewOrchestratorCompactionCheckpoint {
+        &NewSessionCompactionCheckpoint {
             session_id: "session".to_string(),
             previous_checkpoint_id: Some(first.id),
             summary: installed_summary("changed summary"),
@@ -187,9 +187,9 @@ fn wrapper_only_checkpoint_falls_back_to_older_valid_row() {
         user("current"),
     ];
     let (source, policy) = checkpoint_digests(&messages, 2);
-    let valid = append_orchestrator_compaction_checkpoint(
+    let valid = append_session_compaction_checkpoint(
         &path,
-        &NewOrchestratorCompactionCheckpoint {
+        &NewSessionCompactionCheckpoint {
             session_id: "session".to_string(),
             previous_checkpoint_id: None,
             summary: installed_summary("valid"),
@@ -205,9 +205,9 @@ fn wrapper_only_checkpoint_falls_back_to_older_valid_row() {
     )
     .unwrap();
     let (source, policy) = checkpoint_digests(&messages, 3);
-    append_orchestrator_compaction_checkpoint(
+    append_session_compaction_checkpoint(
         &path,
-        &NewOrchestratorCompactionCheckpoint {
+        &NewSessionCompactionCheckpoint {
             session_id: "session".to_string(),
             previous_checkpoint_id: Some(valid.id),
             summary: HISTORICAL_CONTEXT_PREFIX.to_string(),
@@ -247,9 +247,9 @@ fn repaired_transcript_clears_stale_checkpoint_before_candidate_and_sample_use()
         user("current"),
     ];
     let (source, policy) = checkpoint_digests(&messages, 2);
-    let checkpoint = append_orchestrator_compaction_checkpoint(
+    let checkpoint = append_session_compaction_checkpoint(
         &path,
-        &NewOrchestratorCompactionCheckpoint {
+        &NewSessionCompactionCheckpoint {
             session_id: "session".to_string(),
             previous_checkpoint_id: None,
             summary: installed_summary("stale summary"),
@@ -322,9 +322,9 @@ fn restore_accepts_legacy_user_assistant_and_end_boundaries_but_rejects_unsafe_p
         store::initialize(&path).unwrap();
         store::insert_test_session(&path, "session");
         let (source, policy) = checkpoint_digests(&messages, boundary);
-        let checkpoint = append_orchestrator_compaction_checkpoint(
+        let checkpoint = append_session_compaction_checkpoint(
             &path,
-            &NewOrchestratorCompactionCheckpoint {
+            &NewSessionCompactionCheckpoint {
                 session_id: "session".to_string(),
                 previous_checkpoint_id: None,
                 summary: installed_summary(label),

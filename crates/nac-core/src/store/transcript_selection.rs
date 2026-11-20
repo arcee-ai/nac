@@ -190,8 +190,8 @@ fn stamp(
     attribution: &TerminalSelectionAttribution,
 ) -> Result<()> {
     let (id,json): (i64,String) = tx.query_row(
-        "SELECT id,event_json FROM thread_events WHERE session_id=?1 AND thread_name=?2 AND json_extract(event_json,'$.nac_transcript_message.idx')=?3 ORDER BY id DESC LIMIT 1",
-        params![session,ORCHESTRATOR_STEERING_TARGET,index], |row| Ok((row.get(0)?,row.get(1)?)))?;
+        "SELECT id,event_json FROM session_events WHERE session_id=?1 AND event_target=?2 AND json_extract(event_json,'$.nac_transcript_message.idx')=?3 ORDER BY id DESC LIMIT 1",
+        params![session,TRANSCRIPT_EVENT_TARGET,index], |row| Ok((row.get(0)?,row.get(1)?)))?;
     let mut entry = super::transcript::decode_transcript_log_entry(&json)
         .ok_or_else(|| anyhow!("invalid selection transcript row"))?;
     if entry.idx != index || entry.kind != TranscriptMessageKind::User {
@@ -202,7 +202,7 @@ fn stamp(
     entry.terminal_selection_attribution = Some(attribution.clone());
     let payload = serde_json::json!({"nac_transcript_message":entry});
     tx.execute(
-        "UPDATE thread_events SET event_json=?1 WHERE id=?2",
+        "UPDATE session_events SET event_json=?1 WHERE id=?2",
         params![serde_json::to_string(&payload)?, id],
     )?;
     Ok(())
@@ -242,8 +242,8 @@ fn references(
     let mut snapshot_current = None;
     let mut snapshot_initialized = false;
     let mut snapshot_expected = start;
-    let mut query=conn.prepare("SELECT event_json FROM thread_events WHERE session_id=?1 AND thread_name=?2 AND json_extract(event_json,'$.nac_transcript_message.idx')>=?3 AND json_extract(event_json,'$.nac_transcript_message.idx')<?4 AND json_extract(event_json,'$.nac_transcript_message.terminal_selection_attribution') IS NOT NULL ORDER BY id ASC")?;
-    let mut rows = query.query(params![session, ORCHESTRATOR_STEERING_TARGET, start, end])?;
+    let mut query=conn.prepare("SELECT event_json FROM session_events WHERE session_id=?1 AND event_target=?2 AND json_extract(event_json,'$.nac_transcript_message.idx')>=?3 AND json_extract(event_json,'$.nac_transcript_message.idx')<?4 AND json_extract(event_json,'$.nac_transcript_message.terminal_selection_attribution') IS NOT NULL ORDER BY id ASC")?;
+    let mut rows = query.query(params![session, TRANSCRIPT_EVENT_TARGET, start, end])?;
     let mut prior = None;
     while let Some(row) = rows.next()? {
         let json: String = row.get(0)?;
@@ -308,8 +308,8 @@ pub(crate) fn load_terminal_selection_history_metadata(path:&Path,session:&str,b
     let mut connection=open_runtime_connection(path)?;
     let snapshot=connection.transaction()?;
     let mut times=vec![None; usize::try_from(blob_len.min(total))?];
-    let mut query=snapshot.prepare("SELECT created_at FROM thread_events WHERE session_id=?1 AND thread_name=?2 AND json_extract(event_json,'$.nac_transcript_message.idx')>=?3 AND json_extract(event_json,'$.nac_transcript_message.idx')<?4 ORDER BY id ASC")?;
-    for time in query.query_map(params![session,ORCHESTRATOR_STEERING_TARGET,blob_len,total],|row| row.get::<_,String>(0))? { times.push(Some(time?)); }
+    let mut query=snapshot.prepare("SELECT created_at FROM session_events WHERE session_id=?1 AND event_target=?2 AND json_extract(event_json,'$.nac_transcript_message.idx')>=?3 AND json_extract(event_json,'$.nac_transcript_message.idx')<?4 ORDER BY id ASC")?;
+    for time in query.query_map(params![session,TRANSCRIPT_EVENT_TARGET,blob_len,total],|row| row.get::<_,String>(0))? { times.push(Some(time?)); }
     times.resize(usize::try_from(total)?,None);
     let mut found=Vec::new();
     references(&snapshot,session,0,total,|reference| { found.push(reference); Ok(()) })?;

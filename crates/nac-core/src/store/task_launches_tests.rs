@@ -356,7 +356,7 @@ fn task_model_is_frozen_and_rejects_credential_headers_before_reservation() {
         api_key_env: Some("OPENAI_API_KEY".into()),
         reasoning_effort: None,
         extra_headers: None,
-        orchestrator_compaction_threshold: None,
+        compaction_threshold: None,
     });
     let first = reserve_task_launch(&path, request.clone(), source.clone()).unwrap();
     assert_eq!(first.request.model_selection, request.model_selection);

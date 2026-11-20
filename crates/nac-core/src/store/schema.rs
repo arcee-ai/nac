@@ -21,6 +21,7 @@ mod internal_completions;
 #[cfg(test)]
 mod native_task_launch_migration_tests;
 mod native_task_launches;
+mod neutral_session;
 #[cfg(test)]
 mod peer_goal_start_migration_tests;
 mod peer_goal_starts;
@@ -143,7 +144,7 @@ use wal_preflight::read_schema_version_header;
 // early whenever the stored version already equals this one. (12 carries the
 // same schema as 11, which added episodes.status; 10 added the
 // ssh_configurations table; 9 the per-session ssh port and key columns.)
-const STORE_SCHEMA_VERSION: i64 = 54;
+const STORE_SCHEMA_VERSION: i64 = 55;
 const HTTP_OPT_IN_COLUMN: &str = "INTEGER NOT NULL DEFAULT 0 CHECK (allow_insecure_http IN (0, 1))";
 pub const MINIMUM_MIGRATABLE_SCHEMA_VERSION: i64 = 0;
 
@@ -531,6 +532,16 @@ fn open_connection_with_hooks(
         transaction.commit()?;
         return Ok(conn);
     }
+    if schema_version == 54 {
+        let session_ids = retirement::all_session_ids(&transaction)?;
+        let _leases = retirement::acquire_retirement_leases(path, &session_ids)?;
+        // Checkpoint evidence must be verified before the v54 names change.
+        neutral_session::rename_storage(&transaction)?;
+        before_commit()?;
+        transaction.pragma_update(None, "user_version", STORE_SCHEMA_VERSION)?;
+        transaction.commit()?;
+        return Ok(conn);
+    }
     let needs_session_summary_backfill = schema_version < SESSION_SUMMARY_BACKFILL_VERSION;
     match schema_version {
         0 | 1 => {
@@ -851,6 +862,8 @@ fn open_connection_with_hooks(
     )?;
     verify_auxiliary_foreign_keys(&transaction)?;
     retire_worker_storage(&transaction)?;
+    // Checkpoint evidence must be verified before the v54 names change.
+    neutral_session::rename_storage(&transaction)?;
 
     before_commit()?;
     transaction.pragma_update(None, "user_version", STORE_SCHEMA_VERSION)?;

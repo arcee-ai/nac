@@ -770,7 +770,7 @@ async fn observes_existing_approval_without_becoming_an_approver_or_answering_it
         Arc::new(|| Some("observed-run".into())),
     );
     let conn = store::open_runtime_connection(&runtime.store_path).unwrap();
-    conn.execute("INSERT INTO thread_events (session_id, thread_name, event_json, created_at) VALUES ('peer-a', '__direct__', '{}', 'now')",[]).unwrap();
+    conn.execute("INSERT INTO session_events (session_id, event_target, event_json, created_at) VALUES ('peer-a', '__direct__', '{}', 'now')",[]).unwrap();
     conn.execute("INSERT INTO session_run_recovery (session_id,run_id,submitted_message_id,status) VALUES ('peer-a','observed-run',?1,'active')",[conn.last_insert_rowid()]).unwrap();
     drop(conn);
     let pending = {
@@ -916,7 +916,7 @@ async fn idle_cached_broker_is_not_authoritative_for_a_foreign_run() {
     broker.attach_event_bus(bus.clone());
     crate::permissions::task_observation::bind_runs(&broker, Arc::new(|| None));
     let conn = store::open_runtime_connection(&runtime.store_path).unwrap();
-    conn.execute("INSERT INTO thread_events (session_id, thread_name, event_json, created_at) VALUES ('peer-a', '__direct__', '{}', 'now')",[]).unwrap();
+    conn.execute("INSERT INTO session_events (session_id, event_target, event_json, created_at) VALUES ('peer-a', '__direct__', '{}', 'now')",[]).unwrap();
     conn.execute("INSERT INTO session_run_recovery (session_id,run_id,submitted_message_id,status) VALUES ('peer-a','foreign-run',?1,'active')",[conn.last_insert_rowid()]).unwrap();
     let input = json!({"targets":[{"session_id":"peer-a","run_id":"foreign-run"}]});
     for _ in 0..2 {
@@ -1744,7 +1744,7 @@ async fn scope_hint_rereads_only_its_pinned_session_without_retargeting_or_inven
         .is_ok());
     let mut hints = store::goal_changes::subscribe(&runtime.store_path);
     let mut config = crate::sessions::load_session_config(&runtime.store_path, "peer-a").unwrap();
-    config.orchestrator_compaction_threshold = Some(64_000);
+    config.compaction_threshold = Some(64_000);
     owner.update_raw_session_config(config).await.unwrap();
     let hint = hints.try_recv().unwrap();
     assert!(matches!(

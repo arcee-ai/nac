@@ -34,7 +34,7 @@ async fn compaction_is_durable_before_ordinary_request_and_preserves_canonical_t
         ],
         move |index, _request| {
             let checkpoints =
-                crate::store::orchestrator_compaction::load_orchestrator_compaction_checkpoints(
+                crate::store::session_compaction::load_session_compaction_checkpoints(
                     &observer_path,
                     "session",
                 )
@@ -136,7 +136,7 @@ async fn compaction_is_durable_before_ordinary_request_and_preserves_canonical_t
         .contains("durable concise summary"));
 
     let checkpoints =
-        crate::store::orchestrator_compaction::load_orchestrator_compaction_checkpoints(
+        crate::store::session_compaction::load_session_compaction_checkpoints(
             &store_path,
             "session",
         )
@@ -149,7 +149,7 @@ async fn compaction_is_durable_before_ordinary_request_and_preserves_canonical_t
     assert_eq!(usage.input_tokens, 130);
     assert_eq!(usage.cache_read_tokens, 20);
     assert_eq!(usage.output_tokens, 15);
-    assert_eq!(usage.orchestrator_context_tokens, 55);
+    assert_eq!(usage.context_tokens, 55);
 
     let events = drain_events(&mut events_rx);
     let usage_events = events
@@ -161,36 +161,36 @@ async fn compaction_is_durable_before_ordinary_request_and_preserves_canonical_t
         .collect::<Vec<_>>();
     assert_eq!(usage_events.len(), 2);
     assert_eq!(
-        usage_events[0].orchestrator_context_tokens,
+        usage_events[0].context_tokens,
         checkpoints[0].new_context_estimate
     );
-    assert_eq!(usage_events[1].orchestrator_context_tokens, 55);
+    assert_eq!(usage_events[1].context_tokens, 55);
     let started_index = events
         .iter()
         .position(|event| {
             matches!(
                 event,
-                AgentEvent::OrchestratorCompactionStarted {
+                AgentEvent::CompactionStarted {
                     reason: crate::events::CompactionReason::Auto,
                     ..
                 }
             )
         })
         .unwrap();
-    let AgentEvent::OrchestratorCompactionStarted { compaction_id, .. } = events[started_index]
+    let AgentEvent::CompactionStarted { compaction_id, .. } = events[started_index]
     else {
         unreachable!();
     };
     let summary_usage_index = events
         .iter()
-        .position(|event| matches!(event, AgentEvent::TokenUsageUpdated { usage, .. } if usage.orchestrator_context_tokens == checkpoints[0].new_context_estimate))
+        .position(|event| matches!(event, AgentEvent::TokenUsageUpdated { usage, .. } if usage.context_tokens == checkpoints[0].new_context_estimate))
         .unwrap();
     let completed_index = events
         .iter()
         .position(|event| {
             matches!(
                 event,
-                AgentEvent::OrchestratorCompactionCompleted {
+                AgentEvent::CompactionCompleted {
                     compaction_id: id,
                     reason: crate::events::CompactionReason::Auto,
                 } if *id == compaction_id
@@ -199,7 +199,7 @@ async fn compaction_is_durable_before_ordinary_request_and_preserves_canonical_t
         .unwrap();
     let ordinary_start_index = events
         .iter()
-        .position(|event| matches!(event, AgentEvent::TokenUsageUpdated { usage, .. } if usage.orchestrator_context_tokens == 55))
+        .position(|event| matches!(event, AgentEvent::TokenUsageUpdated { usage, .. } if usage.context_tokens == 55))
         .unwrap();
     assert!(started_index < summary_usage_index);
     assert!(summary_usage_index < completed_index);
@@ -309,7 +309,7 @@ async fn long_single_prompt_can_compact_once_per_hook_and_again_after_steering()
     assert!(!final_input.contains("first checkpoint"));
 
     let checkpoints =
-        crate::store::orchestrator_compaction::load_orchestrator_compaction_checkpoints(
+        crate::store::session_compaction::load_session_compaction_checkpoints(
             &store_path,
             "session",
         )
@@ -333,7 +333,7 @@ async fn long_single_prompt_can_compact_once_per_hook_and_again_after_steering()
             .iter()
             .filter(|event| matches!(
                 event,
-                AgentEvent::OrchestratorCompactionStarted {
+                AgentEvent::CompactionStarted {
                     reason: crate::events::CompactionReason::Auto,
                     ..
                 }
@@ -346,7 +346,7 @@ async fn long_single_prompt_can_compact_once_per_hook_and_again_after_steering()
             .iter()
             .filter(|event| matches!(
                 event,
-                AgentEvent::OrchestratorCompactionCompleted {
+                AgentEvent::CompactionCompleted {
                     reason: crate::events::CompactionReason::Auto,
                     ..
                 }
@@ -400,9 +400,9 @@ async fn valid_checkpoint_projects_after_restore_when_generation_is_disabled() {
         },
     ]);
     let (source, policy) = compaction::checkpoint_digests(&agent.messages, 3);
-    crate::store::orchestrator_compaction::append_orchestrator_compaction_checkpoint(
+    crate::store::session_compaction::append_session_compaction_checkpoint(
         &store_path,
-        &crate::store::orchestrator_compaction::NewOrchestratorCompactionCheckpoint {
+        &crate::store::session_compaction::NewSessionCompactionCheckpoint {
             session_id: "session".to_string(),
             previous_checkpoint_id: None,
             summary: compaction::installed_summary("restored summary"),

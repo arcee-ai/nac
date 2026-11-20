@@ -21,7 +21,7 @@ fn selected_model(url: &str) -> store::TaskModelSelection {
         api_key_env: Some("OPENAI_API_KEY".into()),
         reasoning_effort: None,
         extra_headers: None,
-        orchestrator_compaction_threshold: None,
+        compaction_threshold: None,
     }
 }
 

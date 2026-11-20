@@ -13,7 +13,7 @@ async fn sessionless_send_continues_when_provider_context_total_is_invalid() {
         AgentConfig {
             store_path: PathBuf::from("unused.db"),
             session_id: None,
-            orchestrator_compaction_threshold: Some(1),
+            compaction_threshold: Some(1),
             initial_messages: Vec::new(),
             event_sink: EventSink::none(),
             workspace_cwd: PathBuf::from("."),
@@ -38,7 +38,7 @@ async fn sessionless_send_continues_when_provider_context_total_is_invalid() {
             .as_array()
             .is_some_and(|tools| !tools.is_empty())
     );
-    assert_eq!(agent.last_usage.unwrap().orchestrator_context_tokens, 0);
+    assert_eq!(agent.last_usage.unwrap().context_tokens, 0);
 }
 
 #[tokio::test]
@@ -81,7 +81,7 @@ async fn direct_primary_uses_the_direct_compaction_prompt() {
     assert!(summary_body.contains("direct-session context-compaction request"));
     assert!(!summary_body.contains("## Orchestration history"));
     let checkpoints =
-        crate::store::orchestrator_compaction::load_orchestrator_compaction_checkpoints(
+        crate::store::session_compaction::load_session_compaction_checkpoints(
             &store_path,
             "session",
         )
@@ -136,7 +136,7 @@ async fn threshold_not_reached_sends_one_ordinary_canonical_request() {
             .to_string()
             .contains(compaction::HISTORICAL_CONTEXT_PREFIX));
         assert!(
-            crate::store::orchestrator_compaction::load_orchestrator_compaction_checkpoints(
+            crate::store::session_compaction::load_session_compaction_checkpoints(
                 &store_path,
                 "session"
             )
@@ -145,10 +145,10 @@ async fn threshold_not_reached_sends_one_ordinary_canonical_request() {
         );
         assert!(!drain_events(&mut events_rx).iter().any(|event| matches!(
             event,
-            AgentEvent::OrchestratorCompactionStarted { .. }
-                | AgentEvent::OrchestratorCompactionCompleted { .. }
-                | AgentEvent::OrchestratorCompactionSkipped { .. }
-                | AgentEvent::OrchestratorCompactionFailed { .. }
+            AgentEvent::CompactionStarted { .. }
+                | AgentEvent::CompactionCompleted { .. }
+                | AgentEvent::CompactionSkipped { .. }
+                | AgentEvent::CompactionFailed { .. }
         )));
 
         let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
@@ -215,7 +215,7 @@ async fn rejected_summary_accounts_cost_and_falls_back_to_canonical_request() {
     assert!(ordinary_text.contains("answer"));
     assert!(!ordinary_text.contains(compaction::HISTORICAL_CONTEXT_PREFIX));
     assert!(
-        crate::store::orchestrator_compaction::load_orchestrator_compaction_checkpoints(
+        crate::store::session_compaction::load_session_compaction_checkpoints(
             &store_path,
             "session"
         )
@@ -226,7 +226,7 @@ async fn rejected_summary_accounts_cost_and_falls_back_to_canonical_request() {
     assert_eq!(usage.input_tokens, 65);
     assert_eq!(usage.cache_read_tokens, 5);
     assert_eq!(usage.output_tokens, 7);
-    assert_eq!(usage.orchestrator_context_tokens, 44);
+    assert_eq!(usage.context_tokens, 44);
 
     let events = drain_events(&mut events_rx);
     let started = events
@@ -234,7 +234,7 @@ async fn rejected_summary_accounts_cost_and_falls_back_to_canonical_request() {
         .position(|event| {
             matches!(
                 event,
-                AgentEvent::OrchestratorCompactionStarted {
+                AgentEvent::CompactionStarted {
                     reason: crate::events::CompactionReason::Auto,
                     ..
                 }
@@ -250,7 +250,7 @@ async fn rejected_summary_accounts_cost_and_falls_back_to_canonical_request() {
         .position(|event| {
             matches!(
                 event,
-                AgentEvent::OrchestratorCompactionFailed {
+                AgentEvent::CompactionFailed {
                     reason: crate::events::CompactionReason::Auto,
                     failure: crate::events::CompactionFailure::SummaryRejected,
                     ..
@@ -369,7 +369,7 @@ async fn complete_tool_result_batch_reenters_threshold_hook_before_next_ordinary
     assert!(final_input.contains("post-tool checkpoint"));
     assert!(!final_input.contains("call-1"));
     assert_eq!(
-        crate::store::orchestrator_compaction::load_orchestrator_compaction_checkpoints(
+        crate::store::session_compaction::load_session_compaction_checkpoints(
             &store_path,
             "session"
         )
@@ -432,7 +432,7 @@ async fn one_user_automatic_compaction_uses_end_boundary() {
             .is_some_and(|content| content.starts_with(compaction::HISTORICAL_CONTEXT_PREFIX))));
 
     let checkpoints =
-        crate::store::orchestrator_compaction::load_orchestrator_compaction_checkpoints(
+        crate::store::session_compaction::load_session_compaction_checkpoints(
             &store_path,
             "session",
         )
@@ -446,7 +446,7 @@ async fn one_user_automatic_compaction_uses_end_boundary() {
             .iter()
             .filter(|event| matches!(
                 event,
-                AgentEvent::OrchestratorCompactionStarted {
+                AgentEvent::CompactionStarted {
                     reason: CompactionReason::Auto,
                     ..
                 }
@@ -459,7 +459,7 @@ async fn one_user_automatic_compaction_uses_end_boundary() {
             .iter()
             .filter(|event| matches!(
                 event,
-                AgentEvent::OrchestratorCompactionCompleted {
+                AgentEvent::CompactionCompleted {
                     reason: CompactionReason::Auto,
                     ..
                 }
@@ -469,7 +469,7 @@ async fn one_user_automatic_compaction_uses_end_boundary() {
     );
     assert!(!events.iter().any(|event| matches!(
         event,
-        AgentEvent::OrchestratorCompactionSkipped {
+        AgentEvent::CompactionSkipped {
             cause: CompactionSkipReason::NoEligibleBoundary,
             ..
         }
@@ -520,7 +520,7 @@ async fn automatic_summary_request_failure_emits_failed_and_falls_back_to_ordina
     assert!(ordinary.get("tools").is_some());
     assert!(ordinary["input"].to_string().contains("old answer"));
     assert!(
-        crate::store::orchestrator_compaction::load_orchestrator_compaction_checkpoints(
+        crate::store::session_compaction::load_session_compaction_checkpoints(
             &store_path,
             "session"
         )
@@ -534,7 +534,7 @@ async fn automatic_summary_request_failure_emits_failed_and_falls_back_to_ordina
         .position(|event| {
             matches!(
                 event,
-                AgentEvent::OrchestratorCompactionStarted {
+                AgentEvent::CompactionStarted {
                     reason: CompactionReason::Auto,
                     ..
                 }
@@ -546,7 +546,7 @@ async fn automatic_summary_request_failure_emits_failed_and_falls_back_to_ordina
         .position(|event| {
             matches!(
                 event,
-                AgentEvent::OrchestratorCompactionFailed {
+                AgentEvent::CompactionFailed {
                     reason: CompactionReason::Auto,
                     failure: CompactionFailure::SummaryRequestFailed,
                     ..
@@ -624,7 +624,7 @@ async fn failed_summary_attempt_retries_at_the_next_tool_hook_without_dedup() {
         .to_string()
         .contains("unknown_retry_tool"));
     assert_eq!(
-        crate::store::orchestrator_compaction::load_orchestrator_compaction_checkpoints(
+        crate::store::session_compaction::load_session_compaction_checkpoints(
             &store_path,
             "session"
         )
@@ -639,7 +639,7 @@ async fn failed_summary_attempt_retries_at_the_next_tool_hook_without_dedup() {
             .iter()
             .filter(|event| matches!(
                 event,
-                AgentEvent::OrchestratorCompactionStarted {
+                AgentEvent::CompactionStarted {
                     reason: CompactionReason::Auto,
                     ..
                 }
@@ -652,7 +652,7 @@ async fn failed_summary_attempt_retries_at_the_next_tool_hook_without_dedup() {
             .iter()
             .filter(|event| matches!(
                 event,
-                AgentEvent::OrchestratorCompactionFailed {
+                AgentEvent::CompactionFailed {
                     reason: CompactionReason::Auto,
                     failure: CompactionFailure::SummaryRequestFailed,
                     ..
@@ -666,7 +666,7 @@ async fn failed_summary_attempt_retries_at_the_next_tool_hook_without_dedup() {
             .iter()
             .filter(|event| matches!(
                 event,
-                AgentEvent::OrchestratorCompactionCompleted {
+                AgentEvent::CompactionCompleted {
                     reason: CompactionReason::Auto,
                     ..
                 }

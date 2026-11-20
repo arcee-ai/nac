@@ -27,7 +27,7 @@ pub use completion_occurrences::{
 };
 mod managed_maintenance;
 mod managed_probe;
-pub(crate) mod orchestrator_compaction;
+pub(crate) mod session_compaction;
 pub(crate) mod peer_goals;
 mod permission_grants;
 mod projects;
@@ -79,7 +79,7 @@ pub use native_task_launches::{
 };
 mod terminal_cleanups;
 mod terminal_selection;
-mod thread_events;
+mod session_events;
 mod time;
 mod traditional_children;
 mod transcript;
@@ -87,9 +87,8 @@ mod transcript_append;
 use transcript_append::AppendPurpose;
 mod workspace_revisions;
 
-/// Historical storage target for the canonical primary-session transcript.
-/// The following migration renames this without rewriting user content.
-pub const ORCHESTRATOR_STEERING_TARGET: &str = "__orchestrator__";
+/// Reserved storage target for the canonical session transcript.
+pub const TRANSCRIPT_EVENT_TARGET: &str = "__nac_transcript__";
 
 pub use coordinator::{PersistenceAdmissionError, PersistenceStats, StoreCoordinator};
 pub use managed_maintenance::*;
@@ -141,7 +140,7 @@ pub use task_launches::{
 };
 pub use terminal_cleanups::*;
 pub use terminal_selection::*;
-pub use thread_events::*;
+pub use session_events::*;
 pub use traditional_children::*;
 pub use transcript::*;
 pub use transcript_append::{TranscriptAppendError, TranscriptAppendReceipt};
@@ -155,7 +154,7 @@ pub(crate) use schema::{
     open_connection, open_initialized_read_connection, open_probe_read_connection,
     open_runtime_connection, StoreConnection,
 };
-pub(crate) use thread_events::load_primary_tool_events_with_connection;
+pub(crate) use session_events::load_primary_tool_events_with_connection;
 pub(crate) use time::now_utc;
 
 #[cfg(test)]
@@ -263,9 +262,9 @@ pub fn retry_busy_correlated<T>(
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ThreadEventRecord {
+pub struct SessionEventRecord {
     pub id: i64,
-    pub thread_name: String,
+    pub event_target: String,
     pub session_id: String,
     pub event_json: String,
     pub created_at: String,

@@ -102,7 +102,7 @@ pub struct RunOptions {
     pub model: ModelOptions,
     /// New-session override. `None` defaults to 70% of the resolved model's
     /// context window; `Some(0)` explicitly disables compaction.
-    pub orchestrator_compaction_threshold: Option<u64>,
+    pub compaction_threshold: Option<u64>,
     pub sandbox: SandboxOptions,
     /// How to reach the host of a remote session; mutually exclusive with sandbox.
     pub ssh: SshOptions,

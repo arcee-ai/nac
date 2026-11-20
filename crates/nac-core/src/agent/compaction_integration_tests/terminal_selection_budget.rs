@@ -141,7 +141,7 @@ async fn selection_provenance_tight_actual_provider_budget_with_ten_thousand_ref
         compaction::CompactionResult::Compacted { .. }
     ));
     let checkpoint =
-        crate::store::orchestrator_compaction::load_orchestrator_compaction_checkpoints(
+        crate::store::session_compaction::load_session_compaction_checkpoints(
             &path, "session",
         )
         .unwrap()
@@ -190,7 +190,7 @@ async fn selection_provenance_tight_actual_provider_budget_with_ten_thousand_ref
         serde_json::to_value(&messages).unwrap()
     );
     assert_eq!(
-        crate::store::orchestrator_compaction::load_orchestrator_compaction_checkpoints(
+        crate::store::session_compaction::load_session_compaction_checkpoints(
             &path, "session"
         )
         .unwrap()

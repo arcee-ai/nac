@@ -25,7 +25,7 @@ impl SessionService {
         };
 
         let event_bus =
-            SessionEventBus::with_thread_event_store(session_id.clone(), store_path.clone());
+            SessionEventBus::with_session_event_store(session_id.clone(), store_path.clone());
         let events = event_bus.subscribe();
         run_config
             .agent

@@ -49,8 +49,8 @@ fn apply_task_model_selection(
         .clone()
         .map(Field::Set)
         .unwrap_or(Field::Clear);
-    request.orchestrator_compaction_threshold = selected
-        .orchestrator_compaction_threshold
+    request.compaction_threshold = selected
+        .compaction_threshold
         .map(Field::Set)
         .unwrap_or(Field::Clear);
 }
@@ -92,7 +92,7 @@ pub(crate) struct SessionCreationCommand {
     pub(crate) reasoning_effort: Field<String>,
     pub(crate) api_key_env: Field<String>,
     pub(crate) extra_headers: Field<BTreeMap<String, String>>,
-    pub(crate) orchestrator_compaction_threshold: Field<u64>,
+    pub(crate) compaction_threshold: Field<u64>,
     pub(crate) ssh_host: Option<String>,
     pub(crate) ssh_port: Option<u16>,
     pub(crate) ssh_identity_file: Option<String>,
@@ -341,8 +341,8 @@ impl<'a> SessionCreationApplication<'a> {
             );
             location.workspace_cwd = launch.workspace_path.join(&launch.source.subdirectory);
         }
-        let orchestrator_compaction_threshold =
-            create_compaction_threshold_override(request.orchestrator_compaction_threshold)?;
+        let compaction_threshold =
+            create_compaction_threshold_override(request.compaction_threshold)?;
         let mut model = model_options(
             request.model,
             request.base_url,
@@ -374,7 +374,7 @@ impl<'a> SessionCreationApplication<'a> {
                 store_path: Some(self.manager.inner.store_path.clone()),
             },
             model,
-            orchestrator_compaction_threshold,
+            compaction_threshold,
             sandbox: sandbox_options(request.sandbox),
             ssh: location.ssh,
         };

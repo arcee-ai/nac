@@ -416,7 +416,7 @@ fn transcript_append_v29_upgrade_preserves_legacy_payload_and_recovery() {
         .unwrap();
     let connection = open_runtime_connection(&path).unwrap();
     let payload: String = connection
-        .query_row("SELECT event_json FROM thread_events", [], |r| r.get(0))
+        .query_row("SELECT event_json FROM session_events", [], |r| r.get(0))
         .unwrap();
     let recovery = load_run_recovery(&path, "session").unwrap();
     connection
@@ -433,7 +433,7 @@ fn transcript_append_v29_upgrade_preserves_legacy_payload_and_recovery() {
     );
     assert_eq!(
         connection
-            .query_row::<String, _, _>("SELECT event_json FROM thread_events", [], |r| r.get(0))
+            .query_row::<String, _, _>("SELECT event_json FROM session_events", [], |r| r.get(0))
             .unwrap(),
         payload
     );
@@ -454,7 +454,7 @@ fn transcript_append_statement_abort_rolls_back_the_entire_batch_and_receipt() {
     let connection = open_runtime_connection(&path).unwrap();
     connection
         .execute_batch(
-            "CREATE TRIGGER fail_second_append BEFORE INSERT ON thread_events
+            "CREATE TRIGGER fail_second_append BEFORE INSERT ON session_events
         WHEN NEW.event_json LIKE '%second%' BEGIN SELECT RAISE(ABORT, 'statement failure'); END;",
         )
         .unwrap();

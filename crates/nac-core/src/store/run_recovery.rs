@@ -425,10 +425,10 @@ fn reconcile_active_run_inner(path: &Path, session_id: &str) -> Result<ActiveRun
         return Ok(ActiveRunReconciliation::None);
     }
 
-    let (row_session_id, thread_name, event_json) = transaction
+    let (row_session_id, event_target, event_json) = transaction
         .query_row(
-            "SELECT session_id, thread_name, event_json
-             FROM thread_events
+            "SELECT session_id, event_target, event_json
+             FROM session_events
              WHERE id = ?1",
             params![record.submitted_message_id],
             |row| {
@@ -441,7 +441,7 @@ fn reconcile_active_run_inner(path: &Path, session_id: &str) -> Result<ActiveRun
         )
         .optional()?
         .ok_or_else(|| anyhow!("active run references a missing transcript row"))?;
-    if row_session_id != session_id || thread_name != ORCHESTRATOR_STEERING_TARGET {
+    if row_session_id != session_id || event_target != TRANSCRIPT_EVENT_TARGET {
         return Err(anyhow!(
             "active run references a transcript row outside session '{session_id}'"
         ));
@@ -635,14 +635,14 @@ fn canonical_terminal_disposition(
     record: &RunRecoveryRecord,
 ) -> Result<Option<RecoveredRunTerminal>> {
     let mut statement = connection.prepare(
-        "SELECT event_json FROM thread_events
-         WHERE session_id = ?1 AND thread_name = ?2 AND id > ?3
+        "SELECT event_json FROM session_events
+         WHERE session_id = ?1 AND event_target = ?2 AND id > ?3
          ORDER BY id ASC",
     )?;
     let rows = statement.query_map(
         params![
             session_id,
-            ORCHESTRATOR_STEERING_TARGET,
+            TRANSCRIPT_EVENT_TARGET,
             record.submitted_message_id
         ],
         |row| row.get::<_, String>(0),

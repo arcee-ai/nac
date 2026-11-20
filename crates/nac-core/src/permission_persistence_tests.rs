@@ -24,7 +24,7 @@ impl PersistenceCommand for Gate {
 async fn aborted_owned_approval_removes_authority_without_waiting_for_event_persistence() {
     let (path, broker) = super::tests::broker_fixture();
     let owner = crate::store::StoreCoordinator::acquire(&path).unwrap();
-    let bus = SessionEventBus::with_thread_event_store(Some("session-a".into()), path.clone());
+    let bus = SessionEventBus::with_session_event_store(Some("session-a".into()), path.clone());
     let _interactive = bus.subscribe_assistant_deltas();
     let mut events = bus.subscribe();
     broker.attach_event_bus(bus.clone());

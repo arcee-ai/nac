@@ -563,9 +563,9 @@ pub struct TokenUsage {
     pub cache_write_tokens: u64,
     #[serde(default)]
     pub reasoning_tokens: u64,
-    /// Current context window size from the last ordinary orchestrator call.
+    /// Current context window size from the last ordinary model call.
     #[serde(rename = "total_tokens")]
-    pub orchestrator_context_tokens: u64,
+    pub context_tokens: u64,
     /// Per-response cost computed from catalog rates when the response was
     /// parsed; zero when pricing is unknown. Serde-additive: rows persisted
     /// before S3 deserialize with zero cost.
@@ -589,11 +589,11 @@ impl TokenUsage {
     }
 
     pub(crate) fn replace_context(&mut self, context_tokens: u64) {
-        self.orchestrator_context_tokens = context_tokens;
+        self.context_tokens = context_tokens;
     }
 
     /// Roll up per-response usage entries. Input/output/cache fields are summed
-    /// across all recorded entries, while `orchestrator_context_tokens` is a
+    /// across all recorded entries, while `context_tokens` is a
     /// context-window gauge and therefore takes the last recorded value instead.
     /// Returns `None` when nothing was ever recorded.
     pub fn aggregate(entries: &[Option<Self>]) -> Option<Self> {
@@ -603,7 +603,7 @@ impl TokenUsage {
         for usage in &recorded {
             cumulative.add_cost_saturating(usage);
         }
-        cumulative.orchestrator_context_tokens = last.orchestrator_context_tokens;
+        cumulative.context_tokens = last.context_tokens;
         Some(cumulative)
     }
 
@@ -621,7 +621,7 @@ impl TokenUsage {
     /// the provider omits `total_tokens` (zero) but does report component
     /// usage, fall back to the component sum as the context total.
     pub(crate) fn valid_provider_context(&self) -> Option<u64> {
-        if self.orchestrator_context_tokens > crate::MAX_SUPPORTED_TOKEN_COUNT {
+        if self.context_tokens > crate::MAX_SUPPORTED_TOKEN_COUNT {
             return None;
         }
         let represented = self
@@ -629,9 +629,9 @@ impl TokenUsage {
             .checked_add(self.cache_read_tokens)?
             .checked_add(self.cache_write_tokens)?
             .checked_add(self.output_tokens)?;
-        if self.orchestrator_context_tokens != 0 {
-            return (self.orchestrator_context_tokens >= represented)
-                .then_some(self.orchestrator_context_tokens);
+        if self.context_tokens != 0 {
+            return (self.context_tokens >= represented)
+                .then_some(self.context_tokens);
         }
         // Fallback: provider didn't report total_tokens but did report
         // component usage. Use the component sum as the context total.
@@ -642,9 +642,9 @@ impl TokenUsage {
 impl std::ops::AddAssign for TokenUsage {
     fn add_assign(&mut self, other: Self) {
         self.add_cost_saturating(&other);
-        self.orchestrator_context_tokens = self
-            .orchestrator_context_tokens
-            .saturating_add(other.orchestrator_context_tokens);
+        self.context_tokens = self
+            .context_tokens
+            .saturating_add(other.context_tokens);
     }
 }
 

@@ -68,11 +68,11 @@ async fn primary_tool_tail_is_bounded_and_excludes_other_targets() {
                 delegation_summary_verified: false,
             });
     }
-    crate::store::append_thread_event(&store_path, "primary-session", "retired-worker", "{ignored")
+    crate::store::append_session_event(&store_path, "primary-session", "retired-worker", "{ignored")
         .unwrap();
     let snapshot = parts
         .service
-        .frontend_snapshot_with_thread_event_limit(2)
+        .frontend_snapshot_with_session_event_limit(2)
         .await
         .unwrap();
     let ids: Vec<_> = snapshot
@@ -84,7 +84,7 @@ async fn primary_tool_tail_is_bounded_and_excludes_other_targets() {
         })
         .collect();
     assert_eq!(ids, ["second", "third"]);
-    assert!(snapshot.thread_event_diagnostics.is_empty());
+    assert!(snapshot.session_event_diagnostics.is_empty());
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
 
@@ -117,7 +117,7 @@ async fn validated_subagent_progress_survives_snapshot_projection() {
         });
     let before_approval = parts
         .service
-        .frontend_snapshot_with_thread_event_limit(1)
+        .frontend_snapshot_with_session_event_limit(1)
         .await
         .unwrap();
     assert!(
@@ -139,7 +139,7 @@ async fn validated_subagent_progress_survives_snapshot_projection() {
         });
     let snapshot = parts
         .service
-        .frontend_snapshot_with_thread_event_limit(1)
+        .frontend_snapshot_with_session_event_limit(1)
         .await
         .unwrap();
     assert!(
@@ -167,7 +167,7 @@ async fn validated_subagent_progress_survives_snapshot_projection() {
         });
     let snapshot = parts
         .service
-        .frontend_snapshot_with_thread_event_limit(1)
+        .frontend_snapshot_with_session_event_limit(1)
         .await
         .unwrap();
     assert!(
@@ -187,7 +187,7 @@ async fn validated_subagent_progress_survives_snapshot_projection() {
         ));
     let snapshot = parts
         .service
-        .frontend_snapshot_with_thread_event_limit(1)
+        .frontend_snapshot_with_session_event_limit(1)
         .await
         .unwrap();
     assert!(
@@ -234,7 +234,7 @@ async fn snapshot_waits_for_capacity_before_event_state() {
             parts
                 .service
                 .event_bus
-                .hold_thread_event_connection_for_test()
+                .hold_session_event_connection_for_test()
                 .unwrap()
         })
         .collect::<Vec<_>>();
@@ -252,7 +252,7 @@ async fn snapshot_waits_for_capacity_before_event_state() {
     );
     drop(held_connections);
     let snapshot = snapshot.await.unwrap().unwrap();
-    assert!(!snapshot.thread_event_boundary.epoch_id.is_empty());
+    assert!(!snapshot.session_event_boundary.epoch_id.is_empty());
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
 
@@ -312,7 +312,7 @@ async fn benchmark_frontend_snapshot_latency() {
             usage: None,
         })
         .unwrap();
-        crate::store::append_thread_event(
+        crate::store::append_session_event(
             &store_path,
             "benchmark-session",
             crate::events::PRIMARY_TOOL_EVENT_TARGET,
@@ -385,7 +385,7 @@ async fn focused_snapshot_options_page_messages_and_preserve_default_wrapper_con
     let loaded = parts
         .service
         .frontend_snapshot_with_options(FrontendSnapshotLoadOptions {
-            thread_event_limit: 0,
+            session_event_limit: 0,
             include_sessions: false,
             messages: FrontendSnapshotMessages::Page(request),
         })
@@ -407,7 +407,7 @@ async fn focused_snapshot_options_page_messages_and_preserve_default_wrapper_con
 
     let full = parts
         .service
-        .frontend_snapshot_with_thread_event_limit(0)
+        .frontend_snapshot_with_session_event_limit(0)
         .await
         .unwrap();
     assert_eq!(full.sessions.len(), 1);
@@ -452,7 +452,7 @@ async fn store_backed_pages_are_live_mid_run_while_the_agent_is_busy() {
         parts
             .service
             .frontend_snapshot_with_options(FrontendSnapshotLoadOptions {
-                thread_event_limit: 0,
+                session_event_limit: 0,
                 include_sessions: false,
                 messages: FrontendSnapshotMessages::Page(request),
             }),
@@ -511,7 +511,7 @@ async fn store_backed_pages_are_live_mid_run_while_the_agent_is_busy() {
     let loaded = parts
         .service
         .frontend_snapshot_with_options(FrontendSnapshotLoadOptions {
-            thread_event_limit: 0,
+            session_event_limit: 0,
             include_sessions: false,
             messages: FrontendSnapshotMessages::Page(request),
         })
@@ -799,20 +799,20 @@ async fn malformed_internal_and_future_events_are_nonfatal() {
         r#"{"type":"future_event","payload":"CANARY_UNKNOWN"}"#,
         r#"{"type":"tool_call_started","thread_name":null,"call_id":"call-api","name":"exec_command","args_preview":"CANARY_COMMAND","args_detail":"{\"cmd\":\"echo safe_cmd\",\"workdir\":\"/safe/api\"}"}"#,
     ] {
-        crate::store::append_thread_event(&store_path, "events-session", primary, event_json)
+        crate::store::append_session_event(&store_path, "events-session", primary, event_json)
             .unwrap();
     }
-    crate::store::append_thread_event(&store_path, "events-session", "retired-worker", "{ignored")
+    crate::store::append_session_event(&store_path, "events-session", "retired-worker", "{ignored")
         .unwrap();
     let snapshot = parts.service.frontend_snapshot().await.unwrap();
     assert_eq!(snapshot.primary_tool_events.len(), 1);
-    assert_eq!(snapshot.thread_event_diagnostics.len(), 3);
-    assert!(!snapshot.thread_event_boundary.epoch_id.is_empty());
+    assert_eq!(snapshot.session_event_diagnostics.len(), 3);
+    assert!(!snapshot.session_event_boundary.epoch_id.is_empty());
     let serialized = serde_json::to_string(&snapshot).unwrap();
     assert!(!serialized.contains("CANARY"));
     assert!(serialized.contains("/safe/api"));
     assert!(!snapshot
-        .thread_event_diagnostics
+        .session_event_diagnostics
         .iter()
         .any(|diagnostic| diagnostic.error.contains('{')));
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());

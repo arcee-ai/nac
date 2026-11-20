@@ -5,8 +5,8 @@ use super::{assistant, state, temp_store_path, user};
 
 use crate::agent::TranscriptMessages;
 use crate::store;
-use crate::store::orchestrator_compaction::{
-    append_orchestrator_compaction_checkpoint, NewOrchestratorCompactionCheckpoint,
+use crate::store::session_compaction::{
+    append_session_compaction_checkpoint, NewSessionCompactionCheckpoint,
 };
 use crate::types::{Message, ToolContent};
 
@@ -24,9 +24,9 @@ fn restored(
     store::initialize(&path).unwrap();
     store::insert_test_session(&path, "session");
     let (source, policy) = checkpoint_digests(messages, boundary);
-    append_orchestrator_compaction_checkpoint(
+    append_session_compaction_checkpoint(
         &path,
-        &NewOrchestratorCompactionCheckpoint {
+        &NewSessionCompactionCheckpoint {
             session_id: "session".to_string(),
             previous_checkpoint_id: None,
             summary: installed_summary("summary"),

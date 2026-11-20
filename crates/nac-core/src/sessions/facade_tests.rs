@@ -92,7 +92,7 @@ fn create_and_load_session_round_trip() {
         None,
         BTreeMap::new(),
     );
-    snapshot.orchestrator_compaction_threshold = Some(32_768);
+    snapshot.compaction_threshold = Some(32_768);
     snapshot.last_response_duration_ms = Some(12_345);
     snapshot.previous_response_duration_ms = Some(6_789);
     snapshot.response_durations_ms = Some(vec![Some(1_000), None, Some(12_345)]);
@@ -103,7 +103,7 @@ fn create_and_load_session_round_trip() {
             cache_read_tokens: 20,
             cache_write_tokens: 0,
             reasoning_tokens: 0,
-            orchestrator_context_tokens: 150,
+            context_tokens: 150,
             cost: crate::model::TokenCostMicros::default(),
         }),
         None,
@@ -113,7 +113,7 @@ fn create_and_load_session_round_trip() {
             cache_read_tokens: 40,
             cache_write_tokens: 10,
             reasoning_tokens: 0,
-            orchestrator_context_tokens: 330,
+            context_tokens: 330,
             cost: crate::model::TokenCostMicros::default(),
         }),
     ];
@@ -123,7 +123,7 @@ fn create_and_load_session_round_trip() {
     assert_eq!(loaded.behavior, SessionBehavior::Direct);
     assert_eq!(loaded.cwd, PathBuf::from("/repo"));
     assert_eq!(loaded.messages.len(), 1);
-    assert_eq!(loaded.orchestrator_compaction_threshold, Some(32_768));
+    assert_eq!(loaded.compaction_threshold, Some(32_768));
     assert_eq!(loaded.last_response_duration_ms, Some(12_345));
     assert_eq!(loaded.previous_response_duration_ms, Some(6_789));
     assert_eq!(
@@ -138,7 +138,7 @@ fn create_and_load_session_round_trip() {
         loaded.token_usages[2]
             .as_ref()
             .unwrap()
-            .orchestrator_context_tokens,
+            .context_tokens,
         330
     );
 
@@ -360,7 +360,7 @@ fn session_load_rejects_threshold_above_supported_maximum() {
         .unwrap();
     conn.execute(
         "UPDATE sessions
-         SET orchestrator_compaction_threshold = ?1
+         SET compaction_threshold = ?1
          WHERE session_id = 'oversized-threshold'",
         [(crate::MAX_SUPPORTED_TOKEN_COUNT + 1) as i64],
     )
@@ -882,7 +882,7 @@ fn api_key_env_and_extra_headers_round_trip_through_store() {
         Some(raw_selector.to_string()),
         headers.clone(),
     );
-    snapshot.orchestrator_compaction_threshold = Some(65_536);
+    snapshot.compaction_threshold = Some(65_536);
     create_session(&store_path, &snapshot).unwrap();
 
     let loaded = load_session(&store_path, "session-config").unwrap();
@@ -907,7 +907,7 @@ fn api_key_env_and_extra_headers_round_trip_through_store() {
     );
     assert_eq!(refreshed.api_key_env.as_deref(), Some(raw_selector));
     assert_eq!(refreshed.extra_headers, headers);
-    assert_eq!(refreshed.orchestrator_compaction_threshold, Some(65_536));
+    assert_eq!(refreshed.compaction_threshold, Some(65_536));
     save_session(&store_path, &refreshed).unwrap();
 
     let reloaded = load_session(&store_path, "session-config").unwrap();
@@ -931,7 +931,7 @@ fn config_and_history_writes_preserve_each_other_in_both_orders() {
             "2026-01-01 00:00:00.000000000",
             "2026-01-01 00:00:00.000000000",
         );
-        initial.orchestrator_compaction_threshold = Some(4_096);
+        initial.compaction_threshold = Some(4_096);
         create_session(&store_path, &initial).unwrap();
         crate::store::create_session_inbox_item(
             &store_path,
@@ -952,7 +952,7 @@ fn config_and_history_writes_preserve_each_other_in_both_orders() {
         config_patch.api_key_env = Some("PATCHED_KEY".to_string());
         config_patch.extra_headers =
             BTreeMap::from([("X-Patched".to_string(), "true".to_string())]);
-        config_patch.orchestrator_compaction_threshold = Some(8_192);
+        config_patch.compaction_threshold = Some(8_192);
 
         let mut completed_run = load_session(&store_path, session_id).unwrap();
         completed_run.messages = vec![
@@ -978,7 +978,7 @@ fn config_and_history_writes_preserve_each_other_in_both_orders() {
             cache_read_tokens: 3,
             cache_write_tokens: 4,
             reasoning_tokens: 5,
-            orchestrator_context_tokens: 42,
+            context_tokens: 42,
             cost: crate::model::TokenCostMicros::default(),
         })];
         completed_run.updated_at = "2026-01-02 00:00:00.000000000".to_string();
@@ -1001,7 +1001,7 @@ fn config_and_history_writes_preserve_each_other_in_both_orders() {
             stored.extra_headers.get("X-Patched").map(String::as_str),
             Some("true")
         );
-        assert_eq!(stored.orchestrator_compaction_threshold, Some(8_192));
+        assert_eq!(stored.compaction_threshold, Some(8_192));
         assert_eq!(stored.config_version, 1);
         assert_eq!(stored.messages.len(), 2);
         assert!(matches!(
@@ -1176,7 +1176,7 @@ fn delete_session_uses_cascades_for_owned_auxiliary_rows() {
         None,
     )
     .unwrap();
-    crate::store::append_thread_event(
+    crate::store::append_session_event(
         &store_path,
         "session-del",
         crate::events::PRIMARY_TOOL_EVENT_TARGET,
@@ -1188,7 +1188,7 @@ fn delete_session_uses_cascades_for_owned_auxiliary_rows() {
         vec![queued]
     );
     assert_eq!(
-        crate::store::load_all_thread_events(&store_path, "session-del", 20).unwrap()
+        crate::store::load_all_session_events(&store_path, "session-del", 20).unwrap()
             [crate::events::PRIMARY_TOOL_EVENT_TARGET]
             .len(),
         1
@@ -1208,7 +1208,7 @@ fn delete_session_uses_cascades_for_owned_auxiliary_rows() {
         .unwrap()
         .is_empty());
     assert!(
-        crate::store::load_all_thread_events(&store_path, "session-del", 20)
+        crate::store::load_all_session_events(&store_path, "session-del", 20)
             .unwrap()
             .is_empty()
     );
@@ -1642,7 +1642,7 @@ fn save_session_run_state_preserves_messages_and_config_columns() {
             content: "hello".to_string(),
         },
     ];
-    snapshot.orchestrator_compaction_threshold = Some(4_096);
+    snapshot.compaction_threshold = Some(4_096);
     create_session(&store_path, &snapshot).unwrap();
     let raw_messages_json = || {
         crate::store::open_connection(&store_path)
@@ -1669,7 +1669,7 @@ fn save_session_run_state_preserves_messages_and_config_columns() {
                 cache_read_tokens: 3,
                 cache_write_tokens: 4,
                 reasoning_tokens: 5,
-                orchestrator_context_tokens: 42,
+                context_tokens: 42,
                 cost: crate::model::TokenCostMicros::default(),
             }),
         ],
@@ -1695,13 +1695,13 @@ fn save_session_run_state_preserves_messages_and_config_columns() {
         stored.token_usages[1]
             .as_ref()
             .unwrap()
-            .orchestrator_context_tokens,
+            .context_tokens,
         42
     );
     assert_eq!(stored.updated_at, update.updated_at);
     // Configuration columns are CAS-only: untouched by the run-end save.
     assert_eq!(stored.model, "model-a");
-    assert_eq!(stored.orchestrator_compaction_threshold, Some(4_096));
+    assert_eq!(stored.compaction_threshold, Some(4_096));
     assert_eq!(stored.config_version, 0);
 
     // A missing session row is an error, not an upsert: run end of a

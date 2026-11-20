@@ -259,7 +259,7 @@ fn persist_fork(
     // new independent lifecycle, but it remains the same kind of top-level
     // agent rather than silently reverting direct sessions to orchestrator.
     fork.behavior = source_behavior;
-    fork.orchestrator_compaction_threshold = source.orchestrator_compaction_threshold;
+    fork.compaction_threshold = source.compaction_threshold;
     fork.automatic_compaction = source.automatic_compaction;
     if let Some(spec) = fork.sandbox_spec.as_mut() {
         spec.worktree = None;
@@ -274,7 +274,7 @@ fn persist_fork(
             .take(visible)
             .rev()
             .flatten()
-            .find(|usage| usage.orchestrator_context_tokens > 0)
+            .find(|usage| usage.context_tokens > 0)
             .cloned()
             .map(|mut usage| {
                 usage.input_tokens = 0;
@@ -542,12 +542,12 @@ mod tests {
         let usage = source.token_usages[0].as_mut().unwrap();
         usage.input_tokens = 100;
         usage.output_tokens = 25;
-        usage.orchestrator_context_tokens = 42;
+        usage.context_tokens = 42;
         usage.cost.total = 777;
         let mut unattributed = usage.clone();
         unattributed.input_tokens = 9;
         unattributed.output_tokens = 0;
-        unattributed.orchestrator_context_tokens = 0;
+        unattributed.context_tokens = 0;
         unattributed.cost = Default::default();
         source.unattributed_token_usage = Some(unattributed);
         sessions::create_session(&store_path, &source).unwrap();
@@ -589,7 +589,7 @@ mod tests {
         ));
         assert!(fork.unattributed_token_usage.is_none());
         let inherited_context = fork.token_usages.last().unwrap().as_ref().unwrap();
-        assert_eq!(inherited_context.orchestrator_context_tokens, 42);
+        assert_eq!(inherited_context.context_tokens, 42);
         assert_eq!(inherited_context.billable_tokens(), 0);
         assert_eq!(inherited_context.cost.total, 0);
 

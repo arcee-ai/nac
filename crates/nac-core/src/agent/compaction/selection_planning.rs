@@ -164,7 +164,7 @@ impl CompactionState {
     }
     pub(super) fn selection_checkpoint_valid(
         &self,
-        checkpoint: &OrchestratorCompactionCheckpoint,
+        checkpoint: &SessionCompactionCheckpoint,
         messages: &[Message],
         source: Option<&crate::store::TerminalSelectionProvenance>,
     ) -> bool {
@@ -264,7 +264,7 @@ impl CompactionState {
 /// The checks on the checkpoint record, the policy, the message right after the
 /// summarized prefix and the transcript's system messages.
 fn checkpoint_frame_is_valid(
-    checkpoint: &OrchestratorCompactionCheckpoint,
+    checkpoint: &SessionCompactionCheckpoint,
     messages: &[Message],
     source: Option<&crate::store::TerminalSelectionProvenance>,
 ) -> bool {
@@ -287,7 +287,7 @@ fn checkpoint_frame_is_valid(
 /// The checks that read only the summarized prefix `messages[..boundary]` —
 /// re-serializing and hashing it is the expensive part of validation.
 fn checkpoint_prefix_matches(
-    checkpoint: &OrchestratorCompactionCheckpoint,
+    checkpoint: &SessionCompactionCheckpoint,
     messages: &[Message],
     source: Option<&crate::store::TerminalSelectionProvenance>,
 ) -> bool {

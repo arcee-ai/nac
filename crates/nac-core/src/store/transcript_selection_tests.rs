@@ -148,7 +148,7 @@ fn selection_provenance_delivery_rollback_and_immutable_digest_validation() {
         content: admission.record.content,
     };
     let conn = open_runtime_connection(&path).unwrap();
-    conn.execute_batch("CREATE TRIGGER reject_annotation BEFORE UPDATE OF event_json ON thread_events BEGIN SELECT RAISE(ABORT,'annotation rollback'); END").unwrap();
+    conn.execute_batch("CREATE TRIGGER reject_annotation BEFORE UPDATE OF event_json ON session_events BEGIN SELECT RAISE(ABORT,'annotation rollback'); END").unwrap();
     assert!(writer
         .append_inbox_run_prompt("session", 0, &message, "run", admission.record.id)
         .is_err());
@@ -275,7 +275,7 @@ fn selection_provenance_tamper_and_snapshot_replacement_cannot_rebind_origin() {
     let conn = open_runtime_connection(&path).unwrap();
     let old: String = conn
         .query_row(
-            "SELECT event_json FROM thread_events WHERE session_id='session'",
+            "SELECT event_json FROM session_events WHERE session_id='session'",
             [],
             |row| row.get(0),
         )
@@ -284,13 +284,13 @@ fn selection_provenance_tamper_and_snapshot_replacement_cannot_rebind_origin() {
     json["nac_transcript_message"]["terminal_selection_attribution"]["source_session_id"] =
         serde_json::json!("fork");
     conn.execute(
-        "UPDATE thread_events SET event_json=?1 WHERE session_id='session'",
+        "UPDATE session_events SET event_json=?1 WHERE session_id='session'",
         params![json.to_string()],
     )
     .unwrap();
     assert!(load_terminal_selection_references(&path, "session", 0, 1).is_err());
     conn.execute(
-        "UPDATE thread_events SET event_json=?1 WHERE session_id='session'",
+        "UPDATE session_events SET event_json=?1 WHERE session_id='session'",
         params![old],
     )
     .unwrap();

@@ -9,9 +9,9 @@ impl SessionService {
         &self,
         conn: &rusqlite::Connection,
         per_thread_limit: usize,
-    ) -> Result<DecodedThreadEvents> {
+    ) -> Result<DecodedSessionEvents> {
         let Some(session_id) = self.metadata.session_id.as_deref() else {
-            return Ok(DecodedThreadEvents {
+            return Ok(DecodedSessionEvents {
                 primary_tool_events: Vec::new(),
                 diagnostics: Vec::new(),
             });
@@ -21,7 +21,7 @@ impl SessionService {
             session_id,
             per_thread_limit,
         )?;
-        Ok(decode_thread_events(records))
+        Ok(decode_session_events(records))
     }
 
     fn load_frontend_snapshot_blocking(
@@ -41,7 +41,7 @@ impl SessionService {
             // Event publication waits for its SQL command while holding the
             // event boundary. The executor reads only durable records, never
             // this lock, so queue saturation cannot invert that order.
-            let (boundary, mut projection) = self.event_bus.thread_event_boundary(|| {
+            let (boundary, mut projection) = self.event_bus.session_event_boundary(|| {
                 owner
                     .submit(ReadFrontendProjection {
                         session_id: session_id.map(str::to_owned),
@@ -49,7 +49,7 @@ impl SessionService {
                     })?
                     .acknowledge_blocking()?
             })?;
-            projection.thread_event_boundary = Some(boundary);
+            projection.session_event_boundary = Some(boundary);
             projection
         } else {
             // Keep legacy checkout-before-event-lock ordering for standalone
@@ -57,10 +57,10 @@ impl SessionService {
             let connection = crate::store::open_runtime_connection(store)?;
             read_stored_projection(&connection, session_id, options, || {
                 self.event_bus
-                    .thread_event_boundary(|| {
+                    .session_event_boundary(|| {
                         self.load_primary_tool_events_with_connection(
                             &connection,
-                            options.thread_event_limit,
+                            options.session_event_limit,
                         )
                     })
                     .map(|(boundary, events)| (Some(boundary), events))
@@ -68,18 +68,18 @@ impl SessionService {
         };
         let StoredFrontendProjection {
             sessions,
-            thread_events,
-            thread_event_boundary,
+            session_events,
+            session_event_boundary,
             run_failure,
             forks,
         } = projection;
-        let thread_event_boundary = thread_event_boundary.ok_or_else(|| {
+        let session_event_boundary = session_event_boundary.ok_or_else(|| {
             anyhow::anyhow!("frontend persistence projection omitted its event boundary")
         })?;
         Ok(FrontendSnapshotBlockingLoad {
             sessions,
-            thread_events,
-            thread_event_boundary,
+            session_events,
+            session_event_boundary,
             forks,
             run_failure,
             workspace,
@@ -87,18 +87,18 @@ impl SessionService {
     }
 }
 
-fn decode_thread_events(records: Vec<crate::store::ThreadEventRecord>) -> DecodedThreadEvents {
+fn decode_session_events(records: Vec<crate::store::SessionEventRecord>) -> DecodedSessionEvents {
     let mut primary_tool_events = Vec::new();
     let mut diagnostics = Vec::new();
     for record in records {
         if let Some(
             event @ (AgentEvent::ToolCallStarted { .. } | AgentEvent::ToolCallFinished { .. }),
-        ) = decode_thread_event(record, &mut diagnostics)
+        ) = decode_session_event(record, &mut diagnostics)
         {
             primary_tool_events.push(event);
         }
     }
-    DecodedThreadEvents {
+    DecodedSessionEvents {
         primary_tool_events,
         diagnostics,
     }
@@ -116,13 +116,13 @@ impl SessionService {
             .snapshot)
     }
 
-    pub async fn frontend_snapshot_with_thread_event_limit(
+    pub async fn frontend_snapshot_with_session_event_limit(
         &self,
-        thread_event_limit: usize,
+        session_event_limit: usize,
     ) -> Result<SessionFrontendSnapshot> {
         Ok(self
             .frontend_snapshot_with_options(FrontendSnapshotLoadOptions {
-                thread_event_limit,
+                session_event_limit,
                 ..FrontendSnapshotLoadOptions::default()
             })
             .await?
@@ -209,9 +209,9 @@ impl SessionService {
             active_compaction: self.active_compaction(),
             shell_commands,
             sessions: blocking.sessions,
-            primary_tool_events: blocking.thread_events.primary_tool_events,
-            thread_event_boundary: blocking.thread_event_boundary,
-            thread_event_diagnostics: blocking.thread_events.diagnostics,
+            primary_tool_events: blocking.session_events.primary_tool_events,
+            session_event_boundary: blocking.session_event_boundary,
+            session_event_diagnostics: blocking.session_events.diagnostics,
             forks: blocking.forks,
             workspace: blocking.workspace,
         };
@@ -228,8 +228,8 @@ impl SessionService {
 
 struct StoredFrontendProjection {
     sessions: Vec<SessionSummarySnapshot>,
-    thread_events: DecodedThreadEvents,
-    thread_event_boundary: Option<SessionEventBoundary>,
+    session_events: DecodedSessionEvents,
+    session_event_boundary: Option<SessionEventBoundary>,
     forks: Vec<crate::store::SessionForkLink>,
     run_failure: Option<crate::run_failure::RunFailure>,
 }
@@ -238,14 +238,14 @@ fn read_stored_projection(
     conn: &rusqlite::Connection,
     session_id: Option<&str>,
     options: FrontendSnapshotLoadOptions,
-    load_events: impl FnOnce() -> Result<(Option<SessionEventBoundary>, DecodedThreadEvents)>,
+    load_events: impl FnOnce() -> Result<(Option<SessionEventBoundary>, DecodedSessionEvents)>,
 ) -> Result<StoredFrontendProjection> {
     let sessions = if options.include_sessions {
         view::list_sessions_with_connection(conn)?
     } else {
         Vec::new()
     };
-    let (thread_event_boundary, thread_events) = load_events()?;
+    let (session_event_boundary, session_events) = load_events()?;
     let forks = session_id
         .map(|session_id| crate::store::list_session_forks_with_connection(conn, session_id))
         .transpose()?
@@ -268,8 +268,8 @@ fn read_stored_projection(
 
     Ok(StoredFrontendProjection {
         sessions,
-        thread_events,
-        thread_event_boundary,
+        session_events,
+        session_event_boundary,
         run_failure,
         forks,
     })
@@ -307,12 +307,12 @@ impl crate::store::coordinator::PersistenceCommand for ReadFrontendProjection {
                         crate::store::load_primary_tool_events_with_connection(
                             &connection,
                             session_id,
-                            self.options.thread_event_limit,
+                            self.options.session_event_limit,
                         )
                     })
                     .transpose()?
                     .unwrap_or_default();
-                Ok((None, decode_thread_events(records)))
+                Ok((None, decode_session_events(records)))
             },
         ))
     }

@@ -306,7 +306,7 @@ fn anthropic_response_tool_thinking_round_trips() {
     assert_eq!(usage.output_tokens, 20);
     assert_eq!(usage.cache_read_tokens, 0);
     assert_eq!(usage.cache_write_tokens, 0);
-    assert_eq!(usage.orchestrator_context_tokens, 30);
+    assert_eq!(usage.context_tokens, 30);
 
     let request = anthropic_messages_request(
         "claude-opus-4-6",

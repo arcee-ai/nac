@@ -73,7 +73,7 @@ fn fixture_with_policy(
         AgentConfig {
             store_path: store_path.clone(),
             session_id: Some("direct-terminal".into()),
-            orchestrator_compaction_threshold: None,
+            compaction_threshold: None,
             initial_messages: Vec::new(),
             event_sink: EventSink::none(),
             workspace_cwd: directory.clone(),

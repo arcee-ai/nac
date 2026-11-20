@@ -378,7 +378,7 @@ pub fn update_session_config(
                 .map(|effort| effort.as_str().to_string()),
             api_key_env: snapshot.api_key_env.clone(),
             extra_headers_json,
-            orchestrator_compaction_threshold: snapshot.orchestrator_compaction_threshold,
+            compaction_threshold: snapshot.compaction_threshold,
             automatic_compaction: snapshot.automatic_compaction,
             config_version: snapshot.config_version,
             diagnostics: Vec::new(),
@@ -418,7 +418,7 @@ pub fn update_raw_session_config(
              reasoning_effort = ?5,
              api_key_env = ?6,
              extra_headers_json = ?7,
-             orchestrator_compaction_threshold = ?8,
+             compaction_threshold = ?8,
              config_version = ?9,
              automatic_compaction = ?12
          WHERE session_id = ?10 AND config_version = ?11",
@@ -430,7 +430,7 @@ pub fn update_raw_session_config(
             config.reasoning_effort,
             config.api_key_env,
             config.extra_headers_json,
-            config.orchestrator_compaction_threshold,
+            config.compaction_threshold,
             next_version,
             config.session_id,
             expected_version,
@@ -500,7 +500,7 @@ pub fn load_session(path: &Path, session_id: &str) -> Result<SessionSnapshot> {
                     s.previous_response_duration_ms, s.response_durations_ms_json,
                     s.created_at, s.updated_at, s.host_id, s.api_key_env,
                     s.extra_headers_json, s.token_usages_json, s.config_version,
-                    s.orchestrator_compaction_threshold, s.ssh_port,
+                    s.compaction_threshold, s.ssh_port,
                     s.ssh_identity_file, sp.project_id, s.behavior, s.automatic_compaction
              FROM sessions s
              LEFT JOIN session_projects sp ON sp.session_id = s.session_id
@@ -582,7 +582,7 @@ pub fn load_session_config(path: &Path, session_id: &str) -> Result<RawSessionCo
     let conn = crate::store::open_connection(path)?;
     let row = conn
         .query_row(
-            "SELECT session_id, model, base_url, allow_insecure_http, backend, reasoning_effort, api_key_env, extra_headers_json, config_version, orchestrator_compaction_threshold, automatic_compaction
+            "SELECT session_id, model, base_url, allow_insecure_http, backend, reasoning_effort, api_key_env, extra_headers_json, config_version, compaction_threshold, automatic_compaction
              FROM sessions
              WHERE session_id = ?1",
             params![session_id],
@@ -598,7 +598,7 @@ pub fn load_session_config(path: &Path, session_id: &str) -> Result<RawSessionCo
                         api_key_env: row.get(6)?,
                         extra_headers_json: row.get(7)?,
                                     config_version: row.get(8)?,
-                        orchestrator_compaction_threshold: row.get(9)?,
+                        compaction_threshold: row.get(9)?,
                         automatic_compaction: row.get(10)?,
                         diagnostics: Vec::new(),
                     }
@@ -610,8 +610,8 @@ pub fn load_session_config(path: &Path, session_id: &str) -> Result<RawSessionCo
     let Some(mut config) = row else {
         return Err(anyhow!("session '{session_id}' was not found"));
     };
-    config.orchestrator_compaction_threshold =
-        validate_stored_compaction_threshold(config.orchestrator_compaction_threshold)?;
+    config.compaction_threshold =
+        validate_stored_compaction_threshold(config.compaction_threshold)?;
     config.diagnostics.extend(model_config_diagnostics(
         config.backend.as_deref(),
         config.reasoning_effort.as_deref(),
@@ -948,7 +948,7 @@ pub fn load_last_session(path: &Path) -> Result<SessionSnapshot> {
                     s.previous_response_duration_ms, s.response_durations_ms_json,
                     s.created_at, s.updated_at, s.host_id, s.api_key_env,
                     s.extra_headers_json, s.token_usages_json, s.config_version,
-                    s.orchestrator_compaction_threshold, s.ssh_port,
+                    s.compaction_threshold, s.ssh_port,
                     s.ssh_identity_file, sp.project_id, s.behavior, s.automatic_compaction
              FROM sessions s
              LEFT JOIN session_projects sp ON sp.session_id = s.session_id
@@ -1013,7 +1013,7 @@ fn map_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow> {
         extra_headers_json: row.get(16)?,
         token_usages_json: row.get(17)?,
         config_version: row.get(18)?,
-        orchestrator_compaction_threshold: row.get(19)?,
+        compaction_threshold: row.get(19)?,
         ssh_port: row.get(20)?,
         ssh_identity_file: row.get(21)?,
         project_id: row.get(22)?,
@@ -1539,7 +1539,7 @@ pub(crate) fn insert_or_replace_session(
              last_response_duration_ms, previous_response_duration_ms,
              response_durations_ms_json, created_at, updated_at, host_id, api_key_env,
              extra_headers_json, token_usages_json, config_version,
-             orchestrator_compaction_threshold, ssh_port, ssh_identity_file,
+             compaction_threshold, ssh_port, ssh_identity_file,
              behavior, automatic_compaction
          ) VALUES (
              ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
@@ -1585,7 +1585,7 @@ pub(crate) fn insert_or_replace_session(
             extra_headers_json,
             token_usages_json,
             snapshot.config_version,
-            snapshot.orchestrator_compaction_threshold,
+            snapshot.compaction_threshold,
             stored_ssh_port(snapshot.ssh.as_ref()),
             stored_ssh_identity_file(snapshot.ssh.as_ref()),
             snapshot.behavior.as_str(),
@@ -1616,7 +1616,7 @@ struct SessionRow {
     extra_headers_json: Option<String>,
     token_usages_json: Option<String>,
     config_version: i64,
-    orchestrator_compaction_threshold: Option<u64>,
+    compaction_threshold: Option<u64>,
     ssh_port: Option<u16>,
     ssh_identity_file: Option<String>,
     behavior: String,
@@ -1654,8 +1654,8 @@ impl SessionRow {
             ssh: stored_ssh_connection(self.ssh_host, self.ssh_port, self.ssh_identity_file),
             api_key_env: self.api_key_env,
             extra_headers,
-            orchestrator_compaction_threshold: validate_stored_compaction_threshold(
-                self.orchestrator_compaction_threshold,
+            compaction_threshold: validate_stored_compaction_threshold(
+                self.compaction_threshold,
             )?,
             automatic_compaction: self.automatic_compaction,
             config_version: self.config_version,

@@ -50,7 +50,7 @@ fn parses_deepseek_chat_output() {
     // every completions provider (previously DeepSeek/Fireworks/Arcee
     // always parsed 0).
     assert_eq!(usage.reasoning_tokens, 9);
-    assert_eq!(usage.orchestrator_context_tokens, 30);
+    assert_eq!(usage.context_tokens, 30);
 }
 
 #[test]
@@ -151,7 +151,7 @@ fn parses_openai_responses_output() {
     assert_eq!(usage.cache_read_tokens, 0);
     assert_eq!(usage.cache_write_tokens, 0);
     assert_eq!(usage.reasoning_tokens, 7);
-    assert_eq!(usage.orchestrator_context_tokens, 30);
+    assert_eq!(usage.context_tokens, 30);
 }
 
 #[test]
@@ -183,7 +183,7 @@ fn parses_openai_responses_usage_with_cached_tokens() {
     assert_eq!(usage.cache_read_tokens, 60);
     assert_eq!(usage.cache_write_tokens, 20);
     assert_eq!(usage.reasoning_tokens, 10);
-    assert_eq!(usage.orchestrator_context_tokens, 150);
+    assert_eq!(usage.context_tokens, 150);
 
     // Parsers never bill; the client attaches cost from catalog rates.
     assert_eq!(usage.cost, TokenCostMicros::default());
@@ -228,7 +228,7 @@ fn parses_anthropic_usage_with_cache_fields() {
     assert_eq!(usage.output_tokens, 50);
     assert_eq!(usage.cache_read_tokens, 200);
     assert_eq!(usage.cache_write_tokens, 30);
-    assert_eq!(usage.orchestrator_context_tokens, 380); // 100 + 50 + 200 + 30
+    assert_eq!(usage.context_tokens, 380); // 100 + 50 + 200 + 30
 
     // Parsers never bill; the client attaches cost from catalog rates.
     assert_eq!(usage.cost, TokenCostMicros::default());
@@ -278,7 +278,7 @@ fn parses_chat_completions_usage_with_cached_tokens() {
     assert_eq!(usage.output_tokens, 50);
     assert_eq!(usage.cache_read_tokens, 60);
     assert_eq!(usage.cache_write_tokens, 0);
-    assert_eq!(usage.orchestrator_context_tokens, 150);
+    assert_eq!(usage.context_tokens, 150);
 
     // Parsers never bill; the client attaches cost from catalog rates.
     assert_eq!(usage.cost, TokenCostMicros::default());
@@ -387,7 +387,7 @@ fn parses_together_chat_response() {
     assert_eq!(usage.cache_read_tokens, 60);
     assert_eq!(usage.cache_write_tokens, 0);
     assert_eq!(usage.reasoning_tokens, 25);
-    assert_eq!(usage.orchestrator_context_tokens, 150);
+    assert_eq!(usage.context_tokens, 150);
 
     // Parsers never bill; the client attaches cost from catalog rates.
     assert_eq!(usage.cost, TokenCostMicros::default());
@@ -449,5 +449,5 @@ fn parses_together_chat_response_nested_usage() {
     assert_eq!(usage.cache_read_tokens, 2560);
     assert_eq!(usage.cache_write_tokens, 0);
     assert_eq!(usage.reasoning_tokens, 71);
-    assert_eq!(usage.orchestrator_context_tokens, 2692);
+    assert_eq!(usage.context_tokens, 2692);
 }

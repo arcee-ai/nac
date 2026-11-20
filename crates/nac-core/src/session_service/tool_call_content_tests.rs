@@ -540,7 +540,7 @@ async fn occurrence_rejects_other_stores_and_divergent_store_copies() {
         Some("first")
     );
     second_connection
-        .execute("UPDATE thread_events SET event_json = replace(event_json, 'first', 'different') WHERE session_id = 'session'", [])
+        .execute("UPDATE session_events SET event_json = replace(event_json, 'first', 'different') WHERE session_id = 'session'", [])
         .unwrap();
     assert_eq!(
         second

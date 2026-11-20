@@ -200,7 +200,7 @@ impl Fixture {
                     self.app.clone(),
                     "PATCH",
                     "/sessions/session/config",
-                    serde_json::json!({"orchestrator_compaction_threshold":64000}),
+                    serde_json::json!({"compaction_threshold":64000}),
                 )
                 .await
             }

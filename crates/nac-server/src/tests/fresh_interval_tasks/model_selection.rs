@@ -55,7 +55,7 @@ async fn reservation(
                 "X-Fixture-Model".into(),
                 "original".into(),
             )])),
-            orchestrator_compaction_threshold: None,
+            compaction_threshold: None,
         }),
         pinned_commit: None,
         default_ref: git_project.then(|| "refs/heads/dev".into()),
