@@ -231,6 +231,11 @@ for (const orchestration of [null, "0"] as const) {
           response.url() === `${harness.baseUrl}/sessions` &&
           response.request().method() === "POST",
       );
+      const firstRun = page.waitForResponse(
+        (response) =>
+          /\/sessions\/[^/]+\/runs$/.test(new URL(response.url()).pathname) &&
+          response.request().method() === "POST",
+      );
       await page.keyboard.press("Enter");
       const response = await created;
       // The project's first primary session converges under concurrent submits.
@@ -241,6 +246,11 @@ for (const orchestration of [null, "0"] as const) {
       });
       await expect(page.getByRole("combobox", { name: "Message" })).toBeVisible();
       const firstId = (await response.json()).metadata.session_id;
+      // Polling the session takes the same local-operation gate as run admission.
+      const delivered = await firstRun;
+      expect(delivered.url()).toBe(`${harness.baseUrl}/sessions/${firstId}/runs`);
+      expect(delivered.request().postDataJSON()).toMatchObject({ prompt: "POLICY_FIRST_TOKEN" });
+      expect(delivered.status()).toBe(202);
       await waitForRunIdle(request, harness, firstId);
       await expect(page.getByText("first chat response")).toBeVisible();
       await page.getByRole("combobox", { name: "Message" }).focus();
