@@ -1,5 +1,10 @@
 import { expect, test } from "./harness";
-import { captureSetup, installSetupFixture, withSetupBaselines } from "./setup-visual-fixture";
+import {
+  captureSetup,
+  installSetupFixture,
+  setupBaseline,
+  withSetupBaselines,
+} from "./setup-visual-fixture";
 
 test.use({ orchestration: "0" });
 test.skip(
@@ -77,8 +82,10 @@ for (const width of [1440, 768, 390]) {
       expect(attempts).toHaveLength(2);
       await expect(host).toHaveValue("build-box");
       await expect(port).toHaveValue("");
-      await dialog.getByRole("button", { name: "Select a model", exact: true }).click();
-      await page.getByRole("button").filter({ hasText: "GPT-5.6 Sol" }).first().click();
+      if (setupBaseline()) {
+        await dialog.getByRole("button", { name: "Select a model", exact: true }).click();
+        await page.getByRole("button").filter({ hasText: "GPT-5.6 Sol" }).first().click();
+      }
       await expect(
         dialog.getByRole("button", { name: "Create Project", exact: true }),
       ).toBeEnabled();
@@ -94,7 +101,9 @@ for (const width of [1440, 768, 390]) {
         .first();
       await folder.click();
       const picker = page.getByRole("dialog", {
-        name: "Select Working Folder on build-box",
+        name: setupBaseline()
+          ? "Select Working Folder on build-box"
+          : "Choose a folder on build-box",
         exact: true,
       });
       await expect(picker).toBeVisible();
@@ -111,7 +120,7 @@ for (const width of [1440, 768, 390]) {
           attempts,
           realSSH: false,
           scope:
-            "UI draft, explicit Connect, validation, retry, ready-to-launch and nested path/cancel; actual remote execution not claimed",
+            "UI draft, explicit Connect, validation, retry, project creation readiness and nested path/cancel; actual remote execution not claimed",
         }),
         contentType: "application/json",
       });

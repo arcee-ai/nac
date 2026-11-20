@@ -66,8 +66,8 @@ test("lists server OpenSSH aliases beside saved profiles and fills Host without 
   await page.setViewportSize({ width: 1280, height: 1200 });
   await page.goto(harness.baseUrl);
   await page.getByRole("button", { name: "Get Started", exact: true }).click();
-  const dialog = page.getByRole("dialog");
-  await expect(dialog).toContainText("New Project");
+  const dialog = page.getByRole("dialog", { name: "New Project", exact: true });
+  await expect(dialog).toBeVisible();
   await dialog.getByRole("button", { name: "SSH", exact: true }).click();
   const selector = dialog.getByRole("button", { name: "Create New" });
   await selector.scrollIntoViewIfNeeded();
