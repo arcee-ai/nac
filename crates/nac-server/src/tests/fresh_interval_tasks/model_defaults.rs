@@ -52,6 +52,7 @@ async fn reservation(
     git_project: bool,
     explicit: bool,
     missing_credential: bool,
+    selection_override: Option<store::TaskModelSelection>,
 ) -> PreparedFreshTaskLaunch {
     let project = if git_project {
         task_launches::fixture(root, manager).await.project_id
@@ -103,27 +104,29 @@ async fn reservation(
         .unwrap();
     let destination = FreshTaskDestination {
         project_id: project.clone(),
-        model_selection: Some(store::TaskModelSelection {
-            service_tier: None,
-            backend: "openai-responses".into(),
-            model: if explicit { "gpt-5.1" } else { "gpt-5.2" }.into(),
-            base_url: "http://127.0.0.1:9/v1".into(),
-            allow_insecure_http: false,
-            api_key_env: Some(
-                if missing_credential {
-                    "NAC_TEST_FRESH_MISSING_CREDENTIAL"
-                } else {
-                    "OPENAI_API_KEY"
-                }
-                .into(),
-            ),
-            reasoning_effort: Some(if explicit { "low" } else { "high" }.into()),
-            extra_headers: Some(BTreeMap::from([(
-                "X-Fixture-Model".into(),
-                "original".into(),
-            )])),
-            orchestrator_compaction_threshold: None,
-        }),
+        model_selection: Some(selection_override.unwrap_or_else(|| {
+            store::TaskModelSelection {
+                service_tier: None,
+                backend: "openai-responses".into(),
+                model: if explicit { "gpt-5.1" } else { "gpt-5.2" }.into(),
+                base_url: "http://127.0.0.1:9/v1".into(),
+                allow_insecure_http: false,
+                api_key_env: Some(
+                    if missing_credential {
+                        "NAC_TEST_FRESH_MISSING_CREDENTIAL"
+                    } else {
+                        "OPENAI_API_KEY"
+                    }
+                    .into(),
+                ),
+                reasoning_effort: Some(if explicit { "low" } else { "high" }.into()),
+                extra_headers: Some(BTreeMap::from([(
+                    "X-Fixture-Model".into(),
+                    "original".into(),
+                )])),
+                orchestrator_compaction_threshold: None,
+            }
+        })),
         pinned_commit: None,
         default_ref: git_project.then(|| "refs/heads/dev".into()),
         model: explicit.then(|| "gpt-5.1".into()),
@@ -191,7 +194,7 @@ async fn frozen_model_defaults_and_explicit_choices_survive_project_changes_for_
             let _env = ScopedModelEnv::isolated(&home, Some("fixture-key"));
             let manager = test_manager(&root);
             let primary = catch_fixture_panic(async {
-                let prepared = reservation(&root, &manager, git_project, explicit, false).await;
+                let prepared = reservation(&root, &manager, git_project, explicit, false, None).await;
                 let original = prepared.receipt().clone();
                 select(&manager, &original.destination.project_id, true);
                 let source_before = git_project.then(|| (
@@ -250,7 +253,7 @@ async fn changed_project_defaults_do_not_bypass_current_policy_or_frozen_credent
         let _env = ScopedModelEnv::isolated(&home, Some("fixture-key"));
         let manager = test_manager(&root);
         let primary = catch_fixture_panic(async {
-            let prepared = reservation(&root, &manager, false, false, failure == "credential").await;
+            let prepared = reservation(&root, &manager, false, false, failure == "credential", None).await;
             let original = prepared.receipt().clone();
             select(&manager, &original.destination.project_id, true);
             if failure != "credential" {
@@ -297,7 +300,7 @@ async fn legacy_reserved_task_without_selection_cannot_launch() {
         let _env = ScopedModelEnv::isolated(&home, Some("fixture-key"));
         let manager = test_manager(&root);
         let primary = catch_fixture_panic(async {
-            let prepared = reservation(&root, &manager, git_project, false, false).await;
+            let prepared = reservation(&root, &manager, git_project, false, false, None).await;
             let occurrence = prepared.receipt().occurrence_id.clone();
             let conn = rusqlite::Connection::open(&manager.inner.store_path).unwrap();
             conn.execute("UPDATE heartbeat_task_launches SET launch_json=json_remove(launch_json, '$.receipt.destination.model_selection', '$.receipt.request.model_selection') WHERE occurrence_id=?1", [&occurrence]).unwrap();
@@ -612,4 +615,51 @@ async fn predecessor_resume_and_run_now_replay_without_destination_or_new_work()
     drop(service);
     retire(manager).await;
     std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn scheduled_codex_missing_compaction_is_explicitly_disabled() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    for git_project in [false, true] {
+        let root = temp_root("scheduled_codex_compaction")
+            .canonicalize()
+            .unwrap();
+        let home = root.join("nac-home");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(
+            home.join("config.toml"),
+            "[[permissions.rules]]\naction='*'\nresource='*'\neffect='allow'\n",
+        )
+        .unwrap();
+        write_codex_auth(&home);
+        let _env = ScopedModelEnv::isolated(&home, Some("fixture-key"));
+        let manager = owned_test_manager(&root).unwrap();
+        let selection = store::TaskModelSelection {
+            backend: "chatgpt-codex-responses".into(),
+            model: "gpt-5.2-codex".into(),
+            base_url: nac_core::model::CHATGPT_CODEX_CANONICAL_BASE_URL.into(),
+            allow_insecure_http: false,
+            api_key_env: None,
+            reasoning_effort: None,
+            service_tier: None,
+            extra_headers: None,
+            orchestrator_compaction_threshold: None,
+        };
+        let prepared =
+            reservation(&root, &manager, git_project, false, false, Some(selection)).await;
+        let session_id = prepared.receipt().session_id.clone();
+        TaskLaunchApplication::new(&manager)
+            .prepare(prepared)
+            .await
+            .unwrap();
+        let snapshot = sessions::load_session(&manager.inner.store_path, &session_id).unwrap();
+        assert_eq!(
+            snapshot.backend,
+            nac_core::model::BackendKind::ChatGptCodexResponses
+        );
+        assert_eq!(snapshot.orchestrator_compaction_threshold, None);
+        assert!(!snapshot.automatic_compaction);
+        retire(manager).await;
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }
