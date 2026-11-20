@@ -222,14 +222,22 @@ enum NativePathJourney {
             .matching(NSPredicate(format: "label BEGINSWITH %@ OR label == %@", "Model: ", "Choose a model")).firstMatch
         try click(modelChip)
         let chooser = app.webViews.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Choose model")).firstMatch
-        let legacyModels = app.webViews.menuItems.matching(NSPredicate(format: "label BEGINSWITH %@", "Model ")).firstMatch
-        try click(chooser.exists ? chooser : legacyModels)
+        try click(chooser)
         let search = app.webViews.textFields["Search models"]
         try click(search)
         try authorize()
         search.typeText("gpt-5.6-sol")
         let fixtureModel = app.webViews.menuItems.matching(NSPredicate(format: "label BEGINSWITH %@", "GPT-5.6 Sol")).firstMatch
         try click(fixtureModel)
+        let selectedModel = app.webViews.buttons
+            .matching(NSPredicate(format: "label == %@", "Choose model: GPT-5.6 Sol")).firstMatch
+        try require(selectedModel.waitForExistence(timeout: 10), "Chosen model did not return to Model settings")
+        let settings = app.webViews.descendants(matching: .any)
+            .matching(NSPredicate(format: "label == %@", "Model settings")).firstMatch
+        try authorize()
+        selectedModel.typeKey(.escape, modifierFlags: [])
+        try require(selectedModel.waitForNonExistence(timeout: 10) && settings.waitForNonExistence(timeout: 10),
+                    "Model settings stayed open after Escape")
         try click(home)
         try authorize()
         home.typeText("MAC_PREVIEW_START ALL347_\(runID)")

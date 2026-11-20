@@ -269,7 +269,8 @@ final class StartupSmoke {
         try await waitJS("Home model chip", "return !!(\(chip)) && !\(chip).disabled;")
         _ = try await js("\(chip).click(); return true;")
         let search = "input[aria-label=\"Search models\"]"
-        let modelMenu = "document.querySelector('[role=dialog][aria-label=\"Model settings\"] button[aria-label^=\"Choose model\"]')"
+        let settings = "[role=dialog][aria-label=\"Model settings\"]"
+        let modelMenu = "document.querySelector(\(json(settings + " button[aria-label^=\"Choose model\"]")))"
         try await waitJS("Home model list entry", "return !!document.querySelector(\(json(search))) || !!(\(modelMenu));")
         _ = try await js("if (!document.querySelector(\(json(search)))) \(modelMenu).click(); return true;")
         try await waitJS("Home model search", "return !!document.querySelector(\(json(search)));")
@@ -278,7 +279,15 @@ final class StartupSmoke {
         let selection = "[...document.querySelectorAll('[role=menu][aria-label=Model] [role=menuitemradio]')].find(row => row.parentElement.firstElementChild?.textContent.trim() === \(json(model.account)) && row.firstElementChild?.textContent.trim() === \(json(label)))"
         try await waitJS("exact provider model row", "return !!(\(selection));")
         _ = try await js("\(selection).click(); return true;")
-        try await waitJS("committed Home model choice", "return !document.querySelector(\(json(search))) && \(chip)?.getAttribute('aria-label')?.startsWith(\(json("Model: " + label))) === true;")
+        try await waitJS("committed Home model choice", "return !!(\(modelMenu)) && !document.querySelector(\(json(search))) && \(chip)?.getAttribute('aria-label')?.startsWith(\(json("Model: " + label))) === true;")
+        _ = try await js("""
+        const chooser = \(modelMenu);
+        chooser.focus();
+        if (document.activeElement !== chooser) throw new Error('Home model chooser did not own keyboard focus');
+        chooser.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape', bubbles:true}));
+        return true;
+        """)
+        try await waitJS("Home model settings closed", "return !document.querySelector(\(json(settings))) && \(chip)?.getAttribute('aria-expanded') === 'false';")
     }
 
     /// Home sends its first prompt once the session exists. The real-provider
