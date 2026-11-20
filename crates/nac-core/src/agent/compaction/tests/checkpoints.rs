@@ -382,3 +382,100 @@ fn restore_accepts_legacy_user_assistant_and_end_boundaries_but_rejects_unsafe_p
     assert!(!checkpoint_boundary_is_valid(&with_system, 1));
     assert!(!summarized_prefix_has_complete_tools(&messages, 4));
 }
+
+#[test]
+fn migrated_child_checkpoint_restores_after_prompt_transition_and_stale_falls_back() {
+    use sha2::{Digest, Sha256};
+    fn update_bytes(hash: &mut Sha256, bytes: &[u8]) {
+        hash.update((bytes.len() as u64).to_be_bytes());
+        hash.update(bytes);
+    }
+    let path = temp_store_path("v54_child_prompt");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    conn.execute_batch(include_str!("../../../store/schema/fixtures/v53-fresh.sql"))
+        .unwrap();
+    let description = "child description mentioning orchestrator";
+    let suffix = "\n\nProject instructions with literal orchestrator wording.";
+    let old_template = include_str!("../../../store/schema/fixtures/v54-direct-child.md");
+    let old_system = format!(
+        "{}{}",
+        old_template
+            .replace("{working_directory}", "/tmp/project")
+            .replace("{description}", description),
+        suffix
+    );
+    let old_messages = vec![
+        Message::System {
+            content: old_system,
+        },
+        user("preserved user text"),
+        user("recent"),
+    ];
+    let json = serde_json::to_string(&old_messages).unwrap();
+    for (id, snapshot) in [("parent", "[]"), ("child", json.as_str())] {
+        conn.execute("INSERT INTO sessions(session_id,behavior,cwd,store_path,model,base_url,messages_json,created_at,updated_at) VALUES(?1,'direct','/tmp/project',?2,'test','https://example.invalid',?3,'now','now')", rusqlite::params![id,path.display().to_string(),snapshot]).unwrap();
+    }
+    conn.execute("INSERT INTO traditional_children(child_session_id,parent_session_id,root_session_id,profile,description,nesting_depth,status,generation,created_at,updated_at) VALUES('child','parent','parent','general',?1,1,'idle',0,'now','now')", [description]).unwrap();
+    let boundary = 2_usize;
+    let mut source = Sha256::new();
+    source.update(b"nac-orchestrator-compaction-source-v1\0");
+    source.update((boundary as u64).to_be_bytes());
+    update_bytes(&mut source, &serde_json::to_vec(&old_messages[1]).unwrap());
+    let old_source: [u8; 32] = source.finalize().into();
+    let mut policy = Sha256::new();
+    policy.update(b"nac-direct-compaction-system-policy-v1\0");
+    policy.update(1_u32.to_be_bytes());
+    update_bytes(
+        &mut policy,
+        include_str!("../../../store/schema/fixtures/v54-direct-compaction.md").as_bytes(),
+    );
+    update_bytes(&mut policy, HISTORICAL_CONTEXT_PREFIX.as_bytes());
+    update_bytes(&mut policy, &serde_json::to_vec(&old_messages[0]).unwrap());
+    let old_policy: [u8; 32] = policy.finalize().into();
+    conn.execute("INSERT INTO orchestrator_compaction_checkpoints(id,session_id,summary,tail_start_message_index,source_prefix_sha256,system_policy_sha256,prompt_policy_version,old_context_estimate,new_context_estimate,created_at) VALUES(1,'child',?1,2,?2,?3,1,100,50,'now')",rusqlite::params![installed_summary("verified"),old_source.as_slice(),old_policy.as_slice()]).unwrap();
+    conn.execute("INSERT INTO orchestrator_compaction_checkpoints(id,session_id,previous_checkpoint_id,summary,tail_start_message_index,source_prefix_sha256,system_policy_sha256,prompt_policy_version,old_context_estimate,new_context_estimate,created_at) VALUES(2,'child',1,?1,3,zeroblob(32),zeroblob(32),1,100,50,'now')",[installed_summary("stale newest")]).unwrap();
+    drop(conn);
+    store::initialize(&path).unwrap();
+    store::initialize(&path).unwrap();
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    assert_eq!(
+        conn.query_row::<String, _, _>(
+            "SELECT messages_json FROM sessions WHERE session_id='child'",
+            [],
+            |row| row.get(0)
+        )
+        .unwrap(),
+        json
+    );
+    assert_eq!(
+        conn.query_row::<i64, _, _>(
+            "SELECT prompt_policy_version FROM session_compaction_checkpoints WHERE id=2",
+            [],
+            |row| row.get(0)
+        )
+        .unwrap(),
+        1
+    );
+    drop(conn);
+    let mut resumed = old_messages.clone();
+    resumed[0] = Message::System {
+        content: format!(
+            "{}{}",
+            crate::agent::render_general_child_system_prompt("/tmp/project", description),
+            suffix
+        ),
+    };
+    let mut restored = CompactionState::new(path.clone(), "child".into(), None);
+    restored.restore_newest_valid_checkpoint(&resumed).unwrap();
+    assert_eq!(restored.active_checkpoint_for_test().unwrap().id, 1);
+    resumed[0] = Message::System {
+        content: format!(
+            "{}\n\nChanged project instructions.",
+            crate::agent::render_general_child_system_prompt("/tmp/project", description)
+        ),
+    };
+    restored.restore_newest_valid_checkpoint(&resumed).unwrap();
+    assert!(restored.active_checkpoint_for_test().is_none());
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}

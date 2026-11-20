@@ -3,6 +3,7 @@ use super::*;
 fn fixture() -> (Connection, Vec<Message>) {
     let conn = Connection::open_in_memory().unwrap();
     conn.execute_batch("CREATE TABLE sessions(session_id TEXT PRIMARY KEY,messages_json TEXT NOT NULL);
+        CREATE TABLE traditional_children(child_session_id TEXT PRIMARY KEY,description TEXT NOT NULL);
         CREATE TABLE thread_events(id INTEGER PRIMARY KEY,session_id TEXT NOT NULL,thread_name TEXT NOT NULL,event_json TEXT NOT NULL);
         CREATE TABLE orchestrator_compaction_checkpoints(id INTEGER PRIMARY KEY,session_id TEXT NOT NULL,previous_checkpoint_id INTEGER,summary TEXT NOT NULL,tail_start_message_index INTEGER NOT NULL,source_prefix_sha256 BLOB NOT NULL,system_policy_sha256 BLOB NOT NULL,prompt_policy_version INTEGER NOT NULL,old_context_estimate INTEGER NOT NULL DEFAULT 1,summary_prompt_tokens INTEGER,summary_completion_tokens INTEGER,new_context_estimate INTEGER NOT NULL DEFAULT 1,created_at TEXT NOT NULL DEFAULT 'now');").unwrap();
     let messages = vec![
@@ -315,4 +316,113 @@ fn malformed_surviving_transcript_row_aborts_without_rehashing() {
     let error = rehash_v54_checkpoints(&conn, "new policy", 2).unwrap_err();
     assert!(error.to_string().contains("invalid v54 transcript row"));
     assert_eq!(evidence(&conn, 1), before);
+}
+
+fn child_history(description: &str, suffix: &str) -> Vec<Message> {
+    let system = OLD_CHILD_PROMPT
+        .replace("{working_directory}", "/tmp/project")
+        .replace("{description}", description);
+    vec![
+        Message::System {
+            content: format!("{system}{suffix}"),
+        },
+        Message::User {
+            content: "orchestrator appears in literal user data".into(),
+        },
+        Message::User {
+            content: "next".into(),
+        },
+    ]
+}
+
+#[test]
+fn verified_child_checkpoint_uses_only_the_translated_system_prefix() {
+    let (conn, _) = fixture();
+    let description = "literal orchestrator description";
+    let suffix = "\n\nCustom instructions: do not rewrite orchestrator prose.";
+    let messages = child_history(description, suffix);
+    let original = serde_json::to_string(&messages).unwrap();
+    conn.execute("UPDATE sessions SET messages_json=?1", [&original])
+        .unwrap();
+    conn.execute(
+        "INSERT INTO traditional_children VALUES('s',?1)",
+        [description],
+    )
+    .unwrap();
+    insert(&conn, 1, None, &messages, 2);
+    rehash_v54_checkpoints(
+        &conn,
+        include_str!("../../agent/prompts/nac_direct_compaction.md"),
+        2,
+    )
+    .unwrap();
+    let actual = evidence(&conn, 1);
+    let mut resumed = messages.clone();
+    resumed[0] = Message::System {
+        content: format!(
+            "{}{}",
+            CURRENT_CHILD_PROMPT
+                .replace("{working_directory}", "/tmp/project")
+                .replace("{description}", description),
+            suffix
+        ),
+    };
+    let expected = crate::agent::direct_compaction_checkpoint_digests_for_test(&resumed, 2);
+    assert_eq!(actual.0, expected.0);
+    assert_eq!(actual.1, expected.1);
+    assert_eq!(actual.2, 2);
+    assert_eq!(
+        conn.query_row::<String, _, _>(
+            "SELECT messages_json FROM sessions WHERE session_id='s'",
+            [],
+            |r| r.get(0)
+        )
+        .unwrap(),
+        original
+    );
+    rehash_v54_checkpoints(
+        &conn,
+        include_str!("../../agent/prompts/nac_direct_compaction.md"),
+        2,
+    )
+    .unwrap();
+    assert_eq!(evidence(&conn, 1), actual);
+}
+
+#[test]
+fn unproven_child_or_bad_old_policy_is_never_rehashed() {
+    for case in ["wrong-description", "corrupt-policy", "wrong-template"] {
+        let (conn, _) = fixture();
+        let mut messages = child_history("real description", "");
+        if case == "wrong-template" {
+            messages[0] = Message::System {
+                content: "user supplied system prompt".into(),
+            };
+        }
+        conn.execute(
+            "UPDATE sessions SET messages_json=?1",
+            [serde_json::to_string(&messages).unwrap()],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO traditional_children VALUES('s',?1)",
+            [if case == "wrong-description" {
+                "different"
+            } else {
+                "real description"
+            }],
+        )
+        .unwrap();
+        insert(&conn, 1, None, &messages, 2);
+        if case == "corrupt-policy" {
+            conn.execute(
+                "UPDATE orchestrator_compaction_checkpoints SET system_policy_sha256=zeroblob(32)",
+                [],
+            )
+            .unwrap();
+        }
+        let original = evidence(&conn, 1);
+        rehash_v54_checkpoints(&conn, "new policy", 2).unwrap();
+        assert_eq!(evidence(&conn, 1), original, "{case}");
+    }
 }
