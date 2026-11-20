@@ -152,7 +152,8 @@ for (const orchestration of [null, "0"] as const) {
         }
         await expect(insights.getByRole("tab", { name: "Threads", exact: true })).toHaveCount(0);
         await expect(insights.getByRole("tab", { name: "Worksets", exact: true })).toHaveCount(0);
-        await page.keyboard.press("Escape");
+        if (mobile) await page.keyboard.press("Escape");
+        else await insights.getByRole("button", { name: "Hide panel", exact: true }).click();
         await expect(insights).toBeHidden();
         await expect(page.getByRole("button", { name: "Spawn", exact: true })).toHaveCount(0);
         await expect(page.locator(BEHAVIOR_MARKERS)).toHaveCount(0);

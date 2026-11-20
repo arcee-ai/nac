@@ -88,6 +88,11 @@ async function launchComposed(j: Journey) {
   await expect(form).toHaveCount(0);
   expect(fixture.state.sessionCreates).toBe(0);
   expect(fixture.state.projectAttempts).toBe(j.width === 768 ? 2 : 1);
+  await expect(
+    root
+      .getByRole("region", { name: "Notifications", exact: true })
+      .getByText("Project created", { exact: true }),
+  ).toHaveCount(0);
 
   const model = root.getByRole("button", { name: /^(Model: |Choose a model$)/ });
   const start = root.getByRole("button", { name: "Start session", exact: true });
@@ -159,7 +164,11 @@ async function conversationComposed(j: Journey, id: string) {
     const fold = j.root.locator("[data-work-fold]").last();
     const line = fold.getByRole("button", { name: /^Thinking/ }).first();
     if ((await line.getAttribute("aria-expanded")) !== "true") await activate(j, line);
-    await activate(j, fold.getByRole("button", { name: /^(Details|Open) in Insights$/ }).first());
+    // A streaming turn can replace its fold as the viewport scrolls. Use the
+    // button's keyboard activation to open the live step without moving it.
+    const insight = fold.getByRole("button", { name: /^(Details|Open) in Insights$/ }).first();
+    await expect(insight).toBeEnabled();
+    await insight.press("Enter", { timeout: 10_000 });
     const detail = j.root.getByRole("region", { name: "Insights detail", exact: true });
     const disclosure = detail.getByRole("button", { name: "Thinking…", exact: true });
     await expect(disclosure).toHaveAttribute("aria-expanded", "true");
@@ -234,6 +243,9 @@ async function settingsComposed(j: Journey) {
   await captureComposed(j, "settings-draft");
   await activate(j, settings.getByRole("button", { name: "Save", exact: true }));
   await expect(settings).toHaveCount(0);
+  await expect(notifications.getByText("Session presentation saved", { exact: true })).toHaveCount(
+    0,
+  );
   await openComposedRename(j);
   await expect(title).toHaveValue("Composed settings saved");
   await activate(j, settings.getByRole("button", { name: "Cancel", exact: true }));
