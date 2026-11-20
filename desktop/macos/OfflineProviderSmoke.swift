@@ -52,7 +52,8 @@ final class OfflineProviderSmoke {
 
     private func input(_ label: String, _ value: String) async throws {
         guard try await js(Self.visible + #"""
-        const fields=[...document.querySelectorAll('input')].filter(e=>visible(e)&&e.getAttribute('aria-label')===label);
+        const fields=[...document.querySelectorAll('input')].filter(e=>visible(e)&&
+          (e.getAttribute('aria-label')===label || [...e.labels].some(l=>l.textContent.trim()===label)));
         if(fields.length!==1)return false;
         const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;
         setter.call(fields[0],value); fields[0].dispatchEvent(new Event('input',{bubbles:true}));return true;
