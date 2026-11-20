@@ -4,7 +4,7 @@ import { createDirectSession, expect, test, waitForRunIdle } from "./harness";
 // Explicit capture runs use the same fixture against the base and head binaries.
 // Normal E2E runs do not register this evidence-only scenario.
 if (process.env.NAC_VISUAL_DIR && process.env.NAC_VISUAL_LABEL) {
-  test.use({ orchestration: "0", codexCatalogFixture: true });
+  test.use({ codexCatalogFixture: true });
   for (const mobile of [false, true]) {
     test(`capture Codex context ${mobile ? "mobile" : "desktop"}`, async ({
       harness,

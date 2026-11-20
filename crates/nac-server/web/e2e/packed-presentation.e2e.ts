@@ -2,7 +2,6 @@ import { createProject, createSession, expect, test, waitForRunIdle } from "./ha
 import { startPackedPresentation } from "./packed-presentation-fixture";
 
 test.skip(!!process.env.NAC_E2E_REMOTE, "Requires the isolated local scripted packed consumer");
-test.use({ orchestration: "0" });
 for (const mobile of [false, true]) {
   test(`packed native presentation with caller router/style isolation ${mobile ? "mobile" : "desktop"}`, async ({
     harness,

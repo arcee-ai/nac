@@ -17,8 +17,6 @@ import {
 } from "./nav-focus-helpers";
 import { ScriptGate } from "./scripted-provider";
 
-test.use({ orchestration: "0" });
-
 const LONG_TITLE =
   "Investigate the repository cache and preserve the complete deployment history across repeated runs";
 

@@ -517,7 +517,7 @@ test("ALL473-E2 restart reconciles original peer receipts and preserves exact re
     interactive.abort();
     await Promise.allSettled([callerEvents?.body?.cancel()]);
     callerEvents = undefined;
-    await harness.restart("1", undefined, true);
+    await harness.restart(undefined, true);
     const restarted = await identity(request, harness);
     expect(restarted.binary_sha256).toBe(firstIdentity.binary_sha256);
     expect(restarted.incarnation).not.toBe(firstIdentity.incarnation);

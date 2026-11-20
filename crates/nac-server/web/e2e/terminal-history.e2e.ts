@@ -147,7 +147,7 @@ test("retained terminal history reopens without input, expires independently and
 
   // Restart the isolated embedded server, then use a new endpoint-bound client.
   // Old observer identity is tested directly rather than replayed browser state.
-  await harness.restart(null);
+  await harness.restart();
   api = makeApi();
   const restored = (await api.listExecutionHistory(session)).history.entries.find(
     (entry) => entry.id === first.id,

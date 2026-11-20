@@ -2,8 +2,6 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createSession, expect, startForegroundChild, test } from "./harness";
 
-test.use({ orchestration: "0" });
-
 test.afterEach(async ({ page }) => {
   // This case owns every route on its page. Drain a late child read before
   // Playwright disposes its response context; handler errors remain failures.

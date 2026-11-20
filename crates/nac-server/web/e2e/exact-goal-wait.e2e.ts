@@ -376,7 +376,7 @@ test("ALL471-G1 exact completed goal stays quiet through settlement, clear and r
       "goal_complete",
     );
     const previous = await identity(request, harness);
-    await harness.restart("1", undefined, true);
+    await harness.restart(undefined, true);
     const restarted = await identity(request, harness);
     expect(restarted.source).toBe(previous.source);
     expect(restarted.binary_sha256).toBe(previous.binary_sha256);

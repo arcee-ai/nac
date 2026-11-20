@@ -63,7 +63,12 @@ if (modalBaseline) {
   assert.equal(manifest.purpose, "contained-settings");
 }
 test.use({
-  orchestration: aggregate || modalBaseline ? "0" : "1",
+  // Historical baseline manifests bind an older binary that used this flag.
+  // The current final capture verifies that its retired policy route is absent.
+  serverEnvironment:
+    manifest?.role === "owning-527-final"
+      ? {}
+      : { NAC_ORCHESTRATION: aggregate || modalBaseline ? "0" : "1" },
   hasTouch: true,
   trace: "on",
   screenshot: "off",
@@ -107,8 +112,12 @@ for (const transport of transports) {
       const producer = (await identity.json()) as { build: { source_revision: string } };
       assert.equal(producer.build.source_revision, manifest.apiSource);
       const policy = await request.get(`${harness.baseUrl}/ui-config`);
-      expect(policy.ok()).toBe(true);
-      expect((await policy.json()).orchestration_enabled).toBe(!(aggregate || modalBaseline));
+      if (manifest.role === "owning-527-final") {
+        expect(policy.status()).toBe(404);
+      } else {
+        expect(policy.ok()).toBe(true);
+        expect((await policy.json()).orchestration_enabled).toBe(!(aggregate || modalBaseline));
+      }
       let sealed: Awaited<ReturnType<typeof sealFrontendAssets>> | undefined;
       if (manifest.frontend) {
         const bytes = await fs.readFile(manifest.frontend.mapPath);

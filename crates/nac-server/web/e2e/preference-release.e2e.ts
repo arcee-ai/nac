@@ -2,7 +2,6 @@ import { createProject, createSession, expect, test } from "./harness";
 import { startHostedFixture } from "./hosted-fixture";
 
 test.skip(!!process.env.NAC_E2E_REMOTE, "Requires the isolated caller-owned storage fixture");
-test.use({ orchestration: "0" });
 
 test("caller-owned preferences survive real runtime close and reconstruction", async ({
   harness,

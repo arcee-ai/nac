@@ -4,8 +4,6 @@ import { openSettingsSection } from "./settings-focus";
 
 declare const navigator: { clipboard: { readText(): Promise<string> } };
 
-test.use({ orchestration: "0" });
-
 const VIEWPORTS = [
   { width: 390, height: 844 },
   { width: 768, height: 1024 },

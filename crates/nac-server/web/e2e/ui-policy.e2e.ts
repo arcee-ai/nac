@@ -1,6 +1,6 @@
 import { test, expect, createProject, waitForRunIdle } from "./harness";
 
-test.use({ orchestration: "1" });
+test.use({ serverEnvironment: { NAC_ORCHESTRATION: "1" } });
 
 for (const mobile of [false, true]) {
   test(`direct-only creation with an obsolete environment value (${mobile ? "mobile" : "desktop"})`, async ({

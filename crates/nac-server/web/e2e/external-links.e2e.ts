@@ -3,8 +3,6 @@ import type { APIRequestContext, Locator, Page, TestInfo } from "@playwright/tes
 import { createDirectSession, createProject, expect, test, type EmbeddedHarness } from "./harness";
 import { openSessionSettings } from "./settings-focus";
 
-test.use({ orchestration: "0" });
-
 function linkBrowserEvents(page: Page) {
   const events: Array<Record<string, unknown>> = [];
   page.on("console", (message) => {

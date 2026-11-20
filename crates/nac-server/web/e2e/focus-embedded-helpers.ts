@@ -89,20 +89,6 @@ export function homeComposer(page: Page): Locator {
   return page.getByRole("textbox", { name: "What should we work on?" });
 }
 
-export type BehaviorLabel = "Agent" | "Agent + Orchestrator" | "Orchestrator";
-
-/** One choice of Home's behavior menu, by its display label. */
-export function behaviorChoice(page: Page, label: BehaviorLabel): Locator {
-  return page.getByRole("menuitemradio").filter({ has: page.getByText(label, { exact: true }) });
-}
-
-/** Picks the immutable behavior for the next session from Home's behavior chip. */
-export async function chooseBehavior(page: Page, label: BehaviorLabel) {
-  await page.getByRole("button", { name: /^Behavior: / }).click();
-  await behaviorChoice(page, label).click();
-  await expect(page.getByRole("button", { name: `Behavior: ${label}`, exact: true })).toBeVisible();
-}
-
 /** Sends Home's prompt as a new session's first run and returns the opened session. */
 export async function startSessionFromHome(
   page: Page,

@@ -2,8 +2,6 @@ import { createProject, createSession, expect, test, waitForRunIdle } from "./ha
 import type { ModelCatalog } from "../src/app/types/api";
 import { openSessionSettings } from "./nav-focus-helpers";
 
-test.use({ orchestration: "0" });
-
 for (const mobile of [false, true]) {
   test(`reviews direct session setup, session-only settings and failed saves (${mobile ? "mobile" : "desktop"})`, async ({
     harness,

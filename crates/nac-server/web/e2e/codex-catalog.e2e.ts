@@ -3,7 +3,7 @@ import path from "node:path";
 import { createDirectSession, expect, test, waitForRunIdle } from "./harness";
 import { openSessionSettings } from "./nav-focus-helpers";
 
-test.use({ orchestration: "0", codexCatalogFixture: true });
+test.use({ codexCatalogFixture: true });
 
 test("selects a discovered Codex model and agrees with runtime input budget", async ({
   harness,

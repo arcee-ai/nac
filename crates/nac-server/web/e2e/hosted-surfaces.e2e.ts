@@ -21,7 +21,6 @@ test.skip(
   !!process.env.NAC_E2E_REMOTE,
   "Requires disposable local workspaces and scripted providers",
 );
-test.use({ orchestration: "0" });
 
 /**
  * The session's Files panel: the drawer's Files tab, reached from the Session

@@ -273,7 +273,7 @@ test("an old standalone document cannot read or navigate a replacement server at
   await leaveSettings(page);
   await expect(page.getByRole("button", { name: "High", exact: true })).toBeVisible();
   const origin = harness.baseUrl;
-  await harness.restart("1", undefined, true);
+  await harness.restart(undefined, true);
   expect(harness.baseUrl).toBe(origin);
   context = await openSettingsSection(page, "Capabilities");
   await expect(context.getByRole("alert")).toHaveText(
@@ -321,7 +321,7 @@ test("a delayed old navigation receipt cannot open UI after a same-origin servin
     const context = await inspect(page);
     await context.getByRole("button", { name: "Open MCP settings", exact: true }).click();
     await accepted;
-    await harness.restart("1", undefined, true);
+    await harness.restart(undefined, true);
     expect(harness.baseUrl).toBe(origin);
     release();
     await expect(context.getByRole("alert")).toHaveText(

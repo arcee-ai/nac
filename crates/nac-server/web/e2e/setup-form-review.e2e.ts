@@ -3,7 +3,7 @@ import { createProject, expect, test } from "./harness";
 import { openNameZoom } from "./session-name-zoom";
 import { installSetupFixture, longModel } from "./setup-visual-fixture";
 
-test.use({ orchestration: "0", hasTouch: true });
+test.use({ hasTouch: true });
 test.skip(!!process.env.NAC_E2E_REMOTE, "Requires the isolated local form fixture");
 
 for (const zoomed of [false, true]) {

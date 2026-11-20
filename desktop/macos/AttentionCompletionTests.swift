@@ -25,6 +25,11 @@ enum AttentionCompletionTests {
         }
         var bad = page(1); var value = bad["page"] as! [String: Any]; value["command"] = "resume"; bad["page"] = value; rejects(bad)
         bad = page(1); value = bad["page"] as! [String: Any]; value["baseline"] = true; bad["page"] = value; rejects(bad)
+        for behavior in ["orchestrator", "direct-with-orchestrator"] {
+            bad = page(1); value = bad["page"] as! [String: Any]
+            var items = value["items"] as! [[String: Any]]; items[0]["behavior"] = behavior
+            value["items"] = items; bad["page"] = value; rejects(bad)
+        }
         var parser = AttentionSSEParser()
         func bytes(_ n: Int) throws -> Data {
             var data = Data("event: attention\r\ndata: ".utf8)

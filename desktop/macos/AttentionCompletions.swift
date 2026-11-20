@@ -64,7 +64,7 @@ extension AttentionWire {
             for item in items {
                 guard item.sequence > previous, item.sequence <= cursor,
                       [item.session_id, item.run_id].allSatisfy(validID),
-                      ["orchestrator", "direct", "direct-with-orchestrator"].contains(item.behavior) else {
+                      item.behavior == "direct" else {
                     throw AttentionFeedError.invalid
                 }
                 switch item.kind {

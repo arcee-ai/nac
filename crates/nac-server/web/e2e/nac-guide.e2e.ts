@@ -132,7 +132,7 @@ for (const journey of [
     const sessions = await request.get(`${harness.baseUrl}/sessions`);
     expect((await sessions.json()).length).toBe(1);
     if (journey.document === "mcp") {
-      await harness.restart("1");
+      await harness.restart();
       harness.provider.enqueue(
         "guide-after-restart",
         {

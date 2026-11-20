@@ -146,7 +146,7 @@ test("pending withdrawal preserves quiet list projection and production project 
   expect(withdrawn.outcome).toBeNull();
   await expect(finishedDot).toHaveCount(0);
   await page.screenshot({ path: info.outputPath("quiet-after-withdrawal.png"), fullPage: true });
-  await harness.restart("1"); // Normal shutdown also cleans the owned terminal.
+  await harness.restart(); // Normal shutdown also cleans the owned terminal.
   await page.goto(`${harness.baseUrl}/#/`);
   await expect(card).toBeVisible();
   await expect(finishedDot).toHaveCount(0);

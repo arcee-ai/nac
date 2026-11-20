@@ -1,7 +1,6 @@
 import { expect, test } from "./harness";
 import { captureSetup, installSetupFixture, withSetupBaselines } from "./setup-visual-fixture";
 
-test.use({ orchestration: "0" });
 test.skip(
   !!process.env.NAC_E2E_REMOTE,
   "Controlled SSH boundary requires the disposable local harness",

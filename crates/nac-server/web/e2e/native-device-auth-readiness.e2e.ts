@@ -4,8 +4,6 @@ import { fileURLToPath } from "node:url";
 
 import { expect, test } from "./harness";
 
-test.use({ orchestration: "0" });
-
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 const source = await fs.readFile(
   path.join(repository, "desktop/macos/DeviceAuthSmoke.swift"),
