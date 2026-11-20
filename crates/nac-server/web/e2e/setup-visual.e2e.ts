@@ -20,7 +20,7 @@ for (const width of [1440, 768, 390]) {
     withSetupBaselines(async (baseline) => {
       test.setTimeout(90_000);
       await page.setViewportSize({ width, height: width === 768 ? 1024 : 900 });
-      await page.emulateMedia({ reducedMotion: "reduce" });
+      await page.emulateMedia({ reducedMotion: "reduce", colorScheme: "light" });
       await baseline.serve(page, harness.baseUrl);
       let releaseCatalog!: () => void;
       const catalogReady = new Promise<void>((resolve) => {
@@ -161,6 +161,7 @@ test("setup controls remain reachable at actual 200 percent tab zoom", async ({
       (preparedContext) => baseline.beforeContextClose(preparedContext),
     );
     await baseline.withContext(context, async () => {
+      await page.emulateMedia({ reducedMotion: "reduce", colorScheme: "light" });
       await baseline.serve(page, harness.baseUrl);
       for (const width of [1440, 768, 390]) {
         await page.setViewportSize({ width, height: width === 768 ? 1024 : 900 });
@@ -205,7 +206,7 @@ test("setup controls remain reachable at actual 200 percent tab zoom", async ({
           zoom,
           method: "chrome.tabs.setZoom/getZoom",
           reducedMotion: "reduce",
-          productTheme: "dark",
+          productTheme: "light",
         }),
         contentType: "application/json",
       });

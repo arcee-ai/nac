@@ -65,6 +65,11 @@ for (const zoomed of [false, true]) {
       const chipBox = await chip.boundingBox();
       expect(chipBox).not.toBeNull();
       expect(chipBox!.x + chipBox!.width).toBeLessThanOrEqual(viewport + 1);
+      await expect(page.getByRole("button", { name: "Start session", exact: true })).toBeInViewport(
+        {
+          ratio: 1,
+        },
+      );
 
       // Accounts uses the real catalog and credential store. The first PUT is
       // rejected at the boundary; only the user's next submit may persist it.

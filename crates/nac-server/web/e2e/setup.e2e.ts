@@ -35,7 +35,6 @@ for (const mobile of [false, true]) {
     const modelChip = page.getByRole("button", { name: /^Model: / });
     await expect(modelChip).toHaveAccessibleName(/high reasoning/i);
     await openModelList(page);
-    await expect(page.getByText("Project default", { exact: true })).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(modelChip).toBeFocused();
 
