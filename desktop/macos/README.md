@@ -210,7 +210,7 @@ teardown/abort coupling, not a proven Actual16 cause or native acceptance.
 
 The active direct-only successor initially selects product and protocol source
 `1638a9f36b4978bfe790859d0d42ce3bea96a5cf` and separately pinned test supplier
-`5310b6a9e723db27899ed01ead3f23ca19667bf9`. The optional `startup_product_sha`
+`51c27fe42854f110a58f5105b50a93669cce8a53`. The optional `startup_product_sha`
 dispatch input binds an exact selected candidate to its clean checkout, package
 identity and executable digests. Protocol schema equality remains fail-closed;
 a newer schema needs a separately matching protocol supplier. Hosted full-Xcode,
