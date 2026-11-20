@@ -79,13 +79,43 @@ describe("canonical refresh classification", () => {
         envelope({
           type: "agent",
           event: {
-            type: "orchestrator_compaction_completed",
+            type: "compaction_completed",
             compaction_id: "compaction-1",
             reason: "auto",
           },
         }),
       ),
     ).toBe("replace-snapshot");
+  });
+
+  it("tracks neutral compaction events and settles the activity", () => {
+    resetRuntime("session-a");
+    const base = { compaction_id: "compaction-1", reason: "auto" } as const;
+    applyEnvelope(envelope({ type: "agent", event: { type: "compaction_started", ...base } }));
+    expect(getRuntimeState().activity).toBe("Compacting context…");
+    applyEnvelope(
+      envelope({
+        type: "agent",
+        event: { type: "compaction_skipped", cause: "already_compacted", ...base },
+      }),
+    );
+    expect(getRuntimeState().activity).toBe("");
+    expect(getRuntimeState().events.at(-1)).toMatchObject({
+      kind: "compaction",
+      text: "Compaction skipped: already_compacted",
+      isError: false,
+    });
+    applyEnvelope(
+      envelope({
+        type: "agent",
+        event: { type: "compaction_failed", failure: "summary_rejected", ...base },
+      }),
+    );
+    expect(getRuntimeState().events.at(-1)).toMatchObject({
+      kind: "compaction",
+      text: "Compaction failed: summary_rejected",
+      isError: true,
+    });
   });
 
   it("retains and settles safe primary tool overlays by call identity", () => {

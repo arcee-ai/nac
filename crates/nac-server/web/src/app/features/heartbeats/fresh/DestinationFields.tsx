@@ -41,7 +41,7 @@ export function DestinationFields({
             api_key_env: selection.api_key_env,
             reasoning_effort: selection.reasoning_effort,
             extra_headers: selection.extra_headers,
-            orchestrator_compaction_threshold: selection.orchestrator_compaction_threshold ?? null,
+            compaction_threshold: selection.compaction_threshold ?? null,
           }
         : null;
       if (JSON.stringify(value.model_selection ?? null) !== JSON.stringify(next)) {

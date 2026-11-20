@@ -45,7 +45,7 @@ export function projectChatRequest(values: {
     !(selected.backend === "chatgpt-codex-responses" && values.automaticCompaction) &&
     nullable(values.compaction) !== null
   )
-    body.orchestrator_compaction_threshold = Number(values.compaction);
+    body.compaction_threshold = Number(values.compaction);
   if (values.execution !== "ssh")
     body.sandbox = {
       enabled: values.execution === "sandbox",

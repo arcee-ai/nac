@@ -258,7 +258,7 @@ export async function createSession(
       reasoning_effort: "high",
       api_key_env: "NAC_E2E_API_KEY",
       extra_headers: {},
-      orchestrator_compaction_threshold: 0,
+      compaction_threshold: 0,
     },
   });
   if (!response.ok()) {

@@ -98,7 +98,7 @@ function initialFromConfig(config: RawSessionConfig): SettingsInitialValues {
     api_key_env: config.api_key_env || null,
     extra_headers: headers.headers,
     extra_headers_invalid: headers.invalid,
-    orchestrator_compaction_threshold: config.orchestrator_compaction_threshold,
+    compaction_threshold: config.compaction_threshold,
     automatic_compaction: config.automatic_compaction ?? false,
   };
 }
@@ -244,8 +244,8 @@ function SettingsForm({
   const [, setBaseUrl] = useState(initial.base_url);
   const [headers, setHeaders] = useState(headersToText(initial.extra_headers));
   const [compaction, setCompaction] = useState(
-    initial.orchestrator_compaction_threshold != null
-      ? String(initial.orchestrator_compaction_threshold)
+    initial.compaction_threshold != null
+      ? String(initial.compaction_threshold)
       : "",
   );
   // Track whether the compaction value was auto-suggested (vs. user-entered)
@@ -354,17 +354,17 @@ function SettingsForm({
           credential_mode: selected.api_key_env ? "variable" : "none",
           api_key_env: selected.api_key_env ?? "",
           extra_headers: headers,
-          orchestrator_compaction_threshold: compaction,
+          compaction_threshold: compaction,
         },
         initial,
         allowsCredentiallessSelection,
       );
       if (initial.automatic_compaction && compactionAutoRef.current) {
-        delete patch.orchestrator_compaction_threshold;
+        delete patch.compaction_threshold;
       } else if (initial.automatic_compaction) {
         // Editing an automatic value makes it intentional even when the
         // entered number happens to equal the current suggestion.
-        patch.orchestrator_compaction_threshold = compaction.trim() ? Number(compaction) : null;
+        patch.compaction_threshold = compaction.trim() ? Number(compaction) : null;
       }
     } catch (validationError) {
       throw new SetupValidation(
@@ -530,7 +530,7 @@ function SettingsForm({
             api_key_env: initial.api_key_env,
             reasoning_effort: initial.reasoning_effort,
             extra_headers: initial.extra_headers,
-            orchestrator_compaction_threshold: initial.orchestrator_compaction_threshold,
+            compaction_threshold: initial.compaction_threshold,
           }}
           onChange={onConfigurationChange}
         >

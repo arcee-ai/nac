@@ -142,7 +142,7 @@ function renderReadySettings({
     config_version: 1,
     ...initial,
     extra_headers_json: headersJson,
-    orchestrator_compaction_threshold: threshold,
+    compaction_threshold: threshold,
     diagnostics,
   } as RawSessionConfig);
   vi.spyOn(api, "getModelCatalog").mockResolvedValue({
@@ -236,7 +236,7 @@ it("holds a fast settings submit until managed status authorizes the mounted mod
     config_version: 1,
     ...initial,
     extra_headers_json: "{}",
-    orchestrator_compaction_threshold: null,
+    compaction_threshold: null,
     diagnostics: [],
   } as RawSessionConfig);
   vi.spyOn(api, "getModelCatalog").mockResolvedValue({
@@ -322,7 +322,7 @@ it("saving direct settings keeps disabled compaction intact", async () => {
     await waitFor(() => expect(update).toHaveBeenCalled());
     const patch = update.mock.calls[0]?.[1];
     expect(patch).not.toHaveProperty("light_model");
-    expect(patch).not.toHaveProperty("orchestrator_compaction_threshold");
+    expect(patch).not.toHaveProperty("compaction_threshold");
   } finally {
     view.unmount();
     client.clear();

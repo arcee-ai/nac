@@ -20,10 +20,7 @@ function invocationOutcome(
     if (!value || typeof value !== "object" || Array.isArray(value)) return null;
     const record = value as Record<string, unknown>;
     if (
-      !(
-        typeof record.child_session_id === "string" ||
-        typeof record.orchestrator_session_id === "string"
-      ) ||
+      typeof record.child_session_id !== "string" ||
       typeof record.generation !== "number" ||
       !Number.isSafeInteger(record.generation) ||
       record.generation < 1 ||

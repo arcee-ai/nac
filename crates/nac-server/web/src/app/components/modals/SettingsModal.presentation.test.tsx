@@ -114,7 +114,7 @@ function renderReadySettings({
     config_version: 1,
     ...initial,
     extra_headers_json: headersJson,
-    orchestrator_compaction_threshold: threshold,
+    compaction_threshold: threshold,
     automatic_compaction: automaticCompaction,
     diagnostics,
   } as RawSessionConfig);
@@ -192,7 +192,7 @@ it("saves a manually edited automatic threshold even if restored to its original
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(update).toHaveBeenCalled());
     expect(update.mock.calls[0]?.[1]).toMatchObject({
-      orchestrator_compaction_threshold: Number(original),
+      compaction_threshold: Number(original),
     });
   } finally {
     view.unmount();
@@ -263,7 +263,7 @@ it("names native headers and retains edits while opening provider connections", 
         "settings-session",
         expect.objectContaining({
           extra_headers: { "X-Manual": "draft" },
-          orchestrator_compaction_threshold: 444,
+          compaction_threshold: 444,
         }),
       ),
     );
@@ -320,7 +320,7 @@ it.each([
           expect.objectContaining({
             model: "gpt-5.3",
             extra_headers: headers ? { "X-Manual": "draft" } : {},
-            orchestrator_compaction_threshold: context ? Number(context) : null,
+            compaction_threshold: context ? Number(context) : null,
           }),
         ),
       );
@@ -357,7 +357,7 @@ it.each(["chatgpt-codex-responses", "arcee-auth"] as const)(
       await waitFor(() =>
         expect(update).toHaveBeenCalledExactlyOnceWith(
           "settings-session",
-          expect.objectContaining({ orchestrator_compaction_threshold: 444 }),
+          expect.objectContaining({ compaction_threshold: 444 }),
         ),
       );
       expect(update.mock.calls[0][1]).not.toHaveProperty("backend");

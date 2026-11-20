@@ -75,7 +75,7 @@ for (const mobile of [false, true]) {
     expect(saved).toMatchObject({
       ...before,
       config_version: before.config_version + 1,
-      orchestrator_compaction_threshold: 222,
+      compaction_threshold: 222,
     });
     expect(await (await request.get(`${harness.baseUrl}/projects`)).json()).toEqual(projectBefore);
 
@@ -105,7 +105,7 @@ for (const mobile of [false, true]) {
       settings.getByRole("textbox", { name: "Session title", exact: true }),
     ).toBeVisible();
     const externalSave = await request.patch(configUrl, {
-      data: { orchestrator_compaction_threshold: 444 },
+      data: { compaction_threshold: 444 },
     });
     expect(externalSave.ok()).toBe(true);
     await settings

@@ -45,7 +45,7 @@ function modelCopyText(turn: ModelTurn): string {
     .trim();
 }
 
-/** Must match the activity the runtime store sets when orchestrator compaction starts. */
+/** Must match the activity the runtime store sets when compaction starts. */
 const COMPACTION_ACTIVITY = "Compacting context…";
 
 /** Phones keep their 44px targets; the row's tone does the quieting. */

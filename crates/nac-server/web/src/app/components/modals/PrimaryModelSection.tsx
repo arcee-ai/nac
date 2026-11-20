@@ -127,7 +127,7 @@ export function PrimaryModelSection({
         api_key_env: initial.api_key_env,
         reasoning_effort: effective.effort || null,
         extra_headers: initial.extra_headers,
-        orchestrator_compaction_threshold: initial.orchestrator_compaction_threshold,
+        compaction_threshold: initial.compaction_threshold,
       };
     }
     if (!providerReady) return null;

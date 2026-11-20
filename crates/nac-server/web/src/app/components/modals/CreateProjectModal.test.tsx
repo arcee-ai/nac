@@ -158,7 +158,7 @@ it("leaves an untouched Codex suggestion automatic when creating the first chat"
     fireEvent.click(screen.getByRole("button", { name: "Create Project" }));
     await waitFor(() => expect(api.createSession).toHaveBeenCalled());
     expect(vi.mocked(api.createSession).mock.calls[0]?.[0]).not.toHaveProperty(
-      "orchestrator_compaction_threshold",
+      "compaction_threshold",
     );
   } finally {
     view.unmount();
@@ -230,7 +230,7 @@ it("preserves an edited context limit when changing the session model", async ()
     await waitFor(() => expect(api.createSession).toHaveBeenCalled());
     expect(vi.mocked(api.createSession).mock.calls[0]?.[0]).toMatchObject({
       model: "gpt-5.3",
-      orchestrator_compaction_threshold: 777,
+      compaction_threshold: 777,
     });
   } finally {
     view.unmount();

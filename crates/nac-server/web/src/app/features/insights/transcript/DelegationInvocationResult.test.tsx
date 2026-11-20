@@ -23,7 +23,7 @@ it.each([
       verification_summary: "Tests passed",
     },
   ],
-  ["orchestrator_session_id", "failed", { failure: "Unable to finish" }],
+  ["child_session_id", "failed", { failure: "Unable to finish" }],
   ["child_session_id", "running", {}],
 ] as const)(
   "renders native %s %s outcomes without exposing JSON",
@@ -69,7 +69,7 @@ it.each([
           "The response reports background work; completion may be delivered separately.",
         ),
       ).toBeTruthy();
-    expect(screen.queryByText(/child_session_id|orchestrator_session_id/)).toBeNull();
+    expect(screen.queryByText(/child_session_id/)).toBeNull();
     fireEvent.click(screen.getByText("Show retained result"));
     expect((await screen.findByText(/retained_extra/)).textContent).toContain('"kept"');
     client.clear();

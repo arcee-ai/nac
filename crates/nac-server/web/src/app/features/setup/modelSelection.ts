@@ -10,7 +10,7 @@ export interface LaunchModelSelection {
   api_key_env: string | null;
   reasoning_effort: string | null;
   extra_headers: Record<string, string> | null;
-  orchestrator_compaction_threshold?: number | null;
+  compaction_threshold?: number | null;
 }
 
 export interface SessionModelInitial {
@@ -21,7 +21,7 @@ export interface SessionModelInitial {
   api_key_env: string | null;
   reasoning_effort: string | null;
   extra_headers: Record<string, string>;
-  orchestrator_compaction_threshold?: number | null;
+  compaction_threshold?: number | null;
 }
 
 export function sameModelSelection(
@@ -46,6 +46,6 @@ export function sameModelSelection(
     left.api_key_env === right.api_key_env &&
     left.reasoning_effort === right.reasoning_effort &&
     headersEqual &&
-    left.orchestrator_compaction_threshold === right.orchestrator_compaction_threshold
+    left.compaction_threshold === right.compaction_threshold
   );
 }

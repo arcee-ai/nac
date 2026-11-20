@@ -34,7 +34,7 @@ export function configuredSessionRequest({
     reasoning_effort: selected.reasoning_effort,
     extra_headers: selected.extra_headers,
   };
-  if (selected.orchestrator_compaction_threshold !== undefined)
-    request.orchestrator_compaction_threshold = selected.orchestrator_compaction_threshold;
+  if (selected.compaction_threshold !== undefined)
+    request.compaction_threshold = selected.compaction_threshold;
   return request;
 }

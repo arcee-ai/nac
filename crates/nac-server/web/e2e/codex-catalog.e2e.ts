@@ -93,7 +93,7 @@ test("selects a discovered Codex model and agrees with runtime input budget", as
   expect(created.ok()).toBeTruthy();
   const newId = (await created.json()).metadata.session_id;
   const configUrl = `${harness.baseUrl}/sessions/${newId}/config`;
-  expect((await (await request.get(configUrl)).json()).orchestrator_compaction_threshold).toBe(
+  expect((await (await request.get(configUrl)).json()).compaction_threshold).toBe(
     332_500,
   );
   expect((await (await request.get(configUrl)).json()).automatic_compaction).toBe(true);
@@ -102,7 +102,7 @@ test("selects a discovered Codex model and agrees with runtime input budget", as
   const astra = catalog.providers
     .find((provider: { id: string }) => provider.id === "chatgpt-codex-responses")
     .models.find((entry: { id: string }) => entry.id === "gpt-6-astra");
-  expect(switchedConfig.orchestrator_compaction_threshold).toBe(
+  expect(switchedConfig.compaction_threshold).toBe(
     astra.limits.automatic_compaction_threshold,
   );
   expect(switchedConfig.automatic_compaction).toBe(true);
@@ -120,11 +120,11 @@ test("selects a discovered Codex model and agrees with runtime input budget", as
   await expect(settings).toBeHidden();
   await expect
     .poll(
-      async () => (await (await request.get(configUrl)).json()).orchestrator_compaction_threshold,
+      async () => (await (await request.get(configUrl)).json()).compaction_threshold,
     )
     .toBe(123_456);
   await page.reload();
-  expect((await (await request.get(configUrl)).json()).orchestrator_compaction_threshold).toBe(
+  expect((await (await request.get(configUrl)).json()).compaction_threshold).toBe(
     123_456,
   );
 
@@ -154,12 +154,12 @@ test("selects a discovered Codex model and agrees with runtime input budget", as
   expect(providerSwitch.ok()).toBeTruthy();
   const switchedProviderConfig = await (await request.get(anotherConfig)).json();
   expect(switchedProviderConfig.automatic_compaction).toBe(false);
-  expect(switchedProviderConfig.orchestrator_compaction_threshold).toBe(
+  expect(switchedProviderConfig.compaction_threshold).toBe(
     target.limits.automatic_compaction_threshold,
   );
   expect((await (await request.get(configUrl)).json()).automatic_compaction).toBe(false);
   expect((await request.patch(configUrl, { data: { model: "gpt-6-astra" } })).ok()).toBeTruthy();
-  expect((await (await request.get(configUrl)).json()).orchestrator_compaction_threshold).toBe(
+  expect((await (await request.get(configUrl)).json()).compaction_threshold).toBe(
     123_456,
   );
 });

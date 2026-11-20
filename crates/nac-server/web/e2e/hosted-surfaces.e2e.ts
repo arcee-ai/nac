@@ -320,7 +320,7 @@ for (const mobile of [false, true]) {
       await expect(settings).toHaveCount(0);
       expect(await (await request.get(configUrl)).json()).toMatchObject({
         config_version: before.config_version + 1,
-        orchestrator_compaction_threshold: 222,
+        compaction_threshold: 222,
       });
       expect(await (await request.get(`${harness.baseUrl}/projects`)).json()).toEqual(
         projectsBefore,
@@ -335,7 +335,7 @@ for (const mobile of [false, true]) {
       await expect(settings.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
       expect(fixture.lostResponses).toHaveLength(1);
       expect(await (await request.get(configUrl)).json()).toMatchObject({
-        orchestrator_compaction_threshold: 333,
+        compaction_threshold: 333,
       });
       expect(fixture.lostResponses[0].status).toBe(200);
       await page.keyboard.press("Escape");
@@ -350,7 +350,7 @@ for (const mobile of [false, true]) {
         settings.getByRole("textbox", { name: "Context limit", exact: true }),
       ).toHaveValue("333");
       const external = await request.patch(configUrl, {
-        data: { orchestrator_compaction_threshold: 444 },
+        data: { compaction_threshold: 444 },
       });
       expect(external.ok()).toBe(true);
       await settings
