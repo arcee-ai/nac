@@ -394,6 +394,9 @@ export function HomeComposer({
                         checking: sandboxCheck.isFetching || sandboxCheck.isPending,
                         checkFailed: sandboxCheck.isError,
                         onChange: (options) => {
+                          // A disappearing auto-selected project must not move a
+                          // selected sandbox launch onto another project's Local backend.
+                          if (options) setChosen(project.project_id);
                           if (options && useIsolation) setIsolatedProjectId(null);
                           setSandboxFor(options ? { projectId, options } : null);
                           starter.clearError();

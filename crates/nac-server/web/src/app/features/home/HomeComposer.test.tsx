@@ -226,6 +226,26 @@ describe("Sandbox launch", () => {
     expect(fakes.start.mock.calls[0]?.[0]).not.toHaveProperty("sandbox");
   });
 
+  it("does not send on a different project when the selected sandbox project disappears", () => {
+    const view = mount("/", false);
+    fireEvent.change(prompt(), { target: { value: "Stay in the selected sandbox" } });
+    fireEvent.click(screen.getByRole("button", { name: "Additional settings" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Sandbox" }));
+    view.rerender(
+      <MemoryRouter initialEntries={["/"]}>
+        <UiPolicyContext.Provider value={DIRECT_UI_POLICY}>
+          <HomeComposer projects={projects.slice(0, 1)} sessions={sessions} />
+        </UiPolicyContext.Provider>
+      </MemoryRouter>,
+    );
+    fireEvent.keyDown(prompt(), { key: "Enter" });
+    expect(fakes.start).not.toHaveBeenCalled();
+    expect((prompt() as HTMLTextAreaElement).value).toBe("Stay in the selected sandbox");
+    expect((prompt() as HTMLTextAreaElement).placeholder).toMatch(
+      /project is no longer available/i,
+    );
+  });
+
   it.each(["managed", "ssh"])("omits Sandbox on %s projects", (mode) => {
     fakes.managed = mode === "managed";
     mount(
