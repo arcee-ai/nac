@@ -16,11 +16,11 @@ fn as_transcript(messages: &[Message]) -> crate::agent::TranscriptMessages {
 #[test]
 fn direct_prompt_matches_approved_bytes_hash_and_text() {
     const EXPECTED_SHA256: [u8; 32] = [
-        0xf6, 0x98, 0xd5, 0x18, 0x6a, 0x98, 0xa9, 0xe1, 0xe4, 0xc6, 0x04, 0x1e, 0xa3, 0x06, 0x1d,
-        0x02, 0xb7, 0xd8, 0x93, 0xb8, 0xd3, 0xbd, 0xd6, 0x62, 0x1d, 0xe1, 0xa4, 0xf5, 0x5a, 0x9c,
-        0xa4, 0x03,
+        0xf0, 0x45, 0xba, 0x00, 0x6c, 0x00, 0x31, 0x2b, 0x07, 0xa3, 0x00, 0xe2, 0xf2, 0x75, 0xb0,
+        0x81, 0x1e, 0xa2, 0xe5, 0x68, 0xe1, 0xc3, 0xc8, 0xbe, 0x38, 0x73, 0xab, 0x0f, 0x08, 0x66,
+        0xf9, 0x3f,
     ];
-    assert_eq!(NAC_DIRECT_COMPACTION_PROMPT.len(), 2_704);
+    assert_eq!(NAC_DIRECT_COMPACTION_PROMPT.len(), 2_668);
     assert!(NAC_DIRECT_COMPACTION_PROMPT.ends_with('\n'));
     assert!(!NAC_DIRECT_COMPACTION_PROMPT.ends_with("\n\n"));
     assert_eq!(
@@ -230,7 +230,7 @@ fn stale_policy_version_checkpoint_is_invalidated() {
             tail_start_message_index: 2,
             source_prefix_sha256: source,
             system_policy_sha256: policy,
-            prompt_policy_version: 2,
+            prompt_policy_version: DIRECT_PROMPT_POLICY_VERSION + 1,
             old_context_estimate: 100,
             summary_prompt_tokens: None,
             summary_completion_tokens: None,

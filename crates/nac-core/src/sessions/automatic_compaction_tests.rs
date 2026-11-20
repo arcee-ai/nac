@@ -5,12 +5,16 @@ use super::*;
 fn automatic_compaction_provenance_survives_restart_and_preserves_legacy_settings() {
     let path = temp_store_path("automatic_compaction_migration");
     crate::store::initialize_synthetic_predecessor(&path).unwrap();
+    let conn = crate::store::open_connection(&path).unwrap();
+    conn.execute_batch("ALTER TABLE sessions RENAME COLUMN orchestrator_compaction_threshold TO compaction_threshold;").unwrap();
+    drop(conn);
     let mut legacy = test_snapshot("legacy", "2026-01-01", "2026-01-02");
     legacy.compaction_threshold = Some(123_456);
     create_session(&path, &legacy).unwrap();
     let conn = crate::store::open_connection(&path).unwrap();
     conn.execute_batch(
-        "ALTER TABLE sessions DROP COLUMN automatic_compaction; PRAGMA user_version=51;",
+        "ALTER TABLE sessions RENAME COLUMN compaction_threshold TO orchestrator_compaction_threshold;
+         ALTER TABLE sessions DROP COLUMN automatic_compaction; PRAGMA user_version=51;",
     )
     .unwrap();
     drop(conn);
