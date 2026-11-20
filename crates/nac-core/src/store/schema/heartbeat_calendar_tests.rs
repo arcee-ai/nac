@@ -57,6 +57,7 @@ impl Fixture {
             INSERT INTO session_completion_occurrences(sequence,session_id,run_id,behavior,kind,goal_id,mark_version,committed_at) VALUES(74,'owner','goal-run','direct','goal','goal',4,'retained');
             INSERT INTO session_completion_occurrences(sequence,session_id,run_id,behavior,kind,committed_at) VALUES(90,'deleted','deleted-frontier','direct','request','retained');
             DELETE FROM sessions WHERE session_id IN ('creator','produced','deleted');").unwrap();
+        fixture_receipts::populate(&conn);
         assert_eq!(version(&conn), 49);
         assert_eq!(
             autoincrement_sequence(&conn, "session_completion_occurrences").unwrap(),

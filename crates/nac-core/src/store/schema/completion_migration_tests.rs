@@ -68,7 +68,7 @@ fn historical(path: &Path, version: i64) {
     heartbeat_tables::create_heartbeat_tables(&conn).unwrap();
     conn.execute_batch("INSERT INTO task_followup_delegations VALUES('delegation','caller','human-request','target','queue','original-request','original-scope',0,'human_product_request','retained',NULL);
         INSERT INTO task_followups(caller_session_id,request_id,target_session_id,request_json,resolved_delivery,inbox_item_id,created_at,delegation_id) VALUES('caller','request','target','original-request','queue',77,'retained','delegation');
-        INSERT INTO native_task_launches VALUES('launch','caller','project','{}','/repo','target',0,'failed','retained error',NULL,'created','updated');
+        INSERT INTO native_task_launches VALUES('launch','caller','project','{\"request_id\":\"launch\",\"project_id\":null,\"title\":\"Fixture\",\"prompt\":\"Fixture prompt\"}','/repo','target',0,'failed','retained error',NULL,'created','updated');
         INSERT INTO peer_goal_starts VALUES('caller','goal','target','{}','retained reply');
         INSERT INTO heartbeat_schedules(schedule_id,session_id,version,state,binding_json,specification_json,anchor_ms,next_due_ms,created_at_ms,updated_at_ms) VALUES('schedule','caller',7,'paused','original binding','original specification',0,60000,0,0);
         INSERT INTO heartbeat_occurrences(occurrence_id,schedule_id,session_id,schedule_version,due_first_ms,due_last_ms,coalesced_count,source,state,specification_json,receipt_id,settlement_sequence) VALUES('occurrence','schedule','caller',7,60000,60000,1,'interval','withdrawn','{}','receipt',1);
@@ -90,6 +90,7 @@ fn historical(path: &Path, version: i64) {
             INSERT INTO heartbeat_retained_commands VALUES('allowance-request','digest','original response');").unwrap();
         assert_eq!(conn.query_row::<i64,_,_>("SELECT \"notnull\" FROM pragma_table_info('heartbeat_schedules') WHERE name='session_id'",[],|r|r.get(0)).unwrap(),0);
     }
+    fixture_receipts::populate(&conn);
     conn.pragma_update(None, "user_version", version).unwrap();
     assert_eq!(
         conn.query_row::<i64, _, _>("SELECT count(*) FROM pragma_foreign_key_check", [], |r| r

@@ -8,6 +8,8 @@ mod completion_tables;
 mod connection;
 mod delegation_receipts;
 #[cfg(test)]
+mod fixture_receipts;
+#[cfg(test)]
 mod fresh_schema_tests;
 #[cfg(test)]
 mod fresh_task_migration_tests;

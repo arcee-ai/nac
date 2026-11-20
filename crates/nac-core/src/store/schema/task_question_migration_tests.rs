@@ -23,9 +23,10 @@ fn question_table_repair_is_atomic_on_a_hybrid_45_catalog_and_preserves_receipts
     {
         let conn = open_runtime_connection(&path).unwrap();
         conn.execute("INSERT INTO task_followups(caller_session_id,request_id,target_session_id,request_json,resolved_delivery,inbox_item_id,created_at) VALUES('owner','followup','target','{}','queue',?1,'fixture')",[inbox.id]).unwrap();
-        conn.execute("INSERT INTO native_task_launches(request_id,caller_session_id,project_id,request_json,source_cwd,session_id,retained,phase,created_at,updated_at) VALUES('launch','owner','project','{}','/repo','launched',0,'reserved','fixture','fixture')",[]).unwrap();
+        conn.execute("INSERT INTO native_task_launches(request_id,caller_session_id,project_id,request_json,source_cwd,session_id,retained,phase,created_at,updated_at) VALUES('launch','owner','project','{\"request_id\":\"launch\",\"project_id\":null,\"title\":\"Fixture\",\"prompt\":\"Fixture prompt\"}','/repo','launched',0,'reserved','fixture','fixture')",[]).unwrap();
         conn.execute("INSERT INTO peer_goal_starts(caller_session_id,request_id,target_session_id,request_json,response_json) VALUES('owner','goal','target','{}','original receipt')",[]).unwrap();
         conn.execute("INSERT INTO heartbeat_schedules(schedule_id,session_id,version,state,binding_json,specification_json,anchor_ms,next_due_ms,created_at_ms,updated_at_ms) VALUES('schedule','owner',1,'paused','{}','{}',0,60000,0,0)",[]).unwrap();
+        fixture_receipts::populate(&conn);
         before = conn
             .prepare("SELECT session_id,behavior,messages_json FROM sessions ORDER BY session_id")
             .unwrap()
