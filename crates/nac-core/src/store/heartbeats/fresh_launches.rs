@@ -66,32 +66,67 @@ fn validate_publication(
         !launch.stop_requested && launch.first_input_id.is_none(),
         "cancelled or already-published scheduled launch cannot publish input"
     );
-    if let Some(selection) = prepared.legacy_frozen_model()? {
-        let expected_selector = selection
-            .api_key_env
-            .clone()
-            .or_else(|| crate::model::auto_select_api_key_env(snapshot.backend));
+    let legacy = prepared.legacy_frozen_model()?;
+    let selection = launch
+        .destination
+        .model_selection
+        .as_ref()
+        .or(legacy.as_ref())
+        .context("scheduled launch has no bound model selection")?;
+    if legacy.is_none() {
         ensure!(
-            snapshot.backend.to_string() == selection.backend
-                && snapshot.model == selection.model
-                && snapshot.base_url == selection.base_url
-                && snapshot.allow_insecure_http == selection.allow_insecure_http
-                && snapshot.api_key_env == expected_selector
-                && selection.extra_headers.as_ref() == Some(&snapshot.extra_headers)
-                && snapshot
-                    .reasoning_effort
-                    .map(crate::model::ReasoningEffort::as_str)
-                    == selection.reasoning_effort.as_deref()
-                && snapshot.service_tier.map(crate::model::ServiceTier::as_str)
-                    == selection.service_tier.as_deref()
-                && selection
-                    .orchestrator_compaction_threshold
-                    .is_none_or(|threshold| snapshot.orchestrator_compaction_threshold
-                        == Some(threshold)
-                        && !snapshot.automatic_compaction),
-            "conflict: prepared session does not match historical frozen model receipt"
+            launch.request.model_selection.as_ref() == Some(selection)
+                && launch.binding.fresh_task.as_ref() == Some(&launch.destination),
+            "conflict: scheduled model selection does not match its receipt"
         );
     }
+    let expected_selector = selection
+        .api_key_env
+        .clone()
+        .or_else(|| crate::model::auto_select_api_key_env(snapshot.backend));
+    let expected_tier = launch
+        .destination
+        .service_tier
+        .as_deref()
+        .or(selection.service_tier.as_deref());
+    let threshold_matches = if legacy.is_some() {
+        selection
+            .orchestrator_compaction_threshold
+            .is_none_or(|threshold| {
+                snapshot.orchestrator_compaction_threshold == Some(threshold)
+                    && !snapshot.automatic_compaction
+            })
+    } else {
+        snapshot.orchestrator_compaction_threshold
+            == selection
+                .orchestrator_compaction_threshold
+                .filter(|threshold| *threshold != 0)
+            && !snapshot.automatic_compaction
+    };
+    let mismatch = if legacy.is_some() {
+        "conflict: prepared session does not match historical frozen model receipt"
+    } else {
+        "conflict: prepared session does not match scheduled model receipt"
+    };
+    ensure!(
+        snapshot.backend.to_string() == selection.backend
+            && snapshot.model == selection.model.trim()
+            && snapshot.base_url == selection.base_url.trim()
+            && snapshot.allow_insecure_http == selection.allow_insecure_http
+            && snapshot.api_key_env == expected_selector
+            && selection
+                .extra_headers
+                .as_ref()
+                .map_or(snapshot.extra_headers.is_empty(), |headers| headers
+                    == &snapshot.extra_headers)
+            && snapshot
+                .reasoning_effort
+                .map(crate::model::ReasoningEffort::as_str)
+                == selection.reasoning_effort.as_deref()
+            && snapshot.service_tier.map(crate::model::ServiceTier::as_str) == expected_tier
+            && threshold_matches,
+        "{mismatch}"
+    );
     let occurrence = conn
         .query_row(
             &format!(
