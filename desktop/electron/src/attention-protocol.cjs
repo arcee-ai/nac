@@ -114,9 +114,7 @@ function completionPage(page) {
         item.sequence <= page.cursor &&
         id(item.session_id) &&
         id(item.run_id) &&
-        ["orchestrator", "direct", "direct-with-orchestrator"].includes(
-          item.behavior,
-        ),
+        item.behavior === "direct",
     );
     if (item.kind === "request")
       requireValue(item.goal_id === null && item.mark_version === null);

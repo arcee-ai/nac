@@ -24,7 +24,6 @@ fn row() -> AttentionStoredSession {
         id: "session".into(),
         primary: true,
         traditional_child: false,
-        direct: true,
         questions_supported: true,
         goal: None,
         question: None,
@@ -571,7 +570,6 @@ async fn cancelled_owned_read_keeps_its_physical_seat_until_the_accepted_caller_
     let manager = SessionManager::new_async(crate::ServerOptions {
         root_cwd: root.clone(),
         store_path: Some(root.join("store.db")),
-        worker_executable: None,
         managed_host: None,
     })
     .await

@@ -49,7 +49,7 @@ fn migration_51_classifies_only_pending_completions_with_durable_evidence() {
             uuid::Uuid::new_v4()
         ))
         .join("store.db");
-    initialize(&path).unwrap();
+    initialize_synthetic_predecessor(&path).unwrap();
     for session in ["parent", "child-a", "child-b", "child-c"] {
         insert_test_session(&path, session);
     }

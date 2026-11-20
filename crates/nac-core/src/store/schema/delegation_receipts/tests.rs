@@ -5,7 +5,7 @@ fn migration_35_seeds_only_available_terminal_generations_and_is_restartable() {
     let path = std::env::temp_dir()
         .join(format!("nac-delegation-migration-{}", uuid::Uuid::new_v4()))
         .join("store.db");
-    initialize(&path).unwrap();
+    initialize_synthetic_predecessor(&path).unwrap();
     for session in ["parent", "child", "running-child"] {
         insert_test_session(&path, session);
     }

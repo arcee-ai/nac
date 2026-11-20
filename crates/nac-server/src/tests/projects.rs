@@ -1,7 +1,7 @@
 use super::*;
 
 #[tokio::test]
-async fn project_defaults_do_not_override_explicit_session_speed() {
+async fn explicit_session_speed_is_route_bound_and_never_inherited_from_project() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let root = temp_root("project_speed_reconciliation");
     let workspace = root.join("workspace");
@@ -11,25 +11,6 @@ async fn project_defaults_do_not_override_explicit_session_speed() {
     let _env = ScopedModelEnv::isolated(&nac_home, Some("project-test-key"));
     let manager = test_manager(&root);
     let store_path = root.join("store.db");
-    model_configurations::insert_model_configuration(
-        &store_path,
-        "codex-fast",
-        model_configurations::NewModelConfiguration {
-            name: "Codex Fast".into(),
-            backend: "chatgpt-codex-responses".into(),
-            model: "gpt-6.1-sol".into(),
-            base_url: "https://chatgpt.com/backend-api".into(),
-            allow_insecure_http: false,
-            api_key_env: None,
-            reasoning_effort: None,
-            service_tier: Some("fast".into()),
-            extra_headers: BTreeMap::new(),
-            orchestrator_compaction_threshold: None,
-            initial_prompt: None,
-            light_model: None,
-        },
-    )
-    .unwrap();
     let project = manager
         .projects()
         .create(application::projects::CreateProject {
@@ -39,7 +20,6 @@ async fn project_defaults_do_not_override_explicit_session_speed() {
             ssh_host: None,
             ssh_port: None,
             ssh_identity_file: None,
-            default_model_config_id: Some("codex-fast".into()),
         })
         .await
         .unwrap();
@@ -49,16 +29,10 @@ async fn project_defaults_do_not_override_explicit_session_speed() {
         "backend": "openai-responses", "model": "gpt-5.2",
         "base_url": "https://api.openai.com/v1", "api_key_env": "OPENAI_API_KEY"
     });
-    for (tier, expected) in [
-        (None, None),
-        (
-            Some(serde_json::json!("fast")),
-            Some(nac_core::model::ServiceTier::Fast),
-        ),
-    ] {
+    for tier in [None, Some(serde_json::json!("fast"))] {
         let mut request = base.clone();
-        if let Some(tier) = tier {
-            request["service_tier"] = tier;
+        if let Some(tier) = &tier {
+            request["service_tier"] = tier.clone();
         }
         let response = post_json(app.clone(), "/sessions", request).await;
         assert_eq!(response.status(), StatusCode::CREATED);
@@ -69,14 +43,18 @@ async fn project_defaults_do_not_override_explicit_session_speed() {
             sessions::load_session(&store_path, id)
                 .unwrap()
                 .service_tier,
-            expected
+            if tier.is_some() {
+                Some(nac_core::model::ServiceTier::Fast)
+            } else {
+                None
+            }
         );
     }
     let mut unsupported = base;
     unsupported["base_url"] = serde_json::json!("https://example.com/v1");
-    let mut explicit_fast = unsupported.clone();
-    explicit_fast["service_tier"] = serde_json::json!("fast");
-    let response = post_json(app.clone(), "/sessions", explicit_fast).await;
+    let mut unsupported_fast = unsupported.clone();
+    unsupported_fast["service_tier"] = serde_json::json!("fast");
+    let response = post_json(app.clone(), "/sessions", unsupported_fast).await;
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let body = String::from_utf8(response_body(response).await.to_vec()).unwrap();
     assert!(body.contains("clear the speed preference"), "{body}");
@@ -102,13 +80,6 @@ async fn project_defaults_do_not_override_explicit_session_speed() {
     let saved = sessions::load_session(&store_path, id).unwrap();
     assert_eq!(saved.service_tier, None);
     assert_eq!(saved.backend, BackendKind::OpenAiResponses);
-    assert_eq!(
-        model_configurations::load_model_configuration(&store_path, "codex-fast")
-            .unwrap()
-            .service_tier
-            .as_deref(),
-        Some("fast")
-    );
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -413,7 +384,6 @@ async fn project_session_uses_explicit_model_and_filters_membership() {
             ssh_host: None,
             ssh_port: None,
             ssh_identity_file: None,
-            default_model_config_id: None,
         })
         .await
         .unwrap();
@@ -532,7 +502,6 @@ async fn project_sibling_requires_its_own_model_and_http_opt_in() {
             ssh_host: None,
             ssh_port: None,
             ssh_identity_file: None,
-            default_model_config_id: None,
         })
         .await
         .unwrap();
@@ -605,7 +574,6 @@ async fn concurrent_direct_first_chat_admission_is_unique() {
             ssh_host: None,
             ssh_port: None,
             ssh_identity_file: None,
-            default_model_config_id: None,
         })
         .await
         .unwrap();
@@ -659,7 +627,6 @@ async fn first_chat_matching_selection_is_opt_in_and_refuses_changed_routes() {
             ssh_host: None,
             ssh_port: None,
             ssh_identity_file: None,
-            default_model_config_id: None,
         })
         .await
         .unwrap();
@@ -730,7 +697,6 @@ async fn first_chat_matching_selection_is_opt_in_and_refuses_changed_routes() {
             ssh_host: None,
             ssh_port: None,
             ssh_identity_file: None,
-            default_model_config_id: None,
         })
         .await
         .unwrap();
@@ -779,7 +745,6 @@ async fn project_model_source_is_passive_and_bound_to_current_durable_owner() {
         ssh_host: None,
         ssh_port: None,
         ssh_identity_file: None,
-        default_model_config_id: None,
     };
     let project = manager
         .projects()

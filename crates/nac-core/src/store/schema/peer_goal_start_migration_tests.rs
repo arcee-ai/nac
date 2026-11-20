@@ -5,7 +5,7 @@ fn schema_43_upgrades_actual_42_atomically_and_preserves_supplier_receipts() {
     let path = std::env::temp_dir()
         .join(format!("nac-peer-start-migration-{}", uuid::Uuid::new_v4()))
         .join("store.db");
-    initialize(&path).unwrap();
+    initialize_synthetic_predecessor(&path).unwrap();
     for id in ["caller", "other-caller", "target"] {
         insert_test_session(&path, id);
     }
@@ -64,7 +64,6 @@ fn schema_43_upgrades_actual_42_atomically_and_preserves_supplier_receipts() {
         .unwrap();
     assert!(conn.execute(insert, params!["caller", ""]).is_err());
     assert!(conn.execute(insert, params!["missing", "start"]).is_err());
-    conn.pragma_update(None, "user_version", 42).unwrap();
     drop(conn);
     initialize(&path).unwrap();
     let conn = open_runtime_connection(&path).unwrap();

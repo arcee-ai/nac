@@ -3,7 +3,7 @@ import { expect, test, waitForRunIdle } from "./harness";
 import { startSessionFromHome } from "./focus-embedded-helpers";
 import { modelChip, openModelCatalog, openModelSettings } from "./speed-controls";
 
-test.use({ orchestration: "0", codexCatalogFixture: true });
+test.use({ codexCatalogFixture: true });
 
 test("native OpenAI speed survives composer settings, protocol changes and restart", async ({
   harness,
@@ -279,7 +279,7 @@ test("native OpenAI speed survives composer settings, protocol changes and resta
   await page.getByRole("menuitemradio", { name: "Standard", exact: true }).click();
   await expect.poll(async () => (await config()).service_tier).toBe("standard");
   await page.unroute(`${harness.baseUrl}/models`);
-  await harness.restart("0", undefined, true);
+  await harness.restart(undefined, true);
   await page.reload();
   await expect(modelChip(page)).toHaveAccessibleName(/Standard speed/);
   expect((await config()).service_tier).toBe("standard");

@@ -44,15 +44,12 @@ and rich results. Individual families own their native operation and tests.
   redaction, and workspace capabilities.
 - `terminal_tools.rs`, `run_admission.rs` and `run_cancellation.rs` — process-tool
   adapter, generation-bound admission, and nested cancellation/mutation fencing.
-  `worker_dispatch.rs` takes the run lock before its worker bookkeeping lock;
-  direct admission and cancellation do not require the worker registry.
 - `mcp_adapter.rs` — dynamic imported capability adapter.
 - `discovery.rs` and `discovery/` — glob/grep orchestration and traversal.
 - `mutation.rs`, `mutation_remote.rs`, `mutation_tests.rs` — local/remote edit
   protocol and atomicity regressions.
 - `web.rs` / `web_tests.rs` — Exa schema, URL policy, transport and redaction.
-- `thread/`, `workset.rs`, `orchestrator.rs`, `subagent.rs`, `goal.rs` — topology
-  capabilities; keep worker and child semantics distinct.
+- `subagent.rs`, `goal.rs` — traditional child and durable goal capabilities.
 
 ## Cohesive size exceptions
 
@@ -68,10 +65,6 @@ and rich results. Individual families own their native operation and tests.
 - `discovery/filesystem.rs` keeps Local, mounted-Podman, and SSH no-follow
   traversal parity together. Split only when an adapter boundary preserves the
   same validation algorithm and tests.
-- `thread/worker.rs` keeps one supervised worker subprocess and its typed
-  host/worker acknowledgement protocol, bounded stdout/stderr pumps, credential
-  redaction and terminal outcome together. Telemetry stays in its reserved pipe
-  path; do not add provider or application policy to this lifecycle owner.
 - `web.rs` keeps one provider family's schema, target validation, redirect and
   retry policy, cancellable transport injection, bounded decoding, and masking.
   Do not add managed onboarding or generic HTTP product clients there.
@@ -86,7 +79,7 @@ cargo test --locked -p nac-core tools::web
 make crate-check CRATE=nac-core
 ```
 
-Run relevant permission and direct/worker topology tests when changing prepared
+Run relevant permission and direct/child lifecycle tests when changing prepared
 resources, admission, or capability composition.
 
 ## Generated artifacts and placement mistakes

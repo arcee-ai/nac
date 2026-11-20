@@ -10,7 +10,7 @@ from types import SimpleNamespace
 from pathlib import Path
 import unittest
 
-from attention_semantic_fixture import BEHAVIORS, MARKER, Protocol
+from attention_semantic_fixture import CASES, MARKER, Protocol
 
 HERE = Path(__file__).resolve().parent
 
@@ -34,7 +34,7 @@ def goal_prompt(token):
 class ProtocolControls(unittest.TestCase):
     def test_actual_goal_continuation_wrapper_selects_real_caller_token(self):
         caller = (HERE / 'attention_semantic_app_smoke.py').read_text()
-        self.assertIn("token = 'SEMANTIC_GOAL_' + behavior", caller)
+        self.assertIn("token = 'SEMANTIC_GOAL_' + case", caller)
         token = 'SEMANTIC_GOAL_direct'
         prompt = goal_prompt(token)
         self.assertIn('\n' + token + ':', prompt)
@@ -65,24 +65,24 @@ class ProtocolControls(unittest.TestCase):
         p = Protocol('/owned/semantic-marker.txt')
         caller = (HERE / 'attention_semantic_app_smoke.py').read_text()
         for label in ['FIRST', 'OFFLINE']:
-            self.assertIn("request_case(behavior, '" + label + "')", caller)
-        self.assertIn("token = 'SEMANTIC_' + label + '_' + behavior", caller)
-        self.assertIn("queued = 'SEMANTIC_QUEUE_' + behavior", caller)
-        for behavior in BEHAVIORS:
-            token = 'SEMANTIC_FIRST_' + behavior
+            self.assertIn("request_case(case, '" + label + "')", caller)
+        self.assertIn("token = 'SEMANTIC_' + label + '_' + case", caller)
+        self.assertIn("queued = 'SEMANTIC_QUEUE_' + case", caller)
+        for case in CASES:
+            token = 'SEMANTIC_FIRST_' + case
             p.register(token)
             self.assertEqual(p.accept(body(token))[1]['type'], 'message')
-        for behavior in BEHAVIORS[1:]:
-            token = 'SEMANTIC_GOAL_' + behavior
+        for case in CASES[1:]:
+            token = 'SEMANTIC_GOAL_' + case
             self.goal(p, token)
-            queued = 'SEMANTIC_QUEUE_' + behavior
+            queued = 'SEMANTIC_QUEUE_' + case
             p.register(queued, 'queue', parent=token)
             result = p.accept(dict(body(queued), input=[dict(role='user', content=goal_prompt(token)),
                                                        dict(role='user', content=queued)]))
             self.assertEqual(result[0], queued)
             self.assertEqual(result[2], [queued + ':finish-B'])
-        for behavior in BEHAVIORS:
-            token = 'SEMANTIC_OFFLINE_' + behavior
+        for case in CASES:
+            token = 'SEMANTIC_OFFLINE_' + case
             p.register(token)
             p.accept(body(token))
         self.assertEqual(len(p.requests), 14)
@@ -93,7 +93,7 @@ class ProtocolControls(unittest.TestCase):
 
     def test_decoded_leaf_boundaries_and_direct_suffixes(self):
         direct = 'SEMANTIC_GOAL_direct'
-        dwo = direct + '-with-orchestrator'
+        dwo = direct + '-second'
         for prefix in ['\n', '\r\n', '\t', '"', "'"]:
             for token in [direct, dwo]:
                 with self.subTest(prefix=repr(prefix), token=token):
@@ -108,7 +108,7 @@ class ProtocolControls(unittest.TestCase):
 
     def test_embedded_unknown_ambiguous_key_only_and_split_tokens_fail_closed(self):
         token = 'SEMANTIC_GOAL_direct'
-        other = 'SEMANTIC_GOAL_direct-with-orchestrator'
+        other = 'SEMANTIC_GOAL_direct-second'
         for text in [r'\n' + token, 'a' + token, token + 'a', '0' + token, token + '0',
                      '_' + token, token + '_', '-' + token, token + '-', 'unknown', token + ' ' + other]:
             p = Protocol('/owned/marker');p.register(token, 'goal');p.register(other, 'goal')
@@ -123,7 +123,7 @@ class ProtocolControls(unittest.TestCase):
 
     def test_marked_queue_cannot_claim_an_unrelated_parent(self):
         p = Protocol('/owned/marker')
-        direct = 'SEMANTIC_GOAL_direct';dwo = direct + '-with-orchestrator'
+        direct = 'SEMANTIC_GOAL_direct';dwo = direct + '-second'
         self.goal(p, direct);p.register(dwo, 'goal')
         queued = 'SEMANTIC_QUEUE_direct';p.register(queued, 'queue', parent=direct)
         with self.assertRaisesRegex(AssertionError, 'Wrong queued-goal context'):

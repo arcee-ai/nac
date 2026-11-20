@@ -1,14 +1,4 @@
-import type { BackendKind, LightModelSettings, UpdateConfigRequest } from "../types/api";
-export declare function inheritPrimaryCredential(light: LightModelSettings, primaryBackend: BackendKind, primaryApiKeyEnv: string | null, previousApiKeyEnv?: string | null): LightModelSettings;
-/**
- * Drop a light-model credential that came from inheriting the launch's
- * primary key. That selector is launch-specific (a typed key is stored under
- * a generated name), so remembering it would replay a name that may no longer
- * exist; a null credential re-inherits the next launch's primary.
- */
-export declare function withoutInheritedCredential(light: LightModelSettings, primaryApiKeyEnv: string | null): LightModelSettings;
-/** Field-by-field comparison, so serialization order can never fake a change. */
-export declare function sameLightModel(left: LightModelSettings | null, right: LightModelSettings | null): boolean;
+import type { UpdateConfigRequest } from "../types/api";
 interface ManagedLaunchBaseUrlMap {
     [backend: string]: string;
 }

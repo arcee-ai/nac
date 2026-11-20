@@ -1,7 +1,6 @@
 import { createProject, createSession, expect, test, waitForRunIdle } from "./harness";
 import { startPackedPresentation } from "./packed-presentation-fixture";
 
-test.use({ orchestration: "0" });
 for (const packed of [false, true]) {
   test(`task Markdown uses verified inventory and routing in ${packed ? "packed" : "native"} presentation`, async ({
     harness,

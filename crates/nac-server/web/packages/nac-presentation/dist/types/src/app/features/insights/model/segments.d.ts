@@ -15,8 +15,8 @@ export declare const LEADING_ANCHOR = "insights-leading";
 export declare function insightAnchor(turn: ModelTurn, previous: TranscriptTurn | undefined): string;
 export declare function createInsightGroup(id: string, segments: readonly InsightSegment[]): InsightGroup;
 /**
- * One model turn as groups of consecutive reasoning, tool and workset blocks,
- * the sessions it launched, and the text and wave blocks between them, in
+ * One model turn as groups of consecutive reasoning and tool blocks,
+ * the sessions it launched, and the text blocks between them, in
  * transcript order. `previous` is the turn before it in the same `turns`.
  *
  * Group ids are `<anchor>:<first segment key>` and session ids

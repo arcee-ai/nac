@@ -199,11 +199,11 @@ test('exact production empty UI waits for its real configuration query, then pas
   const barrier = new Promise(resolve => { release = resolve; });
   try {
     await page.addInitScript(diagnostics);
-    await page.route(endpoint + '/ui-config', async route => { await barrier; await route.continue(); });
+    await page.route(endpoint + '/projects', async route => { await barrier; await route.continue(); });
     await page.goto(endpoint + '/#/', { waitUntil: 'load' });
     const pending = await observe(page, endpoint);
     assert.equal(pending.ready, false);
-    assert.ok(pending.body_text.includes('Loading workspace configuration'));
+    assert.equal(await page.getByRole('status', { name: 'Loading Home' }).isVisible(), true);
     release();
     await page.waitForFunction(readyPredicate, endpoint, { timeout: 15000 });
     assert.equal((await observe(page, endpoint)).semantic, 'empty-onboarding');

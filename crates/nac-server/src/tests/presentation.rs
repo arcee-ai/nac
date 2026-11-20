@@ -393,6 +393,8 @@ async fn snapshot_projection_preserves_defaults_and_all_non_session_fields() {
         serde_json::from_slice(&response_body(true_response).await).unwrap();
     assert_eq!(included, default);
     assert_eq!(default["sessions"].as_array().unwrap().len(), 2);
+    assert!(default.get("threads").is_none());
+    assert!(default.get("worksets").is_none());
 
     let false_response = get_response(
         app,
@@ -497,11 +499,11 @@ async fn paged_routes_preserve_raw_indexes_timestamps_and_projection_caps() {
         .all(serde_json::Value::is_null));
     assert!(message_created_at[2].is_string());
     assert_eq!(snapshot["sessions"], serde_json::json!([]));
-    assert!(snapshot["thread_events"]
-        .as_object()
-        .unwrap()
-        .values()
-        .all(|events| events.as_array().unwrap().len() <= 1));
+    assert!(snapshot.get("thread_events").is_none());
+    assert!(snapshot
+        .get("primary_tool_events")
+        .and_then(serde_json::Value::as_array)
+        .is_none_or(|events| events.len() <= 1));
 
     let _ = std::fs::remove_dir_all(root);
 }

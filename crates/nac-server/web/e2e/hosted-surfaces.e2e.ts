@@ -23,7 +23,6 @@ test.skip(
   !!process.env.NAC_E2E_REMOTE,
   "Requires disposable local workspaces and scripted providers",
 );
-test.use({ orchestration: "0" });
 
 /**
  * Opens the Files tab of the session panel, or the phone's Files sheet.

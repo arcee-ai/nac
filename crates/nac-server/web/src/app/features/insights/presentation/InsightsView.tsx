@@ -16,7 +16,6 @@ import type {
   InsightGroupEntry,
   InsightSegment,
   InsightsFilter as InsightsFilterValue,
-  InsightsTopology,
 } from "@/app/features/insights/model/types";
 import { InsightsDetail } from "@/app/features/insights/presentation/InsightsDetail";
 import { InsightsFilter } from "@/app/features/insights/presentation/InsightsFilter";
@@ -51,7 +50,6 @@ import type { SessionSnapshotResponse } from "@/app/types/api";
 export interface InsightsViewProps {
   sessionId: string;
   snapshot: SessionSnapshotResponse | null;
-  topology: InsightsTopology;
 }
 
 /**
@@ -59,7 +57,7 @@ export interface InsightsViewProps {
  * for it, beside the detail of the picked action. Until a row is picked the
  * detail follows the newest action.
  */
-export function InsightsView({ sessionId, snapshot, topology }: InsightsViewProps) {
+export function InsightsView({ sessionId, snapshot }: InsightsViewProps) {
   const {
     useInsightsFilter,
     useSelectedInsight,
@@ -74,7 +72,7 @@ export function InsightsView({ sessionId, snapshot, topology }: InsightsViewProp
   const model = useTranscriptModelContext();
   const navigation = useInsightsNavigation();
 
-  const options = useMemo(() => insightFilterOptions(topology), [topology]);
+  const options = insightFilterOptions();
   const storedFilter = useInsightsFilter();
   const filter = options.some((option) => option.value === storedFilter) ? storedFilter : "all";
   // Rebuilt on every delta, though prose changes no group and reasoning only
@@ -89,10 +87,7 @@ export function InsightsView({ sessionId, snapshot, topology }: InsightsViewProp
   const selection = useSelectedInsight();
   const focusNonce = useInsightFocusNonce();
   const expanded = useExpandedInsightGroups();
-  const picked = useMemo(
-    () => resolveStoredInsight(selection, { name: null, episode: null }, timeline, () => false),
-    [selection, timeline],
-  );
+  const picked = useMemo(() => resolveStoredInsight(selection, timeline), [selection, timeline]);
   const shown = useMemo(
     () => picked ?? newestShownInsight(sections, timeline),
     [picked, sections, timeline],
@@ -115,14 +110,7 @@ export function InsightsView({ sessionId, snapshot, topology }: InsightsViewProp
     }
   }, [focusNonce, picked, filter, sections, selectInsightsFilter, toggleInsightGroup]);
 
-  const threads = snapshot?.threads;
-  const sources = useMemo<RowSources>(
-    () => ({
-      resolveSession,
-      episodeCounts: new Map((threads ?? []).map((thread) => [thread.name, thread.episode_count])),
-    }),
-    [resolveSession, threads],
-  );
+  const sources = useMemo<RowSources>(() => ({ resolveSession }), [resolveSession]);
 
   const openSubagent = useCallback(
     (rowKey: DelegatedRowKey) => {
@@ -152,7 +140,6 @@ export function InsightsView({ sessionId, snapshot, topology }: InsightsViewProp
       };
     };
     const entryAction = (entry: InsightEntry) => {
-      if (entry.kind === "thread") return null;
       if (entry.kind === "session") {
         const session = resolveSession(entry.rowKey);
         return session ? () => openSubagent(session.rowKey) : null;
@@ -232,7 +219,7 @@ export function InsightsView({ sessionId, snapshot, topology }: InsightsViewProp
     },
     [selectInsightsFilter, selectInsight],
   );
-  const emptyCopy = useMemo(() => insightFilterEmptyCopy(filter, topology), [filter, topology]);
+  const emptyCopy = useMemo(() => insightFilterEmptyCopy(filter), [filter]);
   const hasOlder = snapshot?.message_page?.has_older === true;
   // A new element on every render would undo the list's memo.
   const loadOlder = useMemo(
@@ -241,7 +228,6 @@ export function InsightsView({ sessionId, snapshot, topology }: InsightsViewProp
   );
 
   if (!snapshot) return <PanelLoading listTitle="Insights" />;
-  // A thread the chat pointed Insights at still opens with no turns.
   if (!shown && !hasOlder && model.turns.length === 0) {
     return (
       <PanelEmptyState

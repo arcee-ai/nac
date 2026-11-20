@@ -97,24 +97,6 @@ impl crate::SessionManager {
             .await?
     }
 
-    pub(crate) async fn queue_managed_orchestrator_steering_async(
-        &self,
-        parent: &str,
-        orchestrator: &str,
-        instruction: &str,
-    ) -> Result<crate::OrchestratorSteeringResponse> {
-        let manager = self.clone();
-        let parent = parent.to_owned();
-        let orchestrator = orchestrator.to_owned();
-        let instruction = instruction.to_owned();
-        self.inner
-            ._store_ownership
-            .call_legacy(move || {
-                manager.queue_managed_orchestrator_steering(&parent, &orchestrator, &instruction)
-            })
-            .await?
-    }
-
     pub(crate) async fn stop_local_run_admission(&self) {
         self.inner.attention.stop();
         self.inner.fleet_attention.stop();

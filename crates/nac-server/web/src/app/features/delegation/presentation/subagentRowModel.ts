@@ -43,12 +43,10 @@ export function compactAge(updatedAt: string, now: number): string {
 /** The row's one line of state: its kind, where it is, and the latest word from it. */
 export function subagentStateLine({
   status,
-  orchestrator,
   background,
   detail,
 }: {
   status: TraditionalChildStatus;
-  orchestrator: boolean;
   background: boolean;
   detail: string | null;
 }): string {
@@ -58,7 +56,6 @@ export function subagentStateLine({
       .find((line) => line.trim())
       ?.trim() ?? null;
   return [
-    orchestrator ? "Orchestrator" : null,
     STATE_LABEL[status],
     status === "running" && background ? "background" : null,
     status !== "running" ? first : null,

@@ -5,7 +5,7 @@ import { captureSetup, withSetupBaselines, setupBaseline } from "./setup-visual-
 import { openNameZoom } from "./session-name-zoom";
 import { openSessionRename, openSettingsSection } from "./settings-focus";
 
-test.use({ orchestration: "0", hasTouch: true });
+test.use({ hasTouch: true });
 test.skip(
   !!process.env.NAC_E2E_REMOTE,
   "Requires an isolated local store and controlled MCP/OAuth fixtures",

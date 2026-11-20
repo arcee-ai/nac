@@ -87,11 +87,11 @@ async fn mcp_rejects_retired_creation_and_thread_steering_inputs() {
             json!({"light_model":{"model":"test"}}),
         )
         .await,
-        "light_model is no longer supported",
+        "Unsupported session fields",
     );
     rejected(
         call(&manager, "create_session", json!({"light_model":null})).await,
-        "light_model is no longer supported",
+        "Unsupported session fields",
     );
     rejected(
         call(
@@ -100,7 +100,7 @@ async fn mcp_rejects_retired_creation_and_thread_steering_inputs() {
             json!({"session_id":"missing", "light_model":null}),
         )
         .await,
-        "light_model is no longer supported",
+        "Unsupported session fields",
     );
     for thread_name in [json!("worker"), Value::Null] {
         rejected(

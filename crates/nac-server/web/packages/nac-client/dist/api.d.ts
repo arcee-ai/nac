@@ -293,10 +293,6 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         path: string;
         truncated: boolean;
     }>;
-    /**
-     * The same listing for a directory on an SSH host. Also the connection test
-     * the launch form runs first: only a working connection can answer.
-     */
     browseSshPath: (target: SshTarget, path: string | null, hidden?: boolean, signal?: AbortSignal) => Promise<{
         entries: import("./openapi.generated.js").components["schemas"]["BrowseEntry"][];
         home?: string | null;
@@ -570,8 +566,6 @@ export declare function createNacApi(nacClient: NacClient, options?: {
     getSession: (id: string, options?: SessionSnapshotOptions) => Promise<{
         active_compaction?: import("./openapi.generated.js").components["schemas"]["ActiveCompactionSnapshot"] | null;
         active_run?: import("./openapi.generated.js").components["schemas"]["ActiveRunSnapshot"] | null;
-        active_threads?: string[];
-        covered_orchestrator_steering_ids?: number[];
         forks?: import("./openapi.generated.js").components["schemas"]["SessionForkLink"][];
         message_created_at?: (string | null)[];
         messages: import("./openapi.generated.js").components["schemas"]["Message"][];
@@ -581,14 +575,9 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         run_failure?: import("./openapi.generated.js").components["schemas"]["RunFailure"] | null;
         sessions: import("./openapi.generated.js").components["schemas"]["SessionSummarySnapshot"][];
         shell_commands?: import("./openapi.generated.js").components["schemas"]["ShellCommandSnapshot"][];
-        thread_episodes: Record<string, import("./openapi.generated.js").components["schemas"]["EpisodeSnapshot"][]>;
         thread_event_boundary: import("./openapi.generated.js").components["schemas"]["SessionEventBoundary"];
         thread_event_diagnostics?: import("./openapi.generated.js").components["schemas"]["ThreadEventDecodeDiagnostic"][];
-        thread_events?: Record<string, import("./openapi.generated.js").components["schemas"]["AgentEvent"][]>;
-        thread_steering?: import("./openapi.generated.js").components["schemas"]["ThreadSteeringRecord"][];
-        threads: import("./openapi.generated.js").components["schemas"]["ThreadSnapshot"][];
         transcript_recovery_warning?: string | null;
-        worksets: import("./openapi.generated.js").components["schemas"]["WorksetsSnapshot"];
         workspace: import("./openapi.generated.js").components["schemas"]["WorkspaceSnapshot"];
     } & {
         lineage?: import("./openapi.generated.js").components["schemas"]["SessionLineageSnapshot"] | null;
@@ -600,8 +589,6 @@ export declare function createNacApi(nacClient: NacClient, options?: {
     createSession: (payload: CreateSessionRequest) => Promise<{
         active_compaction?: import("./openapi.generated.js").components["schemas"]["ActiveCompactionSnapshot"] | null;
         active_run?: import("./openapi.generated.js").components["schemas"]["ActiveRunSnapshot"] | null;
-        active_threads?: string[];
-        covered_orchestrator_steering_ids?: number[];
         forks?: import("./openapi.generated.js").components["schemas"]["SessionForkLink"][];
         message_created_at?: (string | null)[];
         messages: import("./openapi.generated.js").components["schemas"]["Message"][];
@@ -611,14 +598,9 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         run_failure?: import("./openapi.generated.js").components["schemas"]["RunFailure"] | null;
         sessions: import("./openapi.generated.js").components["schemas"]["SessionSummarySnapshot"][];
         shell_commands?: import("./openapi.generated.js").components["schemas"]["ShellCommandSnapshot"][];
-        thread_episodes: Record<string, import("./openapi.generated.js").components["schemas"]["EpisodeSnapshot"][]>;
         thread_event_boundary: import("./openapi.generated.js").components["schemas"]["SessionEventBoundary"];
         thread_event_diagnostics?: import("./openapi.generated.js").components["schemas"]["ThreadEventDecodeDiagnostic"][];
-        thread_events?: Record<string, import("./openapi.generated.js").components["schemas"]["AgentEvent"][]>;
-        thread_steering?: import("./openapi.generated.js").components["schemas"]["ThreadSteeringRecord"][];
-        threads: import("./openapi.generated.js").components["schemas"]["ThreadSnapshot"][];
         transcript_recovery_warning?: string | null;
-        worksets: import("./openapi.generated.js").components["schemas"]["WorksetsSnapshot"];
         workspace: import("./openapi.generated.js").components["schemas"]["WorkspaceSnapshot"];
     } & {
         lineage?: import("./openapi.generated.js").components["schemas"]["SessionLineageSnapshot"] | null;
@@ -667,7 +649,6 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         config_version: number;
         diagnostics?: string[];
         extra_headers_json: string | null;
-        light_model?: import("./openapi.generated.js").components["schemas"]["LightModelSettings"] | null;
         model: string;
         orchestrator_compaction_threshold: number | null;
         reasoning_effort: string | null;
@@ -1032,7 +1013,6 @@ export declare function createNacApi(nacClient: NacClient, options?: {
     revertSession: (id: string, messageIdx: number) => Promise<{
         messages_removed: number;
         revisions_removed: number;
-        threads_removed: number;
         transcript_len: number;
         workspace_restored: boolean;
     }>;

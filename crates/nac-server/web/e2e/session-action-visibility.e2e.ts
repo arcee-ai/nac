@@ -11,7 +11,7 @@ for (const mode of [
   { width: 1440, touch: false },
 ]) {
   test.describe(`packed session actions ${mode.width}px touch=${mode.touch}`, () => {
-    test.use({ orchestration: "1", hasTouch: mode.touch });
+    test.use({ hasTouch: mode.touch });
     test("preserves tab space, hover, keyboard and real pointer interception", async ({
       harness,
       page,

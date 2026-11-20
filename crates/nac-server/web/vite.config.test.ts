@@ -9,6 +9,8 @@ describe("Vite development proxy", () => {
 
     expect(API_PREFIXES).toContain("/health");
     expect(API_PREFIXES).not.toContain("/ui-config");
+    expect(API_PREFIXES).not.toContain("/model-configs");
+    expect(API_PREFIXES).toContain("/provider-connections");
     expect(API_PREFIXES).toContain("/product-context");
     expect(API_PREFIXES).toContain("/product-destinations");
     expect(API_PREFIXES).toContain("/sessions");

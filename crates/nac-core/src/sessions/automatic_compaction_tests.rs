@@ -4,6 +4,7 @@ use super::*;
 #[test]
 fn automatic_compaction_provenance_survives_restart_and_preserves_legacy_settings() {
     let path = temp_store_path("automatic_compaction_migration");
+    crate::store::initialize_synthetic_predecessor(&path).unwrap();
     let mut legacy = test_snapshot("legacy", "2026-01-01", "2026-01-02");
     legacy.orchestrator_compaction_threshold = Some(123_456);
     create_session(&path, &legacy).unwrap();

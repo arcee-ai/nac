@@ -5,7 +5,6 @@ use nac_core::{
     runtime::{self, NacConfig},
     session_service::SessionService,
     sessions,
-    store::ManagedOrchestratorStatus,
 };
 
 use crate::SessionManager;
@@ -197,34 +196,11 @@ impl<'a> SessionAttachmentApplication<'a> {
                 // need to re-enter the parent's lifecycle gate.
                 Box::pin(self.manager.attach_session(&child_session_id)).await?;
             }
-            if metadata.behavior == sessions::SessionBehavior::DirectWithOrchestrator {
-                let orchestrators = match self.manager.inner._store_ownership.coordinator() {
-                    Some(owner) => {
-                        owner
-                            .list_managed_orchestrators(parent_session_id.to_owned())
-                            .await?
-                    }
-                    None => nac_core::store::list_managed_orchestrators(
-                        &self.manager.inner.store_path,
-                        parent_session_id,
-                    )?,
-                };
-                for orchestrator in orchestrators.into_iter().filter(|orchestrator| {
-                    orchestrator.status == ManagedOrchestratorStatus::Running
-                }) {
-                    self.manager.spawn_managed_orchestrator_monitor(
-                        orchestrator.orchestrator_session_id,
-                        orchestrator.generation,
-                    );
-                }
-            }
         }
-        if service.metadata().behavior != sessions::SessionBehavior::Orchestrator {
-            if let Some(session_id) = service.metadata().session_id.as_deref() {
-                self.retain_pending_wake(session_id).await?;
-            }
-            service.start_next_direct_inbox_item().await?;
+        if let Some(session_id) = service.metadata().session_id.as_deref() {
+            self.retain_pending_wake(session_id).await?;
         }
+        service.start_next_direct_inbox_item().await?;
         Ok(())
     }
 
@@ -277,29 +253,6 @@ impl<'a> SessionAttachmentApplication<'a> {
                 nac_core::store::restore_traditional_child_completion(
                     store_path,
                     &child_session_id,
-                    generation,
-                )?;
-            }
-            drop(lease);
-        }
-        for (orchestrator_session_id, generation) in
-            nac_core::store::list_suppressed_managed_orchestrator_generations(
-                store_path,
-                parent_session_id,
-            )?
-        {
-            let lease = match sessions::SessionRelationshipLease::try_acquire(
-                store_path,
-                &orchestrator_session_id,
-            ) {
-                Ok(lease) => lease,
-                Err(sessions::SessionOperationLeaseError::Busy(_)) => continue,
-                Err(sessions::SessionOperationLeaseError::Store(error)) => return Err(error),
-            };
-            if sessions::load_session(store_path, &orchestrator_session_id).is_ok() {
-                nac_core::store::restore_managed_orchestrator_completion(
-                    store_path,
-                    &orchestrator_session_id,
                     generation,
                 )?;
             }
@@ -440,7 +393,6 @@ impl<'a> SessionAttachmentApplication<'a> {
                 session_id,
                 &config,
                 self.manager.inner.root_cwd.clone(),
-                Some(self.manager.inner.worker_executable.clone()),
                 operation_lease,
                 model.clone(),
             )
@@ -451,7 +403,6 @@ impl<'a> SessionAttachmentApplication<'a> {
                 session_id,
                 &config,
                 self.manager.inner.root_cwd.clone(),
-                Some(self.manager.inner.worker_executable.clone()),
                 model,
             )
             .await?
@@ -514,7 +465,6 @@ impl<'a> SessionAttachmentApplication<'a> {
                 session_id,
                 &config,
                 self.manager.inner.root_cwd.clone(),
-                Some(self.manager.inner.worker_executable.clone()),
                 model,
             )
             .await?;

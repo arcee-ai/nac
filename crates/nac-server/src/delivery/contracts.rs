@@ -2,7 +2,6 @@ use std::{collections::BTreeMap, path::PathBuf};
 
 use nac_core::{
     events::{SessionEventBoundary, SessionEventEnvelope, SessionReplayGap},
-    light_model::LightModelSettings,
     model::{BackendKind, ProviderModel},
     permissions::{PermissionApprovalMode, PermissionReply, PermissionRequest},
     session_service::{
@@ -219,6 +218,7 @@ impl utoipa::ToSchema for HeadersRequest {
 }
 
 #[derive(Debug, Clone, Default, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
 pub struct CreateSessionRequest {
     /// Direct session behavior. Omission selects direct.
     #[serde(default)]
@@ -265,9 +265,6 @@ pub struct CreateSessionRequest {
     /// Omitted defaults to 70% of the model's context window; null or zero disables.
     #[serde(default)]
     pub orchestrator_compaction_threshold: RequestField<u64>,
-    /// Retired selector. Any explicitly supplied value is rejected.
-    #[serde(default)]
-    pub light_model: RequestField<LightModelSettings>,
     /// OpenSSH target for remote sessions; `cwd` is remote and defaults to `~`.
     #[serde(default, alias = "host_id")]
     pub ssh_host: Option<String>,
@@ -336,7 +333,6 @@ impl CreateSessionRequest {
             orchestrator_compaction_threshold: application_field(
                 self.orchestrator_compaction_threshold,
             ),
-            light_model: application_field(self.light_model),
             ssh_host: self.ssh_host,
             ssh_port: self.ssh_port,
             ssh_identity_file: self.ssh_identity_file,
@@ -390,6 +386,7 @@ pub struct ProviderModelList {
 }
 
 #[derive(Debug, Clone, Default, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
 pub struct UpdateConfigRequest {
     /// Compare an intentional edit against the configuration the caller reviewed.
     pub expected_config_version: Option<i64>,
@@ -415,9 +412,6 @@ pub struct UpdateConfigRequest {
     /// Omitted preserves; null or zero disables.
     #[serde(default)]
     pub orchestrator_compaction_threshold: RequestField<u64>,
-    /// Retired selector. Any explicitly supplied value is rejected.
-    #[serde(default)]
-    pub light_model: RequestField<LightModelSettings>,
 }
 
 impl UpdateConfigRequest {
@@ -441,7 +435,6 @@ impl UpdateConfigRequest {
             orchestrator_compaction_threshold: application_field(
                 self.orchestrator_compaction_threshold,
             ),
-            light_model: application_field(self.light_model),
         }
     }
 }
@@ -524,7 +517,6 @@ pub struct PermissionStateResponse {
 pub enum InboxItemOrigin {
     Input,
     TraditionalChild,
-    ManagedOrchestrator,
 }
 
 impl From<Option<&nac_core::store::InternalCompletionOrigin>> for InboxItemOrigin {
@@ -533,9 +525,6 @@ impl From<Option<&nac_core::store::InternalCompletionOrigin>> for InboxItemOrigi
             None => Self::Input,
             Some(nac_core::store::InternalCompletionSource::TraditionalChild) => {
                 Self::TraditionalChild
-            }
-            Some(nac_core::store::InternalCompletionSource::ManagedOrchestrator) => {
-                Self::ManagedOrchestrator
             }
         }
     }
@@ -588,31 +577,6 @@ pub struct SubmitPromptResponse {
     pub run_id: String,
     pub client_id: Option<String>,
     pub display_prompt: String,
-}
-
-#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
-pub struct OrchestratorSteeringRequest {
-    pub instruction: String,
-}
-
-#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
-pub struct OrchestratorSteeringResponse {
-    pub steering_id: i64,
-    pub status: String,
-    pub instruction_preview: String,
-}
-
-#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
-pub struct ThreadSteeringRequest {
-    pub instruction: String,
-}
-
-#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
-pub struct ThreadSteeringResponse {
-    pub steering_id: i64,
-    pub thread_name: String,
-    pub status: String,
-    pub instruction_preview: String,
 }
 
 #[derive(Debug, Clone, Deserialize, utoipa::IntoParams)]
@@ -720,7 +684,6 @@ pub struct ToolCallContentResponse {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq, utoipa::ToSchema)]
 pub struct MessageCycleMetadata {
     pub marker: String,
-    pub thread_names: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
@@ -743,7 +706,6 @@ pub struct SessionSnapshotResponse {
 #[serde(rename_all = "kebab-case")]
 pub enum SessionLineageKind {
     TraditionalChild,
-    ManagedOrchestrator,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq, utoipa::ToSchema)]
@@ -769,7 +731,6 @@ impl From<nac_core::session_service::MessageCycleMetadata> for MessageCycleMetad
     fn from(cycle: nac_core::session_service::MessageCycleMetadata) -> Self {
         Self {
             marker: cycle.marker,
-            thread_names: cycle.thread_names,
         }
     }
 }

@@ -31,7 +31,6 @@ vi.mock("@/app/services/queries", () => ({
   useSessionSummary: () => ({ data: null }),
   useSshConnect: () => ({ isPending: false, mutateAsync: vi.fn() }),
   useTraditionalChildren: () => ({ data: [] }),
-  useManagedOrchestrators: () => ({ data: [] }),
 }));
 vi.mock("@/app/features/inbox/InboxProvider", () => ({ InboxReadMarker: () => null }));
 vi.mock("@/app/components/inspector/Transcript", () => ({

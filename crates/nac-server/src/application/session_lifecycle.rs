@@ -103,11 +103,6 @@ impl<'a> SessionLifecycleApplication<'a> {
             .await?;
         suppression_rollback.suppress_running(session_id)?;
 
-        for orchestrator in
-            nac_core::store::list_managed_orchestrators(&self.manager.inner.store_path, session_id)?
-        {
-            Box::pin(self.delete_cascade(&orchestrator.orchestrator_session_id)).await?;
-        }
         for child in
             nac_core::store::list_traditional_children(&self.manager.inner.store_path, session_id)?
         {

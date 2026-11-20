@@ -8,17 +8,12 @@ use uuid::Uuid;
 mod planning;
 mod provenance;
 
+#[cfg(test)]
+pub(crate) use planning::checkpoint_digests;
 use planning::*;
+pub(super) use planning::{CompactionState, PreparedProviderView, HISTORICAL_CONTEXT_PREFIX};
 #[cfg(test)]
-pub(crate) use planning::{checkpoint_digests, checkpoint_digests_for_policy};
-pub(super) use planning::{
-    CompactionPolicy, CompactionState, PreparedProviderView, HISTORICAL_CONTEXT_PREFIX,
-};
-#[cfg(test)]
-pub(super) use planning::{
-    DIRECT_PROMPT_POLICY_VERSION, NAC_COMPACTION_PROMPT, NAC_DIRECT_COMPACTION_PROMPT,
-    PROMPT_POLICY_VERSION,
-};
+pub(super) use planning::{DIRECT_PROMPT_POLICY_VERSION, NAC_DIRECT_COMPACTION_PROMPT};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompactionResult {
@@ -594,10 +589,7 @@ impl super::Agent {
             let mut delta = usage.clone();
             delta.replace_context(installed_context.unwrap_or_default());
             event_sink
-                .emit_async(AgentEvent::TokenUsageUpdated {
-                    thread_name: self.thread_name.clone(),
-                    usage: delta,
-                })
+                .emit_async(AgentEvent::TokenUsageUpdated { usage: delta })
                 .await;
         }
     }

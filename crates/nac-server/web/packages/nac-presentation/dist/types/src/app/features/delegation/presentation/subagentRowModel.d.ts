@@ -5,9 +5,8 @@ export declare function subagentDotStatus(status: TraditionalChildStatus): Sessi
 /** "now", "4m", "3h", "2d": how long ago the record last changed. */
 export declare function compactAge(updatedAt: string, now: number): string;
 /** The row's one line of state: its kind, where it is, and the latest word from it. */
-export declare function subagentStateLine({ status, orchestrator, background, detail, }: {
+export declare function subagentStateLine({ status, background, detail, }: {
     status: TraditionalChildStatus;
-    orchestrator: boolean;
     background: boolean;
     detail: string | null;
 }): string;

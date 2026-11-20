@@ -141,15 +141,9 @@ impl SessionService {
             }
             return Ok((snapshot, true));
         }
-        if self.metadata.behavior == sessions::SessionBehavior::Orchestrator {
-            return Err(ShellCommandError::Unsupported);
-        }
         if crate::store::load_traditional_child(&self.metadata.store_path, session_id)
             .map_err(store_error)?
             .is_some()
-            || crate::store::load_managed_orchestrator(&self.metadata.store_path, session_id)
-                .map_err(store_error)?
-                .is_some()
         {
             return Err(ShellCommandError::Unsupported);
         }
@@ -292,7 +286,6 @@ impl SessionService {
         self.publish_shell_snapshot();
         let context = ToolCallContext {
             call_id: Some(snapshot.operation_id.clone()),
-            thread_name: None,
             cancellation: Some(runtime.command_cancellation.clone()),
             ..Default::default()
         };

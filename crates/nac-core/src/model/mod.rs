@@ -194,7 +194,7 @@ pub use types::{
     validate_model_base_url, validate_model_base_url_with_policy, EffectiveModelSettings,
     ARCEE_AUTH_CANONICAL_BASE_URL, CHATGPT_CODEX_CANONICAL_BASE_URL,
 };
-pub use types::{BackendKind, DispatchWeight, ReasoningEffort};
+pub use types::{BackendKind, ReasoningEffort};
 
 /// Identifies model setup failures caused by a caller-controlled configuration.
 ///

@@ -33,8 +33,6 @@ import {
   useSessionSnapshot,
 } from "@/app/services/queries";
 
-function ignoreThread(): void {}
-
 /** Text of the newest user bubble, or null when the chat opens with the model. */
 function lastUserText(turns: TranscriptTurn[]): string | null {
   for (let index = turns.length - 1; index >= 0; index -= 1) {
@@ -91,8 +89,7 @@ export function SubagentPreview({
   ]);
   const older = useLoadOlderMessages(sessionId);
   const data = snapshot.data;
-  const direct =
-    data?.metadata.behavior === "direct" || data?.metadata.behavior === "direct-with-orchestrator";
+  const direct = data?.metadata.behavior === "direct";
   const { data: permissions } = useSessionPermissions(sessionId, direct);
   const pendingPermissionCallIds = useMemo(
     () =>
@@ -161,7 +158,7 @@ export function SubagentPreview({
   }, [hasOlder, loadOlder, olderFailed, scrollRef, windowStart]);
 
   const built = useMemo(
-    () => buildTranscript(data ?? null, {}, {}, live.toolEvents, pendingPermissionCallIds),
+    () => buildTranscript(data ?? null, live.toolEvents, pendingPermissionCallIds),
     [data, live.toolEvents, pendingPermissionCallIds],
   );
   const [drawn, setDrawn] = useState<
@@ -338,9 +335,7 @@ export function SubagentPreview({
                     model={model}
                     active={running && lastIsThisRun}
                     isLast={false}
-                    selectedThreadEpisode={null}
                     selectedGroupId={null}
-                    onSelectThread={ignoreThread}
                     readOnly
                     interactive={false}
                   />
@@ -374,8 +369,6 @@ export function SubagentPreview({
                   model={model}
                   active
                   isLast={false}
-                  selectedThreadEpisode={null}
-                  onSelectThread={ignoreThread}
                   readOnly
                   interactive={false}
                 />

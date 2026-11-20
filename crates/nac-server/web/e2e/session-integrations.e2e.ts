@@ -3,7 +3,6 @@ import type { APIRequestContext, Page } from "@playwright/test";
 import { createSession, expect, test, waitForRunIdle, type EmbeddedHarness } from "./harness";
 
 test.skip(!!process.env.NAC_E2E_REMOTE, "Requires disposable local MCP and model fixtures");
-test.use({ orchestration: "0" });
 const ECHO = "mcp__refresh_fixture__echo";
 
 async function mcpFixture() {
@@ -180,7 +179,7 @@ for (const mobile of [false, true]) {
       await expect(panel.getByText("Refresh 2 · Applied 2", { exact: true })).toBeVisible();
       expect(fixture.calls()).toBe(1);
       await page.keyboard.press("Escape");
-      await harness.restart("0");
+      await harness.restart();
       harness.provider.enqueue(
         "restart-no-replay",
         { token: "REFRESH_RESTART", forbiddenTools: [ECHO] },

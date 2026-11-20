@@ -8,7 +8,7 @@ fn migration_36_retains_legacy_inbox_and_atomically_adds_child_mode() {
             uuid::Uuid::new_v4()
         ))
         .join("store.db");
-    initialize(&path).unwrap();
+    initialize_synthetic_predecessor(&path).unwrap();
     insert_test_session(&path, "child");
     let legacy = create_session_inbox_item(
         &path,
@@ -90,7 +90,7 @@ fn migration_37_preserves_requested_mode_without_inventing_waiter_authority() {
     let path = std::env::temp_dir()
         .join(format!("nac-child-wait-migration-{}", uuid::Uuid::new_v4()))
         .join("store.db");
-    initialize(&path).unwrap();
+    initialize_synthetic_predecessor(&path).unwrap();
     insert_test_session(&path, "child");
     let item = create_traditional_child_inbox_item(
         &path,

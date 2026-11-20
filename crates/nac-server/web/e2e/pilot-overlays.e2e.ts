@@ -4,7 +4,6 @@ import { createProject, createSession, expect, test } from "./harness";
 import { openPhoneMenu, openSessionRowAction, showSidebar } from "./nav-focus-helpers";
 
 test.skip(!!process.env.NAC_E2E_REMOTE, "Requires isolated pilot fixtures");
-test.use({ orchestration: "0" });
 
 test("rename and delete preserve the responsive pilot journey and accessibility", async ({
   harness,

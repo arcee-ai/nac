@@ -13,9 +13,7 @@ use axum::{
     http::Request,
 };
 use flate2::read::GzDecoder;
-use nac_core::light_model::LightModelSettings;
 use nac_core::model::{BackendKind, ModelConfigurationError, ReasoningEffort};
-use nac_core::model_configurations;
 use nac_core::projects::ProjectRecord;
 use nac_core::runtime::OptionalModelOption;
 use nac_core::store::{GoalStatus, InboxDelivery};
@@ -335,7 +333,6 @@ pub(crate) fn test_manager(root: &std::path::Path) -> SessionManager {
     SessionManager::new_unowned_fixture(ServerOptions {
         root_cwd: root.to_path_buf(),
         store_path: Some(root.join("store.db")),
-        worker_executable: None,
         managed_host: None,
     })
     .expect("session manager")
@@ -345,7 +342,6 @@ fn owned_test_manager(root: &std::path::Path) -> Result<SessionManager> {
     SessionManager::new(ServerOptions {
         root_cwd: root.to_path_buf(),
         store_path: Some(root.join("store.db")),
-        worker_executable: None,
         managed_host: None,
     })
 }
@@ -420,7 +416,6 @@ fn test_managed_manager(root: &std::path::Path) -> SessionManager {
     SessionManager::new_unowned_fixture(ServerOptions {
         root_cwd: root.to_path_buf(),
         store_path: Some(root.join("store.db")),
-        worker_executable: None,
         managed_host: Some(managed_host),
     })
     .expect("managed session manager")
@@ -493,7 +488,6 @@ fn test_managed_bootstrap_manager_with_contract(
     SessionManager::new_unowned_fixture(ServerOptions {
         root_cwd: root.to_path_buf(),
         store_path: Some(root.join("store.db")),
-        worker_executable: None,
         managed_host: Some(managed_host),
     })
     .expect("managed bootstrap session manager")

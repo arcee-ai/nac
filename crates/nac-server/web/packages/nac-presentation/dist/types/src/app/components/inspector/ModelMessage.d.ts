@@ -1,5 +1,4 @@
 import { type FilesPanelLink } from "./SnapshotBadge";
-import { type SelectThread } from "./ThreadWave";
 import { type ModelTurn } from "../../lib/transcript";
 import type { SessionForkLink, WorkspaceRevision } from "../../types/api";
 interface ModelMessageProps {
@@ -9,7 +8,7 @@ interface ModelMessageProps {
     active: boolean;
     /**
      * What the run is doing right now, of which only the compaction status is
-     * shown: the turn's own steps already name tools and threads. Only the
+     * shown: the turn's own steps already name tools. Only the
      * active turn is given it, so the finished ones are not re-rendered every
      * time the line changes.
      */
@@ -18,11 +17,8 @@ interface ModelMessageProps {
     runStartedAt?: number | null;
     /** Stretches the last bubble so stick-to-bottom lands below the fold. */
     isLast?: boolean;
-    /** Episode key of the thread card the panels are pointing at, if any. */
-    selectedThreadEpisode: string | null;
     /** Id of the group the panels are pointing at, if any. */
     selectedGroupId?: string | null;
-    onSelectThread: SelectThread;
     /**
      * Snapshot index of the user prompt this model turn answers. Regenerate and
      * revert address that prompt — same endpoints as the user bubble above.
@@ -64,8 +60,7 @@ interface ModelMessageProps {
 }
 /**
  * Everything the model did for one prompt, in the order it happened: the work
- * folded behind one line, the sessions it launched, the waves of threads it
- * ran and the answer it gave.
+ * folded behind one line, the sessions it launched, and the answer it gave.
  */
 export declare const ModelMessage: import("react").MemoExoticComponent<(props: ModelMessageProps) => import("react").JSX.Element>;
 export {};

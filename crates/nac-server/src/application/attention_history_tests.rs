@@ -27,7 +27,6 @@ impl Fixture {
         let manager = SessionManager::new_async(crate::ServerOptions {
             root_cwd: root.clone(),
             store_path: Some(root.join("store.db")),
-            worker_executable: None,
             managed_host: None,
         })
         .await

@@ -202,7 +202,7 @@ print(json.dumps({'kind':'stopped-store canonical due fixture','due_ms':due_ms,'
     },
     gate,
   );
-  await harness.restart("1");
+  await harness.restart();
   await gate.accepted;
   const active = (await inspect()).history.find((item) => item.state === "admitted")!;
   expect(active).toBeTruthy();
@@ -267,7 +267,7 @@ print(json.dumps({'kind':'stopped-store canonical due fixture','due_ms':due_ms,'
       harness.provider.requests.find((entry) => entry.matchedStep === "calendar-create")!.body,
     ),
   ).toContain("2026f");
-  await harness.restart("1");
+  await harness.restart();
   expect((await inspect()).history).toEqual(after.history);
   expect((await inspect()).schedule.starts).toBe(1);
   const restartedApi = createNacApi(

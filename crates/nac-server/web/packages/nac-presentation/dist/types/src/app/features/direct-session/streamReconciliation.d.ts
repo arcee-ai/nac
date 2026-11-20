@@ -3,7 +3,6 @@ import { Context, Effect, Scope } from "effect";
 export interface SessionChange {
     refresh: "none" | "messages" | "snapshot" | "replace-snapshot";
     transcriptLength: number;
-    finishedThread?: string;
     runCompleted: boolean;
     permissionsChanged: boolean;
 }
@@ -26,7 +25,7 @@ export interface ObservationPorts {
     } | {
         kind: "snapshot-required";
     }>;
-    invalidate: (kind: "permissions" | "skills" | "revisions" | "thread", thread?: string) => void;
+    invalidate: (kind: "permissions" | "skills" | "revisions") => void;
 }
 declare const SessionObservation_base: Context.TagClass<SessionObservation, "nac/SessionObservation", ObservationPorts>;
 /** The composition root supplies the existing browser capabilities for one activation. */

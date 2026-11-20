@@ -39,17 +39,14 @@ establishes `accepted == exported + failures`. To claim complete zero-loss
 capture for a recorder, require exactly one final receipt, all observed lines
 bound to it, the captured observation count equal to `exported`, and zero
 `dropped`, `failures`, and `receipt_failures`. Inspect every recorder, including
-child processes. Worker pipes forward both reserved JSON prefixes to host
-stderr, including during cancellation drain, instead of emitting product
-thread-log events or retaining the receipt as worker failure output.
-Parseable logs or a live snapshot alone do not meet this
+child processes. Parseable logs or a live snapshot alone do not meet this
 requirement. A crash, forced exit, stalled writer or missing final receipt is
 incomplete evidence.
 
 Normal server shutdown seals/drains telemetry after application and persistence
 work quiesce, inside the existing complete-shutdown watchdog, with a maximum
-100-ms receipt wait. Worker/early-error exits use the same bounded finalization
-at the binary boundary. Telemetry failures do not change application results
+100-ms receipt wait. Early-error exits use the same bounded finalization at the
+binary boundary. Telemetry failures do not change application results
 or widen the existing shutdown watchdog. Disabled telemetry does not wait;
 the default in-memory test adapter retains its observation-only behavior.
 
@@ -92,7 +89,7 @@ transaction results, schema, connection limits, or shutdown budgets.
 | `nac.store.connection.active` | gauge | process/store scope, engine | `nac-core::store::schema` |
 | `nac.store.terminal_settlement.active` | gauge | engine | `nac-core::telemetry` observed in-flight terminal settlements |
 | `nac.persistence.queue.active` | gauge | engine | `nac-core::telemetry` observed in-flight persistence operations |
-| `nac.runtime.activity.active` | gauge | orchestrator/worker/direct/child-process | `nac-core::agent` and process call sites |
+| `nac.runtime.activity.active` | gauge | direct/child-process | `nac-core::agent` and process call sites |
 | `nac.runtime.child_process` | diagnostic | started/stopped; PID as a non-series field | `nac-core` process call sites |
 | `nac.runtime.resource.sample` | gauge | engine; correlation digests are exemplars, not series dimensions | `nac-core::telemetry` |
 | `nac.mcp.oauth.callback.listening` | diagnostic | numeric generation, started | `nac-server` loopback OAuth task |
@@ -108,11 +105,9 @@ subprocesses, including those launched by native tools.
 
 - `connection_acquire`, `transaction`, `transaction_begin`, `commit`, `checkpoint`, `retry`, and
   `readiness` for SQLite access and probes;
-- `transcript_append`, `event_persistence`, and `worker_episode_commit` for
-  durable execution history;
+- `transcript_append` and `event_persistence` for durable execution history;
 - `managed_monitor_poll`, `recovery`, and `terminal_settlement` for lifecycle
-  attribution; terminal settlement covers both traditional children and
-  managed orchestrators.
+  attribution; terminal settlement covers session runs and traditional children.
 
 Every event includes bounded build ID, source revision, store engine, journal
 mode, and schema version. Managed server events also include the host digest.
@@ -137,7 +132,7 @@ diagnostic field.
   within one second while the exporter is deliberately blocked.
 
 The in-memory exporter is the deterministic test adapter. The
-four-orchestrator fixture runs four producer threads concurrently, proves the
+four-direct-run fixture runs four producer threads concurrently, proves the
 active count reaches four, emits store, readiness-route, and resource
 observations for four generations, and proves they join on the same bounded
 correlation fields. It also serializes the result and checks prompt,

@@ -1,13 +1,5 @@
 use super::*;
 
-fn require_direct_snapshot(snapshot: &SessionSnapshot) -> Result<()> {
-    anyhow::ensure!(
-        snapshot.behavior == sessions::SessionBehavior::Direct,
-        "retired session was not found"
-    );
-    Ok(())
-}
-
 pub async fn build_resume_picker_config(
     options: ResumeOptions,
     config: &NacConfig,
@@ -27,7 +19,6 @@ pub async fn build_resume_picker_config(
     Ok(ResumePickerRunConfig {
         store_path,
         lookup_cwd,
-        worker_executable: options.worker_executable,
     })
 }
 
@@ -72,7 +63,6 @@ pub async fn build_resume_config(
         (Some(_), true) => unreachable!(),
         (None, _) => sessions::load_last_session_async(resume_store_path.clone()).await?,
     };
-    require_direct_snapshot(&snapshot)?;
     let session_id = snapshot.session_id.clone();
     let lease = sessions::SessionOperationLease::try_acquire(&resume_store_path, &session_id)?;
     lease.validate(&resume_store_path, &session_id)?;
@@ -89,7 +79,6 @@ pub async fn build_resume_config(
         resume_store_path,
         config,
         lookup_cwd,
-        options.worker_executable,
         Some(&lease),
         true,
         None,
@@ -105,11 +94,9 @@ pub async fn build_resume_config_for_session(
     session_id: &str,
     config: &NacConfig,
     resume_base_cwd: PathBuf,
-    worker_executable: Option<PathBuf>,
     model: ResumeModelOptions,
 ) -> Result<SessionRunConfig> {
-    let snapshot = sessions::load_session_async(store_path.clone(), session_id.to_string()).await?;
-    require_direct_snapshot(&snapshot)?;
+    sessions::load_session_async(store_path.clone(), session_id.to_string()).await?;
     let lease = sessions::SessionOperationLease::try_acquire(&store_path, session_id)?;
     lease.validate(&store_path, session_id)?;
     let recovery = if let Some(owner) = store::coordinator::owner_for(&store_path)? {
@@ -123,7 +110,6 @@ pub async fn build_resume_config_for_session(
         store_path,
         config,
         resume_base_cwd,
-        worker_executable,
         Some(&lease),
         true,
         None,
@@ -139,7 +125,6 @@ pub async fn build_resume_config_for_session_attachment(
     session_id: &str,
     config: &NacConfig,
     resume_base_cwd: PathBuf,
-    worker_executable: Option<PathBuf>,
     model: ResumeModelOptions,
 ) -> Result<(
     SessionRunConfig,
@@ -147,7 +132,6 @@ pub async fn build_resume_config_for_session_attachment(
     Option<sessions::SessionOperationLease>,
 )> {
     let snapshot = sessions::load_session_async(store_path.clone(), session_id.to_string()).await?;
-    require_direct_snapshot(&snapshot)?;
     let metadata = resolve_model_metadata(snapshot.backend, &snapshot.model);
     let requires_migration = snapshot.reasoning_effort.is_some_and(|effort| {
         metadata.source.is_authoritative() && !metadata.thinking_level_map.is_supported(effort)
@@ -164,7 +148,6 @@ pub async fn build_resume_config_for_session_attachment(
             store_path,
             config,
             resume_base_cwd,
-            worker_executable,
             None,
             true,
             Some(metadata),
@@ -188,7 +171,6 @@ pub async fn build_resume_config_for_session_attachment(
                 store_path,
                 config,
                 resume_base_cwd,
-                worker_executable,
                 Some(&lease),
                 true,
                 None,
@@ -204,7 +186,6 @@ pub async fn build_resume_config_for_session_attachment(
                 store_path,
                 config,
                 resume_base_cwd,
-                worker_executable,
                 None,
                 false,
                 Some(metadata),
@@ -222,13 +203,11 @@ pub async fn build_resume_config_for_session_with_lease(
     session_id: &str,
     config: &NacConfig,
     resume_base_cwd: PathBuf,
-    worker_executable: Option<PathBuf>,
     operation_lease: &sessions::SessionOperationLease,
     model: ResumeModelOptions,
 ) -> Result<SessionRunConfig> {
     operation_lease.validate(&store_path, session_id)?;
-    let snapshot = sessions::load_session_async(store_path.clone(), session_id.to_string()).await?;
-    require_direct_snapshot(&snapshot)?;
+    sessions::load_session_async(store_path.clone(), session_id.to_string()).await?;
     let recovery = if let Some(owner) = store::coordinator::owner_for(&store_path)? {
         owner.reconcile_active_run(session_id.to_owned()).await?
     } else {
@@ -240,7 +219,6 @@ pub async fn build_resume_config_for_session_with_lease(
         store_path,
         config,
         resume_base_cwd,
-        worker_executable,
         Some(operation_lease),
         true,
         None,
@@ -253,27 +231,19 @@ pub async fn build_resume_config_for_session_with_lease(
 
 #[expect(
     clippy::too_many_arguments,
-    reason = "resume composition keeps persisted snapshot, overrides, lease, and executable authority explicit"
+    reason = "resume composition keeps persisted snapshot, overrides, and lease authority explicit"
 )]
 pub(super) async fn build_resume_config_from_snapshot(
     snapshot: SessionSnapshot,
     store_path: PathBuf,
     config: &NacConfig,
     resume_base_cwd: PathBuf,
-    worker_executable: Option<PathBuf>,
     operation_lease: Option<&sessions::SessionOperationLease>,
     persist_recovery: bool,
     resolved_metadata: Option<ModelMetadata>,
     model: ResumeModelOptions,
 ) -> Result<SessionRunConfig> {
-    require_direct_snapshot(&snapshot)?;
     let mut snapshot = normalize_snapshot_paths(snapshot, &resume_base_cwd)?;
-    let agent_mode = match snapshot.behavior {
-        sessions::SessionBehavior::Orchestrator => AgentMode::Orchestrator,
-        sessions::SessionBehavior::Direct | sessions::SessionBehavior::DirectWithOrchestrator => {
-            AgentMode::Direct
-        }
-    };
     // Resume reaches the host with the connection the session recorded, not with
     // whatever the local ssh config happens to say now.
     let ssh = snapshot.ssh.clone();
@@ -351,37 +321,6 @@ pub(super) async fn build_resume_config_from_snapshot(
             }
         })?
         .with_cache_ttl(Some("1h"));
-    let light_client = if snapshot.behavior == sessions::SessionBehavior::Direct {
-        // Keep this symmetric with fresh construction: ALL-36 owns any future
-        // direct-session use. The durable selection is retained without
-        // credential resolution and is absent from the resumed direct runtime.
-        None
-    } else {
-        snapshot
-            .light_model
-            .as_ref()
-            .map(|light| {
-                resolve_light_client_with_http_policy(
-                    light,
-                    &snapshot.extra_headers,
-                    model.trusted_light_credential.as_ref(),
-                    snapshot.allow_insecure_http,
-                )
-            })
-            .transpose()
-            .map_err(|error| match error {
-                // The resolver classifies the failure at the source; add the
-                // repair context without type-sniffing the chain. The boundary
-                // renders the full chain once with `{:#}`.
-                LightModelError::InvalidSettings(inner) => inner.context(
-                    "stored session light-model settings are invalid; settings repair required",
-                ),
-                // Keep the typed wrapper so its top-level context still names
-                // the light model as the failing component.
-                error @ LightModelError::Other(_) => anyhow::Error::from(error),
-            })?
-            .map(std::sync::Arc::new)
-    };
     let sandbox = if ssh.is_some() {
         None
     } else {
@@ -436,9 +375,7 @@ pub(super) async fn build_resume_config_from_snapshot(
             (workspace_dir.as_deref(), SkillPathVisibility::Visible)
         };
         let skills = SkillRegistry::load(skill_workspace, visibility, &paths)?;
-        let message = (agent_mode == AgentMode::Direct)
-            .then(|| agents_md.system_message())
-            .flatten();
+        let message = agents_md.system_message();
         (skills, agents_md.status_text(), message)
     };
     let mcp_paths = if ssh.is_some() {
@@ -446,27 +383,23 @@ pub(super) async fn build_resume_config_from_snapshot(
     } else {
         PathContext::new(&workspace_cwd)
     };
-    let mcp = if agent_mode == AgentMode::Direct {
-        McpRegistry::load_reporting_skips(
-            &workspace_cwd,
-            sandbox.as_ref(),
-            &mcp_paths,
-            if ssh.is_some() {
-                McpTransportPolicy::StreamableHttpOnly
-            } else {
-                McpTransportPolicy::All
-            },
-            if ssh.is_some() {
-                McpRootPolicy::None
-            } else {
-                McpRootPolicy::Workspace
-            },
-        )
-        .await?
-        .registry
-    } else {
-        None
-    };
+    let mcp = McpRegistry::load_reporting_skips(
+        &workspace_cwd,
+        sandbox.as_ref(),
+        &mcp_paths,
+        if ssh.is_some() {
+            McpTransportPolicy::StreamableHttpOnly
+        } else {
+            McpTransportPolicy::All
+        },
+        if ssh.is_some() {
+            McpRootPolicy::None
+        } else {
+            McpRootPolicy::Workspace
+        },
+    )
+    .await?
+    .registry;
     if let Some(instructions) = mcp
         .as_ref()
         .and_then(|registry| registry.instructions_message())
@@ -501,28 +434,20 @@ pub(super) async fn build_resume_config_from_snapshot(
         .unwrap_or_else(|| "off".to_string());
 
     let agent_config = AgentConfig {
-        command_output_limits: worker_command_output_limits(config)?,
-        mode: agent_mode,
-        session_behavior: Some(snapshot.behavior),
         store_path: store_path.clone(),
         session_id: Some(snapshot.session_id.clone()),
         orchestrator_compaction_threshold: snapshot.orchestrator_compaction_threshold,
         initial_messages: Vec::new(),
-        thread_name: None,
-        dispatch_id: None,
         event_sink: EventSink::none(),
         workspace_cwd,
         config_cwd,
         working_directory: working_directory.clone(),
-        worker_executable,
         sandbox,
         ssh,
         mcp,
         skills,
         extra_tool_defs,
         agents_md_message,
-        thread_timeout_secs: worker_thread_timeout_secs(config),
-        light_client,
         permission_rules: config.permissions.rules.clone(),
     };
     let agent_client = client.clone();

@@ -204,6 +204,39 @@ correlation |command| crate::telemetry::Correlation::session(Some(&command.sessi
 port public;
 }
 
+/// Load the bounded primary-tool event tail in chronological order. The
+/// transcript ledger shares this table but has a different reserved target.
+pub(crate) fn load_primary_tool_events_with_connection(
+    conn: &Connection,
+    session_id: &str,
+    limit: usize,
+) -> Result<Vec<ThreadEventRecord>> {
+    if limit == 0 {
+        return Ok(Vec::new());
+    }
+    let mut statement = conn.prepare(
+        "SELECT id, thread_name, session_id, event_json, created_at FROM (
+            SELECT id, thread_name, session_id, event_json, created_at
+            FROM thread_events WHERE session_id = ?1 AND thread_name = ?2
+            ORDER BY id DESC LIMIT ?3
+         ) ORDER BY id ASC",
+    )?;
+    let rows = statement.query_map(
+        params![session_id, crate::events::PRIMARY_TOOL_EVENT_TARGET, limit],
+        |row| {
+            Ok(ThreadEventRecord {
+                id: row.get(0)?,
+                thread_name: row.get(1)?,
+                session_id: row.get(2)?,
+                event_json: row.get(3)?,
+                created_at: row.get(4)?,
+            })
+        },
+    )?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
+#[cfg(test)]
 pub(crate) fn load_all_thread_events_with_connection(
     conn: &Connection,
     session_id: &str,
@@ -251,79 +284,6 @@ pub(crate) fn load_all_thread_events_with_connection(
             .push(event);
     }
     Ok(grouped)
-}
-
-coordinated_command! {
-pub fn load_thread_events_page(
-    path: &Path,
-    session_id: &str,
-    thread_name: &str,
-    before_id: Option<i64>,
-    limit: usize,
-) -> Result<(Vec<ThreadEventRecord>, bool)> {
-    if limit == 0 {
-        return Ok((Vec::new(), false));
-    }
-    let conn = open_runtime_connection(path)?;
-    load_thread_events_page_with_connection(&conn, session_id, thread_name, before_id, limit)
-}
-command LoadThreadEventsPageCommand {
-    session_id: String = session_id.to_owned(),
-    thread_name: String = thread_name.to_owned(),
-    before_id: Option<i64> = before_id,
-    limit: usize = limit,
-}
-call |command| (&command.session_id, &command.thread_name, command.before_id, command.limit)
-correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
-port public;
-}
-
-pub(crate) fn load_thread_events_page_with_connection(
-    conn: &Connection,
-    session_id: &str,
-    thread_name: &str,
-    before_id: Option<i64>,
-    limit: usize,
-) -> Result<(Vec<ThreadEventRecord>, bool)> {
-    if limit == 0 {
-        return Ok((Vec::new(), false));
-    }
-    // Transcript log rows live under the reserved orchestrator target
-    // (store/transcript.rs); they must never enter the event/tile paths, even
-    // when paged directly by name.
-    let mut stmt = conn.prepare(
-        "SELECT id, thread_name, session_id, event_json, created_at
-         FROM thread_events
-         WHERE session_id = ?1 AND thread_name = ?2
-           AND thread_name != ?5
-           AND (?3 IS NULL OR id < ?3)
-         ORDER BY id DESC
-         LIMIT ?4",
-    )?;
-    let rows = stmt.query_map(
-        params![
-            session_id,
-            thread_name,
-            before_id,
-            limit.saturating_add(1),
-            ORCHESTRATOR_STEERING_TARGET
-        ],
-        |row| {
-            Ok(ThreadEventRecord {
-                id: row.get(0)?,
-                thread_name: row.get(1)?,
-                session_id: row.get(2)?,
-                event_json: row.get(3)?,
-                created_at: row.get(4)?,
-            })
-        },
-    )?;
-    let mut events = rows.collect::<std::result::Result<Vec<_>, _>>()?;
-    let has_older = events.len() > limit;
-    if has_older {
-        events.truncate(limit);
-    }
-    Ok((events, has_older))
 }
 
 #[cfg(test)]
@@ -401,54 +361,6 @@ mod tests {
     }
 
     #[test]
-    fn thread_event_pages_are_newest_first_and_use_id_cursors() {
-        let path = std::env::temp_dir()
-            .join(format!(
-                "nac_thread_event_pages_{}",
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_nanos()
-            ))
-            .join("store.db");
-        initialize(&path).unwrap();
-        crate::store::insert_test_session(&path, "session-a");
-        for value in ["one", "two", "three", "four", "five"] {
-            append_thread_event(&path, "session-a", "worker-a", value).unwrap();
-        }
-
-        let (latest, has_older) =
-            load_thread_events_page(&path, "session-a", "worker-a", None, 2).unwrap();
-        assert!(has_older);
-        assert_eq!(
-            latest
-                .iter()
-                .map(|event| event.event_json.as_str())
-                .collect::<Vec<_>>(),
-            ["five", "four"]
-        );
-
-        let (older, has_older) = load_thread_events_page(
-            &path,
-            "session-a",
-            "worker-a",
-            Some(latest.last().unwrap().id),
-            2,
-        )
-        .unwrap();
-        assert!(has_older);
-        assert_eq!(
-            older
-                .iter()
-                .map(|event| event.event_json.as_str())
-                .collect::<Vec<_>>(),
-            ["three", "two"]
-        );
-
-        let _ = std::fs::remove_dir_all(path.parent().unwrap());
-    }
-
-    #[test]
     fn transcript_log_rows_never_enter_event_loads() {
         let path = std::env::temp_dir()
             .join(format!(
@@ -475,33 +387,15 @@ mod tests {
                 )
                 .unwrap();
         }
-        // Seed regular event rows.
-        append_thread_event(&path, "session-a", "worker-a", "event-a").unwrap();
-        append_thread_event(&path, "session-a", "worker-b", "event-b").unwrap();
-
-        // The transcript rows are still stored...
+        // Primary tool events share this table but remain separate from the
+        // canonical transcript rows.
+        let primary = crate::events::PRIMARY_TOOL_EVENT_TARGET;
+        append_thread_event(&path, "session-a", primary, "event-a").unwrap();
         assert_eq!(writer.read_from("session-a", 0).unwrap().len(), 3);
-
-        // ...but the grouped load never surfaces them.
         let events = load_all_thread_events(&path, "session-a", 24).unwrap();
-        assert_eq!(events.len(), 2);
+        assert_eq!(events.len(), 1);
         assert!(!events.contains_key(ORCHESTRATOR_STEERING_TARGET));
-        assert_eq!(events["worker-a"].len(), 1);
-        assert_eq!(events["worker-b"].len(), 1);
-
-        // Paging the reserved name directly returns nothing.
-        let (page, has_older) =
-            load_thread_events_page(&path, "session-a", ORCHESTRATOR_STEERING_TARGET, None, 24)
-                .unwrap();
-        assert!(page.is_empty());
-        assert!(!has_older);
-
-        // Regular pages are unaffected.
-        let (page, has_older) =
-            load_thread_events_page(&path, "session-a", "worker-a", None, 24).unwrap();
-        assert!(!has_older);
-        assert_eq!(page.len(), 1);
-        assert_eq!(page[0].event_json, "event-a");
+        assert_eq!(events[primary][0].event_json, "event-a");
 
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }

@@ -279,7 +279,6 @@ fn followup_scope_is_transactional_and_opaque_before_target_topology() {
                 ssh_host: None,
                 ssh_port: None,
                 ssh_identity_file: None,
-                default_model_config_id: None,
             },
         )
         .unwrap();

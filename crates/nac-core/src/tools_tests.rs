@@ -68,7 +68,6 @@ async fn model_execution_cannot_invoke_a_tool_outside_its_capability_snapshot() 
         result.content.as_text(),
         Some("Error: unknown tool 'thread' is not available to this agent")
     );
-    assert!(runtime.active_threads.names().is_empty());
 
     runtime.web_credential = Some(Arc::new(super::web::ExaCredential::new(
         "snapshot-only-canary".to_string(),
@@ -117,11 +116,11 @@ fn read_description_advertises_images_only_when_supported() {
 }
 
 #[test]
-fn worker_registry_preserves_definition_order_and_declares_admission() {
+fn coding_registry_preserves_definition_order_and_declares_admission() {
     let registry = native_tool_registry(false).unwrap();
     let snapshot = registry
         .snapshot(super::CODING_TOOL_NAMES)
-        .expect("complete worker capabilities");
+        .expect("complete coding capabilities");
     assert_eq!(
         snapshot
             .definitions()
@@ -170,65 +169,27 @@ fn direct_registries_preserve_exact_topology_capabilities() {
         .into_iter()
         .map(|definition| definition.function.name)
         .collect::<Vec<_>>();
-    let delegating = super::direct_with_orchestrator_tool_definitions(false)
-        .into_iter()
-        .map(|definition| definition.function.name)
-        .collect::<Vec<_>>();
     let direct_web = super::direct_tool_definitions_with_web(false, true)
-        .into_iter()
-        .map(|definition| definition.function.name)
-        .collect::<Vec<_>>();
-    let delegating_web = super::direct_with_orchestrator_tool_definitions_with_web(false, true)
         .into_iter()
         .map(|definition| definition.function.name)
         .collect::<Vec<_>>();
     for name in ["request_question", "read_question", "answer_question"] {
         assert!(direct.iter().any(|n| n == name));
-        assert!(
-            !delegating.iter().any(|n| n == name),
-            "question delivery starts in plain direct mode only"
-        );
         assert!(!worker.iter().any(|n| n == name));
     }
     assert_eq!(worker, super::CODING_TOOL_NAMES);
     assert_eq!(direct, super::DIRECT_TOOL_NAMES);
-    assert_eq!(delegating, super::DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES);
-    let shared = direct
-        .iter()
-        .filter(|name| {
-            !super::TASK_FOLLOWUP_TOOL_NAMES.contains(&name.as_str())
-                && !["request_question", "read_question", "answer_question"]
-                    .contains(&name.as_str())
-        })
-        .cloned()
-        .collect::<Vec<_>>();
-    assert_eq!(&delegating[..shared.len()], &shared);
-    assert_eq!(
-        &delegating[delegating.len() - super::ORCHESTRATOR_CONTROL_TOOL_NAMES.len()..],
-        super::ORCHESTRATOR_CONTROL_TOOL_NAMES
-    );
     assert_eq!(&direct_web[..super::DIRECT_TOOL_NAMES.len()], &direct);
     assert_eq!(
         &direct_web[super::DIRECT_TOOL_NAMES.len()..],
-        super::WEB_TOOL_NAMES
-    );
-    assert_eq!(
-        &delegating_web[..super::DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES.len()],
-        &delegating
-    );
-    assert_eq!(
-        &delegating_web[super::DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES.len()..],
         super::WEB_TOOL_NAMES
     );
 }
 
 #[test]
 fn launch_tools_use_strict_compatible_nullable_new_session_ids() {
-    let definitions = super::direct_with_orchestrator_tool_definitions(false);
-    for (tool_name, session_id) in [
-        ("subagent", "child_session_id"),
-        ("orchestrator_launch", "orchestrator_session_id"),
-    ] {
+    let definitions = super::direct_tool_definitions(false);
+    for (tool_name, session_id) in [("subagent", "child_session_id")] {
         let parameters = &definitions
             .iter()
             .find(|definition| definition.function.name == tool_name)
@@ -643,9 +604,11 @@ fn prepared_builtin_calls_project_validated_correlated_permission_resources() {
 }
 
 #[tokio::test]
-async fn brokerless_worker_model_calls_still_enforce_native_hard_denials() {
-    let directory =
-        std::env::temp_dir().join(format!("nac-worker-hard-denial-{}", uuid::Uuid::new_v4()));
+async fn brokerless_model_calls_still_enforce_native_hard_denials() {
+    let directory = std::env::temp_dir().join(format!(
+        "nac-brokerless-hard-denial-{}",
+        uuid::Uuid::new_v4()
+    ));
     std::fs::create_dir_all(&directory).unwrap();
     let mut runtime = crate::tools::test_runtime();
     runtime.workspace_cwd = directory.clone();
@@ -660,8 +623,7 @@ async fn brokerless_worker_model_calls_still_enforce_native_hard_denials() {
     let registry = native_tool_registry(false).unwrap();
     let snapshot = registry.snapshot(super::CODING_TOOL_NAMES).unwrap();
     let context = kernel::ToolCallContext {
-        call_id: Some("call-worker-denied".to_string()),
-        thread_name: Some("worker".to_string()),
+        call_id: Some("call-brokerless-denied".to_string()),
         ..Default::default()
     };
 
@@ -669,12 +631,12 @@ async fn brokerless_worker_model_calls_still_enforce_native_hard_denials() {
         (
             "write_stdin",
             serde_json::json!({"session_id":"shell-test", "chars":"help<RET>"}),
-            "nonempty terminal input is unavailable to brokerless workers",
+            "nonempty terminal input is unavailable without an approval broker",
         ),
         (
             "exec_command",
             serde_json::json!({"cmd":"bash", "tty":true}),
-            "interactive opaque commands and broad interpreters are unavailable to brokerless workers",
+            "interactive opaque commands and broad interpreters are unavailable without an approval broker",
         ),
     ] {
         let result = snapshot.invoke(tool, input, services, &context).await;
@@ -833,7 +795,6 @@ async fn direct_terminal_input_requires_once_only_approval_for_the_exact_handle(
     let snapshot = registry.snapshot(super::CODING_TOOL_NAMES).unwrap();
     let context = kernel::ToolCallContext {
         call_id: Some("call-terminal-input".to_string()),
-        thread_name: None,
         ..Default::default()
     };
 

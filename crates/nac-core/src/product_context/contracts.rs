@@ -116,7 +116,6 @@ pub struct ProductDestinationInfo {
 #[serde(rename_all = "snake_case")]
 pub enum ProductFeatureKind {
     TraditionalSubagents,
-    ManagedOrchestrators,
     ManagedHost,
     ProductNavigation,
 }

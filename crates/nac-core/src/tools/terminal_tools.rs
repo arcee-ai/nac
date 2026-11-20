@@ -156,7 +156,7 @@ impl kernel::NativeTool for WriteStdinTool {
     ) -> Result<Vec<kernel::PermissionResource>, ToolResult> {
         let resources = write_stdin_resources(&input.args, services.runtime)?;
         // Native hard denials remain prior to process resolution, including
-        // the brokerless worker contract for nonempty interactive input.
+        // the brokerless contract for nonempty interactive input.
         if resources
             .iter()
             .any(|resource| resource.hard_denial.is_some())
@@ -364,7 +364,7 @@ fn exec_command_resources(
                     "interactive opaque commands and broad interpreters require direct-session approval",
                 )
                 .with_hard_denial(
-                    "interactive opaque commands and broad interpreters are unavailable to brokerless workers because follow-up input requires direct-session approval",
+                    "interactive opaque commands and broad interpreters are unavailable without an approval broker because follow-up input requires session approval",
                 ),
         );
     }
@@ -399,7 +399,7 @@ fn write_stdin_resources(
             ));
         if runtime.permission_broker.is_none() {
             resource.with_hard_denial(
-                "nonempty terminal input is unavailable to brokerless workers because it requires direct-session approval",
+                "nonempty terminal input is unavailable without an approval broker because it requires session approval",
             )
         } else {
             resource

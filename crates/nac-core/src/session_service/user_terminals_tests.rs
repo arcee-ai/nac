@@ -1,11 +1,10 @@
 use super::*;
-use crate::agent::{AgentConfig, AgentMode};
+use crate::agent::AgentConfig;
 use crate::permissions::{
     PermissionApprovalMode, PermissionEffect, PermissionReply, PermissionRule,
 };
 use nac_contracts::{
     CommandEnvironmentFuture, CommandEnvironmentProvider, CommandEnvironmentSnapshot,
-    WorkerEnvironment,
 };
 
 #[path = "user_terminal_control_tests.rs"]
@@ -29,9 +28,6 @@ impl CommandEnvironmentProvider for Environment {
     fn redaction_snapshot(&self) -> Result<CommandEnvironmentSnapshot> {
         Ok(self.0.clone())
     }
-    fn worker_environment(&self) -> WorkerEnvironment {
-        WorkerEnvironment::default()
-    }
 }
 
 // Pause the real environment snapshot after prepared authorization and before
@@ -51,9 +47,6 @@ impl CommandEnvironmentProvider for PausedEnvironment {
     }
     fn redaction_snapshot(&self) -> Result<CommandEnvironmentSnapshot> {
         Ok(CommandEnvironmentSnapshot::empty())
-    }
-    fn worker_environment(&self) -> WorkerEnvironment {
-        WorkerEnvironment::default()
     }
 }
 
@@ -78,28 +71,20 @@ fn fixture_with_policy(
     let mut agent = Agent::with_config(
         client.clone(),
         AgentConfig {
-            command_output_limits: crate::terminal::CommandOutputLimits::default(),
-            mode: AgentMode::Direct,
-            session_behavior: None,
             store_path: store_path.clone(),
             session_id: Some("direct-terminal".into()),
             orchestrator_compaction_threshold: None,
             initial_messages: Vec::new(),
-            thread_name: None,
-            dispatch_id: None,
             event_sink: EventSink::none(),
             workspace_cwd: directory.clone(),
             config_cwd: directory.clone(),
             working_directory: directory.display().to_string(),
-            worker_executable: None,
             sandbox: None,
             ssh: None,
             mcp: None,
             skills: None,
             extra_tool_defs: Vec::new(),
             agents_md_message: None,
-            thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
-            light_client: None,
             permission_rules,
         },
     )

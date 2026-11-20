@@ -91,7 +91,6 @@ impl Fixture {
         let options = || crate::ServerOptions {
             root_cwd: root.clone(),
             store_path: Some(path.clone()),
-            worker_executable: None,
             managed_host: None,
         };
         let producer = SessionManager::new_async(options()).await.unwrap();

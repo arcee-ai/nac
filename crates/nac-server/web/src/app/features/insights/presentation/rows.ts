@@ -1,5 +1,5 @@
 import type { ActionListButtonStatus, IconName } from "@/app/atoms";
-import { actionMeta, entryRow, segmentRow } from "@/app/features/insights/model/labels";
+import { entryRow, segmentRow } from "@/app/features/insights/model/labels";
 import type { InsightEntry, InsightRow, InsightSegment } from "@/app/features/insights/model/types";
 import { rowIcon, rowStatus } from "@/app/features/insights/presentation/actionPresentation";
 import {
@@ -16,8 +16,6 @@ export interface RowView {
 
 export interface RowSources {
   resolveSession: SessionResolver;
-  /** `episode_count` of each thread the snapshot retains, by name. */
-  episodeCounts: ReadonlyMap<string, number>;
 }
 
 function rowView(row: InsightRow): RowView {
@@ -41,13 +39,6 @@ export function segmentRowView(segment: InsightSegment, sources: RowSources): Ro
 
 export function entryRowView(entry: InsightEntry, sources: RowSources): RowView {
   const row = entryRow(entry);
-  if (entry.kind === "thread") {
-    const count = sources.episodeCounts.get(entry.thread.name);
-    return rowView({
-      ...row,
-      meta: count === undefined ? actionMeta("thread") : `Thread, ${count}`,
-    });
-  }
   if (entry.kind === "session") {
     return rowView(withSessionTitle(row, sources.resolveSession(entry.rowKey)?.title));
   }

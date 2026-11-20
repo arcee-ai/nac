@@ -14,7 +14,7 @@ fn v34_store_adds_bounded_task_evidence_without_rewriting_goals() {
     let path = std::env::temp_dir()
         .join(format!("nac-task-evidence-v34-{}", uuid::Uuid::new_v4()))
         .join("store.db");
-    initialize(&path).unwrap();
+    schema::initialize_synthetic_predecessor(&path).unwrap();
     insert_test_session(&path, "direct");
     let legacy = Connection::open(&path).unwrap();
     legacy

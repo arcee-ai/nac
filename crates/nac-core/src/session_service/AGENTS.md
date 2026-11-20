@@ -10,7 +10,7 @@ durable records; runtime/tool modules own execution internals.
 - Admission and settlement ordering must remain transactional and generation-
   aware. Never expose a run as accepted before its durable preconditions commit.
 - Cancellation, recovery, and completion delivery are restart-safe. A terminal
-  child/managed relationship settles exactly once and remains attributable to
+  child relationship settles exactly once and remains attributable to
   the correct parent/generation.
 - Steering/inbox items are never silently dropped: late direct steers promote
   to successor execution under the established contract.
@@ -18,9 +18,8 @@ durable records; runtime/tool modules own execution internals.
   a view. Projection failures must preserve canonical durable state.
 - Recovery distinguishes process-local liveness from durable leases and peer
   ownership. Do not present in-memory task tracking as restart-safe.
-- Preserve direct and traditional-child lifecycle invariants. Legacy topology
-  remains distinct until the planned retirement cutover; do not collapse it
-  incidentally while sharing lifecycle helpers.
+- Preserve direct and traditional-child lifecycle invariants when sharing
+  lifecycle helpers.
 - Human product intent is issued here after admission through private,
   non-deserializable capabilities. Exact shell submission and human terminal
   launch share prepared policy/binding/revalidation but never create agent Ask

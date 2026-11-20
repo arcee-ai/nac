@@ -248,7 +248,7 @@ impl NativeTool for ControlFreshTaskScheduleTool {
             if request.is_none() {
                 let Some(run) = services
                     .runtime
-                    .active_threads
+                    .run_admission
                     .run_id()
                     .filter(|_| relinquishing && services.runtime.heartbeat_execution)
                 else {

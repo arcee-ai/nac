@@ -3,8 +3,6 @@ import { createProject, createSession, expect, test, waitForRunIdle } from "./ha
 import type { CreateSessionRequest, ModelCatalog } from "../src/app/types/api";
 import { homeComposer, openModelList, startSessionFromHome } from "./focus-embedded-helpers";
 
-test.use({ orchestration: "0" });
-
 test("offers the launch folder without creating projects until the user chooses it", async ({
   harness,
   page,

@@ -48,35 +48,6 @@ impl PersistenceCommand for ReadLog {
     }
 }
 
-struct AdmitWorker(&'static str);
-impl PersistenceCommand for AdmitWorker {
-    type Output = crate::store::WorkerDispatchIdentity;
-    fn correlation(&self) -> Correlation {
-        Correlation::session(Some("session"))
-    }
-    fn execute(self, path: &Path) -> Result<Self::Output> {
-        crate::store::admit_worker_dispatch(path, "session", "worker", self.0, None, "test")
-    }
-}
-struct CommitWorker {
-    identity: crate::store::WorkerDispatchIdentity,
-    content: &'static str,
-}
-impl PersistenceCommand for CommitWorker {
-    type Output = i64;
-    fn correlation(&self) -> Correlation {
-        Correlation::session(Some("session")).with_generation(self.identity.generation as u64)
-    }
-    fn execute(self, path: &Path) -> Result<i64> {
-        crate::store::commit_worker_episode(
-            path,
-            &self.identity,
-            self.content,
-            crate::store::EpisodeStatus::Ok,
-        )
-    }
-}
-
 fn path() -> PathBuf {
     std::env::temp_dir()
         .join(format!("nac-coordinator-contract-{}", uuid::Uuid::new_v4()))
@@ -296,12 +267,8 @@ async fn async_thread_event_waits_for_commit_before_publication_without_blocking
     let sink = crate::events::EventSink::bus(bus.clone());
     let (gate, release, _) = super::tests::block_executor(&owner);
     let publication = tokio::spawn(async move {
-        sink.emit_async(crate::events::AgentEvent::ThreadStarted {
-            name: "worker".into(),
-            action: "test".into(),
-            source_threads: vec![],
-        })
-        .await;
+        sink.emit_async(crate::events::test_primary_tool_started("persistence-gate"))
+            .await;
     });
     while owner.stats().queued == 0 {
         tokio::task::yield_now().await;
@@ -331,7 +298,7 @@ async fn async_thread_event_waits_for_commit_before_publication_without_blocking
         .await
         .unwrap();
     assert_eq!(events.len(), 1);
-    assert_eq!(events["worker"].len(), 1);
+    assert_eq!(events[crate::events::PRIMARY_TOOL_EVENT_TARGET].len(), 1);
     owner.shutdown().await.unwrap();
     std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
 }
@@ -474,72 +441,6 @@ async fn queued_writer_pins_the_admitted_canonical_store_when_an_alias_changes()
     second.shutdown().await.unwrap();
     std::fs::remove_dir_all(first_path.parent().unwrap()).unwrap();
     std::fs::remove_dir_all(second_path.parent().unwrap()).unwrap();
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn worker_generation_fence_and_receipt_replay_survive_the_queue_and_restart() {
-    let path = path();
-    let owner = seed(&path).await;
-    let old = owner
-        .submit(AdmitWorker("old"))
-        .unwrap()
-        .acknowledge()
-        .await
-        .unwrap();
-    let current = owner
-        .submit(AdmitWorker("current"))
-        .unwrap()
-        .acknowledge()
-        .await
-        .unwrap();
-    assert!(current.generation > old.generation);
-    assert!(owner
-        .submit(CommitWorker {
-            identity: old,
-            content: "stale"
-        })
-        .unwrap()
-        .acknowledge()
-        .await
-        .is_err());
-    let commit = || CommitWorker {
-        identity: current.clone(),
-        content: "canonical",
-    };
-    let id = owner.submit(commit()).unwrap().acknowledge().await.unwrap();
-    assert_eq!(
-        owner.submit(commit()).unwrap().acknowledge().await.unwrap(),
-        id
-    );
-    assert!(owner
-        .submit(CommitWorker {
-            identity: current.clone(),
-            content: "changed"
-        })
-        .unwrap()
-        .acknowledge()
-        .await
-        .is_err());
-    owner.shutdown().await.unwrap();
-    let restarted = StoreCoordinator::acquire(&path).unwrap();
-    restarted.initialize().await.unwrap();
-    assert_eq!(
-        restarted
-            .submit(commit())
-            .unwrap()
-            .acknowledge()
-            .await
-            .unwrap(),
-        id
-    );
-    let records = restarted
-        .thread_dispatches("session".into(), "worker".into())
-        .await
-        .unwrap();
-    assert_eq!(records.len(), 1);
-    assert_eq!(records[0].content, "canonical");
-    restarted.shutdown().await.unwrap();
-    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
 }
 
 #[tokio::test(flavor = "current_thread")]

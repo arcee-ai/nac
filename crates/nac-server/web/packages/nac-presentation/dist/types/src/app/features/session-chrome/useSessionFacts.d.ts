@@ -5,10 +5,8 @@ import type { ManagedSessionSummary, SessionBehavior, SessionGoalRecord, Session
 export interface SessionAgents {
     count: number;
     running: number;
-    /** The panel the Session menu's row opens: Subagents for a direct agent, Worksets/Insights for threads. */
+    /** The panel the Session menu's row opens. */
     panel: SessionPanel;
-    /** "agent"/"agents" for children, "thread"/"threads" for an orchestrator's workers. */
-    noun: "agent" | "thread";
 }
 /**
  * Everything the session header shows, read once: the title and where the

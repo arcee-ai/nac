@@ -34,7 +34,6 @@ export function makeObservationPorts(
     applyAssistantDelta,
     applyEnvelope,
     captureRuntimeActivation,
-    clearRuntimeThreads,
     resetRuntime,
     setStreamStatus,
     syncRunFromSnapshot,
@@ -56,8 +55,6 @@ export function makeObservationPorts(
       if (ownsRuntime()) resetRuntime(null);
       disposeSessionRefresh(refreshKey);
       void client.cancelQueries({ queryKey: queryKeys.sessionSnapshot(id), exact: true });
-      void client.cancelQueries({ queryKey: queryKeys.threadEventsRoot(id) });
-      client.removeQueries({ queryKey: queryKeys.threadEventsRoot(id) });
     },
     subscribe: (callbacks) =>
       adapters.subscribe(id, {
@@ -67,10 +64,6 @@ export function makeObservationPorts(
           callbacks.change({
             refresh: applyEnvelope(envelope),
             transcriptLength: event.type === "transcript_appended" ? event.transcript_len : 0,
-            finishedThread:
-              event.type === "agent" && event.event.type === "thread_finished"
-                ? event.event.name
-                : undefined,
             runCompleted: event.type === "run_completed",
             permissionsChanged:
               event.type === "permission_asked" ||
@@ -96,11 +89,6 @@ export function makeObservationPorts(
         onBackpressure: callbacks.replayLost,
       }),
     fenceSnapshot: (replace) => {
-      if (replace) {
-        clearRuntimeThreads();
-        void client.cancelQueries({ queryKey: queryKeys.threadEventsRoot(id) });
-        client.removeQueries({ queryKey: queryKeys.threadEventsRoot(id) });
-      }
       void client.cancelQueries({ queryKey: queryKeys.sessionSnapshot(id), exact: true });
       fenceSessionSnapshot(refreshKey, replace);
     },
@@ -149,15 +137,13 @@ export function makeObservationPorts(
         finishTailFetch(refreshKey, token);
       }
     },
-    invalidate: (kind, thread) => {
+    invalidate: (kind) => {
       const key =
         kind === "permissions"
           ? queryKeys.sessionPermissions(id)
           : kind === "skills"
             ? queryKeys.sessionSkills(id)
-            : kind === "revisions"
-              ? queryKeys.workspaceRevisions(id)
-              : queryKeys.threadEvents(id, thread ?? "");
+            : queryKeys.workspaceRevisions(id);
       void client.invalidateQueries({ queryKey: key, exact: true });
     },
   };

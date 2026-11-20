@@ -21,7 +21,6 @@ export type ManagedUpgradeBlockerKind =
   | "active_run"
   | "compaction"
   | "traditional_child"
-  | "managed_orchestrator"
   | "terminal_process"
   | "clone_operation"
   | "workspace_mutation"
@@ -36,7 +35,6 @@ export type ManagedUpgradeBlockerAction =
   | "wait"
   | "cancel_active_run"
   | "cancel_traditional_child"
-  | "cancel_managed_orchestrator"
   | "terminate_terminal"
   | "cancel_clone_operation";
 
@@ -44,7 +42,6 @@ export interface ManagedUpgradeBlockerTarget {
   session_id?: string;
   run_id?: string;
   child_session_id?: string;
-  orchestrator_session_id?: string;
   terminal_id?: string;
   clone_operation_id?: string;
 }
@@ -172,8 +169,6 @@ export function managedUpgradeActionLabel(action: ManagedUpgradeBlockerAction): 
       return "Stop run";
     case "cancel_traditional_child":
       return "Cancel coding agent";
-    case "cancel_managed_orchestrator":
-      return "Cancel NAC orchestrator";
     case "terminate_terminal":
       return "Stop terminal";
     case "cancel_clone_operation":

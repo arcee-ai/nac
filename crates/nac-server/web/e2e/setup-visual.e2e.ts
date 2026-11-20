@@ -8,7 +8,7 @@ import {
 } from "./setup-visual-fixture";
 import { openNameZoom } from "./session-name-zoom";
 
-test.use({ orchestration: "0", hasTouch: true });
+test.use({ hasTouch: true });
 test.skip(!!process.env.NAC_E2E_REMOTE, "Requires disposable local setup commands");
 
 for (const width of [1440, 768, 390]) {

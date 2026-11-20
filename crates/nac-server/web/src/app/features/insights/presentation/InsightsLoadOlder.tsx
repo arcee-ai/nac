@@ -2,7 +2,7 @@ import { Button, ButtonContent, ButtonSize, ButtonVariant } from "@/app/atoms";
 import { useLoadOlderMessages } from "@/app/services/queries";
 
 /**
- * The snapshot carries only the newest messages, so the actions and threads of
+ * The snapshot carries only the newest messages, so the actions of
  * earlier prompts join the list once their messages load, as in the chat.
  */
 export function InsightsLoadOlder({ sessionId }: { sessionId: string }) {

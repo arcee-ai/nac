@@ -1,10 +1,10 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
-use tokio::sync::{watch, Mutex};
+use tokio::sync::watch;
 
 use crate::events::{AgentEvent, AssistantStreamDelta, EventSink, SessionRunId};
 use crate::mcp::McpRegistry;
@@ -15,7 +15,6 @@ use crate::tools::{self, ToolResult, ToolRuntime};
 use crate::types::{Message, ToolCall, ToolDefinition};
 
 mod compaction;
-mod dag;
 mod failed_tool_round;
 mod heartbeat;
 mod mcp_refresh;
@@ -48,21 +47,17 @@ pub(crate) fn direct_compaction_checkpoint_digests_for_test(
     messages: &[crate::types::Message],
     boundary: usize,
 ) -> ([u8; 32], [u8; 32]) {
-    compaction::checkpoint_digests_for_policy(messages, boundary, CompactionPolicy::Direct)
+    compaction::checkpoint_digests(messages, boundary)
 }
 pub(crate) use compaction::{
     CompactionCompletion, CompactionError, CompactionLifecycle, CompactionResult,
 };
-use compaction::{CompactionPolicy, CompactionState, PreparedProviderView};
+use compaction::{CompactionState, PreparedProviderView};
 use failed_tool_round::failed_tool_round;
 pub(crate) use preview::key_arg_preview;
 use preview::*;
-use prompt_rendering::{
-    light_model_prompt_guidance, render_orchestrator_system_prompt, render_worker_system_prompt,
-};
 pub(crate) use prompt_rendering::{
-    render_direct_system_prompt, render_direct_with_orchestrator_system_prompt,
-    render_general_child_system_prompt,
+    render_direct_system_prompt, render_general_child_system_prompt,
 };
 use tool_exec::{execute_tools_parallel, finalize_tool_results};
 pub(crate) use transcript_messages::TranscriptMessages;
@@ -91,25 +86,14 @@ Reply with your answer as ordinary text, or issue the tool call you meant to mak
 
 /// Flash-class models can ignore a correct tool error and retry the same call
 /// forever (`write` + `expected_revision: null` on an existing file). The
-/// error stays on the tool result; this only stops the worker after the
-/// identical failing round has repeated enough times to be a loop. The stop
-/// is reported as `ModelError` so the parent dispatch keeps the reason (plain
-/// `Error` is reduced to "operation failed" before it leaves the worker) and
-/// the orchestrator sees it on the `thread` tool result.
+/// error stays on the tool result; this stops the run after the identical
+/// failing round has repeated enough times to be a loop.
 const REPEATED_TOOL_FAILURE_LIMIT: usize = 3;
 
 fn duration_millis(duration: Duration) -> u64 {
     u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AgentMode {
-    Worker,
-    Orchestrator,
-    /// Persistent top-level coding loop. This shares the lower model/tool
-    /// engine with workers but not their bounded dispatch prompt or lifecycle.
-    Direct,
-}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum RunPromptCommitStatus {
     Pending,
@@ -118,23 +102,15 @@ pub(crate) enum RunPromptCommitStatus {
 }
 
 pub struct AgentConfig {
-    pub mode: AgentMode,
-    /// Authoritative immutable behavior for a persistent top-level session.
-    /// Fresh sessions are constructed before their row exists, so callers
-    /// must not rely on a store reread to distinguish the two direct modes.
-    pub session_behavior: Option<crate::sessions::SessionBehavior>,
     pub store_path: PathBuf,
     pub session_id: Option<String>,
     pub orchestrator_compaction_threshold: Option<u64>,
     pub initial_messages: Vec<Message>,
-    pub thread_name: Option<String>,
-    pub dispatch_id: Option<String>,
     pub event_sink: EventSink,
     pub workspace_cwd: PathBuf,
     /// Local cwd for nac config/store paths; differs from workspace_cwd for SSH.
     pub config_cwd: PathBuf,
     pub working_directory: String,
-    pub worker_executable: Option<PathBuf>,
     pub sandbox: Option<SandboxSession>,
     /// How to reach the host of a remote session; mutually exclusive with sandbox.
     pub ssh: Option<SshConnection>,
@@ -142,18 +118,13 @@ pub struct AgentConfig {
     pub skills: Option<Arc<SkillRegistry>>,
     pub extra_tool_defs: Vec<ToolDefinition>,
     pub agents_md_message: Option<String>,
-    pub thread_timeout_secs: u64,
-    pub command_output_limits: crate::terminal::CommandOutputLimits,
-    /// Light worker model client; `None` keeps single-model dispatch.
-    pub light_client: Option<Arc<ModelClient>>,
     pub permission_rules: Vec<crate::permissions::PermissionRule>,
 }
 
-type McpObservation = Arc<dyn Fn(EventSink, Option<String>) + Send + Sync>;
+type McpObservation = Arc<dyn Fn(EventSink) + Send + Sync>;
 
 pub struct Agent {
     client: ModelClient,
-    mode: AgentMode,
     pub messages: TranscriptMessages,
     tool_defs: Vec<ToolDefinition>,
     fallback_tool_defs: Vec<ToolDefinition>,
@@ -165,14 +136,10 @@ pub struct Agent {
     compaction: Option<CompactionState>,
     tool_runtime: ToolRuntime,
     event_sink: EventSink,
-    thread_name: Option<String>,
     mcp_observation: Option<McpObservation>,
     mcp_mounts: Arc<crate::mcp::SessionMcpMounts>,
     current_run_id: Option<String>,
-    appended_steering_ids: HashSet<i64>,
-    /// Top-level transcript log sink (DB-direct transcript workset, see
-    /// store/transcript.rs). Present for persistent primary agents with a
-    /// session id — workers (separate `__worker` processes) never log.
+    /// Transcript log sink for persistent sessions; see store/transcript.rs.
     transcript_log: Option<TranscriptLogSink>,
     /// Exclusive upper bound of transcript log rows this process has
     /// committed or adopted (restore/refresh). Durable rows at or beyond
@@ -211,7 +178,7 @@ pub struct Agent {
     partial_stream: StdMutex<ModelStreamDelta>,
 }
 
-/// Path-backed writer and identity needed to append to the orchestrator
+/// Path-backed writer and identity needed to append to the session
 /// transcript log. The writer is shared into `spawn_blocking` closures per
 /// operation.
 struct TranscriptLogSink {
@@ -233,121 +200,44 @@ impl Agent {
     pub fn with_config(client: ModelClient, config: AgentConfig) -> Result<Self> {
         let client = client.with_prompt_cache_key(config.session_id.clone());
         let cwd = config.working_directory.clone();
-        let thread_timeout_secs = config.thread_timeout_secs;
-        let mode = config.mode;
-        let traditional_child = if mode == AgentMode::Direct {
-            config
-                .session_id
-                .as_deref()
-                .map(|session_id| {
-                    crate::store::load_traditional_child(&config.store_path, session_id)
-                })
-                .transpose()?
-                .flatten()
-        } else {
-            None
-        };
-        let direct_behavior = if mode == AgentMode::Direct && traditional_child.is_none() {
-            config
-                .session_behavior
-                .or_else(|| {
-                    config.session_id.as_deref().and_then(|session_id| {
-                        crate::sessions::load_session(&config.store_path, session_id)
-                            .ok()
-                            .map(|snapshot| snapshot.behavior)
-                    })
-                })
-                .unwrap_or(crate::sessions::SessionBehavior::Direct)
-        } else {
-            crate::sessions::SessionBehavior::Direct
-        };
-        let compaction = if matches!(mode, AgentMode::Orchestrator | AgentMode::Direct) {
-            config.session_id.clone().map(|session_id| {
-                CompactionState::new(
-                    config.store_path.clone(),
-                    session_id,
-                    config.orchestrator_compaction_threshold,
-                    match mode {
-                        AgentMode::Direct => CompactionPolicy::Direct,
-                        AgentMode::Orchestrator => CompactionPolicy::Orchestrator,
-                        AgentMode::Worker => unreachable!("workers do not own compaction state"),
-                    },
-                )
-            })
-        } else {
-            None
-        };
-        // Construction-time gate for the transcript log: persistent primary
-        // agents only, and only with a session id (mirrors the compaction
-        // gate). Workers run in separate `__worker` processes and must never
-        // append top-level transcript rows.
-        let transcript_log = match (mode, config.session_id.clone()) {
-            (AgentMode::Orchestrator | AgentMode::Direct, Some(session_id)) => {
-                Some(TranscriptLogSink {
+        let traditional_child = config
+            .session_id
+            .as_deref()
+            .map(|session_id| crate::store::load_traditional_child(&config.store_path, session_id))
+            .transpose()?
+            .flatten();
+        let compaction = config.session_id.clone().map(|session_id| {
+            CompactionState::new(
+                config.store_path.clone(),
+                session_id,
+                config.orchestrator_compaction_threshold,
+            )
+        });
+        let transcript_log = config
+            .session_id
+            .clone()
+            .map(|session_id| {
+                Ok::<_, anyhow::Error>(TranscriptLogSink {
                     writer: Arc::new(crate::store::TranscriptLogWriter::new(&config.store_path)?),
                     session_id,
                     store_path: config.store_path.clone(),
                 })
-            }
-            _ => None,
-        };
-
-        let (mut system_prompt, mut tool_defs) = match config.mode {
-            AgentMode::Worker => {
-                let image_read = client.supports_image_tool_results();
-                (
-                    render_worker_system_prompt(&cwd),
-                    tools::coding_tool_definitions(image_read),
-                )
-            }
-            AgentMode::Orchestrator => (
-                render_orchestrator_system_prompt(&cwd, thread_timeout_secs),
-                tools::orchestrator_tool_definitions(
-                    config.skills.as_deref(),
-                    config.light_client.as_deref(),
-                ),
+            })
+            .transpose()?;
+        let (mut system_prompt, mut tool_defs) = match traditional_child.as_ref() {
+            Some(child) => (
+                render_general_child_system_prompt(&cwd, &child.description),
+                tools::coding_tool_definitions(client.supports_image_tool_results()),
             ),
-            AgentMode::Direct => match traditional_child.as_ref() {
-                Some(child) => (
-                    render_general_child_system_prompt(&cwd, &child.description),
-                    tools::coding_tool_definitions(client.supports_image_tool_results()),
-                ),
-                None => (
-                    if direct_behavior == crate::sessions::SessionBehavior::DirectWithOrchestrator {
-                        render_direct_with_orchestrator_system_prompt(&cwd)
-                    } else {
-                        render_direct_system_prompt(&cwd)
-                    },
-                    if direct_behavior == crate::sessions::SessionBehavior::DirectWithOrchestrator {
-                        tools::direct_with_orchestrator_tool_definitions(
-                            client.supports_image_tool_results(),
-                        )
-                    } else {
-                        tools::direct_tool_definitions(client.supports_image_tool_results())
-                    },
-                ),
-            },
+            None => (
+                render_direct_system_prompt(&cwd),
+                tools::direct_tool_definitions(client.supports_image_tool_results()),
+            ),
         };
-        let guide_selected = config.mode == AgentMode::Worker && {
-            let preload = format!(
-                "The orchestrator preloaded this skill for this worker dispatch.\n\n{}",
-                crate::skills::bundled_help_for_prompt()
-            );
-            config.initial_messages.iter().any(
-                |message| matches!(message, Message::System { content } if content == &preload),
-            )
-        };
-        if config.mode != AgentMode::Worker && traditional_child.is_none() {
+        if traditional_child.is_none() {
             system_prompt.push_str(&crate::guide::primary_prompt());
-        } else if guide_selected || traditional_child.is_some() {
-            // Traditional children retain explicit skill expansion. Keep the
-            // bundled router usable without adding primary self-help routing.
+        } else {
             tool_defs.push(tools::guide::definition());
-        }
-        if config.mode == AgentMode::Orchestrator {
-            if let Some(light) = config.light_client.as_deref() {
-                system_prompt.push_str(&light_model_prompt_guidance(light));
-            }
         }
         if config.ssh.is_some() || config.sandbox.is_some() {
             tool_defs.retain(|definition| {
@@ -355,22 +245,19 @@ impl Agent {
             });
         }
         let base_tool_defs = tool_defs.clone();
-        if matches!(config.mode, AgentMode::Worker | AgentMode::Direct) {
-            if config
-                .extra_tool_defs
-                .iter()
-                .any(|definition| definition.function.name == tools::guide::NAME)
-            {
-                anyhow::bail!("nac_guide is a reserved first-party capability name");
-            }
-            tool_defs.extend(config.extra_tool_defs);
+        if config
+            .extra_tool_defs
+            .iter()
+            .any(|definition| definition.function.name == tools::guide::NAME)
+        {
+            anyhow::bail!("nac_guide is a reserved first-party capability name");
         }
+        tool_defs.extend(config.extra_tool_defs);
         let native_web_capabilities =
-            NativeWebCapabilities::new(mode, &config.store_path, config.session_id.as_deref())?;
-        if native_web_capabilities.is_eligible()
-            && tool_defs.iter().any(|definition| {
-                tools::WEB_TOOL_NAMES.contains(&definition.function.name.as_str())
-            })
+            NativeWebCapabilities::new(&config.store_path, config.session_id.as_deref())?;
+        if tool_defs
+            .iter()
+            .any(|definition| tools::WEB_TOOL_NAMES.contains(&definition.function.name.as_str()))
         {
             anyhow::bail!("web_search and web_fetch are reserved first-party capability names");
         }
@@ -379,35 +266,16 @@ impl Agent {
             content: system_prompt,
         }];
         if let Some(agents_md_message) = config.agents_md_message {
-            if matches!(config.mode, AgentMode::Worker | AgentMode::Direct) {
-                append_to_initial_system_message(&mut messages, &agents_md_message);
-            } else {
-                messages.push(Message::System {
-                    content: agents_md_message,
-                });
-            }
+            append_to_initial_system_message(&mut messages, &agents_md_message);
         }
-        if config.mode == AgentMode::Worker {
-            for message in config.initial_messages {
-                match message {
-                    Message::System { content } => {
-                        append_to_initial_system_message(&mut messages, &content);
-                    }
-                    other => messages.push(other),
-                }
-            }
-        } else {
-            messages.extend(config.initial_messages);
-        }
+        messages.extend(config.initial_messages);
 
         let local_paths = crate::paths::PathContext::new(&config.config_cwd);
-        let mcp_observation = config.mcp.as_ref().map(|mcp| {
-            mcp.register_event_sink(config.event_sink.clone(), config.thread_name.clone())
-        });
-        let mcp_mounts = Arc::new(crate::mcp::SessionMcpMounts::new(
-            config.mcp.clone(),
-            mode == AgentMode::Orchestrator,
-        ));
+        let mcp_observation = config
+            .mcp
+            .as_ref()
+            .map(|mcp| mcp.register_event_sink(config.event_sink.clone()));
+        let mcp_mounts = Arc::new(crate::mcp::SessionMcpMounts::new(config.mcp.clone()));
         let workspace_lease_identity =
             crate::workspace::workspace_lease_identity(config.ssh.as_ref(), &config.workspace_cwd);
         let backend = crate::sandbox::select_execution_backend(
@@ -416,13 +284,7 @@ impl Agent {
             &config.workspace_cwd,
             &local_paths,
         )?;
-        let terminal_manager = match config.mode {
-            AgentMode::Worker => crate::terminal::TerminalManager::for_worker_with_limits(
-                config.command_output_limits,
-            )?,
-            AgentMode::Orchestrator => crate::terminal::TerminalManager::new(),
-            AgentMode::Direct => crate::terminal::TerminalManager::for_direct(),
-        };
+        let terminal_manager = crate::terminal::TerminalManager::for_direct();
         terminal_manager
             .configure_workspace_authority(config.store_path.clone(), workspace_lease_identity);
         if let Some(session_id) = config.session_id.as_ref() {
@@ -439,10 +301,11 @@ impl Agent {
                 .collect(),
         );
         let fallback_tool_defs = tool_defs.clone();
-        let goal_runtime = match (mode, config.session_id.as_ref(), traditional_child.as_ref()) {
-            (AgentMode::Direct, Some(session_id), None) => Some(Arc::new(
-                crate::goals::GoalRuntime::new(config.store_path.clone(), session_id.clone()),
-            )),
+        let goal_runtime = match (config.session_id.as_ref(), traditional_child.as_ref()) {
+            (Some(session_id), None) => Some(Arc::new(crate::goals::GoalRuntime::new(
+                config.store_path.clone(),
+                session_id.clone(),
+            ))),
             _ => None,
         };
         // The initial messages are exactly the snapshot blob written at
@@ -451,15 +314,13 @@ impl Agent {
         let run_admission = Arc::new(crate::tools::RunAdmission::default());
         let agent = Self {
             client,
-            mode,
             messages: messages.into(),
             tool_defs,
             fallback_tool_defs,
             base_tool_defs,
-            admission_controlled_tools: mode == AgentMode::Direct,
-            direct_primary: mode == AgentMode::Direct,
-            product_context_eligible: mode == AgentMode::Orchestrator
-                || (mode == AgentMode::Direct && traditional_child.is_none()),
+            admission_controlled_tools: true,
+            direct_primary: true,
+            product_context_eligible: traditional_child.is_none(),
             native_web_capabilities,
             compaction,
             tool_runtime: ToolRuntime {
@@ -468,21 +329,14 @@ impl Agent {
                 config_cwd: config.config_cwd,
                 store_path: config.store_path,
                 session_id: config.session_id,
-                active_threads: Arc::new(crate::tools::WorkerDispatchRegistry::new(Arc::clone(
-                    &run_admission,
-                ))),
                 run_admission,
                 event_sink: config.event_sink.clone(),
-                worker_executable: config.worker_executable,
                 backend,
                 mcp: config.mcp.clone(),
                 mcp_tools: Arc::new(HashMap::new()),
                 skills: config.skills,
                 terminal_manager,
                 command_cancellation: crate::tools::RunCancellation::default(),
-                thread_timeout_secs: config.thread_timeout_secs,
-                worker_usage: Arc::new(Mutex::new(TokenUsage::default())),
-                light_client: config.light_client,
                 allowed_tools: Some(allowed_tools),
                 permission_broker: None,
                 permission_reviewer: None,
@@ -499,11 +353,9 @@ impl Agent {
                 command_redactions: Arc::new(StdMutex::new(HashMap::new())),
             },
             event_sink: config.event_sink,
-            thread_name: config.thread_name,
             mcp_observation,
             mcp_mounts,
-            current_run_id: config.dispatch_id,
-            appended_steering_ids: HashSet::new(),
+            current_run_id: None,
             transcript_log,
             committed_log_len,
             pending_log_end: None,
@@ -542,7 +394,7 @@ impl Agent {
     }
 
     /// Host composition binds this port to one serving owner and exact session.
-    /// Worker/child capability sets stay unchanged.
+    /// Child capability limits stay unchanged.
     pub fn bind_product_context(
         &mut self,
         port: Arc<dyn crate::product_context::ProductContextPort>,
@@ -569,11 +421,6 @@ impl Agent {
         Ok(())
     }
 
-    pub(crate) fn set_worker_web_credential(&mut self, credential: Option<String>) {
-        self.native_web_capabilities
-            .set_worker_credential(credential);
-    }
-
     pub(crate) fn admit_native_web_generation(&mut self) -> Result<()> {
         self.native_web_capabilities.admit_generation()
     }
@@ -586,7 +433,6 @@ impl Agent {
 
     fn install_capabilities(&mut self, credential: Option<String>) -> Vec<ToolDefinition> {
         let credential = credential
-            .filter(|_| self.native_web_capabilities.is_eligible())
             .map(crate::tools::web::ExaCredential::new)
             .map(Arc::new);
         let mut definitions = self
@@ -637,28 +483,20 @@ impl Agent {
         Self::with_config(
             client,
             AgentConfig {
-                command_output_limits: crate::terminal::CommandOutputLimits::default(),
-                mode: AgentMode::Worker,
-                session_behavior: None,
                 store_path: crate::store::default_store_path(),
                 session_id: None,
                 orchestrator_compaction_threshold: None,
                 initial_messages: Vec::new(),
-                thread_name: None,
-                dispatch_id: None,
                 event_sink: EventSink::none(),
                 workspace_cwd: workspace_cwd.clone(),
                 config_cwd: workspace_cwd,
                 working_directory,
-                worker_executable: None,
                 sandbox: None,
                 ssh: None,
                 mcp: None,
                 skills: None,
                 extra_tool_defs: Vec::new(),
                 agents_md_message: None,
-                thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
-                light_client: None,
                 permission_rules: Vec::new(),
             },
         )
@@ -729,6 +567,7 @@ impl Agent {
         self.tool_runtime.goal_runtime.clone()
     }
 
+    #[cfg(test)]
     pub async fn send(&mut self, prompt: &str) -> Result<String> {
         self.admit_native_web_generation()?;
         self.send_inner(prompt, None).await
@@ -775,22 +614,11 @@ impl Agent {
         let correlation =
             crate::telemetry::Correlation::session(self.tool_runtime.session_id.as_deref())
                 .with_run(session_run.as_ref().map(|run| run.run_id.as_str()));
-        let _runtime_activity = match self.mode {
-            AgentMode::Orchestrator => Some(crate::telemetry::RuntimeActivityGuard::start(
-                crate::telemetry::RuntimeActivity::Orchestrator,
-                correlation,
-            )),
-            AgentMode::Worker => Some(crate::telemetry::RuntimeActivityGuard::start(
-                crate::telemetry::RuntimeActivity::Worker,
-                correlation,
-            )),
-            AgentMode::Direct => Some(crate::telemetry::RuntimeActivityGuard::start(
-                crate::telemetry::RuntimeActivity::Direct,
-                correlation,
-            )),
-        };
+        let _runtime_activity = Some(crate::telemetry::RuntimeActivityGuard::start(
+            crate::telemetry::RuntimeActivity::Direct,
+            correlation,
+        ));
         self.emit(AgentEvent::RunStarted {
-            thread_name: self.thread_name.clone(),
             prompt_preview: preview(prompt, 160),
         })
         .await;
@@ -824,7 +652,6 @@ impl Agent {
         }
         if let Err(error) = prompt_result {
             self.emit(AgentEvent::Error {
-                thread_name: self.thread_name.clone(),
                 message: error.to_string(),
             })
             .await;
@@ -834,7 +661,6 @@ impl Agent {
 
         if let Err(error) = self.ensure_backend_ready().await {
             self.emit(AgentEvent::Error {
-                thread_name: self.thread_name.clone(),
                 message: error.to_string(),
             })
             .await;
@@ -869,7 +695,6 @@ impl Agent {
                     Err(error) => {
                         self.last_usage = Some(accumulated_usage.clone());
                         self.emit(AgentEvent::Error {
-                            thread_name: self.thread_name.clone(),
                             message: error.to_string(),
                         })
                         .await;
@@ -895,20 +720,13 @@ impl Agent {
             }
             self.project_mcp_instructions(&mut provider_view.messages);
             iteration = iteration.saturating_add(1);
-            self.emit(AgentEvent::ModelCallStarted {
-                thread_name: self.thread_name.clone(),
-                iteration,
-            })
-            .await;
+            self.emit(AgentEvent::ModelCallStarted { iteration }).await;
 
             let call_started = Instant::now();
             self.clear_partial_stream();
             let deltas = CoalescedDeltas::new(|delta: ModelStreamDelta| {
                 self.event_sink
-                    .emit_assistant_delta(AssistantStreamDelta::from_model(
-                        self.thread_name.clone(),
-                        delta,
-                    ));
+                    .emit_assistant_delta(AssistantStreamDelta::from_model(delta));
             });
             let push_delta = |delta: ModelStreamDelta| {
                 {
@@ -922,43 +740,29 @@ impl Agent {
                 }
                 deltas.push(delta);
             };
-            // Only the orchestrator's output is read as it arrives: a thread is
-            // summarized on its card, and nobody watching at all means the
-            // cheaper buffered request shape.
-            let delta_sink: DeltaSink<'_> = (self.thread_name.is_none()
-                && self.event_sink.wants_assistant_deltas())
-            .then_some(&push_delta);
+            // Use the cheaper buffered request shape when nobody is watching.
+            let delta_sink: DeltaSink<'_> = self
+                .event_sink
+                .wants_assistant_deltas()
+                .then_some(&push_delta);
             let model_call = self.client.send_turn_streaming(
                 provider_view.messages,
                 request_tool_defs,
                 delta_sink,
             );
-            let cancellation = self.command_cancellation();
-            let turn = if self.mode == AgentMode::Worker && self.current_run_id.is_some() {
-                // Native workers acknowledge host cancellation on a separate
-                // stdin thread. Interrupt provider I/O too, so normal cleanup
-                // and the CLI's final telemetry receipt run before host reap.
-                tokio::select! {
-                    biased;
-                    _ = cancellation.cancelled() => Err(anyhow!("worker command cancelled")),
-                    result = model_call => result,
-                }
-            } else {
-                model_call.await
-            };
+            let turn = model_call.await;
             // Whatever arrived in the last partial window still belongs on screen.
             deltas.flush();
             let response = match turn {
                 Ok(response) => response,
                 Err(error) => {
-                    // Preserve accumulated usage (including summary and worker
-                    // costs from prior rounds) so it survives the error return.
+                    // Preserve accumulated usage from prior rounds and summaries
+                    // so it survives the error return.
                     self.last_usage = Some(accumulated_usage.clone());
                     // The provider's own words about the call it refused: the
                     // one error class worth showing rather than reducing to
                     // "operation failed".
                     self.emit(AgentEvent::ModelError {
-                        thread_name: self.thread_name.clone(),
                         message: error.to_string(),
                     })
                     .await;
@@ -982,11 +786,7 @@ impl Agent {
                 if let Some(goals) = &self.tool_runtime.goal_runtime {
                     goals.update_usage(&accumulated_usage);
                 }
-                self.emit(AgentEvent::TokenUsageUpdated {
-                    thread_name: self.thread_name.clone(),
-                    usage,
-                })
-                .await;
+                self.emit(AgentEvent::TokenUsageUpdated { usage }).await;
             }
             if response.finish_reason.as_deref() == Some("length") {
                 if let Some(compaction) = &mut self.compaction {
@@ -1002,7 +802,6 @@ impl Agent {
                 );
                 self.last_usage = Some(accumulated_usage.clone());
                 self.emit(AgentEvent::Error {
-                    thread_name: self.thread_name.clone(),
                     message: error.to_string(),
                 })
                 .await;
@@ -1040,7 +839,6 @@ impl Agent {
                 // path above.
                 self.last_usage = Some(accumulated_usage.clone());
                 self.emit(AgentEvent::Error {
-                    thread_name: self.thread_name.clone(),
                     message: error.to_string(),
                 })
                 .await;
@@ -1075,7 +873,6 @@ impl Agent {
                         {
                             self.last_usage = Some(accumulated_usage.clone());
                             self.emit(AgentEvent::Error {
-                                thread_name: self.thread_name.clone(),
                                 message: error.to_string(),
                             })
                             .await;
@@ -1091,7 +888,6 @@ impl Agent {
                     );
                     self.last_usage = Some(accumulated_usage.clone());
                     self.emit(AgentEvent::Error {
-                        thread_name: self.thread_name.clone(),
                         message: error.to_string(),
                     })
                     .await;
@@ -1099,7 +895,6 @@ impl Agent {
                     return Err(error);
                 };
                 self.emit(AgentEvent::AssistantMessage {
-                    thread_name: self.thread_name.clone(),
                     content: content.clone(),
                     usage: Some(accumulated_usage.clone()),
                 })
@@ -1107,16 +902,12 @@ impl Agent {
                 self.last_usage = Some(accumulated_usage.clone());
                 if let Err(error) = self.tool_runtime.terminal_manager.settle_run().await {
                     self.emit(AgentEvent::Error {
-                        thread_name: self.thread_name.clone(),
                         message: error.to_string(),
                     })
                     .await;
                     return Err(error);
                 }
-                self.emit(AgentEvent::RunFinished {
-                    thread_name: self.thread_name.clone(),
-                })
-                .await;
+                self.emit(AgentEvent::RunFinished {}).await;
                 return Ok(content);
             }
 
@@ -1130,7 +921,6 @@ impl Agent {
                 self.tool_runtime.clone(),
                 self.client.clone(),
                 self.event_sink.clone(),
-                self.thread_name.clone(),
                 self.admission_controlled_tools,
             )
             .await;
@@ -1157,27 +947,16 @@ impl Agent {
             };
             let failure_detail = last_failure_detail.clone();
             let tool_messages =
-                finalize_tool_results(&self.messages, results, &self.event_sink, &self.thread_name)
-                    .await;
+                finalize_tool_results(&self.messages, results, &self.event_sink).await;
 
             if self.tool_runtime.command_cancellation.is_cancelled() {
-                let error = anyhow!("worker command cancelled");
+                let error = anyhow!("command cancelled");
                 self.emit(AgentEvent::Error {
-                    thread_name: self.thread_name.clone(),
                     message: error.to_string(),
                 })
                 .await;
                 self.record_terminal_cleanup_error().await;
                 return Err(error);
-            }
-
-            // Fold worker token usage (from thread dispatches) into the
-            // orchestrator's accumulated usage. Only cost fields are summed;
-            // orchestrator context stays ordinary-orchestrator-only.
-            {
-                let mut wu = self.tool_runtime.worker_usage.lock().await;
-                accumulated_usage.add_cost_saturating(&wu);
-                *wu = TokenUsage::default();
             }
 
             self.last_usage = Some(accumulated_usage.clone());
@@ -1192,7 +971,6 @@ impl Agent {
             if let Err(error) = self.push_batch_and_log(tool_messages).await {
                 self.last_usage = Some(accumulated_usage.clone());
                 self.emit(AgentEvent::Error {
-                    thread_name: self.thread_name.clone(),
                     message: error.to_string(),
                 })
                 .await;
@@ -1212,7 +990,6 @@ impl Agent {
                 // which the identical-failure guard below cannot see.
                 let error = anyhow!("{reason}");
                 self.emit(AgentEvent::ModelError {
-                    thread_name: self.thread_name.clone(),
                     message: error.to_string(),
                 })
                 .await;
@@ -1223,12 +1000,8 @@ impl Agent {
                 let error = anyhow!(
                     "Stopped after {REPEATED_TOOL_FAILURE_LIMIT} identical tool failures: {failure_detail}"
                 );
-                // Same channel as a provider refusal: the message survives
-                // sanitization and is captured as `WorkerRun.model_error`,
-                // which `worker_failure_details` puts on the orchestrator's
-                // thread tool result.
+                // Use the same sanitized error channel as a provider refusal.
                 self.emit(AgentEvent::ModelError {
-                    thread_name: self.thread_name.clone(),
                     message: error.to_string(),
                 })
                 .await;
@@ -1276,11 +1049,6 @@ impl Agent {
     }
 
     #[cfg(test)]
-    pub(crate) fn has_light_client_for_test(&self) -> bool {
-        self.tool_runtime.light_client.is_some()
-    }
-
-    #[cfg(test)]
     pub(crate) fn ssh_control_path_for_test(&self) -> Option<&std::path::Path> {
         match self.tool_runtime.backend.as_ref() {
             crate::sandbox::ExecutionBackend::Ssh(ssh) => Some(ssh.control_path_for_test()),
@@ -1291,7 +1059,7 @@ impl Agent {
     pub fn set_event_sink(&mut self, sink: EventSink) {
         self.event_sink = sink.clone();
         if let Some(observation) = self.mcp_observation.as_ref() {
-            observation(sink.clone(), self.thread_name.clone());
+            observation(sink.clone());
         }
         self.tool_runtime.set_event_sink(sink);
     }
@@ -1337,17 +1105,12 @@ impl Agent {
         Arc::clone(&self.tool_runtime.run_admission)
     }
 
-    pub fn active_threads_handle(&self) -> Arc<crate::tools::WorkerDispatchRegistry> {
-        Arc::clone(&self.tool_runtime.active_threads)
-    }
-
-    pub fn set_current_run_id(&mut self, dispatch_id: Option<String>) {
-        self.current_run_id = dispatch_id;
-        self.appended_steering_ids.clear();
+    pub fn set_current_run_id(&mut self, run_id: Option<String>) {
+        self.current_run_id = run_id;
     }
 
     /// Shared handle to the transcript log writer, present only for
-    /// orchestrator agents with a session id. The session service reads the
+    /// persistent agents with a session id. The session service reads the
     /// log through the same writer for store-backed transcript reads (step
     /// 3), so reads and appends stay serialized without retaining a connection.
     pub fn transcript_log_writer(&self) -> Option<Arc<crate::store::TranscriptLogWriter>> {
@@ -1848,90 +1611,16 @@ impl Agent {
         }
     }
 
-    async fn append_pending_steering(&mut self) -> Result<usize> {
-        let Some(session_id) = self.tool_runtime.session_id.clone() else {
-            return Ok(0);
-        };
-        let dispatch_id = self
-            .current_run_id
-            .clone()
-            .ok_or_else(|| anyhow!("steering dispatch id is unavailable"))?;
-        let thread_name = self.thread_name.clone();
-        let store_path = self.tool_runtime.store_path.clone();
-        let claim_store_path = store_path.clone();
-        let claim_session_id = session_id.clone();
-        let claim_dispatch_id = dispatch_id.clone();
-        let records = crate::store::spawn_blocking_store_caller(move || {
-            crate::store::claim_thread_steering(
-                &claim_store_path,
-                &claim_session_id,
-                &claim_dispatch_id,
-            )
-        })
-        .await
-        .map_err(|error| anyhow!("steering claim task failed: {error}"))??;
-
-        let message_checkpoint = self.messages.len();
-        let mut staged_ids = Vec::new();
-        let mut staged_messages = Vec::new();
-        for record in &records {
-            if !self.appended_steering_ids.contains(&record.id) {
-                staged_ids.push(record.id);
-                if thread_name.is_some() {
-                    staged_messages.push(Message::User {
-                        content: format!(
-                            "Steering instruction received for this worker thread. Apply it before continuing:\n\n{}",
-                            record.instruction
-                        ),
-                    });
-                } else {
-                    staged_messages.push(Message::User {
-                        content: record.instruction.clone(),
-                    });
+    async fn append_pending_guidance_checked(&mut self) -> Result<usize> {
+        match self.append_pending_direct_inbox().await {
+            Ok(count) => {
+                if count > 0 {
+                    self.refresh_heartbeat_request_from_guidance().await;
                 }
+                Ok(count)
             }
-        }
-
-        self.commit_staged_steering(
-            message_checkpoint,
-            &staged_ids,
-            &staged_messages,
-            &session_id,
-            &dispatch_id,
-        )
-        .await?;
-        self.messages.extend(staged_messages);
-        self.appended_steering_ids
-            .extend(staged_ids.iter().copied());
-
-        for record in records
-            .into_iter()
-            .filter(|record| staged_ids.contains(&record.id))
-        {
-            if let Some(thread_name) = &thread_name {
-                self.emit(AgentEvent::ThreadSteeringDelivered {
-                    name: thread_name.clone(),
-                    steering_id: record.id,
-                    instruction_preview: preview(&record.instruction, 160),
-                })
-                .await;
-            } else {
-                self.emit(AgentEvent::OrchestratorSteeringDelivered {
-                    steering_id: record.id,
-                    instruction_preview: preview(&record.instruction, 160),
-                })
-                .await;
-            }
-        }
-        Ok(staged_ids.len())
-    }
-
-    async fn append_pending_steering_checked(&mut self) -> Result<usize> {
-        match self.append_pending_steering().await {
-            Ok(count) => Ok(count),
             Err(error) => {
                 self.emit(AgentEvent::Error {
-                    thread_name: self.thread_name.clone(),
                     message: error.to_string(),
                 })
                 .await;
@@ -1941,34 +1630,9 @@ impl Agent {
         }
     }
 
-    async fn append_pending_guidance_checked(&mut self) -> Result<usize> {
-        if self.direct_primary {
-            match self.append_pending_direct_inbox().await {
-                Ok(count) => {
-                    if count > 0 {
-                        self.refresh_heartbeat_request_from_guidance().await;
-                    }
-                    Ok(count)
-                }
-                Err(error) => {
-                    self.emit(AgentEvent::Error {
-                        thread_name: self.thread_name.clone(),
-                        message: error.to_string(),
-                    })
-                    .await;
-                    self.record_terminal_cleanup_error().await;
-                    Err(error)
-                }
-            }
-        } else {
-            self.append_pending_steering_checked().await
-        }
-    }
-
     async fn record_terminal_cleanup_error(&self) {
         if let Err(error) = self.tool_runtime.terminal_manager.settle_run().await {
             self.emit(AgentEvent::Error {
-                thread_name: self.thread_name.clone(),
                 message: format!("terminal cleanup incomplete: {error:#}"),
             })
             .await;

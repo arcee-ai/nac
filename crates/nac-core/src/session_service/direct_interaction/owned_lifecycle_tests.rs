@@ -205,11 +205,7 @@ async fn compaction_lifecycle_waits_off_runtime_behind_durable_publication() {
     let publication_sink = sink.clone();
     let publication = tokio::spawn(async move {
         publication_sink
-            .try_emit_async(AgentEvent::ThreadStarted {
-                name: "worker".into(),
-                action: "work".into(),
-                source_threads: Vec::new(),
-            })
+            .try_emit_async(crate::events::test_primary_tool_started("persistence-gate"))
             .await
     });
     tokio::time::timeout(Duration::from_secs(1), async {
@@ -256,12 +252,8 @@ async fn lifecycle_overload_retries_do_not_open_replay_gaps() {
     let saturation = crate::store::reject_callers_for_test();
     let sink = EventSink::bus(parts.service.event_bus.clone());
     let publication = tokio::spawn(async move {
-        sink.emit_lifecycle_async(AgentEvent::ThreadStarted {
-            name: "worker".into(),
-            action: "work".into(),
-            source_threads: Vec::new(),
-        })
-        .await;
+        sink.emit_lifecycle_async(crate::events::test_primary_tool_started("persistence-gate"))
+            .await;
     });
     tokio::time::sleep(Duration::from_millis(20)).await;
     assert!(!publication.is_finished());

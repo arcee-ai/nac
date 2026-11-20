@@ -78,14 +78,12 @@ impl std::str::FromStr for InboxStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InternalCompletionSource {
     TraditionalChild,
-    ManagedOrchestrator,
 }
 
 impl InternalCompletionSource {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::TraditionalChild => "traditional_child",
-            Self::ManagedOrchestrator => "managed_orchestrator",
         }
     }
 }
@@ -96,7 +94,6 @@ impl std::str::FromStr for InternalCompletionSource {
     fn from_str(value: &str) -> Result<Self> {
         match value {
             "traditional_child" => Ok(Self::TraditionalChild),
-            "managed_orchestrator" => Ok(Self::ManagedOrchestrator),
             _ => Err(anyhow!("unsupported stored completion source '{value}'")),
         }
     }

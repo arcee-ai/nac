@@ -1,4 +1,4 @@
-export type DelegatedCompletionKind = "coding-agent" | "nac-orchestrator";
+export type DelegatedCompletionKind = "coding-agent";
 export type DelegatedCompletionStatus = "completed" | "failed" | "cancelled" | "interrupted";
 export interface DelegatedCompletion {
     kind: DelegatedCompletionKind;
@@ -10,5 +10,5 @@ export interface DelegatedCompletion {
     changes: string | null;
     verification: string | null;
 }
-/** Strictly recognizes only the two backend-owned durable completion envelopes. */
+/** Strictly recognizes a backend-owned child completion envelope. */
 export declare function parseDelegatedCompletion(content: string | null | undefined): DelegatedCompletion | null;

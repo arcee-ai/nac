@@ -7,44 +7,25 @@ import type {
 } from "@/app/features/insights/model/types";
 import type { InsightSelection } from "@/app/store/sessionLayoutStore";
 
-/** What the detail pane shows; groups always come from the unfiltered timeline. */
-export type ShownInsight =
-  | { kind: "group"; entry: InsightGroupEntry; segmentKey: string | null }
-  | { kind: "thread"; name: string; episode: string | null };
+/** The detail pane reads groups from the unfiltered timeline. */
+export type ShownInsight = { kind: "group"; entry: InsightGroupEntry; segmentKey: string | null };
 
-export interface StoredThread {
-  name: string | null;
-  episode: string | null;
-}
-
-/** Session rows and workset-only groups navigate to another panel instead. */
+/** Session rows navigate to another panel instead. */
 export function opensInPlace(entry: InsightEntry): boolean {
-  if (entry.kind === "thread") return false;
-  if (entry.kind === "session") return false;
-  return entry.group.segments.some((segment) => segment.kind !== "workset");
+  return entry.kind === "group";
 }
 
-/** The pick stored in the layout store, while it still names something on the page. */
 export function resolveStoredInsight(
   selection: InsightSelection | null,
-  _thread: StoredThread,
   timeline: readonly InsightTurnSection[],
-  _ownsThread: (name: string) => boolean,
 ): ShownInsight | null {
-  if (selection?.kind === "group") {
-    const entry = findInsightEntry(timeline, selection.groupId);
-    if (entry?.kind !== "group") return null;
-    const known = entry.group.segments.some((segment) => segment.key === selection.segmentKey);
-    return {
-      kind: "group",
-      entry,
-      segmentKey: known ? selection.segmentKey : null,
-    };
-  }
-  return null;
+  if (selection?.kind !== "group") return null;
+  const entry = findInsightEntry(timeline, selection.groupId);
+  if (entry?.kind !== "group") return null;
+  const known = entry.group.segments.some((segment) => segment.key === selection.segmentKey);
+  return { kind: "group", entry, segmentKey: known ? selection.segmentKey : null };
 }
 
-/** The newest entry the filtered list shows that has a detail of its own. */
 export function newestShownInsight(
   sections: readonly InsightTurnSection[],
   timeline: readonly InsightTurnSection[],
@@ -53,9 +34,6 @@ export function newestShownInsight(
     for (let index = section.entries.length - 1; index >= 0; index -= 1) {
       const entry = section.entries[index];
       if (!opensInPlace(entry)) continue;
-      if (entry.kind === "thread") {
-        return { kind: "thread", name: entry.thread.name, episode: entry.id };
-      }
       const full = findInsightEntry(timeline, entry.id);
       return full?.kind === "group" ? { kind: "group", entry: full, segmentKey: null } : null;
     }
@@ -63,20 +41,10 @@ export function newestShownInsight(
   return null;
 }
 
-function threadMatches(entry: InsightEntry, shown: ShownInsight): boolean {
-  if (entry.kind !== "thread" || shown.kind !== "thread") return false;
-  return shown.episode ? entry.id === shown.episode : entry.thread.name === shown.name;
-}
-
 export function hiddenByFilter(
   shown: ShownInsight,
   sections: readonly InsightTurnSection[],
 ): boolean {
-  if (shown.kind === "thread") {
-    return !sections.some((section) =>
-      section.entries.some((entry) => threadMatches(entry, shown)),
-    );
-  }
   const entry = findInsightEntry(sections, shown.entry.id);
   if (entry?.kind !== "group") return true;
   return (
@@ -85,15 +53,12 @@ export function hiddenByFilter(
   );
 }
 
-/** Undefined for rows that navigate away, which never show as selected. */
 export function entrySelected(
   entry: InsightEntry,
   shown: ShownInsight | null,
 ): boolean | undefined {
   if (!opensInPlace(entry)) return undefined;
-  if (!shown) return false;
-  if (entry.kind === "thread") return threadMatches(entry, shown);
-  return shown.kind === "group" && shown.entry.id === entry.id;
+  return shown !== null && shown.entry.id === entry.id;
 }
 
 export function segmentSelected(
@@ -101,15 +66,10 @@ export function segmentSelected(
   segment: InsightSegment,
   shown: ShownInsight | null,
 ): boolean | undefined {
-  if (segment.kind === "workset") return undefined;
-  return shown?.kind === "group" && shown.entry.id === entry.id && shown.segmentKey === segment.key;
+  return shown?.entry.id === entry.id && shown.segmentKey === segment.key;
 }
 
-/** Both point at the same row, which is all `entrySelected` and `segmentSelected` read. */
 export function sameInsight(a: ShownInsight | null, b: ShownInsight | null): boolean {
   if (a === null || b === null) return a === b;
-  if (a.kind === "group") {
-    return b.kind === "group" && a.entry.id === b.entry.id && a.segmentKey === b.segmentKey;
-  }
-  return b.kind === "thread" && a.name === b.name && a.episode === b.episode;
+  return a.entry.id === b.entry.id && a.segmentKey === b.segmentKey;
 }

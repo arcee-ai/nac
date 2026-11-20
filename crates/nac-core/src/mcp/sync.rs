@@ -24,7 +24,6 @@ pub(super) struct McpCatalogSnapshot {
 #[derive(Clone, Default)]
 struct ObservationTarget {
     sink: EventSink,
-    thread_name: Option<String>,
 }
 
 pub(super) struct McpObservationTarget {
@@ -32,12 +31,11 @@ pub(super) struct McpObservationTarget {
 }
 
 impl McpObservationTarget {
-    pub(super) fn update(&self, sink: EventSink, thread_name: Option<String>) {
+    pub(super) fn update(&self, sink: EventSink) {
         *self
             .target
             .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) =
-            ObservationTarget { sink, thread_name };
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = ObservationTarget { sink };
     }
 }
 
@@ -118,13 +116,9 @@ impl McpSyncState {
             .clone()
     }
 
-    pub(super) fn register_target(
-        &self,
-        sink: EventSink,
-        thread_name: Option<String>,
-    ) -> Arc<McpObservationTarget> {
+    pub(super) fn register_target(&self, sink: EventSink) -> Arc<McpObservationTarget> {
         let target = Arc::new(McpObservationTarget {
-            target: StdRwLock::new(ObservationTarget { sink, thread_name }),
+            target: StdRwLock::new(ObservationTarget { sink }),
         });
         let mut targets = self
             .targets
@@ -205,7 +199,6 @@ impl McpSyncState {
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .clone();
             target.sink.emit(AgentEvent::McpNotification {
-                thread_name: target.thread_name,
                 server_name: server.to_string(),
                 kind,
                 message: bounded.clone(),
@@ -679,7 +672,7 @@ mod tests {
     fn observations_are_bounded_redacted_and_rate_limited() {
         let state = McpSyncState::new();
         let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
-        let _target = state.register_target(EventSink::channel(sender), Some("worker".to_string()));
+        let _target = state.register_target(EventSink::channel(sender));
         state.set_redactions("docs", vec!["top-secret-value".to_string()]);
         state.emit(
             "docs",
@@ -700,7 +693,7 @@ mod tests {
     fn resource_updates_are_deduplicated() {
         let state = McpSyncState::new();
         let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
-        let _target = state.register_target(EventSink::channel(sender), None);
+        let _target = state.register_target(EventSink::channel(sender));
         state.emit_resource_update("docs", "doc://one");
         state.emit_resource_update("docs", "doc://one");
         assert!(matches!(
@@ -718,26 +711,18 @@ mod tests {
         let state = McpSyncState::new();
         let (first_sender, mut first_receiver) = tokio::sync::mpsc::unbounded_channel();
         let (second_sender, mut second_receiver) = tokio::sync::mpsc::unbounded_channel();
-        let _first =
-            state.register_target(EventSink::channel(first_sender), Some("first".to_string()));
-        let _second = state.register_target(
-            EventSink::channel(second_sender),
-            Some("second".to_string()),
-        );
+        let _first = state.register_target(EventSink::channel(first_sender));
+        let _second = state.register_target(EventSink::channel(second_sender));
 
         state.emit("docs", McpNotificationKind::Log, "shared observation");
 
-        for (receiver, expected) in [
-            (&mut first_receiver, "first"),
-            (&mut second_receiver, "second"),
-        ] {
+        for receiver in [&mut first_receiver, &mut second_receiver] {
             assert!(matches!(
                 receiver.try_recv(),
                 Ok(AgentEvent::McpNotification {
-                    thread_name: Some(thread_name),
                     message,
                     ..
-                }) if thread_name == expected && message == "shared observation"
+                }) if message == "shared observation"
             ));
         }
     }

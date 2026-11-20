@@ -9,7 +9,7 @@ fn combine_system_guidance(primary: Option<String>, secondary: Option<String>) -
 }
 
 pub async fn build_run_config(options: RunOptions, config: &NacConfig) -> Result<SessionRunConfig> {
-    build_run_config_inner(options, config, None, sessions::SessionBehavior::Direct).await
+    build_run_config_for_project(options, config, None).await
 }
 
 pub async fn build_run_config_for_project(
@@ -17,33 +17,7 @@ pub async fn build_run_config_for_project(
     config: &NacConfig,
     project_id: Option<String>,
 ) -> Result<SessionRunConfig> {
-    build_run_config_inner(
-        options,
-        config,
-        project_id,
-        sessions::SessionBehavior::Direct,
-    )
-    .await
-}
-
-/// Build a persistent top-level direct session. Retired behavior selections
-/// are rejected before runtime or workspace preparation.
-pub async fn build_run_config_for_project_with_behavior(
-    options: RunOptions,
-    config: &NacConfig,
-    project_id: Option<String>,
-    behavior: sessions::SessionBehavior,
-) -> Result<SessionRunConfig> {
-    build_run_config_inner(options, config, project_id, behavior).await
-}
-
-async fn build_run_config_inner(
-    options: RunOptions,
-    config: &NacConfig,
-    project_id: Option<String>,
-    behavior: sessions::SessionBehavior,
-) -> Result<SessionRunConfig> {
-    prepare_run_config_inner(options, config, project_id, behavior, None)
+    prepare_run_config_inner(options, config, project_id, None)
         .await?
         .persist()
         .await
@@ -51,13 +25,12 @@ async fn build_run_config_inner(
 
 /// Resolve a fresh runtime without committing its session. Application creation
 /// retains the resources only after its response and durable row are ready.
-pub async fn prepare_run_config_for_project_with_behavior(
+pub async fn prepare_run_config_for_project(
     options: RunOptions,
     config: &NacConfig,
     project_id: Option<String>,
-    behavior: sessions::SessionBehavior,
 ) -> Result<PreparedSessionRunConfig> {
-    prepare_run_config_inner(options, config, project_id, behavior, None).await
+    prepare_run_config_inner(options, config, project_id, None).await
 }
 
 /// Construct only the runtime belonging to a durable retained launch. Resource
@@ -79,7 +52,6 @@ pub async fn prepare_retained_task_run_config(
         options,
         config,
         Some(launch.request.project_id.clone()),
-        sessions::SessionBehavior::Direct,
         Some(launch.session_id.clone()),
     )
     .await
@@ -104,7 +76,6 @@ pub async fn prepare_native_task_run_config(
         options,
         config,
         Some(launch.project_id.clone()),
-        sessions::SessionBehavior::Direct,
         Some(launch.session_id.clone()),
     )
     .await
@@ -131,7 +102,6 @@ pub async fn prepare_scheduled_shared_task_run_config(
         options,
         config,
         Some(receipt.destination.project_id.clone()),
-        sessions::SessionBehavior::Direct,
         Some(receipt.session_id.clone()),
     )
     .await
@@ -141,23 +111,8 @@ async fn prepare_run_config_inner(
     options: RunOptions,
     config: &NacConfig,
     project_id: Option<String>,
-    behavior: sessions::SessionBehavior,
     retained_session_id: Option<String>,
 ) -> Result<PreparedSessionRunConfig> {
-    anyhow::ensure!(
-        behavior == sessions::SessionBehavior::Direct,
-        "only direct session behavior is supported"
-    );
-    anyhow::ensure!(
-        options.model.light_model.is_none(),
-        "light_model is no longer supported"
-    );
-    let agent_mode = match behavior {
-        sessions::SessionBehavior::Orchestrator => AgentMode::Orchestrator,
-        sessions::SessionBehavior::Direct | sessions::SessionBehavior::DirectWithOrchestrator => {
-            AgentMode::Direct
-        }
-    };
     let ssh_host = options.ssh.host();
     let config_cwd = options
         .config_cwd
@@ -174,27 +129,6 @@ async fn prepare_run_config_inner(
         limits.effective_input_tokens,
     )?;
     let client = ModelClient::from_effective_settings(settings.clone())?.with_cache_ttl(Some("1h"));
-    let light_model = options.model.light_model.clone();
-    let light_client = if behavior == sessions::SessionBehavior::Direct {
-        // ALL-36 owns the future responsibilities of a light model in a plain
-        // direct session. Retain its durable configuration, but do not resolve
-        // credentials or construct a client until that product and safety
-        // design has been explicitly accepted.
-        None
-    } else {
-        light_model
-            .as_ref()
-            .map(|light| {
-                resolve_light_client_with_http_policy(
-                    light,
-                    &settings.extra_headers,
-                    options.model.trusted_light_credential.as_ref(),
-                    settings.allow_insecure_http,
-                )
-            })
-            .transpose()?
-            .map(std::sync::Arc::new)
-    };
     let sandbox_options = effective_sandbox_options(options.sandbox, config);
     validate_target_sandbox_options(ssh_host.as_deref(), &sandbox_options, "session")?;
     let store_base_cwd = if ssh_host.is_some() {
@@ -225,19 +159,15 @@ async fn prepare_run_config_inner(
             .clone()
             .unwrap_or_else(|| Uuid::new_v4().to_string());
         let skills = SkillRegistry::load(None, SkillPathVisibility::Hidden, &config_paths)?;
-        let mcp = if agent_mode == AgentMode::Direct {
-            McpRegistry::load_reporting_skips(
-                &options.workspace_cwd,
-                None,
-                &config_paths,
-                McpTransportPolicy::StreamableHttpOnly,
-                McpRootPolicy::None,
-            )
-            .await?
-            .registry
-        } else {
-            None
-        };
+        let mcp = McpRegistry::load_reporting_skips(
+            &options.workspace_cwd,
+            None,
+            &config_paths,
+            McpTransportPolicy::StreamableHttpOnly,
+            McpRootPolicy::None,
+        )
+        .await?
+        .registry;
         let extra_tool_defs = mcp
             .as_ref()
             .map(|registry| registry.model_tool_definitions())
@@ -248,28 +178,20 @@ async fn prepare_run_config_inner(
         let mut agent = Agent::with_config(
             client.clone(),
             AgentConfig {
-                command_output_limits: worker_command_output_limits(config)?,
-                mode: agent_mode,
-                session_behavior: Some(behavior),
                 store_path: store_path.clone(),
                 session_id: Some(session_id.clone()),
                 orchestrator_compaction_threshold,
                 initial_messages: Vec::new(),
-                thread_name: None,
-                dispatch_id: None,
                 event_sink: EventSink::none(),
                 workspace_cwd: remote_cwd.clone(),
                 config_cwd: config_cwd.clone(),
                 working_directory: working_directory.clone(),
-                worker_executable: options.worker_executable,
                 sandbox: None,
                 ssh: Some(connection.clone()),
                 mcp,
                 skills,
                 extra_tool_defs,
                 agents_md_message,
-                thread_timeout_secs: worker_thread_timeout_secs(config),
-                light_client: light_client.clone(),
                 permission_rules: config.permissions.rules.clone(),
             },
         )?;
@@ -290,12 +212,10 @@ async fn prepare_run_config_inner(
             settings.extra_headers.clone(),
         );
         session_snapshot.service_tier = settings.service_tier;
-        session_snapshot.behavior = behavior;
         session_snapshot.allow_insecure_http = settings.allow_insecure_http;
         session_snapshot.project_id = project_id.clone();
         session_snapshot.orchestrator_compaction_threshold = orchestrator_compaction_threshold;
         session_snapshot.automatic_compaction = automatic_compaction;
-        session_snapshot.light_model = light_model;
         return Ok(PreparedSessionRunConfig::new(
             SessionRunConfig {
                 agent,
@@ -333,31 +253,27 @@ async fn prepare_run_config_inner(
             .as_ref()
             .and_then(|session| session.spec().worktree.clone()),
     );
-    let mcp = if agent_mode == AgentMode::Direct {
-        match McpRegistry::load_reporting_skips(
-            &workspace_cwd,
-            sandbox.as_ref(),
-            &paths,
-            McpTransportPolicy::All,
-            McpRootPolicy::Workspace,
-        )
-        .await
-        {
-            Ok(outcome) => outcome.registry,
-            Err(error) => {
-                if let Some(sandbox) = sandbox.as_ref() {
-                    sandbox.disable_drop_cleanup();
-                    if let Err(cleanup) = sandbox.destroy().await {
-                        return Err(error.context(format!(
+    let mcp = match McpRegistry::load_reporting_skips(
+        &workspace_cwd,
+        sandbox.as_ref(),
+        &paths,
+        McpTransportPolicy::All,
+        McpRootPolicy::Workspace,
+    )
+    .await
+    {
+        Ok(outcome) => outcome.registry,
+        Err(error) => {
+            if let Some(sandbox) = sandbox.as_ref() {
+                sandbox.disable_drop_cleanup();
+                if let Err(cleanup) = sandbox.destroy().await {
+                    return Err(error.context(format!(
                             "fresh sandbox MCP setup also failed to roll back its container: {cleanup:#}"
                         )));
-                    }
                 }
-                return Err(error);
             }
+            return Err(error);
         }
-    } else {
-        None
     };
     let build_result = (|| -> Result<SessionRunConfig> {
         let workspace_dir = effective_workspace_dir(&workspace_cwd, sandbox.as_ref());
@@ -395,28 +311,20 @@ async fn prepare_run_config_inner(
         let mut agent = Agent::with_config(
             client.clone(),
             AgentConfig {
-                command_output_limits: worker_command_output_limits(config)?,
-                mode: agent_mode,
-                session_behavior: Some(behavior),
                 store_path: store_path.clone(),
                 session_id: Some(session_id.clone()),
                 orchestrator_compaction_threshold,
                 initial_messages: Vec::new(),
-                thread_name: None,
-                dispatch_id: None,
                 event_sink: EventSink::none(),
                 workspace_cwd: workspace_cwd.clone(),
                 config_cwd: config_cwd.clone(),
                 working_directory: working_directory.clone(),
-                worker_executable: options.worker_executable,
                 sandbox: sandbox.clone(),
                 ssh: None,
                 mcp: mcp.clone(),
                 skills,
                 extra_tool_defs,
                 agents_md_message,
-                thread_timeout_secs: worker_thread_timeout_secs(config),
-                light_client: light_client.clone(),
                 permission_rules: config.permissions.rules.clone(),
             },
         )?;
@@ -437,12 +345,10 @@ async fn prepare_run_config_inner(
             settings.extra_headers.clone(),
         );
         session_snapshot.service_tier = settings.service_tier;
-        session_snapshot.behavior = behavior;
         session_snapshot.allow_insecure_http = settings.allow_insecure_http;
         session_snapshot.project_id = project_id;
         session_snapshot.orchestrator_compaction_threshold = orchestrator_compaction_threshold;
         session_snapshot.automatic_compaction = automatic_compaction;
-        session_snapshot.light_model = light_model;
         Ok(SessionRunConfig {
             agent,
             client,
@@ -476,148 +382,4 @@ async fn prepare_run_config_inner(
             Err(error)
         }
     }
-}
-
-pub async fn build_managed_worker_config(
-    _options: ManagedWorkerOptions,
-    _config: &NacConfig,
-) -> Result<ManagedWorkerRunConfig> {
-    anyhow::bail!("retired worker construction is unavailable")
-}
-
-#[expect(
-    dead_code,
-    reason = "retired worker construction is unreachable until ALL-614 removes it"
-)]
-async fn build_retired_managed_worker_config(
-    options: ManagedWorkerOptions,
-    config: &NacConfig,
-) -> Result<ManagedWorkerRunConfig> {
-    let client = ModelClient::from_effective_settings(managed_worker_effective_model_settings(
-        &options.model,
-    )?)?;
-    let ssh_host = options.ssh.host();
-    let config_cwd = options
-        .config_cwd
-        .clone()
-        .unwrap_or_else(|| default_config_cwd(&options.workspace_cwd, ssh_host.as_deref()));
-    let workspace_cwd = options.workspace_cwd;
-    let sandbox_options = effective_sandbox_options(options.sandbox, config);
-    validate_target_sandbox_options(ssh_host.as_deref(), &sandbox_options, "worker")?;
-    let store_base_cwd = if ssh_host.is_some() {
-        &config_cwd
-    } else {
-        &workspace_cwd
-    };
-    let store_path = resolve_store_path(store_base_cwd, options.store, config);
-    let sandbox = if ssh_host.is_some() {
-        None
-    } else {
-        build_sandbox_session(&sandbox_options, &workspace_cwd).await?
-    };
-    let workspace_paths = PathContext::new(&workspace_cwd);
-    let config_paths = PathContext::new(&config_cwd);
-    let (agents_md_message, mcp_outcome, skills) = if ssh_host.is_some() {
-        let mcp_outcome = McpRegistry::load_reporting_skips(
-            &workspace_cwd,
-            None,
-            &config_paths,
-            McpTransportPolicy::StreamableHttpOnly,
-            McpRootPolicy::None,
-        )
-        .await?;
-        let skills = SkillRegistry::load(None, SkillPathVisibility::Hidden, &config_paths)?;
-        (None, mcp_outcome, skills)
-    } else {
-        let workspace_dir = effective_workspace_dir(&workspace_cwd, sandbox.as_ref());
-        let agents_md = AgentsMdBundle::load(workspace_dir.as_deref(), &workspace_paths)?;
-        let mcp_outcome = McpRegistry::load_reporting_skips(
-            &workspace_cwd,
-            sandbox.as_ref(),
-            &workspace_paths,
-            McpTransportPolicy::All,
-            McpRootPolicy::Workspace,
-        )
-        .await?;
-        let (skill_workspace, visibility) = if sandbox.is_some() {
-            (None, SkillPathVisibility::Hidden)
-        } else {
-            (workspace_dir.as_deref(), SkillPathVisibility::Visible)
-        };
-        let skills = SkillRegistry::load(skill_workspace, visibility, &workspace_paths)?;
-        (agents_md.system_message(), mcp_outcome, skills)
-    };
-    // Surface each skip as a typed event on the worker's stderr channel so the
-    // dashboard shows why a server's tools are missing.
-    let worker_event_sink = EventSink::stderr_prefixed();
-    for skipped in &mcp_outcome.skipped {
-        worker_event_sink.emit(AgentEvent::McpServerSkipped {
-            thread_name: Some(options.dispatch.thread_name.clone()),
-            server_name: skipped.name.clone(),
-            reason: skipped.reason.clone(),
-        });
-    }
-    let mcp = mcp_outcome.registry;
-    let working_directory = sandbox
-        .as_ref()
-        .map(super::super::sandbox::SandboxSession::workdir_display)
-        .unwrap_or_else(|| directory_display(&workspace_cwd));
-    let extra_tool_defs = mcp
-        .as_ref()
-        .map(|registry| registry.model_tool_definitions())
-        .unwrap_or_default();
-    let agents_md_message = combine_system_guidance(
-        agents_md_message,
-        mcp.as_ref()
-            .and_then(|registry| registry.instructions_message()),
-    );
-
-    let worker_context = store::load_worker_context(
-        &store_path,
-        &options.dispatch.session_id,
-        &options.dispatch.thread_name,
-        &options.dispatch.source_threads,
-    )?;
-    let mut initial_messages =
-        build_preloaded_skill_messages(skills.as_deref(), &options.dispatch.skills)?;
-    initial_messages.extend(build_worker_context_messages(
-        &options.dispatch.thread_name,
-        &worker_context,
-    ));
-    let agent = Agent::with_config(
-        client.clone(),
-        AgentConfig {
-            command_output_limits: worker_command_output_limits(config)?,
-            mode: AgentMode::Worker,
-            session_behavior: None,
-            store_path: store_path.clone(),
-            session_id: Some(options.dispatch.session_id.clone()),
-            orchestrator_compaction_threshold: None,
-            initial_messages,
-            thread_name: Some(options.dispatch.thread_name.clone()),
-            dispatch_id: Some(options.dispatch.dispatch_id.clone()),
-            event_sink: EventSink::worker_stderr_prefixed(),
-            workspace_cwd,
-            config_cwd,
-            working_directory,
-            worker_executable: None,
-            sandbox,
-            ssh: options.ssh.connection(&config_paths),
-            mcp,
-            skills: None,
-            extra_tool_defs,
-            agents_md_message,
-            thread_timeout_secs: worker_thread_timeout_secs(config),
-            light_client: None,
-            permission_rules: config.permissions.rules.clone(),
-        },
-    )?;
-
-    Ok(ManagedWorkerRunConfig {
-        agent,
-        dispatch_id: options.dispatch.dispatch_id,
-        session_id: options.dispatch.session_id,
-        thread_name: options.dispatch.thread_name,
-        action: options.dispatch.action,
-    })
 }

@@ -9,7 +9,6 @@ fn stored(id: &str, primary: bool) -> AttentionStoredSession {
         id: id.into(),
         primary,
         traditional_child: !primary,
-        direct: true,
         questions_supported: primary,
         goal: None,
         question: None,

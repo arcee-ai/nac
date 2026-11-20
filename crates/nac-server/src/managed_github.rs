@@ -351,7 +351,7 @@ impl SessionManager {
             status: StatusCode::NOT_FOUND,
             message: "Managed NAC is not configured".to_string(),
         })?;
-        let executable = self.inner.worker_executable.clone();
+        let executable = self.inner.running_executable.clone();
         let status = status.clone();
         let identity = tokio::task::spawn_blocking(move || {
             configure_git_defaults(&managed, &executable, &status)
@@ -546,10 +546,7 @@ fn map_clone_start_error(error: anyhow::Error) -> ApiError {
             nac_core::projects::ProjectStoreError::InvalidInput(_) => StatusCode::BAD_REQUEST,
             nac_core::projects::ProjectStoreError::DuplicateLocation
             | nac_core::projects::ProjectStoreError::Conflict(_) => StatusCode::CONFLICT,
-            nac_core::projects::ProjectStoreError::NotFound(_)
-            | nac_core::projects::ProjectStoreError::ModelConfigurationNotFound(_) => {
-                StatusCode::NOT_FOUND
-            }
+            nac_core::projects::ProjectStoreError::NotFound(_) => StatusCode::NOT_FOUND,
             nac_core::projects::ProjectStoreError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };
         return ApiError { status, message };

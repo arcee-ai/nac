@@ -4,7 +4,6 @@ import type {
   InsightSegment,
 } from "@/app/features/insights/model/types";
 import type { ToolPresentationStatus } from "@/app/lib/toolPresentation";
-import type { ThreadState } from "@/app/lib/transcript";
 
 const TOOL_STATUSES: Record<ToolPresentationStatus, ActionStatus> = {
   pending: "running",
@@ -16,14 +15,6 @@ const TOOL_STATUSES: Record<ToolPresentationStatus, ActionStatus> = {
   cancelled: "failed",
   interrupted: "failed",
   unknown: "ready",
-};
-
-const THREAD_STATUSES: Record<ThreadState, ActionStatus> = {
-  running: "running",
-  pending: "pending",
-  done: "ready",
-  cancelled: "failed",
-  error: "failed",
 };
 
 const PRECEDENCE: readonly ActionStatus[] = ["running", "pending", "failed", "ready"];
@@ -49,6 +40,5 @@ export function combineStatuses(statuses: Iterable<ActionStatus>): ActionStatus 
 
 export function entryStatus(entry: InsightEntry): ActionStatus {
   if (entry.kind === "group") return entry.group.status;
-  if (entry.kind === "thread") return THREAD_STATUSES[entry.thread.state];
   return entry.status;
 }

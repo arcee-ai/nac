@@ -38,14 +38,13 @@ pub use delivery::contracts::{
     ApiErrorBody, CancelInboxItemRequest, ClearGoalRequest, CreateGoalRequest,
     CreateInboxItemRequest, CreateSessionRequest, EventsQuery, HeadersRequest, HealthResponse,
     InboxItemResponse, LaggedEvent, ManagedSessionSummary, MessageCycleMetadata,
-    MessagePageMetadata, MessagesPageResponse, MessagesQuery, OrchestratorSteeringRequest,
-    OrchestratorSteeringResponse, PermissionStateResponse, ProviderModelList,
-    ProviderModelsRequest, RecentEventsResponse, ReplayBoundaryEvent, ReplayGapEvent,
-    ReplyPermissionRequest, RequestField, SandboxRequest, SessionLineageKind,
+    MessagePageMetadata, MessagesPageResponse, MessagesQuery, PermissionStateResponse,
+    ProviderModelList, ProviderModelsRequest, RecentEventsResponse, ReplayBoundaryEvent,
+    ReplayGapEvent, ReplyPermissionRequest, RequestField, SandboxRequest, SessionLineageKind,
     SessionLineageSnapshot, SessionSnapshotQuery, SessionSnapshotResponse, SshBrowseRequest,
-    StoreInfo, SubmitPromptRequest, SubmitPromptResponse, ThreadEventsQuery, ThreadSteeringRequest,
-    ThreadSteeringResponse, ToolCallContentResponse, UpdateConfigRequest, UpdateGoalRequest,
-    UpdateInboxItemRequest, UpdatePermissionApprovalModeRequest,
+    StoreInfo, SubmitPromptRequest, SubmitPromptResponse, ThreadEventsQuery,
+    ToolCallContentResponse, UpdateConfigRequest, UpdateGoalRequest, UpdateInboxItemRequest,
+    UpdatePermissionApprovalModeRequest,
 };
 pub use delivery::credentials::{
     GeneratedCredential, StoreCredentialRequest, StoredCredentialList, StoredCredentialSummary,
@@ -137,14 +136,10 @@ use nac_core::{
     session_service::{
         ActiveSessionOperationSnapshot, FrontendSnapshotLoadOptions, MessagePageRequest,
         MessagesPageSnapshot, SessionEventReceiver, SessionFrontendSnapshot,
-        SessionFrontendSnapshotLoad, SessionRunHandle, SessionService, ThreadEventPage,
-        ToolCallContent,
+        SessionFrontendSnapshotLoad, SessionRunHandle, SessionService, ToolCallContent,
     },
     sessions,
-    store::{
-        ManagedOrchestratorExecutionMode, ManagedOrchestratorStatus, SessionGoalRecord,
-        SessionInboxRecord,
-    },
+    store::{SessionGoalRecord, SessionInboxRecord},
     view::{self, SessionSummarySnapshot},
     workspace::GitTarget,
 };
@@ -187,9 +182,9 @@ const WORKSPACE_DIFF_MEASURE_BUDGET: Duration = Duration::from_secs(4);
 const GIT_PROBE_CACHE_TTL: Duration = Duration::from_secs(60);
 const COMPLETE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(20);
 
-enum SuppressedCompletion {
-    Traditional { session_id: String, generation: u64 },
-    Managed { session_id: String, generation: u64 },
+struct SuppressedCompletion {
+    session_id: String,
+    generation: u64,
 }
 
 struct CompletionSuppressionRollback {
@@ -233,26 +228,10 @@ impl CompletionSuppressionRollback {
     }
 
     fn suppress_running(&mut self, session_id: &str) -> Result<()> {
-        let managed_already = self.suppressed.iter().any(|entry| {
-            matches!(entry, SuppressedCompletion::Managed { session_id: existing, .. } if existing == session_id)
-        });
-        if !managed_already
-            && nac_core::store::load_managed_orchestrator(&self.store_path, session_id)?
-                .is_some_and(|record| record.status == ManagedOrchestratorStatus::Running)
-        {
-            let record = nac_core::store::suppress_managed_orchestrator_completion(
-                &self.store_path,
-                session_id,
-            )?;
-            self.suppressed.push(SuppressedCompletion::Managed {
-                session_id: session_id.to_string(),
-                generation: record.generation,
-            });
-        }
-
-        let child_already = self.suppressed.iter().any(|entry| {
-            matches!(entry, SuppressedCompletion::Traditional { session_id: existing, .. } if existing == session_id)
-        });
+        let child_already = self
+            .suppressed
+            .iter()
+            .any(|entry| entry.session_id == session_id);
         if !child_already
             && nac_core::store::load_traditional_child(&self.store_path, session_id)?.is_some_and(
                 |record| record.status == nac_core::store::TraditionalChildStatus::Running,
@@ -262,7 +241,7 @@ impl CompletionSuppressionRollback {
                 &self.store_path,
                 session_id,
             )?;
-            self.suppressed.push(SuppressedCompletion::Traditional {
+            self.suppressed.push(SuppressedCompletion {
                 session_id: session_id.to_string(),
                 generation: record.generation,
             });
@@ -281,24 +260,11 @@ impl Drop for CompletionSuppressionRollback {
             return;
         }
         for entry in self.suppressed.drain(..).rev() {
-            let result = match entry {
-                SuppressedCompletion::Traditional {
-                    session_id,
-                    generation,
-                } => nac_core::store::restore_traditional_child_completion(
-                    &self.store_path,
-                    &session_id,
-                    generation,
-                ),
-                SuppressedCompletion::Managed {
-                    session_id,
-                    generation,
-                } => nac_core::store::restore_managed_orchestrator_completion(
-                    &self.store_path,
-                    &session_id,
-                    generation,
-                ),
-            };
+            let result = nac_core::store::restore_traditional_child_completion(
+                &self.store_path,
+                &entry.session_id,
+                entry.generation,
+            );
             if let Err(error) = result {
                 eprintln!("nac: failed to roll back completion suppression: {error:#}");
             }
@@ -319,7 +285,7 @@ struct SessionManagerInner {
     mcp_runtime: Arc<nac_core::mcp_configurations::McpRuntimeManager>,
     store_path: PathBuf,
     _store_ownership: application::persistence::StoreOwnership,
-    worker_executable: PathBuf,
+    running_executable: PathBuf,
     managed_host: Option<nac_managed::ManagedHostConfig>,
     managed_model: Option<application::managed::ManagedModelProfile>,
     managed_clones: Option<nac_managed::ManagedCloneService>,
@@ -340,8 +306,6 @@ struct SessionManagerInner {
     managed_identity: Option<nac_core::store::ManagedAcceptedIdentity>,
     pending_forward_start: bool,
     #[cfg(test)]
-    managed_monitor_peer_observed: tokio::sync::Notify,
-    #[cfg(test)]
     session_creation_before_projection:
         StdMutex<Option<Arc<application::session_creation::CreationProjectionGate>>>,
     #[cfg(test)]
@@ -351,19 +315,6 @@ struct SessionManagerInner {
 
 struct ServerTraditionalChildController {
     manager: Weak<SessionManagerInner>,
-}
-
-struct ServerOrchestrationController {
-    manager: Weak<SessionManagerInner>,
-}
-
-impl ServerOrchestrationController {
-    fn manager(&self) -> Result<SessionManager> {
-        self.manager
-            .upgrade()
-            .map(|inner| SessionManager { inner })
-            .ok_or_else(|| anyhow!("session manager is no longer available"))
-    }
 }
 
 impl ServerTraditionalChildController {
@@ -523,7 +474,7 @@ impl SessionManager {
             build_identity::store_track(),
         );
         let (store_ownership, store_path) = application::persistence::acquire_store(&store_path)?;
-        let worker_executable = executable::worker_executable(options.worker_executable)?;
+        let running_executable = executable::running_executable()?;
 
         // This is deliberately before any managed model, credential, clone,
         // reconciliation, or listener setup. Only an exact controller-authored
@@ -582,7 +533,7 @@ impl SessionManager {
                 root_cwd,
                 store_path: store_path.clone(),
                 _store_ownership: store_ownership,
-                worker_executable,
+                running_executable,
                 managed_host: options.managed_host,
                 managed_model,
                 managed_clones,
@@ -606,8 +557,6 @@ impl SessionManager {
                 active_admissions: Arc::new(StdMutex::new(HashMap::new())),
                 managed_identity,
                 pending_forward_start,
-                #[cfg(test)]
-                managed_monitor_peer_observed: tokio::sync::Notify::new(),
                 #[cfg(test)]
                 session_creation_before_projection: StdMutex::new(None),
                 #[cfg(test)]
@@ -639,14 +588,8 @@ impl SessionManager {
             }),
         );
         nac_core::peer_goal_control::register_controller(
-            store_path.clone(),
-            Arc::new(application::peer_goals::ServerPeerGoalController {
-                manager: Arc::downgrade(&manager.inner),
-            }),
-        );
-        nac_core::orchestration_control::register_controller(
             store_path,
-            Arc::new(ServerOrchestrationController {
+            Arc::new(application::peer_goals::ServerPeerGoalController {
                 manager: Arc::downgrade(&manager.inner),
             }),
         );
@@ -1459,18 +1402,6 @@ impl SessionManager {
             .await
     }
 
-    pub async fn thread_events(
-        &self,
-        session_id: &str,
-        thread_name: &str,
-        before_id: Option<i64>,
-        limit: usize,
-    ) -> Result<ThreadEventPage> {
-        self.session_state()
-            .thread_events(session_id, thread_name, before_id, limit)
-            .await
-    }
-
     pub async fn session_skills(
         &self,
         session_id: &str,
@@ -1495,102 +1426,6 @@ impl SessionManager {
             run_id: submitted.run_id,
             client_id: submitted.client_id,
             display_prompt: submitted.display_prompt,
-        })
-    }
-
-    async fn submit_managed_orchestrator_prompt(
-        &self,
-        session_id: &str,
-        request: SubmitPromptRequest,
-        execution_mode: ManagedOrchestratorExecutionMode,
-    ) -> Result<SubmitPromptResponse> {
-        let submitted = self
-            .session_runs()
-            .submit_managed_orchestrator(session_id, request.prompt, execution_mode)
-            .await?;
-        Ok(SubmitPromptResponse {
-            run_id: submitted.run_id,
-            client_id: submitted.client_id,
-            display_prompt: submitted.display_prompt,
-        })
-    }
-
-    pub async fn queue_thread_steering(
-        &self,
-        session_id: &str,
-        thread_name: &str,
-        request: ThreadSteeringRequest,
-        origin: nac_core::store::InputOrigin,
-    ) -> Result<ThreadSteeringResponse> {
-        let steering = self
-            .session_runs()
-            .queue_thread_steering(session_id, thread_name, request.instruction, origin)
-            .await?;
-        Ok(ThreadSteeringResponse {
-            steering_id: steering.steering_id,
-            thread_name: steering.thread_name,
-            status: steering.status,
-            instruction_preview: steering.instruction_preview,
-        })
-    }
-
-    async fn queue_thread_steering_unchecked(
-        &self,
-        session_id: &str,
-        thread_name: &str,
-        request: ThreadSteeringRequest,
-        expected_run_id: Option<&str>,
-    ) -> Result<ThreadSteeringResponse> {
-        let steering = self
-            .session_runs()
-            .queue_thread_steering_for_run(
-                session_id,
-                thread_name,
-                request.instruction,
-                expected_run_id,
-                nac_core::store::InputOrigin::Automation,
-            )
-            .await?;
-        Ok(ThreadSteeringResponse {
-            steering_id: steering.steering_id,
-            thread_name: steering.thread_name,
-            status: steering.status,
-            instruction_preview: steering.instruction_preview,
-        })
-    }
-
-    pub async fn queue_orchestrator_steering(
-        &self,
-        session_id: &str,
-        request: OrchestratorSteeringRequest,
-        origin: nac_core::store::InputOrigin,
-    ) -> Result<OrchestratorSteeringResponse> {
-        let steering = self
-            .session_runs()
-            .queue_orchestrator_steering(session_id, request.instruction, origin)
-            .await?;
-        Ok(OrchestratorSteeringResponse {
-            steering_id: steering.steering_id,
-            status: steering.status,
-            instruction_preview: steering.instruction_preview,
-        })
-    }
-
-    fn queue_managed_orchestrator_steering(
-        &self,
-        parent_session_id: &str,
-        orchestrator_session_id: &str,
-        instruction: &str,
-    ) -> Result<OrchestratorSteeringResponse> {
-        let steering = self.session_runs().queue_managed_orchestrator_steering(
-            parent_session_id,
-            orchestrator_session_id,
-            instruction,
-        )?;
-        Ok(OrchestratorSteeringResponse {
-            steering_id: steering.steering_id,
-            status: steering.status,
-            instruction_preview: steering.instruction_preview,
         })
     }
 
@@ -1624,16 +1459,6 @@ impl SessionManager {
 
     pub async fn cancel_active_run(&self, session_id: &str) -> Result<()> {
         self.session_runs().cancel(session_id).await
-    }
-
-    async fn cancel_active_run_exact_unchecked(
-        &self,
-        session_id: &str,
-        run_id: &str,
-    ) -> Result<application::session_runs::ExactCancelOutcome> {
-        self.session_runs()
-            .cancel_exact_unchecked(session_id, run_id)
-            .await
     }
 
     /// Cancel every run owned by this process before a graceful server stop.
@@ -1684,59 +1509,6 @@ impl SessionManager {
             .await
     }
 
-    async fn create_managed_orchestrator_session(
-        &self,
-        parent_session_id: &str,
-        description: &str,
-    ) -> Result<String> {
-        let gate = self.lifecycle_gate(parent_session_id);
-        let _lifecycle = gate.lock().await;
-        let _relationship_lease = sessions::SessionRelationshipLease::try_acquire(
-            &self.inner.store_path,
-            parent_session_id,
-        )?;
-        let parent = sessions::load_session(&self.inner.store_path, parent_session_id)?;
-        if parent.behavior != sessions::SessionBehavior::DirectWithOrchestrator {
-            return Err(anyhow!(
-                "managed orchestrators require direct-with-orchestrator behavior"
-            ));
-        }
-        if nac_core::store::load_managed_orchestrator(&self.inner.store_path, parent_session_id)?
-            .is_some()
-        {
-            return Err(anyhow!(
-                "managed orchestrator sessions cannot launch orchestrators"
-            ));
-        }
-        let orchestrator_session_id = uuid::Uuid::new_v4().to_string();
-        let mut orchestrator = sessions::new_snapshot(
-            orchestrator_session_id.clone(),
-            parent.cwd,
-            parent.model,
-            parent.base_url,
-            parent.backend,
-            parent.reasoning_effort,
-            parent.sandbox_spec,
-            parent.ssh,
-            Vec::new(),
-            parent.api_key_env,
-            parent.extra_headers,
-        );
-        orchestrator.service_tier = parent.service_tier;
-        orchestrator.behavior = sessions::SessionBehavior::Orchestrator;
-        orchestrator.project_id = parent.project_id;
-        orchestrator.light_model = parent.light_model;
-        orchestrator.orchestrator_compaction_threshold = parent.orchestrator_compaction_threshold;
-        orchestrator.automatic_compaction = parent.automatic_compaction;
-        nac_core::store::create_managed_orchestrator_session(
-            &self.inner.store_path,
-            &orchestrator,
-            parent_session_id,
-            description,
-        )?;
-        Ok(orchestrator_session_id)
-    }
-
     async fn create_traditional_child_session(
         &self,
         parent_session_id: &str,
@@ -1757,11 +1529,6 @@ impl SessionManager {
                 Ok::<_, anyhow::Error>((lease, parent))
             })
             .await??;
-        if parent.behavior == sessions::SessionBehavior::Orchestrator {
-            return Err(anyhow!(
-                "traditional children are available only to direct parent sessions"
-            ));
-        }
         if parent.sandbox_spec.is_some() {
             let parent_service = self.attach_session_locked(parent_session_id, None).await?;
             if parent_service.metadata().workspace_host_path.is_none() {

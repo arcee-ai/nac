@@ -42,7 +42,7 @@ impl Fixture {
             "research",
         )
         .unwrap();
-        NativeWebCapabilities::new(AgentMode::Direct, &self.store, Some(child)).unwrap()
+        NativeWebCapabilities::new(&self.store, Some(child)).unwrap()
     }
     fn source(&self, id: &str, value: Arc<Mutex<Option<String>>>) -> Arc<CredentialSource> {
         let source: Arc<CredentialSource> = Arc::new(move || Ok(value.lock().unwrap().clone()));
@@ -107,8 +107,7 @@ fn generations_rebind_rotation_removal_reattachment_and_restart_without_storing_
         assert!(child.resolve_credential().unwrap().is_none());
         // A reattached child cannot discover the host's key on its own. The
         // recovered parent runtime must first re-establish its trusted source.
-        let mut reattached =
-            NativeWebCapabilities::new(AgentMode::Direct, &f.store, Some("child")).unwrap();
+        let mut reattached = NativeWebCapabilities::new(&f.store, Some("child")).unwrap();
         reattached.admit_generation().unwrap();
         assert!(reattached.resolve_credential().unwrap().is_none());
         let _recovered_parent = f.source("parent", key);
@@ -158,9 +157,6 @@ fn parent_and_store_ownership_bind_traditional_generations() {
     let mut absent = other_host.child("parent-b", "child-b");
     absent.admit_generation().unwrap();
     assert!(absent.resolve_credential().unwrap().is_none());
-    let ordinary = NativeWebCapabilities::new(AgentMode::Orchestrator, &f.store, None).unwrap();
-    assert!(!ordinary.is_eligible());
-    assert!(ordinary.resolve_credential().unwrap().is_none());
 }
 
 #[tokio::test]
@@ -277,8 +273,7 @@ fn concurrent_parents_never_cross_bind_and_deleted_parents_cannot_regrant() {
             });
         }
     });
-    let mut child =
-        NativeWebCapabilities::new(AgentMode::Direct, &f.store, Some("child-a")).unwrap();
+    let mut child = NativeWebCapabilities::new(&f.store, Some("child-a")).unwrap();
     child.admit_generation().unwrap();
     assert!(sessions::delete_session(&f.store, "a").unwrap());
     child.admit_generation().unwrap();

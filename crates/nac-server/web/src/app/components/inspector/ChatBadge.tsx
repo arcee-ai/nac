@@ -12,7 +12,7 @@ interface ChatBadgeProps {
   label: string;
   /** Shimmers the label while the step the badge stands for is still running. */
   pending?: boolean;
-  /** Highlighted when the matching side-panel tab is selected (e.g. a workset). */
+  /** Highlighted when the matching side-panel tab is selected. */
   active?: boolean;
   /** Rendered after the label, e.g. the diff counts of a snapshot. */
   trailing?: ReactNode;
@@ -28,7 +28,7 @@ interface ChatBadgeProps {
 
 /**
  * The inline marker the model message uses for its non-prose steps: reasoning,
- * a saved workset, a snapshot. Only reasoning has a body to expand.
+ * a snapshot. Only reasoning has a body to expand.
  */
 export function ChatBadge({
   label,

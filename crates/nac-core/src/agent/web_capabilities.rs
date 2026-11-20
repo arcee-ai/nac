@@ -4,8 +4,6 @@ use std::sync::{Arc, LazyLock, Mutex};
 
 use anyhow::Result;
 
-use super::AgentMode;
-
 type CredentialSource = dyn Fn() -> Result<Option<String>> + Send + Sync;
 type ParentKey = (PathBuf, String);
 
@@ -19,7 +17,6 @@ static PARENT_SOURCES: LazyLock<Mutex<HashMap<ParentKey, Arc<CredentialSource>>>
 /// Delegates resolve only a trusted parent binding at generation admission; their
 /// model requests cannot consult ambient credentials or refresh mid-generation.
 pub(super) enum NativeWebCapabilities {
-    Disabled,
     Direct(Arc<CredentialSource>),
     Inherited {
         store: PathBuf,
@@ -27,14 +24,10 @@ pub(super) enum NativeWebCapabilities {
         parent: String,
         credential: Option<String>,
     },
-    Worker(Option<String>),
 }
 
 impl NativeWebCapabilities {
-    pub(super) fn new(mode: AgentMode, store: &Path, session: Option<&str>) -> Result<Self> {
-        if mode == AgentMode::Worker {
-            return Ok(Self::Worker(None));
-        }
+    pub(super) fn new(store: &Path, session: Option<&str>) -> Result<Self> {
         if let Some(session) = session {
             if let Some(parent) = parent_for(store, session)? {
                 return Ok(Self::Inherited {
@@ -44,9 +37,6 @@ impl NativeWebCapabilities {
                     credential: None,
                 });
             }
-        }
-        if mode != AgentMode::Direct {
-            return Ok(Self::Disabled);
         }
         let source: Arc<CredentialSource> = Arc::new(resolve_direct_credential);
         Ok(Self::Direct(source))
@@ -67,10 +57,6 @@ impl NativeWebCapabilities {
         }
     }
 
-    pub(super) fn is_eligible(&self) -> bool {
-        !matches!(self, Self::Disabled)
-    }
-
     pub(super) fn admit_generation(&mut self) -> Result<()> {
         if let Self::Inherited {
             store,
@@ -88,11 +74,7 @@ impl NativeWebCapabilities {
             }
             let eligible =
                 crate::sessions::load_session_summary(store, parent)?.is_some_and(|summary| {
-                    matches!(
-                        summary.behavior,
-                        crate::sessions::SessionBehavior::Direct
-                            | crate::sessions::SessionBehavior::DirectWithOrchestrator
-                    )
+                    summary.behavior == crate::sessions::SessionBehavior::Direct
                 });
             if !eligible {
                 PARENT_SOURCES
@@ -120,29 +102,16 @@ impl NativeWebCapabilities {
         Ok(())
     }
 
-    pub(super) fn set_worker_credential(&mut self, credential: Option<String>) {
-        if let Self::Worker(worker_credential) = self {
-            *worker_credential = credential.filter(|value| !value.trim().is_empty());
-        }
-    }
-
     pub(super) fn resolve_credential(&self) -> Result<Option<String>> {
         match self {
-            Self::Disabled => Ok(None),
             Self::Direct(source) => source(),
-            Self::Inherited { credential, .. } | Self::Worker(credential) => Ok(credential.clone()),
+            Self::Inherited { credential, .. } => Ok(credential.clone()),
         }
     }
 }
 
 fn parent_for(store: &Path, session: &str) -> Result<Option<String>> {
-    let parent = if let Some(child) = crate::store::load_traditional_child(store, session)? {
-        Some(child.parent_session_id)
-    } else {
-        crate::store::load_managed_orchestrator(store, session)?
-            .map(|child| child.parent_session_id)
-    };
-    Ok(parent)
+    Ok(crate::store::load_traditional_child(store, session)?.map(|child| child.parent_session_id))
 }
 
 fn resolve_direct_credential() -> Result<Option<String>> {
@@ -188,18 +157,13 @@ mod tests {
             )
             .unwrap();
         }
-        let capability =
-            NativeWebCapabilities::new(AgentMode::Direct, &nac_home.join("store.db"), None)
-                .unwrap();
+        let capability = NativeWebCapabilities::new(&nac_home.join("store.db"), None).unwrap();
         assert_eq!(
             capability.resolve_credential().unwrap().as_deref(),
             Some(CANARY)
         );
         assert_eq!(
-            crate::managed_native_credentials::ManagedNativeCredentials::from_process_environment()
-                .unwrap()
-                .into_exa_api_key()
-                .as_deref(),
+            crate::managed_native_credentials::managed_exa_api_key().as_deref(),
             Some(CANARY)
         );
     }

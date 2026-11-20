@@ -88,58 +88,6 @@ pub fn effective_orchestrator_compaction_threshold(
     Ok(threshold)
 }
 
-pub(super) fn managed_worker_effective_model_settings(
-    model: &ModelOptions,
-) -> Result<EffectiveModelSettings> {
-    EffectiveModelSettings::from_optional_with_http_policy(
-        model.backend,
-        model.api_model.clone(),
-        model.api_base_url.clone(),
-        model.reasoning_effort.snapshot_value(),
-        model.api_key_env.snapshot_value(),
-        model.extra_headers.clone().unwrap_or_default(),
-        model.allow_insecure_http,
-    )?
-    .with_trusted_api_key_file(model.trusted_api_key_file.clone())?
-    .with_service_tier(model.service_tier.snapshot_value())
-}
-
-/// Parse the hidden worker header transport as a JSON object.
-///
-/// A present argument must be valid JSON. In particular, workers use `{}` to
-/// transport an explicitly empty snapshot header map; absence is represented by
-/// omitting the argument entirely.
-pub fn parse_extra_headers_json(
-    json: &str,
-) -> std::result::Result<BTreeMap<String, String>, String> {
-    serde_json::from_str::<BTreeMap<String, String>>(json)
-        .map_err(|error| format!("expected a JSON object with string header values: {error}"))
-}
-
-pub(super) fn worker_thread_timeout_secs(config: &NacConfig) -> u64 {
-    config
-        .worker
-        .thread_timeout_secs
-        .unwrap_or(crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS)
-        .max(crate::tools::thread::MIN_THREAD_TIMEOUT_SECS)
-}
-
-pub(super) fn worker_command_output_limits(
-    config: &NacConfig,
-) -> Result<crate::terminal::CommandOutputLimits> {
-    crate::terminal::CommandOutputLimits {
-        per_command_bytes: config
-            .worker
-            .command_output_max_bytes
-            .unwrap_or(crate::terminal::DEFAULT_COMMAND_OUTPUT_MAX_BYTES),
-        per_session_bytes: config
-            .worker
-            .command_output_session_max_bytes
-            .unwrap_or(crate::terminal::DEFAULT_COMMAND_OUTPUT_SESSION_MAX_BYTES),
-    }
-    .validate()
-}
-
 pub(super) fn default_config_cwd(workspace_cwd: &Path, ssh_host: Option<&str>) -> PathBuf {
     let is_ssh = ssh_host
         .map(str::trim)

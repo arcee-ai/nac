@@ -27,7 +27,6 @@ const identityFields = ["owner", "profile", "organization", "host", "store", "tr
 const documentFields = ["launch", "view", "document"] as const;
 const preferenceKeys = new Set([
   "nac-panel-list-width",
-  "nac-thread-log-height-ratio",
   "nac.last-light-model",
   "nac.chatTabs",
   "nac.sessionNavigation",

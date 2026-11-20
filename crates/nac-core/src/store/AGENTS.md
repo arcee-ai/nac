@@ -1,7 +1,7 @@
 # Durable store guide
 
 This directory owns SQLite persistence and durable records for projects,
-sessions, transcripts, threads/worksets, relationships, inbox/goals, grants,
+sessions, transcripts, child relationships, inbox/goals, grants,
 workspace revisions, recovery markers, and cross-process coordination.
 `../sessions/` owns session snapshot codecs and the lower session DB facade;
 `../session_service/` coordinates live lifecycle over these records.
@@ -15,8 +15,8 @@ workspace revisions, recovery markers, and cross-process coordination.
   historical transcript meaning incidentally.
 - Transcript and event revisions are monotonic. Recovery and delivery markers
   must make crash-window replay exactly-once or explicitly idempotent.
-- Parent/child and managed-orchestrator reads bind to the correct parent and
-  generation; wrong-parent lookups remain opaque/not-found.
+- Parent/child reads bind to the correct parent and generation; wrong-parent
+  lookups remain opaque/not-found.
 - Leases coordinate across processes. In-memory ownership is not evidence that
   a peer is dead.
 - Deletion/order operations preserve their established transactional ordering,
@@ -50,16 +50,15 @@ workspace revisions, recovery markers, and cross-process coordination.
   migrations, including composition with the retained-task schema.
 - `managed_probe.rs` — committed store/maintenance readiness observations that
   remain available while durable write admission is saturated.
-- `transcript.rs`, `thread_events.rs`, `threads.rs`, `worksets.rs` — durable
-  execution history.
+- `transcript.rs` and `thread_events.rs` — canonical durable transcript and
+  event history; historical table names remain until the next migration.
 - `transcript_selection.rs` — verified selection annotations on existing
   canonical log wrappers, included-fork copying, and bounded provenance scans.
 - `transcript_append.rs` — identified transcript transactions, run/generation
   fencing and uncertain-commit reconciliation; `transcript_append_tests.rs`
   owns deterministic append fault and concurrency contracts.
-- `traditional_children.rs`, `managed_orchestrators.rs` — distinct relationship
-  topologies and completion state.
-- `session_inbox.rs`, `session_goals.rs`, `steering.rs` — durable continuation.
+- `traditional_children.rs` — child relationships and completion state.
+- `session_inbox.rs` and `session_goals.rs` — durable continuation.
 - `run_recovery.rs`, `orchestrator_compaction.rs` — recovery markers.
 - `permission_grants.rs` — remembered authorization persistence.
 - `review_intent.rs` — the messages a person typed to a session tree,

@@ -47,7 +47,6 @@ function entry(
       finished: {
         type: "tool_call_finished",
         call_id: "launch",
-        thread_name: null,
         name,
         content_preview: `Unknown profile. ${"Safe diagnostic ".repeat(30)}`,
         is_error: true,

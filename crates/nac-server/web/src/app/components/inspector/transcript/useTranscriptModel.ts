@@ -69,24 +69,18 @@ export function useTranscriptModel(
     useStreamReasoning,
     useRunning,
     useOptimisticUserPrompt,
-    useLiveThreads,
     usePrimaryToolEvents,
-    useFinishedToolCalls,
     runtimeStore,
   } = useNativeRuntime().stores.runtimeStore;
 
   const running = useRunning(sessionId);
-  const liveThreads = useLiveThreads();
-  const finishedToolCalls = useFinishedToolCalls();
   const primaryToolEvents = usePrimaryToolEvents();
   const streamText = useStreamText();
   const streamReasoning = useStreamReasoning();
   const streamSettled = runtimeStore.useStore((state) => state.streamSettled);
   const streamPredatesPrompt = runtimeStore.useStore((state) => state.streamPredatesPrompt);
   const optimisticPrompt = useOptimisticUserPrompt();
-  const direct =
-    snapshot?.metadata.behavior === "direct" ||
-    snapshot?.metadata.behavior === "direct-with-orchestrator";
+  const direct = snapshot?.metadata.behavior === "direct";
   const { data: permissions } = useSessionPermissions(sessionId, direct);
   const pendingPermissionCallIds = useMemo(
     () =>
@@ -104,15 +98,9 @@ export function useTranscriptModel(
   const built = useMemo(
     () =>
       perfTime("buildTranscript", () =>
-        buildTranscript(
-          snapshot,
-          liveThreads,
-          finishedToolCalls,
-          primaryToolEvents,
-          pendingPermissionCallIds,
-        ),
+        buildTranscript(snapshot, primaryToolEvents, pendingPermissionCallIds),
       ),
-    [snapshot, liveThreads, finishedToolCalls, primaryToolEvents, pendingPermissionCallIds],
+    [snapshot, primaryToolEvents, pendingPermissionCallIds],
   );
   const windowStart = snapshot?.message_page?.start ?? 0;
   const [drawn, setDrawn] = useState<Drawn | null>(null);

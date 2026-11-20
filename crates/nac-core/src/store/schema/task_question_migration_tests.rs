@@ -5,7 +5,7 @@ fn question_table_repair_is_atomic_on_a_hybrid_45_catalog_and_preserves_receipts
     let path = std::env::temp_dir()
         .join(format!("nac-question-migration46-{}", uuid::Uuid::new_v4()))
         .join("store.db");
-    initialize(&path).unwrap();
+    initialize_synthetic_predecessor(&path).unwrap();
     for id in ["owner", "target"] {
         insert_test_session(&path, id);
     }

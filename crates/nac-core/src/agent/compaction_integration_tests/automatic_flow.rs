@@ -1,44 +1,36 @@
 use super::*;
 
 #[tokio::test]
-async fn worker_send_stays_direct_when_provider_context_total_is_invalid() {
+async fn sessionless_send_continues_when_provider_context_total_is_invalid() {
     use crate::model::test_http::{ScriptedResponse, ScriptedServer};
 
     let server = ScriptedServer::start(vec![ScriptedResponse::json(
         "200 OK",
-        scripted_responses_text("worker answer", 100, 0, 5, 1),
+        scripted_responses_text("answer", 100, 0, 5, 1),
     )]);
-    let mut worker = Agent::with_config(
+    let mut agent = Agent::with_config(
         ModelClient::new_for_test_server(server.base_url.clone()),
         AgentConfig {
-            command_output_limits: crate::terminal::CommandOutputLimits::default(),
-            mode: AgentMode::Worker,
-            session_behavior: None,
             store_path: PathBuf::from("unused.db"),
             session_id: None,
             orchestrator_compaction_threshold: Some(1),
             initial_messages: Vec::new(),
-            thread_name: Some("worker".to_string()),
-            dispatch_id: None,
             event_sink: EventSink::none(),
             workspace_cwd: PathBuf::from("."),
             config_cwd: PathBuf::from("."),
             working_directory: ".".to_string(),
-            worker_executable: None,
             sandbox: None,
             ssh: None,
             mcp: None,
             skills: None,
             extra_tool_defs: Vec::new(),
             agents_md_message: None,
-            thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
-            light_client: None,
             permission_rules: Vec::new(),
         },
     )
     .unwrap();
 
-    assert_eq!(worker.send("hello").await.unwrap(), "worker answer");
+    assert_eq!(agent.send("hello").await.unwrap(), "answer");
     let requests = server.finish();
     assert_eq!(requests.len(), 1);
     assert!(
@@ -46,7 +38,7 @@ async fn worker_send_stays_direct_when_provider_context_total_is_invalid() {
             .as_array()
             .is_some_and(|tools| !tools.is_empty())
     );
-    assert_eq!(worker.last_usage.unwrap().orchestrator_context_tokens, 0);
+    assert_eq!(agent.last_usage.unwrap().orchestrator_context_tokens, 0);
 }
 
 #[tokio::test]
@@ -71,13 +63,12 @@ async fn direct_primary_uses_the_direct_compaction_prompt() {
             scripted_responses_text("ordinary answer", 20, 0, 3, 23),
         ),
     ]);
-    let mut agent = compaction_test_agent_with_mode(
+    let mut agent = compaction_test_agent(
         ModelClient::new_for_test_server(server.base_url.clone()),
         store_path.clone(),
         Some("session"),
         Some(1),
         EventSink::none(),
-        AgentMode::Direct,
     );
     agent.set_current_run_id(Some("run".to_string()));
     agent.messages = compactable_messages().into();
@@ -369,7 +360,7 @@ async fn complete_tool_result_batch_reenters_threshold_hook_before_next_ordinary
     assert!(second.get("tools").is_none(), "second call must be summary");
     assert_eq!(
         second["input"].as_array().unwrap().last().unwrap()["content"],
-        compaction::NAC_COMPACTION_PROMPT
+        compaction::NAC_DIRECT_COMPACTION_PROMPT
     );
     let summary_input = second["input"].to_string();
     assert!(summary_input.contains("call-1"));

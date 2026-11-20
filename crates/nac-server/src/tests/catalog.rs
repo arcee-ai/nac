@@ -572,7 +572,6 @@ async fn create_session_rejects_ssh_host_combined_with_sandbox() {
         api_key_env: RequestField::Omitted,
         extra_headers: RequestField::Omitted,
         orchestrator_compaction_threshold: RequestField::Omitted,
-        light_model: RequestField::Omitted,
         ssh_host: Some("build-box".to_string()),
         ssh_port: None,
         ssh_identity_file: None,
@@ -616,7 +615,6 @@ async fn server_create_rejects_removed_backend_names_as_bad_requests() {
                 api_key_env: RequestField::Omitted,
                 extra_headers: RequestField::Omitted,
                 orchestrator_compaction_threshold: RequestField::Omitted,
-                light_model: RequestField::Omitted,
                 ssh_host: None,
                 ssh_port: None,
                 ssh_identity_file: None,
@@ -665,7 +663,6 @@ async fn stored_arcee_auth_config_errors_are_400_and_store_failures_are_500() {
                     api_key_env: RequestField::Omitted,
                     extra_headers: RequestField::Omitted,
                     orchestrator_compaction_threshold: RequestField::Omitted,
-                    light_model: RequestField::Omitted,
                 },
             )
             .await
@@ -711,7 +708,6 @@ async fn stored_arcee_auth_config_errors_are_400_and_store_failures_are_500() {
                     api_key_env: RequestField::Omitted,
                     extra_headers: RequestField::Omitted,
                     orchestrator_compaction_threshold: RequestField::Omitted,
-                    light_model: RequestField::Omitted,
                 },
             )
             .await
@@ -750,7 +746,6 @@ async fn stored_arcee_auth_config_errors_are_400_and_store_failures_are_500() {
                     api_key_env: RequestField::Omitted,
                     extra_headers: RequestField::Omitted,
                     orchestrator_compaction_threshold: RequestField::Omitted,
-                    light_model: RequestField::Omitted,
                 },
             )
             .await
@@ -804,9 +799,12 @@ async fn provider_connection_is_model_independent_and_keeps_secret_private() {
     assert!(!body.to_string().contains("private-fake-api-key"));
     let conn = rusqlite::Connection::open(root.join("store.db")).unwrap();
     assert_eq!(
-        conn.query_row::<i64, _, _>("SELECT count(*) FROM model_configurations", [], |row| row
-            .get(0))
-            .unwrap(),
+        conn.query_row::<i64, _, _>(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='model_configurations'",
+            [],
+            |row| row.get(0)
+        )
+        .unwrap(),
         0
     );
     drop(conn);

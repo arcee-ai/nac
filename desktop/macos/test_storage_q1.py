@@ -162,14 +162,14 @@ class Q1CompositionControls(unittest.TestCase):
             state['requests'].append((path, body))
             if path == '/store':
                 return dict(store_path=str(store))
-            if path == '/model-configs':
-                if body is not None:
-                    store.touch(exist_ok=True)
-                    state['configurations'] = [dict(config_id='saved-q1', name=body['name'],
-                        backend=body['backend'], model=body['model'], base_url=body['base_url'],
-                        allow_insecure_http=False, api_key_env='exact-private-selector')]
-                    return state['configurations'][0]
-                return dict(configurations=state['configurations'])
+            if path == '/provider-connections':
+                store.touch(exist_ok=True)
+                state['configurations'] = [dict(base_url=body['base_url'],
+                    allow_insecure_http=False, api_key_env='exact-private-selector')]
+                return dict(connection_id='saved-q1')
+            if path == '/models':
+                return dict(providers=[dict(id='openai-responses', auth_status='ready',
+                    connection=state['configurations'][0])])
             if path == '/projects':
                 with closing(sqlite3.connect(store)) as db, db:
                     db.execute('CREATE TABLE sessions(session_id TEXT PRIMARY KEY, behavior TEXT, run_count INTEGER, '

@@ -93,6 +93,25 @@ describe("managed upgrade facade decoder", () => {
       }),
     ],
     [
+      "retired managed orchestrator blocker",
+      () => ({
+        ...clone(snapshot),
+        operation: {
+          ...clone(operation),
+          blockers: [
+            {
+              selection_key: `sha256:${"3".repeat(64)}`,
+              kind: "managed_orchestrator",
+              message: "An active orchestrator must finish before maintenance can start",
+              actionable: true,
+              action: "cancel_managed_orchestrator",
+              target: { session_id: "session-1", orchestrator_session_id: "old" },
+            },
+          ],
+        },
+      }),
+    ],
+    [
       "action-kind mismatch",
       () => ({
         ...clone(snapshot),

@@ -12,9 +12,6 @@ impl nac_contracts::CommandEnvironmentProvider for TestEnvironment {
     fn redaction_snapshot(&self) -> anyhow::Result<nac_contracts::CommandEnvironmentSnapshot> {
         Ok(test_environment())
     }
-    fn worker_environment(&self) -> nac_contracts::WorkerEnvironment {
-        Default::default()
-    }
 }
 fn test_environment() -> nac_contracts::CommandEnvironmentSnapshot {
     nac_contracts::CommandEnvironmentSnapshot::from_parts(
@@ -24,9 +21,9 @@ fn test_environment() -> nac_contracts::CommandEnvironmentSnapshot {
 }
 
 use super::*;
-use crate::agent::{AgentConfig, AgentMode};
+use crate::agent::AgentConfig;
 use crate::model::ModelClient;
-use crate::session_service::tests::{test_active_service, test_store_path};
+use crate::session_service::tests::test_store_path;
 
 fn test_direct_active_service(
     label: &str,
@@ -50,28 +47,20 @@ fn test_direct_active_service_at(
     let mut agent = Agent::with_config(
         client.clone(),
         AgentConfig {
-            command_output_limits: crate::terminal::CommandOutputLimits::default(),
-            mode: AgentMode::Direct,
-            session_behavior: Some(sessions::SessionBehavior::Direct),
             store_path: path.clone(),
             session_id: Some(session_id.into()),
             orchestrator_compaction_threshold: None,
             initial_messages: Vec::new(),
-            thread_name: None,
-            dispatch_id: None,
             event_sink: EventSink::none(),
             workspace_cwd: cwd.clone(),
             config_cwd: cwd.clone(),
             working_directory: cwd.to_string_lossy().into(),
-            worker_executable: None,
             sandbox: None,
             ssh: None,
             mcp: None,
             skills: None,
             extra_tool_defs: Vec::new(),
             agents_md_message: None,
-            thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
-            light_client: None,
             permission_rules: if label == "deny" {
                 vec![crate::permissions::PermissionRule::new(
                     "*",
@@ -220,11 +209,21 @@ async fn human_shell_executes_once_without_model_or_approval_and_appends_once() 
 
 #[tokio::test]
 async fn human_shell_rejects_unsupported_topology_and_busy_without_effects() {
-    let (orchestrator, _) = test_active_service("human_shell_orchestrator", "session");
+    let (child, path) =
+        test_direct_active_service("human_shell_child", "session", ModelClient::new_for_test());
+    crate::store::insert_test_session(&path, "parent");
+    crate::store::create_traditional_child_relationship(
+        &path,
+        "parent",
+        "session",
+        crate::store::GENERAL_CHILD_PROFILE,
+        "child",
+    )
+    .unwrap();
     assert_eq!(
-        orchestrator
+        child
             .service
-            .submit_shell_command(request("unsupported", "touch /tmp/never-human-shell"))
+            .submit_shell_command(request("unsupported", "echo forbidden"))
             .await
             .unwrap_err(),
         ShellCommandError::Unsupported

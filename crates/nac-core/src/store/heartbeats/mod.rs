@@ -33,10 +33,7 @@ pub(crate) use fresh_launches::{
     fresh_launch_for_request_with_connection, link_fresh_launch_input_with_connection,
     publish_shared_fresh_launch_with_connection,
 };
-pub use fresh_launches::{
-    pin_fresh_heartbeat_model_defaults, pin_fresh_heartbeat_workspace_mode,
-    read_fresh_heartbeat_launch,
-};
+pub use fresh_launches::{pin_fresh_heartbeat_workspace_mode, read_fresh_heartbeat_launch};
 mod fresh_model;
 pub use fresh_admission::*;
 pub use fresh_model::{
@@ -275,7 +272,7 @@ fn current_binding(conn: &Connection, session_id: &str) -> Result<HeartbeatBindi
     // sessions.backend names the model provider, not the execution backend.
     // Durable SSH/Podman bindings are host_id/sandbox_json; the live prepared
     // boundary independently checks the constructed ExecutionBackend::Local.
-    let binding = conn.query_row("SELECT config_version,cwd,(SELECT project_id FROM session_projects WHERE session_id=?1),'local' FROM sessions WHERE session_id=?1 AND behavior='direct' AND host_id IS NULL AND sandbox_json IS NULL AND NOT EXISTS(SELECT 1 FROM traditional_children WHERE child_session_id=?1) AND NOT EXISTS(SELECT 1 FROM managed_orchestrators WHERE orchestrator_session_id=?1)", [session_id], |row| Ok(HeartbeatBinding{config_version:row.get(0)?,cwd:row.get(1)?,project_id:row.get(2)?,backend:row.get(3)?,execution_cwd:None,scheduling_request:None,seen_through_sequence:0,fresh_task:None,creator_session_id:None,model_configuration_id:None})).optional()?;
+    let binding = conn.query_row("SELECT config_version,cwd,(SELECT project_id FROM session_projects WHERE session_id=?1),'local' FROM sessions WHERE session_id=?1 AND behavior='direct' AND host_id IS NULL AND sandbox_json IS NULL AND NOT EXISTS(SELECT 1 FROM traditional_children WHERE child_session_id=?1)", [session_id], |row| Ok(HeartbeatBinding{config_version:row.get(0)?,cwd:row.get(1)?,project_id:row.get(2)?,backend:row.get(3)?,execution_cwd:None,scheduling_request:None,seen_through_sequence:0,fresh_task:None,creator_session_id:None})).optional()?;
     binding.context("heartbeats require an existing independent direct Local chat")
 }
 
@@ -295,7 +292,6 @@ fn current_project_binding(conn: &Connection, project_id: &str) -> Result<Heartb
         seen_through_sequence: 0,
         fresh_task: None,
         creator_session_id: None,
-        model_configuration_id: project.default_model_config_id,
     })
 }
 

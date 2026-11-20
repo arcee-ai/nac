@@ -39,21 +39,14 @@ pub struct ModelOptions {
     pub reasoning_effort: OptionalModelOption<ReasoningEffort>,
     pub service_tier: OptionalModelOption<crate::model::ServiceTier>,
     pub api_base_url: Option<String>,
-    /// Explicitly permit public plaintext HTTP for both primary and light model endpoints.
+    /// Explicitly permit public plaintext HTTP for the selected model endpoint.
     pub allow_insecure_http: bool,
     pub api_model: Option<String>,
     pub api_key_env: OptionalModelOption<String>,
     /// Trusted operator-mounted credential path. This is internal runtime
     /// composition state and is never populated from ordinary CLI/HTTP input.
     pub trusted_api_key_file: Option<PathBuf>,
-    /// Independently route-bound credential for the optional light client.
-    /// The resolver attaches it only when backend, endpoint, and absent
-    /// selector all match exactly.
-    pub trusted_light_credential: Option<TrustedLightCredential>,
     pub extra_headers: Option<BTreeMap<String, String>>,
-    /// Optional light worker model; `Some` enables weight-classified
-    /// dispatch for the session, `None` keeps single-model behavior.
-    pub light_model: Option<LightModelSettings>,
 }
 
 /// Ephemeral model inputs needed to reconstruct a persisted session.
@@ -62,7 +55,6 @@ pub struct ModelOptions {
 #[derive(Debug, Clone, Default)]
 pub struct ResumeModelOptions {
     pub trusted_api_key_file: Option<PathBuf>,
-    pub trusted_light_credential: Option<TrustedLightCredential>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -103,21 +95,10 @@ impl SandboxOptions {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct WorkerDispatchOptions {
-    pub session_id: String,
-    pub thread_name: String,
-    pub dispatch_id: String,
-    pub action: String,
-    pub source_threads: Vec<String>,
-    pub skills: Vec<String>,
-}
-
-#[derive(Debug, Clone, Default)]
 pub struct RunOptions {
     pub workspace_cwd: PathBuf,
     /// Local cwd for config/store resolution; SSH workspaces are remote.
     pub config_cwd: Option<PathBuf>,
-    pub worker_executable: Option<PathBuf>,
     pub store: StoreOptions,
     pub model: ModelOptions,
     /// New-session override. `None` defaults to 70% of the resolved model's
@@ -193,22 +174,8 @@ impl SshOptions {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct ManagedWorkerOptions {
-    pub workspace_cwd: PathBuf,
-    /// Local cwd for config/store resolution; SSH workspaces are remote.
-    pub config_cwd: Option<PathBuf>,
-    pub dispatch: WorkerDispatchOptions,
-    pub store: StoreOptions,
-    pub model: ModelOptions,
-    pub sandbox: SandboxOptions,
-    /// How to reach the host of a remote worker; mutually exclusive with sandbox.
-    pub ssh: SshOptions,
-}
-
-#[derive(Debug, Clone, Default)]
 pub struct ResumeOptions {
     pub lookup_cwd: PathBuf,
-    pub worker_executable: Option<PathBuf>,
     pub session_id: Option<String>,
     pub last: bool,
     pub store: StoreOptions,
@@ -287,7 +254,7 @@ impl RuntimeSession {
     pub fn behavior(&self) -> sessions::SessionBehavior {
         match self {
             Self::Active { snapshot, .. } => snapshot.behavior,
-            Self::Picker { .. } => sessions::SessionBehavior::Orchestrator,
+            Self::Picker { .. } => sessions::SessionBehavior::Direct,
         }
     }
 }
@@ -337,20 +304,8 @@ impl SessionRunConfig {
         self.agent.set_command_environment_provider(provider);
     }
 }
-
 #[derive(Debug, Clone)]
 pub struct ResumePickerRunConfig {
     pub store_path: PathBuf,
     pub lookup_cwd: PathBuf,
-    pub worker_executable: Option<PathBuf>,
-}
-
-#[expect(
-    clippy::large_enum_variant,
-    reason = "run-state variants own construction inputs and avoid heap indirection on the hot path"
-)]
-pub enum RunState {
-    Session { run_config: SessionRunConfig },
-    ResumePicker(ResumePickerRunConfig),
-    ManagedWorker(ManagedWorkerRunConfig),
 }

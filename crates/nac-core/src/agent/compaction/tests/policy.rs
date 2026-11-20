@@ -1,5 +1,5 @@
 use super::super::*;
-use super::{assistant, candidate, state, state_with_policy, temp_store_path, user};
+use super::{assistant, candidate, state, temp_store_path, user};
 
 use sha2::{Digest, Sha256};
 
@@ -11,30 +11,6 @@ use crate::types::{FunctionCall, Message, ToolCall};
 
 fn as_transcript(messages: &[Message]) -> crate::agent::TranscriptMessages {
     messages.to_vec().into()
-}
-
-#[test]
-fn nac_prompt_matches_approved_bytes_hash_and_text() {
-    const EXPECTED_SHA256: [u8; 32] = [
-        0xdf, 0x7d, 0xa7, 0xf9, 0xa9, 0xff, 0xa5, 0x8a, 0x6d, 0x3d, 0xb5, 0xf9, 0xac, 0xc7, 0xa1,
-        0x22, 0x25, 0xc6, 0x6f, 0x51, 0xce, 0xe9, 0x86, 0x17, 0xbf, 0xab, 0x62, 0x32, 0x38, 0x4c,
-        0x37, 0x25,
-    ];
-    assert_eq!(NAC_COMPACTION_PROMPT.len(), 2_817);
-    assert!(NAC_COMPACTION_PROMPT.ends_with('\n'));
-    assert!(!NAC_COMPACTION_PROMPT.ends_with("\n\n"));
-    assert_eq!(
-        Sha256::digest(NAC_COMPACTION_PROMPT.as_bytes())[..],
-        EXPECTED_SHA256
-    );
-    assert!(NAC_COMPACTION_PROMPT.starts_with(
-        "Internal NAC context-compaction request.\n\nReturn one concise, standalone historical checkpoint"
-    ));
-    assert!(NAC_COMPACTION_PROMPT.contains("## Orchestration history\n"));
-    assert!(NAC_COMPACTION_PROMPT.contains("## State at the end of the supplied history\n"));
-    assert!(NAC_COMPACTION_PROMPT.ends_with(
-        "Omit empty sections, routine operations, raw logs, hidden reasoning, low-value IDs, repeated chronology, and unsupported claims.\n"
-    ));
 }
 
 #[test]
@@ -59,78 +35,6 @@ fn direct_prompt_matches_approved_bytes_hash_and_text() {
     assert!(!NAC_DIRECT_COMPACTION_PROMPT.contains("## Orchestration history\n"));
 }
 
-#[test]
-fn direct_and_orchestrator_checkpoints_use_distinct_compatible_policies() {
-    let path = temp_store_path("behavior_policy");
-    store::initialize(&path).unwrap();
-    store::insert_test_session(&path, "session");
-    let messages = vec![user("old"), assistant("answer"), user("current")];
-    let (source, orchestrator_policy) = checkpoint_digests(&messages, 2);
-    let (direct_source, direct_policy) =
-        checkpoint_digests_for_policy(&messages, 2, CompactionPolicy::Direct);
-    assert_eq!(source, direct_source);
-    assert_ne!(orchestrator_policy, direct_policy);
-
-    let orchestrator = append_orchestrator_compaction_checkpoint(
-        &path,
-        &NewOrchestratorCompactionCheckpoint {
-            session_id: "session".to_string(),
-            previous_checkpoint_id: None,
-            summary: installed_summary("orchestrator summary"),
-            tail_start_message_index: 2,
-            source_prefix_sha256: source,
-            system_policy_sha256: orchestrator_policy,
-            prompt_policy_version: PROMPT_POLICY_VERSION,
-            old_context_estimate: 100,
-            summary_prompt_tokens: None,
-            summary_completion_tokens: None,
-            new_context_estimate: 50,
-        },
-    )
-    .unwrap();
-    let direct = append_orchestrator_compaction_checkpoint(
-        &path,
-        &NewOrchestratorCompactionCheckpoint {
-            session_id: "session".to_string(),
-            previous_checkpoint_id: None,
-            summary: installed_summary("direct summary"),
-            tail_start_message_index: 2,
-            source_prefix_sha256: direct_source,
-            system_policy_sha256: direct_policy,
-            prompt_policy_version: DIRECT_PROMPT_POLICY_VERSION,
-            old_context_estimate: 100,
-            summary_prompt_tokens: None,
-            summary_completion_tokens: None,
-            new_context_estimate: 50,
-        },
-    )
-    .unwrap();
-
-    let mut orchestrator_state = state(path.clone(), None);
-    orchestrator_state
-        .restore_newest_valid_checkpoint(&messages)
-        .unwrap();
-    assert_eq!(
-        orchestrator_state.active_checkpoint_for_test().unwrap().id,
-        orchestrator.id
-    );
-    let mut direct_state = state_with_policy(path.clone(), None, CompactionPolicy::Direct);
-    direct_state
-        .restore_newest_valid_checkpoint(&messages)
-        .unwrap();
-    assert_eq!(
-        direct_state.active_checkpoint_for_test().unwrap().id,
-        direct.id
-    );
-
-    let direct_candidate =
-        candidate(direct_state.plan(&as_transcript(&messages), &[], CompactionReason::Manual));
-    assert!(matches!(
-        direct_candidate.summary_messages.last(),
-        Some(Message::User { content }) if content == NAC_DIRECT_COMPACTION_PROMPT
-    ));
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
-}
 #[test]
 fn installed_historical_wrapper_is_unchanged() {
     assert_eq!(
@@ -168,7 +72,7 @@ fn repeated_candidate_uses_previous_summary_and_only_newly_aged_messages() {
             tail_start_message_index: 3,
             source_prefix_sha256: source,
             system_policy_sha256: policy,
-            prompt_policy_version: PROMPT_POLICY_VERSION,
+            prompt_policy_version: DIRECT_PROMPT_POLICY_VERSION,
             old_context_estimate: 10_000,
             summary_prompt_tokens: Some(8_000),
             summary_completion_tokens: Some(500),
@@ -189,7 +93,7 @@ fn repeated_candidate_uses_previous_summary_and_only_newly_aged_messages() {
             {"role":"system","content":"system"},
             {"role":"user","content":installed_summary("prior summary")},
             {"role":"user","content":"aged since checkpoint"},
-            {"role":"user","content":NAC_COMPACTION_PROMPT}
+            {"role":"user","content":NAC_DIRECT_COMPACTION_PROMPT}
         ])
     );
 
@@ -213,7 +117,7 @@ fn repeated_candidate_uses_previous_summary_and_only_newly_aged_messages() {
             tail_start_message_index: 1,
             source_prefix_sha256: end_source,
             system_policy_sha256: end_policy,
-            prompt_policy_version: PROMPT_POLICY_VERSION,
+            prompt_policy_version: DIRECT_PROMPT_POLICY_VERSION,
             old_context_estimate: 100,
             summary_prompt_tokens: None,
             summary_completion_tokens: None,
@@ -273,8 +177,46 @@ fn policy_digest_covers_every_ordered_system_even_after_boundary() {
     assert_ne!(policy, reordered_policy);
 }
 #[test]
-fn version_one_checkpoint_is_invalidated() {
-    let path = temp_store_path("version_one");
+fn historical_orchestrator_digest_does_not_validate_as_direct() {
+    // Captured from the retired v2 policy for this transcript, before removal.
+    let historical_policy = [
+        0xc7, 0xbf, 0x93, 0x4d, 0x40, 0x7d, 0xfd, 0x0f, 0xe4, 0xdd, 0xae, 0x7f, 0x5f, 0x0d, 0xa8,
+        0xe3, 0xfa, 0xf0, 0x43, 0x5e, 0x37, 0x9a, 0x2b, 0x02, 0x53, 0x9f, 0xce, 0x52, 0x0a, 0x53,
+        0x40, 0x3f,
+    ];
+    let path = temp_store_path("historical_policy");
+    store::initialize(&path).unwrap();
+    store::insert_test_session(&path, "session");
+    let messages = vec![user("old"), assistant("answer"), user("current")];
+    let (source, direct_policy) = checkpoint_digests(&messages, 2);
+    assert_ne!(historical_policy, direct_policy);
+    append_orchestrator_compaction_checkpoint(
+        &path,
+        &NewOrchestratorCompactionCheckpoint {
+            session_id: "session".to_string(),
+            previous_checkpoint_id: None,
+            summary: installed_summary("old policy summary"),
+            tail_start_message_index: 2,
+            source_prefix_sha256: source,
+            system_policy_sha256: historical_policy,
+            // Isolate digest validation from the version check.
+            prompt_policy_version: DIRECT_PROMPT_POLICY_VERSION,
+            old_context_estimate: 100,
+            summary_prompt_tokens: None,
+            summary_completion_tokens: None,
+            new_context_estimate: 50,
+        },
+    )
+    .unwrap();
+    let mut state = state(path.clone(), None);
+    state.restore_newest_valid_checkpoint(&messages).unwrap();
+    assert!(state.active_checkpoint_for_test().is_none());
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn stale_policy_version_checkpoint_is_invalidated() {
+    let path = temp_store_path("stale_policy_version");
     store::initialize(&path).unwrap();
     store::insert_test_session(&path, "session");
     let messages = vec![user("old"), assistant("answer"), user("current")];
@@ -284,11 +226,11 @@ fn version_one_checkpoint_is_invalidated() {
         &NewOrchestratorCompactionCheckpoint {
             session_id: "session".to_string(),
             previous_checkpoint_id: None,
-            summary: installed_summary("v1 summary"),
+            summary: installed_summary("stale policy summary"),
             tail_start_message_index: 2,
             source_prefix_sha256: source,
             system_policy_sha256: policy,
-            prompt_policy_version: 1,
+            prompt_policy_version: 2,
             old_context_estimate: 100,
             summary_prompt_tokens: None,
             summary_completion_tokens: None,

@@ -380,7 +380,7 @@ test("native saved-project launches open independent named-skill tasks across Gi
   );
   await page.screenshot({ path: info.outputPath("native-task-after.png"), animations: "disabled" });
   await page.setViewportSize({ width: 1280, height: 720 });
-  await harness.restart("1", undefined, true);
+  await harness.restart(undefined, true);
   await page.reload();
   harness.provider.enqueue(
     "retry",

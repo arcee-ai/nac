@@ -29,13 +29,24 @@ fn recent_shell_history_is_bounded_read_only_and_session_scoped() {
 }
 
 fn fixture(label: &str) -> (PathBuf, Arc<SessionOperationLease>, ShellCommandSnapshot) {
+    fixture_with_historical_schema(label, false)
+}
+
+fn fixture_with_historical_schema(
+    label: &str,
+    historical: bool,
+) -> (PathBuf, Arc<SessionOperationLease>, ShellCommandSnapshot) {
     let path = std::env::temp_dir()
         .join(format!(
             "nac-human-journal-{label}-{}",
             uuid::Uuid::new_v4()
         ))
         .join("store.db");
-    crate::store::initialize(&path).unwrap();
+    if historical {
+        crate::store::initialize_synthetic_predecessor(&path).unwrap();
+    } else {
+        crate::store::initialize(&path).unwrap();
+    }
     crate::store::insert_test_session(&path, "session");
     open_runtime_connection(&path)
         .unwrap()
@@ -98,7 +109,7 @@ fn human_shell_result_reconciles_lost_commit_ack_and_fences_stale_writers() {
 
 #[test]
 fn human_shell_schema_upgrade_from_32_preserves_existing_sessions() {
-    let (path, lease, _) = fixture("migration");
+    let (path, lease, _) = fixture_with_historical_schema("migration", true);
     drop(lease);
     let connection = open_runtime_connection(&path).unwrap();
     let before: String = connection

@@ -609,53 +609,6 @@ impl TranscriptLogWriter {
         .map(|_| ())
     }
 
-    /// Steering acknowledgement is an effect of the same identified commit.
-    pub fn append_claimed_thread_steering(
-        &self,
-        session_id: &str,
-        dispatch_id: &str,
-        steering_ids: &[i64],
-        start_idx: u64,
-        messages: &[Message],
-    ) -> Result<()> {
-        coordinate_writer!(self, Result<()>, {
-            session_id: String = session_id.to_owned(),
-            dispatch_id: String = dispatch_id.to_owned(),
-            steering_ids: Vec<i64> = steering_ids.to_vec(),
-            start_idx: u64 = start_idx,
-            messages: Vec<Message> = messages.to_vec(),
-        }, call |command| command.writer.append_claimed_thread_steering(&command.session_id, &command.dispatch_id, &command.steering_ids, command.start_idx, &command.messages),
-        correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id)));
-
-        if steering_ids.len() != messages.len() {
-            anyhow::bail!(
-                "steering acknowledgement/message count mismatch: {} ids for {} messages",
-                steering_ids.len(),
-                messages.len()
-            );
-        }
-        if messages.is_empty() {
-            return Ok(());
-        }
-        let effect = format!("steering:{dispatch_id}:{steering_ids:?}");
-        self.commit_append(
-            session_id,
-            &self.append_identity(start_idx, &effect),
-            Some(start_idx),
-            messages,
-            AppendPurpose::Messages,
-            |transaction| {
-                super::steering::acknowledge_thread_steering_batch_with_connection(
-                    transaction,
-                    steering_ids,
-                    session_id,
-                    dispatch_id,
-                )
-            },
-        )
-        .map(|_| ())
-    }
-
     pub fn append_run_prompt(
         &self,
         session_id: &str,

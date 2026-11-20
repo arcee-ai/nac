@@ -281,7 +281,6 @@ fn stable_binary_reports_identity_and_preserves_future_store_on_real_http_routes
             ssh_host: None,
             ssh_port: None,
             ssh_identity_file: None,
-            default_model_config_id: None,
         },
     )
     .unwrap();

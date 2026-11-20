@@ -698,9 +698,6 @@ async fn sanitized_markers_are_not_masked_again_by_tool_results_or_byte_pages() 
                 vec!["REDACTED".into()],
             ))
         }
-        fn worker_environment(&self) -> nac_contracts::WorkerEnvironment {
-            Default::default()
-        }
     }
     let mut runtime = test_runtime();
     runtime.command_environment = Some(Arc::new(Environment));

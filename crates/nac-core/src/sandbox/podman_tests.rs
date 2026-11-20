@@ -242,24 +242,6 @@ fn pull_error_detail_prefers_the_error_line_over_progress() {
 }
 
 #[test]
-fn worker_cli_args_are_explicit() {
-    let args = sample_session().worker_cli_args();
-    let rendered: Vec<String> = args
-        .into_iter()
-        .map(|value| value.to_string_lossy().to_string())
-        .collect();
-    assert!(rendered.contains(&"--sandbox".to_string()));
-    assert!(rendered.contains(&"--no-mount-cwd".to_string()));
-    assert!(rendered.contains(&"--sandbox-session-key".to_string()));
-    assert!(rendered.contains(&"--sandbox-mount".to_string()));
-    assert!(rendered.contains(&"/tmp/project".to_string()));
-    assert!(rendered.contains(&"/workspace".to_string()));
-    assert!(!rendered.contains(&"/tmp/project:/workspace".to_string()));
-    assert!(rendered.contains(&"--sandbox-shm-size".to_string()));
-    assert!(rendered.contains(&"0".to_string()));
-}
-
-#[test]
 fn create_container_args_include_mounts_and_command() {
     let args = sample_session().create_container_args().unwrap();
     let rendered: Vec<String> = args
@@ -295,31 +277,21 @@ fn create_container_args_preserve_colons_in_typed_mount_paths() {
         .map(|value| value.to_string_lossy().to_string())
         .collect();
     assert!(rendered.contains(&"type=bind,src=/tmp/nac:home/worktree,dst=/workspace".to_string()));
-    let worker_args = session.worker_cli_args();
-    assert!(worker_args.windows(3).any(|args| {
-        args == [
-            OsString::from("--sandbox-mount"),
-            OsString::from("/tmp/nac:home/worktree"),
-            OsString::from("/workspace"),
-        ]
-    }));
 }
 
 #[cfg(unix)]
 #[test]
-fn worker_cli_args_preserve_non_utf_mount_paths() {
-    use std::os::unix::ffi::OsStringExt;
-
+fn container_args_preserve_non_utf_mount_paths() {
+    use std::os::unix::ffi::{OsStrExt, OsStringExt};
     let host = PathBuf::from(OsString::from_vec(b"/tmp/nac-\xff-worktree".to_vec()));
     let mut session = sample_session();
     session.spec.mounts[0].host = host.clone();
-
-    let args = session.worker_cli_args();
-    assert!(args.windows(3).any(|args| {
-        args[0] == OsString::from("--sandbox-mount")
-            && args[1] == host.as_os_str()
-            && args[2] == OsString::from("/workspace")
-    }));
+    let args = session.create_container_args().unwrap();
+    assert!(args.iter().any(|arg| arg
+        .as_os_str()
+        .as_bytes()
+        .windows(host.as_os_str().as_bytes().len())
+        .any(|part| part == host.as_os_str().as_bytes())));
 }
 
 #[test]

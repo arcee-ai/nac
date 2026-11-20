@@ -53,13 +53,12 @@ function namedSessions(timeline: readonly InsightTurnSection[]): DelegatedRowKey
  */
 function awaitsRecords(
   named: readonly DelegatedRowKey[],
-  kind: "child" | "orchestrator",
   knownIds: readonly string[] | undefined,
 ): boolean {
-  const wanted = named.filter((key) => key.startsWith(`${kind}:`));
+  const wanted = named.filter((key) => key.startsWith("child:"));
   if (!wanted.length) return false;
   if (!knownIds) return true;
-  const known = new Set(knownIds.map((id) => `${kind}:${id}`));
+  const known = new Set(knownIds.map((id) => `child:${id}`));
   return wanted.some((key) => !known.has(key));
 }
 
@@ -85,7 +84,6 @@ export function useDelegatedSessions(
     delegating &&
       awaitsRecords(
         named,
-        "child",
         cachedChildren?.map((child) => child.child_session_id),
       ),
   );

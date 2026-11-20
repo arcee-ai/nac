@@ -9,7 +9,7 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { ScriptedProvider } from "../../crates/nac-server/web/e2e/scripted-provider.ts";
-import { exerciseOwnedWorker } from "./owned_worker_fixture.mjs";
+import { exerciseOwnedDirect } from "./owned_direct_fixture.mjs";
 
 const execute = promisify(execFile);
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -116,7 +116,7 @@ async function runCase(source, destination, scenario) {
     childPID = child.pid;
     evidence.child = child;
     evidence.selected_store = store;
-    if (scenario === "owned-worker") {
+    if (scenario === "owned-direct") {
       // Observe only this verified engine's listener, never a fixed/default port.
       const base = await until("owned engine loopback listener", async () => {
         try {
@@ -133,7 +133,7 @@ async function runCase(source, destination, scenario) {
       });
       assert.equal(policyStatus, 404);
       evidence.retired_ui_policy_status = policyStatus;
-      Object.assign(evidence, await exerciseOwnedWorker({provider, base, workspace, store, executable, enginePID:childPID}));
+      Object.assign(evidence, await exerciseOwnedDirect({provider, base, workspace, store, executable, enginePID:childPID}));
     }
     const stoppedAt = Date.now();
     await ownedSignal(appPID, native, "SIGTERM");
@@ -170,6 +170,6 @@ async function runCase(source, destination, scenario) {
 
 const source = await fs.realpath(process.argv[2]);
 const destination = path.resolve(process.argv[3]);
-const scenarios = process.env.NAC_STARTUP_LIFECYCLE_CASES?.split(",") ?? ["owned-worker", "preflight-parent-loss"];
-assert(scenarios.length && scenarios.every(value => ["owned-worker", "preflight-parent-loss"].includes(value)));
+const scenarios = process.env.NAC_STARTUP_LIFECYCLE_CASES?.split(",") ?? ["owned-direct", "preflight-parent-loss"];
+assert(scenarios.length && scenarios.every(value => ["owned-direct", "preflight-parent-loss"].includes(value)));
 for (const scenario of scenarios) await runCase(source, destination, scenario);

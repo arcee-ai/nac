@@ -26,14 +26,13 @@ impl<'a> SessionIntegrationApplication<'a> {
         let _lifecycle = gate.lock().await;
         let path = self.manager.inner.store_path.clone();
         let id = session.to_string();
-        let (request, behavior, config_version) = self
+        let (request, config_version) = self
             .manager
             .inner
             ._store_ownership
             .call_legacy(move || -> Result<_> {
                 Ok((
                     store::load_session_mcp_refresh(&path, &id)?,
-                    sessions::load_session_behavior(&path, &id)?,
                     sessions::load_session_config(&path, &id)?.config_version,
                 ))
             })
@@ -58,8 +57,6 @@ impl<'a> SessionIntegrationApplication<'a> {
             incarnation_id: None,
             state: if request.revision == 0 {
                 SessionMcpRefreshState::NotRequested
-            } else if behavior == sessions::SessionBehavior::Orchestrator {
-                SessionMcpRefreshState::ScheduledForWorkers
             } else {
                 SessionMcpRefreshState::Pending
             },

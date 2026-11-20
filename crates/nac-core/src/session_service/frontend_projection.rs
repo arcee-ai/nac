@@ -5,41 +5,18 @@ impl SessionService {
         view::list_sessions(&self.metadata.store_path)
     }
 
-    pub fn list_threads(&self) -> Result<Vec<ThreadSnapshot>> {
-        view::list_threads(
-            &self.metadata.store_path,
-            self.metadata.session_id.as_deref(),
-        )
-    }
-
-    pub fn thread_episodes(&self, thread_name: &str) -> Result<Vec<EpisodeSnapshot>> {
-        view::load_thread_episodes(
-            &self.metadata.store_path,
-            self.metadata.session_id.as_deref(),
-            thread_name,
-        )
-    }
-
-    pub fn all_thread_episodes(&self) -> Result<HashMap<String, Vec<EpisodeSnapshot>>> {
-        view::load_all_thread_episodes(
-            &self.metadata.store_path,
-            self.metadata.session_id.as_deref(),
-        )
-    }
-
-    fn load_all_thread_events_with_connection(
+    fn load_primary_tool_events_with_connection(
         &self,
         conn: &rusqlite::Connection,
         per_thread_limit: usize,
     ) -> Result<DecodedThreadEvents> {
         let Some(session_id) = self.metadata.session_id.as_deref() else {
             return Ok(DecodedThreadEvents {
-                events: HashMap::new(),
                 primary_tool_events: Vec::new(),
                 diagnostics: Vec::new(),
             });
         };
-        let records = crate::store::load_all_thread_events_with_connection(
+        let records = crate::store::load_primary_tool_events_with_connection(
             conn,
             session_id,
             per_thread_limit,
@@ -81,7 +58,7 @@ impl SessionService {
             read_stored_projection(&connection, session_id, options, || {
                 self.event_bus
                     .thread_event_boundary(|| {
-                        self.load_all_thread_events_with_connection(
+                        self.load_primary_tool_events_with_connection(
                             &connection,
                             options.thread_event_limit,
                         )
@@ -91,13 +68,9 @@ impl SessionService {
         };
         let StoredFrontendProjection {
             sessions,
-            threads,
-            thread_episodes,
             thread_events,
             thread_event_boundary,
-            thread_steering,
             run_failure,
-            worksets,
             forks,
         } = projection;
         let thread_event_boundary = thread_event_boundary.ok_or_else(|| {
@@ -105,163 +78,33 @@ impl SessionService {
         })?;
         Ok(FrontendSnapshotBlockingLoad {
             sessions,
-            threads,
-            thread_episodes,
             thread_events,
             thread_event_boundary,
-            thread_steering,
             forks,
             run_failure,
-            worksets,
             workspace,
         })
     }
 }
 
-fn decode_thread_events(
-    records: HashMap<String, Vec<crate::store::ThreadEventRecord>>,
-) -> DecodedThreadEvents {
-    let mut events = HashMap::new();
+fn decode_thread_events(records: Vec<crate::store::ThreadEventRecord>) -> DecodedThreadEvents {
     let mut primary_tool_events = Vec::new();
     let mut diagnostics = Vec::new();
-    let mut records: Vec<_> = records.into_iter().collect();
-    records.sort_by(|(left, _), (right, _)| left.cmp(right));
-    for (thread_name, records) in records {
-        let decoded = records
-            .into_iter()
-            .filter_map(|record| decode_thread_event(record, &mut diagnostics))
-            .collect::<Vec<_>>();
-        if thread_name == crate::events::PRIMARY_TOOL_EVENT_TARGET {
-            let mut ordinary_events = Vec::new();
-            for event in decoded {
-                match &event {
-                    AgentEvent::ToolCallStarted {
-                        thread_name: None, ..
-                    }
-                    | AgentEvent::ToolCallFinished {
-                        thread_name: None, ..
-                    } => primary_tool_events.push(event),
-                    _ => ordinary_events.push(event),
-                }
-            }
-            // A model-selected worker name can equal the private persistence
-            // bucket. Preserve any genuinely thread-owned rows rather than
-            // hiding that durable transcript behind the projection detail.
-            if !ordinary_events.is_empty() {
-                events.insert(thread_name, ordinary_events);
-            }
-            continue;
-        }
-        if !decoded.is_empty() {
-            events.insert(thread_name, decoded);
+    for record in records {
+        if let Some(
+            event @ (AgentEvent::ToolCallStarted { .. } | AgentEvent::ToolCallFinished { .. }),
+        ) = decode_thread_event(record, &mut diagnostics)
+        {
+            primary_tool_events.push(event);
         }
     }
     DecodedThreadEvents {
-        events,
         primary_tool_events,
         diagnostics,
     }
 }
 
 impl SessionService {
-    pub fn thread_events_page(
-        &self,
-        thread_name: &str,
-        before_id: Option<i64>,
-        limit: usize,
-    ) -> Result<ThreadEventPage> {
-        let session_id = self
-            .metadata
-            .session_id
-            .as_deref()
-            .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
-        let (thread_event_boundary, (records, has_older)) = if before_id.is_none() {
-            // Persistence also checks out before taking the event state lock.
-            // Keep the latest-page snapshot on the same order so capacity
-            // saturation cannot deadlock emitters against this boundary.
-            let (boundary, records) =
-                if crate::store::coordinator::owner_for(&self.metadata.store_path)?.is_some() {
-                    self.event_bus.thread_event_boundary(|| {
-                        crate::store::load_thread_events_page(
-                            &self.metadata.store_path,
-                            session_id,
-                            thread_name,
-                            before_id,
-                            limit,
-                        )
-                    })?
-                } else {
-                    let connection =
-                        crate::store::open_runtime_connection(&self.metadata.store_path)?;
-                    let load = || {
-                        crate::store::load_thread_events_page_with_connection(
-                            &connection,
-                            session_id,
-                            thread_name,
-                            before_id,
-                            limit,
-                        )
-                    };
-                    self.event_bus.thread_event_boundary(load)?
-                };
-            (Some(boundary), records)
-        } else {
-            (
-                None,
-                crate::store::load_thread_events_page(
-                    &self.metadata.store_path,
-                    session_id,
-                    thread_name,
-                    before_id,
-                    limit,
-                )?,
-            )
-        };
-        let next_before_id = records.last().map(|record| record.id);
-        let mut diagnostics = Vec::new();
-        let events = records
-            .into_iter()
-            .filter_map(|record| {
-                let id = record.id;
-                let created_at = record.created_at.clone();
-                decode_thread_event(record, &mut diagnostics).map(|event| ThreadEventPageItem {
-                    id,
-                    created_at,
-                    event,
-                })
-            })
-            .collect();
-        Ok(ThreadEventPage {
-            next_before_id,
-            events,
-            has_older,
-            thread_event_boundary,
-            diagnostics,
-        })
-    }
-
-    pub fn list_worksets(&self) -> Result<Vec<WorksetSummarySnapshot>> {
-        view::list_worksets(
-            &self.metadata.store_path,
-            self.metadata.session_id.as_deref(),
-        )
-    }
-
-    pub fn read_workset(&self, workset_id: &str) -> Result<Option<WorksetSnapshot>> {
-        view::read_workset(
-            &self.metadata.store_path,
-            self.metadata.session_id.as_deref(),
-            workset_id,
-        )
-    }
-
-    pub fn worksets_snapshot(&self) -> WorksetsSnapshot {
-        view::worksets_snapshot(
-            &self.metadata.store_path,
-            self.metadata.session_id.as_deref(),
-        )
-    }
-
     pub fn workspace_snapshot(&self) -> WorkspaceSnapshot {
         view::workspace_snapshot(&self.metadata.cwd, self.workspace_git.as_ref())
     }
@@ -290,9 +133,7 @@ impl SessionService {
         &self,
         options: FrontendSnapshotLoadOptions,
     ) -> Result<SessionFrontendSnapshotLoad> {
-        let shell_commands = if self.metadata.session_id.is_some()
-            && self.metadata.behavior != sessions::SessionBehavior::Orchestrator
-        {
+        let shell_commands = if self.metadata.session_id.is_some() {
             self.shell_commands().await?
         } else {
             Vec::new()
@@ -306,7 +147,6 @@ impl SessionService {
         let blocking_task = crate::store::spawn_blocking_store_caller(move || {
             blocking_service.load_frontend_snapshot_blocking(options)
         });
-        let active_threads = self.active_thread_names();
         let blocking = blocking_task
             .await
             .map_err(|error| anyhow::anyhow!("frontend snapshot load task failed: {error}"))??;
@@ -338,7 +178,7 @@ impl SessionService {
             }
             FrontendSnapshotMessages::Page(request) => {
                 let page = self.page_store_transcript(request).await?;
-                let cycle = self.message_cycle_from_store().await?;
+                let cycle = self.message_cycle_from_store();
                 LoadedFrontendMessages {
                     canonical_message_indices: page.canonical_message_indices,
                     tool_call_occurrences: page.tool_call_occurrences,
@@ -351,10 +191,6 @@ impl SessionService {
             }
         };
 
-        let covered_orchestrator_steering_ids = {
-            let scan = self.lock_transcript_scan();
-            covered_ids_from_scan(&blocking.thread_steering, &scan)
-        };
         let mut metadata = self.metadata();
         metadata.extra_headers.clear();
         let transcript_warning = self
@@ -373,17 +209,10 @@ impl SessionService {
             active_compaction: self.active_compaction(),
             shell_commands,
             sessions: blocking.sessions,
-            active_threads,
-            threads: blocking.threads,
-            thread_episodes: blocking.thread_episodes,
-            thread_events: blocking.thread_events.events,
             primary_tool_events: blocking.thread_events.primary_tool_events,
             thread_event_boundary: blocking.thread_event_boundary,
             thread_event_diagnostics: blocking.thread_events.diagnostics,
-            thread_steering: blocking.thread_steering,
-            covered_orchestrator_steering_ids,
             forks: blocking.forks,
-            worksets: blocking.worksets,
             workspace: blocking.workspace,
         };
         Ok(SessionFrontendSnapshotLoad {
@@ -399,13 +228,9 @@ impl SessionService {
 
 struct StoredFrontendProjection {
     sessions: Vec<SessionSummarySnapshot>,
-    threads: Vec<ThreadSnapshot>,
-    thread_episodes: HashMap<String, Vec<EpisodeSnapshot>>,
     thread_events: DecodedThreadEvents,
     thread_event_boundary: Option<SessionEventBoundary>,
-    thread_steering: Vec<crate::store::ThreadSteeringRecord>,
     forks: Vec<crate::store::SessionForkLink>,
-    worksets: WorksetsSnapshot,
     run_failure: Option<crate::run_failure::RunFailure>,
 }
 
@@ -420,17 +245,7 @@ fn read_stored_projection(
     } else {
         Vec::new()
     };
-    let threads = view::list_threads_with_connection(conn, session_id)?;
-    let thread_episodes = view::load_all_thread_episodes_with_connection(conn, session_id)?;
     let (thread_event_boundary, thread_events) = load_events()?;
-    let worksets = view::worksets_snapshot_with_connection(conn, session_id);
-    // Keep this final storage read adjacent to the transcript scan so
-    // a delivery committed during slower workspace inspection has the
-    // current status needed to cover its canonical message.
-    let thread_steering = session_id
-        .map(|session_id| crate::store::list_thread_steering_with_connection(conn, session_id))
-        .transpose()?
-        .unwrap_or_default();
     let forks = session_id
         .map(|session_id| crate::store::list_session_forks_with_connection(conn, session_id))
         .transpose()?
@@ -453,13 +268,9 @@ fn read_stored_projection(
 
     Ok(StoredFrontendProjection {
         sessions,
-        threads,
-        thread_episodes,
         thread_events,
         thread_event_boundary,
-        thread_steering,
         run_failure,
-        worksets,
         forks,
     })
 }
@@ -493,7 +304,7 @@ impl crate::store::coordinator::PersistenceCommand for ReadFrontendProjection {
             || {
                 let records = session_id
                     .map(|session_id| {
-                        crate::store::load_all_thread_events_with_connection(
+                        crate::store::load_primary_tool_events_with_connection(
                             &connection,
                             session_id,
                             self.options.thread_event_limit,

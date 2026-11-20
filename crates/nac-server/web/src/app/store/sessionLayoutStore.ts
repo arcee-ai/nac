@@ -5,18 +5,14 @@
 import type { InsightsFilter } from "@/app/features/insights/model/types";
 import { createStore, standalonePreferenceStorage } from "@/app/lib/store";
 
-/** What the Insights detail shows. A thread reads its name from `selectedThread`. */
-export type InsightSelection =
-  | { kind: "group"; groupId: string; segmentKey: string | null }
-  | { kind: "thread" };
+/** What the Insights detail shows. */
+export type InsightSelection = { kind: "group"; groupId: string; segmentKey: string | null };
 
 /** A reader-owned origin. Streaming data never writes these saved pointers. */
 interface InsightsReturnContext {
   insightSelectionEpoch: number;
   insightFocusNonce: number;
   selectedInsight: InsightSelection | null;
-  selectedThread: string | null;
-  selectedThreadEpisode: string | null;
   expandedInsightGroups: ReadonlySet<string>;
   insightsFilter: InsightsFilter;
   panelList: boolean;
@@ -77,14 +73,6 @@ interface SessionLayoutState {
    * phone, in place of the detail on a tablet. Wide layouts ignore this.
    */
   panelList: boolean;
-  /** Thread the chat last pointed Insights at; its detail shows this one. */
-  selectedThread: string | null;
-  /**
-   * Which of that thread's chat cards did the pointing, or null when the pick
-   * came from the panel's own list. A re-dispatched thread has one card per
-   * episode, and only the card clicked belongs highlighted.
-   */
-  selectedThreadEpisode: string | null;
   /** Entry the Insights detail shows; null until the panel or the chat picks one. */
   selectedInsight: InsightSelection | null;
   /**
@@ -95,8 +83,6 @@ interface SessionLayoutState {
   /** Insights groups whose child rows are open, by group id. */
   expandedInsightGroups: ReadonlySet<string>;
   insightsFilter: InsightsFilter;
-  /** Workset the chat last pointed the Worksets panel at. */
-  selectedWorkset: string | null;
   /** Open Subagents row per parent, kept so returning from a transcript reopens it. */
   selectedSubagents: ReadonlyMap<string, string>;
   /** Revision the panels are looking at, or null for the live working tree. */
@@ -138,13 +124,10 @@ export function createSessionLayoutStore(
     dockable: false,
     drawerContent: "panel",
     panelList: false,
-    selectedThread: null,
-    selectedThreadEpisode: null,
     selectedInsight: null,
     insightFocusNonce: 0,
     expandedInsightGroups: new Set(),
     insightsFilter: "all",
-    selectedWorkset: null,
     selectedSubagents: new Map(),
     selectedRevision: null,
     selectedFile: null,
@@ -297,20 +280,6 @@ export function createSessionLayoutStore(
     applyCollapsed(false);
   }
 
-  function selectThread(
-    selectedThread: string | null,
-    selectedThreadEpisode: string | null = null,
-  ): void {
-    if (import.meta.env.DEV) {
-      console.debug("[nac:threads] select", {
-        name: selectedThread,
-        episode: selectedThreadEpisode,
-      });
-    }
-    setState({ selectedThread, selectedThreadEpisode });
-    if (selectedThread) showSidePanelList(false);
-  }
-
   /**
    * Point the Insights detail at an entry. Leaves the narrow list alone: a
    * group row both opens its children there and selects itself.
@@ -345,8 +314,6 @@ export function createSessionLayoutStore(
       insightSelectionEpoch: state.insightSelectionEpoch,
       insightFocusNonce: state.insightFocusNonce,
       selectedInsight: state.selectedInsight,
-      selectedThread: state.selectedThread,
-      selectedThreadEpisode: state.selectedThreadEpisode,
       expandedInsightGroups: state.expandedInsightGroups,
       insightsFilter: state.insightsFilter,
       panelList: state.panelList,
@@ -354,15 +321,10 @@ export function createSessionLayoutStore(
   }
 
   /** Capture only on an intentional jump, never on refetch or a stream delta. */
-  function rememberInsightsReturn(
-    parentSessionId: string,
-    shown: InsightSelection | null,
-    thread?: { name: string; episode: string | null },
-  ): void {
+  function rememberInsightsReturn(parentSessionId: string, shown: InsightSelection | null): void {
     const context = {
       ...insightsContext(),
       selectedInsight: shown,
-      ...(thread ? { selectedThread: thread.name, selectedThreadEpisode: thread.episode } : {}),
     };
     setState((state) => ({
       insightsReturns: new Map(state.insightsReturns).set(parentSessionId, context),
@@ -434,11 +396,6 @@ export function createSessionLayoutStore(
     }
   }
 
-  function selectWorkset(selectedWorkset: string | null): void {
-    setState({ selectedWorkset });
-    if (selectedWorkset) showSidePanelList(false);
-  }
-
   function selectSubagent(parentSessionId: string, key: string): void {
     if (getState().selectedSubagents.get(parentSessionId) === key) return;
     setState((state) => ({
@@ -475,29 +432,15 @@ export function createSessionLayoutStore(
 
   /**
    * Wipe the session-scoped pointers that belong to the inspector we just left.
-   * Threads, Insights entries, worksets, revisions, files and folders belong
-   * to one session, so carrying them into another would point the panels at
-   * something that is not theirs. A leftover selectedThread in particular was
-   * injected into the next session's thread list as a ghost row that vanished
-   * the moment you clicked a real one.
+   * Insights entries, revisions, files and folders belong to one session.
    */
   function resetSessionSelection(): void {
-    if (import.meta.env.DEV) {
-      const prev = getState();
-      console.debug("[nac:threads] resetSessionSelection", {
-        selectedThread: prev.selectedThread,
-        selectedWorkset: prev.selectedWorkset,
-      });
-    }
     setState({
       insightSelectionEpoch: ++nextInsightSelectionEpoch,
-      selectedThread: null,
-      selectedThreadEpisode: null,
       selectedInsight: null,
       insightFocusNonce: 0,
       expandedInsightGroups: new Set(),
       insightsFilter: "all",
-      selectedWorkset: null,
       selectedRevision: null,
       selectedFile: null,
       toggledFolders: new Set(),
@@ -505,22 +448,15 @@ export function createSessionLayoutStore(
     });
   }
 
-  if (import.meta.env.DEV) {
-    Object.assign(globalThis, { __nacSelectThread: selectThread });
-  }
-
   const useSidePanelCollapsed = () => useStore((s) => s.collapsed);
   const useSidePanelAnimate = () => useStore((s) => s.sidePanelAnimate);
   const useSidePanelExpanded = () => useStore((s) => s.expanded);
   const useDrawerContent = () => useStore((s) => s.drawerContent);
   const useSidePanelList = () => useStore((s) => s.panelList);
-  const useSelectedThread = () => useStore((s) => s.selectedThread);
-  const useSelectedThreadEpisode = () => useStore((s) => s.selectedThreadEpisode);
   const useSelectedInsight = () => useStore((s) => s.selectedInsight);
   const useInsightFocusNonce = () => useStore((s) => s.insightFocusNonce);
   const useExpandedInsightGroups = () => useStore((s) => s.expandedInsightGroups);
   const useInsightsFilter = () => useStore((s) => s.insightsFilter);
-  const useSelectedWorkset = () => useStore((s) => s.selectedWorkset);
   const useSelectedSubagent = (parentSessionId: string) =>
     useStore((s) => s.selectedSubagents.get(parentSessionId) ?? null);
   const useSelectedRevision = () => useStore((s) => s.selectedRevision);
@@ -544,11 +480,9 @@ export function createSessionLayoutStore(
     showSidePanelList,
     toggleSidePanelList,
     revealSidePanel,
-    selectThread,
     selectInsight,
     toggleInsightGroup,
     selectInsightsFilter,
-    selectWorkset,
     selectSubagent,
     selectRevision,
     selectFile,
@@ -567,13 +501,10 @@ export function createSessionLayoutStore(
     useSidePanelExpanded,
     useDrawerContent,
     useSidePanelList,
-    useSelectedThread,
-    useSelectedThreadEpisode,
     useSelectedInsight,
     useInsightFocusNonce,
     useExpandedInsightGroups,
     useInsightsFilter,
-    useSelectedWorkset,
     useSelectedSubagent,
     useSelectedRevision,
     useSelectedFile,
@@ -597,11 +528,9 @@ export const {
   showSidePanelList,
   toggleSidePanelList,
   revealSidePanel,
-  selectThread,
   selectInsight,
   toggleInsightGroup,
   selectInsightsFilter,
-  selectWorkset,
   selectSubagent,
   selectRevision,
   selectFile,
@@ -620,13 +549,10 @@ export const {
   useSidePanelExpanded,
   useDrawerContent,
   useSidePanelList,
-  useSelectedThread,
-  useSelectedThreadEpisode,
   useSelectedInsight,
   useInsightFocusNonce,
   useExpandedInsightGroups,
   useInsightsFilter,
-  useSelectedWorkset,
   useSelectedSubagent,
   useSelectedRevision,
   useSelectedFile,

@@ -29,12 +29,19 @@ import { startPackedPresentation } from "./packed-presentation-fixture";
 import { openNameZoom } from "./session-name-zoom";
 import { ownComposedCleanup, ownPackedCapturePage } from "./presentation-capture-page";
 import { finishPresentation } from "./presentation-lifetime";
+import {
+  captureApiEnvironment,
+  isCaptureApiPolicy,
+  matchesCaptureApiPolicy,
+  type CaptureApiPolicy,
+} from "./presentation-api-policy";
 
 type CaptureManifest = {
   role: "aggregate-D" | "owning-527-baseline" | "owning-527-final" | "owning-527-modal-baseline";
   purpose?: "contained-settings";
   frontendSource: string;
   apiSource: string;
+  apiPolicy: CaptureApiPolicy;
   apiBinarySha256: string;
   package: { path: string; sha256: string; integrity: string };
   frontend?: { directory: string; mapPath: string; mapSha256: string };
@@ -55,6 +62,7 @@ if (manifest) {
   for (const hash of [manifest.frontendSource, manifest.apiSource])
     assert(/^[a-f0-9]{40}$/.test(hash));
   assert(/^[a-f0-9]{64}$/.test(manifest.apiBinarySha256));
+  assert(isCaptureApiPolicy(manifest.apiPolicy), "Manifest must specify the exact API policy");
 }
 const aggregate = manifest?.role === "aggregate-D";
 const modalBaseline = manifest?.role === "owning-527-modal-baseline";
@@ -63,7 +71,8 @@ if (modalBaseline) {
   assert.equal(manifest.purpose, "contained-settings");
 }
 test.use({
-  orchestration: aggregate || modalBaseline ? "0" : "1",
+  // API policy is independently pinned; frontend role never selects it.
+  serverEnvironment: manifest ? captureApiEnvironment(manifest.apiPolicy) : {},
   hasTouch: true,
   trace: "on",
   screenshot: "off",
@@ -107,8 +116,8 @@ for (const transport of transports) {
       const producer = (await identity.json()) as { build: { source_revision: string } };
       assert.equal(producer.build.source_revision, manifest.apiSource);
       const policy = await request.get(`${harness.baseUrl}/ui-config`);
-      expect(policy.ok()).toBe(true);
-      expect((await policy.json()).orchestration_enabled).toBe(!(aggregate || modalBaseline));
+      const policyBody = policy.status() === 200 ? await policy.json() : null;
+      expect(matchesCaptureApiPolicy(manifest.apiPolicy, policy.status(), policyBody)).toBe(true);
       let sealed: Awaited<ReturnType<typeof sealFrontendAssets>> | undefined;
       if (manifest.frontend) {
         const bytes = await fs.readFile(manifest.frontend.mapPath);

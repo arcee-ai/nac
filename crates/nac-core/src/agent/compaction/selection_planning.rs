@@ -169,7 +169,7 @@ impl CompactionState {
         source: Option<&crate::store::TerminalSelectionProvenance>,
     ) -> bool {
         let source = source.filter(|source| source.count > 0);
-        checkpoint_frame_is_valid(checkpoint, messages, self.policy, source)
+        checkpoint_frame_is_valid(checkpoint, messages, source)
             && checkpoint_prefix_matches(checkpoint, messages, source)
     }
 
@@ -189,7 +189,7 @@ impl CompactionState {
             .selection_sources
             .get(&checkpoint.tail_start_message_index)
             .filter(|source| source.count > 0);
-        if !checkpoint_frame_is_valid(checkpoint, messages, self.policy, source) {
+        if !checkpoint_frame_is_valid(checkpoint, messages, source) {
             return false;
         }
         let verified = VerifiedPrefix {
@@ -266,16 +266,15 @@ impl CompactionState {
 fn checkpoint_frame_is_valid(
     checkpoint: &OrchestratorCompactionCheckpoint,
     messages: &[Message],
-    policy: CompactionPolicy,
     source: Option<&crate::store::TerminalSelectionProvenance>,
 ) -> bool {
-    checkpoint.prompt_policy_version == policy.version()
+    checkpoint.prompt_policy_version == DIRECT_PROMPT_POLICY_VERSION
         && checkpoint_boundary_is_valid(messages, checkpoint.tail_start_message_index)
         && checkpoint
             .summary
             .strip_prefix(HISTORICAL_CONTEXT_PREFIX)
             .is_some_and(|summary| !summary.trim().is_empty())
-        && checkpoint.system_policy_sha256 == system_policy_digest(messages, policy)
+        && checkpoint.system_policy_sha256 == system_policy_digest(messages)
         && source.is_none_or(|source| {
             super::super::provenance::validates(
                 &checkpoint.summary,

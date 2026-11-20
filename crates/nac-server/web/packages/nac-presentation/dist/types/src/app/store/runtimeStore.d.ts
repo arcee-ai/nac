@@ -1,7 +1,6 @@
-import { type ThreadLogLine } from "../lib/threadLog";
 import type { StreamStatus } from "../services/eventStream";
 import type { ActiveRunSnapshot, AgentEvent, AssistantStreamDelta, SessionEventEnvelope, RunFailure, TokenUsage } from "../types/api";
-export type RuntimeEventKind = "run" | "tool" | "mcp" | "thread" | "assistant" | "steering" | "compaction" | "error";
+export type RuntimeEventKind = "run" | "tool" | "mcp" | "assistant" | "steering" | "compaction" | "error";
 export interface RuntimeEvent {
     seq: number | null;
     kind: RuntimeEventKind;
@@ -9,19 +8,6 @@ export interface RuntimeEvent {
     isError: boolean;
     ts: number;
     local: boolean;
-}
-export interface RuntimeThread {
-    name: string;
-    status: "running" | "finished";
-    /** The active dispatch ended because the parent run was stopped. */
-    cancelled: boolean;
-    exitCode: number | null;
-    isError: boolean;
-    /**
-     * The commands the thread has issued and their results, oldest first. The
-     * card tails the last few lines of it and the side panel shows all of them.
-     */
-    log: ThreadLogLine[];
 }
 export interface RuntimeState {
     sessionId: string | null;
@@ -40,13 +26,6 @@ export interface RuntimeState {
     modelRetryAttempt: number | null;
     streamStatus: StreamStatus;
     events: RuntimeEvent[];
-    threads: Record<string, RuntimeThread>;
-    /**
-     * Orchestrator tool-call ids that have already emitted `tool_call_finished`.
-     * Used by the transcript so a workset badge can leave the pending state
-     * before the DAG batch commits its tool messages.
-     */
-    finishedToolCalls: Record<string, true>;
     /** Safe top-level tool lifecycle overlays, merged with durable snapshot rows by call id. */
     primaryToolEvents: AgentEvent[];
     /** Prose the current model call has produced so far. */
@@ -60,10 +39,6 @@ export interface RuntimeState {
      * the renderer drops whichever part the snapshot already covers.
      */
     streamSettled: boolean;
-    /**
-     * The buffers hold output from before the prompt sent last, and its run has
-     * neither started nor streamed since, so none of that output answers it.
-     */
     streamPredatesPrompt: boolean;
     /**
      * Prompt shown in the chat from the moment Send is pressed until the
@@ -99,7 +74,7 @@ export interface RuntimeState {
      */
     workspaceEpoch: number;
     /**
-     * Stop was painted; the HTTP cancel is still waiting on worker trees.
+     * Stop was painted; the HTTP cancel is still waiting for process cleanup.
      * Composer Send and transcript Regenerate stay blocked, and a still-live
      * `active_run` on the snapshot must not snap the chrome back to running.
      */
@@ -112,7 +87,6 @@ export declare function createRuntimeStore(_storage?: Pick<Storage, "getItem" | 
     runtimeStore: import("../lib/store").Store<RuntimeState>;
     captureRuntimeActivation: (sessionId: string) => () => boolean;
     resetRuntime: (sessionId: string | null) => void;
-    clearRuntimeThreads: () => void;
     liftSessionSpend: (persisted: TokenUsage | null | undefined) => void;
     setOptimisticUserPrompt: (prompt: string | null, settlement?: "rejected" | "committed") => void;
     applyAssistantDelta: (delta: AssistantStreamDelta) => void;
@@ -142,18 +116,13 @@ export declare function createRuntimeStore(_storage?: Pick<Storage, "getItem" | 
     useModelRetryAttempt: () => number | null;
     useLiveEvents: () => RuntimeEvent[];
     useStreamStatus: () => StreamStatus;
-    useLiveThreads: () => Record<string, RuntimeThread>;
-    useFinishedToolCalls: () => Record<string, true>;
     usePrimaryToolEvents: () => ({
         prompt_preview: string;
-        thread_name?: string | null;
         type: "run_started";
     } | {
         iteration: number;
-        thread_name?: string | null;
         type: "model_call_started";
     } | {
-        thread_name?: string | null;
         type: "token_usage_updated";
         usage: import("../types/openapi.generated").components["schemas"]["TokenUsage"];
     } | {
@@ -164,12 +133,11 @@ export declare function createRuntimeStore(_storage?: Pick<Storage, "getItem" | 
         delegation_summary_verified?: boolean;
         key_arg_preview?: string | null;
         name: string;
-        thread_name?: string | null;
         type: "tool_call_started";
     } | {
         call_id: string;
         cleanup_duration_ms?: number | null;
-        command_status?: import("../types/openapi.generated").components["schemas"]["CommandStatus"] | null;
+        command_status?: import("../types/openapi.generated").components["schemas"] /** Structured terminal failure for recovery-aware transcript actions. */["CommandStatus"] | null;
         completion_status?: import("../types/openapi.generated").components["schemas"]["ToolCompletionStatus"] | null;
         content_preview: string;
         delegation_outcome?: import("../types/openapi.generated").components["schemas"]["DelegationOutcome"] | null;
@@ -180,44 +148,7 @@ export declare function createRuntimeStore(_storage?: Pick<Storage, "getItem" | 
         is_error: boolean;
         name: string;
         remote_outcome_uncertain?: boolean;
-        thread_name?: string | null;
         type: "tool_call_finished";
-    } | {
-        action: string;
-        name: string;
-        source_threads: string[];
-        type: "thread_started";
-    } | {
-        line: string;
-        name: string;
-        type: "thread_log";
-    } | {
-        instruction_preview: string;
-        name: string;
-        steering_id: number;
-        type: "thread_steering_queued";
-    } | {
-        instruction_preview: string;
-        name: string;
-        steering_id: number;
-        type: "thread_steering_delivered";
-    } | {
-        instruction_preview: string;
-        name: string;
-        steering_id: number;
-        type: "thread_steering_expired";
-    } | {
-        instruction_preview: string;
-        steering_id: number;
-        type: "orchestrator_steering_queued";
-    } | {
-        instruction_preview: string;
-        steering_id: number;
-        type: "orchestrator_steering_delivered";
-    } | {
-        instruction_preview: string;
-        steering_id: number;
-        type: "orchestrator_steering_expired";
     } | {
         compaction_id: string;
         reason: import("../types/openapi.generated").components["schemas"]["CompactionReason"];
@@ -237,38 +168,25 @@ export declare function createRuntimeStore(_storage?: Pick<Storage, "getItem" | 
         reason: import("../types/openapi.generated").components["schemas"]["CompactionReason"];
         type: "orchestrator_compaction_failed";
     } | {
-        exit_code: number;
-        name: string;
-        timed_out: boolean;
-        timeout_reason?: string | null;
-        type: "thread_finished";
-        usage?: import("../types/openapi.generated").components["schemas"]["TokenUsage"] | null;
-    } | {
         content: string;
-        thread_name?: string | null;
         type: "assistant_message";
         usage?: import("../types/openapi.generated").components["schemas"]["TokenUsage"] | null;
     } | {
         message: string;
-        thread_name?: string | null;
         type: "error";
     } | {
         reason: string;
         server_name: string;
-        thread_name?: string | null;
         type: "mcp_server_skipped";
     } | {
         kind: import("../types/openapi.generated").components["schemas"]["McpNotificationKind"];
         message: string;
         server_name: string;
-        thread_name?: string | null;
         type: "mcp_notification";
     } | {
         message: string;
-        thread_name?: string | null;
         type: "model_error";
     } | {
-        thread_name?: string | null;
         type: "run_finished";
     })[];
     useRunUsage: () => {
@@ -299,7 +217,7 @@ export declare function createRuntimeStore(_storage?: Pick<Storage, "getItem" | 
     useOptimisticUserPrompt: () => string | null;
     getRuntimeState: () => RuntimeState;
 };
-export declare const release: () => void, runtimeStore: import("../lib/store").Store<RuntimeState>, captureRuntimeActivation: (sessionId: string) => () => boolean, resetRuntime: (sessionId: string | null) => void, clearRuntimeThreads: () => void, liftSessionSpend: (persisted: TokenUsage | null | undefined) => void, setOptimisticUserPrompt: (prompt: string | null, settlement?: "rejected" | "committed") => void, applyAssistantDelta: (delta: AssistantStreamDelta) => void, setStreamStatus: (streamStatus: StreamStatus) => void, syncRunFromSnapshot: (activeRun: ActiveRunSnapshot | null | undefined) => void, pushLocalEvent: (kind: RuntimeEventKind, text: string, isError?: boolean) => void, requestRunCancel: () => RuntimeState, restoreRunCancel: (previous: RuntimeState) => void, finishRunCancel: () => void, applyEnvelope: (envelope: SessionEventEnvelope) => RefreshKind, useRunning: (sessionId: string | null) => boolean, useCancelArmed: (sessionId: string | null) => boolean, useActivity: () => string, useRunError: () => string | null, useRunFailure: () => {
+export declare const release: () => void, runtimeStore: import("../lib/store").Store<RuntimeState>, captureRuntimeActivation: (sessionId: string) => () => boolean, resetRuntime: (sessionId: string | null) => void, liftSessionSpend: (persisted: TokenUsage | null | undefined) => void, setOptimisticUserPrompt: (prompt: string | null, settlement?: "rejected" | "committed") => void, applyAssistantDelta: (delta: AssistantStreamDelta) => void, setStreamStatus: (streamStatus: StreamStatus) => void, syncRunFromSnapshot: (activeRun: ActiveRunSnapshot | null | undefined) => void, pushLocalEvent: (kind: RuntimeEventKind, text: string, isError?: boolean) => void, requestRunCancel: () => RuntimeState, restoreRunCancel: (previous: RuntimeState) => void, finishRunCancel: () => void, applyEnvelope: (envelope: SessionEventEnvelope) => RefreshKind, useRunning: (sessionId: string | null) => boolean, useCancelArmed: (sessionId: string | null) => boolean, useActivity: () => string, useRunError: () => string | null, useRunFailure: () => {
     attempt_count: number;
     diagnostic: string;
     http_status?: number | null;
@@ -310,16 +228,13 @@ export declare const release: () => void, runtimeStore: import("../lib/store").S
     retry_after_ms?: number | null;
     summary: string;
     transient: boolean;
-} | null, useModelRetryAttempt: () => number | null, useLiveEvents: () => RuntimeEvent[], useStreamStatus: () => StreamStatus, useLiveThreads: () => Record<string, RuntimeThread>, useFinishedToolCalls: () => Record<string, true>, usePrimaryToolEvents: () => ({
+} | null, useModelRetryAttempt: () => number | null, useLiveEvents: () => RuntimeEvent[], useStreamStatus: () => StreamStatus, usePrimaryToolEvents: () => ({
     prompt_preview: string;
-    thread_name?: string | null;
     type: "run_started";
 } | {
     iteration: number;
-    thread_name?: string | null;
     type: "model_call_started";
 } | {
-    thread_name?: string | null;
     type: "token_usage_updated";
     usage: import("../types/openapi.generated").components["schemas"]["TokenUsage"];
 } | {
@@ -330,12 +245,11 @@ export declare const release: () => void, runtimeStore: import("../lib/store").S
     delegation_summary_verified?: boolean;
     key_arg_preview?: string | null;
     name: string;
-    thread_name?: string | null;
     type: "tool_call_started";
 } | {
     call_id: string;
     cleanup_duration_ms?: number | null;
-    command_status?: import("../types/openapi.generated").components["schemas"]["CommandStatus"] | null;
+    command_status?: import("../types/openapi.generated").components["schemas"] /** Structured terminal failure for recovery-aware transcript actions. */["CommandStatus"] | null;
     completion_status?: import("../types/openapi.generated").components["schemas"]["ToolCompletionStatus"] | null;
     content_preview: string;
     delegation_outcome?: import("../types/openapi.generated").components["schemas"]["DelegationOutcome"] | null;
@@ -346,44 +260,7 @@ export declare const release: () => void, runtimeStore: import("../lib/store").S
     is_error: boolean;
     name: string;
     remote_outcome_uncertain?: boolean;
-    thread_name?: string | null;
     type: "tool_call_finished";
-} | {
-    action: string;
-    name: string;
-    source_threads: string[];
-    type: "thread_started";
-} | {
-    line: string;
-    name: string;
-    type: "thread_log";
-} | {
-    instruction_preview: string;
-    name: string;
-    steering_id: number;
-    type: "thread_steering_queued";
-} | {
-    instruction_preview: string;
-    name: string;
-    steering_id: number;
-    type: "thread_steering_delivered";
-} | {
-    instruction_preview: string;
-    name: string;
-    steering_id: number;
-    type: "thread_steering_expired";
-} | {
-    instruction_preview: string;
-    steering_id: number;
-    type: "orchestrator_steering_queued";
-} | {
-    instruction_preview: string;
-    steering_id: number;
-    type: "orchestrator_steering_delivered";
-} | {
-    instruction_preview: string;
-    steering_id: number;
-    type: "orchestrator_steering_expired";
 } | {
     compaction_id: string;
     reason: import("../types/openapi.generated").components["schemas"]["CompactionReason"];
@@ -403,38 +280,25 @@ export declare const release: () => void, runtimeStore: import("../lib/store").S
     reason: import("../types/openapi.generated").components["schemas"]["CompactionReason"];
     type: "orchestrator_compaction_failed";
 } | {
-    exit_code: number;
-    name: string;
-    timed_out: boolean;
-    timeout_reason?: string | null;
-    type: "thread_finished";
-    usage?: import("../types/openapi.generated").components["schemas"]["TokenUsage"] | null;
-} | {
     content: string;
-    thread_name?: string | null;
     type: "assistant_message";
     usage?: import("../types/openapi.generated").components["schemas"]["TokenUsage"] | null;
 } | {
     message: string;
-    thread_name?: string | null;
     type: "error";
 } | {
     reason: string;
     server_name: string;
-    thread_name?: string | null;
     type: "mcp_server_skipped";
 } | {
     kind: import("../types/openapi.generated").components["schemas"]["McpNotificationKind"];
     message: string;
     server_name: string;
-    thread_name?: string | null;
     type: "mcp_notification";
 } | {
     message: string;
-    thread_name?: string | null;
     type: "model_error";
 } | {
-    thread_name?: string | null;
     type: "run_finished";
 })[], useRunUsage: () => {
     cache_read_tokens: number;

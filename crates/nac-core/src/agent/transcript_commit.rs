@@ -19,7 +19,7 @@ impl Agent {
 
     /// Append `messages` to the transcript log at absolute positions
     /// `start_idx..` via `spawn_blocking` (steering-claim precedent). A no-op
-    /// for agents without a transcript log (workers, picker sessions).
+    /// for agents without a transcript log (such as picker sessions).
     pub(super) async fn log_transcript_batch(
         &mut self,
         start_idx: u64,
@@ -264,62 +264,6 @@ impl Agent {
     /// transaction. The in-memory vector is adopted only after this returns,
     /// preserving the log-first invariant even if the run is cancelled while
     /// the blocking transaction is pending.
-    pub(super) async fn commit_staged_steering(
-        &mut self,
-        from_idx: usize,
-        steering_ids: &[i64],
-        staged: &[Message],
-        session_id: &str,
-        dispatch_id: &str,
-    ) -> Result<()> {
-        let Some(sink) = &self.transcript_log else {
-            return crate::store::acknowledge_thread_steering_batch(
-                &self.tool_runtime.store_path,
-                steering_ids,
-                session_id,
-                dispatch_id,
-            );
-        };
-        if staged.is_empty() {
-            return Ok(());
-        }
-        let writer = Arc::clone(&sink.writer);
-        let sink_session_id = sink.session_id.clone();
-        let dispatch_id = dispatch_id.to_string();
-        let steering_ids = steering_ids.to_vec();
-        let batch_len = staged.len() as u64;
-        self.pending_log_end = Some(from_idx as u64 + batch_len);
-        let staged = staged.to_vec();
-        self.prompt_commit_pending = true;
-        let joined = crate::store::spawn_blocking_store_caller(move || {
-            writer.append_claimed_thread_steering(
-                &sink_session_id,
-                &dispatch_id,
-                &steering_ids,
-                from_idx as u64,
-                &staged,
-            )
-        })
-        .await;
-        self.prompt_commit_pending = false;
-        let committed =
-            joined.map_err(|error| anyhow!("steering transcript commit task failed: {error}"))?;
-        match committed {
-            Ok(()) => {
-                self.committed_log_len = from_idx as u64 + batch_len;
-                self.pending_log_end = None;
-                self.event_sink
-                    .emit_transcript_appended_async(from_idx as u64 + batch_len)
-                    .await;
-                Ok(())
-            }
-            Err(error) => {
-                self.pending_log_end = None;
-                Err(error)
-            }
-        }
-    }
-
     pub(super) async fn append_pending_direct_inbox(&mut self) -> Result<usize> {
         let Some(sink) = &self.transcript_log else {
             return Ok(0);

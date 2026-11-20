@@ -3,8 +3,6 @@ import path from "node:path";
 
 import { expect, test } from "./harness";
 
-test.use({ orchestration: "0" });
-
 test("Select applies the typed working folder without pressing Enter", async ({
   harness,
   page,

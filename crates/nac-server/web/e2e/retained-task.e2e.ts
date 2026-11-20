@@ -92,7 +92,7 @@ async function retainedJourney(
   await expect(page).toHaveURL(`${harness.baseUrl}/#/?project=${project}`);
   const prompt = page.getByRole("textbox", { name: "What should we work on?", exact: true });
   await expect(prompt).toBeFocused();
-  // Isolated checkouts are a direct-agent choice; pick Agent when orchestration offers others.
+  // Isolated checkouts use a direct session.
   const chooseAgent = async () => {
     const behavior = page.getByRole("button", { name: /^Behavior: / });
     // The chips render with the composer; wait for them before deciding.
@@ -189,7 +189,7 @@ async function retainedJourney(
   await firstCard.getByRole("link", { name: "Open task" }).click();
   await expect(page).toHaveURL(new RegExp(first.session_id));
   await expect(page.getByText("First task ready", { exact: true })).toBeVisible();
-  await harness.restart("1", undefined, true);
+  await harness.restart(undefined, true);
   await page.reload();
   const retry = await request.post(`${harness.baseUrl}/task-launches`, { data: first.request });
   expect(retry.ok()).toBe(true);

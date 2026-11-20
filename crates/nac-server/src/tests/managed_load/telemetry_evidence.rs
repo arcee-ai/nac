@@ -22,7 +22,6 @@ pub(super) async fn drain_telemetry(
         api_latency_us: BTreeMap::new(),
         max_connection_active: 0,
         max_persistence_queue_active: 0,
-        max_orchestrators_active: 0,
         max_direct_active: 0,
         max_terminal_settlement_overlap: 0,
         max_child_processes_active: 0,
@@ -60,10 +59,6 @@ pub(super) async fn drain_telemetry(
                 evidence.max_terminal_settlement_overlap =
                     evidence.max_terminal_settlement_overlap.max(value as usize);
             }
-            (
-                nac_core::telemetry::TelemetryName::RuntimeActivityActive,
-                Some(nac_core::telemetry::RuntimeActivity::Orchestrator),
-            ) => evidence.max_orchestrators_active = evidence.max_orchestrators_active.max(value),
             (
                 nac_core::telemetry::TelemetryName::RuntimeActivityActive,
                 Some(nac_core::telemetry::RuntimeActivity::Direct),

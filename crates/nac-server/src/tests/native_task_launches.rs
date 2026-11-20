@@ -249,7 +249,6 @@ async fn native_same_project_retry_and_non_git_launch_publish_independent_goal_f
             ssh_host: None,
             ssh_port: None,
             ssh_identity_file: None,
-            default_model_config_id: Some("task-config".into()),
         })
         .await
         .unwrap();
@@ -288,7 +287,6 @@ async fn native_same_project_retry_and_non_git_launch_publish_independent_goal_f
             ssh_host: Some("unavailable.invalid".into()),
             ssh_port: None,
             ssh_identity_file: None,
-            default_model_config_id: Some("task-config".into()),
         },
     )
     .unwrap();

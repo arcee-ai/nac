@@ -223,7 +223,7 @@ it("does not route when the task disappears before activation", async () => {
   expect(screen.getByLabelText("route").textContent).toBe("/session/caller/insights");
 });
 it("keeps missing or ineligible tasks non-actionable", () => {
-  state.entries = [{ ...entry, summary: { ...entry.summary, behavior: "orchestrator" } }];
+  state.entries = [];
   mount();
   expect(screen.queryByRole("link")).toBeNull();
   expect(screen.getByText(/Task unavailable/)).toBeTruthy();

@@ -5,7 +5,7 @@ fn schema_41_upgrades_40_atomically_and_preserves_existing_inbox() {
     let path = std::env::temp_dir()
         .join(format!("nac-followup-migration-{}", uuid::Uuid::new_v4()))
         .join("store.db");
-    initialize(&path).unwrap();
+    initialize_synthetic_predecessor(&path).unwrap();
     insert_test_session(&path, "target");
     let legacy = create_person_session_inbox_item(
         &path,
@@ -73,8 +73,7 @@ fn schema_41_upgrades_40_atomically_and_preserves_existing_inbox() {
         .is_err());
     conn.execute(insert, params!["other", "one", "steer", legacy.id + 1])
         .unwrap();
-    // Re-entering migration after a successful table creation preserves receipts.
-    conn.pragma_update(None, "user_version", 40).unwrap();
+    // Reopening the migrated store preserves receipts.
     drop(conn);
     initialize(&path).unwrap();
     let conn = open_runtime_connection(&path).unwrap();

@@ -51,15 +51,11 @@ impl Agent {
         .await?;
         self.tool_runtime.terminal_manager.settle_run().await?;
         self.emit(AgentEvent::AssistantMessage {
-            thread_name: self.thread_name.clone(),
             content: content.clone(),
             usage: Some(usage.clone()),
         })
         .await;
-        self.emit(AgentEvent::RunFinished {
-            thread_name: self.thread_name.clone(),
-        })
-        .await;
+        self.emit(AgentEvent::RunFinished {}).await;
         Ok(Some(content))
     }
 }

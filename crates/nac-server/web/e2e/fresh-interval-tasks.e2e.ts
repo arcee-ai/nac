@@ -70,7 +70,7 @@ async function fixture(request: APIRequestContext, harness: EmbeddedHarness) {
   await fs.writeFile(path.join(repo, "untracked"), "source only");
   const index = await fs.readFile(path.join(repo, ".git/index"));
   const status = (await git("status", "--porcelain=v1")).stdout;
-  await harness.restart("1", undefined, true);
+  await harness.restart(undefined, true);
   const project = await createProject(request, harness, { name: "Standalone interval fixture" });
   return {
     repo,
@@ -310,7 +310,7 @@ test("standalone human interval schedule retries one intent and retains two inde
   await expect(page.locator(`[data-occurrence="${first.receipt.occurrence_id}"]`)).toContainText(
     "Initial occurrence settled: unchanged",
   );
-  await harness.restart("1", undefined, true);
+  await harness.restart(undefined, true);
   await page.reload();
   // Respect the real shared 15-second admission bound; no fixture clock bypass.
   await expect
@@ -548,7 +548,7 @@ test("native saved-project schedule outlives its creator and runs through the sa
   expect(schedule.session_id).toBeNull();
   expect(schedule.binding.creator_session_id).toBe(creator);
   expect((await request.delete(`${harness.baseUrl}/sessions/${creator}`)).ok()).toBe(true);
-  await harness.restart("1", undefined, true);
+  await harness.restart(undefined, true);
   const gate = holdInspection(harness, "native-initial");
   const run = await request.post(
     `${harness.baseUrl}/projects/${f.project}/task-schedules/control`,

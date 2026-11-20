@@ -9,9 +9,6 @@ export type ReasoningSegment = Extract<InsightSegment, {
 export type ToolSegment = Extract<InsightSegment, {
     kind: "tool";
 }>;
-export type WorksetSegment = Extract<InsightSegment, {
-    kind: "workset";
-}>;
 export interface ItemContext {
     sessionId: string;
     resolveSession: SessionResolver;

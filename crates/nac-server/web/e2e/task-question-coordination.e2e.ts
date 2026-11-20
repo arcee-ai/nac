@@ -347,7 +347,7 @@ test("ALL472-D5 exact native and human responses preserve isolation and fail clo
       "",
     ].join("\n");
     await fs.writeFile(path.join(harness.runRoot, "nac-home", "config.toml"), config);
-    await harness.restart("1");
+    await harness.restart();
     evidence.restarted = await identity(request, harness);
     const before = await permissions(request, harness, caller);
     const configBefore = await configuration(request, harness, caller);
@@ -635,7 +635,7 @@ test("ALL472-D6 composed question wait, human interruption, restart and approval
       await request.get(`${harness.baseUrl}/sessions/${peer}/goal`)
     ).json();
     expect(currentGoal.status).toBe("active");
-    await harness.restart("1", undefined, true);
+    await harness.restart(undefined, true);
     const restartedIdentity = await identity(request, harness);
     expect(restartedIdentity.incarnation).not.toBe(initialIdentity.incarnation);
     expect(restartedIdentity.release).toBe(initialIdentity.release);

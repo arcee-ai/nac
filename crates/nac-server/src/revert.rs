@@ -42,7 +42,6 @@ pub struct RevertSessionResponse {
     pub messages_removed: usize,
     pub workspace_restored: bool,
     pub revisions_removed: usize,
-    pub threads_removed: usize,
 }
 
 impl From<RevertOutcome> for RevertSessionResponse {
@@ -52,7 +51,6 @@ impl From<RevertOutcome> for RevertSessionResponse {
             messages_removed: outcome.messages_removed,
             workspace_restored: outcome.workspace_restored,
             revisions_removed: outcome.revisions_removed,
-            threads_removed: outcome.threads_removed,
         }
     }
 }

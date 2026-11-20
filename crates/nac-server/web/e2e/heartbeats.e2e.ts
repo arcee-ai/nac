@@ -112,7 +112,7 @@ test("native heartbeat survives ended chat, closed client and restart, then fini
   await page.close();
   // No recovering session read or subscription is used after restart. The
   // passive schedule inspection cannot attach or wake the execution owner.
-  await harness.restart("1");
+  await harness.restart();
   await gate.accepted;
   const inspect = () =>
     request
@@ -433,7 +433,7 @@ test("crash after a Local effect suspends the exact occurrence without replaying
     })
     .toBe(true);
   gate.release();
-  await harness.restart("1");
+  await harness.restart();
   await expect.poll(async () => (await inspect()).history[0]?.state).toBe("settled");
   const recovered = await inspect();
   expect(recovered.schedule.state).toBe("suspended");

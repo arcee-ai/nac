@@ -36,13 +36,17 @@ fn retired_worker_entrypoint_cannot_execute() {
         .output()
         .unwrap();
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("retired worker entrypoint"));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("error:"), "{stderr}");
+    assert!(stderr.contains("__worker"), "{stderr}");
     let output = Command::new(BINARY)
         .args(["--worker-executable", BINARY, "--no-open"])
         .output()
         .unwrap();
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("retired --worker-executable"));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("error:"), "{stderr}");
+    assert!(stderr.contains("--worker-executable"), "{stderr}");
 }
 
 struct ChildGuard(Option<Child>);

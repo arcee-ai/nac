@@ -9,8 +9,6 @@ type DomNode = { parentElement: DomNode | null; scrollTop: number };
 declare function getComputedStyle(element: DomNode): { overflowY: string };
 declare const navigator: { clipboard: { readText(): Promise<string> } };
 
-test.use({ orchestration: "0" });
-
 const VIEWPORTS = [
   { width: 390, height: 844 },
   { width: 768, height: 1024 },

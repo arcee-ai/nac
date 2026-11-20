@@ -11,11 +11,7 @@ export const PANEL_ICON: Record<SessionPanel, IconName> = {
   history: IconName.History,
 };
 
-export function panelBadgeCount(
-  name: SessionPanel,
-  subagentCount: number,
-  _worksetCount: number,
-): number {
+export function panelBadgeCount(name: SessionPanel, subagentCount: number): number {
   if (name === "delegated") return subagentCount;
   return 0;
 }

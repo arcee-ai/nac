@@ -9,8 +9,6 @@ export interface RowView {
 }
 export interface RowSources {
     resolveSession: SessionResolver;
-    /** `episode_count` of each thread the snapshot retains, by name. */
-    episodeCounts: ReadonlyMap<string, number>;
 }
 export declare function segmentRowView(segment: InsightSegment, sources: RowSources): RowView;
 export declare function entryRowView(entry: InsightEntry, sources: RowSources): RowView;

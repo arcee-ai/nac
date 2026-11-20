@@ -3,9 +3,6 @@ import type { ActionKind, ActionStatus } from "@/app/features/insights/model/typ
 
 const ROW_ICONS: Record<ActionKind, IconName> = {
   reasoning: IconName.Brain,
-  thread: IconName.Chat,
-  "define-workset": IconName.Checklist,
-  "delete-thread": IconName.Trash,
   "read-file": IconName.ReadFile,
   "write-file": IconName.FileUpload,
   "edit-file": IconName.Edit,
@@ -20,11 +17,7 @@ const ROW_ICONS: Record<ActionKind, IconName> = {
   "get-goal": IconName.Goal,
   "update-goal": IconName.Checklist,
   "spawn-agent": IconName.Plane,
-  "spawn-orchestrator": IconName.Orchestrator,
   "session-status": IconName.Info,
-  "session-steer": IconName.AddChat,
-  "session-read": IconName.Eye,
-  "session-wait": IconName.Timelaps,
   "session-cancel": IconName.Close,
   other: IconName.Code,
 };

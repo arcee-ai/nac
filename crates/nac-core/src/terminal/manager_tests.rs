@@ -220,10 +220,10 @@ async fn successful_one_shot_kills_background_descendants() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn worker_one_shot_does_not_hang_on_descendant_inherited_pipes() {
-    let manager = TerminalManager::for_worker_with_limits(CommandOutputLimits::default()).unwrap();
+async fn direct_one_shot_does_not_hang_on_descendant_inherited_pipes() {
+    let manager = TerminalManager::for_direct();
     let root = std::env::temp_dir().join(format!(
-        "nac-worker-one-shot-pipes-{}",
+        "nac-direct-one-shot-pipes-{}",
         uuid::Uuid::new_v4()
     ));
     std::fs::create_dir_all(&root).unwrap();
@@ -238,7 +238,7 @@ async fn worker_one_shot_does_not_hang_on_descendant_inherited_pipes() {
         manager.exec_one_shot(&command, None, 120, 40, 5_000, 8_000, &backend(), None),
     )
     .await
-    .expect("worker one-shot remained blocked on descendant-owned pipes");
+    .expect("direct one-shot remained blocked on descendant-owned pipes");
     assert_eq!(output.status, CommandStatus::Completed);
     assert_eq!(output.exit_code, Some(0));
     let pid = std::fs::read_to_string(&pid_path)

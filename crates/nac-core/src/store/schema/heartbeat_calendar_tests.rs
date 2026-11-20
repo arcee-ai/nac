@@ -17,7 +17,7 @@ impl Fixture {
         let root =
             std::env::temp_dir().join(format!("nac-calendar-schema-{}", uuid::Uuid::new_v4()));
         let path = root.join("store.db");
-        initialize(&path).unwrap();
+        initialize_synthetic_predecessor(&path).unwrap();
         for id in ["owner", "creator", "produced", "deleted"] {
             insert_test_session(&path, id);
         }
@@ -114,6 +114,46 @@ fn facts(conn: &Connection) -> Facts {
     )
 }
 
+// Compare all surviving values across the v54 retirement without treating
+// deliberately removed worker tables and columns as retained records.
+fn surviving_facts(conn: &Connection) -> Vec<(String, TableRows)> {
+    let retired = [
+        "managed_orchestrator_terminal_receipts",
+        "managed_orchestrators",
+        "worker_dispatches",
+        "episodes",
+        "threads",
+        "workset_items",
+        "worksets",
+        "thread_steering",
+        "model_configurations",
+    ];
+    rows(
+        conn,
+        "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name",
+    )
+    .into_iter()
+    .filter_map(|row| {
+        let Value::Text(table) = &row[0] else {
+            panic!("table name")
+        };
+        if retired.contains(&table.as_str()) {
+            return None;
+        }
+        Some((
+            table.clone(),
+            rows(
+                conn,
+                &format!(
+                    "SELECT rowid,{} FROM \"{table}\" ORDER BY rowid",
+                    surviving_test_columns(conn, table)
+                ),
+            ),
+        ))
+    })
+    .collect()
+}
+
 fn catalog(conn: &Connection) -> TableRows {
     rows(
         conn,
@@ -122,7 +162,7 @@ fn catalog(conn: &Connection) -> TableRows {
 }
 
 fn unaffected_catalog(conn: &Connection) -> TableRows {
-    rows(conn, "SELECT type,name,tbl_name,sql FROM sqlite_master WHERE tbl_name!='heartbeat_occurrences' ORDER BY type,name")
+    rows(conn, "SELECT type,name,tbl_name,sql FROM sqlite_master WHERE tbl_name NOT IN ('heartbeat_occurrences','sessions','projects','managed_orchestrator_terminal_receipts','managed_orchestrators','worker_dispatches','episodes','threads','workset_items','worksets','thread_steering','model_configurations') AND name NOT IN ('session_direct_inbox_origin_insert','session_direct_inbox_origin_update') ORDER BY type,name")
 }
 
 fn occurrence_indices(conn: &Connection) -> Vec<(String, String)> {
@@ -197,7 +237,7 @@ fn reconstruct49(path: &Path) {
 fn calendar_schema50_real49_preserves_rows_feed_sequences_and_retained_owners() {
     let f = Fixture::previous49();
     let conn = Connection::open(&f.path).unwrap();
-    let before = facts(&conn);
+    let before = surviving_facts(&conn);
     let other_catalog = unaffected_catalog(&conn);
     let indices = occurrence_indices(&conn);
     drop(conn);
@@ -205,8 +245,8 @@ fn calendar_schema50_real49_preserves_rows_feed_sequences_and_retained_owners() 
     let mut conn = open_runtime_connection(&f.path).unwrap();
     assert_eq!(version(&conn), STORE_SCHEMA_VERSION);
     assert_eq!(
-        facts(&conn).1,
-        before.1,
+        surviving_facts(&conn),
+        before,
         "every rowid/value including feed UUID and sqlite_sequence"
     );
     assert_eq!(unaffected_catalog(&conn), other_catalog);
@@ -215,7 +255,7 @@ fn calendar_schema50_real49_preserves_rows_feed_sequences_and_retained_owners() 
     let tx = conn.transaction().unwrap();
     rebuild_occurrences_for_calendar(&tx).unwrap();
     tx.commit().unwrap();
-    assert_eq!(facts(&conn).1, before.1);
+    assert_eq!(surviving_facts(&conn), before);
     assert_eq!(
         catalog(&conn),
         current,
@@ -224,7 +264,7 @@ fn calendar_schema50_real49_preserves_rows_feed_sequences_and_retained_owners() 
     drop(conn);
     initialize(&f.path).unwrap();
     let conn = open_runtime_connection(&f.path).unwrap();
-    assert_eq!(facts(&conn).1, before.1, "reopen retains all facts");
+    assert_eq!(surviving_facts(&conn), before, "reopen retains all facts");
     assert!(rows(&conn, "PRAGMA foreign_key_check").is_empty());
     conn.execute("INSERT INTO session_completion_occurrences(session_id,run_id,behavior,kind,committed_at) VALUES('owner','after-upgrade','direct','request','retained')", []).unwrap();
     assert!(

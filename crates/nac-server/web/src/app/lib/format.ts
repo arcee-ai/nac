@@ -155,21 +155,9 @@ export function displayPromptFromMessageText(content: string | null | undefined)
   if (isGoalContinuationEnvelope(normalized)) return "[durable goal continuation]";
   const completion = parseDelegatedCompletion(normalized);
   if (completion) {
-    const type = completion.kind === "coding-agent" ? "traditional child" : "managed orchestrator";
-    return `[${type} ${completion.status}: ${completion.description}]`;
+    return `[traditional child ${completion.status}: ${completion.description}]`;
   }
-  const header = normalized.split("\n", 1)[0] ?? "";
-  const match = /^# \/(plan|run)\s*:/.exec(header);
-  if (!match) return text;
-  const kind = match[1];
-  const marker = kind === "run" ? "Workset id:\n" : "User instruction:\n";
-  const markerIndex = normalized.indexOf(marker);
-  if (markerIndex === -1) return text;
-  const valueStart = markerIndex + marker.length;
-  const valueEnd = normalized.indexOf("\n\n", valueStart);
-  if (valueEnd === -1) return text;
-  const value = normalized.slice(valueStart, valueEnd).trim();
-  return value ? `/${kind} ${value}` : text;
+  return text;
 }
 
 /** Compact duration, e.g. 850 -> "0.9s", 62000 -> "1m 2s". */

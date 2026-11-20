@@ -6,7 +6,6 @@ import Foundation
 final class OfflineProviderPolicy {
     static let scenario = "offline-api-key"
     static let key = "offline-dummy-local-only"
-    static let setupName = "Offline local fixture"
     enum Refusal: Error { case invalid, missingObservation }
     enum Request {
         case http(method: String, path: String)

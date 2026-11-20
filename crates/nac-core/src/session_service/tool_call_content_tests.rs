@@ -23,9 +23,6 @@ impl nac_contracts::CommandEnvironmentProvider for ExactSecret {
             ],
         ))
     }
-    fn worker_environment(&self) -> nac_contracts::WorkerEnvironment {
-        Default::default()
-    }
 }
 
 fn assistant(calls: &[(&str, &str)]) -> Message {

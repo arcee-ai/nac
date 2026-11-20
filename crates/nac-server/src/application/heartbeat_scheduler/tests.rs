@@ -161,7 +161,6 @@ async fn measure_case(n: usize, calendar: bool) -> Measurement {
         SessionManager::new_unowned_fixture(ServerOptions {
             root_cwd: root.clone(),
             store_path: Some(path.clone()),
-            worker_executable: None,
             managed_host: None,
         })
         .unwrap()

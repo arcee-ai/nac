@@ -4,7 +4,7 @@ use super::*;
 fn schema_45_upgrades_actual_44_atomically_without_rewriting_or_scheduling_work() {
     let root = std::env::temp_dir().join(format!("nac-mcp-migration45-{}", uuid::Uuid::new_v4()));
     let path = root.join("store.db");
-    initialize(&path).unwrap();
+    initialize_synthetic_predecessor(&path).unwrap();
     for id in ["owner", "target"] {
         insert_test_session(&path, id);
     }

@@ -33,25 +33,6 @@ pub(super) async fn fixture(root: &std::path::Path, manager: &SessionManager) ->
             "seed",
         ],
     );
-    model_configurations::insert_model_configuration(
-        &manager.inner.store_path,
-        "task-config",
-        model_configurations::NewModelConfiguration {
-            service_tier: None,
-            name: "Task fixture".into(),
-            backend: "openai-responses".into(),
-            model: "gpt-5.2".into(),
-            base_url: "http://127.0.0.1:9/v1".into(),
-            allow_insecure_http: false,
-            api_key_env: Some("OPENAI_API_KEY".into()),
-            reasoning_effort: None,
-            extra_headers: BTreeMap::new(),
-            orchestrator_compaction_threshold: None,
-            initial_prompt: None,
-            light_model: None,
-        },
-    )
-    .unwrap();
     let project = manager
         .projects()
         .create(application::projects::CreateProject {
@@ -61,7 +42,6 @@ pub(super) async fn fixture(root: &std::path::Path, manager: &SessionManager) ->
             ssh_host: None,
             ssh_port: None,
             ssh_identity_file: None,
-            default_model_config_id: Some("task-config".into()),
         })
         .await
         .unwrap();
@@ -624,7 +604,6 @@ async fn cross_project_backend_origin_launches_in_local_destination(sandbox: boo
             ssh_host: (!sandbox).then(|| "fixture.invalid".into()),
             ssh_port: None,
             ssh_identity_file: None,
-            default_model_config_id: None,
         },
     )
     .unwrap();

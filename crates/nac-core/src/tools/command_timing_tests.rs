@@ -32,9 +32,6 @@ impl nac_contracts::CommandEnvironmentProvider for Environment {
             vec!["deadline-secret-canary".into()],
         ))
     }
-    fn worker_environment(&self) -> nac_contracts::WorkerEnvironment {
-        Default::default()
-    }
 }
 
 struct GitRedirectEnvironment(std::path::PathBuf);
@@ -65,9 +62,6 @@ impl nac_contracts::CommandEnvironmentProvider for GitRedirectEnvironment {
             Vec::new(),
         ))
     }
-    fn worker_environment(&self) -> nac_contracts::WorkerEnvironment {
-        Default::default()
-    }
 }
 
 struct PathOverride(std::path::PathBuf);
@@ -82,9 +76,6 @@ impl nac_contracts::CommandEnvironmentProvider for PathOverride {
                 .collect(),
             Vec::new(),
         ))
-    }
-    fn worker_environment(&self) -> nac_contracts::WorkerEnvironment {
-        Default::default()
     }
 }
 

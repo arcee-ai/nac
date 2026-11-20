@@ -74,7 +74,6 @@ impl ProjectRegistrar for TestProjectRegistrar {
             ssh_host: project.ssh_host,
             ssh_port: project.ssh_port,
             ssh_identity_file: project.ssh_identity_file,
-            default_model_config_id: project.default_model_config_id,
             created_at: now.clone(),
             updated_at: now,
             pinned: false,
@@ -448,7 +447,6 @@ fn startup_reconciliation_recovers_crash_after_project_last_commit() {
             ssh_host: None,
             ssh_port: None,
             ssh_identity_file: None,
-            default_model_config_id: None,
         })
         .unwrap();
     let service = fixture.service();

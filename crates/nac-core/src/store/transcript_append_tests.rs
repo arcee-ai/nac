@@ -8,10 +8,17 @@ impl Drop for TestStoreDir {
     }
 }
 fn setup() -> (TestStoreDir, PathBuf) {
+    setup_with_historical_schema(false)
+}
+fn setup_with_historical_schema(historical: bool) -> (TestStoreDir, PathBuf) {
     let directory = std::env::temp_dir().join(format!("nac-append-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&directory).unwrap();
     let path = directory.join("store.db");
-    initialize(&path).unwrap();
+    if historical {
+        initialize_synthetic_predecessor(&path).unwrap();
+    } else {
+        initialize(&path).unwrap();
+    }
     insert_test_session(&path, "session");
     (TestStoreDir(directory), path)
 }
@@ -363,10 +370,10 @@ fn transcript_append_generation_change_rejects_even_the_same_run_id() {
     let (_dir, path) = setup();
     insert_test_session(&path, "parent");
     let connection = open_runtime_connection(&path).unwrap();
-    connection.execute("INSERT INTO managed_orchestrators
-        (orchestrator_session_id, parent_session_id, root_session_id, description,
+    connection.execute("INSERT INTO traditional_children
+        (child_session_id, parent_session_id, root_session_id, profile, description, nesting_depth,
          status, generation, run_id, execution_mode, created_at, updated_at)
-        VALUES ('session', 'parent', 'parent', 'test', 'running', 1, 'run', 'background', 'now', 'now')", []).unwrap();
+        VALUES ('session', 'parent', 'parent', 'general', 'test', 1, 'running', 1, 'run', 'background', 'now', 'now')", []).unwrap();
     let lease = Arc::new(SessionOperationLease::try_acquire(&path, "session").unwrap());
     let writer = TranscriptLogWriter::for_run(&path, "session", "run", &lease).unwrap();
     writer
@@ -381,7 +388,7 @@ fn transcript_append_generation_change_rejects_even_the_same_run_id() {
         .unwrap();
     assert_eq!(generation, 1);
     connection
-        .execute("UPDATE managed_orchestrators SET generation = 2", [])
+        .execute("UPDATE traditional_children SET generation = 2", [])
         .unwrap();
     assert_eq!(
         writer
@@ -402,7 +409,7 @@ fn transcript_append_generation_change_rejects_even_the_same_run_id() {
 
 #[test]
 fn transcript_append_v29_upgrade_preserves_legacy_payload_and_recovery() {
-    let (_dir, path) = setup();
+    let (_dir, path) = setup_with_historical_schema(true);
     let writer = TranscriptLogWriter::new(&path).unwrap();
     writer
         .append_run_prompt("session", 0, &message("legacy prompt"), "legacy-run")
@@ -517,42 +524,34 @@ fn transcript_append_steer_and_inbox_ack_loss_replay_delivery_once() {
             .version,
         version
     );
-    let queued = queue_thread_steering(
+    let second = create_session_inbox_item(
         &path,
         "session",
-        ORCHESTRATOR_STEERING_TARGET,
-        "run",
-        "thread steer",
+        InboxDelivery::Steer,
+        "second steer",
+        Some("run"),
+        None,
     )
     .unwrap();
-    claim_thread_steering(&path, "session", "run").unwrap();
     *writer.append_fault.lock().unwrap() = Some((AppendFault::UncertainCommit, 1));
-    writer
-        .append_claimed_thread_steering(
-            "session",
-            "run",
-            &[queued.id],
-            2,
-            &[message("thread steer")],
-        )
+    let committed = writer
+        .append_pending_inbox_steers("session", "run", 2)
         .unwrap();
-    writer
-        .append_claimed_thread_steering(
-            "session",
-            "run",
-            &[queued.id],
-            2,
-            &[message("thread steer")],
-        )
+    assert_eq!(committed[0].id, second.id);
+    let replay = writer
+        .append_pending_inbox_steers("session", "run", 2)
         .unwrap();
+    assert_eq!(replay[0].id, second.id);
     assert_eq!(writer.read_from("session", 0).unwrap().len(), 3);
     assert_eq!(
         crate::sessions::list_sessions(&path).unwrap()[0].visible_message_count,
         3
     );
     assert_eq!(
-        list_thread_steering(&path, "session").unwrap()[0].status,
-        "delivered"
+        load_session_inbox_item(&path, "session", second.id)
+            .unwrap()
+            .status,
+        InboxStatus::Delivered
     );
     assert_eq!(
         load_run_recovery(&path, "session")

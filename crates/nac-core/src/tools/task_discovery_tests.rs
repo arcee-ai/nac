@@ -44,7 +44,6 @@ pub(crate) fn project(path: &Path, project_id: &str) {
             ssh_host: None,
             ssh_port: None,
             ssh_identity_file: None,
-            default_model_config_id: None,
         },
     )
     .unwrap();
@@ -869,12 +868,7 @@ async fn assert_deadline_during_internal_approval(cancel: bool) {
             completion_status,
             execution_duration_ms,
             ..
-        } = AgentEvent::tool_call_finished(
-            None,
-            "late-project".into(),
-            "find_tasks".into(),
-            &result,
-        )
+        } = AgentEvent::tool_call_finished("late-project".into(), "find_tasks".into(), &result)
         else {
             panic!("expected finished event");
         };
@@ -914,7 +908,7 @@ async fn assert_deadline_during_internal_approval(cancel: bool) {
         completion_status,
         remote_outcome_uncertain,
         ..
-    } = AgentEvent::tool_call_finished(None, "late-project".into(), "find_tasks".into(), &result)
+    } = AgentEvent::tool_call_finished("late-project".into(), "find_tasks".into(), &result)
     else {
         panic!("expected finished event");
     };

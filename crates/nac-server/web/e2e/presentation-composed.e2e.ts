@@ -38,7 +38,7 @@ const answer = "The exact composed artifact preserved the selected workflow.";
 const reasoning =
   "Read the selected state before acting.\n\nKeep the parent and sibling contexts independent.";
 const childTitle = "Inspect the composed artifact and retain the complete parent context";
-test.use({ orchestration: "0", hasTouch: true });
+test.use({ hasTouch: true });
 test.skip(
   !!process.env.NAC_E2E_REMOTE,
   "Requires the isolated current production binary and controlled external boundaries",

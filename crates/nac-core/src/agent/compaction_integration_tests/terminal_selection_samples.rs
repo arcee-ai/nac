@@ -24,13 +24,12 @@ async fn selection_provenance_ordinary_response_samples_survive_restore_and_fork
         ),
     ]);
     let client = ModelClient::new_for_test_server(server.base_url.clone());
-    let mut agent = compaction_test_agent_with_mode(
+    let mut agent = compaction_test_agent(
         client.clone(),
         path.clone(),
         Some("session"),
         None,
         EventSink::none(),
-        AgentMode::Direct,
     );
     agent.messages = original.into_iter().map(|(_, message)| message).collect();
     store_agent_snapshot(&path, &agent);
@@ -97,13 +96,12 @@ async fn selection_provenance_ordinary_response_samples_survive_restore_and_fork
         .into_iter()
         .map(|(_, message)| message)
         .collect::<Vec<_>>();
-    let mut restarted = compaction_test_agent_with_mode(
+    let mut restarted = compaction_test_agent(
         client.clone(),
         path.clone(),
         Some("session"),
         None,
         EventSink::none(),
-        AgentMode::Direct,
     );
     restarted.messages = canonical.clone().into();
     restarted.restore_compaction_checkpoint().unwrap();
@@ -135,13 +133,12 @@ async fn selection_provenance_ordinary_response_samples_survive_restore_and_fork
     assert!(crate::store::list_session_inbox(&path, "fork")
         .unwrap()
         .is_empty());
-    let mut fork = compaction_test_agent_with_mode(
+    let mut fork = compaction_test_agent(
         client,
         path.clone(),
         Some("fork"),
         Some(1_000_000),
         EventSink::none(),
-        AgentMode::Direct,
     );
     fork.messages = canonical.into();
     let connection = crate::store::open_runtime_connection(&path).unwrap();

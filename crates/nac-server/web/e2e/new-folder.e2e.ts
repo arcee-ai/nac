@@ -3,8 +3,6 @@ import path from "node:path";
 
 import { expect, test } from "./harness";
 
-test.use({ orchestration: "0" });
-
 test("New folder creates one folder that Select then applies", async ({
   harness,
   page,

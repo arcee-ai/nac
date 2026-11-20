@@ -6,7 +6,7 @@ import { openNameZoom } from "./session-name-zoom";
 import { auditSetupTargets } from "./setup-target-audit";
 import { captureSetup, installSetupFixture } from "./setup-visual-fixture";
 
-test.use({ orchestration: "0", hasTouch: true });
+test.use({ hasTouch: true });
 test.skip(!!process.env.NAC_E2E_REMOTE, "Requires a disposable local setup store");
 
 for (const zoomed of [false, true]) {

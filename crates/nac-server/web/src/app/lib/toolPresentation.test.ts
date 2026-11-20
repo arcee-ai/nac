@@ -4,6 +4,7 @@ import {
   collectToolResults,
   indexToolEvents,
   presentToolCall,
+  toolCallFailed,
   type ToolPresentationStatus,
 } from "@/app/lib/toolPresentation";
 import type { AgentEvent, ToolCall } from "@/app/types/api";
@@ -18,7 +19,6 @@ function started(
 ): Extract<AgentEvent, { type: "tool_call_started" }> {
   return {
     type: "tool_call_started",
-    thread_name: null,
     call_id: `call-${name}`,
     name,
     args_preview: '{"operation":"invoke"}',
@@ -32,7 +32,6 @@ function finished(
 ): Extract<AgentEvent, { type: "tool_call_finished" }> {
   return {
     type: "tool_call_finished",
-    thread_name: null,
     call_id: `call-${name}`,
     name,
     content_preview: "bounded result",
@@ -67,8 +66,6 @@ describe("tool presentation mapper", () => {
       ["web_search", "Search web"],
       ["web_fetch", "Fetch web page"],
       ["subagent", "Subagent request in progress"],
-      ["orchestrator_launch", "Start NAC orchestrator"],
-      ["orchestrator_wait", "Wait for NAC orchestrator"],
     ] as const;
 
     for (const [name, label] of cases) {
@@ -447,10 +444,7 @@ describe("tool presentation mapper", () => {
     ).toBe("Image result");
   });
 
-  it("ignores worker events and malformed or missing optional event data", () => {
-    const worker = started("read", "must not appear");
-    worker.thread_name = "worker";
-    expect(indexToolEvents([worker]).size).toBe(0);
+  it("handles malformed or missing optional event data", () => {
     expect(
       presentToolCall({
         call: call("unknown", "malformed SECRET"),
@@ -502,31 +496,10 @@ describe("tool durations and spawned sessions", () => {
     expect(JSON.stringify(presentation)).not.toContain("Fixed the race.");
   });
 
-  it("reads a new orchestrator from the background acknowledgement", () => {
-    const ack = {
-      orchestrator_session_id: ORCHESTRATOR_ID,
-      generation: 0,
-      status: "running",
-      message: "The orchestrator is running in the background.",
-    };
-
-    expect(
-      launch(
-        "orchestrator_launch",
-        { orchestrator_session_id: null, background: true },
-        JSON.stringify(ack),
-      ).spawnedSessionId,
-    ).toBe(ORCHESTRATOR_ID);
-  });
-
   it("takes a continued session from the arguments before any result exists", () => {
     expect(launch("subagent", { child_session_id: CHILD_ID }, null).spawnedSessionId).toBe(
       CHILD_ID,
     );
-    expect(
-      launch("orchestrator_launch", { orchestrator_session_id: ORCHESTRATOR_ID }, null)
-        .spawnedSessionId,
-    ).toBe(ORCHESTRATOR_ID);
   });
 
   it("omits the session id when neither the arguments nor the result name one", () => {
@@ -649,36 +622,43 @@ describe("tool durations and spawned sessions", () => {
     }
   });
 
-  it("does not infer a managed invocation outcome from an unbound response", () => {
-    for (const childStatus of ["completed", "failed", "cancelled", "interrupted"]) {
-      const presentation = presentToolCall({
-        call: call("orchestrator_launch"),
-        hasResult: true,
-        resultText: JSON.stringify({ status: childStatus }),
-        resultHasImage: false,
-        active: false,
-        turnCancelled: false,
-        occurrence: "log:parent:1:2",
-      });
-      expect(presentation).toMatchObject({ status: "unknown", statusLabel: "Outcome unavailable" });
-    }
+  it.each(["subagent"])("does not attach unbound %s events without an occurrence token", (name) => {
+    const presentation = presentToolCall({
+      call: call(name),
+      events: { finished: finished(name, { content_preview: "other generation" }) },
+      hasResult: true,
+      resultText: '{"status":"failed"}',
+      resultHasImage: false,
+      active: false,
+      turnCancelled: false,
+      unboundEvents: true,
+    });
+    expect(presentation).toMatchObject({ status: "unknown", summary: null, resultPreview: null });
+    expect(JSON.stringify(presentation)).not.toContain("other generation");
   });
+});
 
-  it.each(["subagent", "orchestrator_launch"])(
-    "does not attach unbound %s events without an occurrence token",
-    (name) => {
-      const presentation = presentToolCall({
-        call: call(name),
-        events: { finished: finished(name, { content_preview: "other generation" }) },
-        hasResult: true,
-        resultText: '{"status":"failed"}',
-        resultHasImage: false,
-        active: false,
-        turnCancelled: false,
-        unboundEvents: true,
-      });
-      expect(presentation).toMatchObject({ status: "unknown", summary: null, resultPreview: null });
-      expect(JSON.stringify(presentation)).not.toContain("other generation");
+describe("tool completion failure classification", () => {
+  it.each(["error", "timed_out", "cancelled"] as const)(
+    "marks %s completion as failed",
+    (completion_status) => {
+      expect(
+        toolCallFailed({ is_error: false, content_preview: completion_status, completion_status }),
+      ).toBe(true);
     },
   );
+  it.each(["timed_out", "cancelled", "spawn_error"] as const)(
+    "marks %s command as failed",
+    (command_status) => {
+      expect(toolCallFailed({ is_error: false, content_preview: "", command_status })).toBe(true);
+    },
+  );
+  it("preserves legacy timeout fallback and ordinary completed results", () => {
+    expect(
+      toolCallFailed({ is_error: false, content_preview: "Command timed out after 1000ms" }),
+    ).toBe(true);
+    expect(
+      toolCallFailed({ is_error: false, content_preview: "exit 7", command_status: "completed" }),
+    ).toBe(false);
+  });
 });

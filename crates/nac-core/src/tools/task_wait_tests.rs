@@ -407,10 +407,7 @@ async fn late_hint_after_final_pass_requests_resync_without_another_read() {
 
 #[test]
 fn wait_inventory_preserves_guide_and_product_context_capabilities() {
-    for definitions in [
-        crate::tools::direct_tool_definitions(false),
-        crate::tools::direct_with_orchestrator_tool_definitions(false),
-    ] {
+    for definitions in [crate::tools::direct_tool_definitions(false)] {
         for name in ["nac_guide", "wait_tasks"] {
             assert!(definitions.iter().any(|tool| tool.function.name == name));
         }

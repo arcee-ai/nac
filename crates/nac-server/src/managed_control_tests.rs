@@ -115,7 +115,6 @@ impl Fixture {
         let manager = SessionManager::new_unowned_fixture(crate::ServerOptions {
             root_cwd: root.clone(),
             store_path: Some(root.join("store.db")),
-            worker_executable: None,
             managed_host: Some(managed_host),
         })
         .unwrap();
@@ -233,7 +232,6 @@ impl Fixture {
         SessionManager::new_unowned_fixture(crate::ServerOptions {
             root_cwd: self.root.clone(),
             store_path: Some(self.manager.inner.store_path.clone()),
-            worker_executable: None,
             managed_host: Some(self.manager.managed_host().unwrap().clone()),
         })
         .unwrap()
@@ -857,7 +855,6 @@ fn wrong_candidate_is_rejected_before_any_managed_state_mutation() {
     let result = SessionManager::new_unowned_fixture(crate::ServerOptions {
         root_cwd: fixture.root.clone(),
         store_path: Some(fixture.manager.inner.store_path.clone()),
-        worker_executable: None,
         managed_host: Some(managed_host),
     });
     assert!(result.is_err());
@@ -893,7 +890,6 @@ async fn managed_v2_future_and_invalid_stores_serve_immutable_recovery_diagnosti
         let recovery = SessionManager::new_unowned_fixture(crate::ServerOptions {
             root_cwd: fixture.root.clone(),
             store_path: Some(fixture.manager.inner.store_path.clone()),
-            worker_executable: None,
             managed_host: Some(fixture.manager.managed_host().unwrap().clone()),
         })
         .expect("managed v2 store failure must construct recovery-only state");
@@ -972,7 +968,6 @@ async fn failed_listener_bind_keeps_accepted_candidate_in_maintenance() {
     let replacement = SessionManager::new_unowned_fixture(crate::ServerOptions {
         root_cwd: fixture.root.clone(),
         store_path: Some(fixture.manager.inner.store_path.clone()),
-        worker_executable: None,
         managed_host: Some(fixture.manager.managed_host().unwrap().clone()),
     })
     .unwrap();
@@ -1128,7 +1123,6 @@ async fn controller_startup_expectation_recovers_suspended_or_failed_release_and
             let unexpected = SessionManager::new_unowned_fixture(crate::ServerOptions {
                 root_cwd: fixture.root.clone(),
                 store_path: Some(fixture.manager.inner.store_path.clone()),
-                worker_executable: None,
                 managed_host: Some(fixture.manager.managed_host().unwrap().clone()),
             });
             assert!(unexpected.is_err());
@@ -1188,14 +1182,12 @@ async fn controller_startup_expectation_recovers_suspended_or_failed_release_and
         let replacement = SessionManager::new_unowned_fixture(crate::ServerOptions {
             root_cwd: fixture.root.clone(),
             store_path: Some(fixture.manager.inner.store_path.clone()),
-            worker_executable: None,
             managed_host: Some(managed.clone()),
         })
         .unwrap();
         let replayed = SessionManager::new_unowned_fixture(crate::ServerOptions {
             root_cwd: fixture.root.clone(),
             store_path: Some(fixture.manager.inner.store_path.clone()),
-            worker_executable: None,
             managed_host: Some(managed),
         })
         .unwrap();
@@ -1270,7 +1262,6 @@ fn controller_startup_expectation_explicitly_adopts_a_virgin_pre_control_release
     assert!(SessionManager::new_unowned_fixture(crate::ServerOptions {
         root_cwd: fixture.root.clone(),
         store_path: Some(fixture.manager.inner.store_path.clone()),
-        worker_executable: None,
         managed_host: Some(mismatched),
     })
     .is_err());
@@ -1287,14 +1278,12 @@ fn controller_startup_expectation_explicitly_adopts_a_virgin_pre_control_release
     let replacement = SessionManager::new_unowned_fixture(crate::ServerOptions {
         root_cwd: fixture.root.clone(),
         store_path: Some(fixture.manager.inner.store_path.clone()),
-        worker_executable: None,
         managed_host: Some(managed.clone()),
     })
     .unwrap();
     let replayed = SessionManager::new_unowned_fixture(crate::ServerOptions {
         root_cwd: fixture.root.clone(),
         store_path: Some(fixture.manager.inner.store_path.clone()),
-        worker_executable: None,
         managed_host: Some(managed),
     })
     .unwrap();
@@ -1347,7 +1336,6 @@ async fn accepted_replacement_fences_old_public_completion_and_private_control_r
     let replacement = SessionManager::new_unowned_fixture(crate::ServerOptions {
         root_cwd: fixture.root.clone(),
         store_path: Some(fixture.manager.inner.store_path.clone()),
-        worker_executable: None,
         managed_host: Some(fixture.manager.managed_host().unwrap().clone()),
     })
     .unwrap();

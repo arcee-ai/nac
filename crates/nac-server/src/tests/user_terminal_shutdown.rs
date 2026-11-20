@@ -35,7 +35,6 @@ async fn graceful_shutdown_settles_human_shell_and_descendants_before_store_drai
     let manager = SessionManager::new_async(ServerOptions {
         root_cwd: root.clone(),
         store_path: Some(root.join("store.db")),
-        worker_executable: None,
         managed_host: None,
     })
     .await

@@ -4,8 +4,6 @@ use std::collections::{BTreeMap, HashSet};
 
 pub use nac_contracts::{NewProject, ProjectRecord};
 
-use crate::store::model_configurations::{model_configuration_columns, row_to_record_at};
-
 const MAX_NAME_LEN: usize = 120;
 const MAX_DESCRIPTION_LEN: usize = 2_000;
 
@@ -13,14 +11,12 @@ const MAX_DESCRIPTION_LEN: usize = 2_000;
 pub struct ProjectPatch {
     pub name: Option<String>,
     pub description: Option<Option<String>>,
-    pub default_model_config_id: Option<Option<String>>,
     pub pinned: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectLaunchContext {
     pub project: ProjectRecord,
-    pub default_model_config: Option<ModelConfigurationRecord>,
 }
 
 #[derive(Debug)]
@@ -28,7 +24,6 @@ pub enum ProjectStoreError {
     InvalidInput(String),
     DuplicateLocation,
     NotFound(String),
-    ModelConfigurationNotFound(String),
     Conflict(String),
     Store(anyhow::Error),
 }
@@ -39,9 +34,6 @@ impl std::fmt::Display for ProjectStoreError {
             Self::InvalidInput(message) | Self::Conflict(message) => formatter.write_str(message),
             Self::DuplicateLocation => formatter.write_str("a project already uses this location"),
             Self::NotFound(id) => write!(formatter, "project '{id}' was not found"),
-            Self::ModelConfigurationNotFound(id) => {
-                write!(formatter, "model configuration '{id}' was not found")
-            }
             Self::Store(error) => write!(formatter, "{error}"),
         }
     }
@@ -64,7 +56,7 @@ impl From<rusqlite::Error> for ProjectStoreError {
 type ProjectResult<T> = std::result::Result<T, ProjectStoreError>;
 
 const PROJECT_COLUMNS: &str = "project_id, name, description, cwd, ssh_host, ssh_port,
-     ssh_identity_file, default_model_config_id, created_at, updated_at,
+     ssh_identity_file, created_at, updated_at,
      pinned, sort_order, presentation_version";
 
 /// Pinned projects lead the list; inside a pin group the explicit order wins and
@@ -165,8 +157,6 @@ fn validated_project(project: NewProject) -> ProjectResult<ProjectRecord> {
             "ssh_port and ssh_identity_file require ssh_host".to_string(),
         ));
     }
-    let default_model_config_id =
-        normalize_optional_nonblank(project.default_model_config_id, "default_model_config_id")?;
     let name = match project.name {
         Some(name) => normalize_name(&name)?,
         None => generated_name(&project.cwd, ssh_host.as_deref()),
@@ -180,7 +170,6 @@ fn validated_project(project: NewProject) -> ProjectResult<ProjectRecord> {
         ssh_host,
         ssh_port: project.ssh_port,
         ssh_identity_file,
-        default_model_config_id,
         created_at: now.clone(),
         updated_at: now,
         pinned: false,
@@ -199,12 +188,11 @@ fn row_to_project_at(row: &rusqlite::Row<'_>, offset: usize) -> rusqlite::Result
         ssh_host: row.get(offset + 4)?,
         ssh_port: row.get(offset + 5)?,
         ssh_identity_file: row.get(offset + 6)?,
-        default_model_config_id: row.get(offset + 7)?,
-        created_at: row.get(offset + 8)?,
-        updated_at: row.get(offset + 9)?,
-        pinned: row.get::<_, i64>(offset + 10)? != 0,
-        sort_order: row.get(offset + 11)?,
-        presentation_version: row.get(offset + 12)?,
+        created_at: row.get(offset + 7)?,
+        updated_at: row.get(offset + 8)?,
+        pinned: row.get::<_, i64>(offset + 9)? != 0,
+        sort_order: row.get(offset + 10)?,
+        presentation_version: row.get(offset + 11)?,
     })
 }
 
@@ -225,26 +213,6 @@ fn map_insert_error(error: rusqlite::Error) -> ProjectStoreError {
     } else {
         ProjectStoreError::Store(error.into())
     }
-}
-
-fn ensure_model_configuration(
-    conn: &rusqlite::Connection,
-    config_id: Option<&str>,
-) -> ProjectResult<()> {
-    let Some(config_id) = config_id else {
-        return Ok(());
-    };
-    let exists: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM model_configurations WHERE config_id = ?1)",
-        params![config_id],
-        |row| row.get(0),
-    )?;
-    if !exists {
-        return Err(ProjectStoreError::ModelConfigurationNotFound(
-            config_id.to_string(),
-        ));
-    }
-    Ok(())
 }
 
 pub(super) fn load_project_with_connection(
@@ -296,14 +264,12 @@ pub fn insert_project(path: &Path, project: NewProject) -> ProjectResult<Project
     let mut record = validated_project(project)?;
     let mut conn = open_runtime_connection(path)?;
     let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-    ensure_model_configuration(&tx, record.default_model_config_id.as_deref())?;
     record.sort_order = next_sort_order(&tx, false, None)?;
     tx.execute(
         "INSERT INTO projects
          (project_id, name, description, cwd, ssh_host, ssh_port, ssh_identity_file,
-          default_model_config_id, created_at, updated_at, pinned, sort_order,
-          presentation_version)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 0, ?11, 0)",
+          created_at, updated_at, pinned, sort_order, presentation_version)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 0, ?10, 0)",
         params![
             record.project_id,
             record.name,
@@ -312,7 +278,6 @@ pub fn insert_project(path: &Path, project: NewProject) -> ProjectResult<Project
             record.ssh_host,
             record.ssh_port,
             record.ssh_identity_file,
-            record.default_model_config_id,
             record.created_at,
             record.updated_at,
             record.sort_order,
@@ -367,14 +332,6 @@ pub fn update_project(
         Some(description) => normalize_description(description)?,
         None => existing.description,
     };
-    let default_model_config_id = match patch.default_model_config_id {
-        Some(config_id) => {
-            let config_id = normalize_optional_nonblank(config_id, "default_model_config_id")?;
-            ensure_model_configuration(&tx, config_id.as_deref())?;
-            config_id
-        }
-        None => existing.default_model_config_id,
-    };
     // Re-pinning moves the project to the end of the target group and bumps the
     // presentation version so a concurrent reorder holding the old version is
     // rejected instead of silently reinstating the previous placement.
@@ -398,14 +355,13 @@ pub fn update_project(
     let updated_at = now_utc();
     tx.execute(
         "UPDATE projects
-         SET name = ?2, description = ?3, default_model_config_id = ?4, updated_at = ?5,
-             pinned = ?6, sort_order = ?7, presentation_version = ?8
+         SET name = ?2, description = ?3, updated_at = ?4,
+             pinned = ?5, sort_order = ?6, presentation_version = ?7
          WHERE project_id = ?1",
         params![
             project_id,
             name,
             description,
-            default_model_config_id,
             updated_at,
             i64::from(pinned),
             sort_order,
@@ -654,34 +610,9 @@ pub fn load_project_launch_context(
     project_id: &str,
 ) -> ProjectResult<ProjectLaunchContext> {
     let conn = open_runtime_connection(path)?;
-    let model_columns = model_configuration_columns("mc");
-    conn.query_row(
-        &format!(
-            "SELECT p.project_id, p.name, p.description, p.cwd, p.ssh_host, p.ssh_port,
-                    p.ssh_identity_file, p.default_model_config_id, p.created_at, p.updated_at,
-                    p.pinned, p.sort_order, p.presentation_version,
-                    {model_columns}
-             FROM projects p
-             LEFT JOIN model_configurations mc
-               ON mc.config_id = p.default_model_config_id
-             WHERE p.project_id = ?1"
-        ),
-        params![project_id],
-        |row| {
-            let project = row_to_project_at(row, 0)?;
-            let default_model_config = if row.get::<_, Option<String>>(13)?.is_some() {
-                Some(row_to_record_at(row, 13)?)
-            } else {
-                None
-            };
-            Ok(ProjectLaunchContext {
-                project,
-                default_model_config,
-            })
-        },
-    )
-    .optional()?
-    .ok_or_else(|| ProjectStoreError::NotFound(project_id.to_string()))
+    Ok(ProjectLaunchContext {
+        project: load_project_with_connection(&conn, project_id)?,
+    })
 }
 command LoadProjectLaunchContextCommand {
     project_id: String = project_id.to_owned(),
@@ -694,7 +625,6 @@ port public;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::BTreeMap;
 
     fn temp_store_path(label: &str) -> PathBuf {
         let unique = std::time::SystemTime::now()
@@ -715,24 +645,6 @@ mod tests {
             ssh_host: None,
             ssh_port: None,
             ssh_identity_file: None,
-            default_model_config_id: None,
-        }
-    }
-
-    fn model_configuration(name: &str) -> NewModelConfiguration {
-        NewModelConfiguration {
-            name: name.to_string(),
-            backend: "openai-responses".to_string(),
-            model: "gpt-5.5".to_string(),
-            base_url: "https://api.openai.com/v1".to_string(),
-            allow_insecure_http: false,
-            api_key_env: Some("PROJECT_TEST_KEY".to_string()),
-            reasoning_effort: Some("high".to_string()),
-            service_tier: None,
-            extra_headers: BTreeMap::new(),
-            orchestrator_compaction_threshold: Some(64_000),
-            initial_prompt: None,
-            light_model: None,
         }
     }
 
@@ -769,48 +681,17 @@ mod tests {
     }
 
     #[test]
-    fn project_default_load_is_joined_and_restricts_configuration_delete() {
-        let path = temp_store_path("default");
+    fn project_launch_context_loads_project_identity() {
+        let path = temp_store_path("launch_context");
         initialize(&path).unwrap();
-        insert_model_configuration(&path, "config-a", model_configuration("Project default"))
-            .unwrap();
-        let mut project = new_project("project-a", "/work/alpha");
-        project.default_model_config_id = Some("config-a".to_string());
-        insert_project(&path, project).unwrap();
-
-        let context = load_project_launch_context(&path, "project-a").unwrap();
+        insert_project(&path, new_project("project-a", "/work/alpha")).unwrap();
         assert_eq!(
-            context
-                .default_model_config
-                .as_ref()
-                .map(|config| config.config_id.as_str()),
-            Some("config-a")
+            load_project_launch_context(&path, "project-a")
+                .unwrap()
+                .project
+                .project_id,
+            "project-a"
         );
-        let deletion = delete_model_configuration(&path, "config-a");
-        assert!(
-            matches!(
-                &deletion,
-                Err(ModelConfigurationStoreError::InUse(id)) if id == "config-a"
-            ),
-            "unexpected deletion result: {deletion:?}"
-        );
-        assert!(load_model_configuration(&path, "config-a").is_ok());
-
-        update_project(
-            &path,
-            "project-a",
-            ProjectPatch {
-                default_model_config_id: Some(None),
-                ..ProjectPatch::default()
-            },
-        )
-        .unwrap();
-        assert!(delete_model_configuration(&path, "config-a").unwrap());
-        assert!(load_project_launch_context(&path, "project-a")
-            .unwrap()
-            .default_model_config
-            .is_none());
-
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 

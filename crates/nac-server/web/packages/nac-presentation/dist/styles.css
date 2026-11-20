@@ -987,10 +987,6 @@
     }
   }
 
-[data-nac-runtime]:is(.\!m-0), [data-nac-runtime] .\!m-0 {
-    margin: 0 !important;
-  }
-
 [data-nac-runtime]:is(.-m-px), [data-nac-runtime] .-m-px {
     margin: -1px;
   }
@@ -1587,14 +1583,6 @@
     max-height: 70dvh;
   }
 
-[data-nac-runtime]:is(.max-h-\[70vh\]), [data-nac-runtime] .max-h-\[70vh\] {
-    max-height: 70vh;
-  }
-
-[data-nac-runtime]:is(.max-h-\[160px\]), [data-nac-runtime] .max-h-\[160px\] {
-    max-height: 160px;
-  }
-
 [data-nac-runtime]:is(.max-h-\[200px\]), [data-nac-runtime] .max-h-\[200px\] {
     max-height: 200px;
   }
@@ -1891,10 +1879,6 @@
     width: 400px;
   }
 
-[data-nac-runtime]:is(.w-\[430px\]), [data-nac-runtime] .w-\[430px\] {
-    width: 430px;
-  }
-
 [data-nac-runtime]:is(.w-\[440px\]), [data-nac-runtime] .w-\[440px\] {
     width: 440px;
   }
@@ -2045,10 +2029,6 @@
 
 [data-nac-runtime]:is(.max-w-\[540px\]), [data-nac-runtime] .max-w-\[540px\] {
     max-width: 540px;
-  }
-
-[data-nac-runtime]:is(.max-w-\[560px\]), [data-nac-runtime] .max-w-\[560px\] {
-    max-width: 560px;
   }
 
 [data-nac-runtime]:is(.max-w-\[600px\]), [data-nac-runtime] .max-w-\[600px\] {
@@ -3924,10 +3904,6 @@
     line-height: var(--nac-presentation-tw-leading, var(--text-xs--line-height));
   }
 
-[data-nac-runtime]:is(.\!text-\[11px\]), [data-nac-runtime] .\!text-\[11px\] {
-    font-size: 11px !important;
-  }
-
 [data-nac-runtime]:is(.\!text-\[13px\]), [data-nac-runtime] .\!text-\[13px\] {
     font-size: 13px !important;
   }
@@ -3978,11 +3954,6 @@
 [data-nac-runtime]:is(.\!leading-7), [data-nac-runtime] .\!leading-7 {
     --nac-presentation-tw-leading: calc(var(--spacing) * 7) !important;
     line-height: calc(var(--spacing) * 7) !important;
-  }
-
-[data-nac-runtime]:is(.\!leading-\[16px\]), [data-nac-runtime] .\!leading-\[16px\] {
-    --nac-presentation-tw-leading: 16px !important;
-    line-height: 16px !important;
   }
 
 [data-nac-runtime]:is(.\!leading-\[22px\]), [data-nac-runtime] .\!leading-\[22px\] {
@@ -4338,12 +4309,6 @@
     text-decoration-color: var(--f-ink-5);
   }
 
-[data-nac-runtime]:is(.decoration-\[var\(--f-line-strong\)\]), [data-nac-runtime] .decoration-\[var\(--f-line-strong\)\] {
-    -webkit-text-decoration-color: var(--f-line-strong);
-    -webkit-text-decoration-color: var(--f-line-strong);
-    text-decoration-color: var(--f-line-strong);
-  }
-
 [data-nac-runtime]:is(.underline-offset-2), [data-nac-runtime] .underline-offset-2 {
     text-underline-offset: 2px;
   }
@@ -4358,10 +4323,6 @@
 
 [data-nac-runtime]:is(.opacity-0), [data-nac-runtime] .opacity-0 {
     opacity: 0;
-  }
-
-[data-nac-runtime]:is(.opacity-10), [data-nac-runtime] .opacity-10 {
-    opacity: .1;
   }
 
 [data-nac-runtime]:is(.opacity-25), [data-nac-runtime] .opacity-25 {
@@ -4632,10 +4593,6 @@
     user-select: text;
   }
 
-[data-nac-runtime]:is(.\[nac\:threads\]), [data-nac-runtime] .\[nac\:threads\] {
-    nac: threads;
-  }
-
 [data-nac-runtime]:is(.group-open\:rotate-90:is(:where(.group):is([open], :popover-open, :open) *)), [data-nac-runtime] .group-open\:rotate-90:is(:where(.group):is([open], :popover-open, :open) *) {
     rotate: 90deg;
   }
@@ -4744,7 +4701,7 @@
       color: var(--color-text-basic-primary);
     }
 
-    [data-nac-runtime]:is(.group-hover\/subagent-row\:opacity-100:is(:where(.group\/subagent-row):hover *)), [data-nac-runtime] .group-hover\/subagent-row\:opacity-100:is(:where(.group\/subagent-row):hover *), [data-nac-runtime]:is(.group-hover\/terminal-tab-button\:opacity-100:is(:where(.group\/terminal-tab-button):hover *)), [data-nac-runtime] .group-hover\/terminal-tab-button\:opacity-100:is(:where(.group\/terminal-tab-button):hover *), [data-nac-runtime]:is(.group-hover\/thread\:opacity-100:is(:where(.group\/thread):hover *)), [data-nac-runtime] .group-hover\/thread\:opacity-100:is(:where(.group\/thread):hover *), [data-nac-runtime]:is(.group-hover\/turn\:opacity-100:is(:where(.group\/turn):hover *)), [data-nac-runtime] .group-hover\/turn\:opacity-100:is(:where(.group\/turn):hover *) {
+    [data-nac-runtime]:is(.group-hover\/subagent-row\:opacity-100:is(:where(.group\/subagent-row):hover *)), [data-nac-runtime] .group-hover\/subagent-row\:opacity-100:is(:where(.group\/subagent-row):hover *), [data-nac-runtime]:is(.group-hover\/terminal-tab-button\:opacity-100:is(:where(.group\/terminal-tab-button):hover *)), [data-nac-runtime] .group-hover\/terminal-tab-button\:opacity-100:is(:where(.group\/terminal-tab-button):hover *), [data-nac-runtime]:is(.group-hover\/turn\:opacity-100:is(:where(.group\/turn):hover *)), [data-nac-runtime] .group-hover\/turn\:opacity-100:is(:where(.group\/turn):hover *) {
       opacity: 1;
     }
   }
@@ -4753,7 +4710,7 @@
     display: block;
   }
 
-[data-nac-runtime]:is(.group-focus-visible\:opacity-100:is(:where(.group):focus-visible *)), [data-nac-runtime] .group-focus-visible\:opacity-100:is(:where(.group):focus-visible *), [data-nac-runtime]:is(.group-focus-visible\/name\:opacity-100:is(:where(.group\/name):focus-visible *)), [data-nac-runtime] .group-focus-visible\/name\:opacity-100:is(:where(.group\/name):focus-visible *), [data-nac-runtime]:is(.group-focus-visible\/thread\:opacity-100:is(:where(.group\/thread):focus-visible *)), [data-nac-runtime] .group-focus-visible\/thread\:opacity-100:is(:where(.group\/thread):focus-visible *) {
+[data-nac-runtime]:is(.group-focus-visible\:opacity-100:is(:where(.group):focus-visible *)), [data-nac-runtime] .group-focus-visible\:opacity-100:is(:where(.group):focus-visible *), [data-nac-runtime]:is(.group-focus-visible\/name\:opacity-100:is(:where(.group\/name):focus-visible *)), [data-nac-runtime] .group-focus-visible\/name\:opacity-100:is(:where(.group\/name):focus-visible *) {
     opacity: 1;
   }
 
@@ -8441,16 +8398,6 @@
 
 [data-nac-runtime]:is(.chat-response td), [data-nac-runtime] .chat-response td {
   font-variant-numeric: tabular-nums;
-}
-
-[data-nac-runtime]:is(.chat-response.task-preview), [data-nac-runtime] .chat-response.task-preview {
-  --prose-size: var(--type-2xs);
-  --prose-leading: 1.6;
-  --prose-gap: .25rem;
-}
-
-[data-nac-runtime]:is(.chat-response.task-preview li), [data-nac-runtime] .chat-response.task-preview li {
-  margin: .125rem 0;
 }
 
 [data-nac-runtime]:is(.chat-response .thinking-content), [data-nac-runtime] .chat-response .thinking-content, [data-nac-runtime]:is(.reasoning-prose .chat-response), [data-nac-runtime] .reasoning-prose .chat-response {
