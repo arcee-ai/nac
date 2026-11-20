@@ -23,10 +23,10 @@ class FailureScopeTests(unittest.TestCase):
         self.assertEqual(capture.count('sheet.frame'), 1)
         self.assertEqual(capture.count('rootWindow.frame'), 1)
         self.assertIn('attached(exists: exists,\n                    frame: frame, owner: rootFrame)', capture)
-        self.assertIn('usable(exists: exists, enabled: enabled,\n                        hittable: hittable, frame: frame, owner: rootFrame)', capture)
+        self.assertIn('try require(enabled,', capture)
+        self.assertNotIn('sheet.isHittable', capture)
         for name, expression in [('root_frame', 'rootWindow.frame'), ('panel_exists', 'sheet.exists'),
-                                 ('panel_frame', 'sheet.frame'), ('panel_enabled', 'sheet.isEnabled'),
-                                 ('panel_hittable', 'sheet.isHittable')]:
+                                 ('panel_frame', 'sheet.frame'), ('panel_enabled', 'sheet.isEnabled')]:
             with self.subTest(name=name):
                 begin = capture.index('emit(.' + name + ', .begin)')
                 end = capture.index('emit(.' + name + ', .end)')
@@ -34,7 +34,19 @@ class FailureScopeTests(unittest.TestCase):
                 self.assertLess(capture.index(expression, begin), end)
                 self.assertEqual(capture.count(expression), 1)
         guard = source.split('func guardTarget() throws {', 1)[1].split('func dispatch(', 1)[0]
-        self.assertIn('consume(ticket, surface: captured.surface, rootFrame: captured.root, field: captured.field)', guard)
+        self.assertIn('consume(ticket, surface: captured.surface, rootFrame: captured.root, field: captured.field, panelFrame: captured.panel)', guard)
+        dispatch = source.split('func dispatch(', 1)[1].split('func text(', 1)[0]
+        self.assertIn('let panelKeyboard = kind == "panel" && keyboard && folderSurface == .panel', dispatch)
+        self.assertEqual(dispatch.count('(panelKeyboard || target.isHittable)'), 2)
+        actor = Path(__file__).with_name('StartupAXGuard.swift').read_text()
+        proof = actor.split('func panelProof(', 1)[1].split('func observe(', 1)[0]
+        self.assertIn('surface: "panel", kind: "panel", label: "", keyboard: true', proof)
+        self.assertIn('CFEqual(hit, panel)', proof)
+        self.assertIn('rootFrame.contains(point)', proof)
+        hit = actor.split('private func hitTarget(', 1)[1].split('func interaction(', 1)[0]
+        self.assertIn('focusedPID == pid', hit)
+        self.assertIn('flag.boolValue', hit)
+        self.assertIn('StartupInteractionPolicy.focusedWithin', hit)
 
     def test_direct_model_actions_keep_bounded_guard_and_interaction_counts(self):
         root = Path(__file__).parent
@@ -90,6 +102,49 @@ func panelCheckpointRun() -> [String: Any] {
     }
     StartupPanelCheckpoint.emit(.panel_frame, .begin, write: { _ in throw StartupAXReceiptError.invalid })
     return ["lines": lines, "writes": writes, "continued_after_write_error": true]
+}
+
+func panelFocusRun(_ mode: String) -> [String: Any] {
+    let owner = mode == "foreign_owner" ? 9 : 3
+    let result = StartupInteractionPolicy.focusedWithin(focus: 1, owner: owner, pid: mode == "invalid_pid" ? 0 : 400, focused:mode != "not_focused",
+        process: { node in mode == "foreign_pid" && node == 2 ? 500 : 400 },
+        parent: { node in
+            if mode == "missing_parent" { return nil }
+            if mode == "cycle" { return node == 1 ? 2 : 1 }
+            return node < 3 ? node + 1 : nil
+        })
+    return ["accepted": result]
+}
+
+func panelPreludeRun(_ mode: String) -> [String: Any] {
+    var stamp: UInt64 = 3_000_000_000, loads = 0, inputs = 0, pending: StartupAXInteractionRequest?
+    let root = UUID().uuidString, panel = UUID().uuidString
+    let helper = StartupAXProcess(pid:300,parent:200,uid:Int32(getuid()),start_seconds:1,start_microseconds:0,executable:"/inert/helper")
+    let target = StartupAXProcess(pid:400,parent:1,uid:Int32(getuid()),start_seconds:2,start_microseconds:0,executable:"/inert/app")
+    let declaration = StartupAXDeclaration(path:"/inert/receipt",nonce:String(repeating:"a",count:64),helper_path:helper.executable,helper_sha256:String(repeating:"b",count:64),support_sha256:["StartupAXGuard.swift":String(repeating:"c",count:64),"StartupAXReceipt.swift":String(repeating:"e",count:64)],owner_pid:200,deadline_ns:"100000000000")
+    let client = StartupAXClient(declaration,configurationSHA:String(repeating:"d",count:64),pid:400,launch:10,window:7,executable:target.executable,
+        now:{ stamp += 1_000_000; return stamp },pause:{ stamp += mode == "never" ? 31_000_000_000 : 1_000_000 },load:{
+            loads += 1; stamp += 100_000_000
+            let phase = loads <= 2 ? "form" : "panel"
+            let prelude = pending != nil && (loads == 5 || mode == "never")
+            var observed = StartupAXSurface(surface:phase,root_id:root,panel_id:phase == "panel" ? panel : nil,go_to_id:nil,root_frame:[10,20,100,30],focus:nil)
+            if phase == "panel" && (pending == nil || prelude) {
+                observed.panel_proof = StartupAXPanelProof(panel_id:prelude && mode == "foreign_panel" ? UUID().uuidString : panel,
+                    frame:prelude && mode == "foreign_frame" ? [11,20,100,30] : [10,20,100,30],point:[20,25])
+            }
+            if let request = pending, !prelude {
+                observed.interaction = StartupAXInteraction(request_id:request.id,target_id:UUID().uuidString,point:request.point,anchor_frame:request.anchor_frame,keyboard:request.keyboard,focus_checked:request.keyboard)
+            }
+            let receipt = StartupAXReceipt(schema:"nac342-ax-witness-v1",nonce:declaration.nonce,configuration_sha256:String(repeating:"d",count:64),helper_sha256:declaration.helper_sha256,support_sha256:declaration.support_sha256,trusted:true,helper:helper,target:target,app_launch_epoch:10,window_number:7,sequence:String(loads),refusal_generation:"0",began_ns:String(stamp-10_000_000),ended_ns:String(stamp-5_000_000),status:"ready",case_deadline_ns:"50000000000",observation:observed,refusal_stage:nil,refusal:nil)
+            return try JSONEncoder().encode(receipt)
+        })
+    do {
+        let first = try client.begin(); _ = try client.consume(first,surface:.form,rootFrame:CGRect(x:10,y:20,width:100,height:30))
+        let panelTicket = try client.begin(); _ = try client.consume(panelTicket,surface:.panel,rootFrame:CGRect(x:10,y:20,width:100,height:30),panelFrame:CGRect(x:10,y:20,width:100,height:30))
+        _ = try client.prepareInteraction(panelTicket,point:CGPoint(x:20,y:25),anchor:CGRect(x:10,y:20,width:100,height:30),kind:"panel",label:"",keyboard:true,value:nil,rootFrame:CGRect(x:10,y:20,width:100,height:30),publish:{ pending = $0 })
+        inputs += 1
+        return ["accepted":true,"inputs":inputs,"loads":loads,"proofs":client.interactions.count]
+    } catch { return ["accepted":false,"inputs":inputs,"loads":loads,"proofs":client.interactions.count] }
 }
 
 // Test-only syscall ports. The one-shot read hook runs after the REAL open
@@ -342,7 +397,9 @@ func focusRun(_ mode: String) -> [String: Any] {
                 role:scenario == "focus_role" ? "AXSecureTextField" : "AXTextField",focused:scenario != "focus_false",
                 attached:scenario != "focus_ancestor",frame:scenario == "focus_frame" ? [11,20,100,30] : [10,20,100,30],
                 value:scenario == "focus_value" ? "/foreign" : "/owned workspace") : nil
-            let receipt = StartupAXReceipt(schema:"nac342-ax-witness-v1",nonce:declaration.nonce,configuration_sha256:String(repeating:"d",count:64),helper_sha256:declaration.helper_sha256,support_sha256:declaration.support_sha256,trusted:true,helper:helper,target:target,app_launch_epoch:10,window_number:7,sequence:String(sequence),refusal_generation:"0",began_ns:String(stamp-20_000_000),ended_ns:String(stamp-10_000_000),status:"ready",case_deadline_ns:"50000000000",observation:StartupAXSurface(surface:phase,root_id:root,panel_id:phase == "form" ? nil : panel,go_to_id:phase == "goTo" ? goTo : nil,root_frame:[10,20,100,30],focus:focus),refusal_stage:nil,refusal:nil)
+            var observation = StartupAXSurface(surface:phase,root_id:root,panel_id:phase == "form" ? nil : panel,go_to_id:phase == "goTo" ? goTo : nil,root_frame:[10,20,100,30],focus:focus)
+            if phase == "panel" { observation.panel_proof = StartupAXPanelProof(panel_id:panel,frame:[10,20,100,30],point:[20,25]) }
+            let receipt = StartupAXReceipt(schema:"nac342-ax-witness-v1",nonce:declaration.nonce,configuration_sha256:String(repeating:"d",count:64),helper_sha256:declaration.helper_sha256,support_sha256:declaration.support_sha256,trusted:true,helper:helper,target:target,app_launch_epoch:10,window_number:7,sequence:String(sequence),refusal_generation:"0",began_ns:String(stamp-20_000_000),ended_ns:String(stamp-10_000_000),status:"ready",case_deadline_ns:"50000000000",observation:observation,refusal_stage:nil,refusal:nil)
             last = try JSONEncoder().encode(receipt)
             if staleFocus && call == 6 { stamp += 1_100_000_000 }
             return last
@@ -351,7 +408,8 @@ func focusRun(_ mode: String) -> [String: Any] {
         for phase in [StartupNativeFolderPolicy.Surface.form,.panel,.goTo] {
             let ticket = try client.begin()
             _ = try client.consume(ticket,surface:phase,rootFrame:CGRect(x:10,y:20,width:100,height:30),
-                field:phase == .goTo ? (CGRect(x:10,y:20,width:100,height:30),"/owned workspace") : nil)
+                field:phase == .goTo ? (CGRect(x:10,y:20,width:100,height:30),"/owned workspace") : nil,
+                panelFrame:phase == .panel ? CGRect(x:10,y:20,width:100,height:30) : nil)
         }
         return ["accepted":true,"inputs":1,"loads":call,"pauses":pauses,"proof":client.evidence.map { $0.sequence }]
     } catch { return ["accepted":false,"inputs":0,"loads":call,"pauses":pauses,"proof":client.evidence.map { $0.sequence }] }
@@ -748,6 +806,14 @@ func handoffRun(_ mode: String) -> [String: Any] {
                     anchor_frame:request.anchor_frame,keyboard:request.keyboard,focus_checked:request.keyboard)
                 lease = StartupAXActionLease(request:request,target:targetID)
             }
+            if observed.surface == "panel" && observed.interaction == nil {
+                if mode != "post_proof_missing" || post == nil {
+                    observed.panel_proof = StartupAXPanelProof(
+                        panel_id: post != nil && mode == "post_proof_panel" ? UUID().uuidString : observed.panel_id!,
+                        frame: post != nil && mode == "post_proof_frame" ? [11,20,100,30] : [10,20,100,30],
+                        point: post != nil && mode == "post_proof_point" ? [500,500] : [20,25])
+                }
+            }
             var receipt = StartupAXReceipt(schema:"nac342-ax-witness-v1",nonce:declaration.nonce,
                 configuration_sha256:configuration,helper_sha256:declaration.helper_sha256,support_sha256:declaration.support_sha256,
                 trusted:true,helper:helper,target:target,app_launch_epoch:10,window_number:7,sequence:String(sequence),
@@ -808,13 +874,13 @@ func handoffRun(_ mode: String) -> [String: Any] {
                 if mode == "duplicate_complete" { try client.completeInteraction(request) }
                 let fresh = try client.begin()
                 try StartupAXFiles.need(fresh.deadline == originalDeadline)
-                _ = try client.consume(fresh,surface:folderSurface,rootFrame:CGRect(x:10,y:20,width:100,height:30))
+                _ = try client.consume(fresh,surface:folderSurface,rootFrame:CGRect(x:10,y:20,width:100,height:30),panelFrame:CGRect(x:10,y:20,width:100,height:30))
             }
 __JOURNEY_ACTION_HANDOFF__
             if mode.hasPrefix("boundary_") {
                 ordinaryRequested = true
                 let next = try client.begin()
-                _ = try client.consume(next,surface:.panel,rootFrame:CGRect(x:10,y:20,width:100,height:30))
+                _ = try client.consume(next,surface:.panel,rootFrame:CGRect(x:10,y:20,width:100,height:30),panelFrame:CGRect(x:10,y:20,width:100,height:30))
                 try StartupAXFiles.need(drained && heldPreLoads >= 1 && heldPostLoads >= 2)
             }
             return ["accepted":true,"inputs":inputs,"postconditions":postconditions,"after_guards":afterGuards,
@@ -1372,7 +1438,7 @@ func requestChildRun(_ mode: String) -> [String: Any] {
     } catch { return ["accepted":false,"family":StartupFailureEvidence.family(error)] }
 }
 
-let rows = modes.map { $0 == "panel_checkpoint" ? panelCheckpointRun() : $0.hasPrefix("admission_") ? admissionRun(String($0.dropFirst(10))) : $0.hasPrefix("producer_hold_") ? producerHoldRun(String($0.dropFirst(14))) : $0.hasPrefix("handoff_") ? handoffRun(String($0.dropFirst(8))) : $0.hasPrefix("lease_") ? leaseRun(String($0.dropFirst(6))) : $0.hasPrefix("file_interleave_") ? fileInterleaveRun(String($0.dropFirst("file_interleave_".count))) : $0.hasPrefix("request_child_") ? requestChildRun(String($0.dropFirst("request_child_".count))) : $0.hasPrefix("retention_") ? refusalRetentionRun(String($0.dropFirst("retention_".count))) : $0.hasPrefix("errno_") ? publishErrnoRun(String($0.dropFirst(6))) : $0.hasPrefix("lifecycle_") ? lifecycleRun(String($0.dropFirst("lifecycle_".count))) : $0.hasPrefix("semantic_policy_") ? semanticPolicyRun(String($0.dropFirst("semantic_policy_".count))) : $0.hasPrefix("atomic_shape_") ? atomicShapeRun(String($0.dropFirst("atomic_shape_".count))) : $0.hasPrefix("semantic_compatibility_") ? semanticCompatibilityRun(String($0.dropFirst("semantic_compatibility_".count))) : $0.hasPrefix("publisher_checkpoint_") ? publisherCheckpointRun(String($0.dropFirst("publisher_checkpoint_".count))) : $0.hasPrefix("float_") ? floatSelectionRun($0) : $0.hasPrefix("first_") ? firstFailureRun($0) : $0.hasPrefix("request_") ? requestRun($0) : $0.hasPrefix("interaction_") ? interactionRun($0) : $0.hasPrefix("point_") ? interactionPolicyRun($0) : $0.hasPrefix("publication_") ? publicationRun($0) : $0.hasPrefix("loss_") ? lossRun($0) : $0 == "identity" ? identityProof() : ($0.hasPrefix("focus_") || $0.hasPrefix("stale_focus")) ? focusRun($0) : $0.hasPrefix("file_") ? fileRun($0) : run($0) }
+let rows = modes.map { $0.hasPrefix("panel_prelude_") ? panelPreludeRun(String($0.dropFirst(14))) : $0.hasPrefix("panel_focus_") ? panelFocusRun(String($0.dropFirst(12))) : $0 == "panel_checkpoint" ? panelCheckpointRun() : $0.hasPrefix("admission_") ? admissionRun(String($0.dropFirst(10))) : $0.hasPrefix("producer_hold_") ? producerHoldRun(String($0.dropFirst(14))) : $0.hasPrefix("handoff_") ? handoffRun(String($0.dropFirst(8))) : $0.hasPrefix("lease_") ? leaseRun(String($0.dropFirst(6))) : $0.hasPrefix("file_interleave_") ? fileInterleaveRun(String($0.dropFirst("file_interleave_".count))) : $0.hasPrefix("request_child_") ? requestChildRun(String($0.dropFirst("request_child_".count))) : $0.hasPrefix("retention_") ? refusalRetentionRun(String($0.dropFirst("retention_".count))) : $0.hasPrefix("errno_") ? publishErrnoRun(String($0.dropFirst(6))) : $0.hasPrefix("lifecycle_") ? lifecycleRun(String($0.dropFirst("lifecycle_".count))) : $0.hasPrefix("semantic_policy_") ? semanticPolicyRun(String($0.dropFirst("semantic_policy_".count))) : $0.hasPrefix("atomic_shape_") ? atomicShapeRun(String($0.dropFirst("atomic_shape_".count))) : $0.hasPrefix("semantic_compatibility_") ? semanticCompatibilityRun(String($0.dropFirst("semantic_compatibility_".count))) : $0.hasPrefix("publisher_checkpoint_") ? publisherCheckpointRun(String($0.dropFirst("publisher_checkpoint_".count))) : $0.hasPrefix("float_") ? floatSelectionRun($0) : $0.hasPrefix("first_") ? firstFailureRun($0) : $0.hasPrefix("request_") ? requestRun($0) : $0.hasPrefix("interaction_") ? interactionRun($0) : $0.hasPrefix("point_") ? interactionPolicyRun($0) : $0.hasPrefix("publication_") ? publicationRun($0) : $0.hasPrefix("loss_") ? lossRun($0) : $0 == "identity" ? identityProof() : ($0.hasPrefix("focus_") || $0.hasPrefix("stale_focus")) ? focusRun($0) : $0.hasPrefix("file_") ? fileRun($0) : run($0) }
 FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject:rows))
 '''
 
@@ -1459,7 +1525,7 @@ class ReceiptControls(unittest.TestCase):
 
     def test_action_handoff_never_replays_or_credits_wrong_phase_stale_refused_after_samples(self):
         modes = ['ack_absent', 'ack_foreign', 'duplicate_arm', 'recheck_changed', 'action_throw', 'actor_timeout', 'next_input',
-                 'postcondition_throw', 'capture_throw', 'capture_timeout', 'duplicate_complete', 'post_generation', 'post_refused', 'post_preentry', 'post_old_phase', 'post_stale', 'post_surface', 'post_frame']
+                 'postcondition_throw', 'capture_throw', 'capture_timeout', 'duplicate_complete', 'post_generation', 'post_refused', 'post_preentry', 'post_old_phase', 'post_stale', 'post_surface', 'post_frame', 'post_proof_missing', 'post_proof_panel', 'post_proof_frame', 'post_proof_point']
         for mode, row in zip(modes, self.rows(['handoff_' + mode for mode in modes])):
             with self.subTest(mode=mode):
                 self.assertFalse(row['accepted'], row)
@@ -1640,6 +1706,13 @@ class ReceiptControls(unittest.TestCase):
         self.assertTrue(row['accepted'])
         self.assertEqual((row['inputs'], row['loads'], row['clears'], row['proofs']), (1, 5, 1, 1))
         self.assertEqual(row['deadline'], '33001000000')
+        prelude = self.rows(['panel_prelude_positive', 'panel_prelude_foreign_panel',
+                             'panel_prelude_foreign_frame', 'panel_prelude_never'])
+        self.assertTrue(prelude[0]['accepted'], prelude[0])
+        self.assertEqual((prelude[0]['loads'], prelude[0]['proofs']), (6, 1))
+        for rejected in prelude[1:]:
+            self.assertFalse(rejected['accepted'], rejected)
+            self.assertEqual((rejected['inputs'], rejected['proofs']), (0, 0))
         self.assertGreater(int(row['finalized']), 0)
 
         self.assertEqual(self.rows(['semantic_compatibility_title', 'semantic_compatibility_incidental']),
@@ -1685,6 +1758,9 @@ class ReceiptControls(unittest.TestCase):
     def test_global_hit_ancestry_rejects_foreign_and_same_pid_occlusion_ambiguity_cycles_and_replacement(self):
         modes = ['positive', 'occluded', 'owned_occluder', 'ambiguous', 'cycle', 'depth', 'moved', 'replaced', 'wrong_label', 'later_replacement']
         self.assertEqual(self.rows(['point_' + m for m in modes]), [{'accepted':True}] + [{'accepted':False}] * 9)
+        focus_modes = ['positive', 'foreign_pid', 'foreign_owner', 'missing_parent', 'cycle', 'invalid_pid', 'not_focused']
+        self.assertEqual(self.rows(['panel_focus_' + mode for mode in focus_modes]),
+                         [{'accepted':True}] + [{'accepted':False}] * 6)
 
     def test_immediate_recheck_refuses_changed_point_anchor_or_root(self):
         self.assertEqual(self.rows(['point_point_changed', 'point_anchor_changed', 'point_root_changed']),

@@ -659,7 +659,7 @@ final class StartupJourneys: XCTestCase {
                 "Owned Go to Folder field is not actionable")
             return field
         }
-        func captureFolderSurface() throws -> (surface: StartupNativeFolderPolicy.Surface, root: CGRect, field: (CGRect, String)?) {
+        func captureFolderSurface() throws -> (surface: StartupNativeFolderPolicy.Surface, root: CGRect, panel: CGRect?, field: (CGRect, String)?) {
             let roots = rootWindow.children(matching: .sheet).allElementsBoundByAccessibilityElement
             let nested = roots.count == 1 ? roots[0].children(matching: .sheet).count : 0
             try require(StartupNativeFolderPolicy.surface(folderSurface, windows: ui.windows.count,
@@ -668,6 +668,7 @@ final class StartupJourneys: XCTestCase {
             StartupPanelCheckpoint.emit(.root_frame, .begin)
             let rootFrame = rootWindow.frame
             StartupPanelCheckpoint.emit(.root_frame, .end)
+            var panelFrame: CGRect?
             if folderSurface != .form {
                 let sheet = try XCTUnwrap(roots.first)
                 StartupPanelCheckpoint.emit(.panel_exists, .begin)
@@ -675,6 +676,7 @@ final class StartupJourneys: XCTestCase {
                 StartupPanelCheckpoint.emit(.panel_exists, .end)
                 StartupPanelCheckpoint.emit(.panel_frame, .begin)
                 let frame = sheet.frame
+                panelFrame = frame
                 StartupPanelCheckpoint.emit(.panel_frame, .end)
                 try require(StartupNativeFolderPolicy.attached(exists: exists,
                     frame: frame, owner: rootFrame),
@@ -683,11 +685,7 @@ final class StartupJourneys: XCTestCase {
                     StartupPanelCheckpoint.emit(.panel_enabled, .begin)
                     let enabled = sheet.isEnabled
                     StartupPanelCheckpoint.emit(.panel_enabled, .end)
-                    StartupPanelCheckpoint.emit(.panel_hittable, .begin)
-                    let hittable = sheet.isHittable
-                    StartupPanelCheckpoint.emit(.panel_hittable, .end)
-                    try require(StartupNativeFolderPolicy.usable(exists: exists, enabled: enabled,
-                        hittable: hittable, frame: frame, owner: rootFrame),
+                    try require(enabled,
                         "Owned folder panel is not actionable")
                 }
             }
@@ -696,9 +694,9 @@ final class StartupJourneys: XCTestCase {
                 let target = try goToField()
                 field = (target.frame, try XCTUnwrap(target.value as? String))
             } else { field = nil }
-            return (folderSurface, rootFrame, field)
+            return (folderSurface, rootFrame, folderSurface == .panel ? panelFrame : nil, field)
         }
-        var postActionSurface: (surface: StartupNativeFolderPolicy.Surface, root: CGRect, field: (CGRect, String)?)?
+        var postActionSurface: (surface: StartupNativeFolderPolicy.Surface, root: CGRect, panel: CGRect?, field: (CGRect, String)?)?
         func capturePostActionGuard() throws {
             try guardWindow(ui, running: running, paths: paths, launch: launch, number: number)
             try require((try? Data(contentsOf: URL(fileURLWithPath: path))) == bytes,
@@ -710,7 +708,7 @@ final class StartupJourneys: XCTestCase {
             do {
                 let ticket = try axClient?.begin()
                 if let captured = postActionSurface, let ticket {
-                    _ = try XCTUnwrap(axClient).consume(ticket, surface: captured.surface, rootFrame: captured.root, field: captured.field)
+                    _ = try XCTUnwrap(axClient).consume(ticket, surface: captured.surface, rootFrame: captured.root, field: captured.field, panelFrame: captured.panel)
                     postActionSurface = nil
                 } else {
                     try guardWindow(ui, running: running, paths: paths, launch: launch, number: number)
@@ -718,7 +716,7 @@ final class StartupJourneys: XCTestCase {
                         "Frozen fixture configuration changed")
                     if let ticket {
                         let captured = try captureFolderSurface()
-                        _ = try XCTUnwrap(axClient).consume(ticket, surface: captured.surface, rootFrame: captured.root, field: captured.field)
+                        _ = try XCTUnwrap(axClient).consume(ticket, surface: captured.surface, rootFrame: captured.root, field: captured.field, panelFrame: captured.panel)
                     }
                 }
                 guardTicket = ticket
@@ -762,7 +760,8 @@ final class StartupJourneys: XCTestCase {
             if let client = axClient {
                 let target = try XCTUnwrap(target), ticket = try XCTUnwrap(ticket)
                 let anchor = target.frame, root = rootWindow.frame
-                try require(target.exists && target.isEnabled && target.isHittable,
+                let panelKeyboard = kind == "panel" && keyboard && folderSurface == .panel
+                try require(target.exists && target.isEnabled && (panelKeyboard || target.isHittable),
                     "Interaction target lost public eligibility")
                 let center = target.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
                 let (selected, point) = try StartupInteractionPolicy.selectCoordinate(anchor: anchor, center: center,
@@ -799,7 +798,7 @@ final class StartupJourneys: XCTestCase {
                     failureEvidence.step = .final_recheck
                     try guardWindow(ui, running: running, paths: paths, launch: launch, number: number, record: false)
                     try require((try? Data(contentsOf: URL(fileURLWithPath: path))) == bytes
-                        && target.exists && target.isEnabled && target.isHittable
+                        && target.exists && target.isEnabled && (panelKeyboard || target.isHittable)
                         && (["button", "message"].contains(kind) ? namedTargetMatches(request.label) : target.label == request.label)
                         && StartupInteractionPolicy.unchanged(point: selected.screenPoint, expected: point,
                             anchor: target.frame, expectedAnchor: anchor, root: rootWindow.frame, expectedRoot: root)

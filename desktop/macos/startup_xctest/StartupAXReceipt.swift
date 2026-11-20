@@ -149,12 +149,18 @@ struct StartupAXInteraction: Codable, Equatable {
     let keyboard, focus_checked: Bool
 }
 
+struct StartupAXPanelProof: Codable, Equatable {
+    let panel_id: String
+    let frame, point: [Double]
+}
+
 struct StartupAXSurface: Codable {
     let surface, root_id: String
     let panel_id, go_to_id: String?
     let root_frame: [Double]
     let focus: StartupAXFocus?
     var interaction: StartupAXInteraction? = nil
+    var panel_proof: StartupAXPanelProof? = nil
 }
 
 struct StartupAXReceipt: Codable {
@@ -393,7 +399,10 @@ enum StartupAXFiles {
             let keys: Set<String> = ["surface", "root_id", "root_frame"]
             diagnostic?.step = .decode_observation
             try need(keys.isSubset(of: Set(observation.keys))
-                && Set(observation.keys).isSubset(of: keys.union(["panel_id", "go_to_id", "focus", "interaction"])))
+                && Set(observation.keys).isSubset(of: keys.union(["panel_id", "go_to_id", "focus", "interaction", "panel_proof"])))
+            if let proof = observation["panel_proof"] as? [String: Any] {
+                try need(Set(proof.keys) == ["panel_id", "frame", "point"])
+            }
             if let interaction = observation["interaction"] as? [String: Any] {
                 diagnostic?.step = .decode_interaction
                 try need(Set(interaction.keys) == ["request_id", "target_id", "point", "anchor_frame", "keyboard", "focus_checked"])
@@ -770,6 +779,7 @@ final class StartupAXClient {
     }
     func consume(_ ticket: Ticket, surface: StartupNativeFolderPolicy.Surface, rootFrame: CGRect,
                  field: (CGRect, String)? = nil, request: StartupAXInteractionRequest? = nil,
+                 panelFrame: CGRect? = nil,
                  diagnostic: StartupFailureEvidence? = nil) throws -> StartupAXSurface {
         do { while true {
             let checkedTime = try time(diagnostic: diagnostic)
@@ -811,6 +821,16 @@ final class StartupAXClient {
                 && (observed.panel_id == nil || UUID(uuidString: observed.panel_id!) != nil)
                 && (observed.go_to_id == nil || UUID(uuidString: observed.go_to_id!) != nil)
                 && folderBinding.accept(surface, root: observed.root_id, panel: observed.panel_id, goTo: observed.go_to_id))
+            if surface == .panel && (request == nil || observed.interaction == nil) {
+                guard let proof = observed.panel_proof else { throw StartupAXReceiptError.invalid }
+                let expectedPanel = try panelFrame ?? request.map { try StartupAXFiles.frame($0.anchor_frame) }
+                guard let expectedPanel else { throw StartupAXReceiptError.invalid }
+                let frame = try StartupAXFiles.frame(proof.frame)
+                try StartupAXFiles.need(proof.panel_id == observed.panel_id && frame == expectedPanel
+                    && proof.point.count == 2 && proof.point.allSatisfy { $0.isFinite && Double(Float($0)) == $0 }
+                    && frame.contains(CGPoint(x: proof.point[0], y: proof.point[1]))
+                    && rootFrame.contains(CGPoint(x: proof.point[0], y: proof.point[1])))
+            } else { try StartupAXFiles.need(observed.panel_proof == nil) }
             if surface == .goTo {
                 diagnostic?.step = .consume_focus_presence
                 guard let focus = observed.focus, let field else { throw StartupAXReceiptError.invalid }

@@ -43,7 +43,7 @@ The canonical actor retains real CFEqual root/panel/GoTo handles through the
 case, including disappeared sheets. Exact original-root geometry, admitted PID,
 direct root→sheet→nested-sheet topology and membership of every AXWindows object
 remain enforced. Same-shaped replacements do not rebind. Q retains its exact
-logical window/sheet counts, geometry, enabled/hittable checks, console,
+logical window/sheet counts, geometry, enabled and non-panel hittable checks, console,
 resource and process checks. GoTo keyboard focus still requires exact PID,
 AXTextField role, true focus, retained-sheet ancestry, exact frame and exact
 private String value (<=4096 UTF-8 bytes).
@@ -109,9 +109,18 @@ Q compares it to the captured surface, root frame and field and requires the
 same original cutoff, freshness and request-drain checks before any next input.
 Refusals remain terminal; neither the checks nor completion renews the ticket.
 The public root-sheet enumeration supplies the unique panel for this snapshot;
-its existence and geometry are read once and passed to both attachment and
-usability predicates. Window and complete sheet counts, enabled/hittable checks,
-and the separately retained witness identity and frame match remain required.
+its existence and geometry are read once and passed to the attachment predicate;
+enabled state remains required. Window and complete sheet counts and the
+separately retained witness identity and frame match remain required.
+For a panel guard, H additionally performs a global hit at an exactly
+representable point within the retained panel and root, with same-PID ancestry,
+exact panel identity and frame, and same-PID focused-descendant proof. H repeats
+the same proof after its closing process/resource/frame bookend. Q requires the
+fresh proof to match its captured panel frame and retained panel ID. Before a
+panel keyboard input the separate request-bound two-hit and focus proof remains
+mandatory at both action fences. Other elements retain their XCUI hittability
+checks. A concrete global hit and focus proof is not a claim of exact equivalence
+to XCTest's unspecified `isHittable` implementation.
 
 Coordinates are dynamic. A last-instant race between the final checks and OS
 input remains explicitly ACCEPTED. This does not claim atomic dispatch or an
