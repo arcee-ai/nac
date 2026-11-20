@@ -127,6 +127,7 @@ fn surviving_facts(conn: &Connection) -> Vec<(String, TableRows)> {
         "worksets",
         "thread_steering",
         "model_configurations",
+        "task_model_v54_provenance",
     ];
     let mut result: Vec<_> = rows(
         conn,
@@ -180,7 +181,7 @@ fn catalog(conn: &Connection) -> TableRows {
 }
 
 fn unaffected_catalog(conn: &Connection) -> TableRows {
-    let mut result = rows(conn, "SELECT type,name,tbl_name,sql FROM sqlite_master WHERE tbl_name NOT IN ('heartbeat_occurrences','sessions','projects','managed_orchestrator_terminal_receipts','managed_orchestrators','worker_dispatches','episodes','threads','workset_items','worksets','thread_steering','model_configurations') AND name NOT IN ('session_direct_inbox_origin_insert','session_direct_inbox_origin_update') ORDER BY type,name");
+    let mut result = rows(conn, "SELECT type,name,tbl_name,sql FROM sqlite_master WHERE tbl_name NOT IN ('heartbeat_occurrences','sessions','projects','managed_orchestrator_terminal_receipts','managed_orchestrators','worker_dispatches','episodes','threads','workset_items','worksets','thread_steering','model_configurations','task_model_v54_provenance') AND name NOT IN ('session_direct_inbox_origin_insert','session_direct_inbox_origin_update') AND name NOT LIKE 'task_model_v54_%' ORDER BY type,name");
     for row in &mut result {
         for value in row {
             if let Value::Text(text) = value {

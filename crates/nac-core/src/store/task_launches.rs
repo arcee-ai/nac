@@ -213,7 +213,14 @@ fn load(conn: &Connection, request_id: &str) -> Result<Option<TaskLaunchRecord>>
             updated_at,
         )| {
             Ok(TaskLaunchRecord {
-                request: serde_json::from_str(&request)?,
+                request: super::legacy_task_model::decode(
+                    conn,
+                    super::legacy_task_model::Owner::Task,
+                    request_id,
+                    "",
+                    &request,
+                )?
+                .0,
                 source: serde_json::from_str(&source)?,
                 session_id: session_id.clone(),
                 workspace_path: path.into(),

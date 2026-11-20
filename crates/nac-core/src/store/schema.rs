@@ -511,6 +511,7 @@ fn open_connection_with_hooks(
         // New stores do not pass through historical worker or preset schemas.
         // Keep this catalog in parity with the result of the v53 upgrade.
         transaction.execute_batch(include_str!("schema/current.sql"))?;
+        super::legacy_task_model::create_schema(&transaction)?;
         transaction.execute_batch(
             "INSERT INTO heartbeat_retained_allowance VALUES(1,100,1);
              INSERT INTO managed_host_maintenance VALUES(1,'serving',NULL,NULL,NULL,NULL,0);",
@@ -536,6 +537,7 @@ fn open_connection_with_hooks(
     if schema_version == 54 {
         let session_ids = retirement::all_session_ids(&transaction)?;
         let _leases = retirement::acquire_retirement_leases(path, &session_ids)?;
+        super::legacy_task_model::migrate(&transaction)?;
         checkpoint_v54::rehash_v54_checkpoints(
             &transaction,
             include_str!("../agent/prompts/nac_direct_compaction.md"),
@@ -867,6 +869,7 @@ fn open_connection_with_hooks(
     )?;
     verify_auxiliary_foreign_keys(&transaction)?;
     retire_worker_storage(&transaction)?;
+    super::legacy_task_model::migrate(&transaction)?;
     checkpoint_v54::rehash_v54_checkpoints(
         &transaction,
         include_str!("../agent/prompts/nac_direct_compaction.md"),

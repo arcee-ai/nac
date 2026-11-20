@@ -7,6 +7,7 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction};
 mod blocking_caller;
 pub(crate) mod coordinator;
 pub(crate) mod goal_changes;
+mod legacy_task_model;
 pub(crate) use blocking_caller::call_legacy_store;
 pub use blocking_caller::{spawn_blocking_store_caller, BlockingStoreCaller};
 #[macro_use]

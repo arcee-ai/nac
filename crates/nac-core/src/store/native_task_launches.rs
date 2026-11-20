@@ -18,7 +18,7 @@ fn load(conn: &Connection, request_id: &str) -> Result<Option<NativeTaskLaunch>>
         FROM native_task_launches WHERE request_id=?1", params![request_id], |row| {
             Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?,row.get::<_,String>(3)?,row.get::<_,String>(4)?,row.get::<_,bool>(5)?,row.get::<_,String>(6)?,row.get::<_,Option<String>>(7)?,row.get::<_,Option<i64>>(8)?,row.get::<_,String>(9)?,row.get::<_,String>(10)?))
         }).optional()?.map(|(request,caller_session_id,project_id,cwd,session_id,retained,phase,error,first_input_id,created_at,updated_at)| {
-            let mut value: serde_json::Value = serde_json::from_str(&request)?;
+            let (mut value, _): (serde_json::Value, bool) = super::legacy_task_model::decode(conn, super::legacy_task_model::Owner::Native, request_id, "", &request)?;
             let selection = value.as_object_mut().ok_or_else(|| anyhow!("invalid native launch request"))?
                 .remove("_nac_model_selection").map(serde_json::from_value).transpose()?;
             Ok(NativeTaskLaunch {

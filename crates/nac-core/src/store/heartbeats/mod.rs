@@ -8,6 +8,7 @@ mod attention;
 mod cadence;
 mod calendar;
 mod spec_codec;
+mod v54_receipt;
 pub use cadence::{
     HeartbeatCadence, HeartbeatCalendarDays, HeartbeatCalendarDraft, HeartbeatCalendarPreview,
     HeartbeatCalendarPreviewPoint, HeartbeatCalendarRule,
@@ -95,13 +96,30 @@ fn optional_enum<T: DeserializeOwned>(
     }
     enum_column(row, index).map(Some)
 }
-fn schedule_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<HeartbeatSchedule> {
+fn schedule_row(conn: &Connection, row: &rusqlite::Row<'_>) -> rusqlite::Result<HeartbeatSchedule> {
+    let schedule_id: String = row.get(0)?;
+    let raw: String = row.get(4)?;
+    let binding = super::legacy_task_model::decode(
+        conn,
+        super::legacy_task_model::Owner::Schedule,
+        &schedule_id,
+        "",
+        &raw,
+    )
+    .map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(
+            4,
+            rusqlite::types::Type::Text,
+            error.into_boxed_dyn_error(),
+        )
+    })?
+    .0;
     Ok(HeartbeatSchedule {
-        schedule_id: row.get(0)?,
+        schedule_id,
         session_id: row.get(1)?,
         version: row.get(2)?,
         state: enum_column(row, 3)?,
-        binding: decode(row, 4)?,
+        binding,
         spec: decode(row, 5)?,
         anchor_ms: row.get(6)?,
         next_due_ms: row.get(7)?,
@@ -143,14 +161,14 @@ fn occurrence_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<HeartbeatOccurren
 }
 fn load_schedule(conn: &Connection, session_id: &str, id: &str) -> Result<HeartbeatSchedule> {
     let project_id = session_id.strip_prefix("project:");
-    conn.query_row(&format!("SELECT {SCHEDULE_COLUMNS} FROM heartbeat_schedules WHERE schedule_id=?2 AND (session_id=?1 OR (session_id IS NULL AND json_extract(binding_json,'$.project_id')=?3))"),params![session_id,id,project_id],schedule_row).optional()?.context("heartbeat schedule was not found")
+    conn.query_row(&format!("SELECT {SCHEDULE_COLUMNS} FROM heartbeat_schedules WHERE schedule_id=?2 AND (session_id=?1 OR (session_id IS NULL AND json_extract(binding_json,'$.project_id')=?3))"),params![session_id,id,project_id],|row|schedule_row(conn,row)).optional()?.context("heartbeat schedule was not found")
 }
 
 fn load_schedule_by_id(conn: &Connection, id: &str) -> Result<HeartbeatSchedule> {
     conn.query_row(
         &format!("SELECT {SCHEDULE_COLUMNS} FROM heartbeat_schedules WHERE schedule_id=?1"),
         [id],
-        schedule_row,
+        |row| schedule_row(conn, row),
     )
     .optional()?
     .context("heartbeat schedule was not found")
@@ -248,7 +266,7 @@ pub(crate) fn heartbeat_blocks_goal_continuation(path:&Path,session_id:&str,goal
     let conn=connection.transaction_with_behavior(rusqlite::TransactionBehavior::Deferred)?;
     let schedules = {
         let mut query = conn.prepare(&format!("SELECT {SCHEDULE_COLUMNS} FROM heartbeat_schedules WHERE session_id=?1 AND state='suspended' AND json_extract(specification_json,'$.goal_id')=?2"))?;
-        let rows = query.query_map(params![session_id, goal_id], schedule_row)?
+        let rows = query.query_map(params![session_id, goal_id], |row| schedule_row(&conn,row))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         rows
     };
@@ -309,7 +327,7 @@ coordinated_command! {
 pub fn list_heartbeats(path:&Path,session_id:Option<&str>) -> Result<Vec<HeartbeatSchedule>> {
     let conn=open_runtime_connection(path)?;
     let mut query=conn.prepare(&format!("SELECT {SCHEDULE_COLUMNS} FROM heartbeat_schedules WHERE (?1 IS NULL OR session_id=?1) AND state!='deleted' ORDER BY created_at_ms,schedule_id LIMIT 101"))?;
-    let rows=query.query_map([session_id],schedule_row)?.collect::<rusqlite::Result<_>>()?;
+    let rows=query.query_map([session_id],|row|schedule_row(&conn,row))?.collect::<rusqlite::Result<_>>()?;
     Ok(rows)
 }
 command ListHeartbeatsCommand { session_id:Option<String>=session_id.map(str::to_owned) }
