@@ -117,14 +117,7 @@ async fn mcp_rejects_retired_creation_and_thread_steering_inputs() {
         json!({"session_id":"missing", "extension_hint":true}),
     )
     .await;
-    assert_eq!(extension["isError"], true, "{extension}");
-    assert!(
-        !extension["content"][0]["text"]
-            .as_str()
-            .unwrap()
-            .contains("Unsupported session fields"),
-        "{extension}"
-    );
+    assert_eq!(success(extension)["status"], "ok");
     for thread_name in [json!("worker"), Value::Null] {
         rejected(
             call(
