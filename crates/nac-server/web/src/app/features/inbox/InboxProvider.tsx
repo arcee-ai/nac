@@ -65,6 +65,9 @@ function LiveInboxProvider({ children }: { children: ReactNode }) {
         : null,
       parentId: entry.lineage?.parent_session_id ?? null,
       updatedAt: Date.parse(entry.summary.updated_at) || 0,
+      quietHeartbeatRunIds: entry.heartbeat_results
+        ?.filter((result) => result.outcome === "unchanged")
+        .map((result) => result.run_id),
     }));
     // titleOf is rebuilt every render; the session list decides the titles.
     // eslint-disable-next-line react-hooks/exhaustive-deps

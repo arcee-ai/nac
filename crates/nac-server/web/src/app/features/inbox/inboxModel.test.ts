@@ -253,3 +253,17 @@ it("reports unsupported orchestration coverage as unavailable rather than a clea
   expect(model.unavailable.map((row) => row.sessionId)).toEqual(["legacy"]);
   expect(model.badge).toBe(0);
 });
+
+it("keeps a quiet heartbeat out of Done without hiding a later ordinary run", () => {
+  const target = session("a", { quietHeartbeatRunIds: ["quiet-check"] });
+  const heartbeat = facts("a", {
+    last_outcome: { disposition: "completed", run_id: "quiet-check" },
+  });
+  expect(derive([target], [heartbeat]).done).toHaveLength(0);
+  const humanRun = facts("a", {
+    last_outcome: { disposition: "completed", run_id: "human-follow-up" },
+  });
+  expect(derive([target], [humanRun]).done.map((row) => row.outcomeRunId)).toEqual([
+    "human-follow-up",
+  ]);
+});

@@ -208,7 +208,7 @@ export function ModelPicker({
   );
 
   const modelList = (
-    <div className="flex max-h-[min(480px,65vh)] flex-col gap-1">
+    <div className="flex max-h-[min(480px,65vh)] flex-col gap-1 md:max-h-[min(480px,65vh,calc(var(--radix-popover-content-available-height)_-_16px))]">
       <BackHeader
         label="Model"
         onBack={() => {
