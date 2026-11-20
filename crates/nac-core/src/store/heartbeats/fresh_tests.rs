@@ -955,8 +955,82 @@ fn v54_fresh_receipts_replay_and_resume_without_rewriting_evidence() {
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .unwrap();
-        // Reconstruct the predecessor catalog, then exercise the real v54
-        // upgrade and reopen instead of manually manufacturing provenance.
+        // Restore the exact v55 predecessor constraints and triggers before
+        // reconstructing v54. Version 56 tightened these definitions in place;
+        // merely changing user_version would create an impossible predecessor.
+        let predecessor = rusqlite::Connection::open_in_memory().unwrap();
+        predecessor
+            .execute_batch(include_str!("../schema/fixtures/v55.sql"))
+            .unwrap();
+        conn.execute_batch("PRAGMA writable_schema=ON").unwrap();
+        for table in [
+            "sessions",
+            "session_inbox",
+            "session_completion_bindings",
+            "session_completion_occurrences",
+        ] {
+            let actual: String = conn
+                .query_row(
+                    "SELECT sql FROM sqlite_schema WHERE type='table' AND name=?1",
+                    [table],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            let restored = actual
+                .replace(
+                    "CHECK (behavior = 'direct')",
+                    "CHECK (behavior IN ('orchestrator', 'direct', 'direct-with-orchestrator'))",
+                )
+                .replace(
+                    "CHECK(behavior = 'direct')",
+                    "CHECK(behavior IN ('orchestrator','direct','direct-with-orchestrator'))",
+                )
+                .replace(
+                    "CHECK (completion_source = 'traditional_child')",
+                    "CHECK (completion_source IN ('traditional_child', 'managed_orchestrator'))",
+                );
+            let expected: String = predecessor
+                .query_row(
+                    "SELECT sql FROM sqlite_schema WHERE type='table' AND name=?1",
+                    [table],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_ne!(actual, restored, "missing v56 constraint for {table}");
+            assert_eq!(restored, expected, "predecessor schema differs for {table}");
+            assert_eq!(
+                conn.execute(
+                    "UPDATE sqlite_schema SET sql=?2 WHERE type='table' AND name=?1",
+                    params![table, restored]
+                )
+                .unwrap(),
+                1
+            );
+        }
+        conn.execute_batch("PRAGMA writable_schema=OFF").unwrap();
+        let cookie: i64 = conn
+            .pragma_query_value(None, "schema_version", |row| row.get(0))
+            .unwrap();
+        conn.pragma_update(None, "schema_version", cookie + 1)
+            .unwrap();
+        drop(conn);
+        let conn = open_runtime_connection(&f.path).unwrap();
+        for trigger in [
+            "session_direct_only_insert",
+            "session_direct_only_update",
+            "session_direct_inbox_origin_insert",
+            "session_direct_inbox_origin_update",
+        ] {
+            let sql: String = predecessor
+                .query_row(
+                    "SELECT sql FROM sqlite_schema WHERE type='trigger' AND name=?1",
+                    [trigger],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            conn.execute_batch(&sql).unwrap();
+        }
+        // Exercise the real v54 upgrade instead of manually manufacturing provenance.
         let triggers: Vec<String> = conn.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'task_model_v54_%'").unwrap().query_map([], |row|row.get(0)).unwrap().collect::<rusqlite::Result<_>>().unwrap();
         for trigger in triggers {
             conn.execute_batch(&format!("DROP TRIGGER {trigger}"))

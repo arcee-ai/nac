@@ -219,11 +219,14 @@ fn unknown_stored_behavior_fails_closed_for_load_and_list() {
     create_session(&store_path, &snapshot).unwrap();
 
     let conn = rusqlite::Connection::open(&store_path).unwrap();
-    assert!(conn.execute_batch(
-        "PRAGMA ignore_check_constraints = ON; UPDATE sessions SET behavior = 'future-behavior' WHERE session_id = 'session';",
-    ).is_err());
-    // Simulate structural corruption by bypassing the write guard, then prove reads fail closed.
-    conn.execute_batch("DROP TRIGGER session_direct_only_update; UPDATE sessions SET behavior = 'future-behavior' WHERE session_id = 'session';").unwrap();
+    assert!(conn
+        .execute(
+            "UPDATE sessions SET behavior = 'future-behavior' WHERE session_id = 'session'",
+            [],
+        )
+        .is_err());
+    // Bypass the v56 CHECK only to simulate corrupted on-disk data.
+    conn.execute_batch("PRAGMA ignore_check_constraints = ON; UPDATE sessions SET behavior = 'future-behavior' WHERE session_id = 'session';").unwrap();
     drop(conn);
 
     let load_error = load_session(&store_path, "session").unwrap_err();
