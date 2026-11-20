@@ -4,7 +4,7 @@ import { useManagedHost } from "@/app/features/managed/controller/useManagedHost
 import { routes } from "@/app/lib/routes";
 import { COMMAND_PALETTE_KEYS, SHORTCUT_SHEET_KEYS } from "@/app/lib/shortcuts";
 import { useTheme } from "@/app/providers/ThemeProvider";
-import { useMcpServers, useModelConfigs, useSshConfigs } from "@/app/services/queries";
+import { useMcpServers, useSshConfigs } from "@/app/services/queries";
 
 import { SettingsGroup, SettingsLinkRow, SettingsRow } from "../SettingsRows";
 
@@ -18,15 +18,14 @@ function count(value: number | undefined, one: string, many: string): string {
 
 /**
  * Settings › General. NAC has no global launch defaults of its own — a session
- * starts from a saved setup chosen in the composer — so this is the overview:
- * what is configured, with a way into each section.
+ * starts from the model chosen in the composer — so this is the overview: what
+ * is configured, with a way into each section.
  */
 export function GeneralSection() {
   const managed = useManagedHost();
   const { theme = "system" } = useTheme();
   const { useTranscriptDensity } = useNativeRuntime().stores.transcriptDensityStore;
   const density = useTranscriptDensity();
-  const { data: models } = useModelConfigs();
   const { data: mcp } = useMcpServers();
   const { data: ssh } = useSshConfigs();
   const servers = mcp?.servers;
@@ -35,14 +34,13 @@ export function GeneralSection() {
     <div className="flex flex-col gap-8">
       <SettingsGroup
         title="Agents"
-        description="New sessions pick a saved setup in the composer; nothing here changes a running session."
+        description="New sessions pick a model in the composer; nothing here changes a running session."
       >
         <SettingsLinkRow
-          label="Models & providers"
-          hint="Saved provider and model setups"
-          value={count(models?.configurations.length, "setup", "setups")}
-          to={routes.settings("models")}
-          icon={IconName.Ai}
+          label="Accounts & keys"
+          hint="Subscription sign-ins and provider API keys"
+          to={routes.settings("accounts")}
+          icon={IconName.Key}
         />
         <SettingsLinkRow
           label="MCP servers"

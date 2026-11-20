@@ -619,6 +619,7 @@ impl NacMcpService {
         Parameters(params): Parameters<UpdateSessionParams>,
     ) -> Result<CallToolResult, ErrorData> {
         let request = UpdateConfigRequest {
+            expected_config_version: None,
             model: field(params.model),
             base_url: field(params.base_url),
             allow_insecure_http: params

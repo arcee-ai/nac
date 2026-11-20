@@ -2,6 +2,8 @@ import { useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
 import { IconName } from "@/app/atoms";
+import { useNewSession } from "@/app/components/LeftSidebar/useSidebarCommands";
+import { useNewSessionKeys } from "@/app/features/desktop-commands/nativeMenu";
 import { useManagedHost } from "@/app/features/managed/controller/useManagedHost";
 import { useProductNavigationOwner } from "@/app/features/product-context/context";
 import { SETTINGS_SECTION_META } from "@/app/features/settings/sections";
@@ -11,7 +13,7 @@ import { isActiveRun, parseStoreTime } from "@/app/lib/format";
 import { projectIdFromPath, routes, sessionIdFromPath, type SessionPanel } from "@/app/lib/routes";
 import { sessionPanelPolicy } from "@/app/lib/sessionBehavior";
 import { sessionStatus, type SessionStatus } from "@/app/lib/sessionStatus";
-import { NEW_SESSION_KEYS, NEXT_NEEDS_YOU_KEYS, TOGGLE_SIDEBAR_KEYS } from "@/app/lib/shortcuts";
+import { NEXT_NEEDS_YOU_KEYS, TOGGLE_SIDEBAR_KEYS } from "@/app/lib/shortcuts";
 import { useInbox } from "@/app/features/inbox/inboxContext";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
 import { THEMES, useTheme, type Theme } from "@/app/providers/ThemeProvider";
@@ -118,6 +120,8 @@ export function usePaletteCommands(): PaletteItem[] {
   const { requestSidebarToggle, useSidebarToggleAvailable } = useCommandSurfaceControls();
   const density = useTranscriptDensity();
   const sidebarAvailable = useSidebarToggleAvailable();
+  const newSessionKeys = useNewSessionKeys();
+  const { newSession } = useNewSession();
 
   const sessionId = sessionIdFromPath(pathname);
   const current = sessions.find((entry) => entry.summary.session_id === sessionId);
@@ -207,8 +211,8 @@ export function usePaletteCommands(): PaletteItem[] {
       label: "New session",
       detail: here,
       icon: IconName.AddChat,
-      shortcut: NEW_SESSION_KEYS,
-      run: () => navigate(routes.newSession(projectId)),
+      shortcut: newSessionKeys,
+      run: () => void newSession(),
     });
     items.push({
       id: "action:new-project",
@@ -260,7 +264,7 @@ export function usePaletteCommands(): PaletteItem[] {
         label: `New session in ${project.name}`,
         keywords: "start create",
         icon: IconName.AddChat,
-        run: () => navigate(routes.newSession(project.project_id)),
+        run: () => void projectActions.newChat(project.project_id),
       });
     }
 
@@ -310,6 +314,8 @@ export function usePaletteCommands(): PaletteItem[] {
     managed,
     navigate,
     needsYouCount,
+    newSession,
+    newSessionKeys,
     openNextNeedsYou,
     projectActions,
     projectId,

@@ -187,8 +187,8 @@ it("reads facts on Settings › Capabilities for the session it came from, then 
 });
 it.each([
   ["mcp-settings", "/settings/mcp"],
-  ["configurations", "/settings/models"],
-  ["model-authentication", "/settings/models"],
+  ["configurations", "/settings/accounts"],
+  ["model-authentication", "/settings/accounts"],
   ["ssh-configurations", "/settings/ssh"],
 ] as const)("opens %s as its Settings section", async (destination, route) => {
   const { open } = fixture();

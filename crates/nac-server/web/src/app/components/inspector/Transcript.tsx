@@ -46,7 +46,6 @@ import { PerfProfiler } from "@/app/lib/PerfProfiler";
 import { perfRender } from "@/app/lib/perfDebug";
 import type { ModelTurn, TranscriptTurn } from "@/app/lib/transcript";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
-import { useSessionActions } from "@/app/providers/SessionActionsProvider";
 import {
   useDismissSessionFork,
   useForkSession,
@@ -157,10 +156,9 @@ export function Transcript({
   const selectedFile = useSelectedFile();
   const selectedRevision = useSelectedRevision();
   const toast = useToast();
-  const sessionActions = useSessionActions();
   const navigate = useNavigate();
   const backend = snapshot?.metadata.backend ?? null;
-  const toNotice = useErrorNotice(sessionId, backend);
+  const toNotice = useErrorNotice(backend);
   // Read before the notice is built, since hook order cannot depend on whether
   // this run failed.
   const authErrorSuppressed = useAuthErrorSuppressed(backend, error);
@@ -686,7 +684,7 @@ export function Transcript({
                 goal={goal}
                 backend={backend}
                 onResumeGoal={resumeGoal}
-                onOpenSettings={() => sessionActions.settings(sessionId)}
+                onOpenSettings={() => navigate(routes.settings("accounts"))}
                 onRegenerate={
                   latestUser?.kind === "user" ? () => resend(latestUser.messageIndex) : null
                 }

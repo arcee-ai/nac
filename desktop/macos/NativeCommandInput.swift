@@ -258,10 +258,10 @@ final class NativeCommandInput {
     private func composerFocus() async throws {
         try await wait("native keyboard focus return") { try await self.js("return document.activeElement?.getAttribute('aria-label') === 'Message'") as? Bool == true }
     }
-    /// Native Settings opens the Settings page on Models & providers, not a dialog.
+    /// Native Settings opens General.
     private func settingsPage(visible: Bool) async throws {
         try await wait("native keyboard Settings page") {
-            try await self.js("const shown = location.hash === '#/settings/models' && [...document.querySelectorAll('main[aria-label=\"Models & providers\"]')].some(m => m.getClientRects().length); return shown === visible && (!visible || !document.querySelector('[role=dialog]'))", arguments: ["visible": visible]) as? Bool == true
+            try await self.js("const shown = location.hash === '#/settings/general' && [...document.querySelectorAll('main[aria-label=\"General\"]')].some(m => m.getClientRects().length); return shown === visible && (!visible || !document.querySelector('[role=dialog]'))", arguments: ["visible": visible]) as? Bool == true
         }
     }
     /// Native New Session lands on Home's composer with its textbox focused.

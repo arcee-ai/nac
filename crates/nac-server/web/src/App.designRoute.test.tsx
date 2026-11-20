@@ -41,6 +41,9 @@ vi.mock("./app/providers/SessionActionsProvider", () => ({
 vi.mock("./app/providers/ProjectActionsProvider", () => ({
   ProjectActionsProvider: ({ children }: { children: ReactNode }) => children,
 }));
+vi.mock("./app/components/LeftSidebar/NewSessionShortcut", () => ({
+  NewSessionShortcut: () => null,
+}));
 vi.mock("./app/features/managed/controller/ManagedHostProvider", () => ({
   ManagedHostProvider: ({ children }: { children: ReactNode }) => children,
 }));

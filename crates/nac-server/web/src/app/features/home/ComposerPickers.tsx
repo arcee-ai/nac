@@ -1,8 +1,7 @@
 import { useState } from "react";
 
-import { IconName, Popover, PopoverPlacement, PopoverSize, SessionAvatar } from "@/app/atoms";
+import { Icon, IconName, Popover, PopoverPlacement, PopoverSize, SessionAvatar } from "@/app/atoms";
 import { Menu, MenuItem, MenuLabel, MenuSeparator } from "@/app/features/sidebar/MenuItem";
-import { cn } from "@/app/lib/cn";
 import type { ProjectRecord, SessionBehavior } from "@/app/types/api";
 
 import { BEHAVIOR_CHOICES, behaviorLabel } from "./behaviors";
@@ -10,7 +9,21 @@ import { Chip } from "./Chip";
 
 const FILTER_FROM = 8;
 
-/** Which project the new session runs in, plus "Add project…". */
+/** Projects grouped by where they run: this computer first, then each SSH host. */
+function byHost(projects: readonly ProjectRecord[]) {
+  const groups = new Map<string | null, ProjectRecord[]>([[null, []]]);
+  for (const project of projects) {
+    const host = project.ssh_host ?? null;
+    groups.set(host, [...(groups.get(host) ?? []), project]);
+  }
+  return [...groups].filter(([, members]) => members.length > 0);
+}
+
+/**
+ * Which project the new session runs in. A project's host is part of it, so
+ * the menu groups projects under where they run rather than offering the host
+ * as a separate choice; SSH projects name their host on the chip.
+ */
 export function ProjectPicker({
   projects,
   value,
@@ -58,20 +71,26 @@ export function ProjectPicker({
               onChange={(event) => setFilter(event.target.value)}
               className="type-body-chrome mb-1 h-8 w-full rounded-lg border border-tertiary bg-elevation-level-1 px-2.5 text-basic-primary outline-none placeholder:text-basic-muted focus:border-secondary max-md:h-11 max-md:text-base"
             />
-          ) : (
-            <MenuLabel>Project</MenuLabel>
-          )}
-          {shown.map((project) => (
-            <MenuItem
-              key={project.project_id}
-              label={project.name}
-              hint={project.cwd}
-              checked={project.project_id === value?.project_id}
-              onSelect={() => {
-                onChange(project.project_id);
-                close();
-              }}
-            />
+          ) : null}
+          {byHost(shown).map(([host, members]) => (
+            <div key={host ?? "local"} role="group" aria-label={host ?? "This computer"}>
+              <p className="type-meta flex items-center gap-1.5 px-2.5 pt-1.5 pb-1 text-basic-tertiary">
+                <Icon iconName={host ? IconName.Server : IconName.Desktop} size={12} />
+                {host ?? "This computer"}
+              </p>
+              {members.map((project) => (
+                <MenuItem
+                  key={project.project_id}
+                  label={project.name}
+                  hint={project.cwd}
+                  checked={project.project_id === value?.project_id}
+                  onSelect={() => {
+                    onChange(project.project_id);
+                    close();
+                  }}
+                />
+              ))}
+            </div>
           ))}
           {shown.length === 0 ? (
             <p className="type-meta px-2.5 py-2 text-basic-muted">No matching projects</p>
@@ -97,7 +116,14 @@ export function ProjectPicker({
         icon={value ? undefined : IconName.Folder}
         onClick={() => setOpen((current) => !current)}
       >
-        {value?.name ?? "Choose a project"}
+        {value?.ssh_host ? (
+          <>
+            <span className="text-basic-tertiary">{value.ssh_host} / </span>
+            {value.name}
+          </>
+        ) : (
+          (value?.name ?? "Choose a project")
+        )}
       </Chip>
     </Popover>
   );
@@ -156,30 +182,5 @@ export function BehaviorPicker({
         {behaviorLabel(value)}
       </Chip>
     </Popover>
-  );
-}
-
-/** Starts an isolated checkout (direct + committed Git source) instead of the project folder. */
-export function IsolatedToggle({
-  value,
-  onChange,
-  disabled,
-}: {
-  value: boolean;
-  onChange: (next: boolean) => void;
-  disabled?: boolean;
-}) {
-  return (
-    <Chip
-      menu={false}
-      pressed={value}
-      disabled={disabled}
-      icon={IconName.FolderCopy}
-      title="Run in a retained, isolated Git checkout; your working tree stays untouched"
-      onClick={() => onChange(!value)}
-      className={cn(value && "text-basic-primary")}
-    >
-      Isolated checkout
-    </Chip>
   );
 }

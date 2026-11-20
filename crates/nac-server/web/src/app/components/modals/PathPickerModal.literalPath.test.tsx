@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
@@ -74,6 +74,11 @@ function picker(initialPath = literal, ssh?: SshTarget) {
   };
 }
 
+async function startTyping() {
+  fireEvent.click(await screen.findByRole("button", { name: "Type a path" }));
+  return screen.getByRole<HTMLInputElement>("textbox", { name: "Folder path" });
+}
+
 it.each([literal, "/workspace/ordinary", " relative leading and trailing "])(
   "keeps the exact nonblank local initial path %j through selection",
   async (path) => {
@@ -87,13 +92,9 @@ it.each([literal, "/workspace/ordinary", " relative leading and trailing "])(
           expect.any(AbortSignal),
         ),
       );
-      expect((screen.getByPlaceholderText("/path/to/directory") as HTMLInputElement).value).toBe(
-        path,
-      );
-      await waitFor(() =>
-        expect(screen.getByText(/^Selected:/).textContent).toBe(`Selected: ${path}`),
-      );
-      fireEvent.click(screen.getByRole("button", { name: "Select" }));
+      const input = await startTyping();
+      expect(input.value).toBe(path);
+      fireEvent.click(screen.getByRole("button", { name: /^Choose “/ }));
       await waitFor(() => expect(p.onSelect).toHaveBeenCalledWith(path));
     } finally {
       p.dispose();
@@ -104,8 +105,8 @@ it.each([literal, "/workspace/ordinary", " relative leading and trailing "])(
 it("keeps typed local paths exact after IME composition and uses the blank fallback only for whitespace", async () => {
   const p = picker("/workspace");
   try {
-    const input = screen.getByPlaceholderText("/path/to/directory");
-    await waitFor(() => expect(api.browsePath).toHaveBeenCalledTimes(1));
+    const input = await startTyping();
+    expect(api.browsePath).toHaveBeenCalledTimes(1);
     fireEvent.change(input, { target: { value: literal } });
     fireEvent.keyDown(input, { key: "Enter", isComposing: true });
     expect(api.browsePath).toHaveBeenCalledTimes(1);
@@ -118,8 +119,9 @@ it("keeps typed local paths exact after IME composition and uses the blank fallb
         expect.any(AbortSignal),
       ),
     );
-    fireEvent.change(input, { target: { value: " \t " } });
-    fireEvent.keyDown(input, { key: "Enter" });
+    const blank = await startTyping();
+    fireEvent.change(blank, { target: { value: " \t " } });
+    fireEvent.keyDown(blank, { key: "Enter" });
     await waitFor(() =>
       expect(api.browsePath).toHaveBeenCalledWith(
         null,
@@ -128,7 +130,7 @@ it("keeps typed local paths exact after IME composition and uses the blank fallb
         expect.any(AbortSignal),
       ),
     );
-    expect((input as HTMLInputElement).value).toBe("");
+    expect((await startTyping()).value).toBe("");
   } finally {
     p.dispose();
   }
@@ -146,7 +148,7 @@ it("retains the existing SSH trimming contract", async () => {
         expect.any(AbortSignal),
       ),
     );
-    const input = screen.getByPlaceholderText("~/path/on/the/host");
+    const input = await startTyping();
     fireEvent.change(input, { target: { value: " ~/another " } });
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() =>
@@ -174,7 +176,7 @@ it("ignores stale browse results after exact-path navigation and cancel never se
   const p = picker("/old");
   try {
     await waitFor(() => expect(api.browsePath).toHaveBeenCalledTimes(1));
-    const input = screen.getByPlaceholderText("/path/to/directory");
+    const input = screen.getByRole("textbox", { name: "Folder path" });
     fireEvent.change(input, { target: { value: literal } });
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() =>
@@ -186,9 +188,10 @@ it("ignores stale browse results after exact-path navigation and cancel never se
       ),
     );
     await act(async () => resolveOld(listing("/old")));
-    await waitFor(() =>
-      expect(screen.getByText(/^Selected:/).textContent).toBe(`Selected: ${literal}`),
-    );
+    const crumbs = await screen.findByRole("navigation", { name: "Folder path" });
+    expect(
+      within(crumbs).getByRole("button", { name: "Project 日本語" }).getAttribute("aria-current"),
+    ).toBe("location");
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(p.onClose).toHaveBeenCalledOnce();
     expect(p.onSelect).not.toHaveBeenCalled();
@@ -215,9 +218,7 @@ it("aborts a detached request and reopens with the exact new initial path", asyn
         expect.any(AbortSignal),
       ),
     );
-    expect((screen.getByPlaceholderText("/path/to/directory") as HTMLInputElement).value).toBe(
-      literal,
-    );
+    expect((await startTyping()).value).toBe(literal);
   } finally {
     p.dispose();
   }

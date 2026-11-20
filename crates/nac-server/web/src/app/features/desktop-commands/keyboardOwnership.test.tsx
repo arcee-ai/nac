@@ -7,7 +7,7 @@ import type { DesktopCommandPort } from "./adapter";
 
 const owners = vi.hoisted(() => ({
   newSession: vi.fn(),
-  openConfigurations: vi.fn(),
+  openSettings: vi.fn(),
   openProjects: vi.fn(),
 }));
 vi.mock("@/app/components/LeftSidebar/useSidebarCommands", () => ({
@@ -52,15 +52,15 @@ it("routes commands only to the embedded presentation with real DOM focus", () =
   screen.getByRole("button", { name: "First view" }).focus();
   expect(first.send(1)).toBe(true);
   expect(second.send(1)).toBe(false);
-  expect(owners.openConfigurations).toHaveBeenCalledOnce();
+  expect(owners.openSettings).toHaveBeenCalledOnce();
   screen.getByRole("button", { name: "Second view" }).focus();
   expect(first.send(2)).toBe(false);
   expect(second.send(2)).toBe(true);
-  expect(owners.openConfigurations).toHaveBeenCalledTimes(2);
+  expect(owners.openSettings).toHaveBeenCalledTimes(2);
   screen.getByRole("button", { name: "Caller view" }).focus();
   expect(first.send(3)).toBe(false);
   expect(second.send(3)).toBe(false);
-  expect(owners.openConfigurations).toHaveBeenCalledTimes(2);
+  expect(owners.openSettings).toHaveBeenCalledTimes(2);
 });
 
 it("preserves an explicitly selected document keyboard owner", () => {
@@ -78,5 +78,5 @@ it("preserves an explicitly selected document keyboard owner", () => {
   expect(global.send(1)).toBe(true);
   focused.mockReturnValue(false);
   expect(global.send(2)).toBe(false);
-  expect(owners.openConfigurations).toHaveBeenCalledOnce();
+  expect(owners.openSettings).toHaveBeenCalledOnce();
 });

@@ -5,7 +5,6 @@ import type { SettingsSection } from "../../lib/routes";
  */
 export interface ProductNavigationOwner {
     openMcp(): void;
-    openConfigurations(): void;
     openSsh(): void;
     /** Settings › Capabilities, scoped to the session on screen (if any). */
     inspect(): void;

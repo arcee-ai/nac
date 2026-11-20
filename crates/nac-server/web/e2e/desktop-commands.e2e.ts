@@ -78,11 +78,11 @@ test("injected UI capability opens shared owners once without submitting a sessi
       },
       { request, action },
     );
-  // Settings is a full page now: the command navigates to Models & providers.
+  // Settings opens its general preferences on desktop.
   expect(await dispatch(1, "settings")).toBe(true);
-  const settings = page.getByRole("main", { name: "Models & providers", exact: true }).first();
+  const settings = page.getByRole("main", { name: "General", exact: true }).first();
   await expect(settings).toBeVisible();
-  await expect(page).toHaveURL(`${harness.baseUrl}/#/settings/models`);
+  await expect(page).toHaveURL(`${harness.baseUrl}/#/settings/general`);
   expect(await dispatch(1, "settings")).toBe(false); // A replayed request never reruns.
   await page.goBack();
   await expect(composer).toBeVisible();
@@ -90,9 +90,9 @@ test("injected UI capability opens shared owners once without submitting a sessi
   await page.getByRole("button", { name: "Session menu", exact: true }).click();
   await page
     .getByRole("dialog", { name: "Session", exact: true })
-    .getByRole("button", { name: "Session settings", exact: true })
+    .getByRole("button", { name: "Rename", exact: true })
     .click();
-  const modal = page.getByRole("dialog", { name: "Session settings", exact: true });
+  const modal = page.getByRole("dialog", { name: "Rename session", exact: true });
   await expect(modal).toBeVisible();
   expect(await dispatch(2, "newSession")).toBe(false); // Current modal owns focus.
   await expect(modal).toHaveCount(1);

@@ -1766,6 +1766,7 @@ export interface components {
       api_key_env?: components["schemas"]["RequestField_String_String"];
       backend?: components["schemas"]["RequestField_String_String"];
       base_url?: components["schemas"]["RequestField_String_String"];
+      expected_config_version?: number | null;
       extra_headers?: components["schemas"]["RequestField_HeadersRequest_HeadersRequest"];
       light_model?: components["schemas"]["RequestField_LightModelSettings_LightModelSettings"];
       model?: components["schemas"]["RequestField_String_String"];

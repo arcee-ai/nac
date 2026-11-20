@@ -1,99 +1,95 @@
-import { useMemo, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { Effect } from "effect";
+import { useCallback } from "react";
 
+import { PopoverPlacement } from "@/app/atoms";
+import { standardEffort } from "@/app/components/modals/options";
+import { ModelPicker as ComposerModelChip } from "@/app/features/home/ComposerModelPickers";
+import { useManagedModelProfile } from "@/app/features/managed/controller/useManagedModelProfile";
 import {
-  Button,
-  ButtonContent,
-  ButtonSize,
-  ButtonVariant,
-  Icon,
-  IconName,
-  PopoverPlacement,
-  Tooltip,
-  TooltipPosition,
-  type SelectItem,
-} from "@/app/atoms";
-import { CatalogModelPicker } from "@/app/components/modals/CatalogModelPicker";
-import { EFFORT_LEVEL_OPTIONS, reasoningOptionsFor } from "@/app/components/modals/options";
-import { SpeedControl } from "@/app/components/modals/SpeedControl";
+  classifySetupFailure,
+  setupFailureMessage,
+  setupReconciliation,
+} from "@/app/features/setup/browserAdapters";
+import { useSetupAction } from "@/app/features/setup/useSetupAction";
+import { SetupFailure, setupSequence } from "@/app/features/setup/workflow";
+import { catalogBaseUrl, resolveCatalogModel, type CatalogPick } from "@/app/lib/catalog";
 import {
-  providerSpeedProfiles,
-  speedForRoute,
+  speedForCatalogRoute,
   speedLabel,
   supportsSpeed,
   type ServiceTier,
 } from "@/app/lib/serviceTier";
-import { SmallSelect } from "@/app/components/modals/SmallSelect";
-import { useManagedModelProfile } from "@/app/features/managed/controller/useManagedModelProfile";
-import { useIsMobile } from "@/app/hooks/useMediaQuery";
-import { resolveCatalogModel, type CatalogPick } from "@/app/lib/catalog";
-import { cn } from "@/app/lib/cn";
-import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { useToast } from "@/app/providers/ToastProvider";
-import {
-  queryKeys,
-  useModelCatalog,
-  useReadyProviderModels,
-  useSessionSnapshot,
-  useUpdateConfig,
-} from "@/app/services/queries";
-import type { BackendKind, ReasoningEffort, SessionMetadata } from "@/app/types/api";
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
+import { useModelCatalog, useSessionConfig, useSessionSnapshot } from "@/app/services/queries";
+import { queryKeys } from "@/app/services/queries/keys";
+import type {
+  BackendKind,
+  ModelCatalog,
+  ReasoningEffort,
+  SessionMetadata,
+  UpdateConfigRequest,
+} from "@/app/types/api";
 
-const EFFORT_ROW_HINTS: Record<string, { title: string; description: string }> = {
-  "": {
-    title: "Default effort",
-    description:
-      "NAC does not send an effort. The model answers the way it does when the level is left unset.",
-  },
-  none: {
-    title: "None",
-    description:
-      "The model answers without a reasoning pass. This is the fastest and cheapest option.",
-  },
-  minimal: {
-    title: "Minimal",
-    description:
-      "A very short reasoning pass before the answer. Slightly more careful than none, still built for speed.",
-  },
-  low: {
-    title: "Low",
-    description:
-      "A light reasoning pass. Enough for small decisions, without a long investigation.",
-  },
-  medium: {
-    title: "Medium",
-    description: "A balanced reasoning pass. The model thinks the task through, then answers.",
-  },
-  high: {
-    title: "High",
-    description:
-      "A deep reasoning pass. The model spends more time checking its work, so replies are slower and cost more.",
-  },
-  xhigh: {
-    title: "X-High",
-    description: "Extra-deep reasoning for hard problems. Longer and more expensive than high.",
-  },
-  max: {
-    title: "Max",
-    description:
-      "The deepest reasoning this model offers. Slowest and most expensive, for the hardest tasks.",
-  },
-};
+const READBACK_FAILED = new Error(
+  "Settings were saved, but the latest session could not be loaded. Reload before editing again.",
+);
 
-const COMPOSER_EFFORT_OPTIONS: SelectItem[] = [
-  {
-    id: "",
-    label: "Default",
-    hoverHint: { ...EFFORT_ROW_HINTS[""], muted: true },
-  },
-  ...EFFORT_LEVEL_OPTIONS.map((item) => ({
-    ...item,
-    hoverHint: { ...EFFORT_ROW_HINTS[item.id], muted: true },
-  })),
-];
+function captureReadback(client: QueryClient, sessionId: string) {
+  return [queryKeys.sessionConfig(sessionId), queryKeys.sessionSnapshot(sessionId)].flatMap(
+    (key) => {
+      const query = client.getQueryCache().find({ queryKey: key, exact: true });
+      return query?.isActive()
+        ? [{ key, updates: query.state.dataUpdateCount + query.state.errorUpdateCount }]
+        : [];
+    },
+  );
+}
+
+function waitForModelReadback(
+  client: QueryClient,
+  checkpoint: ReturnType<typeof captureReadback>,
+  signal: AbortSignal,
+) {
+  return new Promise<boolean>((resolve) => {
+    let done = false;
+    const finish = (ready: boolean) => {
+      if (done) return;
+      done = true;
+      clearTimeout(deadline);
+      unsubscribe();
+      signal.removeEventListener("abort", abort);
+      resolve(ready);
+    };
+    const abort = () => finish(false);
+    const check = () => {
+      if (signal.aborted) return abort();
+      const observed = checkpoint.map(({ key, updates }) => ({
+        state: client.getQueryState(key),
+        updates,
+      }));
+      if (
+        observed.some(
+          ({ state, updates }) =>
+            !state ||
+            state.fetchStatus !== "idle" ||
+            state.dataUpdateCount + state.errorUpdateCount <= updates,
+        )
+      )
+        return;
+      finish(!observed.some(({ state }) => state?.status === "error"));
+    };
+    // Stream reconciliation can cancel and immediately replace the awaited readback.
+    const unsubscribe = client.getQueryCache().subscribe(() => queueMicrotask(check));
+    const deadline = setTimeout(abort, 10_000);
+    signal.addEventListener("abort", abort, { once: true });
+    queueMicrotask(check);
+  });
+}
 
 /**
- * The session's current model and reasoning, directly switchable beside the
+ * The session's model, reasoning, and speed, directly switchable beside the
  * composer from one catalog spanning every connected provider. Cross-provider
  * changes send the complete routing tuple in one revisioned server mutation.
  */
@@ -110,94 +106,138 @@ export function ModelPicker({
   /** A run is in flight, and the server refuses a config change until it ends. */
   disabled: boolean;
 }) {
-  const isMobile = useIsMobile();
   const toast = useToast();
   const catalog = useModelCatalog();
   const managedModel = useManagedModelProfile();
-  const liveByBackend = useReadyProviderModels(catalog.data);
-  const queryClient = useQueryClient();
-  const updateConfig = useUpdateConfig();
-  // Observe the existing snapshot without starting a separate fetch. A failed
-  // refresh leaves cached metadata visible, but it is unsafe for another edit.
+  const client = useQueryClient();
+  const config = useSessionConfig(metadata ? sessionId : null);
   const snapshot = useSessionSnapshot(sessionId, { enabled: false });
-  const controlsDisabled = disabled || !metadata || updateConfig.isPending || snapshot.isError;
-  const reportRefreshFailure = () => {
-    // Read the query after the mutation's awaited invalidation has settled.
-    // React state can still be from the preceding render at this point.
-    const state = queryClient.getQueryState(queryKeys.sessionSnapshot(sessionId));
-    if (state?.status === "error")
-      toast.error(
-        "Settings were saved, but the latest session could not be loaded. Retry the refresh before making another change.",
-      );
-  };
-  const currentModel = metadata?.model ?? label;
-  const currentEffort = metadata?.reasoning_effort ?? "";
-  const currentSpeed = (metadata?.service_tier ?? null) as ServiceTier | null;
-  const currentPick: CatalogPick | null = metadata
-    ? {
-        backend: metadata.backend as BackendKind,
-        model: metadata.model,
-        baseUrl: metadata.base_url ?? "",
-      }
+  const action = useSetupAction();
+  const { api } = useNativeRuntime();
+  const current = config.data ?? metadata;
+  const currentBackend = current?.backend ?? metadata?.backend;
+  const currentModel = current?.model ?? label;
+  const currentEffort = current?.reasoning_effort ?? "";
+  const currentSpeed = (current?.service_tier ?? null) as ServiceTier | null;
+  const route = currentBackend
+    ? { backend: currentBackend as BackendKind, model: currentModel, baseUrl: current?.base_url }
     : null;
-  const resolved = resolveCatalogModel(catalog.data, metadata?.backend, currentModel);
-  const speedCapability = speedForRoute(
-    resolved.model,
-    currentModel,
-    metadata?.backend,
-    metadata?.base_url,
-    providerSpeedProfiles(catalog.data?.providers.find((entry) => entry.id === metadata?.backend)),
+  const speedCapability = speedForCatalogRoute(catalog.data, route);
+  const resolved = resolveCatalogModel(catalog.data, currentBackend, currentModel);
+  const canChange =
+    !disabled &&
+    metadata != null &&
+    config.isSuccess &&
+    !snapshot.isError &&
+    !action.busy &&
+    !action.needsReview;
+  const { credentialReady: managedReady, matches: managedMatches } = managedModel;
+  // A managed host's mounted model is usable before its account reads as connected.
+  const usableProvider = useCallback(
+    (provider: ModelCatalog["providers"][number]) =>
+      provider.auth_status === "ready" ||
+      (managedReady &&
+        managedMatches({
+          backend: provider.id,
+          model: "",
+          baseUrl: catalogBaseUrl(provider) ?? "",
+        })),
+    [managedReady, managedMatches],
   );
-  const effortItems = useMemo(
-    () => reasoningOptionsFor(resolved.supportedEfforts, currentEffort, COMPOSER_EFFORT_OPTIONS),
-    [resolved.supportedEfforts, currentEffort],
-  );
-  const selectedEffort = effortItems.find((item) => item.id === currentEffort)?.label;
-  const effortLabel = typeof selectedEffort === "string" ? selectedEffort : "Default";
-  const [effortOpen, setEffortOpen] = useState(false);
 
-  const chooseModel = async (pick: CatalogPick) => {
-    if (!metadata || (pick.backend === metadata.backend && pick.model === metadata.model)) return;
+  const change = async (patch: UpdateConfigRequest, success: string) => {
+    const version = config.data?.config_version;
+    if (!canChange || version == null) return;
+    try {
+      const refreshed = await action.run((lease) => {
+        const reconcile = setupReconciliation(client, sessionId);
+        let readback: Promise<boolean> | undefined;
+        return setupSequence(
+          {
+            current: lease.current,
+            classify: classifySetupFailure,
+            reconcile: (phase) => {
+              const invalidation = reconcile(phase);
+              // An accepted write's deadline also covers the invalidation GETs.
+              return readback ? Promise.race([invalidation, readback]) : invalidation;
+            },
+          },
+          (step) =>
+            Effect.gen(function* () {
+              const confirmation = yield* step("configuration", async () => {
+                await api.updateConfig(sessionId, {
+                  ...patch,
+                  expected_config_version: version,
+                });
+                const checkpoint = captureReadback(client, sessionId);
+                readback = waitForModelReadback(client, checkpoint, lease.signal);
+                return { readback };
+              });
+              const ready = yield* Effect.promise(() => confirmation.readback);
+              if (!ready) {
+                return yield* Effect.fail(
+                  new SetupFailure({
+                    phase: "configuration",
+                    kind: "rejected",
+                    cause: READBACK_FAILED,
+                    completed: ["configuration"],
+                  }),
+                );
+              }
+              return true;
+            }),
+        );
+      });
+      if (refreshed) toast.success(success);
+    } catch (error) {
+      toast.error(
+        error instanceof SetupFailure && error.cause === READBACK_FAILED
+          ? READBACK_FAILED.message
+          : setupFailureMessage(error),
+      );
+    }
+  };
+
+  const chooseModel = (pick: CatalogPick, clearIncompatibleSpeed: boolean) => {
+    if (!canChange || (pick.backend === currentBackend && pick.model === currentModel)) return;
     const provider = catalog.data?.providers.find((entry) => entry.id === pick.backend);
-    const preservesRoute = pick.backend === metadata.backend;
+    const preservesRoute = pick.backend === currentBackend;
     const providerReady = Boolean(
       provider?.auth_status === "ready" ||
       (managedModel.matches(pick) && managedModel.credentialReady),
     );
     if (!preservesRoute && !providerReady) {
-      toast.error(`Connect ${pick.backend} in session settings before switching to this model.`);
+      toast.error(`Connect ${pick.backend} in Settings › Accounts & keys to switch to this model.`);
       return;
     }
     if (!preservesRoute && !pick.baseUrl) {
-      toast.error(`Configure an endpoint for ${pick.backend} in session settings first.`);
+      toast.error(`The catalog did not provide an endpoint for ${pick.backend}.`);
       return;
     }
 
     const supported = resolveCatalogModel(catalog.data, pick.backend, pick.model).supportedEfforts;
     const compatibleEffort =
-      currentEffort && supported.includes(currentEffort as ReasoningEffort) ? currentEffort : null;
-    const target = speedForRoute(
-      resolveCatalogModel(catalog.data, pick.backend, pick.model).model,
-      pick.model,
-      pick.backend,
-      preservesRoute ? metadata.base_url : pick.baseUrl,
-      providerSpeedProfiles(provider),
-    );
-    const targetSpeed = target.tiers;
-    let speed = currentSpeed;
-    if (speed && pick.backend !== "chatgpt-codex-responses" && !target.openAiApi) {
-      toast.error("Choose a compatible speed before switching to this model.");
-      return;
-    }
-    if (speed && !supportsSpeed(targetSpeed, speed)) {
-      speed = "standard";
-    }
+      currentEffort && supported.includes(currentEffort as ReasoningEffort)
+        ? currentEffort
+        : standardEffort(supported);
+    const targetSpeed = speedForCatalogRoute(catalog.data, {
+      ...pick,
+      baseUrl: preservesRoute ? current?.base_url : pick.baseUrl,
+    });
+    const incompatible = currentSpeed != null && !targetSpeed.explicitTiersAllowed;
+    if (incompatible && !clearIncompatibleSpeed)
+      return {
+        error: "This model does not accept the selected speed.",
+        confirmSpeedClear: true,
+      };
+    const speed = incompatible
+      ? null
+      : currentSpeed && !supportsSpeed(targetSpeed.tiers, currentSpeed)
+        ? "standard"
+        : currentSpeed;
+    const speedPatch = speed !== currentSpeed ? { service_tier: speed } : {};
     const patch = preservesRoute
-      ? {
-          model: pick.model,
-          reasoning_effort: compatibleEffort,
-          ...(speed !== currentSpeed ? { service_tier: speed } : {}),
-        }
+      ? { model: pick.model, reasoning_effort: compatibleEffort, ...speedPatch }
       : {
           backend: pick.backend,
           model: pick.model,
@@ -206,104 +246,42 @@ export function ModelPicker({
           // selected backend to resolve its managed login or conventional env.
           api_key_env: provider?.connection?.api_key_env ?? null,
           reasoning_effort: compatibleEffort,
-          ...(speed !== currentSpeed ? { service_tier: speed } : {}),
+          ...speedPatch,
           // Provider-specific headers must never leak into another backend.
           extra_headers: null,
         };
-    try {
-      await updateConfig.mutateAsync({ id: sessionId, patch });
-      reportRefreshFailure();
-      toast.success(
-        `Model switched to ${pick.model}${speed !== currentSpeed ? "; speed reset to Standard" : ""}`,
-      );
-    } catch (error) {
-      toast.error(`The model was not switched: ${humanErrorText(toRunError(error), pick.backend)}`);
-    }
+    const notice = incompatible
+      ? ". Speed preference cleared."
+      : speed !== currentSpeed
+        ? ". Speed changed to Standard."
+        : "";
+    void change(patch, `Model switched to ${pick.model}${notice}`);
   };
 
-  const chooseEffort = async (effort: string) => {
-    if (!metadata || effort === currentEffort) return;
-    try {
-      await updateConfig.mutateAsync({
-        id: sessionId,
-        patch: { reasoning_effort: effort || null },
-      });
-      reportRefreshFailure();
-      toast.success(`Reasoning set to ${effort || "the model default"}`);
-    } catch (error) {
-      toast.error(
-        `Reasoning was not changed: ${humanErrorText(toRunError(error), metadata.backend)}`,
-      );
-    }
+  const chooseEffort = (effort: string) => {
+    if (effort === currentEffort) return;
+    void change({ reasoning_effort: effort }, `Reasoning set to ${effort}`);
   };
 
-  const chooseSpeed = async (speed: ServiceTier | null) => {
-    if (!metadata || speed === currentSpeed) return;
-    try {
-      await updateConfig.mutateAsync({ id: sessionId, patch: { service_tier: speed } });
-      reportRefreshFailure();
-      toast.success(`Speed set to ${speedLabel(speed)}`);
-    } catch (error) {
-      toast.error(`Speed was not changed: ${humanErrorText(toRunError(error), metadata.backend)}`);
-    }
+  const chooseSpeed = (speed: ServiceTier | null) => {
+    if (speed === currentSpeed) return;
+    void change({ service_tier: speed }, `Speed set to ${speedLabel(speed)}`);
   };
 
   return (
-    <div className={cn("flex min-w-0 items-center", isMobile ? "gap-1" : "gap-2")}>
-      <CatalogModelPicker
-        catalog={catalog.data}
-        loading={catalog.isLoading}
-        failed={catalog.isError}
-        compact
-        disabled={controlsDisabled}
-        liveByBackend={liveByBackend}
-        value={currentPick}
-        onSelect={(pick) => void chooseModel(pick)}
-      />
-      {!(snapshot.isError && isMobile) ? (
-        <Tooltip
-          title={`Effort: ${effortLabel}`}
-          description="How much the model reasons before it answers."
-          position={TooltipPosition.TopCenter}
-          sticky
-          disabled={effortOpen}
-        >
-          <SmallSelect
-            items={effortItems}
-            value={currentEffort}
-            placeholder="Default"
-            disabled={controlsDisabled}
-            size={ButtonSize.Small}
-            trailingIcon={null}
-            placement={PopoverPlacement.TopCenter}
-            onOpenChange={setEffortOpen}
-            onValueChange={(effort) => void chooseEffort(effort)}
-          />
-        </Tooltip>
-      ) : null}
-      {snapshot.isError ? (
-        <Button
-          size={ButtonSize.Small}
-          variant={ButtonVariant.Ghost}
-          content={isMobile ? ButtonContent.Icon : ButtonContent.Text}
-          className={isMobile ? "min-h-11 min-w-11" : undefined}
-          aria-label="Retry settings refresh"
-          disabled={snapshot.isFetching}
-          onClick={() => void snapshot.refetch()}
-        >
-          {isMobile ? <Icon iconName={IconName.Retry} /> : "Retry settings refresh"}
-        </Button>
-      ) : null}
-      {!(snapshot.isError && isMobile) ? (
-        <SpeedControl
-          tiers={speedCapability.tiers}
-          openAiApi={speedCapability.openAiApi}
-          fastContextLimit={speedCapability.fastContextLimit}
-          value={currentSpeed}
-          disabled={controlsDisabled}
-          onChange={(speed) => void chooseSpeed(speed)}
-        />
-      ) : null}
-    </div>
+    <ComposerModelChip
+      key={action.needsReview || config.isError || snapshot.isError ? "reload-needed" : "current"}
+      fallbackLabel={currentModel}
+      pending={!metadata}
+      value={route}
+      effort={currentEffort}
+      supportedEfforts={resolved.supportedEfforts}
+      speed={{ ...speedCapability, value: currentSpeed, onChange: chooseSpeed }}
+      disabled={!canChange}
+      placement={PopoverPlacement.TopRight}
+      usableProvider={usableProvider}
+      onPick={chooseModel}
+      onEffort={chooseEffort}
+    />
   );
 }

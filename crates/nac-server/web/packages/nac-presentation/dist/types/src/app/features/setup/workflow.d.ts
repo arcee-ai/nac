@@ -37,15 +37,5 @@ export declare function createConfiguredChat<M, C>(ports: SetupPorts & {
     model: () => Promise<M>;
     chat: (model: M) => Promise<C>;
 }): Effect.Effect<C, SetupFailure, never>;
-/** Title and config remain separate writes; a partial save remains visible. */
-export declare function saveSettings<M>(ports: SetupPorts & {
-    check: () => Promise<unknown>;
-    persistsModel?: boolean;
-    model: () => Promise<M>;
-    configurationSaved?: boolean;
-    configuration: (model: M) => Promise<unknown>;
-    title?: () => Promise<unknown>;
-    projectDefault?: (model: M) => Promise<unknown>;
-}): Effect.Effect<M, SetupFailure, never>;
 export declare function runSetup<T>(workflow: Effect.Effect<T, SetupFailure>): Promise<T>;
 export {};

@@ -1,6 +1,6 @@
 import { type QueryClient } from "@tanstack/react-query";
 import { type BrowseKind } from "./keys";
-import type { BackendKind, SshTarget, UpdateMcpServerRequest, UpdateModelConfigurationRequest, UpdateSshConfigurationRequest } from "../../types/api";
+import type { BackendKind, SshTarget, UpdateMcpServerRequest, UpdateSshConfigurationRequest } from "../../types/api";
 /** Where a listing comes from: the server's own filesystem or one SSH host. */
 export type BrowseSource = SshTarget | null;
 /**
@@ -329,25 +329,5 @@ export declare function useCreateModelConfig(): import("@tanstack/react-query").
     orchestrator_compaction_threshold?: number | null;
     reasoning_effort?: import("../../types/openapi.generated").components["schemas"]["ReasoningEffort"] | null;
     service_tier?: import("../../types/openapi.generated").components["schemas"]["ServiceTier"] | null;
-}, unknown>;
-export declare function useUpdateModelConfig(): import("@tanstack/react-query").UseMutationResult<{
-    allow_insecure_http: boolean;
-    api_key_env?: string | null;
-    backend: string;
-    base_url: string;
-    config_id: string;
-    created_at: string;
-    extra_headers: Record<string, string>;
-    initial_prompt?: string | null;
-    light_model?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["LightModelSettings"] | null;
-    model: string;
-    name: string;
-    orchestrator_compaction_threshold?: number | null;
-    reasoning_effort?: string | null;
-    service_tier?: string | null;
-    updated_at: string;
-}, Error, {
-    configId: string;
-    payload: UpdateModelConfigurationRequest;
 }, unknown>;
 export declare function useDeleteModelConfig(): import("@tanstack/react-query").UseMutationResult<void, Error, string, unknown>;

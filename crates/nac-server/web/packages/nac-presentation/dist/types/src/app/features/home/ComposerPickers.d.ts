@@ -1,5 +1,9 @@
 import type { ProjectRecord, SessionBehavior } from "../../types/api";
-/** Which project the new session runs in, plus "Add project…". */
+/**
+ * Which project the new session runs in. A project's host is part of it, so
+ * the menu groups projects under where they run rather than offering the host
+ * as a separate choice; SSH projects name their host on the chip.
+ */
 export declare function ProjectPicker({ projects, value, onChange, onAddProject, addLabel, disabled, }: {
     projects: readonly ProjectRecord[];
     value: ProjectRecord | null;
@@ -12,11 +16,5 @@ export declare function ProjectPicker({ projects, value, onChange, onAddProject,
 export declare function BehaviorPicker({ value, onChange, disabled, }: {
     value: SessionBehavior;
     onChange: (behavior: SessionBehavior) => void;
-    disabled?: boolean;
-}): import("react").JSX.Element;
-/** Starts an isolated checkout (direct + committed Git source) instead of the project folder. */
-export declare function IsolatedToggle({ value, onChange, disabled, }: {
-    value: boolean;
-    onChange: (next: boolean) => void;
     disabled?: boolean;
 }): import("react").JSX.Element;

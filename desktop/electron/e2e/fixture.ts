@@ -326,26 +326,17 @@ export const test = base.extend<{ candidate: Candidate; developmentPathOverrides
   },
 });
 /**
- * Opens the Focus session drawer on its Terminal panel through the header's
- * Session menu, as the web journeys do. The drawer starts closed whatever the
- * route names; this never launches a shell or attaches another session.
+ * Opens the current session's Terminal panel without launching a shell.
  */
 export async function showTerminalPanel(page: Page) {
   const pane = page.getByRole("region", { name: "Session terminal", exact: true });
-  const menu = page.getByRole("button", { name: "Session menu", exact: true });
-  const details = page.getByRole("dialog", { name: "Session", exact: true });
-  await expect(menu.or(pane).first()).toBeVisible();
-  await expect(async () => {
-    if (await pane.isVisible()) return;
-    if (!(await details.isVisible())) await menu.click({ timeout: 1000 });
-    // Panel rows carry their live fact after the name ("Terminal 1 running").
-    await details
-      .getByRole("button", { name: /^Terminal(?![A-Za-z])/ })
-      .first()
-      .click({ timeout: 1000 });
-    await expect(pane).toBeVisible({ timeout: 2000 });
-  }).toPass();
-  await expect(details).toHaveCount(0);
+  const toggle = page.getByRole("button", { name: "Session panel", exact: true });
+  await expect(toggle).toBeVisible();
+  if ((await toggle.getAttribute("aria-pressed")) !== "true") await toggle.click();
+  if (!(await pane.isVisible())) {
+    await page.getByRole("tab", { name: "Terminal", exact: true }).click();
+  }
+  await expect(pane).toBeVisible();
   return pane;
 }
 export { expect };

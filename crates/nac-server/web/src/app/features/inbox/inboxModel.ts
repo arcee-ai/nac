@@ -38,6 +38,8 @@ export interface InboxSessionFacts {
   parentId: string | null;
   /** Last activity, epoch ms. */
   updatedAt: number;
+  /** Durable runs that deliberately produced no user-facing heartbeat update. */
+  quietHeartbeatRunIds?: readonly string[];
 }
 
 export interface InboxReadState {
@@ -238,6 +240,11 @@ export function deriveInbox({
     if (!outcome || facts?.activity.kind === "run") continue;
     if (!isUnread(read, session.id, outcome.run_id, session.updatedAt)) continue;
     if (outcome.disposition === "cancelled") continue;
+    if (
+      outcome.disposition === "completed" &&
+      session.quietHeartbeatRunIds?.includes(outcome.run_id)
+    )
+      continue;
     const row: InboxRow = {
       key: `${outcome.disposition}:${session.id}`,
       group: outcome.disposition === "failed" ? "failed" : "done",

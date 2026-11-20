@@ -414,6 +414,8 @@ pub struct ProviderModelList {
 
 #[derive(Debug, Clone, Default, Deserialize, utoipa::ToSchema)]
 pub struct UpdateConfigRequest {
+    /// Compare an intentional edit against the configuration the caller reviewed.
+    pub expected_config_version: Option<i64>,
     #[serde(default)]
     pub model: RequestField<String>,
     #[serde(default)]
@@ -444,6 +446,7 @@ pub struct UpdateConfigRequest {
 impl UpdateConfigRequest {
     pub(crate) fn into_application(self) -> application::session_configuration::SessionConfigPatch {
         application::session_configuration::SessionConfigPatch {
+            expected_config_version: self.expected_config_version,
             model: application_field(self.model),
             base_url: application_field(self.base_url),
             allow_insecure_http: application_field(self.allow_insecure_http),

@@ -1,17 +1,97 @@
 import path from "node:path";
-import { createDirectSession, expect, test } from "./harness";
+import type { APIRequestContext, Page, Request, Route } from "@playwright/test";
+import { createDirectSession, expect, test, type EmbeddedHarness } from "./harness";
+import { ScriptGate } from "./scripted-provider";
+import { modelChip, openModelCatalog, openModelSettings } from "./speed-controls";
 
 test.use({ orchestration: "0", codexCatalogFixture: true });
-test.skip(!process.env.NAC_VISUAL_DIR, "Explicit evidence capture only");
+
+async function openProviderDefaultSpeed(
+  page: Page,
+  request: APIRequestContext,
+  harness: EmbeddedHarness,
+  mobile: boolean,
+) {
+  await page.setViewportSize(mobile ? { width: 390, height: 844 } : { width: 1440, height: 900 });
+  await page.route(`${harness.baseUrl}/providers/models`, async (route) => {
+    if (route.request().postDataJSON().backend !== "chatgpt-codex-responses")
+      return route.fallback();
+    await route.fulfill({
+      json: {
+        base_url: "https://chatgpt.com/backend-api",
+        api_key_env: null,
+        models: [{ id: "gpt-6.1-sol", display_name: "GPT-6.1-Sol" }],
+      },
+    });
+  });
+  const sessionId = await createDirectSession(request, harness);
+  await page.goto(`${harness.baseUrl}/#/session/${sessionId}/delegated`);
+  const catalog = await openModelCatalog(page, "gpt-6.1-sol");
+  await catalog.getByRole("menuitemradio", { name: /^GPT-6\.1-Sol/ }).click();
+  const speed = page.getByRole("button", { name: "Speed: Provider default" });
+  await openModelSettings(page);
+  await expect(speed).toBeVisible();
+  await expect(speed).toBeEnabled();
+  return { sessionId, speed };
+}
 
 for (const mobile of [false, true]) {
+  test(`accepted speed recovers from hanging configuration readback (${mobile ? "phone" : "desktop"})`, async ({
+    harness,
+    page,
+    request,
+  }) => {
+    const { sessionId, speed } = await openProviderDefaultSpeed(page, request, harness, mobile);
+    const configUrl = `${harness.baseUrl}/sessions/${sessionId}/config`;
+    const before = await (await request.get(configUrl)).json();
+    const isConfigWrite = (write: Request) =>
+      write.url() === configUrl && write.method() === "PATCH";
+    const readback = new ScriptGate();
+    let writes = 0;
+    page.on("request", (write) => {
+      if (isConfigWrite(write)) writes++;
+    });
+    const holdRead = async (route: Route) => {
+      if (route.request().method() !== "GET" || writes === 0) return route.fallback();
+      readback.markAccepted();
+      await readback.waitForRelease();
+      await route.fallback().catch(() => {});
+    };
+    await page.route(configUrl, holdRead);
+    try {
+      await speed.click();
+      const saved = page.waitForResponse((response) => isConfigWrite(response.request()));
+      await page.getByRole("menuitemradio", { name: "Fast", exact: true }).click();
+      expect((await saved).status()).toBe(200);
+      await readback.accepted;
+      await expect(page.getByText(/Reload before editing again/)).toBeVisible({
+        timeout: 15_000,
+      });
+      await expect(page.getByText("Speed set to Fast", { exact: true })).toHaveCount(0);
+      await expect(modelChip(page)).toBeDisabled();
+      await expect(page.getByRole("dialog", { name: "Model settings" })).toBeHidden();
+      const committed = await (await request.get(configUrl)).json();
+      expect(committed.service_tier).toBe("fast");
+      expect(committed.config_version).toBe(before.config_version + 1);
+    } finally {
+      readback.release();
+      await page.unroute(configUrl, holdRead);
+    }
+    await expect(modelChip(page)).toHaveAccessibleName(/Fast speed/);
+    await expect(modelChip(page)).toBeDisabled();
+    await page.reload();
+    await expect(modelChip(page)).toBeEnabled();
+    await expect(modelChip(page)).toHaveAccessibleName(/Fast speed/);
+    expect(writes).toBe(1);
+  });
+
   test(`refresh and inherited-speed repair (${mobile ? "phone" : "desktop"})`, async ({
     harness,
     page,
     request,
   }) => {
+    test.skip(!process.env.NAC_VISUAL_DIR, "Explicit evidence capture only");
     test.setTimeout(90_000);
-    await page.setViewportSize(mobile ? { width: 390, height: 844 } : { width: 1440, height: 900 });
     const width = mobile ? "mobile" : "desktop";
     const capture = async (state: string) => {
       await page.waitForTimeout(400);
@@ -19,53 +99,39 @@ for (const mobile of [false, true]) {
         path: path.join(process.env.NAC_VISUAL_DIR!, `after-${width}-${state}.png`),
       });
     };
-    await page.route(`${harness.baseUrl}/providers/models`, async (route) => {
-      if (route.request().postDataJSON().backend !== "chatgpt-codex-responses")
-        return route.fallback();
-      await route.fulfill({
-        json: {
-          base_url: "https://chatgpt.com/backend-api",
-          api_key_env: null,
-          models: [{ id: "gpt-6.1-sol", display_name: "GPT-6.1-Sol" }],
-        },
-      });
-    });
-    const sessionId = await createDirectSession(request, harness);
-    await page.goto(`${harness.baseUrl}/#/session/${sessionId}/delegated`);
-    await page.getByRole("button", { name: "Model" }).click();
-    await page.getByPlaceholder("Search models…").fill("gpt-6.1-sol");
-    await page.getByRole("button", { name: /GPT-6\.1-Sol gpt-6\.1-sol/ }).click();
-    const speed = page.getByRole("button", { name: "Speed: Provider default" });
-    await expect(speed).toBeVisible();
+    const { sessionId, speed } = await openProviderDefaultSpeed(page, request, harness, mobile);
     const snapshotPattern = new RegExp(`/sessions/${sessionId}(?:\\?.*)?$`);
     const failSnapshot = async (route: import("@playwright/test").Route) => {
       if (route.request().method() !== "GET") return route.fallback();
-      await route.fulfill({ status: 503, json: { error: "Fixture refresh unavailable" } });
+      await route.fulfill({
+        status: 503,
+        json: { error: "Fixture refresh unavailable" },
+      });
     };
     await page.route(snapshotPattern, failSnapshot);
+    const configUrl = `${harness.baseUrl}/sessions/${sessionId}/config`;
+    const isConfigWrite = (write: import("@playwright/test").Request) =>
+      write.url() === configUrl && write.method() === "PATCH";
+    let writes = 0;
+    page.on("request", (write) => {
+      if (isConfigWrite(write)) writes++;
+    });
     await speed.click();
+    const saved = page.waitForResponse((response) => isConfigWrite(response.request()));
     await page.getByRole("menuitemradio", { name: "Fast", exact: true }).click();
-    await expect(page.getByRole("button", { name: "Retry settings refresh" })).toBeVisible({
+    expect((await saved).status()).toBe(200);
+    await expect(page.getByText(/Reload before editing again/)).toBeVisible({
       timeout: 20_000,
     });
-    await expect(page.getByRole("button", { name: "Model" })).toBeDisabled();
-    if (mobile) {
-      const retry = await page
-        .getByRole("button", { name: "Retry settings refresh" })
-        .boundingBox();
-      const model = await page.getByRole("button", { name: "Model" }).boundingBox();
-      const send = await page.getByRole("button", { name: "Send", exact: true }).boundingBox();
-      expect(retry?.width).toBeGreaterThanOrEqual(44);
-      expect(retry?.height).toBeGreaterThanOrEqual(44);
-      expect(model?.width).toBeGreaterThan(44);
-      expect(model!.x + model!.width).toBeLessThanOrEqual(retry!.x);
-      expect(retry!.x + retry!.width).toBeLessThanOrEqual(send!.x);
-      await expect(speed).toHaveCount(0);
-    }
-    await capture("refresh-retry");
+    await expect(page.getByText("Speed set to Fast", { exact: true })).toHaveCount(0);
+    await expect(modelChip(page)).toBeDisabled();
+    await expect(page.getByRole("dialog", { name: "Model settings" })).toBeHidden();
+    expect(writes).toBe(1);
+    await capture("reload-needed");
     await page.unroute(snapshotPattern, failSnapshot);
-    await page.getByRole("button", { name: "Retry settings refresh" }).click();
-    await expect(page.getByRole("button", { name: "Model" })).toBeEnabled();
+    await page.reload();
+    await expect(modelChip(page)).toBeEnabled();
+    await expect(modelChip(page)).toHaveAccessibleName(/Fast speed/);
 
     const presetResponse = await request.post(`${harness.baseUrl}/model-configs`, {
       data: {
@@ -87,34 +153,35 @@ for (const mobile of [false, true]) {
     });
     expect(projectResponse.ok()).toBeTruthy();
     const project = await projectResponse.json();
+    await page.route(`${harness.baseUrl}/providers/models`, async (route) => {
+      if (route.request().postDataJSON().backend !== "deepseek-chat") return route.fallback();
+      await route.fulfill({
+        json: {
+          base_url: "https://api.deepseek.com/v1",
+          api_key_env: "DEEPSEEK_API_KEY",
+          models: [{ id: "deepseek-chat", display_name: "DeepSeek Chat" }],
+        },
+      });
+    });
     await page.goto(`${harness.baseUrl}/#/project/${project.project_id}`);
-    await page.getByRole("button", { name: /^Model: / }).click();
-    const dialog = page.getByRole("dialog", { name: "Model for this session" });
-    await dialog
-      .getByRole("button", { name: "Advanced presets and provider setup", exact: true })
-      .click();
-    await dialog.getByRole("button").filter({ hasText: "Fast Codex default" }).click();
-    await page.getByText("Browse Models", { exact: true }).click();
-    await dialog.getByRole("group", { name: "Model*", exact: true }).getByRole("button").click();
-    await page.getByPlaceholder("Search models…").fill("gpt-5.6-sol");
-    await page
-      .getByText("OpenAI Responses", { exact: true })
-      .first()
-      .locator("../..")
-      .getByRole("button")
-      .first()
-      .click();
+    await expect(modelChip(page)).toHaveAccessibleName(/Fast speed/);
+    const chooseDeepSeek = async () => {
+      const models = await openModelCatalog(page, "deepseek-chat");
+      await models
+        .getByRole("group", { name: "DeepSeek", exact: true })
+        .getByRole("menuitemradio", { name: /^DeepSeek Chat/ })
+        .click();
+    };
+    await chooseDeepSeek();
     await expect(
-      dialog.getByRole("button", { name: "Use provider default for speed" }),
+      page.getByRole("alert").filter({ hasText: "This model does not accept the selected speed." }),
     ).toBeVisible();
-    await dialog
-      .getByRole("button", { name: "Use provider default for speed" })
-      .scrollIntoViewIfNeeded();
-    await expect(page.getByText(/Settings were saved, but the latest session/)).toBeHidden();
-    await expect(page.getByText("Speed set to Fast")).toBeHidden();
     await capture("inherited-speed-reconciliation");
-    await dialog.getByRole("button", { name: "Use provider default for speed" }).click();
-    await dialog.getByRole("button", { name: "Use this model" }).click();
-    await expect(dialog).toBeHidden();
+    await page.getByRole("button", { name: "Switch model and clear speed" }).click();
+    const settings = await openModelSettings(page);
+    await expect(
+      settings.getByRole("button", { name: "Choose model: DeepSeek Chat" }),
+    ).toBeVisible();
+    await expect(settings.getByRole("button", { name: /^Speed:/ })).toBeHidden();
   });
 }

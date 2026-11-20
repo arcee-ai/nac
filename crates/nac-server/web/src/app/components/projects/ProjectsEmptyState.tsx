@@ -4,6 +4,10 @@ import { cn } from "@/app/lib/cn";
 interface ProjectsEmptyStateProps {
   /** Opens the new-project dialog. */
   onStart: () => void;
+  launchFolder?: string;
+  launchFolderPending?: boolean;
+  launchFolderError?: string | null;
+  onUseLaunchFolder?: () => void;
   onAddRepository?: () => void;
   onManagedSettings?: () => void;
   modelReady?: boolean;
@@ -17,6 +21,10 @@ interface ProjectsEmptyStateProps {
  */
 export function ProjectsEmptyState({
   onStart,
+  launchFolder,
+  launchFolderPending,
+  launchFolderError,
+  onUseLaunchFolder,
   onAddRepository,
   onManagedSettings,
   modelReady,
@@ -41,7 +49,7 @@ export function ProjectsEmptyState({
           <p className="type-body-chrome text-basic-secondary">
             {managed
               ? "Connect a repository, or create a project from an existing path. Sessions start from there."
-              : "Point NAC at a folder — on this machine, over SSH, or in a sandbox — and start your first session there."}
+              : "Choose a folder on this machine or an SSH host to start your first session."}
           </p>
         </div>
         {managed ? (
@@ -68,6 +76,7 @@ export function ProjectsEmptyState({
             size={mobile ? ButtonSize.Large : ButtonSize.Medium}
             content={ButtonContent.Text}
             onClick={managed ? onAddRepository : onStart}
+            disabled={launchFolderPending}
           >
             {managed ? "Add repository" : "Get Started"}
           </Button>
@@ -78,7 +87,19 @@ export function ProjectsEmptyState({
               content={ButtonContent.Text}
               onClick={onStart}
             >
-              Create Project
+              Create from an existing path
+            </Button>
+          ) : null}
+          {launchFolder ? (
+            <Button
+              variant={ButtonVariant.Secondary}
+              size={mobile ? ButtonSize.Large : ButtonSize.Medium}
+              content={ButtonContent.Text}
+              loading={launchFolderPending}
+              onClick={onUseLaunchFolder}
+              title={launchFolder}
+            >
+              Use launch folder
             </Button>
           ) : null}
           {managed && !githubConnected && onManagedSettings ? (
@@ -92,6 +113,11 @@ export function ProjectsEmptyState({
             </Button>
           ) : null}
         </div>
+        {launchFolderError ? (
+          <p role="alert" className="type-body-chrome text-error-primary">
+            {launchFolderError}
+          </p>
+        ) : null}
       </div>
     </div>
   );

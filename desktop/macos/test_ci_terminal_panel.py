@@ -16,11 +16,16 @@ const step = new Function(SCRIPT);
 let state;
 function fresh(phone = false) {
   state = {panel: false, dialog: false, expanded: false, disabled: false,
-           menuClicks: 0, terminalClicks: 0, shellClicks: 0, rows: []};
+           menuClicks: 0, toggleClicks: 0, terminalClicks: 0, shellClicks: 0, rows: []};
   const menu = {
     get disabled() { return state.disabled; },
     getAttribute(name) { assert.equal(name, 'aria-expanded'); return String(state.expanded); },
     click() { state.menuClicks++; state.expanded = true; }
+  };
+  const toggle = {
+    get disabled() { return state.disabled; },
+    getAttribute(name) { assert.equal(name, 'aria-pressed'); return String(state.expanded); },
+    click() { state.toggleClicks++; state.expanded = true; }
   };
   const panel = {getClientRects: () => state.panel ? [{}] : []};
   const dialog = {querySelectorAll: selector => {
@@ -40,30 +45,26 @@ function fresh(phone = false) {
   globalThis.document = {querySelector(selector) {
     if (selector === '[aria-label="Session terminal"]') return state.panel ? panel : null;
     if (selector === '[role="dialog"][aria-label="Session"]') return state.dialog ? dialog : null;
-    if (selector === 'button[aria-label="Session menu"], button[aria-label="Open panel"]') {
-      state.selectedMenu = phone ? 'Open panel' : 'Session menu'; return menu;
-    }
+    if (selector === 'button[aria-label="Session panel"]') return phone ? null : toggle;
+    if (selector === 'button[aria-label="Open panel"]') return phone ? menu : null;
     assert.fail('unexpected selector: ' + selector);
   }};
 }
-for (const phone of [false, true]) {
-  fresh(phone);
-  assert.equal(step(), false); assert.equal(state.menuClicks, 1);
-  assert.equal(state.selectedMenu, phone ? 'Open panel' : 'Session menu');
-  // The header can report expanded before the dialog mounts. Waiting must not
-  // toggle it closed, dispatch a terminal action elsewhere or create a shell.
-  assert.equal(step(), false); assert.equal(state.menuClicks, 1);
-  state.dialog = true;
-  assert.equal(step(), false); assert.equal(state.terminalClicks, 1);
-  assert.equal(step(), true); assert.equal(step(), true);
-  assert.equal(state.menuClicks, 1); assert.equal(state.terminalClicks, 1);
-  assert.equal(state.shellClicks, 0);
-}
-fresh(); state.panel = true;
+fresh();
+assert.equal(step(), false); assert.equal(state.toggleClicks, 1);
+assert.equal(step(), false); assert.equal(state.toggleClicks, 1);
+state.panel = true;
 assert.equal(step(), true); assert.equal(state.menuClicks, 0);
+assert.equal(state.shellClicks, 0);
 fresh(); state.disabled = true;
-assert.equal(step(), false); assert.equal(state.menuClicks, 0);
-fresh(); state.dialog = true; state.expanded = true;
+assert.equal(step(), false); assert.equal(state.toggleClicks, 0);
+fresh(true);
+assert.equal(step(), false); assert.equal(state.menuClicks, 1);
+assert.equal(step(), false); assert.equal(state.menuClicks, 1);
+state.dialog = true;
+assert.equal(step(), false); assert.equal(state.terminalClicks, 1);
+assert.equal(step(), true); assert.equal(state.shellClicks, 0);
+fresh(true); state.dialog = true; state.expanded = true;
 state.rows = [{disabled: true, querySelectorAll: () => [{textContent: 'Terminal'}],
                click: () => assert.fail('disabled terminal')}];
 assert.equal(step(), false); assert.equal(state.menuClicks, 0);

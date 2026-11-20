@@ -65,7 +65,7 @@ test("serves the production-embedded application and hashed assets", async ({
   expect(asset.headers()["cache-control"]).toContain("immutable");
 
   await page.goto(harness.baseUrl);
-  await expect(page.getByText("No projects yet")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Add a project", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: /Get Started/i })).toBeVisible();
 });
 
@@ -1697,10 +1697,7 @@ test("resizes and restores the dock beside the conversation", async ({
   await page.keyboard.press("ArrowLeft");
   expect(Number(await inner.getAttribute("aria-valuenow"))).toBeGreaterThan(innerBefore);
   await expect(separator).toHaveAttribute("aria-valuenow", String(resized));
-  await dock.getByRole("button", { name: "Full width", exact: true }).click();
-  await expect(dock.getByRole("button", { name: "Exit full width" })).toBeVisible();
-  await dock.getByRole("button", { name: "Exit full width" }).click();
-  await expect(separator).toHaveAttribute("aria-valuenow", String(resized));
+  await expect(dock.getByRole("button", { name: "Full width", exact: true })).toHaveCount(0);
   await hideSessionDrawer(page);
   await openSessionDrawer(page);
   await expect(separator).toHaveAttribute("aria-valuenow", String(resized));
@@ -1711,8 +1708,9 @@ test("resizes and restores the dock beside the conversation", async ({
   await dockSessionDrawer(page);
   await expect(separator).toHaveAttribute("aria-valuenow", String(resized));
   await page.setViewportSize({ width: 900, height: 700 });
-  await expect(page.getByRole("dialog", { name: "Insights" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Hide panel" })).toBeVisible();
+  // The narrow desktop still docks when there is at least 400px for the chat.
+  await expect(dock).toBeVisible();
+  await expect(separator).toHaveAttribute("aria-valuenow", "500");
   await page.setViewportSize({ width: 390, height: 844 });
   await page
     .getByRole("dialog", { name: "Insights" })

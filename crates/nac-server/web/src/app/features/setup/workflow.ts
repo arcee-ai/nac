@@ -116,34 +116,6 @@ export function createConfiguredChat<M, C>(
   );
 }
 
-/** Title and config remain separate writes; a partial save remains visible. */
-export function saveSettings<M>(
-  ports: SetupPorts & {
-    check: () => Promise<unknown>;
-    persistsModel?: boolean;
-    model: () => Promise<M>;
-    configurationSaved?: boolean;
-    configuration: (model: M) => Promise<unknown>;
-    title?: () => Promise<unknown>;
-    projectDefault?: (model: M) => Promise<unknown>;
-  },
-) {
-  return setupSequence(ports, (step) =>
-    Effect.gen(function* () {
-      yield* step("read", ports.check, false);
-      const model = yield* step("preset", ports.model, ports.persistsModel ?? true);
-      yield* step(
-        "configuration",
-        () => ports.configuration(model),
-        ports.configurationSaved ?? true,
-      );
-      if (ports.title) yield* step("title", ports.title);
-      if (ports.projectDefault) yield* step("default", () => ports.projectDefault!(model));
-      return model;
-    }),
-  );
-}
-
 export async function runSetup<T>(workflow: Effect.Effect<T, SetupFailure>): Promise<T> {
   const result = await Effect.runPromiseExit(workflow);
   if (Exit.isSuccess(result)) return result.value;

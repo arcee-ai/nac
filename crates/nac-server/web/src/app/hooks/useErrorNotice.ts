@@ -1,10 +1,11 @@
 import { useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import type { ChatSessionMessageAction } from "@/app/atoms/chat-session-message";
 
 import { useDeviceLogin } from "@/app/features/managed/controller/useDeviceLogin";
 import { managedAuthProvider } from "@/app/lib/providers";
 import { humanError, type ErrorFix, type RunError } from "@/app/lib/providerError";
-import { useSessionActions } from "@/app/providers/SessionActionsProvider";
+import { routes, type SettingsSection } from "@/app/lib/routes";
 
 export interface ErrorNotice {
   title: string;
@@ -14,13 +15,13 @@ export interface ErrorNotice {
 
 /**
  * Turns a failure into the notice the chat shows, with the offered fix wired to
- * whatever carries it out from here: the browser login, this session's
- * settings, the page on the platform that holds the account, or a retry the
- * caller supplies. A fix nothing here can perform is dropped, leaving the
- * wording to stand on its own.
+ * whatever carries it out from here: the browser login, the settings page that
+ * holds the broken setup, the page on the platform that holds the account, or a
+ * retry the caller supplies. A fix nothing here can perform is dropped, leaving
+ * the wording to stand on its own.
  */
-export function useErrorNotice(sessionId: string | null, backend?: string | null) {
-  const actions = useSessionActions();
+export function useErrorNotice(backend?: string | null) {
+  const navigate = useNavigate();
   const { start } = useDeviceLogin();
   const provider = backend ? managedAuthProvider(backend) : null;
 
@@ -32,12 +33,12 @@ export function useErrorNotice(sessionId: string | null, backend?: string | null
         description,
         action: noticeAction(fix, {
           login: provider ? () => void start(provider) : null,
-          settings: sessionId ? () => actions.settings(sessionId) : null,
+          settings: (section) => navigate(routes.settings(section)),
           retry: retry ?? null,
         }),
       };
     },
-    [actions, backend, provider, sessionId, start],
+    [backend, navigate, provider, start],
   );
 }
 
@@ -45,7 +46,7 @@ function noticeAction(
   fix: ErrorFix | undefined,
   handlers: {
     login: (() => void) | null;
-    settings: (() => void) | null;
+    settings: (section: SettingsSection | undefined) => void;
     retry: (() => void) | null;
   },
 ): ErrorNotice["action"] {
@@ -54,7 +55,7 @@ function noticeAction(
     case "login":
       return handlers.login ? { label: fix.label, onClick: handlers.login } : undefined;
     case "settings":
-      return handlers.settings ? { label: fix.label, onClick: handlers.settings } : undefined;
+      return { label: fix.label, onClick: () => handlers.settings(fix.section) };
     case "retry":
       return handlers.retry ? { label: fix.label, onClick: handlers.retry } : undefined;
     case "link":

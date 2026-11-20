@@ -1,3 +1,4 @@
+import { useQuery } from "@tanstack/react-query";
 import type { ServiceTier } from "@/app/lib/serviceTier";
 import { useMemo } from "react";
 
@@ -10,6 +11,7 @@ import type { UiPolicy } from "@/app/features/ui-policy/policy";
 import { creationBehavior } from "@/app/features/ui-policy/policy";
 import { inheritPrimaryCredential } from "@/app/lib/modelConfig";
 import { newestCreatedPrimarySessionForProject } from "@/app/lib/projects";
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import {
   useModelConfigs,
   useProjects,
@@ -21,6 +23,7 @@ import type {
   CreateSessionRequest,
   LightModelSettings,
   ModelConfigurationRecord,
+  ProjectRecord,
   RawSessionConfig,
   SessionBehavior,
 } from "@/app/types/api";
@@ -30,6 +33,28 @@ export interface InheritedModel {
   initial: ConfigurationsPanelInitial;
   light: LightModelSettings | null;
   source: "project-default" | "latest-session";
+}
+
+/** The serving runtime resolves file defaults in the actual launch location. */
+export function useConfiguredLaunchModel(project: ProjectRecord | null, enabled: boolean) {
+  const { api } = useNativeRuntime();
+  const target = project && {
+    cwd: project.cwd,
+    ssh_host: project.ssh_host,
+    ssh_port: project.ssh_port,
+    ssh_identity_file: project.ssh_identity_file,
+  };
+  const query = useQuery({
+    queryKey: ["launch-model-defaults", target],
+    queryFn: ({ signal }) => api.launchDefaults(target ?? {}, signal),
+    enabled: enabled && target != null,
+    retry: false,
+  });
+  return {
+    model: enabled ? (query.data?.configured_model ?? null) : null,
+    pending: enabled && query.isPending,
+    error: enabled ? query.error : null,
+  };
 }
 
 /** A model the user picked in the composer's model chip for this session only. */
@@ -138,7 +163,12 @@ export function useInheritedModel(projectId: string | null) {
   return { inherited, pending, error: error || null };
 }
 
-/** A short chip label: "model · effort". */
+/** A model id without its vendor prefix: "deepseek/deepseek-v4" reads "deepseek-v4". */
+function shortModel(model: string): string {
+  return model.split("/").pop() || model;
+}
+
+/** The model chip's label; reasoning effort has its own chip. */
 export function modelChipLabel(
   override: ModelOverride | null,
   inherited: InheritedModel | null,
@@ -146,10 +176,86 @@ export function modelChipLabel(
   if (override) {
     const selection = override.selection;
     if (selection.kind === "save") return selection.request.model || selection.request.name;
-    return [selection.model, selection.reasoning_effort].filter(Boolean).join(" · ");
+    return shortModel(selection.model);
   }
-  if (!inherited) return null;
-  return [inherited.initial.model, inherited.initial.reasoning_effort].filter(Boolean).join(" · ");
+  return inherited ? shortModel(inherited.initial.model) : null;
+}
+
+/** The route and preferences a session will start with. */
+export function sessionRoute(
+  override: ModelOverride | null,
+  inherited: InheritedModel | null,
+): {
+  backend: BackendKind;
+  model: string;
+  baseUrl: string;
+  effort: string;
+  speed: ServiceTier | null | undefined;
+} | null {
+  const selection = override?.selection;
+  if (selection?.kind === "resolved") {
+    return {
+      backend: selection.backend,
+      model: selection.model,
+      baseUrl: selection.base_url,
+      effort: selection.reasoning_effort ?? "",
+      speed: selection.service_tier,
+    };
+  }
+  if (selection || !inherited) return null;
+  return {
+    backend: inherited.initial.backend,
+    model: inherited.initial.model,
+    baseUrl: inherited.initial.base_url,
+    effort: inherited.initial.reasoning_effort ?? "",
+    speed: inherited.initial.service_tier,
+  };
+}
+
+/** The inherited model as an explicit override, so one setting can change for this session. */
+function inheritedOverride(inherited: InheritedModel): ModelOverride {
+  const initial = inherited.initial;
+  return {
+    selection: {
+      kind: "resolved",
+      backend: initial.backend,
+      model: initial.model,
+      base_url: initial.base_url,
+      allow_insecure_http: initial.allow_insecure_http ?? false,
+      api_key_env: initial.api_key_env,
+      reasoning_effort: initial.reasoning_effort,
+      service_tier: initial.service_tier,
+      extra_headers: initial.extra_headers,
+      orchestrator_compaction_threshold: initial.orchestrator_compaction_threshold,
+      light_model: inherited.light,
+      config_id: initial.config_id,
+    },
+    light: inherited.light
+      ? { mode: "dual", light: inherited.light }
+      : { mode: "single", light: null },
+    selectedLight: inherited.light,
+  };
+}
+
+/** `override` (or the inherited model) with a different reasoning effort; "" is the model's default. */
+export function withEffort(
+  override: ModelOverride | null,
+  inherited: InheritedModel | null,
+  effort: string,
+): ModelOverride | null {
+  const base = override ?? (inherited ? inheritedOverride(inherited) : null);
+  if (base?.selection.kind !== "resolved") return base;
+  return { ...base, selection: { ...base.selection, reasoning_effort: effort || null } };
+}
+
+export function withSpeed(
+  override: ModelOverride | null,
+  inherited: InheritedModel | null,
+  speed: ServiceTier | null,
+): ModelOverride | null {
+  const base = override ?? (inherited ? inheritedOverride(inherited) : null);
+  if (base?.selection.kind !== "resolved") return base;
+  return { ...base, selection: { ...base.selection, service_tier: speed } };
 }
 
 /** The resolved tuple a configured session is created with. */

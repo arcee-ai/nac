@@ -24207,6 +24207,14 @@
           "base_url": {
             "$ref": "#/components/schemas/RequestField_String_String"
           },
+          "expected_config_version": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Compare an intentional edit against the configuration the caller reviewed."
+          },
           "extra_headers": {
             "$ref": "#/components/schemas/RequestField_HeadersRequest_HeadersRequest",
             "description": "Prefer a JSON object. Null or an empty object clears the persisted map."

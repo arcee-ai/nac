@@ -1,6 +1,6 @@
 import type { Locator, Page } from "@playwright/test";
 
-import { expect } from "./harness";
+import { expect, showSidePanel } from "./harness";
 
 /**
  * A transcript step paused before execution. Steps waiting for approval stay
@@ -41,23 +41,9 @@ export function sessionPanelTabs(page: Page): Locator {
   return page.getByRole("tablist", { name: "Session panels" });
 }
 
-/**
- * Opens the desktop session drawer on its tabs, from the header's Session
- * menu (its Insights action), unless it is already showing.
- */
+/** Opens the desktop session drawer through its header toggle. */
 export async function openSessionDrawer(page: Page) {
-  const tabs = sessionPanelTabs(page);
-  const menu = page.getByRole("button", { name: "Session menu", exact: true });
-  await expect(tabs.or(menu).first()).toBeVisible();
-  await expect(async () => {
-    if (await tabs.isVisible()) return;
-    if ((await menu.getAttribute("aria-expanded")) !== "true") await menu.click({ timeout: 1_000 });
-    await page
-      .getByRole("dialog", { name: "Session", exact: true })
-      .getByRole("button", { name: "Insights", exact: true })
-      .click({ timeout: 1_000 });
-    await expect(tabs).toBeVisible({ timeout: 2_000 });
-  }).toPass();
+  await showSidePanel(page);
 }
 
 /** Opens one panel of the desktop session drawer by its tab. */
@@ -68,17 +54,9 @@ export async function openSessionPanel(page: Page, name: string) {
   await expect(tab).toHaveAttribute("aria-selected", "true");
 }
 
-/**
- * Docks the desktop session drawer beside the conversation (⌘\), so the
- * panel and the composer stay usable together, as a docked column does.
- */
+/** Opens the drawer and verifies the available desktop space lets it dock. */
 export async function dockSessionDrawer(page: Page) {
-  await openSessionDrawer(page);
-  const dock = page.getByRole("button", { name: "Dock drawer", exact: true });
-  const float = page.getByRole("button", { name: "Float drawer", exact: true });
-  await expect(dock.or(float).first()).toBeVisible();
-  if (await dock.isVisible()) await dock.click();
-  await expect(float).toHaveAttribute("aria-pressed", "true");
+  await showSidePanel(page);
   await expect(
     page.getByRole("complementary").filter({ has: sessionPanelTabs(page) }),
   ).toBeVisible();
@@ -87,6 +65,27 @@ export async function dockSessionDrawer(page: Page) {
 /** Home's hero composer: the app's one new-session flow. */
 export function homeComposer(page: Page): Locator {
   return page.getByRole("textbox", { name: "What should we work on?" });
+}
+
+/** Opens the connected-provider model list from the composer chip. */
+export async function openModelList(scope: Page | Locator): Promise<Locator> {
+  await scope.getByRole("button", { name: /^(Model: |Choose a model$)/ }).click();
+  await scope
+    .getByRole("dialog", { name: "Model settings", exact: true })
+    .getByRole("button", { name: /^Choose model/ })
+    .click();
+  const list = scope.getByRole("menu", { name: "Model", exact: true });
+  await expect(list).toBeVisible();
+  return list;
+}
+
+/** Opens the still-supported launch options for orchestration-capable builds. */
+export async function openAdvancedModelOptions(page: Page): Promise<Locator> {
+  await openModelList(page);
+  await page.getByRole("menuitem", { name: "Light model and presets…", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Model", exact: true });
+  await expect(dialog).toBeVisible();
+  return dialog;
 }
 
 export type BehaviorLabel = "Agent" | "Agent + Orchestrator" | "Orchestrator";

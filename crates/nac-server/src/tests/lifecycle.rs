@@ -628,6 +628,7 @@ async fn stale_manager_rebuilds_all_model_authority_after_external_patch() {
         .update_session_config(
             "session",
             UpdateConfigRequest {
+                expected_config_version: None,
                 service_tier: RequestField::Omitted,
                 model: RequestField::Value("model-from-other-manager".to_string()),
                 base_url: RequestField::Value(new_base_url.clone()),

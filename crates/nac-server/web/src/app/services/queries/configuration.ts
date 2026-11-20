@@ -23,7 +23,6 @@ import type {
   SshTarget,
   TestMcpServerRequest,
   UpdateMcpServerRequest,
-  UpdateModelConfigurationRequest,
   UpdateSshConfigurationRequest,
 } from "@/app/types/api";
 
@@ -522,30 +521,6 @@ export function useCreateModelConfig() {
     mutationFn: (payload: CreateModelConfigurationRequest) => api.createModelConfig(payload),
     onSuccess: async () => {
       // The server files the key under a generated credential name.
-      await Promise.all([
-        client.invalidateQueries({ queryKey: queryKeys.modelConfigs }),
-        client.invalidateQueries({ queryKey: queryKeys.credentials }),
-        refreshUnifiedProviderCatalog(client),
-      ]);
-    },
-  });
-}
-
-export function useUpdateModelConfig() {
-  const { api } = useNativeRuntime();
-
-  const client = useQueryClient();
-  return useMutation({
-    retry: false,
-    mutationFn: ({
-      configId,
-      payload,
-    }: {
-      configId: string;
-      payload: UpdateModelConfigurationRequest;
-    }) => api.updateModelConfig(configId, payload),
-    onSuccess: async () => {
-      // A replaced key is filed under a new generated name and the old one goes.
       await Promise.all([
         client.invalidateQueries({ queryKey: queryKeys.modelConfigs }),
         client.invalidateQueries({ queryKey: queryKeys.credentials }),

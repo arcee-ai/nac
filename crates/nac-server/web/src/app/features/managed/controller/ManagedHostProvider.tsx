@@ -13,6 +13,7 @@ import {
 } from "@/app/features/managed/presentation/managedSettingsContext";
 import { ManagedRepositoryModal } from "@/app/features/managed/presentation/ManagedRepositoryModal";
 import { routes } from "@/app/lib/routes";
+import { ApiError } from "@/app/services/api";
 
 /**
  * Managed host product state. Host settings (status, GitHub device auth,
@@ -26,6 +27,10 @@ export function ManagedHostProvider({ children }: { children: React.ReactNode })
   const [repositoryOpen, setRepositoryOpen] = useState(false);
   const [resumeRepositoryAfterConnect, setResumeRepositoryAfterConnect] = useState(false);
   const status = statusQuery.data ?? null;
+  // The managed-status route is absent on an ordinary server.
+  const isUnmanaged =
+    status?.managed === false ||
+    (status === null && statusQuery.error instanceof ApiError && statusQuery.error.status === 404);
 
   const openSettings = useCallback(() => {
     setResumeRepositoryAfterConnect(false);
@@ -59,10 +64,11 @@ export function ManagedHostProvider({ children }: { children: React.ReactNode })
     () => ({
       status,
       isManaged: status?.managed === true,
+      isUnmanaged,
       openSettings,
       addRepository,
     }),
-    [addRepository, openSettings, status],
+    [addRepository, isUnmanaged, openSettings, status],
   );
   const settings = useMemo<ManagedSettingsState>(
     () => ({ tab: settingsTab, setTab: selectTab, onGitHubConnected: handleGitHubConnected }),

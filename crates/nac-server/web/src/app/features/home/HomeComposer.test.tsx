@@ -9,6 +9,7 @@ import { DIRECT_UI_POLICY, ORCHESTRATION_UI_POLICY } from "@/app/features/ui-pol
 import type { ManagedSessionSummary, ProjectRecord } from "@/app/types/api";
 
 import { HomeComposer } from "./HomeComposer";
+import { standaloneHomeDraftStore } from "./homeDraftStore";
 
 const fakes = vi.hoisted(() => ({
   start: vi.fn(),
@@ -16,6 +17,14 @@ const fakes = vi.hoisted(() => ({
   addRepository: vi.fn(),
   managed: false,
   eligible: false,
+  sandboxStatus: "ready" as "ready" | "missing",
+  sandboxProbe: vi.fn(),
+  inheritedPending: false,
+  inheritedError: null as Error | null,
+  configuredModel: null as string | null,
+  inheritedEffort: "high" as string | null,
+  inheritedModel: "glm-5",
+  nativeSpeed: undefined as "fast" | "standard" | undefined,
 }));
 
 vi.mock("./useStartSession", () => ({
@@ -30,30 +39,97 @@ vi.mock("./useStartSession", () => ({
 vi.mock("./modelChoice", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./modelChoice")>()),
   useInheritedModel: () => ({
-    inherited: {
-      initial: { model: "glm-5", reasoning_effort: "high", backend: "arcee-api" },
-      light: null,
-      source: "project-default",
-    },
-    pending: false,
-    error: null,
+    inherited:
+      fakes.inheritedError || fakes.configuredModel
+        ? null
+        : {
+            initial: {
+              model: fakes.inheritedModel,
+              reasoning_effort: fakes.inheritedEffort,
+              backend: fakes.nativeSpeed ? "openai-chat-completions" : "arcee-api",
+              base_url: fakes.nativeSpeed ? "https://api.openai.com/v1" : "https://api.arcee.ai/v1",
+              service_tier: fakes.nativeSpeed,
+            },
+            light: null,
+            source: "project-default",
+          },
+    pending: fakes.inheritedPending,
+    error: fakes.inheritedError,
   }),
+  useConfiguredLaunchModel: () => ({ model: fakes.configuredModel, pending: false, error: null }),
 }));
 vi.mock("./ModelOverrideModal", () => ({ ModelOverrideModal: () => null }));
+vi.mock("./suggestedModel", () => ({
+  useSuggestedModel: () => ({ override: null, pending: false, noProviders: false }),
+  catalogOverride: vi.fn(),
+}));
+vi.mock("@/app/services/queries", () => ({
+  useSandboxAvailability: (enabled: boolean) => {
+    fakes.sandboxProbe(enabled);
+    return {
+      data: enabled
+        ? {
+            status: fakes.sandboxStatus,
+            guidance: fakes.sandboxStatus === "missing" ? "Install Podman to continue." : null,
+          }
+        : undefined,
+      isFetching: false,
+      isPending: !enabled,
+      isError: false,
+      refetch: vi.fn(),
+    };
+  },
+  useModelCatalog: () => ({
+    data: {
+      providers: [
+        {
+          id: "arcee-api",
+          auth_status: "ready",
+          models: [{ id: "glm-5", supported_efforts: ["low", "medium", "high"] }],
+          default_limits: { supported_efforts: [] },
+        },
+        {
+          id: "openai-chat-completions",
+          auth_status: "ready",
+          default_base_url: "https://api.openai.com/v1",
+          models: [{ id: "gpt-6.1-sol", supported_efforts: ["low", "high"] }],
+          default_limits: { supported_efforts: [] },
+          speed_profiles: { "gpt-6.1-sol": { tiers: ["standard", "fast"] } },
+        },
+      ],
+    },
+    isPending: false,
+    isError: false,
+  }),
+  useReadyProviderModels: () => new Map(),
+}));
 vi.mock("@/app/features/task-launches/useTaskLaunch", () => ({
   useTaskLaunchSource: (_id: string | null, enabled: boolean) => ({
     data: enabled ? { eligible: fakes.eligible, default_ref: "main" } : undefined,
   }),
 }));
 vi.mock("@/app/features/task-launches/TaskLaunchModal", () => ({
-  TaskLaunchModal: ({ initialPrompt }: { initialPrompt: string }) => (
-    <div role="dialog" aria-label="New isolated task">
+  TaskLaunchModal: ({
+    initialPrompt,
+    initialGitRef,
+    onExistingCheckout,
+  }: {
+    initialPrompt: string;
+    initialGitRef: string;
+    onExistingCheckout: (text: string) => void;
+  }) => (
+    <div role="dialog" aria-label="New isolated task" data-ref={initialGitRef}>
       {initialPrompt}
+      <button onClick={() => onExistingCheckout("Edited task brief")}>Use existing checkout</button>
     </div>
   ),
 }));
 vi.mock("@/app/features/managed/controller/useManagedHost", () => ({
-  useManagedHost: () => ({ isManaged: fakes.managed, addRepository: fakes.addRepository }),
+  useManagedHost: () => ({
+    isManaged: fakes.managed,
+    isUnmanaged: !fakes.managed,
+    addRepository: fakes.addRepository,
+  }),
 }));
 vi.mock("@/app/providers/ProjectActionsProvider", () => ({
   useProjectActions: () => ({ create: fakes.create }),
@@ -69,11 +145,11 @@ const sessions = [
   { summary: { session_id: "s", project_id: "p2", updated_at: "2026-11-16T10:00:00Z" } },
 ] as ManagedSessionSummary[];
 
-function mount(path = "/", orchestration = true) {
+function mount(path = "/", orchestration = true, list: readonly ProjectRecord[] = projects) {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <UiPolicyContext.Provider value={orchestration ? ORCHESTRATION_UI_POLICY : DIRECT_UI_POLICY}>
-        <HomeComposer projects={projects} sessions={sessions} />
+        <HomeComposer projects={list} sessions={sessions} />
       </UiPolicyContext.Provider>
     </MemoryRouter>,
   );
@@ -90,6 +166,15 @@ beforeEach(() => {
   fakes.addRepository.mockReset();
   fakes.managed = false;
   fakes.eligible = false;
+  fakes.sandboxStatus = "ready";
+  fakes.sandboxProbe.mockClear();
+  fakes.inheritedPending = false;
+  fakes.inheritedError = null;
+  fakes.configuredModel = null;
+  fakes.inheritedEffort = "high";
+  fakes.inheritedModel = "glm-5";
+  fakes.nativeSpeed = undefined;
+  standaloneHomeDraftStore.update("", null);
 });
 afterEach(() => {
   cleanup();
@@ -99,6 +184,92 @@ afterEach(() => {
 function prompt() {
   return screen.getByRole("textbox", { name: "What should we work on?" });
 }
+
+describe("Sandbox launch", () => {
+  it("checks Podman only after selecting Sandbox and submits the chosen options", async () => {
+    fakes.eligible = true;
+    mount("/", false);
+    fireEvent.change(prompt(), { target: { value: "Run in the container" } });
+    fireEvent.click(screen.getByRole("button", { name: "Additional settings" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Isolated checkout" }));
+    expect(fakes.sandboxProbe).not.toHaveBeenCalledWith(true);
+    fireEvent.click(screen.getByRole("switch", { name: "Sandbox" }));
+    expect(fakes.sandboxProbe).toHaveBeenCalledWith(true);
+    expect(screen.getByRole("switch", { name: "Isolated checkout", checked: false })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Sandbox options" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Container image" }), {
+      target: { value: "alpine" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Container workdir" }), {
+      target: { value: "/work" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Additional mounts" }), {
+      target: { value: "/cache:/cache" },
+    });
+    fireEvent.click(screen.getByRole("switch", { name: "Don’t mount the working folder" }));
+    fireEvent.click(screen.getByRole("button", { name: "Additional settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start sandbox session" }));
+    await vi.waitFor(() => expect(fakes.start).toHaveBeenCalledOnce());
+    expect(fakes.start).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: "p2",
+        sandbox: expect.objectContaining({
+          image: "alpine",
+          workdir: "/work",
+          mounts: "/cache:/cache",
+          noMount: true,
+        }),
+      }),
+    );
+  });
+
+  it("keeps the draft when Podman is missing and only starts Locally after explicit deselection", async () => {
+    fakes.sandboxStatus = "missing";
+    mount("/", false);
+    fireEvent.change(prompt(), { target: { value: "Do not run Locally" } });
+    fireEvent.click(screen.getByRole("button", { name: "Additional settings" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Sandbox" }));
+    expect(screen.getByText("Install Podman to continue.")).toBeTruthy();
+    fireEvent.keyDown(prompt(), { key: "Enter" });
+    expect(fakes.start).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("switch", { name: "Sandbox" }));
+    fireEvent.keyDown(prompt(), { key: "Enter" });
+    await vi.waitFor(() => expect(fakes.start).toHaveBeenCalledOnce());
+    expect(fakes.start.mock.calls[0]?.[0]).not.toHaveProperty("sandbox");
+  });
+
+  it("does not send on a different project when the selected sandbox project disappears", () => {
+    const view = mount("/", false);
+    fireEvent.change(prompt(), { target: { value: "Stay in the selected sandbox" } });
+    fireEvent.click(screen.getByRole("button", { name: "Additional settings" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Sandbox" }));
+    view.rerender(
+      <MemoryRouter initialEntries={["/"]}>
+        <UiPolicyContext.Provider value={DIRECT_UI_POLICY}>
+          <HomeComposer projects={projects.slice(0, 1)} sessions={sessions} />
+        </UiPolicyContext.Provider>
+      </MemoryRouter>,
+    );
+    fireEvent.keyDown(prompt(), { key: "Enter" });
+    expect(fakes.start).not.toHaveBeenCalled();
+    expect((prompt() as HTMLTextAreaElement).value).toBe("Stay in the selected sandbox");
+    expect((prompt() as HTMLTextAreaElement).placeholder).toMatch(
+      /project is no longer available/i,
+    );
+  });
+
+  it.each(["managed", "ssh"])("omits Sandbox on %s projects", (mode) => {
+    fakes.managed = mode === "managed";
+    mount(
+      "/?project=p2",
+      false,
+      mode === "ssh" ? [projects[0]!, { ...projects[1]!, ssh_host: "build-box" }] : projects,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Additional settings" }));
+    expect(screen.queryByRole("switch", { name: "Sandbox" })).toBeNull();
+    expect(fakes.sandboxProbe).not.toHaveBeenCalledWith(true);
+  });
+});
 
 describe("Home composer", () => {
   it("starts a session in the most recent project with the prompt as its first message", async () => {
@@ -128,11 +299,88 @@ describe("Home composer", () => {
 
   it("shows the inherited model and the behaviors only where orchestration exists", () => {
     mount("/", false);
-    expect(screen.getByRole("button", { name: "Model: glm-5 · high" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Model: glm-5, High reasoning" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /^Behavior:/ })).toBeNull();
     cleanup();
     mount("/", true);
     expect(screen.getByRole("button", { name: "Behavior: Orchestrator" })).toBeTruthy();
+  });
+
+  it("offers only the model's reasoning levels and sends the one picked", async () => {
+    mount("/", false);
+    fireEvent.click(screen.getByRole("button", { name: "Model: glm-5, High reasoning" }));
+    expect(screen.getAllByRole("radio")).toHaveLength(3);
+    expect(screen.getByRole("radio", { name: "High", checked: true })).toBeTruthy();
+    fireEvent.click(screen.getByRole("radio", { name: "Low" }));
+    expect(screen.getByRole("button", { name: "Model: glm-5, Low reasoning" })).toBeTruthy();
+    fireEvent.change(prompt(), { target: { value: "Go" } });
+    fireEvent.keyDown(prompt(), { key: "Enter" });
+    await vi.waitFor(() =>
+      expect(fakes.start).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: expect.objectContaining({
+            selection: expect.objectContaining({ model: "glm-5", reasoning_effort: "low" }),
+          }),
+        }),
+      ),
+    );
+  });
+
+  it("starts at Medium when nothing sets an effort, and sends it", async () => {
+    fakes.inheritedEffort = null;
+    mount("/", false);
+    expect(screen.getByRole("button", { name: "Model: glm-5, Medium reasoning" })).toBeTruthy();
+    fireEvent.change(prompt(), { target: { value: "Go" } });
+    fireEvent.keyDown(prompt(), { key: "Enter" });
+    await vi.waitFor(() =>
+      expect(fakes.start).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: expect.objectContaining({
+            selection: expect.objectContaining({ reasoning_effort: "medium" }),
+          }),
+        }),
+      ),
+    );
+  });
+
+  it("switches inherited Fast to explicit Standard without changing routing or reasoning", async () => {
+    fakes.inheritedModel = "gpt-6.1-sol";
+    fakes.nativeSpeed = "fast";
+    mount("/", false);
+    fireEvent.click(screen.getByRole("button", { name: /High reasoning, Fast speed$/ }));
+    const fast = screen.getByRole("switch", { name: "Fast speed", checked: true });
+    expect(screen.queryByRole("button", { name: /Use provider default/ })).toBeNull();
+    fireEvent.click(fast);
+    fireEvent.change(prompt(), { target: { value: "Go" } });
+    fireEvent.keyDown(prompt(), { key: "Enter" });
+    await vi.waitFor(() =>
+      expect(fakes.start).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: expect.objectContaining({
+            selection: expect.objectContaining({
+              backend: "openai-chat-completions",
+              model: "gpt-6.1-sol",
+              reasoning_effort: "high",
+              service_tier: "standard",
+            }),
+          }),
+        }),
+      ),
+    );
+  });
+
+  it("shows effort as None and sends none for a model that accepts no level", async () => {
+    fakes.inheritedEffort = null;
+    fakes.inheritedModel = "no-levels";
+    mount("/", false);
+    const chip = screen.getByRole("button", { name: /, None reasoning$/ });
+    fireEvent.click(chip);
+    expect(screen.queryByRole("group", { name: /^Reasoning/ })).toBeNull();
+    fireEvent.change(prompt(), { target: { value: "Go" } });
+    fireEvent.keyDown(prompt(), { key: "Enter" });
+    await vi.waitFor(() => expect(fakes.start).toHaveBeenCalled());
+    const model = fakes.start.mock.calls[0]?.[0]?.model;
+    expect(model?.selection?.reasoning_effort ?? null).toBeNull();
   });
 
   it("keeps an unsent draft across visits and sends nothing without a prompt", () => {
@@ -146,16 +394,154 @@ describe("Home composer", () => {
     expect(send.disabled).toBe(true);
   });
 
+  it("leaves an unknown requested project unchosen rather than starting elsewhere", () => {
+    mount("/?project=gone");
+    expect(prompt().getAttribute("placeholder")).toBe(
+      "That project is no longer available. Choose a project.",
+    );
+    fireEvent.change(prompt(), { target: { value: "Anything" } });
+    const send = screen.getByRole("button", { name: "Start session" }) as HTMLButtonElement;
+    expect(send.disabled).toBe(true);
+    expect(screen.queryByRole("button", { name: /^Project: (Atlas|Borealis)/ })).toBeNull();
+  });
+
+  it("waits for inherited model settings before sending", () => {
+    fakes.inheritedPending = true;
+    mount();
+    fireEvent.change(prompt(), { target: { value: "Run with the model shown" } });
+    fireEvent.keyDown(prompt(), { key: "Enter" });
+    expect(
+      (screen.getByRole("button", { name: "Start session" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(fakes.start).not.toHaveBeenCalled();
+  });
+
+  it("lets the server use the launch location's configured model unchanged", async () => {
+    fakes.configuredModel = "project-configured-model";
+    mount();
+    expect(screen.getByRole("button", { name: "Model: project-configured-model" })).toBeTruthy();
+    fireEvent.change(prompt(), { target: { value: "Use the launch configuration" } });
+    fireEvent.keyDown(prompt(), { key: "Enter" });
+    await vi.waitFor(() =>
+      expect(fakes.start).toHaveBeenCalledWith(expect.objectContaining({ model: null })),
+    );
+  });
+
+  it("surfaces an unavailable inherited model without silently sending", () => {
+    fakes.inheritedError = new Error("Model settings unavailable");
+    mount();
+    fireEvent.change(prompt(), { target: { value: "Try again later" } });
+    fireEvent.keyDown(prompt(), { key: "Enter" });
+    expect(screen.getByRole("alert").textContent).toContain("Choose a model");
+    expect(fakes.start).not.toHaveBeenCalled();
+  });
+
+  it("says where a kept draft will start when New session points it at another project", () => {
+    mount("/?project=p1");
+    fireEvent.change(prompt(), { target: { value: "Plan the release" } });
+    expect(screen.queryByText(/Your draft will start in/)).toBeNull();
+    cleanup();
+    mount("/?project=p2");
+    expect((prompt() as HTMLTextAreaElement).value).toBe("Plan the release");
+    expect(document.activeElement).toBe(prompt());
+    expect(screen.getByText(/Your draft will start in/).textContent).toBe(
+      "Your draft will start in Borealis, not Atlas.",
+    );
+    fireEvent.change(prompt(), { target: { value: "Plan the release notes" } });
+    expect(screen.queryByText(/Your draft will start in/)).toBeNull();
+    expect(fakes.start).not.toHaveBeenCalled();
+  });
+
+  it("folds checkout choices behind ⋯", () => {
+    mount("/", false);
+    expect(screen.queryByRole("switch", { name: "Isolated checkout" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Additional settings" }));
+    const isolated = screen.getByRole("switch", { name: "Isolated checkout" });
+    expect((isolated as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText("Needs a direct agent in a local Git project.")).toBeTruthy();
+    expect(
+      (screen.getByRole("button", { name: /^Start from/ }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+
   it("routes an isolated-checkout send through the isolated task form", () => {
     fakes.eligible = true;
     mount("/", false);
-    fireEvent.click(screen.getByRole("button", { name: "Isolated checkout" }));
+    fireEvent.click(screen.getByRole("button", { name: "Additional settings" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Isolated checkout" }));
+    expect(screen.getByRole("button", { name: /^Start from/ }).textContent).toContain("main");
     fireEvent.change(prompt(), { target: { value: "Upgrade the toolchain" } });
     fireEvent.click(screen.getByRole("button", { name: "Set up isolated task" }));
-    expect(screen.getByRole("dialog", { name: "New isolated task" }).textContent).toBe(
-      "Upgrade the toolchain",
-    );
+    const form = screen.getByRole("dialog", { name: "New isolated task" });
+    expect(form.textContent).toContain("Upgrade the toolchain");
+    expect(form.getAttribute("data-ref")).toBe("");
     expect(fakes.start).not.toHaveBeenCalled();
+  });
+
+  it("uses the edited isolated-task brief and keeps newer Home text when falling back", async () => {
+    fakes.eligible = true;
+    mount("/", false);
+    fireEvent.click(screen.getByRole("button", { name: "Additional settings" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Isolated checkout" }));
+    fireEvent.change(prompt(), { target: { value: "Initial task brief" } });
+    fireEvent.click(screen.getByRole("button", { name: "Set up isolated task" }));
+    fireEvent.change(prompt(), { target: { value: "New Home draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Use existing checkout" }));
+    await vi.waitFor(() =>
+      expect(fakes.start).toHaveBeenCalledWith({
+        projectId: "p2",
+        behavior: "direct",
+        prompt: "Edited task brief",
+        model: null,
+      }),
+    );
+    expect((prompt() as HTMLTextAreaElement).value).toBe("New Home draft");
+  });
+
+  it("starts an isolated checkout from a typed ref", () => {
+    fakes.eligible = true;
+    mount("/", false);
+    fireEvent.click(screen.getByRole("button", { name: "Additional settings" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Isolated checkout" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Start from/ }));
+    const input = screen.getByRole("textbox", { name: "Branch, tag or commit" });
+    fireEvent.change(input, { target: { value: " release/2.4 " } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(screen.getByRole("button", { name: /^Start from/ }).textContent).toContain(
+      "release/2.4",
+    );
+
+    fireEvent.change(prompt(), { target: { value: "Backport the fix" } });
+    fireEvent.click(screen.getByRole("button", { name: "Set up isolated task" }));
+    expect(screen.getByRole("dialog", { name: "New isolated task" }).getAttribute("data-ref")).toBe(
+      "release/2.4",
+    );
+  });
+
+  it("groups projects under where they run, naming an SSH host on the chip", () => {
+    const withRemote = [
+      ...projects,
+      {
+        project_id: "p3",
+        name: "Render farm",
+        cwd: "/srv/render",
+        ssh_host: "build-box",
+        pinned: false,
+      },
+    ] as ProjectRecord[];
+    mount("/", false, withRemote);
+    expect(screen.queryByRole("button", { name: /^Location:/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Project: Borealis" }));
+    const local = screen.getByRole("group", { name: "This computer" });
+    const remote = screen.getByRole("group", { name: "build-box" });
+    expect(local.compareDocumentPosition(remote) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(
+      Array.from(local.querySelectorAll('[role="menuitemradio"]'), (item) => item.textContent),
+    ).toEqual(["Atlas/atlas", "Borealis/borealis"]);
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /Render farm/ }));
+    expect(screen.getByRole("button", { name: "Project: Render farm" }).textContent).toBe(
+      "build-box / Render farm",
+    );
   });
 
   it("adds a repository from the project picker on a managed host", () => {

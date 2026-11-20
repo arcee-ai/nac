@@ -26,7 +26,7 @@ import { routes } from "@/app/lib/routes";
 import { sessionBehaviorPresentation } from "@/app/lib/sessionBehavior";
 import type { DropEdge } from "@/app/lib/sessionOrder";
 import { applyTabOrder, placeIdAt, targetIndexInGroup } from "@/app/lib/sessionOrder";
-import { NEW_CHAT_KEYS } from "@/app/lib/shortcuts";
+import { useNewSessionKeys } from "@/app/features/desktop-commands/nativeMenu";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
 import { useSessionActions } from "@/app/providers/SessionActionsProvider";
 
@@ -82,6 +82,7 @@ export function ProjectSessionTabs({
   const showBehaviorIcon = useSessionBehaviorIconVisible();
   const navigate = useNavigate();
   const projectActions = useProjectActions();
+  const newSessionKeys = useNewSessionKeys();
   const sessionActions = useSessionActions();
   const sessionTitle = useSessionTitle();
   const dismissed = useDismissedChatTabs();
@@ -320,7 +321,7 @@ export function ProjectSessionTabs({
         </Popover>
         <Tooltip
           title="New Session"
-          keyboardShortcuts={NEW_CHAT_KEYS}
+          keyboardShortcuts={newSessionKeys}
           position={Tooltip.Position.BottomLeft}
         >
           <Button

@@ -275,10 +275,10 @@ final class NativeCommandSmoke {
         }
         menu.performActionForItem(at: index)
     }
-    /// The shared Settings command opens the Settings page on Models & providers.
+    /// The shared Settings command opens General.
     private func settingsPage() async throws {
-        try await wait("Settings Models & providers page") {
-            try await self.js("const label = matchMedia('(max-width: 1023.98px)').matches ? 'Settings' : 'Back'; return location.hash === '#/settings/models' && !document.querySelector('[role=dialog]') && [...document.querySelectorAll('main[aria-label=\"Models & providers\"]')].some(m => m.getClientRects().length) && [...document.querySelectorAll('button')].filter(b => b.textContent.trim() === label && !b.disabled && b.getClientRects().length).length === 1") as? Bool == true
+        try await wait("General Settings page") {
+            try await self.js("const label = matchMedia('(max-width: 1023.98px)').matches ? 'Settings' : 'Back'; return location.hash === '#/settings/general' && !document.querySelector('[role=dialog]') && [...document.querySelectorAll('main[aria-label=\"General\"]')].some(m => m.getClientRects().length) && [...document.querySelectorAll('button')].filter(b => b.textContent.trim() === label && !b.disabled && b.getClientRects().length).length === 1") as? Bool == true
         }
     }
     private static let settingsBackScript = #"""

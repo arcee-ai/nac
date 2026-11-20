@@ -16,7 +16,7 @@ import {
 } from "@/app/atoms";
 import { cn } from "@/app/lib/cn";
 import { routes } from "@/app/lib/routes";
-import type { SessionStatus } from "@/app/lib/sessionStatus";
+import { SESSION_STATUS_LABEL, type SessionStatus } from "@/app/lib/sessionStatus";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
 import type { ProjectRecord } from "@/app/types/api";
 
@@ -60,33 +60,37 @@ export function ProjectGroupHeader({
       className={cn(
         "group/group relative flex min-w-0 items-center gap-0.5 rounded-md pr-1",
         touch ? "min-h-11" : "h-8",
-        "hover:bg-[var(--f-wash-1)]",
       )}
     >
       <button
         type="button"
         aria-expanded={expanded}
+        aria-description={!expanded && status !== "idle" ? SESSION_STATUS_LABEL[status] : undefined}
         aria-label={`${project.name}, ${count} ${count === 1 ? "session" : "sessions"}`}
         title={project.cwd}
         onClick={onToggle}
         className={cn(
-          "flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-md pl-1.5 text-left outline-none",
+          "group/name flex h-full min-w-0 flex-1 items-center gap-2 rounded-md pl-2.5 text-left outline-none",
           "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--f-focus)]",
         )}
       >
         <Icon
-          iconName={IconName.Right}
-          size={12}
-          className={cn(
-            "shrink-0 text-basic-muted transition-transform duration-150 ease-out motion-reduce:transition-none",
-            expanded && "rotate-90",
-          )}
+          iconName={expanded ? IconName.FolderOpen : IconName.Folder}
+          size={16}
+          className="shrink-0 text-basic-tertiary group-hover/name:text-basic-primary"
         />
-        <span className="type-strong min-w-0 truncate text-basic-secondary">{project.name}</span>
+        <span
+          className={cn(
+            "min-w-0 truncate text-basic-secondary group-hover/name:text-basic-primary",
+            touch ? "type-body-chrome !text-md" : "type-body-chrome",
+          )}
+        >
+          {project.name}
+        </span>
         {project.pinned ? (
           <Icon iconName={IconName.Pin} size={12} className="shrink-0 text-basic-muted" />
         ) : null}
-        {!expanded ? (
+        {!expanded && count > 0 ? (
           <>
             <StatusDot status={status} hideIdle />
             <span className="type-meta tabular text-basic-muted">{count}</span>

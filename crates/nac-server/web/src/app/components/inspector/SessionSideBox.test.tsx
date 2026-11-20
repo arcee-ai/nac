@@ -59,7 +59,6 @@ describe("session side box tabs", () => {
   it("shows the behavior panels without a Sessions tab and heads the drawer with its controls", () => {
     const onPanelChange = vi.fn();
     const onClose = vi.fn();
-    const onTogglePinned = vi.fn();
     render(
       <SessionSideBox
         sessionId="session-a"
@@ -67,7 +66,6 @@ describe("session side box tabs", () => {
         panel="files"
         onPanelChange={onPanelChange}
         onClose={onClose}
-        onTogglePinned={onTogglePinned}
       />,
     );
 
@@ -77,10 +75,7 @@ describe("session side box tabs", () => {
     expect(screen.getByText("files")).toBeTruthy();
     fireEvent.click(screen.getByRole("tab", { name: "Subagents" }));
     expect(onPanelChange).toHaveBeenCalledWith("delegated");
-    fireEvent.click(screen.getByRole("button", { name: "Dock drawer" }));
-    expect(onTogglePinned).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole("button", { name: "Full width" }));
-    expect(sessionLayoutStore.getState().expanded).toBe(true);
+    expect(screen.queryByRole("button", { name: /^(Dock|Float) drawer$|full width/i })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Hide panel" }));
     expect(onClose).toHaveBeenCalledTimes(1);
   });

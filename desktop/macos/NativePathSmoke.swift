@@ -350,11 +350,23 @@ final class NativePathSmoke {
         let target = try await script(#"""
         if (location.href !== expectedHref) throw new Error('Changed reveal session route');
         const id = location.hash.match(/^#\/session\/([^/]+)/)?.[1];
-        if (!id) throw new Error('Normal project flow did not open its first chat');
+        if (!id) throw new Error('Start session did not open the selected project chat');
         const response = await fetch('/sessions/' + encodeURIComponent(id));
         if (!response.ok) throw new Error('Current session unavailable');
         const snapshot = await response.json();
         const root = snapshot.metadata.workspace_host_path;
+        const projects = await (await fetch('/projects')).json();
+        const matching = projects.projects.filter(project => project.cwd === root);
+        if (matching.length !== 1) throw new Error('Missing-folder retry duplicated or lost the project');
+        const projectID = matching[0].project_id;
+        const chats = snapshot.sessions.filter(session => session.project_id === projectID);
+        const configResponse = await fetch('/sessions/' + encodeURIComponent(id) + '/config');
+        if (!configResponse.ok) throw new Error('Current session configuration unavailable');
+        const config = await configResponse.json();
+        if (snapshot.metadata.session_id !== id || snapshot.metadata.project_id !== projectID || chats.length !== 1 ||
+            chats[0].session_id !== id || chats[0].last_user_prompt !== expectedPrompt ||
+            config.backend !== 'openai-responses' || config.model !== 'gpt-5.6-sol' || config.base_url !== fixtureEndpoint)
+          throw new Error('Home did not start exactly one configured chat with the owned fixture prompt');
         const denials = [];
         for (const [path, expected] of [
           ['../outside', root], ['/tmp/absolute', root], ['missing/child', root],
@@ -366,12 +378,12 @@ final class NativePathSmoke {
           if (result.status !== 400) throw new Error('Unsafe Finder target was not rejected: ' + path);
           denials.push({path, status:result.status});
         }
-        const projects = await (await fetch('/projects')).json();
-        const matching = projects.projects.filter(project => project.cwd === root);
-        if (matching.length !== 1) throw new Error('Missing-folder retry duplicated or lost the project');
         if (location.href !== expectedHref) throw new Error('Changed reveal session route');
         return {session:id, root, sandbox:snapshot.metadata.sandbox_status, denials, matching_projects:matching.length};
-        """#, arguments: ["revealLeaf": revealLeaf, "expectedHref": expectedHref], scope: scope, binding: binding) as? [String: Any]
+        """#, arguments: ["revealLeaf": revealLeaf, "expectedHref": expectedHref,
+                          "expectedPrompt": "\(FixtureProvider.sessionStartPrompt) ALL347_\(scope.run)",
+                          "fixtureEndpoint": app.provider.baseURL.absoluteString],
+             scope: scope, binding: binding) as? [String: Any]
         guard let target, let root = target["root"] as? String, canonical(root) == scope.root,
               target["sandbox"] as? String == "off" else {
             throw PreviewError.message("Created chat did not retain the selected Local workspace")

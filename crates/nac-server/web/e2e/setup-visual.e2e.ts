@@ -1,8 +1,8 @@
 import { expect, test } from "./harness";
+import { homeComposer, openModelList } from "./focus-embedded-helpers";
 import {
   captureSetup,
   installSetupFixture,
-  longModel,
   withSetupBaselines,
   setupBaseline,
 } from "./setup-visual-fixture";
@@ -12,7 +12,7 @@ test.use({ orchestration: "0", hasTouch: true });
 test.skip(!!process.env.NAC_E2E_REMOTE, "Requires disposable local setup commands");
 
 for (const width of [1440, 768, 390]) {
-  test(`project launch form, nested choices and settled commands at ${width}px`, async ({
+  test(`project location form, folder selection and settled commands at ${width}px`, async ({
     harness,
     page,
     request,
@@ -20,7 +20,7 @@ for (const width of [1440, 768, 390]) {
     withSetupBaselines(async (baseline) => {
       test.setTimeout(90_000);
       await page.setViewportSize({ width, height: width === 768 ? 1024 : 900 });
-      await page.emulateMedia({ reducedMotion: "reduce" });
+      await page.emulateMedia({ reducedMotion: "reduce", colorScheme: "light" });
       await baseline.serve(page, harness.baseUrl);
       let releaseCatalog!: () => void;
       const catalogReady = new Promise<void>((resolve) => {
@@ -31,63 +31,40 @@ for (const width of [1440, 768, 390]) {
       const start = page.getByRole("button", { name: "Get Started", exact: true });
       await start.click();
       const dialog = page.getByRole("dialog", { name: "New Project", exact: true });
-      const model = dialog.getByRole("button").filter({ hasText: "GPT-5.6 Sol" }).first();
       const launch = dialog.getByRole("button", { name: "Create Project", exact: true });
-      await expect(
-        dialog.getByRole("button", { name: "Loading models…", exact: true }),
-      ).toBeDisabled();
+      const pickBaselineModel = async () => {
+        await dialog.getByRole("button", { name: "Select a model", exact: true }).click();
+        await page.getByRole("button").filter({ hasText: "GPT-5.6 Sol" }).first().click();
+      };
+      if (setupBaseline()) {
+        await expect(
+          dialog.getByRole("button", { name: "Loading models…", exact: true }),
+        ).toBeDisabled();
+      } else {
+        await expect(dialog.getByRole("region", { name: "Location" })).toBeVisible();
+        await expect(dialog.getByRole("textbox", { name: "Project name" })).toBeVisible();
+        await expect(
+          dialog.getByRole("button", { name: "Select a model", exact: true }),
+        ).toHaveCount(0);
+        await expect(launch).toBeEnabled();
+      }
       await captureSetup(page, info, width, "loading-models");
       releaseCatalog();
-      await expect(
-        dialog.getByRole("button", { name: "Select a model", exact: true }),
-      ).toBeVisible();
       await captureSetup(page, info, width, "default");
       await info.attach("setup-accessibility-semantics.txt", {
         body: await dialog.ariaSnapshot(),
         contentType: "text/plain",
       });
-      if (!setupBaseline()) {
-        await expect(dialog.getByRole("region", { name: "Environment" })).toBeVisible();
-        await expect(dialog.getByRole("textbox", { name: "Project name" })).toBeVisible();
-      }
-      await dialog.getByRole("button", { name: "Select a model", exact: true }).click();
-      await page.getByRole("button").filter({ hasText: "GPT-5.6 Sol" }).first().click();
-      await expect(model).toBeVisible();
-      await expect(launch).toBeEnabled();
+      if (setupBaseline()) await pickBaselineModel();
       await dialog.getByPlaceholder("Taken from the git remote").fill("Launch fixture");
-      if (width === 390) await model.tap();
-      else await model.click();
-      const search = page.getByPlaceholder("Search models…");
-      await expect(page.getByRole("button").filter({ hasText: longModel })).toBeVisible();
-      await captureSetup(page, info, width, "model-options");
-      await search.fill("no such model");
-      await expect(page.getByText('No model matches "no such model".')).toBeVisible();
-      await captureSetup(page, info, width, "empty-models");
-      await search.fill("Terra");
-      if (!setupBaseline()) {
-        await search.dispatchEvent("keydown", { key: "Enter", isComposing: true, keyCode: 229 });
-        await expect(search).toBeVisible();
-      }
-      await search.press("ArrowDown");
-      await search.press("Enter");
-      await expect(dialog.getByRole("button").filter({ hasText: longModel }).first()).toBeVisible();
-      await dialog
-        .getByRole("button", { name: "Advanced presets and provider setup", exact: true })
-        .click();
-      await expect(dialog.getByRole("button", { name: "Create New", exact: true })).toBeVisible();
-      await captureSetup(
-        page,
-        info,
-        width,
-        "advanced",
-        dialog.getByText("Configurations", { exact: true }),
-      );
-      await dialog.getByRole("button", { name: "Back to unified models", exact: true }).click();
       const folderButton = dialog
         .getByRole("button", { name: new RegExp(`Working Folder|${folder}`) })
         .first();
       await folderButton.click();
-      const picker = page.getByRole("dialog", { name: "Select Working Folder", exact: true });
+      const picker = page.getByRole("dialog", {
+        name: setupBaseline() ? "Select Working Folder" : "Choose a folder",
+        exact: true,
+      });
       await expect(picker).toBeVisible();
       await captureSetup(page, info, width, "path-selector");
       await page.keyboard.press("Escape");
@@ -103,8 +80,7 @@ for (const width of [1440, 768, 390]) {
         (await (await request.get(`${harness.baseUrl}/projects`)).json()).projects,
       ).toHaveLength(0);
       await start.click();
-      await dialog.getByRole("button", { name: "Select a model", exact: true }).click();
-      await page.getByRole("button").filter({ hasText: "GPT-5.6 Sol" }).first().click();
+      if (setupBaseline()) await pickBaselineModel();
       await expect(launch).toBeEnabled();
       await dialog.getByPlaceholder("Taken from the git remote").fill("Launch fixture");
       let projects = 0;
@@ -139,21 +115,35 @@ for (const width of [1440, 768, 390]) {
       expect(sessions).toBe(0);
       release();
       await expect(dialog).toHaveCount(0);
-      await expect(page).toHaveURL(/\/session\/[^/]+\/insights/);
       expect(projects).toBe(2);
-      expect(sessions).toBe(1);
-      const stored = (await (await request.get(`${harness.baseUrl}/sessions`)).json())[0];
-      const config = await (
-        await request.get(`${harness.baseUrl}/sessions/${stored.summary.session_id}/config`)
-      ).json();
-      expect(config).toMatchObject({ model: "gpt-5.6-sol", backend: "openai-responses" });
-      if (!setupBaseline()) {
-        const snapshot = await page.locator("body").ariaSnapshot();
-        await info.attach("screen-reader-semantics.txt", {
-          body: snapshot,
-          contentType: "text/plain",
-        });
+      if (setupBaseline()) {
+        await expect(page).toHaveURL(/\/session\/[^/]+\/insights/);
+        expect(sessions).toBe(1);
+        return;
       }
+      await expect(page).toHaveURL(/#\/\?project=[^&]+$/);
+      await expect(homeComposer(page)).toBeFocused();
+      expect(sessions).toBe(0);
+      expect(await (await request.get(`${harness.baseUrl}/sessions`)).json()).toEqual([]);
+
+      const models = await openModelList(page);
+      const search = page.getByRole("textbox", { name: "Search models", exact: true });
+      await expect(models.getByRole("menuitemradio", { name: /GPT-5\.6 Terra/ })).toBeVisible();
+      await captureSetup(page, info, width, "model-options");
+      await search.fill("no such model");
+      await expect(models.getByText("No matching models")).toBeVisible();
+      await captureSetup(page, info, width, "empty-models");
+      await search.fill("Terra");
+      await search.dispatchEvent("keydown", { key: "Enter", isComposing: true, keyCode: 229 });
+      await expect(search).toBeVisible();
+      await search.press("ArrowDown");
+      await page.keyboard.press("Enter");
+      await expect(page.getByRole("button", { name: /^Model: .*Terra/ })).toBeVisible();
+      const snapshot = await page.locator("body").ariaSnapshot();
+      await info.attach("screen-reader-semantics.txt", {
+        body: snapshot,
+        contentType: "text/plain",
+      });
     }));
 }
 
@@ -171,6 +161,7 @@ test("setup controls remain reachable at actual 200 percent tab zoom", async ({
       (preparedContext) => baseline.beforeContextClose(preparedContext),
     );
     await baseline.withContext(context, async () => {
+      await page.emulateMedia({ reducedMotion: "reduce", colorScheme: "light" });
       await baseline.serve(page, harness.baseUrl);
       for (const width of [1440, 768, 390]) {
         await page.setViewportSize({ width, height: width === 768 ? 1024 : 900 });
@@ -179,8 +170,10 @@ test("setup controls remain reachable at actual 200 percent tab zoom", async ({
         await page.getByRole("button", { name: "Get Started", exact: true }).click();
         const dialog = page.getByRole("dialog", { name: "New Project", exact: true });
         const launch = dialog.getByRole("button", { name: "Create Project", exact: true });
-        await dialog.getByRole("button", { name: "Select a model", exact: true }).click();
-        await page.getByRole("button").filter({ hasText: "GPT-5.6 Sol" }).first().click();
+        if (setupBaseline()) {
+          await dialog.getByRole("button", { name: "Select a model", exact: true }).click();
+          await page.getByRole("button").filter({ hasText: "GPT-5.6 Sol" }).first().click();
+        }
         await expect(launch).toBeEnabled();
         await expect(launch).toBeInViewport();
         if (!setupBaseline()) {
@@ -195,11 +188,15 @@ test("setup controls remain reachable at actual 200 percent tab zoom", async ({
           info,
           width,
           "zoom200-default",
-          dialog.getByText("Environment", { exact: true }),
+          dialog.getByText(setupBaseline() ? "Environment" : "Location", { exact: true }),
         );
-        await dialog.getByRole("button").filter({ hasText: "GPT-5.6 Sol" }).first().click();
-        await expect(page.getByPlaceholder("Search models…")).toBeVisible();
-        await captureSetup(page, info, width, "zoom200-models");
+        await dialog.getByRole("button", { name: /Working Folder/ }).click();
+        const picker = page.getByRole("dialog", {
+          name: setupBaseline() ? "Select Working Folder" : "Choose a folder",
+          exact: true,
+        });
+        await expect(picker).toBeVisible();
+        await captureSetup(page, info, width, "zoom200-path-selector");
         await page.keyboard.press("Escape");
         await expect(dialog).toBeVisible();
         await dialog.getByRole("button", { name: "Close", exact: true }).click();
@@ -209,7 +206,7 @@ test("setup controls remain reachable at actual 200 percent tab zoom", async ({
           zoom,
           method: "chrome.tabs.setZoom/getZoom",
           reducedMotion: "reduce",
-          productTheme: "dark",
+          productTheme: "light",
         }),
         contentType: "application/json",
       });

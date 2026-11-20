@@ -1006,49 +1006,23 @@ export async function waitForPanelSettled(surface: Locator) {
 }
 
 /**
- * Focus has no permanent right column: a session's panels live in one drawer
- * whose tabs are the "Session panels" tablist. The drawer starts closed, and a
- * saved open preference can open it after the first paint, so every attempt
- * first re-observes the tablist. Where the drawer can dock (≥1280px) the
- * documented ⌘\ docks it beside the chat on the route's own panel — the
- * equivalent of the old column, leaving the conversation usable. Narrower, the
- * header's one control, the Session menu, lists the panels: its row for the
- * route's panel opens the floating drawer on it directly; a panel the menu
- * does not list (it lists only those with something to say) is reached through
- * its Insights row and then the drawer's tab. No path ever closes an open
- * drawer. `dock: false` always takes the floating drawer — for journeys that
- * resize across the docking width, where the app moves the panel between
- * surfaces.
+ * Opens the drawer on the route's panel, leaving an already-open panel alone.
+ * Match the unpressed toggle so late hydration cannot close an opened drawer.
  */
-export async function showSidePanel(page: Page, { dock = true }: { dock?: boolean } = {}) {
-  const open = page.getByRole("tablist", { name: "Session panels", exact: true });
-  const menu = page.getByRole("button", { name: "Session menu", exact: true });
-  const details = page.getByRole("dialog", { name: "Session", exact: true });
-  await expect(menu.or(open).first()).toBeVisible();
-  const label = routePanelLabel(page.url());
+export async function showSidePanel(page: Page) {
+  const tabs = page.getByRole("tablist", { name: "Session panels", exact: true });
+  const closedToggle = page.getByRole("button", {
+    name: "Session panel",
+    exact: true,
+    pressed: false,
+  });
+  await expect(closedToggle.or(tabs).first()).toBeVisible();
   await expect(async () => {
-    const { state, detail } = await drawerDiagnosis(open);
-    // A drawer that is sliding in or out decides nothing yet.
+    const { state, detail } = await drawerDiagnosis(tabs);
     if (state === "moving") throw new Error(`The session drawer is still moving: ${detail}`);
     if (state === "open") return;
-    const dockable =
-      dock && (await page.evaluate("matchMedia('(min-width: 1280px)').matches")) === true;
-    if (dockable) {
-      await page.keyboard.press(`${await appModifier(page)}+Backslash`);
-    } else {
-      // Hydrating an open preference may detach the menu between the read and
-      // click; yield to the outer retry so it can observe the open drawer.
-      if (!(await details.isVisible())) await menu.click({ timeout: 1_000 });
-      await expect(details).toBeVisible({ timeout: 1_000 });
-      const row = sessionMenuPanel(details, label ?? "Insights");
-      const direct = label != null && (await row.count()) > 0;
-      await (direct ? row : sessionMenuPanel(details, "Insights")).click({ timeout: 1_000 });
-      await expect(open).toBeVisible({ timeout: 2_000 });
-      const tab = open.getByRole("tab", { name: label ?? "Insights", exact: true });
-      if (!direct && label && label !== "Insights" && (await tab.count()) > 0)
-        await tab.click({ timeout: 1_000 });
-    }
-    await expect.poll(() => drawerState(open), { timeout: 2_000 }).toBe("open");
+    await closedToggle.click({ timeout: 1_000 });
+    await expect.poll(() => drawerState(tabs), { timeout: 2_000 }).toBe("open");
   }).toPass();
 }
 
@@ -1104,24 +1078,10 @@ async function drawerDiagnosis(
         rect.bottom <= view.innerHeight + 1;
       // A mounted drawer that is not at rest in view is leaving: closing keeps
       // it mounted off-screen (or a docked column at no width) until it
-      // unmounts, and only an unmounted drawer may be opened again — a second
-      // ⌘\ on a live drawer would toggle its docking instead.
+      // unmounts. Wait for that before trying the header toggle.
       return { state: resting ? ("open" as const) : ("moving" as const), detail };
     })
     .catch((error: Error) => ({ state: "moving" as const, detail: error.message }));
-}
-
-/**
- * Lets the drawer fill the window. Full width belongs to the floating drawer,
- * so a docked one (the wide default of `showSidePanel`) is floated first.
- */
-export async function expandSidePanel(page: Page) {
-  await showSidePanel(page);
-  const float = page.getByRole("button", { name: "Float drawer", exact: true });
-  if (await float.isVisible()) await float.click();
-  await page.getByRole("button", { name: "Full width", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Exit full width", exact: true })).toBeVisible();
-  await waitForPanelSettled(page.getByRole("tablist", { name: "Session panels", exact: true }));
 }
 
 /**

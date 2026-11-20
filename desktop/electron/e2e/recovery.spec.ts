@@ -44,9 +44,9 @@ test("renderer crash retires the document while approval, queue and PTY retain t
   await expect
     .poll(() => fs.readFile(path.join(c.workspace, "recovery-input.txt"), "utf8").catch(() => ""))
     .toBe("x");
-  c.ownedPids.push(
-    Number((await fs.readFile(path.join(c.workspace, "recovery-shell.pid"), "utf8")).trim()),
-  );
+  const shellPID = path.join(c.workspace, "recovery-shell.pid");
+  await expect.poll(() => fs.readFile(shellPID, "utf8").catch(() => "")).toMatch(/^[1-9]\d*\n$/);
+  c.ownedPids.push(Number((await fs.readFile(shellPID, "utf8")).trim()));
   await c.page.getByRole("button", { name: "Hide panel", exact: true }).click();
   await expect(pane).not.toBeVisible();
   await c.page.evaluate((id) => {

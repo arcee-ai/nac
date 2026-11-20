@@ -4,11 +4,9 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { SessionDrawer } from "./SessionDrawer";
 
 const controls = vi.hoisted(() => ({
-  pinned: false,
   expanded: false,
   close: vi.fn(),
   toggleExpanded: vi.fn(),
-  togglePinned: vi.fn(),
   openPanel: vi.fn(),
 }));
 vi.mock("./useSessionDrawer", () => ({
@@ -25,7 +23,6 @@ vi.mock("@/app/components/inspector/SessionSideBox", () => ({
   ),
 }));
 beforeEach(() => {
-  controls.pinned = false;
   controls.expanded = false;
   vi.clearAllMocks();
   vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1400);
@@ -59,8 +56,8 @@ function mount() {
   );
 }
 
-it.each([false, true])("leaves IME and terminal Escape with the input (docked=%s)", (pinned) => {
-  controls.pinned = pinned;
+it.each([false, true])("leaves IME and terminal Escape with the input (docked=%s)", (docked) => {
+  if (!docked) vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(600);
   mount();
   const draft = screen.getByRole("textbox", { name: "Panel draft" });
   fireEvent.keyDown(draft, { key: "Escape", isComposing: true });
@@ -72,6 +69,7 @@ it.each([false, true])("leaves IME and terminal Escape with the input (docked=%s
 
 it("leaves full width through the shared Escape owner while keeping the drawer mounted", () => {
   controls.expanded = true;
+  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(600);
   mount();
   fireEvent.keyDown(screen.getByRole("textbox", { name: "Panel draft" }), { key: "Escape" });
   expect(controls.toggleExpanded).toHaveBeenCalledOnce();
@@ -80,7 +78,6 @@ it("leaves full width through the shared Escape owner while keeping the drawer m
 });
 
 it("resizes the outer dock with keyboard and restores the preference after remount", async () => {
-  controls.pinned = true;
   const { setDockWidth } = await import("@/app/hooks/useDockWidth");
   setDockWidth(560);
   const view = mount();
@@ -96,7 +93,6 @@ it("resizes the outer dock with keyboard and restores the preference after remou
 });
 
 it("keeps the split preference while focused and restores it", async () => {
-  controls.pinned = true;
   const { setDockWidth } = await import("@/app/hooks/useDockWidth");
   setDockWidth(620);
   const view = mount();
@@ -128,28 +124,37 @@ it("keeps the split preference while focused and restores it", async () => {
   ).toBe("620");
 });
 
-it("falls back to a floating drawer when an embedded container is too narrow", () => {
-  controls.pinned = true;
+it("docks beside a narrower desktop window, narrowing the panel to fit", () => {
   vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(800);
+  vi.stubGlobal("matchMedia", () => ({
+    matches: false,
+    addEventListener() {},
+    removeEventListener() {},
+  }));
+  mount();
+  const separator = screen.getByRole("separator", { name: "Resize session panel" });
+  expect(separator.getAttribute("aria-valuenow")).toBe("400");
+});
+
+it("falls back to a floating drawer when an embedded container is too narrow", () => {
+  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(600);
   mount();
   expect(screen.queryByRole("separator", { name: "Resize session panel" })).toBeNull();
   expect(screen.getByRole("dialog", { name: "Insights" })).toBeTruthy();
 });
 
 it("clamps keyboard resizing to useful panel and conversation widths", async () => {
-  controls.pinned = true;
   const { setDockWidth } = await import("@/app/hooks/useDockWidth");
   setDockWidth(560);
   mount();
   const separator = screen.getByRole("separator", { name: "Resize session panel" });
   fireEvent.keyDown(separator, { key: "End" });
-  expect(separator.getAttribute("aria-valuenow")).toBe("940");
+  expect(separator.getAttribute("aria-valuenow")).toBe("1000");
   fireEvent.keyDown(separator, { key: "Home" });
-  expect(separator.getAttribute("aria-valuenow")).toBe("480");
+  expect(separator.getAttribute("aria-valuenow")).toBe("360");
 });
 
 it("resizes by pointer and stops at the container limit", async () => {
-  controls.pinned = true;
   const { setDockWidth } = await import("@/app/hooks/useDockWidth");
   setDockWidth(560);
   vi.stubGlobal(
@@ -168,15 +173,14 @@ it("resizes by pointer and stops at the container limit", async () => {
   separator.releasePointerCapture = vi.fn();
   fireEvent.pointerDown(separator, { button: 0, pointerId: 1, clientX: 800 });
   fireEvent.pointerMove(window, { pointerId: 1, clientX: 200 });
-  expect(separator.getAttribute("aria-valuenow")).toBe("940");
+  expect(separator.getAttribute("aria-valuenow")).toBe("1000");
   fireEvent.pointerUp(window, { pointerId: 1 });
   fireEvent.pointerMove(window, { pointerId: 1, clientX: 900 });
-  expect(separator.getAttribute("aria-valuenow")).toBe("940");
+  expect(separator.getAttribute("aria-valuenow")).toBe("1000");
   view.unmount();
 });
 
 it("uses the floating fallback when container observation is unavailable", () => {
-  controls.pinned = true;
   vi.stubGlobal("ResizeObserver", undefined);
   mount();
   expect(screen.queryByRole("separator", { name: "Resize session panel" })).toBeNull();

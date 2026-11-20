@@ -1,4 +1,4 @@
-import type { CatalogModel } from "../types/api";
+import type { CatalogModel, ModelCatalog } from "../types/api";
 /** Durable intent: null means inherit; Standard is an explicit override. */
 export type ServiceTier = "standard" | "fast" | "ultrafast";
 export interface DiscoveredTier {
@@ -21,6 +21,17 @@ export declare function speedForRoute(model: CatalogModel | null, modelId: strin
     tiers: DiscoveredTier[] | null;
     openAiApi: boolean;
     fastContextLimit: number | null;
+    explicitTiersAllowed: boolean;
+};
+export declare function speedForCatalogRoute(catalog: ModelCatalog | undefined, route: {
+    backend: string;
+    model: string;
+    baseUrl?: string | null;
+} | null): {
+    tiers: DiscoveredTier[] | null;
+    openAiApi: boolean;
+    fastContextLimit: number | null;
+    explicitTiersAllowed: boolean;
 };
 export declare function supportsSpeed(tiers: DiscoveredTier[] | null, speed: ServiceTier): boolean;
 export declare function speedLabel(speed: ServiceTier | null | undefined): string;

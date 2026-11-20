@@ -1,3 +1,4 @@
+import { openModelList } from "./focus-embedded-helpers";
 import fs from "node:fs/promises";
 import type { Locator, Page, TestInfo } from "@playwright/test";
 import { createProject, createSession, expect, test } from "./harness";
@@ -142,7 +143,7 @@ async function qualifyInstances(page: Page, info: TestInfo, label: string, id: s
   await rightComposer.fill("Right draft — separate binding with the same session ID");
   const host = page.getByRole("textbox", { name: "Host draft", exact: true });
   await host.fill("Host draft remains independent");
-  // Session settings sits behind the header's session menu (one "Open panel"
+  // Rename sits behind the header's session menu (one "Open panel"
   // sheet on phones); dismissing the dialog returns focus to that trigger.
   const openers = [left, right].map((view) =>
     view.getByRole("button", { name: phone ? "Open panel" : "Session menu", exact: true }),
@@ -151,11 +152,11 @@ async function qualifyInstances(page: Page, info: TestInfo, label: string, id: s
     await openers[index].click();
     await [left, right][index]
       .getByRole("dialog", { name: "Session", exact: true })
-      .getByRole("button", { name: "Session settings", exact: true })
+      .getByRole("button", { name: "Rename", exact: true })
       .click();
   };
   const dialogs = [left, right].map((view) =>
-    view.getByRole("dialog", { name: "Session settings", exact: true }),
+    view.getByRole("dialog", { name: "Rename session", exact: true }),
   );
   await openSettings(0);
   await expect(dialogs[0]).toBeVisible();
@@ -165,13 +166,13 @@ async function qualifyInstances(page: Page, info: TestInfo, label: string, id: s
   await expect(right.locator("[data-nac-content]")).not.toHaveAttribute("inert", "");
   await expect(page.locator("body > [inert]")).toHaveCount(0);
   await dialogs[0]
-    .getByRole("textbox", { name: "Session title", exact: true })
+    .getByRole("textbox", { name: "Title", exact: true })
     .fill("Left long unsaved title / preserve the complete error and action context");
   await expect(dialogs[0].getByRole("button", { name: "Save", exact: true })).toBeEnabled();
   await openSettings(1);
   await expect(dialogs[1]).toBeVisible();
   await dialogs[1]
-    .getByRole("textbox", { name: "Session title", exact: true })
+    .getByRole("textbox", { name: "Title", exact: true })
     .fill("Right long unsaved title / preserve the complete error and action context");
   await expect(dialogs[1].getByRole("button", { name: "Save", exact: true })).toBeEnabled();
   if (phone) await expect(right.locator("[data-nac-content]")).not.toHaveAttribute("inert", "");
@@ -250,22 +251,6 @@ async function qualifyInstances(page: Page, info: TestInfo, label: string, id: s
     await expect(last).toBeFocused();
     await expect([left, right][index].locator("[data-nac-overlays] [role=dialog]")).toHaveCount(1);
   }
-  // A real nested model picker: composing Escape cannot dismiss it or its parent.
-  const model = dialogs[0].getByRole("button").filter({ hasText: "GPT-5.6 Sol" }).first();
-  await model.click();
-  const search = left.getByPlaceholder("Search models…");
-  await expect(search).toBeVisible();
-  await search.dispatchEvent("keydown", {
-    key: "Escape",
-    code: "Escape",
-    isComposing: true,
-    bubbles: true,
-  });
-  await expect(search).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(search).toHaveCount(0);
-  await expect(model).toBeFocused();
-  for (const dialog of dialogs) await expect(dialog).toBeVisible();
   await host.click();
   await page.keyboard.press("Escape");
   await expect(dialogs[0]).toBeVisible();
@@ -273,7 +258,7 @@ async function qualifyInstances(page: Page, info: TestInfo, label: string, id: s
   await expect(host).toBeFocused();
   await capture(page, info, `${label}-packed-two-instance-settings`);
 
-  const title = dialogs[0].getByRole("textbox", { name: "Session title", exact: true });
+  const title = dialogs[0].getByRole("textbox", { name: "Title", exact: true });
   await title.focus();
   await title.dispatchEvent("keydown", {
     key: "Escape",
@@ -289,6 +274,22 @@ async function qualifyInstances(page: Page, info: TestInfo, label: string, id: s
   await expect(leftComposer).toHaveValue(
     "Left draft — keep this text while another runtime is replaced",
   );
+
+  // Verify real composer overlay keyboard ownership while the sibling dialog remains open.
+  const model = left.getByRole("button", { name: /^Model: / });
+  await openModelList(left);
+  const search = left.getByRole("textbox", { name: "Search models", exact: true });
+  await search.dispatchEvent("keydown", {
+    key: "Escape",
+    code: "Escape",
+    isComposing: true,
+    bubbles: true,
+  });
+  await expect(search).toBeVisible();
+  await search.press("Escape");
+  await expect(search).toHaveCount(0);
+  await expect(model).toBeFocused();
+  await expect(dialogs[1]).toBeVisible();
 
   const failure =
     "Packed fixture could not save this change. The previous value remains available; review the long settings context and retry deliberately.";
@@ -314,20 +315,26 @@ async function qualifyInstances(page: Page, info: TestInfo, label: string, id: s
     await left.getByRole("button", { name: "Replace packed runtime", exact: true }).click();
     await expect(leftComposer).toHaveValue("");
     await expect(dialogs[1]).toBeVisible();
-    await expect(
-      dialogs[1].getByRole("textbox", { name: "Session title", exact: true }),
-    ).toHaveValue("Right long unsaved title / preserve the complete error and action context");
+    await expect(dialogs[1].getByRole("textbox", { name: "Title", exact: true })).toHaveValue(
+      "Right long unsaved title / preserve the complete error and action context",
+    );
   } finally {
     release();
   }
-  // A 503 after a title write has an unknown outcome: the existing setup
-  // owner requires review rather than offering an unsafe automatic retry.
-  await expect(dialogs[1].getByRole("alert")).toHaveText(
-    "The title save outcome is unknown. Refresh and review the saved values before trying again.",
+  // The failed acknowledgement stays with the initiating presentation and
+  // preserves its unsaved title without a duplicate write.
+  await expect(
+    right.getByRole("region", { name: "Notifications", exact: true }).getByRole("alert"),
+  ).toContainText(failure);
+  await expect(dialogs[1].getByRole("textbox", { name: "Title", exact: true })).toHaveValue(
+    "Right long unsaved title / preserve the complete error and action context",
   );
-  await expect(dialogs[1].getByRole("button", { name: "Save", exact: true })).toBeDisabled();
   expect(attempts).toBe(1);
   await capture(page, info, `${label}-packed-unknown-save`);
+  const notifications = right.getByRole("region", { name: "Notifications", exact: true });
+  const dismiss = notifications.getByRole("button", { name: "Dismiss notification", exact: true });
+  if (await dismiss.isVisible()) await dismiss.click();
+  await expect(notifications.getByRole("alert")).toHaveCount(0);
   await dialogs[1].getByRole("button", { name: "Cancel", exact: true }).click();
   await expect(rightComposer).toHaveValue(
     "Right draft — separate binding with the same session ID",
@@ -364,7 +371,6 @@ async function qualifyInstances(page: Page, info: TestInfo, label: string, id: s
     await options.click({ timeout: 5000 });
     await pin.click({ timeout: 5000 });
   }
-  const notifications = right.getByRole("region", { name: "Notifications", exact: true });
   await expect(notifications.getByRole("alert")).toContainText(failure);
   await expect(
     left.getByRole("region", { name: "Notifications", exact: true }).getByRole("alert"),
@@ -583,7 +589,7 @@ test("packed retired responses, timers and shortcuts stay within their binding",
   const project = await createProject(request, harness);
   const id = await createSession(request, harness, "direct", project);
   const fixture = await startPackedPresentation(harness, id, { twoInstances: true });
-  const endpoint = new URL(`/fixture-runtime/sessions/${id}/config`, fixture.baseUrl).href;
+  const endpoint = new URL("/fixture-runtime/models", fixture.baseUrl).href;
   let release!: () => void;
   const held = new Promise<void>((resolve) => {
     release = resolve;
@@ -614,12 +620,6 @@ test("packed retired responses, timers and shortcuts stay within their binding",
     const right = page.getByRole("region", { name: "Right presentation", exact: true });
     const rightComposer = right.getByRole("combobox", { name: "Message", exact: true });
     await expect(rightComposer).toBeVisible();
-    expect(oldReads).toBe(0);
-    await left.getByRole("button", { name: "Session menu", exact: true }).click();
-    await left
-      .getByRole("dialog", { name: "Session", exact: true })
-      .getByRole("button", { name: "Session settings", exact: true })
-      .click();
     await expect.poll(() => oldReads).toBe(1);
     await rightComposer.fill("Sibling draft survives retirement and timers");
     const initial = await cacheState(page);
@@ -628,10 +628,10 @@ test("packed retired responses, timers and shortcuts stay within their binding",
     await right.getByRole("button", { name: "Session menu", exact: true }).click();
     await right
       .getByRole("dialog", { name: "Session", exact: true })
-      .getByRole("button", { name: "Session settings", exact: true })
+      .getByRole("button", { name: "Rename", exact: true })
       .click();
-    const dialog = right.getByRole("dialog", { name: "Session settings", exact: true });
-    await expect(dialog.getByRole("textbox", { name: "Session title" })).toBeVisible();
+    const dialog = right.getByRole("dialog", { name: "Rename session", exact: true });
+    await expect(dialog.getByRole("textbox", { name: "Title" })).toBeVisible();
     await left.getByRole("button", { name: "Replace packed runtime", exact: true }).click();
     const leftComposer = left.getByRole("combobox", { name: "Message", exact: true });
     await expect(leftComposer).toBeVisible();

@@ -51,7 +51,7 @@ export function isSessionPanel(value: string | undefined): value is SessionPanel
 export const SETTINGS_SECTIONS = [
   "general",
   "appearance",
-  "models",
+  "accounts",
   "mcp",
   "capabilities",
   "ssh",

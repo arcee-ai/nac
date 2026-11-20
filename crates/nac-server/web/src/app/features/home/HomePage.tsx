@@ -1,26 +1,26 @@
-import { useEffect, useMemo, useRef } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-import { Button, ButtonContent, ButtonSize, ButtonVariant, Icon, IconName } from "@/app/atoms";
+import { Button, ButtonContent, ButtonSize, ButtonVariant } from "@/app/atoms";
 import { LeftSidebar } from "@/app/components/LeftSidebar";
 import { ProjectsEmptyState } from "@/app/components/projects/ProjectsEmptyState";
 import { useManagedHost } from "@/app/features/managed/controller/useManagedHost";
 import { SessionListBody, SessionListSwitch } from "@/app/features/inbox/SessionLists";
+import { useSetupLifetime } from "@/app/features/setup/lifetime";
 import { SidebarToggle } from "@/app/features/sidebar/SidebarToggle";
 import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { visibleSessions } from "@/app/features/ui-policy/policy";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
 import { projectListItems } from "@/app/lib/projects";
-import { routes } from "@/app/lib/routes";
+import { toRunError } from "@/app/lib/providerError";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
 import { errorMessage } from "@/app/providers/ToastProvider";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
-import { useProjects, useSessions } from "@/app/services/queries";
+import { useCreateProject, useProjects, useSessions, useStoreInfo } from "@/app/services/queries";
 
+import { AddProjectAction } from "./AddProjectAction";
 import { HomeComposer } from "./HomeComposer";
 import { NeedsYouLine } from "./NeedsYouLine";
-import { ProjectTiles } from "./ProjectTiles";
 
 function LoadingHome() {
   return (
@@ -32,9 +32,9 @@ function LoadingHome() {
 }
 
 /**
- * Home (`/`): the hero composer — the one new-session flow — then what needs
- * the user, what is running, recent sessions and the project tiles. Phones get
- * the same page under the minimal app header; it is the session list there.
+ * Home (`/`): the hero composer — the one new-session flow — and what needs the
+ * user. Projects and sessions live in the sidebar. Phones get the same page
+ * under the minimal app header, with the session list below it.
  */
 export function HomePage() {
   const { trackAttention } = useNativeRuntime().stores.attentionStore;
@@ -44,6 +44,11 @@ export function HomePage() {
   const projectActions = useProjectActions();
   const sessionsQuery = useSessions();
   const projectsQuery = useProjects();
+  const { data: storeInfo } = useStoreInfo();
+  const createProject = useCreateProject();
+  const launchProjectLifetime = useSetupLifetime();
+  const creatingLaunchProject = useRef(false);
+  const [launchProjectError, setLaunchProjectError] = useState<string | null>(null);
   const sessions = useMemo(
     () => visibleSessions(policy, sessionsQuery.data ?? []),
     [sessionsQuery.data, policy],
@@ -60,21 +65,28 @@ export function HomePage() {
   const loading = projectsQuery.isPending || sessionsQuery.isPending;
   const error = projectsQuery.error ?? sessionsQuery.error;
   const empty = !loading && !error && items.length === 0;
+  // Without the project list, neither "no projects" nor a project choice is true.
+  const projectsKnown = !loading && !projectsQuery.error;
+  const launchFolder = managed.isUnmanaged ? storeInfo?.root_cwd : undefined;
+  const chooseLaunchFolder = async () => {
+    const lease = launchProjectLifetime.current;
+    if (!lease?.current() || !launchFolder || creatingLaunchProject.current) return;
+    creatingLaunchProject.current = true;
+    setLaunchProjectError(null);
+    try {
+      const project = await createProject.mutateAsync({ cwd: launchFolder });
+      if (lease.current()) await projectActions.newChat(project.project_id);
+    } catch (cause) {
+      if (lease.current()) setLaunchProjectError(errorMessage(toRunError(cause)));
+    } finally {
+      creatingLaunchProject.current = false;
+    }
+  };
 
   const retry = () => {
     void projectsQuery.refetch();
     void sessionsQuery.refetch();
   };
-
-  const intervalTasks = managed.isManaged ? null : (
-    <Link
-      to={routes.taskSchedules()}
-      className="type-label inline-flex min-h-8 items-center gap-1.5 rounded-pill px-2.5 text-basic-tertiary hover:bg-[var(--f-wash-1)] hover:text-basic-primary max-md:min-h-11"
-    >
-      <Icon iconName={IconName.Clock} size={14} />
-      Interval tasks
-    </Link>
-  );
 
   return (
     <div className="flex h-full min-h-0 bg-elevation-ground">
@@ -89,6 +101,10 @@ export function HomePage() {
           <ProjectsEmptyState
             mobile={isMobile}
             onStart={projectActions.create}
+            launchFolder={launchFolder}
+            launchFolderPending={createProject.isPending}
+            launchFolderError={launchProjectError}
+            onUseLaunchFolder={() => void chooseLaunchFolder()}
             onAddRepository={managed.isManaged ? managed.addRepository : undefined}
             onManagedSettings={managed.isManaged ? managed.openSettings : undefined}
             modelReady={managed.status?.model_ready}
@@ -120,9 +136,9 @@ export function HomePage() {
               </h1>
               {loading ? (
                 <LoadingHome />
-              ) : (
+              ) : projectsKnown ? (
                 <HomeComposer projects={projects} sessions={sessions} compact={isMobile} />
-              )}
+              ) : null}
               <NeedsYouLine
                 onShowList={
                   isMobile
@@ -137,7 +153,8 @@ export function HomePage() {
                 className="flex items-center justify-between gap-3 rounded-card border border-[var(--f-red-line)] bg-[var(--f-red-wash)] px-4 py-3"
               >
                 <span className="type-body-chrome text-[var(--f-red-text)]">
-                  Couldn't load your sessions: {errorMessage(error)}
+                  Couldn't load your {projectsQuery.error ? "projects" : "sessions"}:{" "}
+                  {errorMessage(error)}
                 </span>
                 <Button
                   variant={ButtonVariant.Secondary}
@@ -149,13 +166,16 @@ export function HomePage() {
                 </Button>
               </div>
             ) : null}
-            {loading ? null : isMobile ? (
+            {projectsKnown && isMobile ? (
               // A phone has no sidebar: its list is here, under the same switch.
               <section
                 ref={listRef}
                 aria-label="Sessions and Inbox"
                 className="flex flex-col gap-3"
               >
+                <div className="self-start">
+                  <AddProjectAction touch />
+                </div>
                 <SessionListSwitch touch />
                 <SessionListBody
                   touch
@@ -163,16 +183,8 @@ export function HomePage() {
                   sessions={sessions}
                   activeSessionId={null}
                 />
-                {intervalTasks ? <div className="self-start">{intervalTasks}</div> : null}
               </section>
-            ) : (
-              <ProjectTiles
-                items={items}
-                projects={projects}
-                sessions={sessions}
-                headingTrailing={intervalTasks}
-              />
-            )}
+            ) : null}
           </main>
         )}
       </div>

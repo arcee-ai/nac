@@ -7,7 +7,7 @@ import type { DesktopCommandPort } from "./adapter";
 
 const state = vi.hoisted(() => ({
   newSession: vi.fn(),
-  openConfigurations: vi.fn(),
+  openSettings: vi.fn(),
   openProjects: vi.fn(),
   focused: true,
   owns: true,
@@ -39,7 +39,7 @@ it("uses the existing UI owners and rejects background, foreign and covered focu
   const view = render(<DesktopCommandOwner port={port} />);
   const request = (request: number, action: string) => ({ version: 1, request, action });
   expect(callback(request(1, "settings"))).toBe(true);
-  expect(state.openConfigurations).toHaveBeenCalledOnce();
+  expect(state.openSettings).toHaveBeenCalledOnce();
   state.focused = false;
   expect(callback(request(2, "newSession"))).toBe(false);
   state.focused = true;
@@ -82,7 +82,7 @@ it("StrictMode retires its discarded subscription before connecting the current 
   expect(callbacks.length).toBe(2);
   expect(callbacks[0](message)).toBe(false);
   expect(callbacks[1](message)).toBe(true);
-  expect(state.openConfigurations).toHaveBeenCalledOnce();
+  expect(state.openSettings).toHaveBeenCalledOnce();
   view.unmount();
   expect(active).toBe(false);
 });

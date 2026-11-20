@@ -1,4 +1,5 @@
-import type { CatalogModel } from "@/app/types/api";
+import { resolveCatalogModel } from "@/app/lib/catalog";
+import type { CatalogModel, ModelCatalog } from "@/app/types/api";
 
 /** Durable intent: null means inherit; Standard is an explicit override. */
 export type ServiceTier = "standard" | "fast" | "ultrafast";
@@ -60,7 +61,25 @@ export function speedForRoute(
           )
         : null;
   const fastContextLimit = profile?.fast_input_tokens_below ?? null;
-  return { tiers, openAiApi, fastContextLimit };
+  return {
+    tiers,
+    openAiApi,
+    fastContextLimit,
+    explicitTiersAllowed: openAiApi || backend === "chatgpt-codex-responses",
+  };
+}
+
+export function speedForCatalogRoute(
+  catalog: ModelCatalog | undefined,
+  route: { backend: string; model: string; baseUrl?: string | null } | null,
+) {
+  return speedForRoute(
+    resolveCatalogModel(catalog, route?.backend, route?.model).model,
+    route?.model ?? "",
+    route?.backend,
+    route?.baseUrl,
+    providerSpeedProfiles(catalog?.providers.find((provider) => provider.id === route?.backend)),
+  );
 }
 
 export function supportsSpeed(tiers: DiscoveredTier[] | null, speed: ServiceTier): boolean {

@@ -1,16 +1,14 @@
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 
 import { AssignToProjectModal } from "@/app/components/modals/AssignToProjectModal";
 import { CreateProjectModal } from "@/app/components/modals/CreateProjectModal";
 import { DeleteProjectModal } from "@/app/components/modals/DeleteProjectModal";
 import { RenameProjectModal } from "@/app/components/modals/RenameProjectModal";
-import { useKeyboardShortcuts } from "@/app/hooks/useKeyboardShortcuts";
 import { primarySessions, projectForSessionLocation } from "@/app/lib/projects";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
-import { projectIdFromPath, routes, sessionIdFromPath } from "@/app/lib/routes";
-import { NEW_CHAT_KEYS, NEW_PROJECT_KEYS } from "@/app/lib/shortcuts";
+import { routes } from "@/app/lib/routes";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 
 import {
@@ -55,7 +53,6 @@ export function ProjectActionsProvider({ children }: { children: React.ReactNode
   const { pruneChatTabs } = useNativeRuntime().stores.chatTabsStore;
 
   const toast = useToast();
-  const { pathname } = useLocation();
   const navigate = useNavigate();
   const sessionsQuery = useSessions();
   const sessionsLoaded = sessionsQuery.isSuccess;
@@ -144,35 +141,6 @@ export function ProjectActionsProvider({ children }: { children: React.ReactNode
       primarySessions(existingSessions).map((entry) => entry.summary.session_id),
     );
   }, [sessionsLoaded, sessionsQuery.data, projectList, pruneChatTabs, pruneSessionNavigation]);
-
-  // Which project the screen is about, whether it was reached by its own route
-  // or through one of its chats. Hidden chats retain their project identity so
-  // the shortcut can create a direct chat without exposing the hidden session.
-  const openSessionId = sessionIdFromPath(pathname);
-  const openProjectId =
-    projectIdFromPath(pathname) ??
-    sessionsQuery.data?.find((entry) => entry.summary.session_id === openSessionId)?.summary
-      .project_id ??
-    null;
-
-  // "Make me a new one" is the single gesture bound to a key, and it means
-  // whatever the screen is a list of: another chat inside an open project,
-  // another project everywhere else. The two can never both apply, so the same
-  // chord is unambiguous.
-  useKeyboardShortcuts([
-    {
-      keys: NEW_CHAT_KEYS,
-      enabled: openProjectId != null,
-      onTrigger: () => {
-        if (openProjectId) void newChat(openProjectId);
-      },
-    },
-    {
-      keys: NEW_PROJECT_KEYS,
-      enabled: openProjectId == null,
-      onTrigger: () => setModal("create"),
-    },
-  ]);
 
   const close = () => setModal(null);
 

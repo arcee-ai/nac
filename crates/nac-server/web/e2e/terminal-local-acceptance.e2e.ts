@@ -52,13 +52,10 @@ async function command(page: Page, text: string) {
   await page.keyboard.type(text);
   await page.keyboard.press("Enter");
 }
-async function show(page: Page, base: string, session: string, dock = false) {
+async function show(page: Page, base: string, session: string) {
   await page.goto(base + "/#/session/" + session + "/terminal");
   const pane = page.getByRole("region", { name: "Session terminal", exact: true });
-  // Document load can precede the session query and React's panel controls.
-  // These journeys resize the window, so keep the terminal in the floating
-  // drawer instead of a dock that the app moves away below 1280px.
-  await showSidePanel(page, { dock });
+  await showSidePanel(page);
   await expect(pane).toBeVisible();
   return pane;
 }
@@ -222,7 +219,10 @@ test("connected native shell, less resize, and trusted browser bracketed UTF-8 p
       page,
       `exec ${shell} ${process.platform === "darwin" ? "-f" : "--noprofile --norc"}`,
     );
-    await command(page, "printf '%s\\n' \"$$\" > shell-before.pid; /usr/bin/less -R -- pager.txt");
+    await command(
+      page,
+      "printf '%s\\n' \"$$\" > shell-before.pid; /usr/bin/less -R -- pager.txt; printf '%s%s\\n' 'PAGER-' 'RETURNED'",
+    );
     await expect(accessible).toContainText("LESS-REAL-CONTENT");
     const before = await api.getUserTerminal(session, terminal);
     await page.setViewportSize({ width: 970, height: 600 });
@@ -234,6 +234,8 @@ test("connected native shell, less resize, and trusted browser bracketed UTF-8 p
       .toBe(true);
     await expect(accessible).toContainText("LESS-REAL-CONTENT");
     await page.keyboard.press("q");
+    // Wait for the foreground pager to surrender the terminal before typing into the shell.
+    await expect(accessible).toContainText("PAGER-RETURNED");
     await command(
       page,
       "printf '%s\\n' \"$$\" > shell-after-pager.pid; stty size > resized.txt; python3 capture_paste.py",
@@ -338,7 +340,7 @@ test("pane disposal releases observer seats and connected OSC52/OSC8 stays withi
   const session = await createDirectSession(request, harness);
   const api = createNacApi(new NacClient({ endpoint: harness.baseUrl, credentials: "omit" }));
   await api.setPermissionApprovalMode(session, "auto_approve");
-  let pane = await show(page, harness.baseUrl, session, true);
+  let pane = await show(page, harness.baseUrl, session);
   await prepareNewShell(pane);
   await pane.getByRole("button", { name: /^New shell$/i }).click();
   await expect(pane.getByText("Connected", { exact: true })).toBeVisible();

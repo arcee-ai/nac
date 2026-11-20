@@ -1,4 +1,4 @@
-import type { SessionStatus } from "../../lib/sessionStatus";
+import { type SessionStatus } from "../../lib/sessionStatus";
 import type { ProjectRecord } from "../../types/api";
 /**
  * A project's row in the sidebar: fold toggle with the name, then a quiet

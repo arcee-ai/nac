@@ -31,9 +31,12 @@ test("pending withdrawal preserves quiet list projection and production project 
     pinned: false,
   });
   await page.goto(`${harness.baseUrl}/#/`);
-  const card = page.locator(`[role="button"][data-item-id="${project}"][data-item-kind="project"]`);
-  const finishedDot = card.locator("span.bg-brand-450");
+  const card = page.getByRole("button", { name: "Embedded E2E project, 2 sessions" });
   await expect(card).toBeVisible();
+  await card.click();
+  await expect(card).toHaveAttribute("aria-expanded", "false");
+  const finishedDot = card.locator('[data-status="done"]');
+  const working = card.locator('[data-status="working"]');
   await expect(finishedDot).toHaveCount(0);
   const control = async (operation: object) => {
     const response = await request.post(
@@ -81,7 +84,7 @@ test("pending withdrawal preserves quiet list projection and production project 
   await control({ action: "run_now", schedule_id: schedule, expected_version: 1 });
   await gate.accepted;
   const active = (await inspect()).history.find((item) => item.state === "admitted")!;
-  await expect(card.getByText("running", { exact: true })).toHaveCount(1);
+  await expect(working).toHaveCount(1);
   harness.provider.enqueue(
     "quiet-report",
     { functionOutputCallId: "quiet-read" },
@@ -115,7 +118,7 @@ test("pending withdrawal preserves quiet list projection and production project 
   const before = await listing();
   expect(before.heartbeat_results?.[0].outcome).toBe("unchanged");
   expect(before.attention_updated_at).toBeTruthy();
-  await expect(card.getByText("running", { exact: true })).toHaveCount(0);
+  await expect(working).toHaveCount(0);
   await expect(finishedDot).toHaveCount(0);
   // A real retained terminal in the same workspace holds its activity lease.
   // This makes pending work deterministic across scheduler ticks, without
@@ -149,6 +152,8 @@ test("pending withdrawal preserves quiet list projection and production project 
   await harness.restart("1"); // Normal shutdown also cleans the owned terminal.
   await page.goto(`${harness.baseUrl}/#/`);
   await expect(card).toBeVisible();
+  if ((await card.getAttribute("aria-expanded")) === "true") await card.click();
+  await expect(card).toHaveAttribute("aria-expanded", "false");
   await expect(finishedDot).toHaveCount(0);
   const restarted = await listing();
   expect(restarted.heartbeat_results).toEqual(after.heartbeat_results);
@@ -170,12 +175,11 @@ test("pending withdrawal preserves quiet list projection and production project 
     ).status(),
   ).toBe(202);
   await ordinary.accepted;
-  await expect(card.getByText("running", { exact: true })).toHaveCount(1);
+  await expect(working).toHaveCount(1);
   ordinary.release();
-  await expect(card.getByText("running", { exact: true })).toHaveCount(0);
+  await expect(working).toHaveCount(0);
   await expect(finishedDot).toHaveCount(1);
-  await finishedDot.hover();
-  await expect(page.getByRole("tooltip").filter({ hasText: "Run finished" })).toBeVisible();
+  await expect(card).toHaveAccessibleDescription("Done");
   const later = await listing();
   expect(later.attention_revision).toBeGreaterThan(before.attention_revision ?? 0);
   expect(later.attention_updated_at ?? null).toBeNull();

@@ -4,9 +4,12 @@ import SessionNameDisclosure, {
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { Icon, IconName, StatusDot } from "@/app/atoms";
+import { Icon, IconName, StatusDot, Tooltip, TooltipPosition } from "@/app/atoms";
 import { SessionMenu } from "@/app/features/session-chrome/SessionMenu";
-import { useSessionDrawer } from "@/app/features/session-chrome/useSessionDrawer";
+import {
+  useSessionDrawer,
+  type SessionDrawerControls,
+} from "@/app/features/session-chrome/useSessionDrawer";
 import { useSessionFacts, type SessionFacts } from "@/app/features/session-chrome/useSessionFacts";
 import { SidebarToggle, useSidebar } from "@/app/features/sidebar/useSidebar";
 import { useTerminalLinkMode } from "@/app/features/terminal/terminalLinkMode";
@@ -70,6 +73,31 @@ function ParentCrumb({ facts, phone }: { facts: SessionFacts; phone: boolean }) 
   );
 }
 
+/** Shows or hides the session's drawer on the panel the route has open. */
+function PanelToggle({ drawer }: { drawer: SessionDrawerControls }) {
+  return (
+    <Tooltip
+      title={drawer.open ? "Hide panel" : "Show panel"}
+      position={TooltipPosition.BottomLeft}
+    >
+      <button
+        type="button"
+        aria-label="Session panel"
+        aria-pressed={drawer.open}
+        onClick={() => (drawer.open ? drawer.close() : drawer.openPanel(drawer.panel))}
+        className={cn(
+          "flex size-7 items-center justify-center rounded-pill text-basic-secondary outline-none",
+          "transition-colors duration-150 ease-out motion-reduce:transition-none",
+          "hover:bg-[var(--f-wash-2)] hover:text-basic-primary focus-visible:ring-2 focus-visible:ring-[var(--f-focus)]",
+          drawer.open && "bg-[var(--f-wash-3)] text-basic-primary",
+        )}
+      >
+        <Icon iconName={IconName.RightSidebar} size={16} />
+      </button>
+    </Tooltip>
+  );
+}
+
 function TitleBlock({
   sessionId,
   facts,
@@ -104,9 +132,10 @@ function TitleBlock({
 
 /**
  * The session header: 52px, quiet, one row. The title with its status dot and
- * one muted line of where it runs; then one control, the Session menu, for
- * every panel, detail and action (a dot on it when something is live). On a
- * phone it is the screen's own top bar: back, title, and that same control.
+ * one muted line of where it runs; then the Session menu, for every panel,
+ * detail and action (a dot on it when something is live), and the panel
+ * toggle. On a phone it is the screen's own top bar: back, title, and the
+ * Session menu, which opens the panels there.
  */
 export function TopSingleSessionHeader({
   sessionId,
@@ -189,7 +218,10 @@ export function TopSingleSessionHeader({
         ) : null}
         <TitleBlock sessionId={sessionId} facts={facts} compact={false} />
       </div>
-      {menu}
+      <div className="flex shrink-0 items-center gap-1">
+        {menu}
+        <PanelToggle drawer={drawer} />
+      </div>
     </header>
   );
 }

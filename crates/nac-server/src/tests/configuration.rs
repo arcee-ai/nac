@@ -119,10 +119,12 @@ async fn custom_public_https_endpoints_persist_for_primary_and_light_models() {
         .remove(&session_id);
     let updated_primary = "https://updated.noncanonical.example/v2";
     let updated_light = "https://updated-light.noncanonical.example/v2";
+    let reviewed_config = sessions::load_session_config(&store_path, &session_id).unwrap();
     manager
         .update_session_config(
             &session_id,
             UpdateConfigRequest {
+                expected_config_version: Some(reviewed_config.config_version),
                 base_url: RequestField::Value(updated_primary.to_string()),
                 light_model: RequestField::Value(LightModelSettings {
                     model: "custom-light-model-v2".to_string(),
@@ -145,6 +147,21 @@ async fn custom_public_https_endpoints_persist_for_primary_and_light_models() {
             .and_then(|light| light.base_url.as_deref()),
         Some(updated_light)
     );
+    let stale_edit = manager
+        .update_session_config(
+            &session_id,
+            UpdateConfigRequest {
+                expected_config_version: Some(reviewed_config.config_version),
+                base_url: RequestField::Value(primary_url.to_string()),
+                ..UpdateConfigRequest::default()
+            },
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(ApiError::from(stale_edit).status, StatusCode::CONFLICT);
+    let current = sessions::load_session_config(&store_path, &session_id).unwrap();
+    assert_eq!(current.config_version, reviewed_config.config_version + 1);
+    assert_eq!(current.base_url, updated_primary);
 
     let _ = std::fs::remove_dir_all(root);
 }
@@ -1401,6 +1418,7 @@ async fn patch_round_trips_every_state_and_rebuilds_from_persisted_settings() {
         .update_session_config(
             "session",
             UpdateConfigRequest {
+                expected_config_version: None,
                 service_tier: RequestField::Omitted,
                 model: RequestField::Value(" replacement-model ".to_string()),
                 base_url: RequestField::Value(" https://api.openai.com/v1 ".to_string()),
@@ -1691,6 +1709,7 @@ async fn removed_backend_updates_are_bad_requests_and_are_not_persisted() {
             .update_session_config(
                 "session",
                 UpdateConfigRequest {
+                    expected_config_version: None,
                     service_tier: RequestField::Omitted,
                     model: RequestField::Omitted,
                     base_url: RequestField::Value("https://api.arcee.ai".to_string()),
@@ -1794,6 +1813,7 @@ async fn server_arcee_configuration_status_and_persistence_are_consistent() {
             .update_session_config(
                 "update",
                 UpdateConfigRequest {
+                    expected_config_version: None,
                     service_tier: RequestField::Omitted,
                     model: RequestField::Omitted,
                     base_url: RequestField::Value(invalid_base_url.to_string()),
@@ -1825,6 +1845,7 @@ async fn server_arcee_configuration_status_and_persistence_are_consistent() {
         .update_session_config(
             "update",
             UpdateConfigRequest {
+                expected_config_version: None,
                 service_tier: RequestField::Omitted,
                 model: RequestField::Value("trinity-large-thinking".to_string()),
                 base_url: RequestField::Value("https://tenant.arcee.ai/api/v1".to_string()),
@@ -1848,6 +1869,7 @@ async fn server_arcee_configuration_status_and_persistence_are_consistent() {
         .update_session_config(
             "update",
             UpdateConfigRequest {
+                expected_config_version: None,
                 service_tier: RequestField::Omitted,
                 model: RequestField::Value("trinity-large-thinking".to_string()),
                 base_url: RequestField::Value("https://api.arcee.ai/api".to_string()),
@@ -1922,6 +1944,7 @@ async fn null_update_clears_legacy_arcee_api_key_env() {
         .update_session_config(
             "legacy-arcee",
             UpdateConfigRequest {
+                expected_config_version: None,
                 service_tier: RequestField::Omitted,
                 model: RequestField::Value("trinity-large-thinking".to_string()),
                 base_url: RequestField::Omitted,

@@ -100,10 +100,9 @@ it("keeps empty search and unknown pricing understandable, then dismisses only t
   trigger.focus();
   fireEvent.click(trigger);
   const search = await screen.findByRole("textbox", { name: "Search models" });
-  expect(screen.getAllByText(/pricing unknown/)).toHaveLength(2);
-  expect(
-    screen.getByRole("button", { name: /A very long model display name/ }).textContent,
-  ).toContain("model-0");
+  const row = screen.getByRole("button", { name: /A very long model display name/ });
+  expect(row.getAttribute("title")).toContain("model-0");
+  expect(row.getAttribute("title")).toContain("pricing unknown");
   fireEvent.change(search, { target: { value: "no match" } });
   expect(screen.getByRole("status").textContent).toContain('No model matches "no match"');
   fireEvent.keyDown(search, { key: "Enter" });

@@ -111,6 +111,7 @@ export declare enum IconName {
     Timelaps = "timelaps",
     Token = "token",
     LeftSidebar = "leftSidebar",
+    RightSidebar = "rightSidebar",
     ShowSidePanel = "showSidePanel",
     HideSidePanel = "hideSidePanel",
     Money = "money",

@@ -105,7 +105,7 @@ export default function SessionPage() {
 
   const { data: snapshot = null, error, refetch: refetchSnapshot } = useSessionSnapshot(id);
   const { data: entry = null } = useSessionSummary(id);
-  const toNotice = useErrorNotice(id, entry?.summary.backend);
+  const toNotice = useErrorNotice(entry?.summary.backend);
   const collapsed = useSidePanelCollapsed();
   const selectedThread = useSelectedThread();
 

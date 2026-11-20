@@ -35,7 +35,8 @@ export function useCreateProject() {
   return useMutation({
     retry: false,
     mutationFn: (payload: CreateProjectRequest) => api.createProject(payload),
-    onSuccess: () => invalidate.projects(),
+    // After an uncertain response, the server may still have created the project.
+    onSettled: () => invalidate.projects(),
   });
 }
 

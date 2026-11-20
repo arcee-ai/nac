@@ -29,7 +29,7 @@ export function DesktopCommandOwner({ port }: { port: DesktopCommandPort }) {
     };
     return connectDesktopCommands(port, {
       newSession: () => invoke(() => latest.current.commands.newSession()),
-      settings: () => invoke(() => latest.current.commands.openConfigurations()),
+      settings: () => invoke(() => latest.current.commands.openSettings()),
       projects: () =>
         invoke(() => {
           void latest.current.commands.openProjects();

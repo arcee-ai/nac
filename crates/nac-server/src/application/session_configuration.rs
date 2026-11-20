@@ -15,6 +15,7 @@ use crate::{
 
 #[derive(Default)]
 pub(crate) struct SessionConfigPatch {
+    pub(crate) expected_config_version: Option<i64>,
     pub(crate) model: Field<String>,
     pub(crate) base_url: Field<String>,
     pub(crate) allow_insecure_http: Field<bool>,
@@ -130,6 +131,15 @@ impl<'a> SessionConfigurationApplication<'a> {
 
         let behavior = sessions::load_session_behavior(&self.manager.inner.store_path, session_id)?;
         let current = sessions::load_session_config(&self.manager.inner.store_path, session_id)?;
+        if request
+            .expected_config_version
+            .is_some_and(|expected| current.config_version != expected)
+        {
+            return Err(sessions::SessionConfigUpdateError::Conflict(
+                "The session configuration changed; reload it before editing".to_string(),
+            )
+            .into());
+        }
         let mut prospective = current.clone();
         let light_field = std::mem::take(&mut request.light_model);
         apply_patch(&mut prospective, request)?;

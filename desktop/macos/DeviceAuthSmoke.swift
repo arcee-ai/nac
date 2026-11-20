@@ -184,14 +184,15 @@ final class DeviceAuthSmoke {
                 evidence["ready_build"] = receipt.identity?.build_id
                 evidence["launch_incarnation"] = receipt.incarnation
                 evidence["ready_store"] = receipt.store
-                try await wait("shared onboarding") {
-                    try await self.js("return [...document.querySelectorAll('button')].some(b=>b.textContent.trim()==='Get Started')") as? Bool == true
+                try await wait("Settings button") {
+                    try await self.js("return !!document.querySelector('button[aria-label=Settings]:not(:disabled)')") as? Bool == true
                 }
-                try await click("Get Started")
-                try await wait("provider connections control") {
-                    try await self.js("return [...document.querySelectorAll('button')].some(b=>b.textContent.trim()==='Provider connections')") as? Bool == true
+                _ = try await js("document.querySelector('button[aria-label=Settings]').click(); return true;")
+                let accounts = "[...(document.querySelector('nav[aria-label=\"Settings sections\"]')?.querySelectorAll('a') || [])].find(a => a.textContent.trim() === 'Accounts & keys')"
+                try await wait("Accounts & keys navigation") {
+                    try await self.js("return !!(\(accounts))") as? Bool == true
                 }
-                try await click("Provider connections")
+                _ = try await js("(\(accounts)).click(); return true;")
                 try await wait("actual Arcee sign-in card") { try await self.cardText().contains("Arcee sign-in") }
 
                 if scenario == "device-restart" {
@@ -311,12 +312,11 @@ final class DeviceAuthSmoke {
     }
 
     private func cardText() async throws -> String {
-        try await js("const section=document.querySelector('section[aria-label=\"Provider connections\"]');const card=[...section?.children||[]].find(e=>e.textContent.includes('Arcee sign-in'));return card?.textContent||''") as? String ?? ""
+        try await js("return document.querySelector('[role=group][aria-label=\"Arcee account\"]')?.textContent || ''") as? String ?? ""
     }
 
     private static let clickScript = #"""
-    const section=document.querySelector('section[aria-label="Provider connections"]');
-    const root=inCard?[...section?.children||[]].find(e=>e.textContent.includes('Arcee sign-in')):document;
+    const root=inCard?document.querySelector('[role=group][aria-label="Arcee account"]'):document;
     const control=[...root?.querySelectorAll('button,a[href]')||[]].find(b=>b.textContent.trim()===title&&!b.disabled);
     control?.click();return !!control;
     """#

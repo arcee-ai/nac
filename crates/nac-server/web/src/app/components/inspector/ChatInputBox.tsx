@@ -1411,7 +1411,6 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
                   focusKey: open ? current.focusKey : null,
                 })),
             }}
-            onSettings={null}
             contextTokens={contextTokens}
             onCompact={() => void compactContext()}
             compacting={compactSession.isPending}

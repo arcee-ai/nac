@@ -1,8 +1,7 @@
 import { expect, it } from "vitest";
-import { projectChatRequest } from "./projectLaunch";
 import { configuredSessionRequest } from "@/app/features/home/modelChoice";
 
-it("distinguishes an explicit provider-default clear from an omitted tier in both launch paths", () => {
+it("distinguishes an explicit provider-default clear from an omitted tier when Home creates a session", () => {
   const selected = {
     kind: "resolved",
     backend: "chatgpt-codex-responses",
@@ -14,28 +13,8 @@ it("distinguishes an explicit provider-default clear from an omitted tier in bot
     extra_headers: null,
     light_model: null,
   } as const;
-  const base = {
-    projectId: "project",
-    selected,
-    policy: { orchestrationEnabled: false },
-    behavior: "direct",
-    reasoning: "",
-    headers: undefined,
-    compaction: "",
-    automaticCompaction: false,
-    presetCompaction: false,
-    savedLight: null,
-    light: { mode: "single", light: null },
-    execution: "ssh",
-    sandbox: { noMount: false, image: "", gpu: "", workdir: "", shm: "", mounts: "" },
-    activityKey: null,
-  } as Parameters<typeof projectChatRequest>[0];
-  expect(projectChatRequest(base)).not.toHaveProperty("service_tier");
-  expect(
-    projectChatRequest({ ...base, selected: { ...selected, service_tier: null } }),
-  ).toHaveProperty("service_tier", null);
   const home = {
-    policy: base.policy,
+    policy: { orchestrationEnabled: false },
     projectId: "project",
     behavior: "direct",
     selected,

@@ -2,13 +2,19 @@ import type { ServiceTier } from "../../lib/serviceTier";
 import type { ConfigurationsPanelInitial, LaunchModelSelection } from "../../components/modals/ConfigurationsPanel";
 import type { LightSelection } from "../../components/modals/LightModelSection";
 import type { UiPolicy } from "../ui-policy/policy";
-import type { BackendKind, CreateSessionRequest, LightModelSettings, SessionBehavior } from "../../types/api";
+import type { BackendKind, CreateSessionRequest, LightModelSettings, ProjectRecord, SessionBehavior } from "../../types/api";
 /** What a new session in a project inherits when the user changes nothing. */
 export interface InheritedModel {
     initial: ConfigurationsPanelInitial;
     light: LightModelSettings | null;
     source: "project-default" | "latest-session";
 }
+/** The serving runtime resolves file defaults in the actual launch location. */
+export declare function useConfiguredLaunchModel(project: ProjectRecord | null, enabled: boolean): {
+    model: string | null;
+    pending: boolean;
+    error: Error | null;
+};
 /** A model the user picked in the composer's model chip for this session only. */
 export interface ModelOverride {
     selection: LaunchModelSelection;
@@ -26,8 +32,19 @@ export declare function useInheritedModel(projectId: string | null): {
     pending: boolean;
     error: Error | null;
 };
-/** A short chip label: "model · effort". */
+/** The model chip's label; reasoning effort has its own chip. */
 export declare function modelChipLabel(override: ModelOverride | null, inherited: InheritedModel | null): string | null;
+/** The route and preferences a session will start with. */
+export declare function sessionRoute(override: ModelOverride | null, inherited: InheritedModel | null): {
+    backend: BackendKind;
+    model: string;
+    baseUrl: string;
+    effort: string;
+    speed: ServiceTier | null | undefined;
+} | null;
+/** `override` (or the inherited model) with a different reasoning effort; "" is the model's default. */
+export declare function withEffort(override: ModelOverride | null, inherited: InheritedModel | null, effort: string): ModelOverride | null;
+export declare function withSpeed(override: ModelOverride | null, inherited: InheritedModel | null, speed: ServiceTier | null): ModelOverride | null;
 /** The resolved tuple a configured session is created with. */
 export interface ResolvedModel {
     backend: BackendKind;

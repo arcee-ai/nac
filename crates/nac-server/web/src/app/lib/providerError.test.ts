@@ -38,10 +38,11 @@ describe("humanError for an Arcee login", () => {
 });
 
 describe("humanError for an Arcee API key", () => {
-  it("sends a rejected key to the settings", () => {
+  it("sends a rejected key to the accounts settings", () => {
     expect(humanError(INVALID_KEY, "arcee-api").fix).toEqual({
       kind: "settings",
-      label: "Open settings",
+      label: "Open accounts",
+      section: "accounts",
     });
   });
 

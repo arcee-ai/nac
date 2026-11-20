@@ -1,6 +1,7 @@
 import path from "node:path";
 import { createDirectSession, expect, test, waitForRunIdle } from "./harness";
-import { openSessionSettings } from "./nav-focus-helpers";
+import { startSessionFromHome } from "./focus-embedded-helpers";
+import { modelChip, openModelCatalog, openModelSettings } from "./speed-controls";
 
 test.use({ orchestration: "0", codexCatalogFixture: true });
 
@@ -25,13 +26,12 @@ for (const mobile of [false, true]) {
     });
     const configUrl = `${harness.baseUrl}/sessions/${sessionId}/config`;
     await page.goto(`${harness.baseUrl}/#/session/${sessionId}/delegated`);
-    await page.getByRole("button", { name: "Model" }).click();
-    await page.getByPlaceholder("Search models…").fill("gpt-6.1-sol");
-    await page.getByRole("button", { name: /GPT-6\.1-Sol gpt-6\.1-sol/ }).click();
+    const catalog = await openModelCatalog(page, "gpt-6.1-sol");
+    await catalog.getByRole("menuitemradio", { name: /^GPT-6\.1-Sol/ }).click();
     await expect
       .poll(async () => (await (await request.get(configUrl)).json()).model)
       .toBe("gpt-6.1-sol");
-    await expect(page.getByPlaceholder("Search models…")).toBeHidden();
+    await expect(page.getByRole("textbox", { name: "Search models" })).toBeHidden();
     await expect(page.getByText("Model switched to gpt-6.1-sol")).toBeHidden();
     const initialReasoning = (await (await request.get(configUrl)).json()).reasoning_effort;
     if (process.env.NAC_VISUAL_DIR && process.env.NAC_VISUAL_LABEL === "before") {
@@ -52,6 +52,7 @@ for (const mobile of [false, true]) {
       }
     };
     const speed = page.getByRole("button", { name: "Speed: Provider default" });
+    await openModelSettings(page);
     await expect(speed).toBeVisible();
     if (process.env.NAC_VISUAL_DIR && process.env.NAC_VISUAL_LABEL) {
       await page.screenshot({
@@ -61,19 +62,19 @@ for (const mobile of [false, true]) {
         ),
       });
     }
+    await expect(speed).toBeEnabled();
     await speed.focus();
     await page.keyboard.press("Enter");
     await expect(page.getByText("Ultrafast", { exact: true })).toBeVisible();
     await page.keyboard.press("Escape");
-    await expect(speed).toBeFocused();
+    await expect(modelChip(page)).toBeFocused();
+    await openModelSettings(page);
     await speed.click();
-    await expect(page.getByRole("menuitemradio", { name: "Use provider default" })).toHaveAttribute(
-      "aria-checked",
-      "true",
-    );
+    await expect(page.getByRole("menuitemradio", { checked: true })).toHaveCount(0);
     await capture("menu");
     await page.keyboard.press("Escape");
     if (mobile) {
+      await openModelSettings(page);
       const box = await speed.boundingBox();
       expect(box?.width).toBeGreaterThanOrEqual(44);
       expect(box?.height).toBeGreaterThanOrEqual(44);
@@ -83,20 +84,29 @@ for (const mobile of [false, true]) {
       await route.fulfill({ status: 409, json: { error: "Configuration changed" } });
     };
     await page.route(configUrl, reject);
+    await openModelSettings(page);
     await speed.click();
     await page.getByRole("menuitemradio", { name: "Fast", exact: true }).click();
-    await expect(page.getByText(/Speed was not changed/)).toBeVisible();
+    await expect(page.getByText(/configuration changed or is busy/i)).toBeVisible();
     await capture("rejected");
     expect((await (await request.get(configUrl)).json()).service_tier ?? null).toBeNull();
     await page.unroute(configUrl, reject);
+    await expect(modelChip(page)).toBeDisabled();
+    await page.reload();
+    await openModelSettings(page);
+    const { config_version } = await (await request.get(configUrl)).json();
     await speed.click();
     const patch = page.waitForRequest((req) => req.url() === configUrl && req.method() === "PATCH");
     await page.getByRole("menuitemradio", { name: "Fast", exact: true }).click();
-    expect((await patch).postDataJSON()).toEqual({ service_tier: "fast" });
+    expect((await patch).postDataJSON()).toEqual({
+      service_tier: "fast",
+      expected_config_version: config_version,
+    });
     await expect
       .poll(async () => (await (await request.get(configUrl)).json()).service_tier)
       .toBe("fast");
     await page.reload();
+    await openModelSettings(page);
     const fastSpeed = page.getByRole("button", { name: "Speed: Fast" });
     await expect(fastSpeed).toBeVisible();
     await capture("selected");
@@ -119,22 +129,19 @@ for (const mobile of [false, true]) {
       await route.fulfill({ response, json: catalog });
     });
     await page.reload();
-    await openSessionSettings(page);
-    const settings = page.getByRole("dialog", { name: "Session settings", exact: true });
-    await expect(settings.getByText("Fast (unavailable)")).toBeVisible();
-    await settings.getByText("Fast (unavailable)").scrollIntoViewIfNeeded();
+    const settings = await openModelSettings(page);
+    const repair = settings.getByRole("button", { name: "Speed: Fast (unavailable)" });
+    await expect(repair).toBeVisible();
     await capture("unavailable");
-    await settings.getByRole("button", { name: "Speed: Fast" }).click();
-    await page.getByRole("menuitemradio", { name: "Use provider default" }).click();
-    await settings.getByRole("button", { name: "Save", exact: true }).click();
-    await expect(settings).toBeHidden();
+    await repair.click();
+    await settings.getByRole("menuitemradio", { name: "Standard", exact: true }).click();
     await expect
-      .poll(async () => (await (await request.get(configUrl)).json()).service_tier ?? null)
-      .toBeNull();
+      .poll(async () => (await (await request.get(configUrl)).json()).service_tier)
+      .toBe("standard");
   });
 }
 
-test("a Fast preset survives simple and advanced setup into the first project chat", async ({
+test("the Home composer uses a saved Fast preset for the first project chat", async ({
   harness,
   page,
   request,
@@ -161,36 +168,39 @@ test("a Fast preset survives simple and advanced setup into the first project ch
       },
     });
   });
-  await page.goto(harness.baseUrl);
-  await page.getByRole("button", { name: "Get Started", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "New Project", exact: true });
-  await expect(dialog.getByRole("button", { name: "Speed: Fast" })).toBeVisible();
-  await dialog
-    .getByRole("button", { name: "Advanced presets and provider setup", exact: true })
-    .click();
-  await dialog.getByRole("button", { name: "Back to unified models", exact: true }).click();
-  await expect(dialog.getByRole("button", { name: "Speed: Fast" })).toBeVisible();
+  const createdProject = await request.post(`${harness.baseUrl}/projects`, {
+    data: {
+      name: "Codex speed fixture",
+      cwd: path.join(harness.runRoot, "workspace"),
+      default_model_config_id: preset.config_id,
+    },
+  });
+  expect(createdProject.ok()).toBeTruthy();
+  const projectId = (await createdProject.json()).project_id;
+  await page.route(
+    (url) => /\/sessions\/[^/]+\/runs$/.test(url.pathname),
+    (route) => (route.request().method() === "POST" ? route.abort() : route.fallback()),
+  );
+  await page.goto(`${harness.baseUrl}/#/project/${projectId}`);
+  await expect(modelChip(page)).toHaveAccessibleName(/High reasoning, Fast speed/);
+  const settings = await openModelSettings(page);
+  await expect(settings.getByRole("button", { name: "Speed: Fast" })).toBeVisible();
+  await page.keyboard.press("Escape");
   const created = page.waitForResponse(
     (response) =>
       response.request().method() === "POST" && response.url() === `${harness.baseUrl}/sessions`,
   );
-  await dialog.getByRole("button", { name: "Create Project", exact: true }).click();
+  const sessionId = await startSessionFromHome(page, "Keep the project speed", {
+    runAdmission: "aborted",
+  });
   const response = await created;
   expect(response.ok()).toBeTruthy();
   expect(response.request().postDataJSON()).toMatchObject({
     first_chat: true,
-    service_tier: "fast",
-    reasoning_effort: "high",
+    project_id: projectId,
   });
-  const metadata = (await response.json()).metadata;
-  const projects = await (await request.get(`${harness.baseUrl}/projects`)).json();
   expect(
-    projects.projects.find(
-      (project: { project_id: string }) => project.project_id === metadata.project_id,
-    )?.default_model_config_id,
-  ).toBe(preset.config_id);
-  expect(
-    await (await request.get(`${harness.baseUrl}/sessions/${metadata.session_id}/config`)).json(),
+    await (await request.get(`${harness.baseUrl}/sessions/${sessionId}/config`)).json(),
   ).toMatchObject({ service_tier: "fast", reasoning_effort: "high" });
 });
 
@@ -236,11 +246,13 @@ test("provider downgrade receipt and estimate warning survive reload", async ({
   );
   expect(upstream?.body).toMatchObject({ service_tier: "priority", reasoning: { effort: "high" } });
   await page.goto(`${harness.baseUrl}/#/session/${sessionId}/insights`);
-  await expect(page.getByText("Requested speed: fast; served tier: default")).toBeVisible();
+  await expect(
+    page.getByText("Requested speed: Fast; served tier: Standard (provider downgrade)"),
+  ).toBeVisible();
   await page.reload();
-  await expect(page.getByText("Requested speed: fast; served tier: default")).toBeVisible();
-  await openSessionSettings(page); // Settle the post-reload surface before opening usage.
-  await page.keyboard.press("Escape");
+  await expect(
+    page.getByText("Requested speed: Fast; served tier: Standard (provider downgrade)"),
+  ).toBeVisible();
   await page.getByRole("button", { name: "Session menu", exact: true }).click();
   await expect(page.getByText("Base-rate estimate; speed-tier charges excluded.")).toBeVisible();
   await expect(

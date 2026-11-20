@@ -160,17 +160,17 @@ for (const mobile of [false, true]) {
           return { font: style.fontFamily, lineHeight: style.lineHeight };
         });
       await expect.poll(callerFormulaStyle).toEqual({ font: "monospace", lineHeight: "19px" });
-      // Session settings lives behind the header's session menu (phone: "Open panel").
+      // Rename lives behind the header's session menu (phone: "Open panel").
       await page
         .getByRole("button", { name: mobile ? "Open panel" : "Session menu", exact: true })
         .click();
-      await page.getByRole("button", { name: "Session settings", exact: true }).click();
-      const settings = page.getByRole("dialog", { name: "Session settings", exact: true });
+      await page.getByRole("button", { name: "Rename", exact: true }).click();
+      const settings = page.getByRole("dialog", { name: "Rename session", exact: true });
       await expect(settings).toBeVisible();
       await sentinel.click();
       await page.keyboard.press("Escape");
       await expect(settings).toBeVisible();
-      await settings.getByRole("textbox", { name: "Session title", exact: true }).focus();
+      await settings.getByRole("textbox", { name: "Title", exact: true }).focus();
       await page.keyboard.press("Escape");
       await expect(settings).toHaveCount(0);
       await composer.fill("old packed draft");

@@ -1,4 +1,5 @@
 import path from "node:path";
+import { openModelList } from "./focus-embedded-helpers";
 import { createDirectSession, expect, test, waitForRunIdle } from "./harness";
 
 // Explicit capture runs use the same fixture against the base and head binaries.
@@ -44,9 +45,20 @@ if (process.env.NAC_VISUAL_DIR && process.env.NAC_VISUAL_LABEL) {
         });
       });
       await page.goto(`${harness.baseUrl}/#/session/${sessionId}/delegated`);
-      await page.getByRole("button", { name: "Model" }).click();
-      await page.getByPlaceholder("Search models…").fill("gpt-6.1-sol");
-      await page.getByRole("button", { name: /GPT-6\.1-Sol gpt-6\.1-sol/ }).click();
+      const oldModelButton = page.getByRole("button", { name: "Model", exact: true });
+      if (await oldModelButton.isVisible()) {
+        await oldModelButton.click();
+        await page.getByPlaceholder("Search models…").fill("gpt-6.1-sol");
+        await page.getByRole("button", { name: /GPT-6\.1-Sol gpt-6\.1-sol/ }).click();
+      } else {
+        const list = await openModelList(page);
+        await page.getByRole("textbox", { name: "Search models", exact: true }).fill("gpt-6.1-sol");
+        await list
+          .getByText("ChatGPT", { exact: true })
+          .locator("..")
+          .getByRole("menuitemradio", { name: /GPT-6\.1[- ]Sol/ })
+          .click();
+      }
       await expect
         .poll(
           async () =>

@@ -66,33 +66,25 @@ export function matchesShortcut(event: KeyboardEvent, keys: string[]): boolean {
 }
 
 /**
- * Opens the new-project dialog. ⌘⇧O rather than ⌘N, which a browser keeps for
- * its own window and never hands to the page.
+ * New session, everywhere: Home's composer for the current project. Never a
+ * project-creation shortcut. ⌘⇧O rather than ⌘N, which browsers reserve for a
+ * window and never hand to the page. Chrome, Edge and Firefox bind this chord to
+ * their bookmark manager but let the page claim it first.
  */
-export const NEW_PROJECT_KEYS = [MOD, "shift", "o"];
-
+export const NEW_SESSION_KEYS = [MOD, "shift", "o"];
 /**
- * Starts a session in the open project. Deliberately the same chord as
- * `NEW_PROJECT_KEYS`: the two never apply at once, so "make me a new one" stays
- * one gesture whose meaning follows whatever the page is showing.
+ * The native app's File › New Session. Delivered by the native menu only, so
+ * it is advertised only when that menu exists.
  */
-export const NEW_CHAT_KEYS = NEW_PROJECT_KEYS;
-/** Focus vocabulary for the same chord. */
-export const NEW_SESSION_IN_PROJECT_KEYS = NEW_PROJECT_KEYS;
+export const NATIVE_NEW_SESSION_KEYS = [MOD, "n"];
 
 /** The ⌘K command palette: sessions, projects, actions and settings. */
 export const COMMAND_PALETTE_KEYS = [MOD, "k"];
 /** The ⌘/ sheet that lists this catalog. */
 export const SHORTCUT_SHEET_KEYS = [MOD, "/"];
-/**
- * A new session. Browsers keep ⌘N for a window, so on the web this chord is
- * delivered only by the native shell's menu; the palette offers the same act.
- */
-export const NEW_SESSION_KEYS = [MOD, "n"];
 /** Show or hide the session sidebar. */
 export const TOGGLE_SIDEBAR_KEYS = [MOD, "b"];
 /** Pin the open drawer as a side column, or float it again. */
-export const DOCK_DRAWER_KEYS = [MOD, "\\"];
 /** Opens the session that has waited longest for you (Inbox › Needs you). */
 export const NEXT_NEEDS_YOU_KEYS = [MOD, "shift", "e"];
 
@@ -133,11 +125,10 @@ export const SHORTCUTS: readonly ShortcutEntry[] = [
     group: "General",
     spelled: true,
   },
-  { id: "new-session", keys: NEW_SESSION_KEYS, label: "New session", group: "Navigation" },
   {
-    id: "new-in-project",
-    keys: NEW_SESSION_IN_PROJECT_KEYS,
-    label: "New session in this project (new project elsewhere)",
+    id: "new-session",
+    keys: NEW_SESSION_KEYS,
+    label: "New session (in the current project)",
     group: "Navigation",
   },
   { id: "sidebar", keys: TOGGLE_SIDEBAR_KEYS, label: "Toggle the sidebar", group: "Navigation" },
@@ -154,7 +145,6 @@ export const SHORTCUTS: readonly ShortcutEntry[] = [
     group: "Navigation",
     spelled: true,
   },
-  { id: "dock", keys: DOCK_DRAWER_KEYS, label: "Dock or float the drawer", group: "Session" },
   { id: "approve", keys: ["enter"], label: "Approve the request", group: "Attention card" },
   { id: "deny", keys: ["d"], label: "Deny the request", group: "Attention card" },
   {
@@ -165,6 +155,22 @@ export const SHORTCUTS: readonly ShortcutEntry[] = [
     spelled: true,
   },
 ];
+
+const NATIVE_SHORTCUTS: readonly ShortcutEntry[] = [
+  {
+    id: "native-new-session",
+    keys: NATIVE_NEW_SESSION_KEYS,
+    label: "New session (app menu)",
+    group: "Navigation",
+  },
+];
+
+/** The catalog for this presentation: the native menu's chords only where it exists. */
+export function shortcutsFor(nativeMenu: boolean): readonly ShortcutEntry[] {
+  if (!nativeMenu) return SHORTCUTS;
+  const at = SHORTCUTS.findIndex((entry) => entry.id === "new-session") + 1;
+  return [...SHORTCUTS.slice(0, at), ...NATIVE_SHORTCUTS, ...SHORTCUTS.slice(at)];
+}
 
 export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = [
   "General",

@@ -17,6 +17,7 @@ import { isJsonObject } from "@/app/lib/json";
 import type { JsonValue } from "@/app/lib/json";
 import { isString } from "@/app/lib/primitive";
 import { managedAuthProvider } from "@/app/lib/providers";
+import type { SettingsSection } from "@/app/lib/routes";
 
 /** What the surface showing the error can offer to do about it. */
 export interface ErrorFix {
@@ -24,6 +25,8 @@ export interface ErrorFix {
   kind: "login" | "settings" | "retry" | "link";
   /** Set for `link` fixes: a page on the Arcee platform. */
   url?: string;
+  /** Set for `settings` fixes: the settings page that carries the fix. */
+  section?: SettingsSection;
 }
 
 export interface HumanError {
@@ -186,7 +189,6 @@ export function humanError(error: RunError, backend?: string | null): HumanError
     return {
       title: "Configuration needs repair",
       description: sentence(invalidConfig[1]),
-      fix: { kind: "settings", label: "Open settings" },
     };
   }
 
@@ -258,7 +260,7 @@ export function humanError(error: RunError, backend?: string | null): HumanError
       return {
         title: "There was a problem with authentication",
         description: "The API key was rejected. Add a valid Arcee API key to continue.",
-        fix: { kind: "settings", label: "Open settings" },
+        fix: { kind: "settings", label: "Open accounts", section: "accounts" },
       };
     }
     return SIGN_IN_AGAIN;
@@ -267,7 +269,7 @@ export function humanError(error: RunError, backend?: string | null): HumanError
     return {
       title: "This account is not allowed to do that",
       description: "Ask the workspace owner for access, or pick a model the account can use.",
-      fix: { kind: "settings", label: "Open settings" },
+      fix: { kind: "settings", label: "Open accounts", section: "accounts" },
     };
   }
 
@@ -306,7 +308,6 @@ export function humanError(error: RunError, backend?: string | null): HumanError
     return {
       title: "This model is not available",
       description: "The account cannot use the selected model. Pick a different one to continue.",
-      fix: { kind: "settings", label: "Open settings" },
     };
   }
   if (has("provider.unprocessable") || codes.has(422)) {

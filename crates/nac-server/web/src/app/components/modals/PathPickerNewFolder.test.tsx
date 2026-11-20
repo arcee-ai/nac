@@ -119,7 +119,19 @@ function nameInput() {
 }
 
 function draft() {
-  return screen.getByLabelText("Folder path") as HTMLInputElement;
+  return screen.getByRole<HTMLInputElement>("textbox", { name: "Folder path" });
+}
+
+function startTyping() {
+  fireEvent.click(screen.getByRole("button", { name: "Type a path" }));
+  return draft();
+}
+
+function currentCrumb(scope: Pick<typeof screen, "getByRole">, name: string) {
+  return within(scope.getByRole("navigation", { name: "Folder path" })).getByRole("button", {
+    current: "location",
+    name,
+  });
 }
 
 function createIn(form: HTMLElement, name: string) {
@@ -136,15 +148,15 @@ it("creates one folder, browses into it and leaves it for Select to apply", asyn
 
   createIn(form, "my project ü");
 
-  await waitFor(() => expect(draft().value).toBe(CREATED));
+  await waitFor(() => expect(currentCrumb(screen, "my project ü")).toBeTruthy());
   expect(create).toHaveBeenCalledTimes(1);
   expect(create).toHaveBeenCalledWith(PARENT, "my project ü");
   expect(screen.queryByRole("group", { name: "New folder" })).toBeNull();
-  await screen.findByText("No subdirectories here.", { exact: false });
+  await screen.findByText("No folders inside. You can still choose this one.");
   // Creating is not selecting: the parent form changes only through Select.
   expect(onSelect).not.toHaveBeenCalled();
 
-  fireEvent.click(screen.getByRole("button", { name: "Select" }));
+  fireEvent.click(screen.getByRole("button", { name: /^Choose “/ }));
   await waitFor(() => expect(onSelect).toHaveBeenCalledWith(CREATED));
 });
 
@@ -163,7 +175,7 @@ it.each([
   expect(alert.textContent).toContain(`Could not create “${name}”`);
   expect(alert.textContent).toContain(detail);
   expect(nameInput().value).toBe(name);
-  expect(draft().value).toBe(PARENT);
+  expect(currentCrumb(screen, "projects")).toBeTruthy();
   expect(create).toHaveBeenCalledTimes(1);
   // A definite refusal is not looked up again.
   expect(api.browsePath).not.toHaveBeenCalledWith(
@@ -185,10 +197,10 @@ it("a lost answer is reconciled before anything is offered, and never replayed",
   expect(alert.textContent).toContain("“my project ü” exists now");
   expect(alert.textContent).toContain("may have created it");
   expect(create).toHaveBeenCalledTimes(1);
-  expect(draft().value).toBe(PARENT);
+  expect(currentCrumb(screen, "projects")).toBeTruthy();
 
   fireEvent.click(within(form).getByRole("button", { name: "Open “my project ü”" }));
-  await waitFor(() => expect(draft().value).toBe(CREATED));
+  await waitFor(() => expect(currentCrumb(screen, "my project ü")).toBeTruthy());
   expect(create).toHaveBeenCalledTimes(1);
 });
 
@@ -207,7 +219,7 @@ it("a retry after reconciliation reports an existing folder truthfully", async (
   const alert = await within(form).findByText(/Could not create/);
   expect(alert.textContent).toContain("already exists");
   expect(create).toHaveBeenCalledTimes(2);
-  expect(draft().value).toBe(PARENT);
+  expect(currentCrumb(screen, "projects")).toBeTruthy();
 });
 
 it("a lost answer for a folder that was not made offers the retry", async () => {
@@ -230,7 +242,7 @@ it("a lost answer for a folder that was not made offers the retry", async () => 
 
   answer(`${PARENT}/fresh`, listing(`${PARENT}/fresh`));
   fireEvent.click(within(form).getByRole("button", { name: "Create" }));
-  await waitFor(() => expect(draft().value).toBe(`${PARENT}/fresh`));
+  await waitFor(() => expect(currentCrumb(screen, "fresh")).toBeTruthy());
   expect(create).toHaveBeenCalledTimes(2);
 });
 
@@ -268,7 +280,7 @@ it("a second Create while one is out sends nothing more", async () => {
 
   expect(create).toHaveBeenCalledTimes(1);
   await act(async () => slow.resolve({ path: CREATED }));
-  await waitFor(() => expect(draft().value).toBe(CREATED));
+  await waitFor(() => expect(currentCrumb(screen, "my project ü")).toBeTruthy());
 });
 
 it("leaving the directory drops a late answer instead of navigating", async () => {
@@ -278,11 +290,12 @@ it("leaving the directory drops a late answer instead of navigating", async () =
   const form = await openForm();
   createIn(form, "my project ü");
 
-  fireEvent.click(screen.getByRole("button", { name: "Parent directory" }));
-  await screen.findByRole("button", { name: "projects" });
+  const crumbs = screen.getByRole("navigation", { name: "Folder path" });
+  fireEvent.click(within(crumbs).getByRole("button", { name: "work" }));
+  await waitFor(() => expect(currentCrumb(screen, "work")).toBeTruthy());
   await act(async () => slow.resolve({ path: CREATED }));
 
-  expect(draft().value).toBe("/work");
+  expect(currentCrumb(screen, "work")).toBeTruthy();
   expect(screen.queryByRole("group", { name: "New folder" })).toBeNull();
 });
 
@@ -295,7 +308,7 @@ it("a path typed while the folder is made is still what Select applies", async (
   const form = await openForm();
   createIn(form, "my project ü");
 
-  fireEvent.change(draft(), { target: { value: typed } });
+  fireEvent.change(startTyping(), { target: { value: typed } });
   answer(
     PARENT,
     listing(PARENT, [
@@ -311,7 +324,7 @@ it("a path typed while the folder is made is still what Select applies", async (
   await screen.findByRole("button", { name: "my project ü" });
   expect(draft().value).toBe(typed);
 
-  fireEvent.click(screen.getByRole("button", { name: "Select" }));
+  fireEvent.click(screen.getByRole("button", { name: /^Choose “/ }));
   await waitFor(() => expect(onSelect).toHaveBeenCalledWith(typed));
   expect(onSelect).toHaveBeenCalledTimes(1);
 });
@@ -323,11 +336,11 @@ it("entering the listed path while the folder is made keeps the picker there", a
   const form = await openForm();
   createIn(form, "my project ü");
 
-  fireEvent.keyDown(draft(), { key: "Enter" });
+  fireEvent.keyDown(startTyping(), { key: "Enter" });
   await act(async () => slow.resolve({ path: CREATED }));
 
   await waitFor(() => expect(screen.queryByRole("group", { name: "New folder" })).toBeNull());
-  expect(draft().value).toBe(PARENT);
+  expect(currentCrumb(screen, "projects")).toBeTruthy();
 });
 
 it("typing or entering a path never creates anything", async () => {
@@ -336,9 +349,9 @@ it("typing or entering a path never creates anything", async () => {
   await screen.findByRole("button", { name: "taken" });
   missing(`${PARENT}/brand new`);
 
-  fireEvent.change(draft(), { target: { value: `${PARENT}/brand new` } });
+  fireEvent.change(startTyping(), { target: { value: `${PARENT}/brand new` } });
   fireEvent.keyDown(draft(), { key: "Enter" });
-  fireEvent.click(screen.getByRole("button", { name: "Select" }));
+  fireEvent.click(screen.getByRole("button", { name: /^Choose “/ }));
 
   await screen.findByText(/Cannot select this folder/);
   expect(create).not.toHaveBeenCalled();
@@ -366,7 +379,7 @@ it("creates on the SSH host being browsed, never locally", async () => {
 
   createIn(form, "my project ü");
 
-  await waitFor(() => expect(draft().value).toBe(CREATED));
+  await waitFor(() => expect(currentCrumb(screen, "my project ü")).toBeTruthy());
   expect(remote).toHaveBeenCalledWith(target, PARENT, "my project ü");
   expect(local).not.toHaveBeenCalled();
 });
@@ -397,10 +410,8 @@ it("a second picker instance keeps its own draft and form", async () => {
     </QueryClientProvider>,
   );
   await screen.findByRole("button", { name: "taken" });
-  await screen.findByRole("button", { name: "projects" });
   const [one, two] = screen.getAllByRole("dialog");
-  const draftOf = (dialog: HTMLElement) =>
-    within(dialog).getByLabelText("Folder path") as HTMLInputElement;
+  await waitFor(() => expect(currentCrumb(within(two), "work")).toBeTruthy());
   fireEvent.click(within(two).getByRole("button", { name: "New folder" }));
   fireEvent.change(within(two).getByLabelText("New folder name"), {
     target: { value: "half typed" },
@@ -412,8 +423,8 @@ it("a second picker instance keeps its own draft and form", async () => {
   });
   fireEvent.click(within(one).getByRole("button", { name: "Create" }));
 
-  await waitFor(() => expect(draftOf(one).value).toBe(CREATED));
-  expect(draftOf(two).value).toBe("/work");
+  await waitFor(() => expect(currentCrumb(within(one), "my project ü")).toBeTruthy());
+  expect(currentCrumb(within(two), "work")).toBeTruthy();
   expect((within(two).getByLabelText("New folder name") as HTMLInputElement).value).toBe(
     "half typed",
   );

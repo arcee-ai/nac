@@ -2,9 +2,9 @@ import { type SessionPanel } from "../../lib/routes";
 import type { SessionBehavior, SessionSnapshotResponse } from "../../types/api";
 /**
  * The session's one secondary surface. Floating, it is the shared `Drawer`:
- * 560px from the right (full width on request) or a bottom sheet on a phone.
- * Docked (⌘\), it is a column laid out beside the chat column, never inside
- * it. The route's panel picks what it shows; the goal has a drawer of its own.
+ * 560px from the right, or a bottom sheet on a phone.
+ * Wherever there is room it docks instead: a column laid out beside the chat
+ * column, never inside it. The route's panel picks what it shows; the goal has a drawer of its own.
  */
 export declare function SessionDrawer({ sessionId, snapshot, behavior, panel, goalEnabled, }: {
     sessionId: string;

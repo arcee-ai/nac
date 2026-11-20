@@ -1,8 +1,66 @@
 import { createProject, createSession, expect, test, waitForRunIdle } from "./harness";
-import type { ModelCatalog } from "../src/app/types/api";
-import { openSessionSettings } from "./nav-focus-helpers";
+import type { CreateSessionRequest, ModelCatalog } from "../src/app/types/api";
+import { homeComposer, openModelList, startSessionFromHome } from "./focus-embedded-helpers";
 
 test.use({ orchestration: "0" });
+
+test("offers the launch folder without creating projects until the user chooses it", async ({
+  harness,
+  page,
+  request,
+}) => {
+  await page.goto(harness.baseUrl);
+  await expect(page.getByRole("heading", { name: "Add a project", exact: true })).toBeVisible();
+  const launch = page.getByRole("button", { name: "Use launch folder", exact: true });
+  await expect(launch).toBeVisible();
+  const projectsUrl = `${harness.baseUrl}/projects`;
+  expect((await (await request.get(projectsUrl)).json()).projects).toEqual([]);
+  await launch.click();
+  await expect(page).toHaveURL(/#\/\?project=[^&]+$/);
+  await expect(homeComposer(page)).toBeFocused();
+  expect((await (await request.get(projectsUrl)).json()).projects).toHaveLength(1);
+  expect(await (await request.get(`${harness.baseUrl}/sessions`)).json()).toEqual([]);
+});
+
+test("a rejected Sandbox launch keeps the draft and never starts a Local session", async ({
+  harness,
+  page,
+  request,
+}) => {
+  const projectId = await createProject(request, harness);
+  let probes = 0;
+  await page.route("**/sandbox/availability", (route) => {
+    probes++;
+    return route.fulfill({ json: { status: "ready" } });
+  });
+  const launches: CreateSessionRequest[] = [];
+  await page.route("**/sessions", (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    launches.push(route.request().postDataJSON() as CreateSessionRequest);
+    return route.fulfill({ status: 400, json: { error: "Fixture Podman launch rejected" } });
+  });
+  await page.goto(`${harness.baseUrl}/#/?project=${projectId}`);
+  const draft = homeComposer(page);
+  await draft.fill("Run the fixture in a sandbox");
+  await expect(page.getByRole("button", { name: "Start session", exact: true })).toBeEnabled();
+  expect(probes).toBe(0);
+  const workspace = page.getByRole("button", { name: "Additional settings" });
+  await workspace.click();
+  await page.getByRole("switch", { name: "Sandbox", exact: true }).click();
+  await page.getByRole("button", { name: "Sandbox options" }).click();
+  await page.getByRole("textbox", { name: "Container image" }).fill("fixture-image");
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Start sandbox session" }).click();
+  await expect(page.getByRole("alert")).toContainText("Fixture Podman launch rejected");
+  await expect(draft).toHaveValue("Run the fixture in a sandbox");
+  expect(launches).toHaveLength(1);
+  expect(launches[0]).toMatchObject({
+    project_id: projectId,
+    first_chat: false,
+    sandbox: { enabled: true, image: "fixture-image" },
+  });
+  expect(await (await request.get(`${harness.baseUrl}/sessions`)).json()).toEqual([]);
+});
 
 for (const mobile of [false, true]) {
   test(`reviews inherited direct setup, session-only settings and failed saves (${mobile ? "mobile" : "desktop"})`, async ({
@@ -13,42 +71,23 @@ for (const mobile of [false, true]) {
     if (mobile) await page.setViewportSize({ width: 390, height: 844 });
     const projectId = await createProject(request, harness);
     await page.goto(`${harness.baseUrl}/#/project/${projectId}`);
-    // An empty project opens Home's composer; its model chip shows what the
-    // session inherits, and Start session creates it and sends the first prompt.
     await expect(page).toHaveURL(new RegExp(`#/\\?project=${projectId}$`));
-    const prompt = page.getByRole("textbox", { name: "What should we work on?", exact: true });
-    await expect(prompt).toBeVisible();
-    await page.getByRole("button", { name: /^Model: / }).click();
-    const dialog = page.getByRole("dialog", { name: "Model for this session" });
-    await expect(dialog).toContainText("Project default");
-    await expect(dialog).toContainText("reasoning high");
-    await expect(dialog.getByText("Primary model", { exact: true })).toBeVisible();
-    await expect(dialog.getByRole("radiogroup")).toHaveCount(0);
-    await expect(dialog.getByText("Optional light model", { exact: true })).toHaveCount(0);
+    const modelChip = page.getByRole("button", { name: /^Model: / });
+    await expect(modelChip).toHaveAccessibleName(/high reasoning/i);
+    await openModelList(page);
     await page.keyboard.press("Escape");
-    await expect(dialog).toHaveCount(0);
+    await expect(modelChip).toBeFocused();
+
     harness.provider.enqueue(
       "setup-first-run",
       { token: "SETUP_FIRST_RUN" },
       { kind: "text", text: "Setup first run complete.", stream: "request" },
     );
-    await prompt.fill("SETUP_FIRST_RUN");
-    const created = page.waitForResponse(
-      (response) =>
-        response.request().method() === "POST" && response.url() === `${harness.baseUrl}/sessions`,
-    );
-    await page.getByRole("button", { name: "Start session", exact: true }).focus();
-    await page.keyboard.press("Enter");
-    const response = await created;
-    expect(response.ok()).toBe(true);
-    const sessionId = (await response.json()).metadata.session_id;
-    await expect(page).toHaveURL(new RegExp(`/session/${sessionId}/insights`));
+    const sessionId = await startSessionFromHome(page, "SETUP_FIRST_RUN");
     await waitForRunIdle(request, harness, sessionId);
     const configUrl = `${harness.baseUrl}/sessions/${sessionId}/config`;
     const before = await (await request.get(configUrl)).json();
     expect(before).toMatchObject({ reasoning_effort: "high" });
-    // Without a model override, Home inherits exactly as any plain project
-    // create does (the server applies the project default).
     const reference = await createSession(request, harness, "direct", projectId);
     const inherited = await (
       await request.get(`${harness.baseUrl}/sessions/${reference}/config`)
@@ -65,73 +104,34 @@ for (const mobile of [false, true]) {
       expect(before[field]).toEqual(inherited[field]);
     const projectBefore = await (await request.get(`${harness.baseUrl}/projects`)).json();
 
-    await openSessionSettings(page);
-    const settings = page.getByRole("dialog", { name: "Session settings", exact: true });
-    await expect(settings).toContainText(
-      "Project defaults and existing children keep their settings",
-    );
-    await expect(settings.getByText("Primary model", { exact: true })).toBeVisible();
-    await settings
-      .getByRole("textbox", { name: "Session title", exact: true })
-      .fill(`Setup ${mobile ? "mobile" : "desktop"}`);
-    await settings.getByText("Advanced execution settings", { exact: true }).click();
-    await settings.getByRole("button", { name: "Advanced Configurations", exact: true }).click();
-    await settings.getByRole("textbox", { name: "Context limit", exact: true }).fill("222");
-    await settings.getByRole("button", { name: "Save", exact: true }).click();
-    await expect(settings).toHaveCount(0);
+    const chooseEffort = async (label: "Low" | "High") => {
+      await modelChip.click();
+      await page.getByRole("radio", { name: label, exact: true }).press("Space");
+    };
+    await chooseEffort("Low");
+    await expect(page.getByText("Reasoning set to low", { exact: true })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(modelChip).toHaveAccessibleName(/low reasoning/i);
     const saved = await (await request.get(configUrl)).json();
     expect(saved).toMatchObject({
       ...before,
       config_version: before.config_version + 1,
-      orchestrator_compaction_threshold: 222,
+      reasoning_effort: "low",
     });
     expect(await (await request.get(`${harness.baseUrl}/projects`)).json()).toEqual(projectBefore);
 
-    await openSessionSettings(page);
-    await settings.getByText("Advanced execution settings", { exact: true }).click();
-    await settings.getByRole("button", { name: "Advanced Configurations", exact: true }).click();
-    await settings.getByRole("textbox", { name: "Context limit", exact: true }).fill("333");
     let attempts = 0;
     await page.route(configUrl, async (route) => {
       if (route.request().method() !== "PATCH") return route.continue();
       attempts += 1;
       await route.abort("failed");
     });
-    await settings.getByRole("button", { name: "Save", exact: true }).click();
-    await expect(settings.getByRole("alert")).toContainText("outcome is unknown");
-    await settings
-      .getByRole("textbox", { name: "Session title", exact: true })
-      .fill("Edited after unknown outcome");
-    await expect(settings.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+    await chooseEffort("High");
+    await expect(page.getByText(/configuration save outcome is unknown/i)).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(modelChip).toBeDisabled();
     expect(attempts).toBe(1);
-    await page.unroute(configUrl);
-    await page.keyboard.press("Escape");
-    await expect(settings).toHaveCount(0);
-
-    await openSessionSettings(page);
-    await expect(
-      settings.getByRole("textbox", { name: "Session title", exact: true }),
-    ).toBeVisible();
-    const externalSave = await request.patch(configUrl, {
-      data: { orchestrator_compaction_threshold: 444 },
-    });
-    expect(externalSave.ok()).toBe(true);
-    await settings
-      .getByRole("textbox", { name: "Session title", exact: true })
-      .fill("Stale editor must not rename");
-    await settings.getByRole("button", { name: "Save", exact: true }).click();
-    await expect(settings.getByRole("alert")).toContainText("settings changed");
-    await expect(settings.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
-    const summary = await (await request.get(`${harness.baseUrl}/sessions`)).json();
-    expect(
-      summary.find(
-        (entry: { summary: { session_id: string } }) => entry.summary.session_id === sessionId,
-      ).summary.title,
-    ).toBe(`Setup ${mobile ? "mobile" : "desktop"}`);
-    const footer = await settings.getByRole("button", { name: "Save", exact: true }).boundingBox();
-    expect(footer).not.toBeNull();
-    expect(footer!.y + footer!.height).toBeLessThanOrEqual(page.viewportSize()!.height);
-    await page.keyboard.press("Escape");
+    expect(await (await request.get(configUrl)).json()).toEqual(saved);
   });
 
   test(`connects Codex alongside Arcee and updates available models without changing project (${mobile ? "mobile" : "desktop"})`, async ({
@@ -227,40 +227,40 @@ for (const mobile of [false, true]) {
         },
       });
     });
-    await page.goto(`${harness.baseUrl}/#/session/${sessionId}/files`);
-    await openSessionSettings(page);
-    const settings = page.getByRole("dialog", { name: "Session settings", exact: true });
-    await settings.getByRole("button", { name: "Provider connections", exact: true }).click();
-    const accounts = settings.getByRole("region", { name: "Provider connections" });
+    const sessionUrl = `${harness.baseUrl}/#/session/${sessionId}/files`;
+    const accountsUrl = `${harness.baseUrl}/#/settings/accounts`;
+    await page.goto(accountsUrl);
+    const accounts = page.getByRole("region", { name: "Subscriptions", exact: true });
     await expect(accounts.getByText("Signed in", { exact: true })).toHaveCount(1);
     const popup = page.waitForEvent("popup");
     await accounts.getByRole("button", { name: "Sign in with ChatGPT", exact: true }).click();
     await (await popup).close();
     await expect(accounts.getByText("Signed in", { exact: true })).toHaveCount(2);
-    await settings.getByRole("button").filter({ hasText: "GPT-5.6 Sol" }).first().click();
-    await page.getByPlaceholder("Search models…").fill("codex-setup-fixture");
-    await expect(page.getByText("Codex setup fixture", { exact: true })).toBeVisible();
-    await page.getByPlaceholder("Search models…").press("Enter");
-    await expect(
-      settings.getByRole("button").filter({ hasText: "Codex setup fixture" }).first(),
-    ).toBeVisible();
-    await expect(settings.getByRole("button", { name: "Save", exact: true })).toBeEnabled();
+
+    await page.goto(sessionUrl);
+    let models = await openModelList(page);
+    await page.getByRole("textbox", { name: "Search models" }).fill("codex-setup-fixture");
+    await expect(models.getByRole("menuitemradio", { name: /Codex setup fixture/ })).toBeVisible();
     expect(modelsRequests).toContainEqual({ backend: "chatgpt-codex-responses" });
-    await accounts.getByRole("button", { name: "Sign out", exact: true }).last().click();
+
+    await page.goto(accountsUrl);
+    await expect(accounts.getByText("Signed in", { exact: true })).toHaveCount(2);
+    await accounts.getByRole("button", { name: "Sign out", exact: true }).first().click();
     await expect(accounts.getByText("Signed in", { exact: true })).toHaveCount(1);
-    await expect(settings.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
     expect(arceeLogouts).toBe(0);
-    await expect(page).toHaveURL(new RegExp(`/session/${sessionId}/files`));
+
+    await page.goto(sessionUrl);
+    models = await openModelList(page);
+    await page.getByRole("textbox", { name: "Search models" }).fill("codex-setup-fixture");
+    await expect(models.getByText("No matching models")).toBeVisible();
     expect(
       await (await request.get(`${harness.baseUrl}/sessions/${sessionId}/config`)).json(),
     ).toMatchObject({ model: "gpt-5.6-sol", backend: "openai-responses" });
-    await page.keyboard.press("Escape");
   });
 }
 
 test("explicitly updates a saved project default while existing children keep creation snapshots and future children inherit the accepted parent", async ({
   harness,
-  page,
   request,
 }) => {
   const projectId = await createProject(request, harness);
@@ -298,19 +298,20 @@ test("explicitly updates a saved project default while existing children keep cr
   });
   expect(presetResponse.ok()).toBe(true);
   const preset = await presetResponse.json();
-  await page.goto(`${harness.baseUrl}/#/session/${parentId}/files`);
-  await openSessionSettings(page);
-  const settings = page.getByRole("dialog", { name: "Session settings", exact: true });
-  await settings
-    .getByRole("button", { name: "Advanced presets and provider setup", exact: true })
-    .click();
-  await settings.getByRole("button", { name: "Create New", exact: true }).click();
-  await page.getByText("Explicit future default", { exact: true }).click();
-  await settings
-    .getByRole("checkbox", { name: /Use selected preset as the project default/ })
-    .check();
-  await settings.getByRole("button", { name: "Save", exact: true }).click();
-  await expect(settings).toHaveCount(0);
+  const parentUpdate = await request.patch(`${harness.baseUrl}/sessions/${parentId}/config`, {
+    data: {
+      model: preset.model,
+      reasoning_effort: preset.reasoning_effort,
+      orchestrator_compaction_threshold: preset.orchestrator_compaction_threshold,
+      api_key_env: preset.api_key_env,
+      extra_headers: { "X-Setup": "future" },
+    },
+  });
+  expect(parentUpdate.ok()).toBe(true);
+  const defaultUpdate = await request.patch(`${harness.baseUrl}/projects/${projectId}`, {
+    data: { default_model_config_id: preset.config_id },
+  });
+  expect(defaultUpdate.ok()).toBe(true);
   const current = await (
     await request.get(`${harness.baseUrl}/sessions/${parentId}/config`)
   ).json();
@@ -326,28 +327,10 @@ test("explicitly updates a saved project default while existing children keep cr
     projects.projects.find((project: { project_id: string }) => project.project_id === projectId)
       .default_model_config_id,
   ).toBe(preset.config_id);
-  // Opening the exact saved tuple auto-selects its preset. The explicit default
-  // action must retain that identity without requiring a redundant re-selection.
-  await openSessionSettings(page);
-  await settings
-    .getByRole("button", { name: "Advanced presets and provider setup", exact: true })
-    .click();
-  await expect(settings.getByText("Explicit future default", { exact: true })).toBeVisible();
-  await settings
-    .getByRole("checkbox", { name: /Use selected preset as the project default/ })
-    .check();
-  const repeatedDefault = page.waitForResponse(
-    (response) =>
-      response.url() === `${harness.baseUrl}/projects/${projectId}` &&
-      response.request().method() === "PATCH",
-  );
-  await settings.getByRole("button", { name: "Save", exact: true }).click();
-  const defaultResponse = await repeatedDefault;
-  expect(defaultResponse.ok()).toBe(true);
-  expect(defaultResponse.request().postDataJSON()).toMatchObject({
-    default_model_config_id: preset.config_id,
+  const repeatDefault = await request.patch(`${harness.baseUrl}/projects/${projectId}`, {
+    data: { default_model_config_id: preset.config_id },
   });
-  await expect(settings).toHaveCount(0);
+  expect(repeatDefault.ok()).toBe(true);
   expect(
     await (await request.get(`${harness.baseUrl}/sessions/${parentId}/config`)).json(),
   ).toEqual(current);

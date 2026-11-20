@@ -1,11 +1,13 @@
 import type { SessionBehavior } from "../../types/api";
 import { type ModelOverride } from "./modelChoice";
+import { type SandboxOptions } from "./workspaceSandbox";
 export interface StartRequest {
     projectId: string;
     behavior: SessionBehavior;
     prompt: string;
     /** Null: the server inherits the project's model, as for any plain create. */
     model: ModelOverride | null;
+    sandbox?: SandboxOptions;
 }
 /**
  * Home's send: create the session (inheriting, or with the composer's model
@@ -21,5 +23,6 @@ export declare function useStartSession(): {
     /** An uncertain configured create needs a fresh review (reload) before retrying. */
     needsReview: boolean;
     error: string | null;
+    sandboxProgress: string | null;
     clearError: () => void;
 };

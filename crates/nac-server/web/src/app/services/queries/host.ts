@@ -6,7 +6,10 @@ import {
   runAuthentication,
 } from "@/app/features/managed/controller/authenticationWorkflow";
 
-import { refreshProviderAuthentication } from "@/app/services/queries/configuration";
+import {
+  refreshProviderAuthentication,
+  refreshUnifiedProviderCatalog,
+} from "@/app/services/queries/configuration";
 import { queryKeys } from "@/app/services/queries/keys";
 import type {
   ManagedAuthProvider,
@@ -26,14 +29,9 @@ export function useStoreInfo() {
   });
 }
 
-/**
- * Whether this host can run sandboxed sessions. Probing spawns podman
- * subprocesses, so it runs only while a caller asks for it — today that is
- * the launch form with sandbox mode selected.
- */
+/** Probing starts Podman subprocesses, so only check after selecting Sandbox. */
 export function useSandboxAvailability(enabled: boolean) {
   const { api } = useNativeRuntime();
-
   return useQuery<SandboxAvailability>({
     queryKey: queryKeys.sandboxAvailability,
     queryFn: ({ signal }) => api.getSandboxAvailability(signal),
@@ -43,20 +41,13 @@ export function useSandboxAvailability(enabled: boolean) {
   });
 }
 
-/**
- * Sandbox setup in progress for one launch (image pull, container start),
- * polled while the launch request is in flight so a minutes-long first pull
- * shows movement instead of a frozen button. Keyed by the launch id sent
- * with the create request, so concurrent launches stay independent.
- */
-export function useSandboxActivity(enabled: boolean, key: string | null) {
+/** Poll only the current launch, using the correlation key sent at creation. */
+export function useSandboxActivity(key: string | null) {
   const { api } = useNativeRuntime();
-
   return useQuery<SandboxActivity | null>({
     queryKey: [...queryKeys.sandboxActivity, key],
-    queryFn: ({ signal }) => api.getSandboxActivity(key as string, signal),
-    enabled: enabled && key !== null,
-    staleTime: 0,
+    queryFn: ({ signal }) => (key ? api.getSandboxActivity(key, signal) : null),
+    enabled: key !== null,
     refetchInterval: 1000,
     retry: false,
   });
@@ -84,9 +75,15 @@ export function useStoreCredential() {
 
   const client = useQueryClient();
   return useMutation({
+    gcTime: 0,
     mutationFn: ({ name, value }: { name: string; value: string }) =>
       api.storeCredential(name, value),
-    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.credentials }),
+    onSuccess: async () => {
+      await Promise.all([
+        client.invalidateQueries({ queryKey: queryKeys.credentials }),
+        refreshUnifiedProviderCatalog(client),
+      ]);
+    },
   });
 }
 
@@ -110,7 +107,12 @@ export function useDeleteCredential() {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (name: string) => api.deleteCredential(name),
-    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.credentials }),
+    onSuccess: async () => {
+      await Promise.all([
+        client.invalidateQueries({ queryKey: queryKeys.credentials }),
+        refreshUnifiedProviderCatalog(client),
+      ]);
+    },
   });
 }
 

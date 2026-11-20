@@ -1,9 +1,9 @@
-import type { Locator, Page, TestInfo } from "@playwright/test";
+import type { Locator, TestInfo } from "@playwright/test";
 import { createSession, expect, test } from "./harness";
 import { openCustomMcpServer, phoneLayout } from "./mcp-library-fixture";
 import { captureSetup, withSetupBaselines, setupBaseline } from "./setup-visual-fixture";
 import { openNameZoom } from "./session-name-zoom";
-import { openSessionSettings, openSettingsSection } from "./settings-focus";
+import { openSessionRename, openSettingsSection } from "./settings-focus";
 
 test.use({ orchestration: "0", hasTouch: true });
 test.skip(
@@ -78,15 +78,8 @@ async function noOverflow(dialog: Locator, info: TestInfo) {
   expect(problems).toEqual([]);
 }
 
-async function openSettings(page: Page) {
-  const dialog = await openSessionSettings(page);
-  await expect(dialog.getByRole("textbox", { name: "Session title" })).toBeVisible();
-  await expect(dialog.getByRole("button", { name: "Save", exact: true })).toBeEnabled();
-  return dialog;
-}
-
 for (const width of [1440, 768, 390]) {
-  test(`settings and MCP edit, error, cancel and saved states at ${width}px`, async ({
+  test(`rename and MCP edit, error, cancel and saved states at ${width}px`, async ({
     harness,
     page,
     request,
@@ -97,61 +90,56 @@ for (const width of [1440, 768, 390]) {
       await page.emulateMedia({ reducedMotion: "reduce" });
       await baseline.serve(page, harness.baseUrl);
       const id = await createSession(request, harness, "direct");
-      const configUrl = `${harness.baseUrl}/sessions/${id}/config`;
+      const presentation = `${harness.baseUrl}/sessions/${id}/presentation`;
       await page.goto(`${harness.baseUrl}/#/session/${id}/insights`);
-      const settings = await openSettings(page);
+      const settings = await openSessionRename(page);
+      const title = settings.getByRole("textbox", { name: "Title", exact: true });
+      const notices = page.getByRole("region", { name: "Notifications", exact: true });
+      const save = settings.getByRole("button", { name: "Save", exact: true });
       await captureSetup(page, info, width, "settings-default");
-      await settings
-        .getByRole("textbox", { name: "Session title" })
-        .fill("Runtime preferences fixture");
-      await settings.getByText("Advanced execution settings", { exact: true }).click();
-      await settings.getByRole("button", { name: "Advanced Configurations", exact: true }).click();
-      const context = settings.getByRole("textbox", { name: "Context limit" });
-      await context.fill("48000");
+      await title.fill("Runtime preferences fixture");
       await noOverflow(settings, info);
       await info.attach("settings-semantics.txt", {
         body: await settings.ariaSnapshot(),
         contentType: "text/plain",
       });
-      await captureSetup(page, info, width, "settings-advanced", context);
+      await captureSetup(page, info, width, "settings-edit", title);
       await settings.getByRole("button", { name: "Cancel", exact: true }).click();
       await expect(settings).toHaveCount(0);
-      await openSettings(page);
-      await expect(settings.getByRole("textbox", { name: "Session title" })).toHaveValue("");
-      await settings
-        .getByRole("textbox", { name: "Session title" })
-        .fill("Runtime preferences fixture");
+      await openSessionRename(page);
+      await expect(title).toHaveValue("");
+      await title.fill("Runtime preferences fixture");
+
       let attempts = 0;
       let release!: () => void;
       const pending = new Promise<void>((resolve) => {
         release = resolve;
       });
-      await page.route(configUrl, async (route) => {
-        if (route.request().method() !== "PATCH") return route.continue();
+      await page.route(presentation, async (route) => {
+        if (route.request().method() !== "PUT") return route.continue();
         attempts += 1;
         if (attempts === 1)
           return route.fulfill({
             status: 400,
-            json: { error: "Configured Deny: this runtime setting cannot be changed." },
+            json: { error: "Configured Deny: this fixture title cannot be changed." },
           });
         await pending;
         return route.continue();
       });
-      await settings.getByText("Advanced execution settings", { exact: true }).click();
-      await settings.getByRole("button", { name: "Advanced Configurations", exact: true }).click();
-      await context.fill("48000");
-      await settings.getByRole("button", { name: "Save", exact: true }).click();
-      await expect(settings.getByRole("alert")).toContainText("Configured Deny");
-      await captureSetup(page, info, width, "settings-rejected", settings.getByRole("alert"));
-      await settings.getByRole("button", { name: "Save", exact: true }).click();
-      await expect(settings.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
-      await captureSetup(page, info, width, "settings-pending");
-      release();
+      await save.click();
+      const rejected = notices.getByRole("alert").filter({ hasText: "Configured Deny" });
+      await expect(rejected).toBeVisible();
+      await captureSetup(page, info, width, "settings-rejected", rejected);
+      try {
+        await save.click();
+        await expect(save).toBeDisabled();
+        await captureSetup(page, info, width, "settings-pending");
+      } finally {
+        release();
+      }
       await expect(settings).toHaveCount(0);
-      await openSettings(page);
-      await expect(settings.getByRole("textbox", { name: "Session title" })).toHaveValue(
-        "Runtime preferences fixture",
-      );
+      await openSessionRename(page);
+      await expect(title).toHaveValue("Runtime preferences fixture");
       await page.keyboard.press("Escape");
       await expect(settings).toHaveCount(0);
 
@@ -262,7 +250,7 @@ test("settings and MCP controls at actual 200 percent browser zoom", async ({
       for (const width of [1440, 768, 390]) {
         await page.setViewportSize({ width, height: 1000 });
         await page.goto(`${harness.baseUrl}/#/session/${id}/insights`);
-        const settings = await openSettings(page);
+        const settings = await openSessionRename(page);
         await noOverflow(settings, info);
         await captureSetup(page, info, width, "settings-200pct");
         await settings.getByRole("button", { name: "Cancel", exact: true }).click();

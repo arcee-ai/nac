@@ -152,7 +152,8 @@ for (const orchestration of [null, "0"] as const) {
         }
         await expect(insights.getByRole("tab", { name: "Threads", exact: true })).toHaveCount(0);
         await expect(insights.getByRole("tab", { name: "Worksets", exact: true })).toHaveCount(0);
-        await page.keyboard.press("Escape");
+        if (mobile) await page.keyboard.press("Escape");
+        else await insights.getByRole("button", { name: "Hide panel", exact: true }).click();
         await expect(insights).toBeHidden();
         await expect(page.getByRole("button", { name: "Spawn", exact: true })).toHaveCount(0);
         await expect(page.locator(BEHAVIOR_MARKERS)).toHaveCount(0);
@@ -221,12 +222,20 @@ for (const orchestration of [null, "0"] as const) {
         { kind: "text", text: "first chat response", stream: "request" },
       );
       await page.keyboard.type("POLICY_FIRST_TOKEN");
+      const start = page.getByRole("button", { name: "Start session", exact: true });
+      await expect(start).toBeEnabled();
+      await start.focus();
+      await expect(start).toBeFocused();
       const created = page.waitForResponse(
         (response) =>
           response.url() === `${harness.baseUrl}/sessions` &&
           response.request().method() === "POST",
       );
-      await page.getByRole("button", { name: "Start session", exact: true }).focus();
+      const firstRun = page.waitForResponse(
+        (response) =>
+          /\/sessions\/[^/]+\/runs$/.test(new URL(response.url()).pathname) &&
+          response.request().method() === "POST",
+      );
       await page.keyboard.press("Enter");
       const response = await created;
       // The project's first primary session converges under concurrent submits.
@@ -237,6 +246,11 @@ for (const orchestration of [null, "0"] as const) {
       });
       await expect(page.getByRole("combobox", { name: "Message" })).toBeVisible();
       const firstId = (await response.json()).metadata.session_id;
+      // Polling the session takes the same local-operation gate as run admission.
+      const delivered = await firstRun;
+      expect(delivered.url()).toBe(`${harness.baseUrl}/sessions/${firstId}/runs`);
+      expect(delivered.request().postDataJSON()).toMatchObject({ prompt: "POLICY_FIRST_TOKEN" });
+      expect(delivered.status()).toBe(202);
       await waitForRunIdle(request, harness, firstId);
       await expect(page.getByText("first chat response")).toBeVisible();
       await page.getByRole("combobox", { name: "Message" }).focus();

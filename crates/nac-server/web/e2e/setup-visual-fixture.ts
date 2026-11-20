@@ -106,7 +106,7 @@ export async function installSetupFixture(
   width: number,
   catalogReady?: Promise<void>,
 ) {
-  const folder = `/tmp/nac-all522-visual-${width}`;
+  const folder = path.join(harness.runRoot, `visual-workspace-${width}`);
   await initializeHarnessWorkspace(folder);
   const catalog = (await (await request.get(`${harness.baseUrl}/models`)).json()) as ModelCatalog;
   const provider = catalog.providers.find((entry) => entry.id === "openai-responses")!;

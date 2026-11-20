@@ -29,8 +29,6 @@ export interface ComposerFooterProps {
         onOpenChange: (open: boolean) => void;
         focusKey: string | null;
     };
-    /** Session settings, until the session header's ⋯ menu carries it. */
-    onSettings: (() => void) | null;
     contextTokens: number | null;
     onCompact: (() => void) | null;
     compacting: boolean;
@@ -41,4 +39,4 @@ export interface ComposerFooterProps {
  * and Send in its context ring. Nothing else lives here; everything that asks
  * for a decision rides in the attention card above the composer instead.
  */
-export declare function ComposerFooter({ sessionId, behavior, compact, menu, metadata, modelLabel, modelDisabled, ssh, permissionSheet, onSettings, contextTokens, onCompact, compacting, submit, }: ComposerFooterProps): import("react").JSX.Element;
+export declare function ComposerFooter({ sessionId, behavior, compact, menu, metadata, modelLabel, modelDisabled, ssh, permissionSheet, contextTokens, onCompact, compacting, submit, }: ComposerFooterProps): import("react").JSX.Element;

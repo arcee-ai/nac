@@ -1,8 +1,8 @@
-import { createDirectSession, expandSidePanel, expect, showRoutePanel, test } from "./harness";
+import { createDirectSession, expect, showRoutePanel, test } from "./harness";
 import { reviewTerminalEvidence } from "./terminal-evidence";
 
 for (const mobile of [false, true]) {
-  test(`terminal options keep keyboard focus ${mobile ? "on a phone" : "in a full-width drawer"}`, async ({
+  test(`terminal options keep keyboard focus ${mobile ? "on a phone" : "in a docked panel"}`, async ({
     harness,
     page,
     request,
@@ -14,9 +14,11 @@ for (const mobile of [false, true]) {
     const pane = page.getByRole("region", { name: "Session terminal", exact: true });
     await pane.getByRole("button", { name: /^New shell$/i }).click();
     await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
-    if (!mobile) await expandSidePanel(page);
-    // Expanding replaces the observer along with its containing panel.
-    await expect(pane.getByText("Connected", { exact: true })).toBeVisible();
+    if (!mobile) {
+      await expect(
+        page.getByRole("complementary", { name: "Terminal", exact: true }),
+      ).toBeVisible();
+    }
     // Seed one painted selection with intentional keyboard input before the
     // menu-only request audit. Octal keeps the echoed command distinct from it.
     const evidence = "menu focus handoff";

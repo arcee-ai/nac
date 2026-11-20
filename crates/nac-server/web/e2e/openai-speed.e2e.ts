@@ -1,11 +1,11 @@
 import path from "node:path";
 import { expect, test, waitForRunIdle } from "./harness";
 import { startSessionFromHome } from "./focus-embedded-helpers";
-import { openSessionSettings } from "./nav-focus-helpers";
+import { modelChip, openModelCatalog, openModelSettings } from "./speed-controls";
 
 test.use({ orchestration: "0", codexCatalogFixture: true });
 
-test("native OpenAI speed survives settings, protocol changes and restart", async ({
+test("native OpenAI speed survives composer settings, protocol changes and restart", async ({
   harness,
   page,
   request,
@@ -32,6 +32,7 @@ test("native OpenAI speed survives settings, protocol changes and restart", asyn
       model: string;
       base_url: string;
       reasoning_effort: string;
+      config_version: number;
       service_tier: string | null;
     };
   // Keep provider model discovery deterministic and off public endpoints;
@@ -56,14 +57,11 @@ test("native OpenAI speed survives settings, protocol changes and restart", asyn
   const mobile = process.env.NAC_VISUAL_MOBILE === "1";
   await page.setViewportSize(mobile ? { width: 390, height: 844 } : { width: 1440, height: 900 });
   await page.goto(`${harness.baseUrl}/#/session/${sessionId}/delegated`);
-  await expect(page.getByRole("button", { name: "Model", exact: true })).toHaveAttribute(
-    "title",
-    /OpenAI Responses/,
-  );
+  await expect(modelChip(page)).toHaveAccessibleName(/GPT-6.1 Sol, High reasoning/);
   await expect(page.getByRole("heading", { name: "Get started" })).toBeVisible();
   if (mobile) {
-    const label = page.getByRole("button", { name: "Model", exact: true }).locator("span").first();
-    await expect(label).toHaveText("GPT-6.1 Sol");
+    const label = modelChip(page).locator("span").first();
+    await expect(label).toHaveText(/GPT-6\.1 Sol\s*High/);
     await expect
       .poll(async () => label.evaluate((node) => node.scrollWidth <= node.clientWidth))
       .toBe(true);
@@ -82,6 +80,7 @@ test("native OpenAI speed survives settings, protocol changes and restart", asyn
       animations: "disabled",
     });
   }
+  await openModelSettings(page);
   const speed = (name: string) => page.getByRole("button", { name: `Speed: ${name}` });
   const initialSpeed = speed("Provider default");
   if (mobile) {
@@ -90,10 +89,7 @@ test("native OpenAI speed survives settings, protocol changes and restart", asyn
     expect(size?.height).toBeGreaterThanOrEqual(44);
   }
   await initialSpeed.click();
-  await expect(page.getByRole("menuitemradio", { name: "Use provider default" })).toHaveAttribute(
-    "aria-checked",
-    "true",
-  );
+  await expect(page.getByRole("menuitemradio", { checked: true })).toHaveCount(0);
   if (process.env.NAC_VISUAL_DIR && process.env.NAC_VISUAL_LABEL === "after") {
     await page.waitForTimeout(350);
     await page.screenshot({
@@ -104,42 +100,60 @@ test("native OpenAI speed survives settings, protocol changes and restart", asyn
     });
   }
   await page.keyboard.press("Escape");
-  await expect(initialSpeed).toBeFocused();
-  const disclosure = page.getByRole("button", { name: "Speed pricing and access" });
-  await disclosure.click();
-  await expect(page.getByText(/Higher token cost; subject to your OpenAI project/)).toBeVisible();
+  await expect(modelChip(page)).toBeFocused();
+  await openModelSettings(page);
+  await expect(page.getByText(/Faster tiers cost more and depend on project access/)).toBeVisible();
   await expect(page.getByRole("link", { name: "OpenAI pricing" })).toHaveAttribute(
     "href",
     "https://developers.openai.com/api/docs/pricing",
   );
-  await page.keyboard.press("Escape");
-  await expect(disclosure).toBeFocused();
-  const rejectSave = async (route: import("@playwright/test").Route) => {
-    if (route.request().method() !== "PATCH") return route.fallback();
-    await route.fulfill({ status: 409, json: { error: "Configuration changed" } });
-  };
-  await page.route(configUrl, rejectSave);
+  const initial = await config();
+  const newer = await request.patch(configUrl, {
+    data: {
+      expected_config_version: initial.config_version,
+      orchestrator_compaction_threshold: 1,
+    },
+  });
+  expect(newer.ok(), await newer.text()).toBe(true);
+  const stale = page.waitForResponse(
+    (response) => response.url() === configUrl && response.request().method() === "PATCH",
+  );
   await speed("Provider default").click();
   await page.getByRole("menuitemradio", { name: "Fast", exact: true }).click();
-  await expect(page.getByText(/Speed was not changed/)).toBeVisible();
-  if (process.env.NAC_VISUAL_DIR)
-    await page.screenshot({
-      path: path.join(
-        process.env.NAC_VISUAL_DIR,
-        mobile ? "after-rejected-save-mobile.png" : "after-rejected-save.png",
-      ),
-      animations: "disabled",
-    });
-  expect((await config()).service_tier ?? null).toBeNull();
-  await page.unroute(configUrl, rejectSave);
-  await speed("Provider default").click();
-  await expect(page.getByRole("menuitemradio", { name: "Use provider default" })).toHaveAttribute(
-    "aria-checked",
-    "true",
-  );
-  await page.getByRole("menuitemradio", { name: "Standard", exact: true }).click();
-  await expect.poll(async () => (await config()).service_tier).toBe("standard");
+  expect((await stale).status()).toBe(409);
+  await expect(page.getByText(/configuration changed or is busy/i)).toBeVisible();
+  await expect(modelChip(page)).toBeDisabled();
+  const afterConflict = await config();
+  expect(afterConflict.service_tier ?? null).toBeNull();
+  expect(afterConflict.config_version).toBe(initial.config_version + 1);
   await page.reload();
+  await openModelSettings(page);
+  await speed("Provider default").click();
+  await expect(page.getByRole("menuitemradio", { checked: true })).toHaveCount(0);
+  const writes: unknown[] = [];
+  const loseAck = async (route: import("@playwright/test").Route) => {
+    if (route.request().method() !== "PATCH") return route.fallback();
+    writes.push(route.request().postDataJSON());
+    const accepted = await route.fetch();
+    expect(accepted.ok(), await accepted.text()).toBe(true);
+    await route.abort("failed");
+  };
+  await page.route(configUrl, loseAck);
+  await page.getByRole("menuitemradio", { name: "Standard", exact: true }).click();
+  await expect(page.getByText(/configuration save outcome is unknown/i)).toBeVisible();
+  await expect(modelChip(page)).toBeDisabled();
+  await expect(modelChip(page)).toHaveAccessibleName(/Standard speed/);
+  expect(writes).toEqual([
+    { service_tier: "standard", expected_config_version: afterConflict.config_version },
+  ]);
+  expect(await config()).toMatchObject({
+    service_tier: "standard",
+    config_version: afterConflict.config_version + 1,
+    reasoning_effort: "high",
+  });
+  await page.unroute(configUrl, loseAck);
+  await page.reload();
+  await openModelSettings(page);
   await expect(speed("Standard")).toBeVisible();
   if (process.env.NAC_VISUAL_DIR) await page.waitForTimeout(1000);
   if (process.env.NAC_VISUAL_DIR)
@@ -168,29 +182,32 @@ test("native OpenAI speed survives settings, protocol changes and restart", asyn
     });
   }
   await page.keyboard.press("Escape");
-  await expect(speed("Ultrafast")).toBeFocused();
+  await expect(modelChip(page)).toBeFocused();
 
   // Both protocol rows use the same model; picker order follows the catalog's
   // Responses, Chat Completions, then Codex provider ordering.
-  await page.getByRole("button", { name: "Model", exact: true }).click();
-  await page.getByPlaceholder("Search models…").fill("gpt-6.1-sol");
-  const modelRows = page
-    .getByRole("group", { name: "Model results" })
-    .getByRole("button", { name: /GPT-6\.1.Sol.*gpt-6\.1-sol/i });
+  const models = await openModelCatalog(page, "gpt-6.1-sol");
+  const modelRows = models.getByRole("menuitemradio", { name: /^GPT-6\.1 Sol/i });
   await expect(modelRows).toHaveCount(3);
   await modelRows.nth(1).click();
   await expect.poll(async () => (await config()).backend).toBe("openai-chat-completions");
   await expect.poll(async () => (await config()).service_tier).toBe("standard");
-  await expect(page.getByText(/speed reset to Standard/)).toBeVisible();
+  await expect(page.getByText(/speed changed to Standard/i)).toBeVisible();
   const afterSwitch = await config();
   expect(afterSwitch).toMatchObject({
     model: "gpt-6.1-sol",
     base_url: "https://api.openai.com/v1",
     reasoning_effort: "high",
   });
-  await expect(speed("Standard")).toHaveAttribute("aria-pressed", "false");
+  const fast = page.getByRole("switch", { name: "Fast speed" });
+  await expect(fast).toHaveAttribute("aria-checked", "false");
+  await expect(page.getByRole("link", { name: "OpenAI pricing" })).toBeVisible();
+  if (mobile) {
+    const size = await fast.boundingBox();
+    expect(size?.width).toBeGreaterThanOrEqual(44);
+    expect(size?.height).toBeGreaterThanOrEqual(44);
+  }
   if (process.env.NAC_VISUAL_DIR) {
-    await page.waitForTimeout(350);
     await page.screenshot({
       path: path.join(
         process.env.NAC_VISUAL_DIR,
@@ -198,31 +215,10 @@ test("native OpenAI speed survives settings, protocol changes and restart", asyn
       ),
     });
   }
-  const pricing = page.getByRole("button", { name: "Speed pricing and access" });
-  await expect(pricing).toBeVisible();
-  if (mobile) {
-    const size = await pricing.boundingBox();
-    expect(size?.width).toBeGreaterThanOrEqual(44);
-    expect(size?.height).toBeGreaterThanOrEqual(44);
-  }
-  await pricing.click();
-  await expect(page.getByText(/Higher token cost; subject to your OpenAI project/)).toBeVisible();
-  if (process.env.NAC_VISUAL_DIR) {
-    await page.waitForTimeout(350);
-    await page.screenshot({
-      path: path.join(
-        process.env.NAC_VISUAL_DIR,
-        mobile ? "after-fast-info-mobile.png" : "after-fast-info.png",
-      ),
-    });
-  }
-  await page.keyboard.press("Escape");
-  await expect(pricing).toBeFocused();
-  await speed("Standard").click();
+  await fast.click();
   await expect.poll(async () => (await config()).service_tier).toBe("fast");
-  await expect(speed("Fast")).toHaveAttribute("aria-pressed", "true");
+  await expect(fast).toHaveAttribute("aria-checked", "true");
   if (process.env.NAC_VISUAL_DIR) {
-    await page.waitForTimeout(350);
     await page.screenshot({
       path: path.join(
         process.env.NAC_VISUAL_DIR,
@@ -230,20 +226,28 @@ test("native OpenAI speed survives settings, protocol changes and restart", asyn
       ),
     });
   }
-  await speed("Fast").click();
+  await fast.click();
   await expect.poll(async () => (await config()).service_tier).toBe("standard");
-  await speed("Standard").click();
+  await expect(fast).toHaveAttribute("aria-checked", "false");
+  await fast.click();
   await expect.poll(async () => (await config()).service_tier).toBe("fast");
   await page.reload();
-  await expect(speed("Fast")).toBeVisible();
+  await openModelSettings(page);
+  await expect(fast).toHaveAttribute("aria-checked", "true");
+  if (process.env.NAC_VISUAL_DIR) {
+    await page.screenshot({
+      path: path.join(
+        process.env.NAC_VISUAL_DIR,
+        mobile ? "after-fast-only-selected-mobile.png" : "after-fast-only-selected.png",
+      ),
+    });
+  }
 
-  await page.getByRole("button", { name: "Model", exact: true }).click();
-  await page.getByPlaceholder("Search models…").fill("gpt-6.1-sol");
+  await openModelCatalog(page, "gpt-6.1-sol");
   await modelRows.nth(2).click();
   await expect.poll(async () => (await config()).backend).toBe("chatgpt-codex-responses");
   await expect.poll(async () => (await config()).service_tier).toBe("fast");
-  await page.getByRole("button", { name: "Model", exact: true }).click();
-  await page.getByPlaceholder("Search models…").fill("gpt-6.1-sol");
+  await openModelCatalog(page, "gpt-6.1-sol");
   await modelRows.nth(1).click();
   await expect.poll(async () => (await config()).backend).toBe("openai-chat-completions");
   await expect.poll(async () => (await config()).service_tier).toBe("fast");
@@ -260,8 +264,7 @@ test("native OpenAI speed survives settings, protocol changes and restart", asyn
     await route.fulfill({ response, json: catalog });
   });
   await page.reload();
-  await openSessionSettings(page);
-  const settings = page.getByRole("dialog", { name: "Session settings", exact: true });
+  const settings = await openModelSettings(page);
   await expect(settings.getByText("Fast (unavailable)")).toBeVisible();
   if (process.env.NAC_VISUAL_DIR)
     await page.screenshot({
@@ -272,16 +275,14 @@ test("native OpenAI speed survives settings, protocol changes and restart", asyn
       animations: "disabled",
     });
   expect((await config()).service_tier).toBe("fast");
-  await settings.getByRole("button", { name: "Speed: Fast" }).click();
-  await page.getByRole("menuitemradio", { name: "Use provider default" }).click();
-  await settings.getByRole("button", { name: "Save", exact: true }).click();
-  await expect(settings).toBeHidden();
-  await expect.poll(async () => (await config()).service_tier ?? null).toBeNull();
+  await settings.getByRole("button", { name: "Speed: Fast (unavailable)" }).click();
+  await page.getByRole("menuitemradio", { name: "Standard", exact: true }).click();
+  await expect.poll(async () => (await config()).service_tier).toBe("standard");
   await page.unroute(`${harness.baseUrl}/models`);
   await harness.restart("0", undefined, true);
   await page.reload();
-  await expect(speed("Provider default")).toBeVisible();
-  expect((await config()).service_tier ?? null).toBeNull();
+  await expect(modelChip(page)).toHaveAccessibleName(/Standard speed/);
+  expect((await config()).service_tier).toBe("standard");
 });
 
 test("new chats inherit project speed and can explicitly choose Standard", async ({
@@ -319,12 +320,12 @@ test("new chats inherit project speed and can explicitly choose Standard", async
     (route) => (route.request().method() === "POST" ? route.abort() : route.fallback()),
   );
   await page.goto(`${harness.baseUrl}/#/project/${projectId}`);
-  await page.getByRole("button", { name: /^(Model: |Choose a model$)/ }).click();
-  const dialog = page.getByRole("dialog", { name: "Model for this session", exact: true });
-  await expect(dialog.getByRole("button", { name: "Speed: Fast" })).toBeVisible();
-  await dialog.getByRole("button", { name: "Speed: Fast" }).click();
-  await page.getByRole("menuitemradio", { name: "Standard", exact: true }).click();
-  await dialog.getByRole("button", { name: "Use this model", exact: true }).click();
+  const settings = await openModelSettings(page);
+  const fast = settings.getByRole("switch", { name: "Fast speed" });
+  await expect(fast).toHaveAttribute("aria-checked", "true");
+  await fast.click();
+  await expect(fast).toHaveAttribute("aria-checked", "false");
+  await page.keyboard.press("Escape");
   const create = page.waitForRequest(
     (req) => req.method() === "POST" && req.url().endsWith("/sessions"),
   );
@@ -401,6 +402,7 @@ test("native policy rejection remains repairable and a served receipt survives r
       ),
       animations: "disabled",
     });
+  await openModelSettings(page);
   await page.getByRole("button", { name: "Speed: Fast" }).click();
   await page.getByRole("menuitemradio", { name: "Standard", exact: true }).click();
   await expect
@@ -434,6 +436,7 @@ test("native policy rejection remains repairable and a served receipt survives r
   await expect(page.getByText("Requested speed: Standard; served tier: Standard")).toBeVisible();
   await page.reload();
   await expect(page.getByText("Requested speed: Standard; served tier: Standard")).toBeVisible();
+  await openModelSettings(page);
   await page.getByRole("button", { name: "Speed: Standard" }).click();
   await page.getByRole("menuitemradio", { name: "Fast", exact: true }).click();
   await expect

@@ -7,7 +7,6 @@ import type { SessionSummarySnapshot } from "../types/api";
 interface SessionActions {
     rename: (summary: SessionSummarySnapshot) => void;
     remove: (summary: SessionSummarySnapshot) => void;
-    settings: (sessionId: string) => void;
     togglePin: (summary: SessionSummarySnapshot) => Promise<void>;
     stopRun: (sessionId: string) => Promise<void>;
 }

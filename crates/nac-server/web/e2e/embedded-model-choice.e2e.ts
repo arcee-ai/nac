@@ -8,6 +8,8 @@ import {
   behaviorChoice,
   chooseBehavior,
   homeComposer,
+  openAdvancedModelOptions,
+  openModelList,
   openSessionDrawer,
   openSessionPanel,
   sessionPanelTabs,
@@ -213,8 +215,7 @@ test("shows and persists the optional light model for every chat behavior", asyn
       await chooseBehavior(page, expected.behavior);
     }
     // The model chip shows what the session inherits, light model included.
-    await page.getByRole("button", { name: /^(Model: |Choose a model$)/ }).click();
-    const dialog = page.getByRole("dialog", { name: "Model for this session", exact: true });
+    const dialog = await openAdvancedModelOptions(page);
     await expect(dialog).toContainText("GPT-5.6 Sol");
     await expect(dialog).toContainText(expected.routingCopy);
     await expect(dialog.getByRole("button", { name: "Dual" })).toHaveAttribute(
@@ -260,17 +261,13 @@ test("uses the unified catalog for a cross-provider New Chat override", async ({
   const projectId = await createProject(request, harness);
   await holdFirstRunAdmission(page);
   await page.goto(`${harness.baseUrl}/#/project/${projectId}`);
-  await page.getByRole("button", { name: /^(Model: |Choose a model$)/ }).click();
-  const dialog = page.getByRole("dialog", { name: "Model for this session", exact: true });
-  await expect(dialog.getByText("Primary model", { exact: true })).toBeVisible();
-  await expect(
-    dialog.getByRole("button", { name: "Advanced presets and provider setup" }),
-  ).toBeVisible();
-  await dialog.getByRole("button").filter({ hasText: "GPT-5.6 Sol" }).first().click();
-  await page.getByPlaceholder("Search models…").fill("deepseek-v4-flash");
-  await page.getByText("deepseek-v4-flash", { exact: true }).click();
-  await dialog.getByRole("button", { name: "Use this model", exact: true }).click();
-  await expect(dialog).toBeHidden();
+  const list = await openModelList(page);
+  await page.getByRole("textbox", { name: "Search models", exact: true }).fill("deepseek-v4-flash");
+  await list
+    .getByRole("menuitemradio")
+    .filter({ hasText: /DeepSeek V4 Flash/i })
+    .click();
+  await expect(list).toBeHidden();
   const created = page.waitForRequest(
     (candidate) => candidate.method() === "POST" && candidate.url().endsWith("/sessions"),
   );
@@ -297,16 +294,17 @@ test("switches the active chat across configured providers from the unified comp
 }) => {
   const sessionId = await createDirectSession(request, harness);
   await page.goto(`${harness.baseUrl}/#/session/${sessionId}/delegated`);
-  const modelButton = page.getByRole("button", { name: "Model" });
-  await expect(modelButton).toBeVisible();
-  await modelButton.click();
-  await page.getByPlaceholder("Search models…").fill("deepseek-v4-flash");
+  const list = await openModelList(page);
+  await page.getByRole("textbox", { name: "Search models", exact: true }).fill("deepseek-v4-flash");
 
   const mutation = page.waitForRequest(
     (candidate) =>
       candidate.method() === "PATCH" && candidate.url().endsWith(`/sessions/${sessionId}/config`),
   );
-  await page.getByText("deepseek-v4-flash", { exact: true }).click();
+  await list
+    .getByRole("menuitemradio")
+    .filter({ hasText: /DeepSeek V4 Flash/i })
+    .click();
   const body = (await mutation).postDataJSON() as Record<string, unknown>;
   expect(body).toMatchObject({
     backend: "deepseek-chat",
@@ -369,15 +367,16 @@ test("uses an Advanced saved provider account from the unified composer without 
   });
 
   await page.goto(`${harness.baseUrl}/#/session/${sessionId}/delegated`);
-  await page.getByRole("button", { name: "Model" }).click();
-  await page.getByPlaceholder("Search models…").fill("fireworks-chat");
+  const list = await openModelList(page);
+  await page.getByRole("textbox", { name: "Search models", exact: true }).fill("gpt-5.6-sol");
   const mutation = page.waitForRequest(
     (candidate) =>
       candidate.method() === "PATCH" && candidate.url().endsWith(`/sessions/${sessionId}/config`),
   );
-  await page
-    .getByRole("group", { name: "Model results", exact: true })
-    .getByRole("button", { name: /^gpt-5\.6-sol\b/ })
+  await list
+    .getByText("Fireworks", { exact: true })
+    .locator("..")
+    .getByRole("menuitemradio", { name: /^GPT-5\.6 Sol|^gpt-5\.6-sol/i })
     .click();
   const body = (await mutation).postDataJSON() as Record<string, unknown>;
   expect(body).toMatchObject({
@@ -428,8 +427,7 @@ test("uses an Advanced saved provider account for the light model without exposi
     { kind: "text", text: "advanced light account session started", stream: "request" },
   );
   await page.goto(`${harness.baseUrl}/#/project/${projectId}`);
-  await page.getByRole("button", { name: /^(Model: |Choose a model$)/ }).click();
-  const dialog = page.getByRole("dialog", { name: "Model for this session", exact: true });
+  const dialog = await openAdvancedModelOptions(page);
   await dialog.getByRole("button", { name: "Dual" }).click();
   const lightRow = dialog.getByText("Light model*", { exact: true }).locator("..").locator("..");
   await lightRow.getByRole("button").click();

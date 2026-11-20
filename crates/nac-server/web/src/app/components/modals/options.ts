@@ -33,6 +33,15 @@ export const REASONING_OPTIONS: SelectItem[] = [
   ...EFFORT_LEVEL_OPTIONS,
 ];
 
+/**
+ * The level a session runs at when nothing chose one: Medium, or the middle
+ * level the model accepts. Null when the model accepts no explicit level.
+ */
+export function standardEffort(supported: readonly ReasoningEffort[]): ReasoningEffort | null {
+  if (supported.includes("medium")) return "medium";
+  return supported[Math.floor((supported.length - 1) / 2)] ?? null;
+}
+
 /** The choices that are not an effort level, and so always apply. */
 const REASONING_ACTIONS: ReadonlySet<string> = new Set(["", CLEAR_EFFORT]);
 

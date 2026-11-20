@@ -14,6 +14,7 @@ import {
   openPhonePanel,
   openSessionRowAction,
   sessionRowMenu,
+  showSidebar,
 } from "./nav-focus-helpers";
 import { ScriptGate } from "./scripted-provider";
 
@@ -284,24 +285,16 @@ test("project navigation, overflow, phone actions and notification feedback", as
               exact: true,
             }),
           ).toBeAttached();
-          await expect(list.getByRole("link", { name: "Interval tasks" })).toBeVisible();
         } else {
-          const projects = page.getByRole("region", { name: "Projects", exact: true });
-          const tile = projects.getByRole("button", {
-            name: "Navigation verification — repository maintenance",
-            exact: true,
-          });
-          await expect(tile).toBeVisible();
-          await expect(tile).toContainText("9 sessions");
-          // Project actions stay reachable from the tile; app-wide configuration
-          // moved to Settings, which stays one control away.
+          // Desktop Home has no project tiles; projects stay in the sidebar.
+          await showSidebar(page);
+          await expect(page.getByRole("region", { name: "Projects", exact: true })).toHaveCount(0);
           await expect(
-            tile.getByRole("button", {
-              name: "Navigation verification — repository maintenance options",
+            nav.getByRole("button", {
+              name: "Navigation verification — repository maintenance, 9 sessions",
               exact: true,
             }),
-          ).toBeAttached();
-          await expect(projects.getByRole("link", { name: "Interval tasks" })).toBeVisible();
+          ).toBeVisible();
         }
         await capture(`${version}-${width}-projects-dark`);
       }

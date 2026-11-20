@@ -9,8 +9,8 @@ import type { InheritedModel } from "./modelChoice";
 vi.mock("@/app/features/ui-policy/UiPolicyContext", () => ({
   useUiPolicy: () => ({ orchestrationEnabled: false }),
 }));
-vi.mock("@/app/features/setup/ModelSetupSection", () => ({
-  ModelSetupSection: ({ onChange }: { onChange: (selection: LaunchModelSelection) => void }) => (
+vi.mock("@/app/components/modals/PrimaryModelSection", () => ({
+  PrimaryModelSection: ({ onChange }: { onChange: (selection: LaunchModelSelection) => void }) => (
     <>
       <button
         onClick={() =>
@@ -84,6 +84,7 @@ function mount() {
         inheritancePending={false}
         inheritanceError={null}
         current={null}
+        overridden={false}
         onApply={onApply}
         onReset={vi.fn()}
         onClose={vi.fn()}

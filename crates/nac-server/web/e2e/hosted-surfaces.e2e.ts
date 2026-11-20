@@ -9,12 +9,14 @@ import {
   createSession,
   expect,
   showPhonePanel,
+  showSidePanel,
   test,
   waitForRunIdle,
 } from "./harness";
 import { startHostedFixture } from "./hosted-fixture";
 import { STDIO_MCP_SERVER, openCustomMcpServer } from "./mcp-library-fixture";
-import { openSessionMenu, openSessionSettings, openSettingsSection } from "./settings-focus";
+import { openModelList } from "./focus-embedded-helpers";
+import { openSessionMenu, openSessionRename, openSettingsSection } from "./settings-focus";
 
 const execute = promisify(execFile);
 test.skip(
@@ -24,19 +26,15 @@ test.skip(
 test.use({ orchestration: "0" });
 
 /**
- * The session's Files panel: the drawer's Files tab, reached from the Session
- * menu (an embedded view has no global ⌘\ to dock it), or a phone's Files sheet.
+ * Opens the Files tab of the session panel, or the phone's Files sheet.
  */
 async function showFiles(page: Page, mobile: boolean) {
   if (mobile) {
     await showPhonePanel(page, "Files");
     return;
   }
+  await showSidePanel(page);
   const panels = page.getByRole("tablist", { name: "Session panels", exact: true });
-  if (!(await panels.isVisible())) {
-    const menu = await openSessionMenu(page);
-    await menu.getByRole("button", { name: "Insights", exact: true }).click();
-  }
   const files = panels.getByRole("tab", { name: "Files", exact: true });
   await files.click();
   await expect(files).toHaveAttribute("aria-selected", "true");
@@ -276,7 +274,7 @@ for (const mobile of [false, true]) {
     }
   });
 
-  test(`injected session settings uncertainty and replacement ${mobile ? "mobile" : "desktop"}`, async ({
+  test(`injected rename acknowledgement loss and replacement ${mobile ? "mobile" : "desktop"}`, async ({
     harness,
     page,
     request,
@@ -284,73 +282,58 @@ for (const mobile of [false, true]) {
     if (mobile) await page.setViewportSize({ width: 390, height: 844 });
     const project = await createProject(request, harness, { name: "Injected settings" });
     const id = await createSession(request, harness, "direct", project);
-    const configUrl = `${harness.baseUrl}/sessions/${id}/config`;
-    const before = await (await request.get(configUrl)).json();
+    const presentationPath = `/sessions/${id}/presentation`;
     const projectsBefore = await (await request.get(`${harness.baseUrl}/projects`)).json();
     const fixture = await startHostedFixture(harness, id);
+    const summary = async (): Promise<{ title: string; presentation_version: number }> =>
+      (await (await request.get(`${harness.baseUrl}/sessions`)).json()).find(
+        (entry: { summary: { session_id: string } }) => entry.summary.session_id === id,
+      ).summary;
+    const notices = page.getByRole("region", { name: "Notifications", exact: true });
     try {
       await page.goto(fixture.baseUrl);
-      const settings = await openSessionSettings(page);
-      await settings
-        .getByRole("textbox", { name: "Session title", exact: true })
-        .fill("Accepted injected title");
-      await settings.getByText("Advanced execution settings", { exact: true }).click();
-      await settings.getByRole("button", { name: "Advanced Configurations", exact: true }).click();
-      await settings.getByRole("textbox", { name: "Context limit", exact: true }).fill("222");
-      await settings.getByRole("button", { name: "Save", exact: true }).click();
-      await expect(settings).toHaveCount(0);
-      expect(await (await request.get(configUrl)).json()).toMatchObject({
-        config_version: before.config_version + 1,
-        orchestrator_compaction_threshold: 222,
+      const dialog = await openSessionRename(page);
+      const title = dialog.getByRole("textbox", { name: "Title", exact: true });
+      const save = dialog.getByRole("button", { name: "Save", exact: true });
+      await title.fill("Accepted injected title");
+      await save.click();
+      await expect(dialog).toHaveCount(0);
+      expect((await summary()).title).toBe("Accepted injected title");
+
+      await openSessionRename(page);
+      await title.fill("Accepted with response lost");
+      fixture.loseNextResponse("PUT", presentationPath);
+      await save.click();
+      await expect(notices.getByRole("alert")).toContainText("Failed to fetch");
+      expect(fixture.lostResponses).toHaveLength(1);
+      expect(fixture.lostResponses[0].status).toBe(200);
+      const accepted = await summary();
+      expect(accepted.title).toBe("Accepted with response lost");
+
+      await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+      await page.getByRole("button", { name: "Replace runtime", exact: true }).click();
+      await openSessionRename(page);
+      await expect(title).toHaveValue(accepted.title);
+      const external = await request.put(`${harness.baseUrl}${presentationPath}`, {
+        data: {
+          title: "Updated outside the presentation",
+          pinned: false,
+          expected_version: accepted.presentation_version,
+        },
       });
+      expect(external.ok()).toBe(true);
+      await title.fill("Stale edit must not rename");
+      await save.click();
+      await expect(
+        notices.getByRole("alert").filter({ hasText: "Version conflict" }),
+      ).toBeVisible();
+      expect((await summary()).title).toBe("Updated outside the presentation");
       expect(await (await request.get(`${harness.baseUrl}/projects`)).json()).toEqual(
         projectsBefore,
       );
-      await openSessionSettings(page);
-      await settings.getByText("Advanced execution settings", { exact: true }).click();
-      await settings.getByRole("button", { name: "Advanced Configurations", exact: true }).click();
-      await settings.getByRole("textbox", { name: "Context limit", exact: true }).fill("333");
-      fixture.loseNextResponse("PATCH", `/sessions/${id}/config`);
-      await settings.getByRole("button", { name: "Save", exact: true }).click();
-      await expect(settings.getByRole("alert")).toContainText("outcome is unknown");
-      await expect(settings.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
-      expect(fixture.lostResponses).toHaveLength(1);
-      expect(await (await request.get(configUrl)).json()).toMatchObject({
-        orchestrator_compaction_threshold: 333,
-      });
-      expect(fixture.lostResponses[0].status).toBe(200);
-      await page.keyboard.press("Escape");
-      await page.getByRole("button", { name: "Replace runtime", exact: true }).click();
-      await openSessionSettings(page);
-      await expect(
-        settings.getByRole("textbox", { name: "Session title", exact: true }),
-      ).toHaveValue("Accepted injected title");
-      await settings.getByText("Advanced execution settings", { exact: true }).click();
-      await settings.getByRole("button", { name: "Advanced Configurations", exact: true }).click();
-      await expect(
-        settings.getByRole("textbox", { name: "Context limit", exact: true }),
-      ).toHaveValue("333");
-      const external = await request.patch(configUrl, {
-        data: { orchestrator_compaction_threshold: 444 },
-      });
-      expect(external.ok()).toBe(true);
-      await settings
-        .getByRole("textbox", { name: "Session title", exact: true })
-        .fill("Stale edit must not rename");
-      await settings.getByRole("button", { name: "Save", exact: true }).click();
-      await expect(settings.getByRole("alert")).toContainText("settings changed");
-      await expect(settings.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
       expect(
-        (await (await request.get(`${harness.baseUrl}/sessions`)).json()).find(
-          (entry: { summary: { session_id: string } }) => entry.summary.session_id === id,
-        ).summary.title,
-      ).toBe("Accepted injected title");
-      expect(fixture.lostResponses).toHaveLength(1);
-      expect(
-        fixture.calls.filter(
-          (call) => call.method === "PATCH" && call.path === `/sessions/${id}/config`,
-        ),
-      ).toHaveLength(2);
+        fixture.calls.filter((call) => call.method === "PUT" && call.path === presentationPath),
+      ).toHaveLength(3);
     } finally {
       await fixture.stop();
     }
@@ -476,7 +459,7 @@ for (const mobile of [false, true]) {
       await fixture.stop();
     }
   });
-  test(`injected saved configuration CRUD and write-only key ${mobile ? "mobile" : "desktop"}`, async ({
+  test(`injected composer uses a saved provider account without reading its key ${mobile ? "mobile" : "desktop"}`, async ({
     harness,
     page,
     request,
@@ -484,83 +467,56 @@ for (const mobile of [false, true]) {
     if (mobile) await page.setViewportSize({ width: 390, height: 844 });
     const project = await createProject(request, harness, { name: "Injected saved configuration" });
     const id = await createSession(request, harness, "direct", project);
+    const canary = "injected-preset-dummy-key-only";
+    const created = await request.post(`${harness.baseUrl}/model-configs`, {
+      data: {
+        name: "Injected Fireworks account",
+        backend: "fireworks-chat",
+        model: "gpt-5.6-sol",
+        base_url: harness.provider.baseUrl,
+        api_key: canary,
+      },
+    });
+    expect(created.ok()).toBe(true);
+    const saved = await created.json();
+    expect(saved.api_key_env).toMatch(/^NAC_CONFIG_/);
+    expect(JSON.stringify(saved)).not.toContain(canary);
     const fixture = await startHostedFixture(harness, id);
-    // Settings › Models & providers holds the saved-configuration manager.
-    const open = () => openSettingsSection(page, "Models & providers");
     try {
       await page.goto(fixture.baseUrl);
       await expect(page.getByRole("combobox", { name: "Message" })).toBeVisible();
-      await open();
-      const dialog = page.getByRole("region", { name: "Configurations", exact: true });
-      if (mobile)
-        await dialog.getByRole("button", { name: "Choose configuration", exact: true }).click();
-      await page.getByRole("button", { name: "New configuration", exact: true }).click();
-      await dialog
-        .getByRole("textbox", { name: "Configuration name", exact: true })
-        .fill("Injected unused preset");
-      // Set the local endpoint before a dummy key can trigger provider discovery.
-      await dialog.getByPlaceholder("https://api.openai.com/v1").fill(harness.provider.baseUrl);
-      await dialog.getByRole("switch", { name: "Allow insecure HTTP", exact: true }).check();
-      const canary = "injected-preset-dummy-key-only";
-      await dialog.getByPlaceholder("Paste the provider key").fill(canary);
-      await expect
-        .poll(() => fixture.calls.filter((call) => call.path === "/providers/models").length)
-        .toBeGreaterThan(0);
-      const manualModel = dialog.getByPlaceholder("gpt-5.5");
-      if (await manualModel.isVisible()) await manualModel.fill("gpt-5.6-sol");
-      else {
-        await dialog.getByRole("button", { name: "No models offered", exact: true }).click();
-        await page.getByRole("button", { name: "gpt-5.6-sol", exact: true }).click();
-      }
-      await dialog.getByRole("button", { name: "Save", exact: true }).click();
-      await expect(
-        page.getByText("Configuration Injected unused preset created", { exact: true }),
-      ).toBeVisible();
-      await expect(
-        dialog.getByRole("textbox", { name: "Configuration name", exact: true }),
-      ).toHaveValue("Injected unused preset");
-      await expect(dialog.getByPlaceholder("*".repeat(32))).toHaveValue("");
-      const saved = (
-        await (await request.get(`${harness.baseUrl}/model-configs`)).json()
-      ).configurations.find((entry: { name: string }) => entry.name === "Injected unused preset");
-      expect(saved).toBeDefined();
-      expect(JSON.stringify(saved)).not.toContain(canary);
-      await dialog
-        .getByRole("textbox", { name: "Configuration name", exact: true })
-        .fill("Renamed injected preset");
-      await dialog.getByRole("button", { name: "Save", exact: true }).click();
-      await expect(
-        page.getByText("Configuration Renamed injected preset saved", { exact: true }),
-      ).toBeVisible();
-      // Replace the whole runtime with identical IDs/endpoint and a new release fence.
+      const list = await openModelList(page);
+      await page.getByRole("textbox", { name: "Search models", exact: true }).fill("gpt-5.6-sol");
+      const switched = page.waitForRequest(
+        (req) => req.method() === "PATCH" && req.url().endsWith(`/sessions/${id}/config`),
+      );
+      await list
+        .getByText("Fireworks", { exact: true })
+        .locator("..")
+        .getByRole("menuitemradio", { name: /^(?:GPT-5\.6 Sol|gpt-5\.6-sol)/i })
+        .click();
+      const payload = (await switched).postDataJSON();
+      expect(payload).toMatchObject({
+        backend: "fireworks-chat",
+        model: "gpt-5.6-sol",
+        api_key_env: saved.api_key_env,
+      });
+      expect(JSON.stringify(payload)).not.toContain(canary);
+      expect((await (await switched).response())?.ok()).toBe(true);
+
       await page.getByRole("button", { name: "Replace runtime", exact: true }).click();
-      await expect(page.getByRole("combobox", { name: "Message" })).toBeVisible();
-      await open();
+      const rebound = await openModelList(page);
+      await page.getByRole("textbox", { name: "Search models", exact: true }).fill("gpt-5.6-sol");
       await expect(
-        dialog.getByRole("textbox", { name: "Configuration name", exact: true }),
-      ).toHaveValue("Renamed injected preset");
-      await expect(dialog.getByPlaceholder("*".repeat(32))).toHaveValue("");
-      await dialog.getByRole("button", { name: "Delete configuration", exact: true }).click();
-      await expect
-        .poll(async () =>
-          (
-            await (await request.get(`${harness.baseUrl}/model-configs`)).json()
-          ).configurations.some(
-            (entry: { config_id: string }) => entry.config_id === saved.config_id,
-          ),
-        )
-        .toBe(false);
-      expect(
-        fixture.calls.filter((call) => call.method === "POST" && call.path === "/model-configs"),
-      ).toHaveLength(1);
+        rebound
+          .getByText("Fireworks", { exact: true })
+          .locator("..")
+          .getByRole("menuitemradio", { name: /^(?:GPT-5\.6 Sol|gpt-5\.6-sol)/i }),
+      ).toHaveAttribute("aria-checked", "true");
+      await expect(page.getByText(canary, { exact: true })).toHaveCount(0);
       expect(
         fixture.calls.filter(
-          (call) => call.method === "PATCH" && call.path === `/model-configs/${saved.config_id}`,
-        ),
-      ).toHaveLength(1);
-      expect(
-        fixture.calls.filter(
-          (call) => call.method === "DELETE" && call.path === `/model-configs/${saved.config_id}`,
+          (call) => call.method === "PATCH" && call.path === `/sessions/${id}/config`,
         ),
       ).toHaveLength(1);
     } finally {
@@ -568,3 +524,75 @@ for (const mobile of [false, true]) {
     }
   });
 }
+
+test("composer fences configuration writes after uncertain settlement or a newer revision", async ({
+  harness,
+  page,
+  request,
+}) => {
+  const project = await createProject(request, harness);
+  const id = await createSession(request, harness, "direct", project);
+  const resource = `/sessions/${id}/config`;
+  const configUrl = `${harness.baseUrl}${resource}`;
+  const config = async (): Promise<{ config_version: number; reasoning_effort: string }> =>
+    (await request.get(configUrl)).json();
+  const initial = await config();
+  expect(initial.reasoning_effort).toBe("high");
+  const fixture = await startHostedFixture(harness, id);
+  const chip = page.getByRole("button", { name: /^Model: / });
+  const notices = page.getByRole("region", { name: "Notifications", exact: true });
+  const openEffort = async () => {
+    await chip.click();
+    return page.getByRole("dialog", { name: "Model settings", exact: true });
+  };
+  const writes = () =>
+    fixture.calls.filter((call) => call.method === "PATCH" && call.path === resource);
+
+  try {
+    await page.goto(fixture.baseUrl);
+    const effort = await openEffort();
+    fixture.loseNextResponse("PATCH", resource);
+    const sent = page.waitForRequest(
+      (req) => req.method() === "PATCH" && req.url().endsWith(resource),
+    );
+    await effort.getByRole("radio", { name: "Medium", exact: true }).press("Space");
+    expect((await sent).postDataJSON()).toMatchObject({
+      expected_config_version: initial.config_version,
+      reasoning_effort: "medium",
+    });
+    await expect(
+      notices.getByRole("alert").filter({ hasText: "save outcome is unknown" }),
+    ).toBeVisible();
+    const accepted = await config();
+    expect(accepted).toMatchObject({
+      config_version: initial.config_version + 1,
+      reasoning_effort: "medium",
+    });
+    expect(fixture.lostResponses).toHaveLength(1);
+    expect(writes()).toHaveLength(1);
+    await expect(chip).toHaveAccessibleName(/Medium reasoning/);
+    await expect(chip).toBeDisabled();
+    await page.keyboard.press("Escape");
+
+    await page.getByRole("button", { name: "Replace runtime", exact: true }).click();
+    await expect(chip).toHaveAccessibleName(/Medium reasoning/);
+    await openEffort();
+    const newer = await request.patch(configUrl, {
+      data: { expected_config_version: accepted.config_version, reasoning_effort: "low" },
+    });
+    expect(newer.ok()).toBe(true);
+    await effort.getByRole("radio", { name: "High", exact: true }).press("Space");
+    await expect(
+      notices.getByRole("alert").filter({ hasText: "changed or is busy" }),
+    ).toBeVisible();
+    expect(await config()).toMatchObject({
+      config_version: accepted.config_version + 1,
+      reasoning_effort: "low",
+    });
+    await expect(chip).toHaveAccessibleName(/Low reasoning/);
+    await expect(chip).toBeDisabled();
+    expect(writes()).toHaveLength(2);
+  } finally {
+    await fixture.stop();
+  }
+});

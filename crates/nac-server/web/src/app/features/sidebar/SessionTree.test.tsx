@@ -18,6 +18,9 @@ const fakes = vi.hoisted(() => ({
   togglePin: vi.fn(),
   assign: vi.fn(),
   newChat: vi.fn(),
+  create: vi.fn(),
+  isManaged: false,
+  addRepository: vi.fn(),
   stores: null as unknown,
 }));
 
@@ -45,6 +48,15 @@ vi.mock("@/app/providers/ProjectActionsProvider", () => ({
     togglePin: vi.fn(),
     rename: vi.fn(),
     remove: vi.fn(),
+    create: fakes.create,
+  }),
+}));
+vi.mock("@/app/features/managed/controller/useManagedHost", () => ({
+  useManagedHost: () => ({
+    status: null,
+    isManaged: fakes.isManaged,
+    openSettings: vi.fn(),
+    addRepository: fakes.addRepository,
   }),
 }));
 
@@ -106,8 +118,35 @@ beforeEach(() => {
     sidebarLayoutStore: createSidebarLayoutStore(),
     attentionStore: createAttentionStore(),
   };
-  for (const fake of [fakes.rename, fakes.remove, fakes.togglePin, fakes.assign, fakes.newChat])
+  fakes.isManaged = false;
+  for (const fake of [
+    fakes.rename,
+    fakes.remove,
+    fakes.togglePin,
+    fakes.assign,
+    fakes.newChat,
+    fakes.create,
+    fakes.addRepository,
+  ])
     fake.mockReset();
+});
+
+it("offers both managed project creation paths from the populated sidebar", () => {
+  fakes.isManaged = true;
+  mount([]);
+  const add = screen.getByRole("button", { name: "Add project to this host" });
+  fireEvent.click(add);
+  const menu = screen.getByRole("menu", { name: "Add project" });
+  expect(fakes.addRepository).not.toHaveBeenCalled();
+  fireEvent.click(within(menu).getByRole("menuitem", { name: /Create from an existing path/ }));
+  expect(fakes.create).toHaveBeenCalledOnce();
+  fireEvent.click(add);
+  fireEvent.click(
+    within(screen.getByRole("menu", { name: "Add project" })).getByRole("menuitem", {
+      name: /Add repository/,
+    }),
+  );
+  expect(fakes.addRepository).toHaveBeenCalledOnce();
 });
 afterEach(() => {
   cleanup();
@@ -126,6 +165,25 @@ describe("sidebar session tree", () => {
       '[data-sidebar="true"] button[aria-current="page"]',
     );
     expect(current?.getAttribute("aria-label")).toBe("Write docs");
+  });
+
+  it("shows unseen completion on the folded project and clears it when opened", () => {
+    const { attentionStore } = fakes.stores as {
+      attentionStore: ReturnType<typeof createAttentionStore>;
+    };
+    attentionStore.attentionStore.setState({ flagged: { a: true } });
+    mount([session("a", "Fix the parser")]);
+    const project = screen.getByRole("button", { name: "Atlas, 1 session" });
+
+    fireEvent.click(project);
+    expect(project.getAttribute("aria-description")).toBe("Done");
+    expect(within(project).getByText("Done")).toBeTruthy();
+
+    fireEvent.click(project);
+    fireEvent.click(screen.getByRole("button", { name: "Fix the parser" }));
+    fireEvent.click(project);
+    expect(project.hasAttribute("aria-description")).toBe(false);
+    expect(within(project).queryByText("Done")).toBeNull();
   });
 
   it("folds subagents under their parent until the count pill is opened", () => {

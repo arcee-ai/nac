@@ -39,7 +39,7 @@ for (const mobile of [false, true]) {
     await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
     await page.goto(`${harness.baseUrl}/#/session/${id}/insights`);
     await expect(page.getByRole("combobox", { name: "Message" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "High", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: /^Model: .+, High reasoning$/ })).toBeVisible();
     const baseline = process.env.NAC_PRODUCT_CONTEXT_BASELINE === "1";
     await capture(page, `${mobile ? "phone" : "desktop"}-navigation`);
     if (baseline) {
@@ -86,8 +86,8 @@ for (const mobile of [false, true]) {
     await expect(page).toHaveURL(original);
     await expect(page.getByRole("combobox", { name: "Message" })).toBeVisible();
     for (const [label, title] of [
-      ["Configurations", "Models & providers"],
-      ["Model authentication", "Models & providers"],
+      ["Configurations", "Accounts & keys"],
+      ["Model authentication", "Accounts & keys"],
       ["SSH configurations", "SSH hosts"],
     ]) {
       context = await inspect(page);
@@ -108,14 +108,13 @@ for (const mobile of [false, true]) {
       await expect(context).toBeHidden();
       // The panel opens inside the session the capabilities described.
       await expect(page).toHaveURL(new RegExp(`/session/${id}/${panel}$`));
-      // A phone opens the panel as its bottom sheet; wider, the floating
-      // drawer. Either is a dialog that Escape closes.
-      const panelDialog = mobile
+      const surface = mobile
         ? page.getByRole("dialog", { name: label, exact: true })
-        : page.getByRole("dialog");
-      await expect(panelDialog).toBeVisible();
-      await page.keyboard.press("Escape");
-      await expect(panelDialog).toBeHidden();
+        : page.getByRole("complementary", { name: label, exact: true });
+      await expect(surface).toBeVisible();
+      if (mobile) await page.keyboard.press("Escape");
+      else await page.getByRole("button", { name: "Session panel", exact: true }).click();
+      await expect(surface).toBeHidden();
     }
     context = await inspect(page);
     await context.getByRole("button", { name: "Open History", exact: true }).click();
@@ -266,12 +265,12 @@ test("an old standalone document cannot read or navigate a replacement server at
   );
   const id = await createSession(request, harness, "direct");
   await page.goto(`${harness.baseUrl}/#/session/${id}/insights`);
-  await expect(page.getByRole("button", { name: "High", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Model: .+, High reasoning$/ })).toBeVisible();
   let context = await inspect(page);
   await context.getByRole("button", { name: "Open MCP settings", exact: true }).click();
   await expect(settingsSection(page, "MCP servers")).toBeVisible();
   await leaveSettings(page);
-  await expect(page.getByRole("button", { name: "High", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Model: .+, High reasoning$/ })).toBeVisible();
   const origin = harness.baseUrl;
   await harness.restart("1", undefined, true);
   expect(harness.baseUrl).toBe(origin);
@@ -285,7 +284,7 @@ test("an old standalone document cannot read or navigate a replacement server at
   await expect(settingsSection(page, "MCP servers")).toHaveCount(0);
   await leaveSettings(page);
   await page.reload();
-  await expect(page.getByRole("button", { name: "High", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Model: .+, High reasoning$/ })).toBeVisible();
   context = await inspect(page);
   await context.getByRole("button", { name: "Open MCP settings", exact: true }).click();
   await expect(settingsSection(page, "MCP servers")).toBeVisible();
@@ -317,7 +316,7 @@ test("a delayed old navigation receipt cannot open UI after a same-origin servin
   });
   try {
     await page.goto(`${origin}/#/session/${id}/insights`);
-    await expect(page.getByRole("button", { name: "High", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: /^Model: .+, High reasoning$/ })).toBeVisible();
     const context = await inspect(page);
     await context.getByRole("button", { name: "Open MCP settings", exact: true }).click();
     await accepted;

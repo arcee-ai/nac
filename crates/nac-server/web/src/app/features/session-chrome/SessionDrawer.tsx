@@ -21,16 +21,11 @@ import { GoalPanel } from "@/app/features/session-chrome/GoalPanel";
 import { useSessionDrawer } from "@/app/features/session-chrome/useSessionDrawer";
 import { CHAT_MIN_WIDTH, DOCK_DEFAULT_WIDTH, DOCK_MIN_WIDTH } from "@/app/hooks/useDockWidth";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
-import { useKeyboardShortcuts } from "@/app/hooks/useKeyboardShortcuts";
-import { useIsMobile, useMediaQuery } from "@/app/hooks/useMediaQuery";
+import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
 import { SESSION_PANEL_LABEL, type SessionPanel } from "@/app/lib/routes";
-import { DOCK_DRAWER_KEYS } from "@/app/lib/shortcuts";
 import { PanelPhoneChromeProvider } from "@/app/providers/PanelPhoneChrome";
 import type { SessionBehavior, SessionSnapshotResponse } from "@/app/types/api";
-
-/** Docking needs room for a readable chat (≥460px) beside the 560px column and sidebar. */
-const DOCK_QUERY = "(min-width: 1280px)";
 
 /** Kept in step with the width transition below. */
 const DOCK_MS = 200;
@@ -61,45 +56,10 @@ function useDockPresence(docked: boolean) {
   return { mounted, shown };
 }
 
-function GoalHeader({
-  pinned,
-  onTogglePinned,
-  onClose,
-  expanded,
-  onToggleExpanded,
-}: {
-  pinned: boolean;
-  onTogglePinned?: () => void;
-  onClose: () => void;
-  expanded: boolean;
-  onToggleExpanded: () => void;
-}) {
+function GoalHeader({ onClose }: { onClose: () => void }) {
   return (
     <header className="flex h-[52px] shrink-0 items-center gap-1 border-b border-muted pr-2 pl-5">
       <h2 className="type-strong min-w-0 flex-1 truncate text-basic-primary">Goal</h2>
-      {onTogglePinned ? (
-        <Button
-          size={ButtonSize.Medium}
-          variant={pinned ? ButtonVariant.GhostHighlighted : ButtonVariant.Ghost}
-          content={ButtonContent.Icon}
-          aria-label={pinned ? "Float drawer" : "Dock drawer"}
-          aria-pressed={pinned}
-          title="Dock or float (⌘\)"
-          onClick={onTogglePinned}
-        >
-          <Icon iconName={IconName.ShowSidePanel} />
-        </Button>
-      ) : null}
-      <Button
-        size={ButtonSize.Medium}
-        variant={ButtonVariant.Ghost}
-        content={ButtonContent.Icon}
-        aria-label={expanded ? "Exit full width" : "Full width"}
-        aria-pressed={expanded}
-        onClick={onToggleExpanded}
-      >
-        <Icon iconName={expanded ? IconName.FullScreenExit : IconName.FullScreen} />
-      </Button>
       <Button
         size={ButtonSize.Medium}
         variant={ButtonVariant.Ghost}
@@ -115,9 +75,9 @@ function GoalHeader({
 
 /**
  * The session's one secondary surface. Floating, it is the shared `Drawer`:
- * 560px from the right (full width on request) or a bottom sheet on a phone.
- * Docked (⌘\), it is a column laid out beside the chat column, never inside
- * it. The route's panel picks what it shows; the goal has a drawer of its own.
+ * 560px from the right, or a bottom sheet on a phone.
+ * Wherever there is room it docks instead: a column laid out beside the chat
+ * column, never inside it. The route's panel picks what it shows; the goal has a drawer of its own.
  */
 export function SessionDrawer({
   sessionId,
@@ -136,7 +96,6 @@ export function SessionDrawer({
 }) {
   const drawer = useSessionDrawer(sessionId, panel);
   const isMobile = useIsMobile();
-  const wideViewport = useMediaQuery(DOCK_QUERY) && !isMobile;
   const { useDockWidth, setDockWidth } = useNativeRuntime().stores.dockWidth;
   const preferredWidth = useDockWidth();
   const measureRef = useRef<HTMLSpanElement>(null);
@@ -154,13 +113,14 @@ export function SessionDrawer({
     observer.observe(parent);
     return () => observer.disconnect();
   }, []);
-  // Without container observation, a host can shrink without a window resize.
-  // Keep the floating fallback rather than risk an unusable split.
+  // Off phones the panel docks whenever the session area fits both minimums.
+  // Without container observation, a host can shrink without a window resize,
+  // so keep the floating fallback rather than risk an unusable split.
   const canDock =
     typeof ResizeObserver !== "undefined" &&
-    wideViewport &&
+    !isMobile &&
     availableWidth >= DOCK_MIN_WIDTH + CHAT_MIN_WIDTH;
-  const docked = drawer.open && drawer.pinned && canDock;
+  const docked = drawer.open && canDock;
   const presence = useDockPresence(docked);
   const maxWidth = Math.max(DOCK_MIN_WIDTH, availableWidth - CHAT_MIN_WIDTH);
   const width = Math.min(preferredWidth, maxWidth);
@@ -199,23 +159,13 @@ export function SessionDrawer({
   };
   const goal = drawer.content === "goal" && goalEnabled;
 
-  useKeyboardShortcuts([
-    { keys: DOCK_DRAWER_KEYS, onTrigger: drawer.togglePinned, enabled: canDock },
-  ]);
+  const { setDrawerDockable } = useNativeRuntime().stores.sessionLayoutStore;
+  useEffect(() => setDrawerDockable(canDock), [canDock, setDrawerDockable]);
 
-  const onTogglePinned = canDock ? drawer.togglePinned : undefined;
-  const body = (pinned: boolean): ReactNode =>
+  const body = (): ReactNode =>
     goal ? (
       <div className="flex min-h-0 flex-1 flex-col">
-        {isMobile ? null : (
-          <GoalHeader
-            pinned={pinned}
-            onTogglePinned={onTogglePinned}
-            onClose={drawer.close}
-            expanded={drawer.expanded}
-            onToggleExpanded={drawer.toggleExpanded}
-          />
-        )}
+        {isMobile ? null : <GoalHeader onClose={drawer.close} />}
         <div className="min-h-0 flex-1 overflow-y-auto">
           <GoalPanel sessionId={sessionId} enabled={goalEnabled} />
         </div>
@@ -228,8 +178,6 @@ export function SessionDrawer({
         panel={panel}
         onPanelChange={drawer.openPanel}
         onClose={drawer.close}
-        pinned={pinned}
-        onTogglePinned={onTogglePinned}
       />
     );
 
@@ -263,7 +211,7 @@ export function SessionDrawer({
             className="absolute inset-y-0 left-0 flex flex-col"
             style={{ width: panelWidth || DOCK_DEFAULT_WIDTH }}
           >
-            {body(true)}
+            {body()}
           </div>
           {!drawer.expanded && docked ? (
             <div
@@ -330,11 +278,11 @@ export function SessionDrawer({
                 </div>
               </div>
             ) : (
-              body(false)
+              body()
             )}
           </PanelPhoneChromeProvider>
         ) : (
-          body(false)
+          body()
         )}
       </Drawer>
     </>

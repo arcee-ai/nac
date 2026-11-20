@@ -1,6 +1,6 @@
 import type { SessionMetadata } from "../../types/api";
 /**
- * The session's current model and reasoning, directly switchable beside the
+ * The session's model, reasoning, and speed, directly switchable beside the
  * composer from one catalog spanning every connected provider. Cross-provider
  * changes send the complete routing tuple in one revisioned server mutation.
  */
