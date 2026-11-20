@@ -205,22 +205,26 @@ def q1_ui_result(record):
 
 
 def seed_q1_configuration(endpoint, provider, environment, deadline, existing=None, nonce=None):
-    """Supported saved-config API only; no discovery, raw SQL or generated-name allowance."""
-    name = existing['name'] if existing else 'Disposable Q1 ' + str(nonce or uuid.uuid4())
+    """Connect one private provider, then bind its catalog selector on every launch."""
     if existing is None:
-        record = request(endpoint, '/model-configs', dict(name=name, backend='openai-responses',
-            model='gpt-5.6-sol', base_url=provider, allow_insecure_http=False,
-            api_key=environment['OPENAI_API_KEY']), timeout=_remaining(deadline, 8))
+        created = request(endpoint, '/provider-connections', dict(backend='openai-responses',
+            base_url=provider, allow_insecure_http=False, api_key=environment['OPENAI_API_KEY']),
+            timeout=_remaining(deadline, 8))
+        require(type(created) is dict and type(created.get('connection_id')) is str and
+                bool(created['connection_id']) and 'api_key' not in created, 'foreign provider receipt')
     else:
-        record = existing
-    require(type(record) is dict and record.get('name') == name and
-            record.get('backend') == 'openai-responses' and record.get('base_url') == provider and
-            record.get('model') == 'gpt-5.6-sol' and record.get('allow_insecure_http') is False and
-            type(record.get('config_id')) is str and record['config_id'] and
-            type(record.get('api_key_env')) is str and record['api_key_env'] and
-            len(record['api_key_env']) <= 256 and 'api_key' not in record, 'foreign saved fixture configuration')
-    rows = request(endpoint, '/model-configs', timeout=_remaining(deadline, 8))['configurations']
-    require(type(rows) is list and len(rows) == 1 and rows[0] == record, 'saved fixture readback changed')
+        created = {'connection_id': existing['connection_id']}
+    catalog = request(endpoint, '/models', timeout=_remaining(deadline, 8))
+    providers = [row for row in catalog.get('providers', []) if row.get('id') == 'openai-responses']
+    require(len(providers) == 1 and providers[0].get('auth_status') == 'ready', 'provider not ready')
+    connection = providers[0].get('connection')
+    require(type(connection) is dict and connection.get('base_url') == provider and
+            connection.get('allow_insecure_http') is False and
+            type(connection.get('api_key_env')) is str and connection['api_key_env'] and
+            len(connection['api_key_env']) <= 256 and 'api_key' not in connection, 'foreign provider connection')
+    record = dict(connection_id=created['connection_id'], backend='openai-responses', model='gpt-5.6-sol',
+                  base_url=provider, allow_insecure_http=False, api_key_env=connection['api_key_env'])
+    require(existing is None or record == existing, 'provider connection readback changed')
     return record
 
 
@@ -314,7 +318,7 @@ class RecoveryLaunch:
             os.chmod(binding.name, 0o600)
             json.dump(dict(nonce=self.fetch_nonce, provider=provider,
                            selector=self.saved_configuration['api_key_env'],
-                           config_id=self.saved_configuration['config_id'], name=self.saved_configuration['name']), binding)
+                           connection_id=self.saved_configuration['connection_id']), binding)
         self.command('profile-open-release')
         self.deadline = startup_deadline
         ready = self.wait('RecoverySmoke readiness', lambda: (r if (r := self.read()).get('bridge', {}).get('ready') else None))

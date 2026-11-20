@@ -117,7 +117,7 @@ final class RecoverySmoke {
                     control: URL(fileURLWithPath: argument("--recovery-control")), name: "storage-q1-fetch.json"),
                    let binding = try? JSONSerialization.jsonObject(with: bytes) as? [String: String],
                    binding["nonce"] == nonce, binding["provider"] == provider,
-                   binding["config_id"]?.isEmpty == false, binding["name"]?.isEmpty == false,
+                   binding["connection_id"]?.isEmpty == false,
                    let saved = binding["selector"], !saved.isEmpty, saved.utf8.count <= 256 {
                     selector = saved
                 }

@@ -63,7 +63,7 @@ class Q1HandshakeTests(unittest.TestCase):
                 clock[0] += seed_seconds
                 q1._remaining(deadline, 4)
                 seeded[0] = True
-                return dict(api_key_env='saved-selector', config_id='fixture-id', name='fixture')
+                return dict(api_key_env='saved-selector', connection_id='fixture-id')
 
             original_guard = owner.guard
             def guard():

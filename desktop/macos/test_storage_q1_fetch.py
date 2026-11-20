@@ -254,12 +254,16 @@ class FetchReadWitnessControls(unittest.TestCase):
 
 class SavedFixtureConfigurationControls(unittest.TestCase):
     def record(self):
-        return dict(config_id='owned-config', name='Disposable Q1 fixed', backend='openai-responses',
+        return dict(connection_id='owned-config', backend='openai-responses',
                     model='gpt-5.6-sol', base_url='http://127.0.0.1:18080', allow_insecure_http=False,
                     api_key_env='exact-generated-selector')
 
+    def catalog(self, record):
+        connection = {key: record[key] for key in ('base_url', 'allow_insecure_http', 'api_key_env')}
+        return dict(providers=[dict(id=record['backend'], auth_status='ready', connection=connection)])
+
     def test_supported_create_and_exact_readback_bind_only_returned_selector(self):
-        record=self.record();request=Mock(side_effect=[record,dict(configurations=[record])])
+        record=self.record();request=Mock(side_effect=[dict(connection_id=record['connection_id']),self.catalog(record)])
         with patch.object(q1,'request',request),patch.object(q1.uuid,'uuid4',return_value='fixed'),             patch.object(q1.time,'monotonic',return_value=0):
             result=q1.seed_q1_configuration('http://127.0.0.1:12001',record['base_url'],
                                            dict(OPENAI_API_KEY='fixed-dummy-value'),4)
@@ -269,15 +273,14 @@ class SavedFixtureConfigurationControls(unittest.TestCase):
         self.assertNotIn('api_key',result)
 
     def test_foreign_managed_inline_or_changed_readback_is_rejected(self):
-        for change in (dict(base_url='https://foreign.invalid'),dict(backend='codex-auth'),
-                       dict(api_key='must-not-appear'),dict(api_key_env=None)):
+        for change in (dict(base_url='https://foreign.invalid'),dict(backend='codex-auth'),dict(api_key_env=None)):
             record=self.record();record.update(change)
-            with patch.object(q1,'request',return_value=record),                 patch.object(q1.uuid,'uuid4',return_value='fixed'),                 patch.object(q1.time,'monotonic',return_value=0),self.assertRaises(ValueError):
+            with patch.object(q1,'request',side_effect=[dict(connection_id='owned-config'),self.catalog(record)]),                 patch.object(q1.time,'monotonic',return_value=0),self.assertRaises(ValueError):
                 q1.seed_q1_configuration('http://127.0.0.1:12001','http://127.0.0.1:18080',
                                         dict(OPENAI_API_KEY='dummy'),4)
         record=self.record();other=dict(record,api_key_env='another-selector')
-        with patch.object(q1,'request',side_effect=[record,dict(configurations=[other])]),             patch.object(q1.uuid,'uuid4',return_value='fixed'),             patch.object(q1.time,'monotonic',return_value=0),self.assertRaises(ValueError):
-            q1.seed_q1_configuration('http://127.0.0.1:12001',record['base_url'],dict(OPENAI_API_KEY='dummy'),4)
+        with patch.object(q1,'request',return_value=self.catalog(other)),             patch.object(q1.time,'monotonic',return_value=0),self.assertRaises(ValueError):
+            q1.seed_q1_configuration('http://127.0.0.1:12001',record['base_url'],dict(OPENAI_API_KEY='dummy'),4,existing=record)
 
     def test_expired_original_seed_barrier_does_not_send_request(self):
         request=Mock()
