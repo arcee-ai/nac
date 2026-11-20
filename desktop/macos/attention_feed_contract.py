@@ -242,7 +242,7 @@ class Engine:
         session = request(self.base, '/sessions', dict(behavior='direct', project_id=project_id,
                           backend='openai-responses', model='gpt-5.6-sol', base_url=provider.base,
                           api_key_env='OPENAI_API_KEY', reasoning_effort='high', extra_headers={},
-                          orchestrator_compaction_threshold=0), expected=201)
+                          compaction_threshold=0), expected=201)
         return session['metadata']['session_id']
     def stop(self):
         if self.process.poll() is None:

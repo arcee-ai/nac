@@ -198,7 +198,7 @@ export const test = base.extend<{ candidate: Candidate; developmentPathOverrides
                 api_key_env: "NAC_E2E_API_KEY",
                 reasoning_effort: "high",
                 extra_headers: {},
-                orchestrator_compaction_threshold: 0,
+                compaction_threshold: 0,
               },
             )
           ).metadata.session_id,

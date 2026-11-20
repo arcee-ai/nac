@@ -298,6 +298,8 @@ test("public PR comparison captures baseline browser and actual Electron shared 
           await info.attach(filename, { path: file, contentType: "image/png" });
         };
         await capture("workspace");
+        // This arm intentionally talks to the pre-retirement baseline binary;
+        // its legacy request contract must remain tied to that exact revision.
         const model = arm === "before"
           ? await api("/model-configs", {
               name: "Visual fixture model",
