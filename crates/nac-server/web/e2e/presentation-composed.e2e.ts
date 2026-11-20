@@ -159,6 +159,13 @@ async function conversationComposed(j: Journey, id: string) {
     j.harness.provider.requests.find((entry) => entry.matchedStep === "composed-reasoning")?.body,
   ).toMatchObject({ stream: true });
   try {
+    // Insights replaces its provisional group once the prompt joins the transcript.
+    const promptTurn = j.root.locator("[data-turn]").filter({
+      has: j.page.getByText(composedPrompt, { exact: true }),
+    });
+    await expect(
+      promptTurn.getByRole("button", { name: "Copy message", exact: true }),
+    ).toBeVisible();
     // The live turn folds its work behind one "Thinking" line; expanded, it
     // links the reasoning into Insights.
     const fold = j.root.locator("[data-work-fold]").last();
