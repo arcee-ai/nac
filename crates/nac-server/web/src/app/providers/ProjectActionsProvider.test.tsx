@@ -55,7 +55,7 @@ function Harness() {
   );
 }
 
-function tree(_orchestration = false, path = "/project/project-1") {
+function tree(path = "/project/project-1") {
   return (
     <MemoryRouter initialEntries={[path]}>
       <>
@@ -105,12 +105,12 @@ describe("project actions", () => {
   });
 });
 
-it("keeps hidden orchestration navigation memory while pruning genuinely deleted sessions", () => {
+it("keeps direct session navigation memory while pruning deleted sessions", () => {
   fakes.projects = [{ project_id: "project-1" }];
-  fakes.sessions = ["direct", "orchestrator", "direct-with-orchestrator"].map((behavior) => ({
-    summary: { session_id: behavior, behavior, project_id: "project-1" },
+  fakes.sessions = ["first", "second", "third"].map((session_id) => ({
+    summary: { session_id, behavior: "direct", project_id: "project-1" },
   }));
-  const ids = ["orchestrator", "direct", "direct-with-orchestrator", "deleted"];
+  const ids = ["first", "second", "third", "deleted"];
   for (const id of ids) {
     dismissChatTab(id);
     toggleSessionNavigationPin(id);
@@ -131,22 +131,21 @@ it("keeps hidden orchestration navigation memory while pruning genuinely deleted
     );
   };
   assertRetained();
-  view.rerender(tree(true));
+  view.rerender(tree());
   assertRetained();
 });
 
-it.each(["orchestrator", "direct-with-orchestrator"])(
-  "keeps the new-session shortcut in the project of a hidden %s deep link",
-  (behavior) => {
-    fakes.projects = [{ project_id: "project-1" }];
-    fakes.sessions = [{ summary: { session_id: "legacy", behavior, project_id: "project-1" } }];
-    render(tree(false, "/session/legacy/threads"));
-    fireEvent.keyDown(window, {
-      key: "o",
-      shiftKey: true,
-      ctrlKey: MOD === "ctrl",
-      metaKey: MOD === "meta",
-    });
-    expect(screen.getByTestId("location").textContent).toBe("/?project=project-1");
-  },
-);
+it("keeps the new-session shortcut in the project of a direct session deep link", () => {
+  fakes.projects = [{ project_id: "project-1" }];
+  fakes.sessions = [
+    { summary: { session_id: "current", behavior: "direct", project_id: "project-1" } },
+  ];
+  render(tree("/session/current/insights"));
+  fireEvent.keyDown(window, {
+    key: "o",
+    shiftKey: true,
+    ctrlKey: MOD === "ctrl",
+    metaKey: MOD === "meta",
+  });
+  expect(screen.getByTestId("location").textContent).toBe("/?project=project-1");
+});

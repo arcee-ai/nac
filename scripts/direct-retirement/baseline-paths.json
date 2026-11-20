@@ -440,7 +440,7 @@
     {"path":"crates/nac-server/web/src/app/lib/toolPresentation.ts","disposition":"neutralized"},
     {"path":"crates/nac-server/web/src/app/lib/transcript.test.ts","disposition":"neutralized"},
     {"path":"crates/nac-server/web/src/app/lib/transcript.ts","disposition":"neutralized"},
-    {"path":"crates/nac-server/web/src/app/providers/ProjectActionsProvider.test.tsx","disposition":"pending"},
+    {"path":"crates/nac-server/web/src/app/providers/ProjectActionsProvider.test.tsx","disposition":"neutralized"},
     {"path":"crates/nac-server/web/src/app/runtime/runtimeQueries.test.tsx","disposition":"neutralized"},
     {"path":"crates/nac-server/web/src/app/services/queries/delegation.test.tsx","disposition":"neutralized"},
     {"path":"crates/nac-server/web/src/app/services/queries/direct.ts","disposition":"neutralized"},
