@@ -2387,7 +2387,7 @@
     scroll-padding-block: calc(var(--spacing) * 4);
   }
 
-[data-nac-runtime]:is(.scrollbar-none), [data-nac-runtime] .scrollbar-none {
+[data-nac-runtime]:is(.\[scrollbar-width\:none\]), [data-nac-runtime] .\[scrollbar-width\:none\], [data-nac-runtime]:is(.scrollbar-none), [data-nac-runtime] .scrollbar-none {
     scrollbar-width: none;
   }
 
@@ -2779,6 +2779,10 @@
 
 [data-nac-runtime]:is(.overflow-y-clip), [data-nac-runtime] .overflow-y-clip {
     overflow-y: clip;
+  }
+
+[data-nac-runtime]:is(.overflow-y-hidden), [data-nac-runtime] .overflow-y-hidden {
+    overflow-y: hidden;
   }
 
 [data-nac-runtime]:is(.overscroll-contain), [data-nac-runtime] .overscroll-contain {
@@ -5763,12 +5767,20 @@
       max-width: 100%;
     }
 
+    [data-nac-runtime]:is(.md\:min-w-0), [data-nac-runtime] .md\:min-w-0 {
+      min-width: 0;
+    }
+
     [data-nac-runtime]:is(.md\:flex-1), [data-nac-runtime] .md\:flex-1 {
       flex: 1;
     }
 
     [data-nac-runtime]:is(.md\:flex-none), [data-nac-runtime] .md\:flex-none {
       flex: none;
+    }
+
+    [data-nac-runtime]:is(.md\:shrink), [data-nac-runtime] .md\:shrink {
+      flex-shrink: 1;
     }
 
     [data-nac-runtime]:is(.md\:shrink-0), [data-nac-runtime] .md\:shrink-0 {
@@ -5838,6 +5850,10 @@
     [data-nac-runtime]:is(.md\:truncate), [data-nac-runtime] .md\:truncate {
       text-overflow: ellipsis;
       white-space: nowrap;
+      overflow: hidden;
+    }
+
+    [data-nac-runtime]:is(.md\:overflow-hidden), [data-nac-runtime] .md\:overflow-hidden {
       overflow: hidden;
     }
 
