@@ -211,7 +211,7 @@ var A = class {
 	}
 	getSession(e, t = {}) {
 		let n = new URLSearchParams();
-		t.messageLimit !== void 0 && n.set("message_limit", String(t.messageLimit)), t.threadEventLimit !== void 0 && n.set("thread_event_limit", String(t.threadEventLimit)), t.includeSessions !== void 0 && n.set("include_sessions", String(t.includeSessions)), t.includeSystem && n.set("include_system", "true");
+		t.messageLimit !== void 0 && n.set("message_limit", String(t.messageLimit)), t.sessionEventLimit !== void 0 && n.set("session_event_limit", String(t.sessionEventLimit)), t.includeSessions !== void 0 && n.set("include_sessions", String(t.includeSessions)), t.includeSystem && n.set("include_system", "true");
 		let r = n.toString();
 		return this.transport.request("GET", `${O(e)}${r ? `?${r}` : ""}`, { signal: t.signal });
 	}
@@ -2195,25 +2195,25 @@ function Mn(e) {
 				text: "New assistant message",
 				isError: !1
 			}), "none";
-			case "orchestrator_compaction_started": return s({ activity: "Compacting context…" }), y({
+			case "compaction_started": return s({ activity: "Compacting context…" }), y({
 				seq: e,
 				kind: "compaction",
 				text: `Compaction started (${t.reason})`,
 				isError: !1
 			}), "none";
-			case "orchestrator_compaction_completed": return s({ activity: "" }), y({
+			case "compaction_completed": return s({ activity: "" }), y({
 				seq: e,
 				kind: "compaction",
 				text: "Compaction completed",
 				isError: !1
 			}), "replace-snapshot";
-			case "orchestrator_compaction_skipped": return s({ activity: "" }), y({
+			case "compaction_skipped": return s({ activity: "" }), y({
 				seq: e,
 				kind: "compaction",
 				text: `Compaction skipped: ${t.cause}`,
 				isError: !1
 			}), "none";
-			case "orchestrator_compaction_failed": return s({ activity: "" }), y({
+			case "compaction_failed": return s({ activity: "" }), y({
 				seq: e,
 				kind: "compaction",
 				text: `Compaction failed: ${t.failure}`,

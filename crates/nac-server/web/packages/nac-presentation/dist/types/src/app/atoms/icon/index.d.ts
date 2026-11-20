@@ -139,7 +139,6 @@ export declare enum IconName {
     Pin = "pin",
     Unpin = "unpin",
     ChatGpt = "chatGpt",
-    Orchestrator = "orchestrator",
     Robot = "robot",
     ReadFile = "readFile",
     SearchFile = "searchFile",

@@ -14,6 +14,7 @@ async fn retired_creation_selections_are_rejected_with_bad_request() {
         serde_json::json!({"behavior": "unknown"}),
         serde_json::json!({"behavior": "direct", "light_model": {"model": "test"}}),
         serde_json::json!({"behavior": "direct", "light_model": null}),
+        serde_json::json!({"behavior": "direct", "orchestrator_compaction_threshold": 1024}),
     ] {
         let response = post_json(app.clone(), "/sessions", body.clone()).await;
         assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{body}");

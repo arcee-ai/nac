@@ -1,6 +1,6 @@
-import { D as e, O as t, a as n, n as r, z as i } from "./RuntimeContext-CfHJvjXc.js";
+import { D as e, O as t, a as n, n as r, z as i } from "./RuntimeContext-DcTM7R-1.js";
 import { a, y as o } from "./PresentationBoundary-BVEraDGB.js";
-import { n as s, t as c } from "./Toast-D_MaotbV.js";
+import { n as s, t as c } from "./Toast-BWS4dvj0.js";
 import { Profiler as l, createContext as u, useCallback as d, useContext as f, useEffect as p, useMemo as m, useReducer as ee, useRef as te, useState as ne } from "react";
 import { keepPreviousData as re, useMutation as h, useQueries as ie, useQuery as g, useQueryClient as _ } from "@tanstack/react-query";
 import { Fragment as ae, jsx as oe, jsxs as se } from "react/jsx-runtime";
@@ -6453,7 +6453,7 @@ function Ww(e, t) {
 		queryFn: async ({ signal: t }) => {
 			let r = Nw(Aw(i, e)), a = await n.getSession(e, {
 				messageLimit: 24,
-				threadEventLimit: 50,
+				sessionEventLimit: 50,
 				includeSessions: !1,
 				includeSystem: !0,
 				signal: t

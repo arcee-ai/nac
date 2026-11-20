@@ -39,6 +39,10 @@ async fn direct_config_patch_updates_selected_model_and_rejects_light_selector()
         serde_json::json!({"light_model": null})
     )
     .is_err());
+    assert!(serde_json::from_value::<UpdateConfigRequest>(
+        serde_json::json!({"orchestrator_compaction_threshold": null})
+    )
+    .is_err());
     let _ = std::fs::remove_dir_all(root);
 }
 

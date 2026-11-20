@@ -139,7 +139,7 @@ export interface ListSessionsOptions {
 
 interface SessionSnapshotOptions {
   messageLimit?: number;
-  threadEventLimit?: number;
+  sessionEventLimit?: number;
   includeSessions?: boolean;
   includeSystem?: boolean;
   signal?: AbortSignal;

@@ -9,7 +9,7 @@ export interface LaunchModelSelection {
     api_key_env: string | null;
     reasoning_effort: string | null;
     extra_headers: Record<string, string> | null;
-    orchestrator_compaction_threshold?: number | null;
+    compaction_threshold?: number | null;
 }
 export interface SessionModelInitial {
     backend: BackendKind;
@@ -19,6 +19,6 @@ export interface SessionModelInitial {
     api_key_env: string | null;
     reasoning_effort: string | null;
     extra_headers: Record<string, string>;
-    orchestrator_compaction_threshold?: number | null;
+    compaction_threshold?: number | null;
 }
 export declare function sameModelSelection(left: LaunchModelSelection | null, right: LaunchModelSelection | null): boolean;

@@ -129,12 +129,7 @@ export interface SessionOverviewRecord {
   source_updated_at: string;
 }
 
-export interface ThreadEventBoundary {
-  epoch_id: string;
-  sequence_id: number;
-}
-
-export type ThreadEventDecodeDiagnostic = ApiSchema<"ThreadEventDecodeDiagnostic">;
+export type SessionEventDecodeDiagnostic = ApiSchema<"SessionEventDecodeDiagnostic">;
 
 export type CompactionReason = ApiSchema<"CompactionReason">;
 export type CompactionSkipReason = ApiSchema<"CompactionSkipReason">;

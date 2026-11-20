@@ -94,6 +94,10 @@ async fn mcp_rejects_retired_creation_and_thread_steering_inputs() {
         "Unsupported session fields",
     );
     rejected(
+        call(&manager, "create_session", json!({"orchestrator_compaction_threshold":1024})).await,
+        "Unsupported session fields",
+    );
+    rejected(
         call(
             &manager,
             "update_session",

@@ -16,7 +16,7 @@ export interface ListSessionsOptions {
 }
 interface SessionSnapshotOptions {
     messageLimit?: number;
-    threadEventLimit?: number;
+    sessionEventLimit?: number;
     includeSessions?: boolean;
     includeSystem?: boolean;
     signal?: AbortSignal;
@@ -573,10 +573,10 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         primary_tool_events?: import("./openapi.generated.js").components["schemas"]["AgentEvent"][];
         response_timing: import("./openapi.generated.js").components["schemas"]["ResponseTimingSnapshot"];
         run_failure?: import("./openapi.generated.js").components["schemas"]["RunFailure"] | null;
+        session_event_boundary: import("./openapi.generated.js").components["schemas"]["SessionEventBoundary"];
+        session_event_diagnostics?: import("./openapi.generated.js").components["schemas"]["SessionEventDecodeDiagnostic"][];
         sessions: import("./openapi.generated.js").components["schemas"]["SessionSummarySnapshot"][];
         shell_commands?: import("./openapi.generated.js").components["schemas"]["ShellCommandSnapshot"][];
-        thread_event_boundary: import("./openapi.generated.js").components["schemas"]["SessionEventBoundary"];
-        thread_event_diagnostics?: import("./openapi.generated.js").components["schemas"]["ThreadEventDecodeDiagnostic"][];
         transcript_recovery_warning?: string | null;
         workspace: import("./openapi.generated.js").components["schemas"]["WorkspaceSnapshot"];
     } & {
@@ -596,10 +596,10 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         primary_tool_events?: import("./openapi.generated.js").components["schemas"]["AgentEvent"][];
         response_timing: import("./openapi.generated.js").components["schemas"]["ResponseTimingSnapshot"];
         run_failure?: import("./openapi.generated.js").components["schemas"]["RunFailure"] | null;
+        session_event_boundary: import("./openapi.generated.js").components["schemas"]["SessionEventBoundary"];
+        session_event_diagnostics?: import("./openapi.generated.js").components["schemas"]["SessionEventDecodeDiagnostic"][];
         sessions: import("./openapi.generated.js").components["schemas"]["SessionSummarySnapshot"][];
         shell_commands?: import("./openapi.generated.js").components["schemas"]["ShellCommandSnapshot"][];
-        thread_event_boundary: import("./openapi.generated.js").components["schemas"]["SessionEventBoundary"];
-        thread_event_diagnostics?: import("./openapi.generated.js").components["schemas"]["ThreadEventDecodeDiagnostic"][];
         transcript_recovery_warning?: string | null;
         workspace: import("./openapi.generated.js").components["schemas"]["WorkspaceSnapshot"];
     } & {
@@ -645,11 +645,11 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         automatic_compaction?: boolean;
         backend: string | null;
         base_url: string;
+        compaction_threshold: number | null;
         config_version: number;
         diagnostics?: string[];
         extra_headers_json: string | null;
         model: string;
-        orchestrator_compaction_threshold: number | null;
         reasoning_effort: string | null;
         session_id: string;
     }>;

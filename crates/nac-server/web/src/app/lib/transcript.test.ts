@@ -58,7 +58,7 @@ function snapshot(messages: Message[]): SessionSnapshotResponse {
       response_durations_ms: [],
     },
     sessions: [],
-    thread_event_boundary: { epoch_id: "epoch-test", sequence_id: 0 },
+    session_event_boundary: { epoch_id: "epoch-test", sequence_id: 0 },
     workspace: {
       host_root: null,
       workspace_display: "nac-test",

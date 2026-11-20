@@ -1,9 +1,9 @@
-import { A as e, C as t, E as n, F as r, I as i, L as a, M as o, N as s, O as c, P as l, R as u, S as d, T as f, _ as p, a as m, b as h, c as g, d as _, f as v, g as y, h as b, i as x, k as S, l as C, m as w, n as T, o as E, p as D, r as O, s as k, t as A, u as j, v as M, w as ee, x as te, y as ne, z as re } from "./chunks/RuntimeContext-CfHJvjXc.js";
+import { A as e, C as t, E as n, F as r, I as i, L as a, M as o, N as s, O as c, P as l, R as u, S as d, T as f, _ as p, a as m, b as h, c as g, d as _, f as v, g as y, h as b, i as x, k as S, l as C, m as w, n as T, o as E, p as D, r as O, s as k, t as A, u as j, v as M, w as ee, x as te, y as ne, z as re } from "./chunks/RuntimeContext-DcTM7R-1.js";
 import { C as ie, D as ae, E as oe, O as se, S as ce, b as le, d as ue, g as de, h as fe, i as pe, l as me, m as he, n as ge, p as _e, r as ve, t as ye, u as be, v as xe, w as Se, x as Ce, y as we } from "./chunks/PresentationBoundary-BVEraDGB.js";
 import { n as Te, t as Ee } from "./chunks/visibility-Cy5NeKga.js";
-import { $ as De, $n as Oe, $t as ke, A as Ae, An as je, At as Me, B as Ne, Bn as Pe, Bt as Fe, C as Ie, Cn as Le, Ct as Re, D as ze, Dn as Be, Dt as Ve, E as He, En as Ue, Et as We, F as Ge, Fn as Ke, Ft as qe, G as Je, Gn as Ye, Gt as Xe, H as Ze, Hn as Qe, Ht as $e, I as et, In as tt, It as nt, J as rt, Jn as it, Jt as at, K as ot, Kn as st, Kt as ct, L as lt, Ln as ut, Lt as dt, M as ft, Mn as pt, Mt as mt, N as ht, Nn as gt, Nt as _t, O as vt, On as yt, Ot as bt, P as xt, Pn as St, Pt as Ct, Q as wt, Qn as Tt, Qt as Et, R as Dt, Rn as Ot, Rt as kt, S as At, Sn as jt, St as Mt, T as Nt, Tn as Pt, Tt as Ft, U as It, Un as Lt, Ut as Rt, V as zt, Vn as Bt, Vt, W as Ht, Wn as Ut, Wt, X as Gt, Xn as Kt, Xt as qt, Y as Jt, Yn as Yt, Yt as Xt, Z as Zt, Zn as Qt, Zt as $t, _ as en, _n as tn, _t as nn, a as N, an as rn, at as an, b as on, bn as sn, bt as cn, c as ln, cn as un, ct as dn, d as fn, dn as pn, dt as mn, en as hn, er as gn, et as _n, f as vn, fn as yn, ft as bn, g as xn, gn as Sn, gt as Cn, h as wn, hn as Tn, ht as En, i as Dn, in as On, it as kn, j as An, jn, jt as Mn, k as Nn, kn as Pn, kt as Fn, l as In, ln as Ln, lt as Rn, m as zn, mn as Bn, mt as Vn, nn as Hn, nr as Un, nt as Wn, o as Gn, on as Kn, ot as qn, p as Jn, pn as Yn, pt as Xn, q as Zn, qn as Qn, qt as $n, r as er, rn as tr, rt as nr, s as rr, sn as ir, st as ar, t as or, tn as sr, tr as P, tt as cr, u as lr, un as ur, ut as dr, v as fr, vn as pr, vt as mr, w as hr, wn as gr, wt as _r, x as vr, xn as yr, xt as br, y as xr, yn as Sr, yt as Cr, z as wr, zn as Tr, zt as Er } from "./chunks/workspaceLink-CZJscVoW.js";
-import { $ as Dr, A as Or, B as kr, F as Ar, I as jr, J as Mr, K as Nr, L as Pr, M as Fr, N as Ir, O as Lr, P as Rr, Q as zr, R as Br, S as Vr, V as Hr, X as Ur, Y as Wr, Z as Gr, _ as F, a as Kr, b as qr, c as Jr, d as Yr, et as I, f as Xr, g as L, h as R, j as Zr, k as Qr, l as $r, m as z, nt as ei, o as ti, p as ni, q as B, rt as V, tt as H, u as ri, x as ii, y as ai, z as oi } from "./chunks/Toast-D_MaotbV.js";
-import { $t as si, A as ci, At as li, B as ui, Bt as di, D as fi, Dt as pi, E as mi, Et as hi, F as gi, Ft as _i, G as vi, H as yi, I as bi, J as xi, Jt as Si, K as Ci, L as wi, Mt as Ti, N as Ei, Nt as Di, Ot as Oi, P as ki, Qt as Ai, S as ji, T as Mi, Tt as Ni, U as Pi, Ut as Fi, W as Ii, Wt as Li, X as Ri, Xt as zi, Y as U, Yt as Bi, Zt as Vi, _ as Hi, a as Ui, b as Wi, bt as Gi, c as Ki, d as qi, dt as Ji, en as Yi, et as Xi, f as Zi, ft as Qi, gt as $i, h as ea, i as ta, it as na, l as ra, lt as ia, m as aa, n as oa, nt as sa, o as ca, ot as la, p as ua, pt as da, q as W, qt as fa, r as pa, rt as ma, s as ha, t as ga, tt as _a, u as va, ut as ya, v as ba, vt as xa, w as Sa, wt as Ca, x as wa, xt as Ta, yt as Ea, z as Da, zt as Oa } from "./chunks/ChatSessionActions-BGO21cZY.js";
+import { $ as De, $n as Oe, $t as ke, A as Ae, An as je, At as Me, B as Ne, Bn as Pe, Bt as Fe, C as Ie, Cn as Le, Ct as Re, D as ze, Dn as Be, Dt as Ve, E as He, En as Ue, Et as We, F as Ge, Fn as Ke, Ft as qe, G as Je, Gn as Ye, Gt as Xe, H as Ze, Hn as Qe, Ht as $e, I as et, In as tt, It as nt, J as rt, Jn as it, Jt as at, K as ot, Kn as st, Kt as ct, L as lt, Ln as ut, Lt as dt, M as ft, Mn as pt, Mt as mt, N as ht, Nn as gt, Nt as _t, O as vt, On as yt, Ot as bt, P as xt, Pn as St, Pt as Ct, Q as wt, Qn as Tt, Qt as Et, R as Dt, Rn as Ot, Rt as kt, S as At, Sn as jt, St as Mt, T as Nt, Tn as Pt, Tt as Ft, U as It, Un as Lt, Ut as Rt, V as zt, Vn as Bt, Vt, W as Ht, Wn as Ut, Wt, X as Gt, Xn as Kt, Xt as qt, Y as Jt, Yn as Yt, Yt as Xt, Z as Zt, Zn as Qt, Zt as $t, _ as en, _n as tn, _t as nn, a as N, an as rn, at as an, b as on, bn as sn, bt as cn, c as ln, cn as un, ct as dn, d as fn, dn as pn, dt as mn, en as hn, er as gn, et as _n, f as vn, fn as yn, ft as bn, g as xn, gn as Sn, gt as Cn, h as wn, hn as Tn, ht as En, i as Dn, in as On, it as kn, j as An, jn, jt as Mn, k as Nn, kn as Pn, kt as Fn, l as In, ln as Ln, lt as Rn, m as zn, mn as Bn, mt as Vn, nn as Hn, nr as Un, nt as Wn, o as Gn, on as Kn, ot as qn, p as Jn, pn as Yn, pt as Xn, q as Zn, qn as Qn, qt as $n, r as er, rn as tr, rt as nr, s as rr, sn as ir, st as ar, t as or, tn as sr, tr as P, tt as cr, u as lr, un as ur, ut as dr, v as fr, vn as pr, vt as mr, w as hr, wn as gr, wt as _r, x as vr, xn as yr, xt as br, y as xr, yn as Sr, yt as Cr, z as wr, zn as Tr, zt as Er } from "./chunks/workspaceLink-D2Kpjl-e.js";
+import { $ as Dr, A as Or, B as kr, F as Ar, I as jr, J as Mr, K as Nr, L as Pr, M as Fr, N as Ir, O as Lr, P as Rr, Q as zr, R as Br, S as Vr, V as Hr, X as Ur, Y as Wr, Z as Gr, _ as F, a as Kr, b as qr, c as Jr, d as Yr, et as I, f as Xr, g as L, h as R, j as Zr, k as Qr, l as $r, m as z, nt as ei, o as ti, p as ni, q as B, rt as V, tt as H, u as ri, x as ii, y as ai, z as oi } from "./chunks/Toast-BWS4dvj0.js";
+import { $t as si, A as ci, At as li, B as ui, Bt as di, D as fi, Dt as pi, E as mi, Et as hi, F as gi, Ft as _i, G as vi, H as yi, I as bi, J as xi, Jt as Si, K as Ci, L as wi, Mt as Ti, N as Ei, Nt as Di, Ot as Oi, P as ki, Qt as Ai, S as ji, T as Mi, Tt as Ni, U as Pi, Ut as Fi, W as Ii, Wt as Li, X as Ri, Xt as zi, Y as U, Yt as Bi, Zt as Vi, _ as Hi, a as Ui, b as Wi, bt as Gi, c as Ki, d as qi, dt as Ji, en as Yi, et as Xi, f as Zi, ft as Qi, gt as $i, h as ea, i as ta, it as na, l as ra, lt as ia, m as aa, n as oa, nt as sa, o as ca, ot as la, p as ua, pt as da, q as W, qt as fa, r as pa, rt as ma, s as ha, t as ga, tt as _a, u as va, ut as ya, v as ba, vt as xa, w as Sa, wt as Ca, x as wa, xt as Ta, yt as Ea, z as Da, zt as Oa } from "./chunks/ChatSessionActions-jfSlCExd.js";
 import { Activity as ka, Fragment as Aa, Suspense as ja, createContext as Ma, forwardRef as Na, lazy as Pa, memo as Fa, use as Ia, useCallback as G, useContext as La, useEffect as K, useEffectEvent as Ra, useId as za, useLayoutEffect as Ba, useMemo as q, useRef as J, useState as Y, useSyncExternalStore as Va } from "react";
 import { QueryClientProvider as Ha, QueryObserver as Ua, replaceEqualDeep as Wa, useIsFetching as Ga, useMutation as Ka, useQueries as qa, useQuery as Ja, useQueryClient as Ya } from "@tanstack/react-query";
 import { Fragment as X, jsx as Z, jsxs as Q } from "react/jsx-runtime";
@@ -498,7 +498,7 @@ function Qo(e, t) {
 	if (e === t) return !0;
 	if (!e || !t) return !1;
 	let n = e.extra_headers === t.extra_headers || e.extra_headers != null && t.extra_headers != null && Object.keys(e.extra_headers).length === Object.keys(t.extra_headers).length && Object.entries(e.extra_headers).every(([e, n]) => t.extra_headers?.[e] === n);
-	return e.backend === t.backend && e.model === t.model && e.base_url === t.base_url && e.allow_insecure_http === t.allow_insecure_http && e.api_key_env === t.api_key_env && e.reasoning_effort === t.reasoning_effort && n && e.orchestrator_compaction_threshold === t.orchestrator_compaction_threshold;
+	return e.backend === t.backend && e.model === t.model && e.base_url === t.base_url && e.allow_insecure_http === t.allow_insecure_http && e.api_key_env === t.api_key_env && e.reasoning_effort === t.reasoning_effort && n && e.compaction_threshold === t.compaction_threshold;
 }
 // src/app/lib/modelConfig.ts
 var $o = {
@@ -575,10 +575,10 @@ function us(e, t, n = !1) {
 	s.model !== t.model && (c.model = s.model), s.base_url !== t.base_url && (c.base_url = s.base_url), s.allow_insecure_http !== t.allow_insecure_http && (c.allow_insecure_http = s.allow_insecure_http), s.backend !== t.backend && (c.backend = s.backend), s.reasoning_effort !== t.reasoning_effort && (c.reasoning_effort = s.reasoning_effort), s.api_key_env !== t.api_key_env && (c.api_key_env = s.api_key_env);
 	let l = ss(e.extra_headers, {});
 	(t.extra_headers_invalid || !ls(l, t.extra_headers)) && (c.extra_headers = l);
-	let u = e.orchestrator_compaction_threshold.trim();
+	let u = e.compaction_threshold.trim();
 	if (u !== "" && !/^\d+$/.test(u)) throw Error("Context Limit must be a non-negative integer");
 	let d = u === "" ? null : Number(u);
-	return d !== t.orchestrator_compaction_threshold && (c.orchestrator_compaction_threshold = d), c;
+	return d !== t.compaction_threshold && (c.compaction_threshold = d), c;
 }
 [...j.map((e) => ({
 	id: e,
@@ -1852,7 +1852,7 @@ function cc({ initial: e, existingSession: t = !1, onChange: n }) {
 			api_key_env: c.api_key_env,
 			reasoning_effort: m.effort || null,
 			extra_headers: c.extra_headers,
-			orchestrator_compaction_threshold: c.orchestrator_compaction_threshold
+			compaction_threshold: c.compaction_threshold
 		} : _ ? {
 			kind: "resolved",
 			backend: m.pick.backend,
@@ -2488,7 +2488,7 @@ function Pc(e) {
 		api_key_env: t.api_key_env,
 		reasoning_effort: e.reasoning === "__clear__" ? null : e.reasoning || t.reasoning_effort || null
 	}, i = e.headers ?? t.extra_headers ?? void 0;
-	return i !== void 0 && (r.extra_headers = i), !(t.backend === "chatgpt-codex-responses" && e.automaticCompaction) && rs(e.compaction) !== null && (r.orchestrator_compaction_threshold = Number(e.compaction)), e.execution !== "ssh" && (r.sandbox = {
+	return i !== void 0 && (r.extra_headers = i), !(t.backend === "chatgpt-codex-responses" && e.automaticCompaction) && rs(e.compaction) !== null && (r.compaction_threshold = Number(e.compaction)), e.execution !== "ssh" && (r.sandbox = {
 		enabled: e.execution === "sandbox",
 		no_mount_cwd: n.noMount,
 		image: rs(n.image),
@@ -8033,7 +8033,7 @@ function Kd(e) {
 		api_key_env: e.api_key_env || null,
 		extra_headers: t.headers,
 		extra_headers_invalid: t.invalid,
-		orchestrator_compaction_threshold: e.orchestrator_compaction_threshold,
+		compaction_threshold: e.compaction_threshold,
 		automatic_compaction: e.automatic_compaction ?? !1
 	};
 }
@@ -8084,7 +8084,7 @@ function Yd({ open: e, id: t, initial: n, initialVersion: r, summary: i, diagnos
 		let e = f.current, t = e?.ownerDocument.defaultView, n = u ? e : e?.parentElement;
 		if (t && n instanceof t.HTMLDivElement) return Ud(n);
 	}, [u]);
-	let p = Ya(), m = Oc(e), h = vo(), g = mn(), _ = fn(), v = _.data ?? null, [y] = Y(i), [b] = Y(r), x = bn(), S = y.title ?? "", [C, w] = Y(S), [E, D] = Y(n.model), [O, k] = Y(n.backend), [A, j] = Y(n.reasoning_effort ?? ""), [, M] = Y(n.base_url), [ee, te] = Y(Wd(n.extra_headers)), [ne, re] = Y(n.orchestrator_compaction_threshold == null ? "" : String(n.orchestrator_compaction_threshold)), ie = J(n.automatic_compaction ?? !1), [ae, oe] = Y(""), [se, ce] = Y(null), [le, ue] = Y(!1), de = J(null), fe = G((e) => {
+	let p = Ya(), m = Oc(e), h = vo(), g = mn(), _ = fn(), v = _.data ?? null, [y] = Y(i), [b] = Y(r), x = bn(), S = y.title ?? "", [C, w] = Y(S), [E, D] = Y(n.model), [O, k] = Y(n.backend), [A, j] = Y(n.reasoning_effort ?? ""), [, M] = Y(n.base_url), [ee, te] = Y(Wd(n.extra_headers)), [ne, re] = Y(n.compaction_threshold == null ? "" : String(n.compaction_threshold)), ie = J(n.automatic_compaction ?? !1), [ae, oe] = Y(""), [se, ce] = Y(null), [le, ue] = Y(!1), de = J(null), fe = G((e) => {
 		if (ce(e), !e || Qo(de.current, e)) return;
 		let t = de.current;
 		de.current = e, k(e.backend), D(e.model), M(e.base_url), j(e.reasoning_effort ?? ""), t && t.backend === e.backend && t.base_url === e.base_url && t.api_key_env === e.api_key_env && t.allow_insecure_http === e.allow_insecure_http || te(Wd(e.extra_headers ?? {}));
@@ -8123,8 +8123,8 @@ function Yd({ open: e, id: t, initial: n, initialVersion: r, summary: i, diagnos
 				credential_mode: e.api_key_env ? "variable" : "none",
 				api_key_env: e.api_key_env ?? "",
 				extra_headers: ee,
-				orchestrator_compaction_threshold: ne
-			}, n, r), n.automatic_compaction && ie.current ? delete t.orchestrator_compaction_threshold : n.automatic_compaction && (t.orchestrator_compaction_threshold = ne.trim() ? Number(ne) : null);
+				compaction_threshold: ne
+			}, n, r), n.automatic_compaction && ie.current ? delete t.compaction_threshold : n.automatic_compaction && (t.compaction_threshold = ne.trim() ? Number(ne) : null);
 		} catch (e) {
 			throw new kc(e instanceof Error ? e.message : String(e));
 		}
@@ -8250,7 +8250,7 @@ function Yd({ open: e, id: t, initial: n, initialVersion: r, summary: i, diagnos
 						api_key_env: n.api_key_env,
 						reasoning_effort: n.reasoning_effort,
 						extra_headers: n.extra_headers,
-						orchestrator_compaction_threshold: n.orchestrator_compaction_threshold
+						compaction_threshold: n.compaction_threshold
 					},
 					onChange: fe,
 					children: /* @__PURE__ */ Q("div", {
@@ -9831,7 +9831,7 @@ function lp({ projectId: e, model: t, defaultRef: n, onClose: r, onExistingCheck
 							api_key_env: t.api_key_env,
 							reasoning_effort: t.reasoning_effort,
 							extra_headers: t.extra_headers,
-							orchestrator_compaction_threshold: t.orchestrator_compaction_threshold ?? null
+							compaction_threshold: t.compaction_threshold ?? null
 						},
 						git_ref: f.trim() || null,
 						default_ref: n ? null : m.trim(),
@@ -10026,7 +10026,7 @@ function hp({ projectId: e, selected: t }) {
 		reasoning_effort: t.reasoning_effort,
 		extra_headers: t.extra_headers
 	};
-	return t.orchestrator_compaction_threshold !== void 0 && (n.orchestrator_compaction_threshold = t.orchestrator_compaction_threshold), n;
+	return t.compaction_threshold !== void 0 && (n.compaction_threshold = t.compaction_threshold), n;
 }
 // src/app/features/home/ModelOverrideModal.tsx
 function gp({ open: e, current: t, onApply: n, onReset: r, onClose: i }) {
@@ -11358,7 +11358,7 @@ function Jp({ value: e, onChange: t, git: n, savedDefaultRef: r }) {
 			api_key_env: n.api_key_env,
 			reasoning_effort: n.reasoning_effort,
 			extra_headers: n.extra_headers,
-			orchestrator_compaction_threshold: n.orchestrator_compaction_threshold ?? null
+			compaction_threshold: n.compaction_threshold ?? null
 		} : null;
 		JSON.stringify(e.model_selection ?? null) !== JSON.stringify(r) && t({
 			...e,
@@ -17705,7 +17705,7 @@ function Cy(e) {
 		let t = JSON.parse(e);
 		if (!t || typeof t != "object" || Array.isArray(t)) return null;
 		let n = t;
-		if (typeof n.child_session_id != "string" && typeof n.orchestrator_session_id != "string" || typeof n.generation != "number" || !Number.isSafeInteger(n.generation) || n.generation < 1 || typeof n.status != "string" || !Object.hasOwn(Sy, n.status)) return null;
+		if (typeof n.child_session_id != "string" || typeof n.generation != "number" || !Number.isSafeInteger(n.generation) || n.generation < 1 || typeof n.status != "string" || !Object.hasOwn(Sy, n.status)) return null;
 		let r = [];
 		for (let [e, t] of [
 			["report", "Result"],
@@ -17892,7 +17892,7 @@ var Ny = Fa(function({ entry: e, interactive: t, showTarget: n = !0 }) {
 						className: "min-w-0 break-words font-medium text-basic-primary",
 						children: c.title
 					}) : null,
-					/* @__PURE__ */ Q("span", { children: [e.action === "spawn-agent" && e.presentation.status !== "unknown" ? g : `${e.action === "spawn-agent" ? "Subagent" : "Managed orchestrator"} · ${g}`, e.action === "spawn-agent" && c.sessionId && !l ? ` · Current: ${c.label ?? (c.status === ji.Running ? "Working…" : "Ready")}` : null] }),
+					/* @__PURE__ */ Q("span", { children: [e.action === "spawn-agent" && e.presentation.status !== "unknown" ? g : `Subagent · ${g}`, e.action === "spawn-agent" && c.sessionId && !l ? ` · Current: ${c.label ?? (c.status === ji.Running ? "Working…" : "Ready")}` : null] }),
 					m ? /* @__PURE__ */ Z("span", { children: m }) : null,
 					e.status === "failed" && e.presentation.resultPreview && e.presentation.resultPreview !== g ? /* @__PURE__ */ Z("span", { children: e.presentation.resultPreview }) : null
 				]
@@ -26650,7 +26650,7 @@ function hE({ children: e }) {
 	});
 }
 // src/App.tsx
-var gE = Pa(() => import("./chunks/DesktopSessionTargetOwner-Cb7eQdqM.js").then((e) => ({ default: e.DesktopSessionTargetOwner }))), _E = Pa(() => import("./chunks/DesignPreviewPage-Dapz5M5O.js").catch(() => ({ default: () => /* @__PURE__ */ Z("p", {
+var gE = Pa(() => import("./chunks/DesktopSessionTargetOwner-DP_rDi03.js").then((e) => ({ default: e.DesktopSessionTargetOwner }))), _E = Pa(() => import("./chunks/DesignPreviewPage-D72sn0mJ.js").catch(() => ({ default: () => /* @__PURE__ */ Z("p", {
 	role: "alert",
 	children: "The design preview could not be loaded. Reload this page to try again."
 }) })));

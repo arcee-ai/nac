@@ -152,21 +152,21 @@ export declare function createRuntimeStore(_storage?: Pick<Storage, "getItem" | 
     } | {
         compaction_id: string;
         reason: import("../types/openapi.generated").components["schemas"]["CompactionReason"];
-        type: "orchestrator_compaction_started";
+        type: "compaction_started";
     } | {
         compaction_id: string;
         reason: import("../types/openapi.generated").components["schemas"]["CompactionReason"];
-        type: "orchestrator_compaction_completed";
+        type: "compaction_completed";
     } | {
         cause: import("../types/openapi.generated").components["schemas"]["CompactionSkipReason"];
         compaction_id: string;
         reason: import("../types/openapi.generated").components["schemas"]["CompactionReason"];
-        type: "orchestrator_compaction_skipped";
+        type: "compaction_skipped";
     } | {
         compaction_id: string;
         failure: import("../types/openapi.generated").components["schemas"]["CompactionFailure"];
         reason: import("../types/openapi.generated").components["schemas"]["CompactionReason"];
-        type: "orchestrator_compaction_failed";
+        type: "compaction_failed";
     } | {
         content: string;
         type: "assistant_message";
@@ -262,21 +262,21 @@ export declare const release: () => void, runtimeStore: import("../lib/store").S
 } | {
     compaction_id: string;
     reason: import("../types/openapi.generated").components["schemas"]["CompactionReason"];
-    type: "orchestrator_compaction_started";
+    type: "compaction_started";
 } | {
     compaction_id: string;
     reason: import("../types/openapi.generated").components["schemas"]["CompactionReason"];
-    type: "orchestrator_compaction_completed";
+    type: "compaction_completed";
 } | {
     cause: import("../types/openapi.generated").components["schemas"]["CompactionSkipReason"];
     compaction_id: string;
     reason: import("../types/openapi.generated").components["schemas"]["CompactionReason"];
-    type: "orchestrator_compaction_skipped";
+    type: "compaction_skipped";
 } | {
     compaction_id: string;
     failure: import("../types/openapi.generated").components["schemas"]["CompactionFailure"];
     reason: import("../types/openapi.generated").components["schemas"]["CompactionReason"];
-    type: "orchestrator_compaction_failed";
+    type: "compaction_failed";
 } | {
     content: string;
     type: "assistant_message";
