@@ -307,7 +307,6 @@ export function ModelPicker({
     <Popover
       open={open}
       onClose={close}
-      className="min-w-0"
       sticky
       className="min-w-0 max-w-full"
       placement={placement}
