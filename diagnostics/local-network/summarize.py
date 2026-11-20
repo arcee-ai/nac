@@ -32,7 +32,12 @@ def main():
         raw = json.loads(Path(result_path).read_text())
         data = summarize(cell, lines, raw['operation'], raw['owned_provider_settlement'])
         data.update({key: raw.get(key) if raw.get(key) in ('unknown', 'ocr_title_match') else 'unknown'
-                     for key in ('before_image', 'after_image')})
+                     for key in ('positive_image', 'before_image', 'after_image')})
+        coverage = ('not_started', 'runner_unavailable', 'test_unavailable', 'test_failed', 'export_failed', 'attachment_invalid', 'ocr_complete')
+        data.update({key: raw.get(key) if raw.get(key) in coverage else 'unknown'
+                     for key in ('positive_coverage', 'before_coverage', 'after_coverage')})
+        builds = ('project_unavailable', 'fixture_unavailable', 'build_failed', 'complete')
+        data['build_coverage'] = raw.get('build_coverage') if raw.get('build_coverage') in builds else 'unknown'
         data.update(scope='diagnostic_fixture_window', fixture_process_settlement='unknown')
     print(json.dumps(data, sort_keys=True))
 

@@ -31,22 +31,33 @@ class Tests(unittest.TestCase):
             events.clear()
             def snapshot(stage):
                 events.append(stage)
-                return 'unknown'
+                return ('ocr_title_match' if stage == 'positive' else 'unknown', 'ocr_complete')
             def request(*_):
                 events.append('request')
                 raise HTTPError('private', 404, 'private', {}, None)
             result = compare(cell, snapshot, Provider, request)
-            self.assertEqual(events, {'idle': ['before', 'after'],
-                                      'provider': ['before', 'provider', 'after', 'settle'],
-                                      'loopback': ['before', 'provider', 'request', 'after', 'settle']}[cell])
+            self.assertEqual(events, {'idle': ['positive', 'before', 'after'],
+                                      'provider': ['positive', 'before', 'provider', 'after', 'settle'],
+                                      'loopback': ['positive', 'before', 'provider', 'request', 'after', 'settle']}[cell])
             self.assertEqual(result['modal'], 'unknown')
             self.assertEqual(result['fixture_process_settlement'], 'unknown')
             self.assertNotIn('private', str(result))
 
+    def test_positive_failure_stops_before_operations(self):
+        result = compare('loopback', lambda _: ('unknown', 'test_failed'), Provider, lambda *_: self.fail())
+        self.assertEqual(result['positive_coverage'], 'test_failed')
+        self.assertEqual(result['operation'], 'not_started')
+        self.assertEqual(events, [])
+        def failed_snapshot(_):
+            raise RuntimeError('private')
+        failure = compare('provider', failed_snapshot, Provider, lambda *_: None)
+        self.assertEqual(failure['positive_coverage'], 'test_unavailable')
+        self.assertNotIn('private', str(failure))
+
     def test_operation_failure_still_stops_provider_and_leaves_after_unknown(self):
         def fail(*_):
             raise RuntimeError('private')
-        result = compare('loopback', lambda stage: 'unknown', Provider, fail)
+        result = compare('loopback', lambda stage: ('ocr_title_match' if stage == 'positive' else 'unknown', 'ocr_complete'), Provider, fail)
         self.assertEqual(result['operation'], 'unavailable')
         self.assertEqual(result['after_image'], 'unknown')
         self.assertEqual(events, ['provider', 'settle'])
@@ -63,17 +74,27 @@ class Tests(unittest.TestCase):
             def save():
                 manifest.write_text(json.dumps([group]))
             save()
-            self.assertEqual(parse_export(export), 'ocr_title_match')
+            self.assertEqual(parse_export(export), ('ocr_title_match', 'ocr_complete'))
+            group['testIdentifier'] = 'CheckpointJourneys/testPositiveControl()'
+            group['testIdentifierURL'] = TEST_URL.replace('testSnapshot', 'testPositiveControl')
+            save()
+            self.assertEqual(parse_export(export, positive=True), ('ocr_title_match', 'ocr_complete'))
+            self.assertEqual(parse_export(export), ('unknown', 'attachment_invalid'))
+            group['testIdentifier'] = TEST_ID; group['testIdentifierURL'] = TEST_URL
+            save()
+            (export / 'payload.txt').write_text('unknown')
+            self.assertEqual(parse_export(export), ('unknown', 'ocr_complete'))
+            (export / 'payload.txt').write_text('ocr_title_match')
             manifest.write_text('[{\"testIdentifier\":\"foreign\",\"testIdentifier\":\"' + TEST_ID + '\",\"attachments\":[' + json.dumps(entry) + ']}]')
-            self.assertEqual(parse_export(export), 'unknown')
+            self.assertEqual(parse_export(export), ('unknown', 'attachment_invalid'))
             group['attachments'].append(dict(entry)); save()
-            self.assertEqual(parse_export(export), 'unknown')
+            self.assertEqual(parse_export(export), ('unknown', 'attachment_invalid'))
             group['attachments'].pop(); group['testIdentifierURL'] = 'foreign'; save()
-            self.assertEqual(parse_export(export), 'unknown')
+            self.assertEqual(parse_export(export), ('unknown', 'attachment_invalid'))
             group['testIdentifierURL'] = TEST_URL; save()
             (export / 'payload.txt').unlink()
             (export / 'payload.txt').symlink_to(manifest)
-            self.assertEqual(parse_export(export), 'unknown')
+            self.assertEqual(parse_export(export), ('unknown', 'attachment_invalid'))
 
 if __name__ == '__main__':
     unittest.main()

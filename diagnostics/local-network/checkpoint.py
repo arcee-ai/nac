@@ -18,7 +18,7 @@ TEST_ID = 'CheckpointJourneys/testSnapshot()'
 TEST_URL = 'test://com.apple.xcode/NACNativeUITests/NACDiagnosticUITests/CheckpointJourneys/testSnapshot'
 
 
-def parse_export(export):
+def parse_export(export, positive=False):
     """Read only the unique fixed Q-prime attachment; never print exported data."""
     try:
         raw = read_owned(export, ('manifest.json',), 256 * 1024)
@@ -29,26 +29,30 @@ def parse_export(export):
         manifest = json.loads(raw, object_pairs_hook=unique,
                               parse_constant=lambda _: (_ for _ in ()).throw(ValueError('constant')))
         if type(manifest) is not list or len(manifest) != 1 or type(manifest[0]) is not dict:
-            return 'unknown'
+            return ('unknown', 'attachment_invalid')
         group = manifest[0]
-        if group.get('testIdentifier') != TEST_ID or group.get('testIdentifierURL', TEST_URL) != TEST_URL:
-            return 'unknown'
+        test_id = 'CheckpointJourneys/testPositiveControl()' if positive else TEST_ID
+        test_url = TEST_URL.replace('testSnapshot', 'testPositiveControl') if positive else TEST_URL
+        if group.get('testIdentifier') != test_id or group.get('testIdentifierURL', test_url) != test_url:
+            return ('unknown', 'attachment_invalid')
         entries = group.get('attachments')
         if type(entries) is not list or len(entries) > 4096:
-            return 'unknown'
+            return ('unknown', 'attachment_invalid')
         selected = [item for item in entries if type(item) is dict
                     and re.fullmatch(r'nac-local-network-checkpoint-v1(?:_\d+_[0-9a-fA-F-]{36})?(?:\.txt)?',
                                      str(item.get('suggestedHumanReadableName', '')))]
         if len(selected) != 1:
-            return 'unknown'
+            return ('unknown', 'attachment_invalid')
         name = selected[0].get('exportedFileName')
         if (type(name) is not str or name in ('', '.', '..') or '/' in name or '\\' in name or '\0' in name
                 or sum(1 for item in entries if type(item) is dict and item.get('exportedFileName') == name) != 1):
-            return 'unknown'
+            return ('unknown', 'attachment_invalid')
         data = read_owned(export, (name,), 64)
-        return 'ocr_title_match' if data == b'ocr_title_match' else 'unknown'
+        if data not in (b'ocr_title_match', b'unknown'):
+            return ('unknown', 'attachment_invalid')
+        return (data.decode('ascii'), 'ocr_complete')
     except (OSError, ValueError, TypeError):
-        return 'unknown'
+        return ('unknown', 'attachment_invalid')
 
 
 def execute(argv, cwd, timeout, log):
@@ -119,29 +123,41 @@ def checkpoint(project_path, app, private, name):
     derived = private / 'derived'
     runners = list((derived / 'Build/Products').glob('*.xctestrun'))
     if len(runners) != 1:
-        return 'unknown'
+        return ('unknown', 'runner_unavailable')
+    method = 'testPositiveControl' if name == 'positive' else 'testSnapshot'
+    test_url = TEST_URL.replace('testSnapshot', method)
     argv = ['xcodebuild', 'test-without-building', '-xctestrun', str(runners[0]),
             '-destination', 'platform=macOS,arch=arm64', '-parallel-testing-enabled', 'NO',
             '-maximum-concurrent-test-device-destinations', '1', '-resultBundlePath', str(result),
-            '-only-testing:' + TARGET + '/CheckpointJourneys/testSnapshot']
+            '-only-testing:' + TARGET + '/CheckpointJourneys/' + method]
     if not execute(argv, project_path.parent, 180, private / (name + '.log')):
-        return 'unknown'
+        return ('unknown', 'test_failed')
     export = private / (name + '-export')
     if not execute(['xcrun', 'xcresulttool', 'export', 'attachments', '--path', str(result),
-                    '--test-id', TEST_URL, '--output-path', str(export)], project_path.parent, 60,
+                    '--test-id', test_url, '--output-path', str(export)], project_path.parent, 60,
                    private / (name + '-export.log')):
-        return 'unknown'
-    return parse_export(export)
+        return ('unknown', 'export_failed')
+    return parse_export(export, positive=name == 'positive')
 
 
 def compare(cell, snapshot, provider_factory, request):
-    result = {'diagnostic_only': True, 'cell': cell, 'before_image': 'unknown', 'after_image': 'unknown',
-              'operation': 'not_started', 'owned_provider_settlement': 'not_applicable',
-              'fixture_process_settlement': 'unknown', 'modal': 'unknown', 'scope': 'diagnostic_fixture_window'}
-    result['before_image'] = snapshot('before')
+    result = {'diagnostic_only': True, 'cell': cell, 'positive_image': 'unknown', 'positive_coverage': 'not_started',
+              'before_image': 'unknown', 'before_coverage': 'not_started', 'after_image': 'unknown',
+              'after_coverage': 'not_started', 'operation': 'not_started',
+              'owned_provider_settlement': 'not_applicable', 'fixture_process_settlement': 'unknown',
+              'modal': 'unknown', 'scope': 'diagnostic_fixture_window', 'build_coverage': 'complete'}
+    def sample(name):
+        try:
+            return snapshot(name)
+        except Exception:
+            return ('unknown', 'test_unavailable')
+    result['positive_image'], result['positive_coverage'] = sample('positive')
+    if result['positive_image'] != 'ocr_title_match' or result['positive_coverage'] != 'ocr_complete':
+        return result
+    result['before_image'], result['before_coverage'] = sample('before')
     if cell == 'idle':
         result['operation'] = 'completed'
-        result['after_image'] = snapshot('after')
+        result['after_image'], result['after_coverage'] = sample('after')
         return result
     if cell not in ('provider', 'loopback'):
         return result
@@ -154,7 +170,7 @@ def compare(cell, snapshot, provider_factory, request):
             except HTTPError:
                 pass
         result['operation'] = 'completed'
-        result['after_image'] = snapshot('after')
+        result['after_image'], result['after_coverage'] = sample('after')
     except Exception:
         result['operation'] = 'unavailable'
     finally:
@@ -169,17 +185,21 @@ def compare(cell, snapshot, provider_factory, request):
 def main():
     cell, harness, controller, temp = sys.argv[1:]
     h, diagnostic, temp = (Path(p).resolve(strict=True) for p in (harness, controller, temp))
-    result = {'diagnostic_only': True, 'cell': cell, 'before_image': 'unknown', 'after_image': 'unknown',
-              'operation': 'unavailable', 'owned_provider_settlement': 'unknown',
-              'fixture_process_settlement': 'unknown', 'modal': 'unknown', 'scope': 'diagnostic_fixture_window'}
+    result = {'diagnostic_only': True, 'cell': cell, 'positive_image': 'unknown', 'positive_coverage': 'not_started',
+              'before_image': 'unknown', 'before_coverage': 'not_started', 'after_image': 'unknown',
+              'after_coverage': 'not_started', 'build_coverage': 'project_unavailable', 'operation': 'unavailable',
+              'owned_provider_settlement': 'unknown', 'fixture_process_settlement': 'unknown',
+              'modal': 'unknown', 'scope': 'diagnostic_fixture_window'}
     try:
         # This host is disposable. Keep the private tree until host teardown:
         # test-runner failure cannot positively establish app settlement.
         private = Path(tempfile.mkdtemp(prefix='nac-diagnostic-qprime-', dir=temp))
         selected = project(h, diagnostic, private / 'project')
+        result['build_coverage'] = 'fixture_unavailable'
         app = make_fixture(diagnostic, private)
         if app is None:
             raise ValueError('fixture unavailable')
+        result['build_coverage'] = 'build_failed'
         derived = private / 'derived'
         build = ['xcodebuild', 'build-for-testing', '-project', str(selected), '-scheme', TARGET,
                  '-destination', 'platform=macOS,arch=arm64', '-derivedDataPath', str(derived),
@@ -188,6 +208,7 @@ def main():
             raise ValueError('test build unavailable')
         sys.path.insert(0, str(h / 'desktop/macos'))
         from ci_startup_api import Provider, request
+        result['build_coverage'] = 'complete'
         result = compare(cell, lambda name: checkpoint(selected, app, private, name), Provider, request)
     except Exception:
         pass

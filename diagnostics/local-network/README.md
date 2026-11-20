@@ -65,3 +65,13 @@ screenshot cannot complete using existing host permissions, the checkpoint
 remains unknown; no permission prompt is acted on. Its small fixture terminates
 itself after a fixed timeout and its private tree remains on the disposable
 host until teardown, because a failed test does not prove fixture settlement.
+
+Before either control snapshot or operation, Q-prime renders a synthetic title
+prefixed `CONTROL` inside its disposable fixture and requires its own OCR to
+match that distinct string. The prefix reduces contamination from an unrelated
+real alert, but adjacent recognized lines can still combine across surfaces.
+The positive verifies fixture-window OCR, not system-alert visibility. If the self-test cannot match, the cell stops
+before its operation. Closed build/test/export/attachment/OCR coverage fields
+show where a checkpoint stopped; `ocr_complete` plus an unknown image still
+never proves a prompt absent. The synthetic positive is never a system-dialog
+observation and never changes the modal field.

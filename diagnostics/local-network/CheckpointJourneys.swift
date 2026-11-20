@@ -5,10 +5,14 @@ import XCTest
 import XCUIAutomation
 
 final class CheckpointJourneys: XCTestCase {
-    func testSnapshot() throws {
+    func testSnapshot() throws { try snapshot(positive: false) }
+    func testPositiveControl() throws { try snapshot(positive: true) }
+
+    private func snapshot(positive: Bool) throws {
         guard let path = ProcessInfo.processInfo.environment["NAC_UI_FIXTURE"],
               path.hasPrefix("/") else { throw NSError(domain: "fixture", code: 1) }
         let app = XCUIApplication(url: URL(fileURLWithPath: path))
+        if positive { app.launchArguments = ["--positive-control"] }
         app.launch()
         defer { app.terminate() }
         guard app.windows.firstMatch.waitForExistence(timeout: 15) else {
@@ -31,7 +35,8 @@ final class CheckpointJourneys: XCTestCase {
                     .split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
                     .replacingOccurrences(of: "“", with: "\"")
                     .replacingOccurrences(of: "”", with: "\"")
-                if value == "Allow \"Python\" to find devices on local networks?" { matched = true }
+                let title = "Allow \"Python\" to find devices on local networks?"
+                if value == (positive ? "CONTROL " + title : title) { matched = true }
             }
         }
         // The image and OCR strings remain private inside the disposable host.
