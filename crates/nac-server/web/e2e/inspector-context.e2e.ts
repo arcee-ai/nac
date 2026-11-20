@@ -40,10 +40,21 @@ async function observeParentStream(page: Page, baseUrl: string, parent: string) 
   const cdp = await page.context().newCDPSession(page);
   const active = new Set<string>();
   let reasoning = "";
+  await cdp.send("Page.enable");
+  let loader = (await cdp.send("Page.getFrameTree")).frameTree.frame.loaderId;
+  // The fixture reloads after its first navigation. A response from the old
+  // document can arrive after its teardown without a later loading event.
+  cdp.on("Page.frameNavigated", ({ frame }) => {
+    if (frame.parentId) return;
+    loader = frame.loaderId;
+    active.clear();
+    reasoning = "";
+  });
   cdp.on("Network.responseReceived", (event) => {
     const url = new URL(event.response.url);
     if (
       event.type === "EventSource" &&
+      event.loaderId === loader &&
       event.response.status === 200 &&
       url.origin === new URL(baseUrl).origin &&
       url.pathname === `/sessions/${parent}/events/stream`
