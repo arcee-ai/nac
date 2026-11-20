@@ -646,7 +646,7 @@ final class StartupJourneys: XCTestCase {
                 "Owned Go to Folder field is not actionable")
             return field
         }
-        func validateFolderSurface(_ ticket: StartupAXClient.Ticket) throws {
+        func captureFolderSurface() throws -> (surface: StartupNativeFolderPolicy.Surface, root: CGRect, field: (CGRect, String)?) {
             let roots = rootWindow.children(matching: .sheet).allElementsBoundByAccessibilityElement
             let nested = roots.count == 1 ? roots[0].children(matching: .sheet).count : 0
             try require(StartupNativeFolderPolicy.surface(folderSurface, windows: ui.windows.count,
@@ -668,16 +668,31 @@ final class StartupJourneys: XCTestCase {
                 let target = try goToField()
                 field = (target.frame, try XCTUnwrap(target.value as? String))
             } else { field = nil }
-            _ = try XCTUnwrap(axClient).consume(ticket, surface: folderSurface, rootFrame: rootWindow.frame, field: field)
+            return (folderSurface, rootWindow.frame, field)
+        }
+        var postActionSurface: (surface: StartupNativeFolderPolicy.Surface, root: CGRect, field: (CGRect, String)?)?
+        func capturePostActionGuard() throws {
+            try guardWindow(ui, running: running, paths: paths, launch: launch, number: number)
+            try require((try? Data(contentsOf: URL(fileURLWithPath: path))) == bytes,
+                "Frozen fixture configuration changed")
+            postActionSurface = try captureFolderSurface()
         }
         var guardTicket: StartupAXClient.Ticket?
         func guardTarget() throws {
             do {
                 let ticket = try axClient?.begin()
-                try guardWindow(ui, running: running, paths: paths, launch: launch, number: number)
-                try require((try? Data(contentsOf: URL(fileURLWithPath: path))) == bytes,
-                    "Frozen fixture configuration changed")
-                if let ticket { try validateFolderSurface(ticket) }
+                if let captured = postActionSurface, let ticket {
+                    _ = try XCTUnwrap(axClient).consume(ticket, surface: captured.surface, rootFrame: captured.root, field: captured.field)
+                    postActionSurface = nil
+                } else {
+                    try guardWindow(ui, running: running, paths: paths, launch: launch, number: number)
+                    try require((try? Data(contentsOf: URL(fileURLWithPath: path))) == bytes,
+                        "Frozen fixture configuration changed")
+                    if let ticket {
+                        let captured = try captureFolderSurface()
+                        _ = try XCTUnwrap(axClient).consume(ticket, surface: captured.surface, rootFrame: captured.root, field: captured.field)
+                    }
+                }
                 guardTicket = ticket
             } catch {
                 if !axRefusalEmitted, let client = axClient,
@@ -768,9 +783,15 @@ final class StartupJourneys: XCTestCase {
             }
             failureEvidence.step = .input
             try action(coordinate)
+            if let after { folderSurface = after }
+            // Keep the existing action lease while XCUI reads the resulting
+            // surface. The witness samples only after completion is published.
+            if actionRequest != nil {
+                do { try capturePostActionGuard() }
+                catch { axClient?.invalidate(); throw error }
+            }
             if let request = actionRequest { try axClient!.completeInteraction(request) }
             operations.append(name)
-            if let after { folderSurface = after }
             failureEvidence.step = .after_guard
             try guardTarget()
             failureEvidence.step = .after_record

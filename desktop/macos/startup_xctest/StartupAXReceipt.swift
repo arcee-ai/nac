@@ -475,6 +475,7 @@ final class StartupAXClient {
         self.now = now; self.pause = pause
         self.load = load
     }
+    func invalidate() { portLost = true }
     private func time(diagnostic: StartupFailureEvidence? = nil) throws -> UInt64 {
         diagnostic?.step = .clock_monotonic
         let value = now()

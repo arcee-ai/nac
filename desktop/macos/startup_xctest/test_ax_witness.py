@@ -40,7 +40,7 @@ class FailureScopeTests(unittest.TestCase):
         guards, caught = body.rsplit('        } catch {', 1)
         self.assertIn('func guardTarget() throws {', guards)
         self.assertIn('func dispatch(', guards)
-        self.assertEqual(guards.count('try guardWindow('), 2)
+        self.assertEqual(guards.count('try guardWindow('), 3)
         self.assertIn('throw error', caught)
         self.assertIn('try? attachment(json(JSONEncoder().encode(record))', caught)
         self.assertLess(caught.index('try? attachment('), caught.index('throw error'))
@@ -622,8 +622,9 @@ func handoffRun(_ mode: String) -> [String: Any] {
             sequence += 1
             let began = clock + 1_000_000, ended = began + 1_000_000
             clock = ended + 1_000_000
-            var observed = StartupAXSurface(surface:inputs == 0 ? "form" : "panel",root_id:rootID,
-                panel_id:inputs == 0 ? nil : panelID,go_to_id:nil,root_frame:[10,20,100,30],focus:nil)
+            var observed = StartupAXSurface(surface: inputs == 0 || (post != nil && mode == "post_surface") ? "form" : "panel",root_id:rootID,
+                panel_id:inputs == 0 ? nil : panelID,go_to_id:nil,
+                root_frame:post != nil && mode == "post_frame" ? [11,20,100,30] : [10,20,100,30],focus:nil)
             if lease == nil, let request = try? StartupAXInteractionRequest.read(try StartupAXFiles.requestPath(path)) {
                 observed.interaction = StartupAXInteraction(request_id:request.id,target_id:targetID,point:request.point,
                     anchor_frame:request.anchor_frame,keyboard:request.keyboard,focus_checked:request.keyboard)
@@ -675,6 +676,14 @@ func handoffRun(_ mode: String) -> [String: Any] {
                 }
                 postconditions += 1
                 if mode == "postcondition_throw" { throw InertOriginalFailure() }
+            }
+            func capturePostActionGuard() throws {
+                try StartupAXFiles.need(inputs == 1 && postconditions == 1 && post == nil && !postPublished
+                    && folderSurface == .panel && lease?.armed != nil && lease?.completed == nil)
+                let claim = try StartupAXActionHandoff.read(try StartupAXFiles.requestPath(path) + ".handoff")
+                try StartupAXFiles.need(claim.completed_ns == nil)
+                if mode == "capture_throw" { throw InertOriginalFailure() }
+                if mode == "capture_timeout" { clock = originalDeadline }
             }
             func guardTarget() throws {
                 afterGuards += 1
@@ -1331,7 +1340,7 @@ class ReceiptControls(unittest.TestCase):
 
     def test_action_handoff_never_replays_or_credits_wrong_phase_stale_refused_after_samples(self):
         modes = ['ack_absent', 'ack_foreign', 'duplicate_arm', 'recheck_changed', 'action_throw', 'actor_timeout', 'next_input',
-                 'postcondition_throw', 'duplicate_complete', 'post_generation', 'post_refused', 'post_preentry', 'post_old_phase', 'post_stale']
+                 'postcondition_throw', 'capture_throw', 'capture_timeout', 'duplicate_complete', 'post_generation', 'post_refused', 'post_preentry', 'post_old_phase', 'post_stale', 'post_surface', 'post_frame']
         for mode, row in zip(modes, self.rows(['handoff_' + mode for mode in modes])):
             with self.subTest(mode=mode):
                 self.assertFalse(row['accepted'], row)

@@ -92,6 +92,13 @@ public coordinate object. Keyboard input retains its public target action and
 exact focus/value preflight. Existing after-action guards and postconditions
 remain required. A failed preflight latches the client; no next input.
 
+After an input, Q reads its existing public window, sheet, geometry and field
+postconditions while the original action lease remains held, then publishes the
+completed claim. H starts the first post-action sample only after that claim;
+Q compares it to the captured surface, root frame and field and requires the
+same original cutoff, freshness and request-drain checks before any next input.
+Refusals remain terminal; neither the checks nor completion renews the ticket.
+
 Coordinates are dynamic. A last-instant race between the final checks and OS
 input remains explicitly ACCEPTED. This does not claim atomic dispatch or an
 independently observed delivered-event point. Geometry, count or root presence
