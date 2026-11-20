@@ -1193,7 +1193,7 @@ jobs:
 
 
   native-admission:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs['native-qualification'] != '' && inputs['native-qualification'] != 'none' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs['native-qualification'] != '' && inputs['native-qualification'] != 'none' && !(github.ref == 'refs/heads/codex/all616-local-network-diagnostic' && inputs['native-paths-custody'] == 'local-network-diagnostic-v1') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -1233,3 +1233,93 @@ jobs:
       harness-sha: ${{ github.sha }}
       target: ${{ inputs['native-qualification'] }}
       paths-custody: ${{ inputs['native-paths-custody'] }}
+
+  local-network-diagnostic:
+    name: Diagnostic only - ${{ matrix.cell }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/all616-local-network-diagnostic' && inputs['native-qualification'] == 'all-347-paths-macos26' && inputs['native-paths-custody'] == 'local-network-diagnostic-v1' }}
+    runs-on: macos-26
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        cell: [idle, provider, loopback, combined_journey]
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      CARGO_BUILD_JOBS: '4'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      NAC_STARTUP_PRODUCT_SHA: 06296d236d42422ede804856de6f240a06d9c535
+    steps:
+      - name: Check out diagnostic controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          path: diagnostic
+          persist-credentials: false
+      - name: Check out immutable H
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 06296d236d42422ede804856de6f240a06d9c535
+          path: h
+          persist-credentials: false
+      - name: Check out immutable P
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 06296d236d42422ede804856de6f240a06d9c535
+          path: p
+          persist-credentials: false
+      - name: Check out immutable Q
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 5306800fd6ea70471ecd372a4f495621e0f74695
+          path: q
+          persist-credentials: false
+      - name: Check out immutable R
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 1638a9f36b4978bfe790859d0d42ce3bea96a5cf
+          path: r
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0
+        if: matrix.cell == 'combined_journey'
+        with:
+          toolchain: 1.98.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24.22.1
+      - name: Execute fixed diagnostic and emit only closed observations
+        env:
+          CELL: ${{ matrix.cell }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for entry in 'h 06296d236d42422ede804856de6f240a06d9c535' 'p 06296d236d42422ede804856de6f240a06d9c535' 'q 5306800fd6ea70471ecd372a4f495621e0f74695' 'r 1638a9f36b4978bfe790859d0d42ce3bea96a5cf'; do
+            read -r dir expected <<< "$entry"
+            [[ "$(git -C "$dir" rev-parse HEAD)" == "$expected" && -z "$(git -C "$dir" status --porcelain)" ]]
+          done
+          mkdir "$RUNNER_TEMP/diagnostic-result"
+          xcrun swiftc diagnostic/diagnostics/local-network/observe.swift -o "$RUNNER_TEMP/passive-observer"
+          "$RUNNER_TEMP/passive-observer" --self-test
+          "$RUNNER_TEMP/passive-observer" > "$RUNNER_TEMP/observation-private" 2>/dev/null &
+          observer=$!
+          trap 'kill "$observer" 2>/dev/null || true; wait "$observer" 2>/dev/null || true' EXIT
+          if [[ "$CELL" == combined_journey ]]; then
+            # Existing Q/H custody and input guards remain mandatory. Raw logs and
+            # attachments stay private on the disposable host, never uploaded.
+            (cd h && python3 -B desktop/macos/ci.py --expected-sha 06296d236d42422ede804856de6f240a06d9c535 \
+              --qualification all-342-startup-macos26 --source-root "$GITHUB_WORKSPACE/p" \
+              --test-source-root "$GITHUB_WORKSPACE/q" --protocol-source-root "$GITHUB_WORKSPACE/r" \
+              --output "$RUNNER_TEMP/qualification-private") > "$RUNNER_TEMP/journey-private.log" 2>&1 || true
+          else
+            python3 -B diagnostic/diagnostics/local-network/probe.py "$CELL" "$GITHUB_WORKSPACE/h" > "$RUNNER_TEMP/probe-private.json"
+          fi
+          kill "$observer" 2>/dev/null || true
+          wait "$observer" 2>/dev/null || true
+          trap - EXIT
+          python3 -B diagnostic/diagnostics/local-network/summarize.py "$CELL" "$RUNNER_TEMP/observation-private" "$RUNNER_TEMP/probe-private.json" > "$RUNNER_TEMP/diagnostic-result/result.json"
+      - name: Retain diagnostic categories only
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: local-network-diagnostic-${{ matrix.cell }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/diagnostic-result/result.json
+          if-no-files-found: warn
+          retention-days: 3

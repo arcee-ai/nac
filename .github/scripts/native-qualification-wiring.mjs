@@ -31,6 +31,15 @@ const jobs = {
   'native-exact': '1b63d965b6241e01fa93db8734276b53b3bbac0539bd9a9df27a9238106af0d2',
 };
 export function reverseNativeQualification(workflow) {
+  if (workflow.jobs['local-network-diagnostic']) {
+    // The experimental branch-only dispatch is an exact additive overlay.
+    // Refuse every change before projecting it out of ordinary-CI proofs.
+    assert.equal(digest(workflow.jobs['local-network-diagnostic']), '2164469badae91d715dc30b453ba7dc6aee7a4ff4e13baf4f425087d6329528c');
+    delete workflow.jobs['local-network-diagnostic'];
+    const admission = "github.event_name == 'workflow_dispatch' && inputs['native-qualification'] != '' && inputs['native-qualification'] != 'none'";
+    assert.equal(workflow.jobs['native-admission'].if, '${{ ' + admission + " && !(github.ref == 'refs/heads/codex/all616-local-network-diagnostic' && inputs['native-paths-custody'] == 'local-network-diagnostic-v1') }}");
+    workflow.jobs['native-admission'].if = '${{ ' + admission + ' }}';
+  }
   reverseStartupConsole(workflow);
   if (!Object.keys(jobs).some(id => workflow.jobs[id])) return;
   for (const [id, hash] of Object.entries(jobs)) {

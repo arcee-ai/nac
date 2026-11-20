@@ -15,7 +15,7 @@ const read = name => YAML.parse(readFileSync(`.github/workflows/${name}.yml`, "u
 const target = "all-347-paths-macos26";
 const sha = "a".repeat(40);
 const ordinary = Object.keys(read("stable-release").jobs).filter(id =>
-  !["ci-admission", "native-qualification", "native-admission", "native-exact"].includes(id));
+  !["ci-admission", "native-qualification", "native-admission", "native-exact", "local-network-diagnostic"].includes(id));
 const context = (event = "workflow_dispatch", ref = "refs/heads/codex/native-unit", choice = target) => ({
   github: { event_name: event, ref, sha, run_attempt: "1" },
   needs: { prepare: { result: "success", outputs: { admission_mode: "full" } } },
@@ -58,6 +58,27 @@ function aggregateName(workflow, ctx) {
   const value = workflow.jobs["required-pr-checks"].name;
   return value.startsWith("${{") ? vm.runInNewContext(value.slice(3, -2), ctx, { timeout: 100 }) : value;
 }
+
+test('diagnostic sentinel schedules only on its exact branch and never mints acceptance', () => {
+  const stable = read('stable-release');
+  const ctx = context('workflow_dispatch', 'refs/heads/codex/all616-local-network-diagnostic');
+  ctx.inputs['native-paths-custody'] = 'local-network-diagnostic-v1';
+  const selected = selection(stable, ctx);
+  assert.equal(selected['local-network-diagnostic'], 'success');
+  assert.equal(selected['native-admission'], 'skipped');
+  assert.equal(selected['native-exact'], 'skipped');
+  for (const id of ordinary) assert.equal(selected[id], 'skipped', id);
+  assert.notEqual(aggregateName(stable, ctx), 'Required PR checks');
+  for (const [event, ref, choice, custody] of [
+    ['workflow_dispatch', 'refs/heads/dev', target, 'local-network-diagnostic-v1'],
+    ['workflow_dispatch', ctx.github.ref, 'none', 'local-network-diagnostic-v1'],
+    ['workflow_dispatch', ctx.github.ref, target, 'synthetic'],
+    ['push', ctx.github.ref, target, 'local-network-diagnostic-v1'],
+  ]) {
+    const other = context(event, ref, choice); other.inputs['native-paths-custody'] = custody;
+    assert.equal(selection(stable, other)['local-network-diagnostic'], 'skipped');
+  }
+});
 
 test("native-only skipped aggregate cannot mint the required PR check context", () => {
   const stable = read("stable-release");
