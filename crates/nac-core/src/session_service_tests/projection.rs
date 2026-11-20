@@ -68,8 +68,13 @@ async fn primary_tool_tail_is_bounded_and_excludes_other_targets() {
                 delegation_summary_verified: false,
             });
     }
-    crate::store::append_session_event(&store_path, "primary-session", "retired-worker", "{ignored")
-        .unwrap();
+    crate::store::append_session_event(
+        &store_path,
+        "primary-session",
+        "retired-worker",
+        "{ignored",
+    )
+    .unwrap();
     let snapshot = parts
         .service
         .frontend_snapshot_with_session_event_limit(2)

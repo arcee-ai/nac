@@ -134,13 +134,7 @@ fn create_and_load_session_round_trip() {
     assert_eq!(loaded.token_usages[0].as_ref().unwrap().input_tokens, 100);
     assert_eq!(loaded.token_usages[0].as_ref().unwrap().output_tokens, 50);
     assert!(loaded.token_usages[1].is_none());
-    assert_eq!(
-        loaded.token_usages[2]
-            .as_ref()
-            .unwrap()
-            .context_tokens,
-        330
-    );
+    assert_eq!(loaded.token_usages[2].as_ref().unwrap().context_tokens, 330);
 
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
@@ -1691,13 +1685,7 @@ fn save_session_run_state_preserves_messages_and_config_columns() {
     );
     assert_eq!(stored.token_usages.len(), 2);
     assert!(stored.token_usages[0].is_none());
-    assert_eq!(
-        stored.token_usages[1]
-            .as_ref()
-            .unwrap()
-            .context_tokens,
-        42
-    );
+    assert_eq!(stored.token_usages[1].as_ref().unwrap().context_tokens, 42);
     assert_eq!(stored.updated_at, update.updated_at);
     // Configuration columns are CAS-only: untouched by the run-end save.
     assert_eq!(stored.model, "model-a");

@@ -179,12 +179,10 @@ impl CompactionLifecycle {
         let event = match self.commit.result() {
             // Acknowledged checkpoint activation is the compaction outcome even
             // if its caller is cancelled while publishing follow-up accounting.
-            Some(CompactionResult::Compacted { .. }) => {
-                AgentEvent::CompactionCompleted {
-                    compaction_id: self.compaction_id,
-                    reason: self.reason,
-                }
-            }
+            Some(CompactionResult::Compacted { .. }) => AgentEvent::CompactionCompleted {
+                compaction_id: self.compaction_id,
+                reason: self.reason,
+            },
             Some(CompactionResult::Unchanged { reason: cause, .. }) => {
                 AgentEvent::CompactionSkipped {
                     compaction_id: self.compaction_id,
@@ -193,12 +191,10 @@ impl CompactionLifecycle {
                 }
             }
             None => match result {
-                Ok(CompactionResult::Compacted { .. }) => {
-                    AgentEvent::CompactionCompleted {
-                        compaction_id: self.compaction_id,
-                        reason: self.reason,
-                    }
-                }
+                Ok(CompactionResult::Compacted { .. }) => AgentEvent::CompactionCompleted {
+                    compaction_id: self.compaction_id,
+                    reason: self.reason,
+                },
                 Ok(CompactionResult::Unchanged { reason: cause, .. }) => {
                     AgentEvent::CompactionSkipped {
                         compaction_id: self.compaction_id,
@@ -232,12 +228,10 @@ impl Drop for CompactionLifecycle {
         if !self.terminal_selected {
             self.terminal_selected = true;
             let event = match self.commit.result() {
-                Some(CompactionResult::Compacted { .. }) => {
-                    AgentEvent::CompactionCompleted {
-                        compaction_id: self.compaction_id,
-                        reason: self.reason,
-                    }
-                }
+                Some(CompactionResult::Compacted { .. }) => AgentEvent::CompactionCompleted {
+                    compaction_id: self.compaction_id,
+                    reason: self.reason,
+                },
                 Some(CompactionResult::Unchanged { reason: cause, .. }) => {
                     AgentEvent::CompactionSkipped {
                         compaction_id: self.compaction_id,
@@ -382,7 +376,7 @@ impl super::Agent {
             .await;
         lifecycle.finish(&result).await;
         if let Err(error) = result {
-            eprintln!("nac: orchestrator compaction failed softly: {error}");
+            eprintln!("nac: session compaction failed softly: {error}");
         }
         Ok(prepared)
     }

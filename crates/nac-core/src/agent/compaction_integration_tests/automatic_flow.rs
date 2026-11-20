@@ -80,12 +80,11 @@ async fn direct_primary_uses_the_direct_compaction_prompt() {
     let summary_body = String::from_utf8_lossy(&requests[0].body);
     assert!(summary_body.contains("direct-session context-compaction request"));
     assert!(!summary_body.contains("## Orchestration history"));
-    let checkpoints =
-        crate::store::session_compaction::load_session_compaction_checkpoints(
-            &store_path,
-            "session",
-        )
-        .unwrap();
+    let checkpoints = crate::store::session_compaction::load_session_compaction_checkpoints(
+        &store_path,
+        "session",
+    )
+    .unwrap();
     assert_eq!(checkpoints.len(), 1);
     assert_eq!(
         checkpoints[0].prompt_policy_version,
@@ -431,12 +430,11 @@ async fn one_user_automatic_compaction_uses_end_boundary() {
             .as_str()
             .is_some_and(|content| content.starts_with(compaction::HISTORICAL_CONTEXT_PREFIX))));
 
-    let checkpoints =
-        crate::store::session_compaction::load_session_compaction_checkpoints(
-            &store_path,
-            "session",
-        )
-        .unwrap();
+    let checkpoints = crate::store::session_compaction::load_session_compaction_checkpoints(
+        &store_path,
+        "session",
+    )
+    .unwrap();
     assert_eq!(checkpoints.len(), 1);
     assert_eq!(checkpoints[0].tail_start_message_index, 2);
 

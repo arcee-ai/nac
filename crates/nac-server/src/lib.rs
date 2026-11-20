@@ -29,8 +29,8 @@ mod mcp_runtime_api;
 #[cfg(feature = "native-auth-fixture")]
 #[doc(hidden)]
 pub mod native_auth_fixture;
-mod orchestration;
 mod revert;
+mod session_operations;
 pub(crate) use managed_control::running_target as managed_running_target;
 
 pub use compaction::{CompactSessionError, CompactSessionResponse};
@@ -40,9 +40,9 @@ pub use delivery::contracts::{
     InboxItemResponse, LaggedEvent, ManagedSessionSummary, MessageCycleMetadata,
     MessagePageMetadata, MessagesPageResponse, MessagesQuery, PermissionStateResponse,
     ProviderModelList, ProviderModelsRequest, RecentEventsResponse, ReplayBoundaryEvent,
-    ReplayGapEvent, ReplyPermissionRequest, RequestField, SandboxRequest, SessionLineageKind,
-    SessionLineageSnapshot, SessionSnapshotQuery, SessionSnapshotResponse, SshBrowseRequest,
-    StoreInfo, SubmitPromptRequest, SubmitPromptResponse, SessionEventsQuery,
+    ReplayGapEvent, ReplyPermissionRequest, RequestField, SandboxRequest, SessionEventsQuery,
+    SessionLineageKind, SessionLineageSnapshot, SessionSnapshotQuery, SessionSnapshotResponse,
+    SshBrowseRequest, StoreInfo, SubmitPromptRequest, SubmitPromptResponse,
     ToolCallContentResponse, UpdateConfigRequest, UpdateGoalRequest, UpdateInboxItemRequest,
     UpdatePermissionApprovalModeRequest,
 };

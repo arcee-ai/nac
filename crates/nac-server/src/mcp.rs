@@ -3,7 +3,7 @@
 //! Exposes session management and passive product-context tools over the
 //! streamable-http transport at `/mcp`.
 
-use crate::orchestration::OrchestrationOperations;
+use crate::session_operations::SessionOperations;
 use crate::{
     CreateSessionRequest, HeadersRequest, RequestField, SandboxRequest, SessionManager,
     SubmitPromptRequest, UpdateConfigRequest,
@@ -33,7 +33,7 @@ use serde_json::json;
 
 #[derive(Clone)]
 pub struct NacMcpService {
-    operations: OrchestrationOperations,
+    operations: SessionOperations,
     product_context: crate::ProductContextApplication,
 }
 
@@ -565,7 +565,7 @@ impl NacMcpService {
         description = "List available model providers and their models. Each model includes supported reasoning efforts and context window. Use the model id when calling create_session — the backend is auto-detected."
     )]
     async fn list_models(&self) -> Result<CallToolResult, ErrorData> {
-        let result = OrchestrationOperations::model_listing();
+        let result = SessionOperations::model_listing();
         Ok(CallToolResult::success(vec![Content::text(
             serde_json::to_string_pretty(&result)
                 .unwrap_or_else(|e| format!("Error serializing: {e}")),
@@ -590,7 +590,7 @@ pub fn streamable_http_service(
     StreamableHttpService::new(
         move || {
             Ok(NacMcpService {
-                operations: OrchestrationOperations::new(manager.clone()),
+                operations: SessionOperations::new(manager.clone()),
                 product_context: crate::ProductContextApplication::new(manager.clone()),
             })
         },

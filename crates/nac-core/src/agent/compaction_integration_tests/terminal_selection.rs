@@ -111,11 +111,9 @@ async fn selection_provenance_actual_compaction_restart_repeated_summary_and_can
     agent.set_current_run_id(Some("ordinary-1".into()));
     agent.send("current question").await.unwrap();
     let first_checkpoint =
-        crate::store::session_compaction::load_session_compaction_checkpoints(
-            &path, "session",
-        )
-        .unwrap()
-        .remove(0);
+        crate::store::session_compaction::load_session_compaction_checkpoints(&path, "session")
+            .unwrap()
+            .remove(0);
     let first = manifest(&first_checkpoint.summary);
     assert!(first["total"].as_u64().unwrap() > 4);
     assert_eq!(first["recent"].as_array().unwrap().len(), 4);
@@ -149,10 +147,8 @@ async fn selection_provenance_actual_compaction_restart_repeated_summary_and_can
     restored.set_current_run_id(Some("ordinary-2".into()));
     restored.send("another question").await.unwrap();
     let checkpoints =
-        crate::store::session_compaction::load_session_compaction_checkpoints(
-            &path, "session",
-        )
-        .unwrap();
+        crate::store::session_compaction::load_session_compaction_checkpoints(&path, "session")
+            .unwrap();
     assert_eq!(checkpoints.len(), 2);
     let second = manifest(&checkpoints[0].summary);
     assert!(second["total"].as_u64().unwrap() > first["total"].as_u64().unwrap());

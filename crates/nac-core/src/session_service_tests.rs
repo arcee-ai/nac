@@ -202,13 +202,7 @@ pub(super) fn test_agent_with_compaction_threshold(
     session_id: Option<String>,
     compaction_threshold: Option<u64>,
 ) -> Agent {
-    build_test_agent(
-        client,
-        store_path,
-        session_id,
-        compaction_threshold,
-        None,
-    )
+    build_test_agent(client, store_path, session_id, compaction_threshold, None)
 }
 
 pub(super) fn test_agent_with_skills(

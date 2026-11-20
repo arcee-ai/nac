@@ -116,8 +116,7 @@ impl CompactionState {
     }
 
     fn restore_checkpoint_and_sources(&mut self, messages: &[Message]) -> Result<()> {
-        let checkpoints =
-            load_session_compaction_checkpoints(&self.store_path, &self.session_id)?;
+        let checkpoints = load_session_compaction_checkpoints(&self.store_path, &self.session_id)?;
         let mut restored_checkpoint = None;
         self.selection_sources.clear();
         let mut boundaries = vec![messages.len()];
@@ -349,11 +348,7 @@ impl CompactionState {
             new_context_estimate,
         };
         let checkpoint = match crate::store::coordinator::owner_for(&self.store_path)? {
-            Some(owner) => {
-                owner
-                    .append_session_compaction_checkpoint(record)
-                    .await?
-            }
+            Some(owner) => owner.append_session_compaction_checkpoint(record).await?,
             None => append_session_compaction_checkpoint(&self.store_path, &record)?,
         };
         // Activate exactly the acknowledged row before another await. A lost

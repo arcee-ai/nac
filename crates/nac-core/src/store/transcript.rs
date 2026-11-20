@@ -451,12 +451,7 @@ pub(super) fn append_messages_in_transaction(
         transaction.execute(
             "INSERT INTO session_events (session_id, event_target, event_json, created_at)
              VALUES (?1, ?2, ?3, ?4)",
-            params![
-                session_id,
-                TRANSCRIPT_EVENT_TARGET,
-                event_json,
-                now_utc()
-            ],
+            params![session_id, TRANSCRIPT_EVENT_TARGET, event_json, now_utc()],
         )?;
         last_inserted_id = transaction.last_insert_rowid();
     }
@@ -1209,10 +1204,9 @@ impl TranscriptLogWriter {
              WHERE session_id = ?1 AND event_target = ?2
              ORDER BY id ASC",
         )?;
-        let rows = statement
-            .query_map(params![session_id, TRANSCRIPT_EVENT_TARGET], |row| {
-                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-            })?;
+        let rows = statement.query_map(params![session_id, TRANSCRIPT_EVENT_TARGET], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?;
         let mut entries = Vec::new();
         for row in rows {
             let (id, event_json) = row?;

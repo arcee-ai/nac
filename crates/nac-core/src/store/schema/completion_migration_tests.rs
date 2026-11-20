@@ -258,7 +258,7 @@ fn schema49_migration_binds_only_actual_active_recovery_without_fabricating_comp
         initialize(&path).unwrap();
         let conn = Connection::open(&path).unwrap();
         assert_eq!(rows(&conn, "session_completion_bindings"), retained);
-        conn.execute_batch("PRAGMA foreign_keys=ON; DELETE FROM thread_events WHERE id=901;")
+        conn.execute_batch("PRAGMA foreign_keys=ON; DELETE FROM session_events WHERE id=901;")
             .unwrap();
         assert!(rows(&conn, "session_completion_bindings").is_empty());
         drop(conn);
@@ -275,7 +275,7 @@ fn completion_schema49_preserves_feed_and_autoincrement_after_cascade_and_reopen
     }
     let conn = open_runtime_connection(&path).unwrap();
     let feed = rows(&conn, "session_completion_feed");
-    conn.execute_batch("INSERT INTO thread_events(id,session_id,thread_name,event_json,created_at)
+    conn.execute_batch("INSERT INTO session_events(id,session_id,event_target,event_json,created_at)
         VALUES(901,'deleted','main','{}','retained');
         INSERT INTO session_completion_bindings(session_id,run_id,submitted_message_id,behavior,eligible)
         VALUES('deleted','bound-run',901,'direct',1);

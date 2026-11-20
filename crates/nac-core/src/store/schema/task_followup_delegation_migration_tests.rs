@@ -240,7 +240,7 @@ fn followup_schema47_upgrades_each_allocated_predecessor_without_inventing_autho
                 .unwrap(),
             STORE_SCHEMA_VERSION
         );
-        assert_eq!(STORE_SCHEMA_VERSION, 54);
+        assert_eq!(STORE_SCHEMA_VERSION, 55);
         assert_eq!(
             heartbeat_layout(&conn),
             current_heartbeat_layout,
@@ -270,7 +270,9 @@ fn followup_schema47_upgrades_each_allocated_predecessor_without_inventing_autho
                     .1
                     .clone()
             } else if table == "sessions" {
-                definition.replace(", light_model_json TEXT", "")
+                definition
+                    .replace(", light_model_json TEXT", "")
+                    .replace("orchestrator_compaction_threshold", "compaction_threshold")
             } else {
                 definition
             };

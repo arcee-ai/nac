@@ -44,7 +44,7 @@ pub fn effective_model_settings(
     .with_trusted_api_key_file(model.trusted_api_key_file.clone())
 }
 
-/// Resolve and normalize the persisted orchestrator compaction threshold for a
+/// Resolve and normalize the persisted session compaction threshold for a
 /// new session. Resume never calls this function: its value comes from the
 /// session snapshot instead.
 ///
@@ -62,7 +62,7 @@ pub fn effective_compaction_threshold(
         .filter(|threshold| *threshold != 0);
     if threshold.is_some_and(|threshold| threshold > crate::MAX_SUPPORTED_TOKEN_COUNT) {
         anyhow::bail!(
-            "orchestrator compaction threshold must not exceed {} tokens",
+            "session compaction threshold must not exceed {} tokens",
             crate::MAX_SUPPORTED_TOKEN_COUNT
         );
     }

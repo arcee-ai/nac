@@ -375,12 +375,11 @@ async fn cancellation_after_checkpoint_commit_keeps_the_committed_projection() {
     wait_until_observed(&ordinary_observed).await;
     task.abort();
     assert!(task.await.unwrap_err().is_cancelled());
-    let checkpoints =
-        crate::store::session_compaction::load_session_compaction_checkpoints(
-            &store_path,
-            "session",
-        )
-        .unwrap();
+    let checkpoints = crate::store::session_compaction::load_session_compaction_checkpoints(
+        &store_path,
+        "session",
+    )
+    .unwrap();
     assert_eq!(checkpoints.len(), 1);
     let guard = agent.lock().await;
     assert_eq!(

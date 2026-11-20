@@ -230,10 +230,7 @@ fn model_request_fields_distinguish_omitted_null_and_values() {
             "launch".to_string()
         )])))
     );
-    assert_eq!(
-        request.compaction_threshold,
-        RequestField::Value(0)
-    );
+    assert_eq!(request.compaction_threshold, RequestField::Value(0));
     assert_eq!(request.cwd, None);
 }
 

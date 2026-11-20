@@ -189,19 +189,14 @@ fn compaction_threshold_defaults_to_70pct_context_normalizes_zero_and_rejects_ou
     );
     // The boundary value is accepted.
     assert_eq!(
-        effective_compaction_threshold(
-            Some(crate::MAX_SUPPORTED_TOKEN_COUNT),
-            200_000,
-        )
-        .unwrap(),
+        effective_compaction_threshold(Some(crate::MAX_SUPPORTED_TOKEN_COUNT), 200_000,).unwrap(),
         Some(crate::MAX_SUPPORTED_TOKEN_COUNT)
     );
     // Above the boundary is rejected.
-    assert!(effective_compaction_threshold(
-        Some(crate::MAX_SUPPORTED_TOKEN_COUNT + 1),
-        200_000,
-    )
-    .is_err());
+    assert!(
+        effective_compaction_threshold(Some(crate::MAX_SUPPORTED_TOKEN_COUNT + 1), 200_000,)
+            .is_err()
+    );
 
     // The `[compaction]` section is no longer consulted: a config that
     // has one produces the same result as one without.

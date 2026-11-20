@@ -496,7 +496,7 @@ fn v16_store_purges_pre_behavior_sessions_and_establishes_downgrade_barrier() {
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
     assert_eq!(version, STORE_SCHEMA_VERSION);
-    assert_eq!(STORE_SCHEMA_VERSION, 54);
+    assert_eq!(STORE_SCHEMA_VERSION, 55);
     drop(migrated);
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
@@ -1128,7 +1128,7 @@ fn v2_to_v4_adds_threshold_and_empty_checkpoint_storage() {
     let conn = open_runtime_connection(&path).unwrap();
     insert_legacy_session(&conn, "owned");
     conn.execute(
-        "INSERT INTO session_events
+        "INSERT INTO thread_events
              (session_id, thread_name, event_json, created_at)
          VALUES ('owned', 'worker', '{legacy-v2-event', 'created')",
         [],
@@ -1136,8 +1136,8 @@ fn v2_to_v4_adds_threshold_and_empty_checkpoint_storage() {
     .unwrap();
     let event_id = conn.last_insert_rowid();
     conn.execute_batch(
-        "DROP TABLE session_compaction_checkpoints;
-         ALTER TABLE sessions DROP COLUMN compaction_threshold;
+        "DROP TABLE orchestrator_compaction_checkpoints;
+         ALTER TABLE sessions DROP COLUMN orchestrator_compaction_threshold;
          PRAGMA user_version = 2;",
     )
     .unwrap();
@@ -1244,9 +1244,9 @@ fn v3_to_v4_backfills_materialized_session_summaries() {
     )
     .unwrap();
     conn.execute(
-        "INSERT INTO session_events (session_id, thread_name, event_json, created_at)
+        "INSERT INTO thread_events (session_id, thread_name, event_json, created_at)
          VALUES ('owned', ?1, ?2, 'created')",
-        params![TRANSCRIPT_EVENT_TARGET, covered_log_entry],
+        params!["__orchestrator__", covered_log_entry],
     )
     .unwrap();
     let log_entry = encode_transcript_log_entry(
@@ -1257,9 +1257,9 @@ fn v3_to_v4_backfills_materialized_session_summaries() {
     )
     .unwrap();
     conn.execute(
-        "INSERT INTO session_events (session_id, thread_name, event_json, created_at)
+        "INSERT INTO thread_events (session_id, thread_name, event_json, created_at)
          VALUES ('owned', ?1, ?2, 'created')",
-        params![TRANSCRIPT_EVENT_TARGET, log_entry],
+        params!["__orchestrator__", log_entry],
     )
     .unwrap();
     conn.execute_batch(
@@ -1723,7 +1723,7 @@ fn opening_v4_store_is_idempotent() {
     insert_legacy_session(&conn, "owned");
     conn.execute(
         "INSERT INTO session_events
-             (session_id, thread_name, event_json, created_at)
+             (session_id, event_target, event_json, created_at)
          VALUES ('owned', 'worker', '{\"type\":\"thread_started\"}', 'created')",
         [],
     )

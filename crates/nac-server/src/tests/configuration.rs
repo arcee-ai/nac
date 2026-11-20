@@ -1090,9 +1090,7 @@ async fn invalid_patches_preserve_database_and_active_service() {
 
     let invalid = [
         UpdateConfigRequest {
-            compaction_threshold: RequestField::Value(
-                nac_core::MAX_SUPPORTED_TOKEN_COUNT + 1,
-            ),
+            compaction_threshold: RequestField::Value(nac_core::MAX_SUPPORTED_TOKEN_COUNT + 1),
             ..UpdateConfigRequest::default()
         },
         UpdateConfigRequest {

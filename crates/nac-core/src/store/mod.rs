@@ -27,11 +27,11 @@ pub use completion_occurrences::{
 };
 mod managed_maintenance;
 mod managed_probe;
-pub(crate) mod session_compaction;
 pub(crate) mod peer_goals;
 mod permission_grants;
 mod projects;
 mod provider_connections;
+pub(crate) mod session_compaction;
 pub use provider_connections::{
     insert_provider_connection, list_provider_connections, ProviderConnectionRecord,
 };
@@ -77,9 +77,9 @@ pub use native_task_launches::{
     load_native_task_launch, reconcile_native_task_launches, reserve_native_task_launch,
     update_native_task_admission_error, update_native_task_launch,
 };
+mod session_events;
 mod terminal_cleanups;
 mod terminal_selection;
-mod session_events;
 mod time;
 mod traditional_children;
 mod transcript;
@@ -114,6 +114,7 @@ pub use schema::{
     StoreMigrationFailure, StoreMigrationState, StoreMigrationStatus, StoreTrack,
     MINIMUM_MIGRATABLE_SCHEMA_VERSION,
 };
+pub use session_events::*;
 pub use session_forks::{
     clone_session_conversation_artifacts, dismiss_session_fork, insert_session_fork,
     list_session_forks, SessionForkLink, SessionForkOrigin,
@@ -140,7 +141,6 @@ pub use task_launches::{
 };
 pub use terminal_cleanups::*;
 pub use terminal_selection::*;
-pub use session_events::*;
 pub use traditional_children::*;
 pub use transcript::*;
 pub use transcript_append::{TranscriptAppendError, TranscriptAppendReceipt};

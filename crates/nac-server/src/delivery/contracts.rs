@@ -318,9 +318,7 @@ impl CreateSessionRequest {
                     application::Field::Set(headers)
                 }
             },
-            compaction_threshold: application_field(
-                self.compaction_threshold,
-            ),
+            compaction_threshold: application_field(self.compaction_threshold),
             ssh_host: self.ssh_host,
             ssh_port: self.ssh_port,
             ssh_identity_file: self.ssh_identity_file,
@@ -413,9 +411,7 @@ impl UpdateConfigRequest {
                     application::Field::Set(headers)
                 }
             },
-            compaction_threshold: application_field(
-                self.compaction_threshold,
-            ),
+            compaction_threshold: application_field(self.compaction_threshold),
         }
     }
 }

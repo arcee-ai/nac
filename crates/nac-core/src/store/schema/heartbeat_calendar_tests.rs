@@ -128,7 +128,7 @@ fn surviving_facts(conn: &Connection) -> Vec<(String, TableRows)> {
         "thread_steering",
         "model_configurations",
     ];
-    rows(
+    let mut result: Vec<_> = rows(
         conn,
         "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name",
     )
@@ -140,18 +140,36 @@ fn surviving_facts(conn: &Connection) -> Vec<(String, TableRows)> {
         if retired.contains(&table.as_str()) {
             return None;
         }
-        Some((
-            table.clone(),
-            rows(
-                conn,
-                &format!(
-                    "SELECT rowid,{} FROM \"{table}\" ORDER BY rowid",
-                    surviving_test_columns(conn, table)
-                ),
+        let mut values = rows(
+            conn,
+            &format!(
+                "SELECT rowid,{} FROM \"{table}\" ORDER BY rowid",
+                surviving_test_columns(conn, table)
             ),
-        ))
+        );
+        if table == "sqlite_sequence" {
+            for row in &mut values {
+                if let Some(Value::Text(name)) = row.get_mut(1) {
+                    *name = match name.as_str() {
+                        "thread_events" => "session_events".into(),
+                        "orchestrator_compaction_checkpoints" => {
+                            "session_compaction_checkpoints".into()
+                        }
+                        _ => name.clone(),
+                    };
+                }
+            }
+        }
+        let canonical = match table.as_str() {
+            "thread_events" => "session_events",
+            "orchestrator_compaction_checkpoints" => "session_compaction_checkpoints",
+            _ => table,
+        };
+        Some((canonical.to_owned(), values))
     })
-    .collect()
+    .collect();
+    result.sort_by(|a, b| a.0.cmp(&b.0));
+    result
 }
 
 fn catalog(conn: &Connection) -> TableRows {
@@ -162,7 +180,30 @@ fn catalog(conn: &Connection) -> TableRows {
 }
 
 fn unaffected_catalog(conn: &Connection) -> TableRows {
-    rows(conn, "SELECT type,name,tbl_name,sql FROM sqlite_master WHERE tbl_name NOT IN ('heartbeat_occurrences','sessions','projects','managed_orchestrator_terminal_receipts','managed_orchestrators','worker_dispatches','episodes','threads','workset_items','worksets','thread_steering','model_configurations') AND name NOT IN ('session_direct_inbox_origin_insert','session_direct_inbox_origin_update') ORDER BY type,name")
+    let mut result = rows(conn, "SELECT type,name,tbl_name,sql FROM sqlite_master WHERE tbl_name NOT IN ('heartbeat_occurrences','sessions','projects','managed_orchestrator_terminal_receipts','managed_orchestrators','worker_dispatches','episodes','threads','workset_items','worksets','thread_steering','model_configurations') AND name NOT IN ('session_direct_inbox_origin_insert','session_direct_inbox_origin_update') ORDER BY type,name");
+    for row in &mut result {
+        for value in row {
+            if let Value::Text(text) = value {
+                *text = text
+                    .replace(
+                        "idx_thread_events_session_thread_id",
+                        "idx_session_events_session_target_id",
+                    )
+                    .replace(
+                        "orchestrator_compaction_checkpoints",
+                        "session_compaction_checkpoints",
+                    )
+                    .replace("thread_events", "session_events")
+                    .replace("thread_name", "event_target")
+                    .replace('"', "")
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ");
+            }
+        }
+    }
+    result.sort_by_key(|row| format!("{:?}", &row[..2]));
+    result
 }
 
 fn occurrence_indices(conn: &Connection) -> Vec<(String, String)> {

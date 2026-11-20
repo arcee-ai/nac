@@ -497,15 +497,14 @@ async fn assert_two_service_admissions_refresh_external_checkpoint(
         parts_a.service.try_compact().unwrap().wait().await.unwrap(),
         SessionCompactionResult::Compacted { .. }
     ));
-    let first_checkpoint =
-        crate::store::session_compaction::load_session_compaction_checkpoints(
-            &store_path,
-            &session_id,
-        )
-        .unwrap()
-        .into_iter()
-        .next()
-        .unwrap();
+    let first_checkpoint = crate::store::session_compaction::load_session_compaction_checkpoints(
+        &store_path,
+        &session_id,
+    )
+    .unwrap()
+    .into_iter()
+    .next()
+    .unwrap();
 
     let mut events = parts_b.service.subscribe_events();
     let run = if supplied_leases {
@@ -571,12 +570,11 @@ async fn assert_two_service_admissions_refresh_external_checkpoint(
     assert!(!manual_request.contains("old request"));
     assert!(!manual_request.contains("old answer"));
 
-    let checkpoints =
-        crate::store::session_compaction::load_session_compaction_checkpoints(
-            &store_path,
-            &session_id,
-        )
-        .unwrap();
+    let checkpoints = crate::store::session_compaction::load_session_compaction_checkpoints(
+        &store_path,
+        &session_id,
+    )
+    .unwrap();
     assert_eq!(checkpoints.len(), 2);
     assert_eq!(
         checkpoints[0].previous_checkpoint_id,

@@ -630,8 +630,7 @@ impl TokenUsage {
             .checked_add(self.cache_write_tokens)?
             .checked_add(self.output_tokens)?;
         if self.context_tokens != 0 {
-            return (self.context_tokens >= represented)
-                .then_some(self.context_tokens);
+            return (self.context_tokens >= represented).then_some(self.context_tokens);
         }
         // Fallback: provider didn't report total_tokens but did report
         // component usage. Use the component sum as the context total.
@@ -642,9 +641,7 @@ impl TokenUsage {
 impl std::ops::AddAssign for TokenUsage {
     fn add_assign(&mut self, other: Self) {
         self.add_cost_saturating(&other);
-        self.context_tokens = self
-            .context_tokens
-            .saturating_add(other.context_tokens);
+        self.context_tokens = self.context_tokens.saturating_add(other.context_tokens);
     }
 }
 

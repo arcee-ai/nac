@@ -65,12 +65,11 @@ async fn manual_compaction_forces_disabled_and_high_threshold_without_mutating_r
             compaction::NAC_DIRECT_COMPACTION_PROMPT
         );
 
-        let checkpoints =
-            crate::store::session_compaction::load_session_compaction_checkpoints(
-                &store_path,
-                "session",
-            )
-            .unwrap();
+        let checkpoints = crate::store::session_compaction::load_session_compaction_checkpoints(
+            &store_path,
+            "session",
+        )
+        .unwrap();
         assert_eq!(checkpoints.len(), 1);
         assert_eq!(checkpoints[0].summary_prompt_tokens, Some(30));
         assert_eq!(checkpoints[0].summary_completion_tokens, Some(5));
@@ -295,12 +294,11 @@ async fn repeated_manual_compaction_progressively_advances_weighted_halves() {
     assert!(!second_input.contains("turn 2"));
     assert!(!second_input.contains("turn 4"));
 
-    let checkpoints =
-        crate::store::session_compaction::load_session_compaction_checkpoints(
-            &store_path,
-            "session",
-        )
-        .unwrap();
+    let checkpoints = crate::store::session_compaction::load_session_compaction_checkpoints(
+        &store_path,
+        "session",
+    )
+    .unwrap();
     assert_eq!(checkpoints.len(), 2);
     assert_eq!(checkpoints[0].tail_start_message_index, 4);
     assert_eq!(checkpoints[1].tail_start_message_index, 3);

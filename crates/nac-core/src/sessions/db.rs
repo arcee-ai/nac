@@ -1654,9 +1654,7 @@ impl SessionRow {
             ssh: stored_ssh_connection(self.ssh_host, self.ssh_port, self.ssh_identity_file),
             api_key_env: self.api_key_env,
             extra_headers,
-            compaction_threshold: validate_stored_compaction_threshold(
-                self.compaction_threshold,
-            )?,
+            compaction_threshold: validate_stored_compaction_threshold(self.compaction_threshold)?,
             automatic_compaction: self.automatic_compaction,
             config_version: self.config_version,
             messages,
@@ -1674,7 +1672,7 @@ impl SessionRow {
 fn validate_stored_compaction_threshold(threshold: Option<u64>) -> Result<Option<u64>> {
     if threshold.is_some_and(|value| value > crate::MAX_SUPPORTED_TOKEN_COUNT) {
         return Err(anyhow!(
-            "stored orchestrator compaction threshold exceeds supported maximum {}",
+            "stored session compaction threshold exceeds supported maximum {}",
             crate::MAX_SUPPORTED_TOKEN_COUNT
         ));
     }

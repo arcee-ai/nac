@@ -56,7 +56,7 @@ fn required_create_string(field: Field<String>, name: &str) -> Result<Option<Str
 pub(crate) fn validated_compaction_threshold(threshold: u64) -> Result<u64> {
     if threshold > nac_core::MAX_SUPPORTED_TOKEN_COUNT {
         return Err(request_configuration_error(format!(
-            "invalid orchestrator compaction threshold: must not exceed {} tokens",
+            "invalid session compaction threshold: must not exceed {} tokens",
             nac_core::MAX_SUPPORTED_TOKEN_COUNT
         )));
     }

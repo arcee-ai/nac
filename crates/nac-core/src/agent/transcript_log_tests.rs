@@ -1763,7 +1763,8 @@ async fn send_emits_transcript_appended_at_each_commit_point_live_only() {
     // intentionally persists only the sanitized top-level tool lifecycle so
     // primary transcript detail survives reload.
     assert_eq!(read_log(&store_path, "session").len(), 5);
-    let session_events = crate::store::load_all_session_events(&store_path, "session", 100).unwrap();
+    let session_events =
+        crate::store::load_all_session_events(&store_path, "session", 100).unwrap();
     let primary = session_events
         .get(crate::events::PRIMARY_TOOL_EVENT_TARGET)
         .expect("sanitized primary tool rows should be durable");

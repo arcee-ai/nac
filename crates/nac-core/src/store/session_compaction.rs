@@ -207,9 +207,7 @@ fn load_checkpoint_by_id(
         .optional()?)
 }
 
-fn map_checkpoint_row(
-    row: &rusqlite::Row<'_>,
-) -> rusqlite::Result<SessionCompactionCheckpoint> {
+fn map_checkpoint_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionCompactionCheckpoint> {
     Ok(SessionCompactionCheckpoint {
         id: row.get(0)?,
         session_id: row.get(1)?,
@@ -429,31 +427,25 @@ mod tests {
         initialize(&path).unwrap();
         insert_test_session(&path, "session-a");
 
-        let missing_session = append_session_compaction_checkpoint(
-            &path,
-            &checkpoint("missing", None, 2, "summary"),
-        )
-        .unwrap_err();
+        let missing_session =
+            append_session_compaction_checkpoint(&path, &checkpoint("missing", None, 2, "summary"))
+                .unwrap_err();
         assert!(missing_session.to_string().contains("does not exist"));
         assert!(load_session_compaction_checkpoints(&path, "missing")
             .unwrap()
             .is_empty());
 
-        let blank = append_session_compaction_checkpoint(
-            &path,
-            &checkpoint("session-a", None, 2, " \n "),
-        )
-        .unwrap_err();
+        let blank =
+            append_session_compaction_checkpoint(&path, &checkpoint("session-a", None, 2, " \n "))
+                .unwrap_err();
         assert!(blank.to_string().contains("summary is empty"));
         assert!(load_session_compaction_checkpoints(&path, "session-a")
             .unwrap()
             .is_empty());
 
-        let first = append_session_compaction_checkpoint(
-            &path,
-            &checkpoint("session-a", None, 2, "first"),
-        )
-        .unwrap();
+        let first =
+            append_session_compaction_checkpoint(&path, &checkpoint("session-a", None, 2, "first"))
+                .unwrap();
         append_session_compaction_checkpoint(
             &path,
             &checkpoint("session-a", Some(first.id), 5, "second"),
@@ -478,11 +470,9 @@ mod tests {
         let path = temp_store_path("malformed_fallback");
         initialize(&path).unwrap();
         insert_test_session(&path, "session-a");
-        let valid = append_session_compaction_checkpoint(
-            &path,
-            &checkpoint("session-a", None, 2, "valid"),
-        )
-        .unwrap();
+        let valid =
+            append_session_compaction_checkpoint(&path, &checkpoint("session-a", None, 2, "valid"))
+                .unwrap();
 
         let conn = open_runtime_connection(&path).unwrap();
         conn.pragma_update(None, "ignore_check_constraints", "ON")

@@ -424,11 +424,13 @@ fn compaction_events_are_replayed_but_never_persisted_as_session_events() {
         bus.emit_agent(event.clone()).unwrap();
     }
 
-    assert!(
-        crate::store::load_all_session_events(&path, "session-compaction-events", events.len())
-            .unwrap()
-            .is_empty()
-    );
+    assert!(crate::store::load_all_session_events(
+        &path,
+        "session-compaction-events",
+        events.len()
+    )
+    .unwrap()
+    .is_empty());
     assert_eq!(
         bus.recent_events(None, events.len())
             .1

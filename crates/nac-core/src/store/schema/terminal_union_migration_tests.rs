@@ -146,6 +146,11 @@ fn fixture(predecessor: Predecessor) -> Fixture {
         crate::store::insert_test_session(&path, id);
     }
     let connection = Connection::open(&path).unwrap();
+    // Seed through current runtime APIs, then restore the predecessor ledger
+    // names before the versioned migration is exercised below.
+    connection.execute_batch("ALTER TABLE thread_events RENAME TO session_events;
+        ALTER TABLE session_events RENAME COLUMN thread_name TO event_target;
+        UPDATE session_events SET event_target='__nac_transcript__' WHERE event_target='__orchestrator__';").unwrap();
     connection
         .execute(
             "UPDATE sessions SET behavior='direct' WHERE session_id='session'",
@@ -196,6 +201,9 @@ fn fixture(predecessor: Predecessor) -> Fixture {
             )
             .unwrap();
     }
+    connection.execute_batch("UPDATE session_events SET event_target='__orchestrator__' WHERE event_target='__nac_transcript__';
+        ALTER TABLE session_events RENAME COLUMN event_target TO thread_name;
+        ALTER TABLE session_events RENAME TO thread_events;").unwrap();
     connection
         .pragma_update(None, "user_version", predecessor.version())
         .unwrap();
@@ -230,6 +238,12 @@ fn retained(connection: &Connection) -> Vec<Vec<Vec<Value>>> {
         "sqlite_sequence",
     ]
     .map(|table| {
+        if table == "thread_events" && table_exists(connection, "session_events").unwrap() {
+            return rows(connection, "SELECT id,session_id,CASE WHEN event_target='__nac_transcript__' THEN '__orchestrator__' ELSE event_target END,event_json,created_at FROM session_events ORDER BY rowid");
+        }
+        if table == "sqlite_sequence" {
+            return rows(connection, "SELECT CASE name WHEN 'session_events' THEN 'thread_events' WHEN 'session_compaction_checkpoints' THEN 'orchestrator_compaction_checkpoints' ELSE name END,seq FROM sqlite_sequence ORDER BY rowid");
+        }
         rows(
             connection,
             &format!(

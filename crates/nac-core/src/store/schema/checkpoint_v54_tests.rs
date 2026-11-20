@@ -301,3 +301,18 @@ fn verified_selection_evidence_is_rehashed_and_tampering_is_inert() {
         with_selection(source_digest(&messages, 1, NEW_SOURCE).unwrap(), &source)
     );
 }
+
+#[test]
+fn malformed_surviving_transcript_row_aborts_without_rehashing() {
+    let (conn, messages) = fixture();
+    insert(&conn, 1, None, &messages, 2);
+    conn.execute(
+        "INSERT INTO thread_events VALUES(1,'s','__orchestrator__','{}')",
+        [],
+    )
+    .unwrap();
+    let before = evidence(&conn, 1);
+    let error = rehash_v54_checkpoints(&conn, "new policy", 2).unwrap_err();
+    assert!(error.to_string().contains("invalid v54 transcript row"));
+    assert_eq!(evidence(&conn, 1), before);
+}

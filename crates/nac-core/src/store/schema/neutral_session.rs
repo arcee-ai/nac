@@ -8,7 +8,9 @@ pub(super) fn rename_storage(conn: &Connection) -> Result<()> {
         |row| row.get(0),
     )?;
     if occupied {
-        return Err(anyhow!("neutral transcript target already exists in legacy storage"));
+        return Err(anyhow!(
+            "neutral transcript target already exists in legacy storage"
+        ));
     }
     conn.execute_batch(
         "ALTER TABLE thread_events RENAME TO session_events;
@@ -21,8 +23,15 @@ pub(super) fn rename_storage(conn: &Connection) -> Result<()> {
          CREATE INDEX idx_session_compaction_checkpoints_latest ON session_compaction_checkpoints(session_id, id DESC);
          UPDATE session_events SET event_target='__nac_transcript__' WHERE event_target='__orchestrator__';",
     )?;
-    if conn.prepare("PRAGMA foreign_key_check")?.query([])?.next()?.is_some() {
-        return Err(anyhow!("foreign key check failed after session storage migration"));
+    if conn
+        .prepare("PRAGMA foreign_key_check")?
+        .query([])?
+        .next()?
+        .is_some()
+    {
+        return Err(anyhow!(
+            "foreign key check failed after session storage migration"
+        ));
     }
     Ok(())
 }

@@ -135,12 +135,11 @@ async fn compaction_is_durable_before_ordinary_request_and_preserves_canonical_t
         .unwrap()
         .contains("durable concise summary"));
 
-    let checkpoints =
-        crate::store::session_compaction::load_session_compaction_checkpoints(
-            &store_path,
-            "session",
-        )
-        .unwrap();
+    let checkpoints = crate::store::session_compaction::load_session_compaction_checkpoints(
+        &store_path,
+        "session",
+    )
+    .unwrap();
     assert_eq!(checkpoints.len(), 1);
     assert_eq!(checkpoints[0].tail_start_message_index, 4);
     assert_eq!(checkpoints[0].summary_prompt_tokens, Some(100));
@@ -177,8 +176,7 @@ async fn compaction_is_durable_before_ordinary_request_and_preserves_canonical_t
             )
         })
         .unwrap();
-    let AgentEvent::CompactionStarted { compaction_id, .. } = events[started_index]
-    else {
+    let AgentEvent::CompactionStarted { compaction_id, .. } = events[started_index] else {
         unreachable!();
     };
     let summary_usage_index = events
@@ -308,12 +306,11 @@ async fn long_single_prompt_can_compact_once_per_hook_and_again_after_steering()
     assert!(final_input.contains("steer now"));
     assert!(!final_input.contains("first checkpoint"));
 
-    let checkpoints =
-        crate::store::session_compaction::load_session_compaction_checkpoints(
-            &store_path,
-            "session",
-        )
-        .unwrap();
+    let checkpoints = crate::store::session_compaction::load_session_compaction_checkpoints(
+        &store_path,
+        "session",
+    )
+    .unwrap();
     assert_eq!(checkpoints.len(), 2);
     assert_eq!(
         checkpoints[0].previous_checkpoint_id,

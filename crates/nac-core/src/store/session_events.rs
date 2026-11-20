@@ -81,7 +81,8 @@ impl SessionEventWriter {
     }
 
     pub fn append(&self, session_id: &str, event_target: &str, event_json: &str) -> Result<()> {
-        self.checkout()?.append(session_id, event_target, event_json)
+        self.checkout()?
+            .append(session_id, event_target, event_json)
     }
 }
 

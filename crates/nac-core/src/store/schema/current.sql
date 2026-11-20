@@ -166,7 +166,7 @@ CREATE TABLE "session_compaction_checkpoints" (
              created_at TEXT NOT NULL,
              UNIQUE (session_id, id),
              FOREIGN KEY (session_id, previous_checkpoint_id)
-                 REFERENCES orchestrator_compaction_checkpoints(session_id, id)
+                 REFERENCES "session_compaction_checkpoints"(session_id, id)
                  ON DELETE CASCADE
          );
 CREATE TABLE peer_goal_starts (
@@ -218,7 +218,7 @@ CREATE TABLE provider_connections (
          );
 CREATE TABLE session_completion_bindings (
              session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
-             run_id TEXT NOT NULL, submitted_message_id INTEGER NOT NULL REFERENCES thread_events(id) ON DELETE CASCADE,
+             run_id TEXT NOT NULL, submitted_message_id INTEGER NOT NULL REFERENCES "session_events"(id) ON DELETE CASCADE,
              behavior TEXT NOT NULL CHECK(behavior IN ('orchestrator','direct','direct-with-orchestrator')),
              eligible INTEGER NOT NULL CHECK(eligible IN (0,1)),
              goal_participated INTEGER NOT NULL DEFAULT 0 CHECK(goal_participated IN (0,1)),
@@ -367,7 +367,7 @@ CREATE TABLE session_run_recovery (
                  REFERENCES sessions(session_id) ON DELETE CASCADE,
              run_id TEXT NOT NULL CHECK (length(trim(run_id)) > 0),
              submitted_message_id INTEGER NOT NULL
-                 REFERENCES thread_events(id) ON DELETE CASCADE,
+                 REFERENCES "session_events"(id) ON DELETE CASCADE,
              status TEXT NOT NULL CHECK (status IN ('active', 'interrupted', 'failed')),
              terminal_disposition TEXT
                  CHECK (terminal_disposition IN ('completed', 'cancelled')),
@@ -553,7 +553,7 @@ CREATE TABLE transcript_append_receipts (
              generation INTEGER,
              start_idx INTEGER NOT NULL CHECK (start_idx >= 0),
              end_idx INTEGER NOT NULL CHECK (end_idx > start_idx),
-             last_message_id INTEGER NOT NULL REFERENCES thread_events(id) ON DELETE CASCADE,
+             last_message_id INTEGER NOT NULL REFERENCES "session_events"(id) ON DELETE CASCADE,
              result_json TEXT,
              PRIMARY KEY (session_id, operation_id)
          );

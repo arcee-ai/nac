@@ -817,11 +817,7 @@ fn successful_response_replaces_failed_run_context_gauge_after_round_trip() {
 
     let timing = ResponseTimingSnapshot::from(&loaded);
     assert_eq!(
-        timing
-            .last_token_usage
-            .as_ref()
-            .unwrap()
-            .context_tokens,
+        timing.last_token_usage.as_ref().unwrap().context_tokens,
         1_000
     );
     let cumulative = timing.cumulative_token_usage.unwrap();

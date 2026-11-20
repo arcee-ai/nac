@@ -1,9 +1,9 @@
 use super::*;
 use std::sync::Mutex;
 
+mod checkpoint_v54;
 #[cfg(test)]
 mod completion_migration_tests;
-mod checkpoint_v54;
 mod completion_tables;
 mod connection;
 mod delegation_receipts;

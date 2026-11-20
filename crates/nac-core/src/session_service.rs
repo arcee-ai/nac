@@ -170,10 +170,7 @@ impl From<&SessionSnapshot> for ResponseTimingSnapshot {
                 for u in &non_none {
                     cumulative += (*u).clone();
                 }
-                cumulative.context_tokens = non_none
-                    .last()
-                    .map(|u| u.context_tokens)
-                    .unwrap_or(0);
+                cumulative.context_tokens = non_none.last().map(|u| u.context_tokens).unwrap_or(0);
                 if let Some(unattributed) = &snapshot.unattributed_token_usage {
                     cumulative.add_cost_saturating(unattributed);
                     if unattributed.context_tokens != 0 {
