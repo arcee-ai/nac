@@ -572,7 +572,7 @@ export async function menuAction(
   if (j.width < 768) {
     const menu = await openPhoneMenu(j, press);
     return press(
-      menu.getByRole("button", {
+      menu.getByRole("navigation", { name: "Menu", exact: true }).getByRole("button", {
         name: create === "New project" ? "Add project" : create,
         exact: true,
       }),

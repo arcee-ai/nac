@@ -720,10 +720,11 @@ for (const width of [1440, 768])
     const unassigned = sidebar.getByRole("region", { name: "Unassigned", exact: true });
     const url = page.url();
     for (const name of names.slice(0, 2)) {
-      const open = unassigned.getByRole("button", {
-        name: new RegExp(`^${escapeRegExp(name)}(?:, Agent)?$`),
+      const label = new RegExp(`^${escapeRegExp(name)}(?:, Agent)?$`);
+      const open = unassigned.getByRole("button", { name: label });
+      const row = unassigned.locator("[data-session-row]").filter({
+        has: page.getByRole("button", { name: label }),
       });
-      const row = unassigned.locator("[data-session-row]").filter({ has: open });
       await expect(open).toBeVisible();
       const nested = await row.evaluate((root) => {
         const interactive = 'button, a[href], [role="button"], input, select, textarea';
@@ -859,11 +860,11 @@ for (const width of [768, 390])
     await page.setViewportSize({ width, height: 900 });
     await page.goto(`${harness.baseUrl}/#/session/${parent}/delegated`);
     await showSubagents(page, width < 768);
-    // The Subagents drawer lists children; choosing one shows its detail.
-    await page
+    // Both the dock and a narrow drawer expose the exact child's row.
+    const panel = page
       .getByRole("dialog", { name: "Subagents", exact: true })
-      .getByRole("button", { name: new RegExp(`^${prefix}Beta`) })
-      .click();
+      .or(page.getByRole("complementary", { name: "Subagents", exact: true }));
+    await panel.getByRole("button", { name: new RegExp(`^${prefix}Beta`) }).click();
     const heading = page.getByRole("button", {
       name: `View full name: ${names[1]}`,
       exact: true,

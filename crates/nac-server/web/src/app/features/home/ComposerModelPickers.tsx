@@ -309,6 +309,7 @@ export function ModelPicker({
       onClose={close}
       className="min-w-0"
       sticky
+      className="min-w-0 max-w-full"
       placement={placement}
       size={view === "model" ? "w-[360px]" : "w-max min-w-[200px] max-w-[280px]"}
       content={view === "effort" ? effortList : view === "model" ? modelList : overview}

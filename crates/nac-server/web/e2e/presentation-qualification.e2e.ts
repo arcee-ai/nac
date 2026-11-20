@@ -331,6 +331,10 @@ async function qualifyInstances(page: Page, info: TestInfo, label: string, id: s
   );
   expect(attempts).toBe(1);
   await capture(page, info, `${label}-packed-unknown-save`);
+  const notifications = right.getByRole("region", { name: "Notifications", exact: true });
+  const dismiss = notifications.getByRole("button", { name: "Dismiss notification", exact: true });
+  if (await dismiss.isVisible()) await dismiss.click();
+  await expect(notifications.getByRole("alert")).toHaveCount(0);
   await dialogs[1].getByRole("button", { name: "Cancel", exact: true }).click();
   await expect(rightComposer).toHaveValue(
     "Right draft — separate binding with the same session ID",
@@ -367,7 +371,6 @@ async function qualifyInstances(page: Page, info: TestInfo, label: string, id: s
     await options.click({ timeout: 5000 });
     await pin.click({ timeout: 5000 });
   }
-  const notifications = right.getByRole("region", { name: "Notifications", exact: true });
   await expect(notifications.getByRole("alert")).toContainText(failure);
   await expect(
     left.getByRole("region", { name: "Notifications", exact: true }).getByRole("alert"),

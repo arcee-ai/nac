@@ -65,7 +65,7 @@ test("serves the production-embedded application and hashed assets", async ({
   expect(asset.headers()["cache-control"]).toContain("immutable");
 
   await page.goto(harness.baseUrl);
-  await expect(page.getByText("No projects yet")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Add a project", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: /Get Started/i })).toBeVisible();
 });
 
