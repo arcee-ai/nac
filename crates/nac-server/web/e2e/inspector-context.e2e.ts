@@ -56,11 +56,9 @@ async function observeParentStream(page: Page, baseUrl: string, parent: string) 
   cdp.on("Network.eventSourceMessageReceived", (event) => {
     if (!active.has(event.requestId) || event.eventName !== "assistant_delta") return;
     const delta = JSON.parse(event.data) as {
-      thread_name: string | null;
       reasoning?: string;
       reset?: boolean;
     };
-    if (delta.thread_name !== null) return;
     if (delta.reset) reasoning = "";
     reasoning += delta.reasoning ?? "";
   });
