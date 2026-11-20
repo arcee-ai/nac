@@ -269,6 +269,7 @@ function PathPicker({
               variant={newFolder.open ? ButtonVariant.SecondaryHighlighted : ButtonVariant.Ghost}
               size={ButtonSize.Medium}
               content={isMobile ? ButtonContent.Icon : ButtonContent.IconLeft}
+              className="max-md:min-h-11 max-md:min-w-11"
               disabled={!data?.path}
               onClick={newFolder.open ? newFolder.cancel : newFolder.start}
               aria-expanded={newFolder.open}
@@ -348,7 +349,7 @@ function PathPicker({
             type="button"
             aria-pressed={hidden}
             onClick={picker.toggleHidden}
-            className="type-meta rounded-md text-basic-tertiary outline-none hover:text-basic-primary focus-visible:ring-2 focus-visible:ring-[var(--f-focus)]"
+            className="type-meta rounded-md text-basic-tertiary outline-none hover:text-basic-primary focus-visible:ring-2 focus-visible:ring-[var(--f-focus)] max-md:min-h-11"
           >
             {hidden ? "Hide hidden folders" : "Show hidden folders"}
           </button>

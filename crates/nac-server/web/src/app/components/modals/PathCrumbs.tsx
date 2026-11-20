@@ -43,7 +43,7 @@ export function PathCrumbs({
   return (
     <nav
       aria-label="Folder path"
-      className="flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden"
+      className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto overflow-y-hidden [scrollbar-width:none] md:overflow-hidden"
     >
       {shown.map((crumb, index) => {
         const last = index === shown.length - 1;
@@ -65,7 +65,7 @@ export function PathCrumbs({
               aria-current={last ? "location" : undefined}
               onClick={() => onOpen(crumb.path)}
               className={cn(
-                "type-body-chrome flex h-11 min-w-0 items-center gap-1.5 rounded-md px-1.5 outline-none md:h-8",
+                "type-body-chrome flex h-11 min-w-11 max-w-full shrink-0 items-center justify-center gap-1.5 rounded-md px-1.5 outline-none md:h-8 md:min-w-0 md:shrink",
                 "focus-visible:ring-2 focus-visible:ring-[var(--f-focus)]",
                 last
                   ? "font-medium text-basic-primary"
