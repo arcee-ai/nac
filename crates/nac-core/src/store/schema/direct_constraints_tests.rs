@@ -675,3 +675,99 @@ fn session_reordering_rejects_unknown_dependencies_atomically() {
         std::fs::remove_dir_all(root).unwrap();
     }
 }
+
+#[test]
+fn altered_column_collation_is_rejected_without_mutation() {
+    for (table, column) in [
+        ("session_completion_bindings", COMPLETION_COLUMN),
+        ("session_completion_occurrences", COMPLETION_COLUMN),
+        ("session_inbox", INBOX_COLUMN),
+    ] {
+        let (root, path) = setup();
+        let conn = Connection::open(&path).unwrap();
+        let original: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_schema WHERE type='table' AND name=?1",
+                [table],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let altered = original.replacen(column, &format!("{column} COLLATE NOCASE"), 1);
+        assert_ne!(original, altered);
+        conn.execute_batch("PRAGMA writable_schema=ON").unwrap();
+        conn.execute(
+            "UPDATE sqlite_schema SET sql=?1 WHERE type='table' AND name=?2",
+            params![altered, table],
+        )
+        .unwrap();
+        conn.execute_batch("PRAGMA writable_schema=OFF").unwrap();
+        let before = catalog(&conn);
+        drop(conn);
+        assert!(initialize(&path).is_err(), "accepted collation on {table}");
+        let conn = Connection::open(&path).unwrap();
+        assert_eq!(catalog(&conn), before);
+        assert_eq!(
+            conn.pragma_query_value::<i64, _>(None, "user_version", |r| r.get(0))
+                .unwrap(),
+            55
+        );
+        assert_eq!(
+            conn.query_row::<i64, _, _>("SELECT count(*) FROM session_completion_marks", [], |r| r
+                .get(0))
+                .unwrap(),
+            1
+        );
+        drop(conn);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[test]
+fn direct_constraints_reject_uppercase_and_blob_values_on_insert() {
+    let (root, path) = setup();
+    initialize(&path).unwrap();
+    let conn = Connection::open(&path).unwrap();
+    conn.execute_batch("PRAGMA foreign_keys=ON").unwrap();
+    for value in ["'DIRECT'", "X'646972656374'"] {
+        assert!(conn
+            .execute(
+                &format!(
+                    "INSERT INTO session_completion_bindings VALUES('s','other',7,{value},1,0,0)"
+                ),
+                []
+            )
+            .is_err());
+        assert!(conn.execute(&format!("INSERT INTO session_completion_occurrences(session_id,run_id,behavior,kind,committed_at) VALUES('s','other',{value},'request','now')"), []).is_err());
+    }
+    for value in [
+        "'TRADITIONAL_CHILD'",
+        "X'747261646974696f6e616c5f6368696c64'",
+    ] {
+        assert!(conn.execute(&format!("INSERT INTO session_inbox(session_id,delivery,status,content,created_at,updated_at,completion_source,completion_session_id,completion_generation) VALUES('s','queue','pending','test','now','now',{value},'child',1)"), []).is_err());
+    }
+    drop(conn);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn noncanonical_existing_values_fail_closed() {
+    for sql in [
+        "UPDATE session_completion_bindings SET behavior='DIRECT'",
+        "UPDATE session_completion_occurrences SET behavior=X'646972656374'",
+        "UPDATE session_inbox SET completion_source='TRADITIONAL_CHILD', completion_session_id='child', completion_generation=1",
+    ] {
+        let (root, path) = setup();
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch("PRAGMA ignore_check_constraints=ON").unwrap();
+        conn.execute(sql, []).unwrap();
+        let before = catalog(&conn);
+        drop(conn);
+        assert!(initialize(&path).is_err(), "accepted {sql}");
+        let conn = Connection::open(&path).unwrap();
+        assert_eq!(catalog(&conn), before);
+        assert_eq!(conn.pragma_query_value::<i64, _>(None, "user_version", |r| r.get(0)).unwrap(), 55);
+        assert_eq!(conn.query_row::<i64,_,_>("SELECT count(*) FROM session_completion_marks", [], |r| r.get(0)).unwrap(), 1);
+        drop(conn);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}

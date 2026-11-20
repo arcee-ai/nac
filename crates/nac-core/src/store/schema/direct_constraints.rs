@@ -61,7 +61,14 @@ fn is_column_definition(sql: &str, candidate: &str) -> bool {
             && matches!(previous, Some(b'(' | b','))
             && bytes[index..].starts_with(candidate.as_bytes())
         {
-            return true;
+            // Require the entire column definition, not a prefix: an added
+            // COLLATE or other suffix could change the CHECK's semantics.
+            let tail = &bytes[index + candidate.len()..];
+            let next = tail
+                .iter()
+                .copied()
+                .find(|byte| !byte.is_ascii_whitespace());
+            return matches!(next, Some(b',' | b')'));
         }
         match byte {
             b'-' if bytes.get(index + 1) == Some(&b'-') => {
@@ -202,18 +209,18 @@ pub(super) fn tighten(conn: &Connection) -> Result<()> {
         edits.push((table, sql, updated));
     }
     for (table, predicate) in [
-        ("sessions", "behavior IS NULL OR behavior <> 'direct'"),
+        ("sessions", "typeof(behavior) <> 'text' OR behavior COLLATE BINARY <> 'direct'"),
         (
             "session_completion_bindings",
-            "behavior IS NULL OR behavior <> 'direct'",
+            "typeof(behavior) <> 'text' OR behavior COLLATE BINARY <> 'direct'",
         ),
         (
             "session_completion_occurrences",
-            "behavior IS NULL OR behavior <> 'direct'",
+            "typeof(behavior) <> 'text' OR behavior COLLATE BINARY <> 'direct'",
         ),
         (
             "session_inbox",
-            "completion_source IS NOT NULL AND completion_source <> 'traditional_child'",
+            "completion_source IS NOT NULL AND (typeof(completion_source) <> 'text' OR completion_source COLLATE BINARY <> 'traditional_child')",
         ),
     ] {
         let invalid: bool = conn.query_row(
