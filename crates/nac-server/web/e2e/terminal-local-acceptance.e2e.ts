@@ -219,7 +219,10 @@ test("connected native shell, less resize, and trusted browser bracketed UTF-8 p
       page,
       `exec ${shell} ${process.platform === "darwin" ? "-f" : "--noprofile --norc"}`,
     );
-    await command(page, "printf '%s\\n' \"$$\" > shell-before.pid; /usr/bin/less -R -- pager.txt");
+    await command(
+      page,
+      "printf '%s\\n' \"$$\" > shell-before.pid; /usr/bin/less -R -- pager.txt; printf '%s%s\\n' 'PAGER-' 'RETURNED'",
+    );
     await expect(accessible).toContainText("LESS-REAL-CONTENT");
     const before = await api.getUserTerminal(session, terminal);
     await page.setViewportSize({ width: 970, height: 600 });
@@ -231,6 +234,8 @@ test("connected native shell, less resize, and trusted browser bracketed UTF-8 p
       .toBe(true);
     await expect(accessible).toContainText("LESS-REAL-CONTENT");
     await page.keyboard.press("q");
+    // Wait for the foreground pager to surrender the terminal before typing into the shell.
+    await expect(accessible).toContainText("PAGER-RETURNED");
     await command(
       page,
       "printf '%s\\n' \"$$\" > shell-after-pager.pid; stty size > resized.txt; python3 capture_paste.py",
