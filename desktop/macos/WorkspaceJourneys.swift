@@ -51,7 +51,7 @@ extension WorkspaceSmoke {
             // Managed host is a Settings section listed only on a managed host;
             // a direct link to it falls back to General while unconfigured.
             try await self.button("Settings")
-            try await self.waitJS("Settings sections without Managed host", "const nav=document.querySelector('nav[aria-label=\"Settings sections\"]'); const names=[...(nav?.querySelectorAll('a') || [])].map(a => a.textContent.trim()); return location.hash.startsWith('#/settings/') && names.includes('Models & providers') && !names.includes('Managed host');")
+            try await self.waitJS("Settings sections without Managed host", "const nav=document.querySelector('nav[aria-label=\"Settings sections\"]'); const names=[...(nav?.querySelectorAll('a') || [])].map(a => a.textContent.trim()); return location.hash.startsWith('#/settings/') && names.includes('Accounts & keys') && !names.includes('Managed host');")
             _ = try await self.js("location.hash = '#/settings/managed'; return true;")
             try await self.waitJS("unconfigured Managed host route falls back", "return location.hash === '#/settings/general' && !document.querySelector('main[aria-label=\"Managed host\"]');")
             try await self.button("Back")
@@ -94,24 +94,21 @@ extension WorkspaceSmoke {
             return "Tailwind production layout, oklch, dynamic viewport units, :has and measured bounds"
         }
         await check("settings") {
-            try await self.sessionAction("Session settings")
-            try await self.waitJS("loaded settings form", "return !!document.querySelector('input[aria-label=\"Session title\"]');")
-            try await self.fill("input[aria-label='Session title']", "WK settings saved")
+            try await self.sessionAction("Rename")
+            try await self.waitJS("loaded rename form", "return !!document.querySelector('[role=dialog][aria-label=\"Rename session\"] input');")
+            try await self.fill("[role=dialog][aria-label='Rename session'] input:not([type=checkbox])", "WK settings saved")
             try await self.button("Save")
-            try await self.waitJS("settings saved", "return !document.querySelector('[role=dialog]') && document.body.innerText.includes('WK settings saved');")
-            try await self.sessionAction("Session settings")
-            try await self.waitJS("settings readback", "return document.querySelector('input[aria-label=\"Session title\"]')?.value === 'WK settings saved';")
-            try await self.button("Close")
-            return "Production settings Save and reopened title readback"
+            try await self.waitJS("title saved", "return !document.querySelector('[role=dialog]') && document.body.innerText.includes('WK settings saved');")
+            try await self.sessionAction("Rename")
+            try await self.waitJS("title readback", "return document.querySelector('[role=dialog][aria-label=\"Rename session\"] input').value === 'WK settings saved';")
+            try await self.button("Cancel")
+            return "Shared Rename saves and reopens the persisted session title"
         }
         await check("provider") {
-            try await self.settingsSection("Models & providers")
-            try await self.waitJS("saved dummy provider", "return document.querySelector('input[aria-label=\"Configuration name\"]')?.value === 'Mac preview — deterministic local fixture';")
-            try await self.fill("input[aria-label='Configuration name']", "WK local fixture configuration")
-            try await self.button("Save")
-            try await self.waitJS("provider configuration readback", "return (await (await fetch('/model-configs')).json()).configurations.some(c => c.name === 'WK local fixture configuration') && !document.body.innerText.includes('preview-dummy-only');")
+            try await self.settingsSection("Accounts & keys")
+            try await self.waitJS("provider account controls", "const page=document.querySelector('main[aria-label=\"Accounts & keys\"]'); return !!page && page.innerText.includes('Subscriptions') && page.innerText.includes('API keys') && !page.innerText.includes('preview-dummy-only');")
             try await self.leaveSettings()
-            return "Saved dummy local provider renamed through production configuration form; no vendor-auth claim"
+            return "Shared Accounts & keys exposes subscription and key controls without displaying the fixture secret"
         }
         await check("mcp") {
             try await self.settingsSection("MCP servers")
@@ -145,14 +142,11 @@ extension WorkspaceSmoke {
         }
         await check("files") {
             try await self.navigate("files")
-            // Panels open in the session drawer: the Session menu opens it on
-            // Insights, then its Files tab. Docking (1280px) lays it beside the
+            // The session panel button opens the drawer, then its Files tab.
+            // The docked layout (1280px) lays it beside the
             // chat as the old side column was, outside any dialog layer.
             try await self.drawerPanel("Files")
-            if (try? await self.js("return !!document.querySelector('button[aria-label=\"Dock drawer\"]');")) as? Bool == true {
-                try await self.button("Dock drawer")
-                try await self.waitJS("docked Files panel", "return !!document.querySelector('aside[aria-label=\"Files\"] [role=tab][aria-label=\"Files\"][aria-selected=\"true\"]') && ![...document.querySelectorAll('[role=dialog]')].some(d => d.querySelector('[role=tablist][aria-label=\"Session panels\"]'));")
-            }
+            try await self.waitJS("docked Files panel", "return !!document.querySelector('aside[aria-label=\"Files\"] [role=tab][aria-label=\"Files\"][aria-selected=\"true\"]') && ![...document.querySelectorAll('[role=dialog]')].some(d => d.querySelector('[role=tablist][aria-label=\"Session panels\"]'));")
             try await self.button("All files")
             let fileRow = """
             if (location.hash !== '#/session/' + \(self.quote(self.sessionID)) + '/files') return [];
@@ -340,14 +334,13 @@ extension WorkspaceSmoke {
 
     /// Opens one action of the session header's Session menu (⋯) popover.
     /// A pressed trigger toggles, so it is pressed only while the menu is shut.
-    /// Shows a panel in the session drawer: when the drawer is shut, the Session
-    /// menu opens it on Insights; then the drawer's own tab selects the panel.
+    /// Opens the session drawer if needed and selects the requested tab.
     /// The tab is looked up only inside the drawer's tab strip, so a closing
     /// Session menu row with the same name can never take the click.
     func drawerPanel(_ label: String) async throws {
         let tab = "[...document.querySelectorAll('[role=tablist][aria-label=\"Session panels\"] [role=tab]')].find(t => t.getAttribute('aria-label') === \(quote(label)) && t.getClientRects().length && !t.closest('[inert]'))"
         if (try? await js("return (\(tab))?.getAttribute('aria-selected') === 'true';")) as? Bool != true {
-            if (try? await js("return !(\(tab));")) as? Bool == true { try await sessionAction("Insights") }
+            if (try? await js("return !(\(tab));")) as? Bool == true { try await button("Session panel") }
             try await waitJS("drawer \(label) tab", "return !!(\(tab));")
             _ = try await js("(\(tab)).click(); return true;")
         }
@@ -383,25 +376,26 @@ extension WorkspaceSmoke {
         for collapsed in [false, true] {
             if collapsed { try await button("Hide sidebar") }
             record(["overlay_layout_in_progress": collapsed ? "collapsed" : "expanded"])
-            // Settings is a page now. Session settings, from the header's
-            // Session menu, is the ordinary production modal in both sidebar
-            // layouts; the menu row hands its focus return to the menu trigger.
-            try await sessionAction("Session settings", rememberAs: "__wkModalOpener")
-            try await waitJS("instance inert background", "return !!document.querySelector('[data-nac-runtime] [inert]') && !!document.querySelector('[role=dialog][aria-label=\"Session settings\"]');")
-            try await require("Dialog overflows viewport", "const r=document.querySelector('[role=dialog][aria-label=\"Session settings\"]').getBoundingClientRect();return r.left>=-1 && r.right<=innerWidth+1;")
+            // The rename action hands its focus return to the Session menu trigger.
+            try await sessionAction("Rename", rememberAs: "__wkModalOpener")
+            try await waitJS("instance inert background", "return !!document.querySelector('[data-nac-runtime] [inert]') && !!document.querySelector('[role=dialog][aria-label=\"Rename session\"]');")
+            try await require("Dialog overflows viewport", "const r=document.querySelector('[role=dialog][aria-label=\"Rename session\"]').getBoundingClientRect();return r.left>=-1 && r.right<=innerWidth+1;")
             _ = try await js("document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));return true;")
             try await waitJS("Escape closes layer", "return !document.querySelector('[role=dialog]');")
             try await waitJS("modal focus return", "return document.activeElement === window.__wkModalOpener;")
-            try await button("Model", rememberAs: "__wkPopoverOpener")
-            try await waitJS("production model popover", "return !!document.querySelector('input[placeholder=\"Search models…\"]') && document.querySelector('button[aria-label=Model]').getAttribute('aria-expanded') === 'true';")
-            try await require("Popover overflows viewport", "const input=document.querySelector('input[placeholder=\"Search models…\"]');const panel=input.closest('[data-radix-popper-content-wrapper]');if(!panel)return false;const r=panel.getBoundingClientRect();return r.left>=-1 && r.right<=innerWidth+1;")
+            try await waitJS("model chip", "return !!document.querySelector('button[aria-label^=\"Model: \"]:not(:disabled)');")
+            _ = try await js("const chip=document.querySelector('button[aria-label^=\"Model: \"]'); window.__wkPopoverOpener=chip; chip.focus(); chip.click(); return true;")
+            try await waitJS("model settings menu", "return !!document.querySelector('[role=menu][aria-label=\"Model settings\"]');")
+            _ = try await js("const menu=document.querySelector('[role=menu][aria-label=\"Model settings\"]'); const row=[...menu.querySelectorAll('[role=menuitem]')].find(b => b.firstElementChild?.textContent === 'Model'); if(!row)throw Error('Missing model list control'); row.click(); return true;")
+            try await waitJS("production model popover", "return !!document.querySelector('input[aria-label=\"Search models\"]') && window.__wkPopoverOpener.getAttribute('aria-expanded') === 'true';")
+            try await require("Popover overflows viewport", "const input=document.querySelector('input[aria-label=\"Search models\"]');const panel=input.closest('[data-radix-popper-content-wrapper]');if(!panel)return false;const r=panel.getBoundingClientRect();return r.left>=-1 && r.right<=innerWidth+1;")
             _ = try await js("document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));return true;")
-            try await waitJS("popover dismissed and focus restored", "return !document.querySelector('input[placeholder=\"Search models…\"]') && document.activeElement === window.__wkPopoverOpener && window.__wkPopoverOpener.getAttribute('aria-expanded') === 'false';")
+            try await waitJS("popover dismissed and focus restored", "return !document.querySelector('input[aria-label=\"Search models\"]') && document.activeElement === window.__wkPopoverOpener && window.__wkPopoverOpener.getAttribute('aria-expanded') === 'false';")
             layouts.append(["sidebar": collapsed ? "collapsed" : "expanded", "modal_focus_return": true, "popover_focus_return": true])
             record(["overlay_layouts": layouts])
             if collapsed { try await button("Show sidebar") }
         }
-        return "Expanded + hidden sidebar: Session settings modal/model-popover bounds, inertness, synthetic Escape and exact focus return; real keyboard/VoiceOver separate"
+        return "Expanded + hidden sidebar: Rename modal/model-popover bounds, inertness, synthetic Escape and exact focus return; real keyboard/VoiceOver separate"
     }
 
     func resizeJourney() async throws -> String {

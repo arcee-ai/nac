@@ -13,11 +13,16 @@ enum CITerminal {
     static let command = "printf '" + marker.utf8.map { String(format: "\\%03o", Int($0)) }.joined()
         + "' > ci-native-input.txt; cat ci-native-input.txt"
 
-    // One bounded setup step through Focus's ordinary Session menu. This opens
-    // only the panel; shell creation and trusted OS input remain separate below.
+    // One bounded setup step through the shared session drawer. Shell creation
+    // and trusted OS input remain separate below.
     private static let openPanelStep = #"""
     const panel = document.querySelector('[aria-label="Session terminal"]');
     if (panel?.getClientRects().length) return true;
+    const toggle = document.querySelector('button[aria-label="Session panel"]');
+    if (toggle) {
+        if (!toggle.disabled && toggle.getAttribute('aria-pressed') !== 'true') toggle.click();
+        return false;
+    }
     const dialog = document.querySelector('[role="dialog"][aria-label="Session"]');
     if (dialog) {
         const terminal = [...dialog.querySelectorAll('button')].find(button =>
@@ -26,7 +31,7 @@ enum CITerminal {
         terminal?.click();
         return false;
     }
-    const menu = document.querySelector('button[aria-label="Session menu"], button[aria-label="Open panel"]');
+    const menu = document.querySelector('button[aria-label="Open panel"]');
     if (menu && !menu.disabled && menu.getAttribute('aria-expanded') !== 'true') menu.click();
     return false;
     """#
@@ -55,8 +60,7 @@ enum CITerminal {
             throw PreviewError.message("Timed out waiting for CI terminal \(label)")
         }
         _ = try await js("location.hash = '/session/\(sessionID)/terminal'; return true;")
-        // The route selects the panel without opening its drawer. Use the same
-        // Session menu and Terminal row as the production Electron/browser paths.
+        // The route selects Terminal. Open its drawer without creating a shell.
         try await wait("panel controls") {
             (try await js(openPanelStep)) as? Bool == true
         }

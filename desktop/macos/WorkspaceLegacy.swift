@@ -58,10 +58,8 @@ extension WorkspaceSmoke {
             _ = try await self.js("window.__wkReloading = true; return true;")
             self.app.webView.reload()
             try await self.waitJS("fresh delegated projection after fixture setup", "return !window.__wkReloading && !!document.querySelector('[role=combobox][aria-label=Message]');")
-            // Panels open in the session drawer (the Session menu, then its
-            // Subagents tab); docked (1280px) it sits beside the transcripts.
+            // The docked Subagents tab sits beside the transcripts at 1280px.
             try await self.drawerPanel("Subagents")
-            if (try? await self.js("return !!document.querySelector('button[aria-label=\"Dock drawer\"]');")) as? Bool == true { try await self.button("Dock drawer") }
             for (title, targetID, prompt) in [("WK traditional child", childID, "WK_CHILD"), ("WK managed orchestrator", managedID, "WK_MANAGED")] {
                 try await self.button(title)
                 try await self.button("Open")

@@ -40,31 +40,32 @@ test('native menu commands enter existing React flows and retain editor/modal gu
   }))).toEqual({ require: 'undefined', process: 'undefined',
     desktop: ['connect', 'connectLifetime', 'connectSessionTarget', 'connectVisibility', 'reportConnectionLost'], paths: ['chooseDirectory'] });
   const hash = () => c.page.evaluate(() => location.hash);
-  // Settings is a full page in Focus: the command opens Models & providers.
-  const models = c.page.getByRole('main', { name: 'Models & providers', exact: true });
+  const general = c.page.getByRole('main', { name: 'General', exact: true });
   await focusWorkspace(c);
   await menu(c, 'Settings…');
-  await expect(models).toBeVisible();
-  await expect.poll(hash).toBe('#/settings/models');
+  await expect(general).toBeVisible();
+  await expect.poll(hash).toBe('#/settings/general');
   await c.page.keyboard.press('Escape');
-  await expect(models).toHaveCount(0);
+  await expect(general).toHaveCount(0);
   await expect.poll(hash).toBe('#/');
   await focusWorkspace(c);
   await c.page.evaluate(() => document.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true })));
   await menu(c, 'Settings…');
-  await expect(models).toHaveCount(0);
+  await expect(general).toHaveCount(0);
   expect(await hash()).toBe('#/');
   await c.page.evaluate(() => document.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true })));
-  // With no project for Home's composer to pick, New Session opens New Project;
-  // an open modal then refuses commands.
+  // New Session never creates a project. A separately opened form owns the keyboard.
   await focusWorkspace(c);
   await menu(c, 'New Session');
   const projectForm = c.page.getByRole('dialog', { name: 'New Project', exact: true });
+  await expect(projectForm).toHaveCount(0);
+  expect((await c.api('/projects')).projects).toEqual([]);
+  await c.page.getByRole('button', { name: 'Get Started', exact: true }).click();
   await expect(projectForm).toBeVisible();
   await projectForm.locator('input').first().focus();
   await menu(c, 'Settings…');
   await menu(c, 'New Session');
-  await expect(models).toHaveCount(0);
+  await expect(general).toHaveCount(0);
   await expect(projectForm).toBeVisible();
   expect(await hash()).toBe('#/');
   await c.page.keyboard.press('Escape');
@@ -78,7 +79,7 @@ test('native menu commands enter existing React flows and retain editor/modal gu
   await expect(composer).toBeVisible();
   await composer.fill('Retained editor draft');
   await menu(c, 'Settings…');
-  await expect(models).toHaveCount(0);
+  await expect(general).toHaveCount(0);
   await expect(composer).toHaveValue('Retained editor draft');
   expect(await hash()).toBe(`#/session/${session}/files`);
   // New Session in a project opens Home's composer preset to it; nothing is sent.
@@ -155,7 +156,7 @@ test('actual preload admits trusted external anchors while rejecting wrong frame
   expect(await c.app.evaluate(() => (globalThis as any).__nativeProbe.opened)).toEqual([href]);
 });
 
-test('shared provider device sign-in requires a deliberate native browser handoff and retains the configuration draft', async ({ candidate: c }) => {
+test('shared provider device sign-in requires a deliberate native browser handoff', async ({ candidate: c }) => {
   const verificationUri = 'https://example.test/device?state=fake%2Bvalue%3D';
   const auth = await ProviderDeviceAuthDouble.install(c.page, c.endpoint, verificationUri);
   // Observe the real main/preload boundary and double only the OS opener.
@@ -170,15 +171,10 @@ test('shared provider device sign-in requires a deliberate native browser handof
   await expect(c.page.getByText('No projects yet', { exact: true })).toBeVisible();
   await focusWorkspace(c);
   await menu(c, 'Settings…');
-  // Settings › Models & providers holds the saved-configuration manager.
-  const dialog = c.page.getByRole('main', { name: 'Models & providers', exact: true })
-    .getByRole('region', { name: 'Configurations', exact: true });
-  await expect(dialog).toBeVisible();
-  const draft = dialog.getByRole('textbox', { name: 'Configuration name', exact: true });
-  await draft.fill('Electron draft survives sign-in');
-  await dialog.getByRole('button', { name: 'OpenAI Responses', exact: true }).click();
-  await c.page.getByRole('button', { name: 'ChatGPT Codex Responses', exact: true }).click();
-  const account = dialog.getByRole('region', { name: 'Provider account', exact: true });
+  await c.page.getByRole('link', { name: 'Accounts & keys', exact: true }).click();
+  const accounts = c.page.getByRole('main', { name: 'Accounts & keys', exact: true });
+  const account = accounts.getByRole('group', { name: 'ChatGPT account', exact: true });
+  await expect(account).toBeVisible();
   await account.getByRole('button', { name: 'Sign in with ChatGPT', exact: true }).click();
   await expect(account.getByTestId('provider-device-code')).toHaveText(FAKE_DEVICE_CODE);
   const handoff = account.getByRole('link', { name: 'Open ChatGPT', exact: true });
@@ -196,8 +192,7 @@ test('shared provider device sign-in requires a deliberate native browser handof
   auth.approve();
   await expect(account.getByText('Signed in', { exact: true })).toBeVisible({ timeout: 15000 });
   await expect(account.getByTestId('provider-device-code')).toHaveCount(0);
-  await expect(draft).toHaveValue('Electron draft survives sign-in');
-  await expect(dialog.getByRole('button', { name: 'ChatGPT Codex Responses', exact: true })).toBeVisible();
+  await expect(accounts).toBeVisible();
   expect(await c.app.evaluate(() => (globalThis as any).__providerAuthActor))
     .toEqual({ opened: [verificationUri], createdWindows: 0 });
   expect(c.app.windows()).toHaveLength(1);

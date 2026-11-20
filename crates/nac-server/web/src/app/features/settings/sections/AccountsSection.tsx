@@ -68,10 +68,10 @@ export function AccountsSection() {
         title="Subscriptions"
         description="Sign in once with an account you already pay for. Every session on that provider uses it."
       >
-        <div>
+        <div role="group" aria-label="ChatGPT account">
           <ManagedAuthCallout backend="chatgpt-codex-responses" className="rounded-none border-0" />
         </div>
-        <div>
+        <div role="group" aria-label="Arcee account">
           <ManagedAuthCallout backend="arcee-auth" className="rounded-none border-0" />
         </div>
       </SettingsGroup>
