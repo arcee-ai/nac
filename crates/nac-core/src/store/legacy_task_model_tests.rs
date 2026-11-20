@@ -743,3 +743,63 @@ fn matching_owners_and_nullable_legacy_identities_are_accepted() {
         0
     );
 }
+
+#[test]
+fn null_and_absent_selections_still_validate_receipt_ownership_atomically() {
+    for absent in [false, true] {
+        for (table, column, mutation) in [
+            ("task_launches", "request_json", "UPDATE task_launches SET request_json=json_set(request_json,'$.request_id','other')"),
+            ("native_task_launches", "request_json", "UPDATE native_task_launches SET request_json=json_set(request_json,'$.request_id','other')"),
+            ("heartbeat_task_launches", "launch_json", "UPDATE heartbeat_task_launches SET launch_json=json_set(launch_json,'$.receipt.request.request_id','other')"),
+            ("heartbeat_commands", "response_json", "UPDATE heartbeat_commands SET response_json=json_set(response_json,'$.schedule.schedule_id','other')"),
+        ] {
+            let conn = all_owner_fixture(&serde_json::Value::Null);
+            if absent {
+                conn.execute_batch("UPDATE task_launches SET request_json=json_remove(request_json,'$.model_selection');
+                    UPDATE native_task_launches SET request_json=json_remove(request_json,'$._nac_model_selection');
+                    UPDATE heartbeat_schedules SET binding_json=json_remove(binding_json,'$.fresh_task.model_selection');
+                    UPDATE heartbeat_task_launches SET launch_json=json_remove(launch_json,'$.receipt.request.model_selection','$.receipt.destination.model_selection','$.receipt.binding.fresh_task.model_selection');
+                    UPDATE heartbeat_commands SET response_json=json_remove(response_json,'$.schedule.binding.fresh_task.model_selection');
+                    UPDATE heartbeat_fresh_destinations SET destination_json=json_remove(destination_json,'$.model_selection'),binding_json=json_remove(binding_json,'$.fresh_task.model_selection');").unwrap();
+            }
+            conn.execute_batch(mutation).unwrap();
+            let before: String = conn.query_row(&format!("SELECT {column} FROM {table}"), [], |r| r.get(0)).unwrap();
+            conn.execute_batch("BEGIN IMMEDIATE").unwrap();
+            assert!(capture_v54(&conn).is_err(), "{table}, absent={absent}");
+            conn.execute_batch("ROLLBACK").unwrap();
+            let after: String = conn.query_row(&format!("SELECT {column} FROM {table}"), [], |r| r.get(0)).unwrap();
+            assert_eq!(before, after, "{table}, absent={absent}");
+            assert_eq!(conn.query_row::<i64, _, _>("SELECT count(*) FROM task_model_v54_provenance", [], |r| r.get(0)).unwrap(), 0);
+        }
+        let conn = all_owner_fixture(&serde_json::Value::Null);
+        if absent {
+            conn.execute_batch("UPDATE task_launches SET request_json=json_remove(request_json,'$.model_selection');
+                UPDATE native_task_launches SET request_json=json_remove(request_json,'$._nac_model_selection');
+                UPDATE heartbeat_schedules SET binding_json=json_remove(binding_json,'$.fresh_task.model_selection');
+                UPDATE heartbeat_task_launches SET launch_json=json_remove(launch_json,'$.receipt.request.model_selection','$.receipt.destination.model_selection','$.receipt.binding.fresh_task.model_selection');
+                UPDATE heartbeat_commands SET response_json=json_remove(response_json,'$.schedule.binding.fresh_task.model_selection');
+                UPDATE heartbeat_fresh_destinations SET destination_json=json_remove(destination_json,'$.model_selection'),binding_json=json_remove(binding_json,'$.fresh_task.model_selection');").unwrap();
+        }
+        capture_v54(&conn).unwrap();
+        assert_eq!(
+            conn.query_row::<i64, _, _>(
+                "SELECT count(*) FROM task_model_v54_provenance",
+                [],
+                |r| r.get(0)
+            )
+            .unwrap(),
+            0
+        );
+    }
+}
+
+#[test]
+fn ordinary_session_schedule_commands_are_not_treated_as_fresh() {
+    let conn = fixture();
+    let mut receipt = command(&serde_json::Value::Null);
+    receipt["schedule"]["session_id"] = serde_json::json!("session");
+    receipt["schedule"]["binding"]["fresh_task"] = serde_json::Value::Null;
+    conn.execute("INSERT INTO heartbeat_schedules(schedule_id,binding_json,session_id) VALUES('schedule',?1,'session')", [receipt["schedule"]["binding"].to_string()]).unwrap();
+    conn.execute("INSERT INTO heartbeat_commands(session_id,request_id,response_json) VALUES('session','command',?1)", [receipt.to_string()]).unwrap();
+    capture_v54(&conn).unwrap();
+}

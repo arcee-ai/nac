@@ -278,6 +278,9 @@ fn verify_owner(
             }
         }
         Owner::Schedule => {
+            if value.pointer("/fresh_task").is_none_or(|v| v.is_null()) {
+                return Ok(());
+            }
             let session: Option<String> = conn.query_row(
                 "SELECT session_id FROM heartbeat_schedules WHERE schedule_id=?1",
                 [key1],
@@ -343,23 +346,30 @@ fn verify_owner(
             )?;
             same(value, "/request_id", key2)?;
             same(value, "/schedule/schedule_id", &schedule)?;
-            anyhow::ensure!(
-                value
-                    .pointer("/schedule/session_id")
-                    .is_none_or(|v| v.is_null()),
-                "legacy fresh command has a session-owned schedule"
-            );
             for path in ["/occurrence", "/active_occurrence"] {
                 if value.pointer(path).is_some_and(|v| !v.is_null()) {
                     same(value, &format!("{path}/schedule_id"), &schedule)?;
                 }
             }
-            let id = project(value, "/schedule/binding/fresh_task/project_id")?;
-            anyhow::ensure!(
-                key1 == format!("project:{id}"),
-                "legacy fresh command owner scope differs"
-            );
-            same(value, "/schedule/binding/project_id", id)?;
+            if value
+                .pointer("/schedule/binding/fresh_task")
+                .is_some_and(|v| !v.is_null())
+            {
+                anyhow::ensure!(
+                    value
+                        .pointer("/schedule/session_id")
+                        .is_none_or(|v| v.is_null()),
+                    "legacy fresh command has a session-owned schedule"
+                );
+                let id = project(value, "/schedule/binding/fresh_task/project_id")?;
+                anyhow::ensure!(
+                    key1 == format!("project:{id}"),
+                    "legacy fresh command owner scope differs"
+                );
+                same(value, "/schedule/binding/project_id", id)?;
+            } else {
+                same(value, "/schedule/session_id", key1)?;
+            }
         }
         Owner::Destination | Owner::DestinationBinding => {
             let (id, creator, destination_raw, binding_raw): (String,Option<String>,String,String) = conn.query_row("SELECT project_id,creator_session_id,destination_json,binding_json FROM heartbeat_fresh_destinations WHERE schedule_id=?1", [key1], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?;
@@ -376,13 +386,17 @@ fn verify_owner(
                     "legacy fresh destination creator differs"
                 );
             }
-            let (destination, destination_legacy, _) =
-                parsed(&destination_raw, Owner::Destination)?;
-            let (binding, binding_legacy, _) = parsed(&binding_raw, Owner::DestinationBinding)?;
+            let (destination, _, _) = parsed(&destination_raw, Owner::Destination)?;
+            let (binding, _, _) = parsed(&binding_raw, Owner::DestinationBinding)?;
+            let destination: FreshTaskDestination = serde_json::from_value(destination)?;
+            let bound: FreshTaskDestination = serde_json::from_value(
+                binding
+                    .pointer("/fresh_task")
+                    .cloned()
+                    .context("legacy destination has no binding")?,
+            )?;
             anyhow::ensure!(
-                destination_legacy
-                    && binding_legacy
-                    && binding.pointer("/fresh_task") == Some(&destination),
+                destination == bound,
                 "legacy fresh destination copies disagree"
             );
             same(&binding, "/project_id", &id)?;
@@ -528,8 +542,8 @@ fn capture_v54(conn: &Connection) -> Result<()> {
             {
                 verify_schedule_destination(conn, &key1)?;
             }
+            verify_owner(conn, owner, &key1, &key2, &value)?;
             if legacy {
-                verify_owner(conn, owner, &key1, &key2, &value)?;
                 let identity = match owner {
                     Owner::Task | Owner::Native => Some(("/request_id", key1.as_str())),
                     Owner::Command => Some(("/request_id", key2.as_str())),
