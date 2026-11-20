@@ -49,6 +49,8 @@ export interface InboxSessionFacts {
     parentId: string | null;
     /** Last activity, epoch ms. */
     updatedAt: number;
+    /** Durable runs that deliberately produced no user-facing heartbeat update. */
+    quietHeartbeatRunIds?: readonly string[];
 }
 export interface InboxReadState {
     /** Outcomes before this moment (epoch ms) count as read on a new device. */
