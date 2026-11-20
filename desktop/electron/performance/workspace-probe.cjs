@@ -126,14 +126,18 @@ async function nacWorkspaceProbe(config) {
   const terminalSession = await create();
   await navigate(terminalSession, 'terminal');
   const region = () => document.querySelector('[aria-label="Session terminal"]');
-  // The session drawer starts closed; the header's Session menu opens it on a
-  // panel. Its rows carry a live fact after the name ("Terminal 1 running").
+  const panelToggle = () => document.querySelector('button[aria-label="Session panel"]');
+  const terminalTab = () => document.querySelector('[role=tablist][aria-label="Session panels"] [role=tab][aria-label=Terminal]');
+  // The older entries keep this probe comparable with the retained baselines.
   const sessionMenu = () => document.querySelector('button[aria-label="Session menu"]');
   const oldEntry = () => document.querySelector('button[aria-label="Show panel"]');
-  await wait(() => region() || sessionMenu() || oldEntry(), 'terminal panel entry');
+  await wait(() => region() || panelToggle() || sessionMenu() || oldEntry(), 'terminal panel entry');
   if (!region()) {
-    // Keep the same probe usable against the retained pre-Focus baseline.
-    if (oldEntry()) oldEntry().click();
+    if (panelToggle()) {
+      if (panelToggle().getAttribute('aria-pressed') !== 'true') panelToggle().click();
+      await wait(() => region() || terminalTab(), 'Terminal tab');
+      if (!region()) terminalTab().click();
+    } else if (oldEntry()) oldEntry().click();
     else {
       if (sessionMenu().getAttribute('aria-expanded') !== 'true') sessionMenu().click();
       (await wait(() => [...document.querySelectorAll('[role=dialog] button')].find(button =>

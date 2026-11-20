@@ -454,9 +454,9 @@ test("cross-Quit/new-port text requires review and deliberate Restore; acknowled
     }, session);
     const composer = next.page.getByRole("combobox", { name: "Message" });
     await expect(composer).toBeVisible();
-    await expect(next.page.getByRole("button", { name: "Model", exact: true })).toContainText(
-      "GPT-5.6 Sol",
-    );
+    await expect(
+      next.page.getByRole("button", { name: /^Model: GPT-5\.6 Sol(?:,|$)/ }),
+    ).toBeVisible();
     await expect(next.page.getByText("Loading session controls…", { exact: true })).toHaveCount(0);
     await expect(
       next.page.getByText("Storage fixture history is ready.", { exact: true }),
