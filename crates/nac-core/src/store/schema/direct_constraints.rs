@@ -185,6 +185,9 @@ pub(super) fn tighten(conn: &Connection) -> Result<()> {
                 normalize_inbox =
                     columns.iter().map(String::as_str).collect::<Vec<_>>() != INBOX_COLUMNS;
                 if sql.matches(INBOX_COLUMN).count() == 1 && !sql.contains(ADA_INBOX_COLUMN) {
+                    if normalize_inbox {
+                        validate_inbox_definitions(&sql)?;
+                    }
                     replace_once(
                         &sql,
                         INBOX_COLUMN,
@@ -194,6 +197,7 @@ pub(super) fn tighten(conn: &Connection) -> Result<()> {
                 } else if sql.matches(ADA_INBOX_COLUMN).count() == 1 && !sql.contains(INBOX_COLUMN)
                 {
                     normalize_inbox = true;
+                    validate_inbox_definitions(&sql)?;
                     replace_once(&sql, ADA_INBOX_COLUMN, "completion_source\n    TEXT CHECK(completion_source = 'traditional_child')", table)?
                 } else {
                     anyhow::bail!("unexpected session inbox origin definition");
@@ -344,6 +348,123 @@ fn inbox_columns(conn: &Connection) -> Result<Vec<String>> {
         names.push(name);
     }
     Ok(names)
+}
+
+// `table_xinfo` does not expose CHECK constraints or collations. Before
+// dropping any additive column, compare its complete top-level definition to
+// the known current definition. Ignore formatting whitespace only outside SQL
+// quoted values; comments or unusual declarations are not supported shapes.
+fn inbox_definitions(sql: &str) -> Result<std::collections::HashMap<String, String>> {
+    let bytes = sql.as_bytes();
+    let start = bytes
+        .iter()
+        .position(|b| *b == b'(')
+        .context("invalid inbox table definition")?;
+    let prefix = sql[..start]
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    anyhow::ensure!(
+        prefix == "CREATE TABLE session_inbox" || prefix == "CREATE TABLE \"session_inbox\"",
+        "unsupported inbox table declaration"
+    );
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut index = start + 1;
+    let mut depth = 1usize;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if (byte == b'-' && bytes.get(index + 1) == Some(&b'-'))
+            || (byte == b'/' && bytes.get(index + 1) == Some(&b'*'))
+        {
+            anyhow::bail!("comments in inbox definition are unsupported");
+        }
+        if matches!(byte, b'\'' | b'"' | b'`' | b'[') {
+            let end = if byte == b'[' { b']' } else { byte };
+            let begin = index;
+            index += 1;
+            let mut closed = false;
+            while index < bytes.len() {
+                if bytes[index] == end {
+                    if byte != b'[' && bytes.get(index + 1) == Some(&end) {
+                        index += 2;
+                    } else {
+                        index += 1;
+                        closed = true;
+                        break;
+                    }
+                } else {
+                    index += 1;
+                }
+            }
+            anyhow::ensure!(closed, "unterminated inbox SQL quote");
+            current.push_str(&sql[begin..index]);
+            continue;
+        }
+        match byte {
+            b'(' => {
+                depth += 1;
+                current.push('(');
+            }
+            b')' => {
+                depth = depth.checked_sub(1).context("invalid inbox SQL nesting")?;
+                if depth == 0 {
+                    parts.push(current);
+                    anyhow::ensure!(
+                        sql[index + 1..].trim().is_empty(),
+                        "unsupported inbox table suffix"
+                    );
+                    break;
+                }
+                current.push(')');
+            }
+            b',' if depth == 1 => {
+                parts.push(std::mem::take(&mut current));
+            }
+            _ if !byte.is_ascii_whitespace() => current.push(char::from(byte)),
+            _ => {}
+        }
+        index += 1;
+    }
+    anyhow::ensure!(depth == 0, "incomplete inbox definition");
+    let mut definitions = std::collections::HashMap::new();
+    for name in &INBOX_COLUMNS[INBOX_BASE_COLUMNS..] {
+        let prefix = format!("{name}TEXT");
+        let integer_prefix = format!("{name}INTEGER");
+        let matches: Vec<_> = parts
+            .iter()
+            .filter(|part| part.starts_with(&prefix) || part.starts_with(&integer_prefix))
+            .collect();
+        anyhow::ensure!(
+            matches.len() == 1,
+            "unsupported inbox column definition for {name}"
+        );
+        definitions.insert((*name).to_owned(), matches[0].clone());
+    }
+    Ok(definitions)
+}
+
+fn validate_inbox_definitions(sql: &str) -> Result<()> {
+    let actual = inbox_definitions(sql)?;
+    let canonical = Connection::open_in_memory()?;
+    canonical.execute_batch(include_str!("current.sql"))?;
+    let current: String = canonical.query_row(
+        "SELECT sql FROM sqlite_schema WHERE type='table' AND name='session_inbox'",
+        [],
+        |row| row.get(0),
+    )?;
+    let expected = inbox_definitions(&current)?;
+    for name in &INBOX_COLUMNS[INBOX_BASE_COLUMNS..] {
+        // The old completion source is independently verified and replaced by
+        // tighten(); its supported v54 definitions differ from the v56 CHECK.
+        if *name != "completion_source" {
+            anyhow::ensure!(
+                actual.get(*name) == expected.get(*name),
+                "unsupported session inbox column definition for {name}"
+            );
+        }
+    }
+    Ok(())
 }
 
 /// SQLite's DROP COLUMN rewrites each record in place without dropping the

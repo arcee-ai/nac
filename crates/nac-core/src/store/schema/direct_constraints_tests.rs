@@ -716,6 +716,8 @@ fn session_reordering_rejects_unknown_dependencies_atomically() {
     for dependency in [
         "CREATE INDEX custom_session_model ON sessions(model);",
         "CREATE TRIGGER custom_session_write AFTER UPDATE ON sessions BEGIN SELECT 1; END;",
+        "PRAGMA writable_schema=ON; UPDATE sqlite_schema SET sql=replace(sql, 'model TEXT NOT NULL', 'model TEXT NOT NULL COLLATE NOCASE') WHERE name='sessions'; PRAGMA writable_schema=OFF;",
+        "PRAGMA writable_schema=ON; UPDATE sqlite_schema SET sql=replace(sql, 'model TEXT NOT NULL', 'model TEXT NOT NULL CHECK(length(model)>0)') WHERE name='sessions'; PRAGMA writable_schema=OFF;",
         "PRAGMA writable_schema=ON; UPDATE sqlite_schema SET sql=replace(sql, 'model TEXT NOT NULL', 'model TEXT NOT NULL DEFAULT ''unsupported''') WHERE name='sessions'; PRAGMA writable_schema=OFF;",
     ] {
         let root = std::env::temp_dir().join(format!("nac-v0-dependency-{}", uuid::Uuid::new_v4()));
@@ -743,6 +745,43 @@ fn session_reordering_rejects_unknown_dependencies_atomically() {
             .query_row("SELECT messages_json FROM sessions", [], |r| r.get(0))
             .unwrap();
         assert_eq!(value, "[\"private\"]");
+        drop(conn);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[test]
+fn inbox_reordering_rejects_extra_column_constraints_atomically() {
+    for declaration in [
+        "review_intent TEXT CHECK(review_intent <> 'blocked')",
+        "review_intent TEXT COLLATE NOCASE",
+    ] {
+        let (root, path) = setup();
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(&format!(
+            "ALTER TABLE session_inbox DROP COLUMN review_intent; \
+             ALTER TABLE session_inbox ADD COLUMN {declaration};"
+        ))
+        .unwrap();
+        let before = catalog(&conn);
+        drop(conn);
+        assert!(initialize(&path).is_err(), "accepted {declaration}");
+        let conn = Connection::open(&path).unwrap();
+        assert_eq!(catalog(&conn), before);
+        assert_eq!(
+            conn.pragma_query_value::<i64, _>(None, "user_version", |r| r.get(0))
+                .unwrap(),
+            55
+        );
+        assert_eq!(
+            conn.query_row::<String, _, _>(
+                "SELECT content FROM session_inbox WHERE id=4",
+                [],
+                |r| r.get(0)
+            )
+            .unwrap(),
+            "orchestrator is user text"
+        );
         drop(conn);
         std::fs::remove_dir_all(root).unwrap();
     }
