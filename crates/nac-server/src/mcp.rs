@@ -87,10 +87,12 @@ struct CreateSessionParams {
         description = "Extra HTTP headers to send with model API requests (JSON object of header name to value)"
     )]
     extra_headers: Option<serde_json::Value>,
+    #[serde(default)]
     #[schemars(
-        description = "Compaction threshold in tokens (0 disables, blank defaults to 70% of context window)"
+        with = "Option<u64>",
+        description = "Compaction threshold in tokens (null or 0 disables, omission defaults to 70% of context window)"
     )]
-    compaction_threshold: Option<u64>,
+    compaction_threshold: RequestField<u64>,
     #[serde(flatten)]
     #[schemars(skip)]
     extra: std::collections::BTreeMap<String, serde_json::Value>,
@@ -171,6 +173,12 @@ struct UpdateSessionParams {
     backend: Option<String>,
     #[schemars(description = "New reasoning effort")]
     reasoning_effort: Option<String>,
+    #[serde(default)]
+    #[schemars(
+        with = "Option<u64>",
+        description = "Compaction threshold in tokens; null or zero disables it"
+    )]
+    compaction_threshold: RequestField<u64>,
     #[serde(flatten)]
     #[schemars(skip)]
     extra: std::collections::BTreeMap<String, serde_json::Value>,
@@ -317,10 +325,7 @@ impl NacMcpService {
             reasoning_effort: field(params.reasoning_effort),
             api_key_env: field(params.api_key_env),
             extra_headers,
-            compaction_threshold: params
-                .compaction_threshold
-                .map(RequestField::Value)
-                .unwrap_or(RequestField::Omitted),
+            compaction_threshold: params.compaction_threshold,
             ssh_host: params.ssh_host,
             ssh_port: params.ssh_port,
             ssh_identity_file: params.ssh_identity_file,
@@ -556,7 +561,7 @@ impl NacMcpService {
             reasoning_effort: field(params.reasoning_effort),
             api_key_env: RequestField::Omitted,
             extra_headers: RequestField::Omitted,
-            compaction_threshold: RequestField::Omitted,
+            compaction_threshold: params.compaction_threshold,
         };
         match self
             .operations

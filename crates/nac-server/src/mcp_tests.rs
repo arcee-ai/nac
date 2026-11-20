@@ -2,6 +2,25 @@ use super::*;
 use rmcp::model::{ClientCapabilities, ClientConfig, ProtocolVersion};
 
 #[test]
+fn compaction_threshold_mcp_distinguishes_omitted_null_and_zero() {
+    let omitted: CreateSessionParams = serde_json::from_value(serde_json::json!({})).unwrap();
+    let null: CreateSessionParams =
+        serde_json::from_value(serde_json::json!({"compaction_threshold":null})).unwrap();
+    let zero: CreateSessionParams =
+        serde_json::from_value(serde_json::json!({"compaction_threshold":0})).unwrap();
+    assert!(matches!(
+        omitted.compaction_threshold,
+        RequestField::Omitted
+    ));
+    assert!(matches!(null.compaction_threshold, RequestField::Null));
+    assert!(matches!(zero.compaction_threshold, RequestField::Value(0)));
+    let patch: UpdateSessionParams =
+        serde_json::from_value(serde_json::json!({"session_id":"s", "compaction_threshold":null}))
+            .unwrap();
+    assert!(matches!(patch.compaction_threshold, RequestField::Null));
+}
+
+#[test]
 fn create_session_schema_exposes_optional_project_id() {
     let schema = serde_json::to_value(schemars::schema_for!(CreateSessionParams)).unwrap();
     let properties = schema["properties"].as_object().unwrap();

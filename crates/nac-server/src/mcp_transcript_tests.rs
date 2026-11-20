@@ -133,6 +133,63 @@ async fn mcp_rejects_retired_creation_and_thread_steering_inputs() {
 }
 
 #[tokio::test]
+async fn mcp_updates_and_clears_session_compaction_threshold() {
+    let _lock = crate::tests::SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = root();
+    let _env = crate::tests::ScopedModelEnv::isolated(&root.join("home"), Some("fixture-key"));
+    crate::tests::seed_direct_session_with_base_url(
+        &root,
+        "direct",
+        "http://127.0.0.1:12345".to_string(),
+    );
+    let manager = crate::tests::test_manager(&root);
+    let store = root.join("store.db");
+    success(
+        call(
+            &manager,
+            "update_session",
+            json!({"session_id":"direct", "compaction_threshold":2048}),
+        )
+        .await,
+    );
+    assert_eq!(
+        sessions::load_session_config(&store, "direct")
+            .unwrap()
+            .compaction_threshold,
+        Some(2048)
+    );
+    success(
+        call(
+            &manager,
+            "update_session",
+            json!({"session_id":"direct", "extension_hint":true}),
+        )
+        .await,
+    );
+    assert_eq!(
+        sessions::load_session_config(&store, "direct")
+            .unwrap()
+            .compaction_threshold,
+        Some(2048)
+    );
+    success(
+        call(
+            &manager,
+            "update_session",
+            json!({"session_id":"direct", "compaction_threshold":null}),
+        )
+        .await,
+    );
+    assert_eq!(
+        sessions::load_session_config(&store, "direct")
+            .unwrap()
+            .compaction_threshold,
+        None
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
 async fn mcp_steer_enqueues_direct_inbox() {
     let _lock = crate::tests::SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let root = root();
