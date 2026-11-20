@@ -118,12 +118,17 @@ function renderWithClient(ui: ReactNode) {
   return { ...view, rerender: (node: ReactNode) => view.rerender(wrap(node)) };
 }
 
-function pathInput(placeholder = "/path/to/directory") {
-  return screen.getByPlaceholderText(placeholder) as HTMLInputElement;
+function pathInput(scope: Pick<typeof screen, "getByRole"> = screen) {
+  return scope.getByRole<HTMLInputElement>("textbox", { name: /^(Folder|Directory) path$/ });
 }
 
-function selectButton() {
-  return screen.getByRole("button", { name: "Select" });
+function startTyping(scope: Pick<typeof screen, "getByRole"> = screen) {
+  fireEvent.click(scope.getByRole("button", { name: "Type a path" }));
+  return pathInput(scope);
+}
+
+function selectButton(scope: Pick<typeof screen, "getByRole"> = screen) {
+  return scope.getByRole("button", { name: /^(Select|Choose “.*”)$/ });
 }
 
 async function listed(text: string) {
@@ -140,7 +145,7 @@ it.each([
   renderWithClient(<Picker onSelect={onSelect} />);
   await listed("nested");
 
-  fireEvent.change(pathInput(), { target: { value: typed } });
+  fireEvent.change(startTyping(), { target: { value: typed } });
   fireEvent.click(selectButton());
 
   await waitFor(() => expect(onSelect).toHaveBeenCalledTimes(1));
@@ -153,9 +158,11 @@ it("Enter and Select resolve a typed path the same way", async () => {
   renderWithClient(<Picker onSelect={onSelect} />);
   await listed("nested");
 
-  fireEvent.change(pathInput(), { target: { value: "~/proj" } });
+  fireEvent.change(startTyping(), { target: { value: "~/proj" } });
   fireEvent.keyDown(pathInput(), { key: "Enter" });
-  await waitFor(() => expect(screen.queryByText("nested")).toBeNull());
+  const crumbs = await screen.findByRole("navigation", { name: "Folder path" });
+  expect(within(crumbs).getByRole("button", { name: "proj", current: "location" })).toBeTruthy();
+  expect(selectButton().textContent).toBe("Choose “proj”");
   fireEvent.click(selectButton());
 
   await waitFor(() => expect(onSelect).toHaveBeenCalledWith("/home/me/proj"));
@@ -168,7 +175,7 @@ it("a listed folder clicked into is still what Select applies", async () => {
   renderWithClient(<Picker onSelect={onSelect} />);
 
   fireEvent.click(await screen.findByRole("button", { name: "nested" }));
-  fireEvent.click(selectButton());
+  fireEvent.click(screen.getByRole("button", { name: "Choose “nested”" }));
 
   await waitFor(() => expect(onSelect).toHaveBeenCalledWith(`${OLD}/nested`));
 });
@@ -185,7 +192,7 @@ it.each([
     renderWithClient(<Picker onSelect={onSelect} onClose={onClose} />);
     await listed("nested");
 
-    fireEvent.change(pathInput(), { target: { value: typed } });
+    fireEvent.change(startTyping(), { target: { value: typed } });
     fireEvent.click(selectButton());
 
     const alert = await screen.findByRole("alert");
@@ -215,7 +222,7 @@ it("a slow check blocks a second Select and is dropped once the draft changes", 
   renderWithClient(<Picker onSelect={onSelect} />);
   await listed("nested");
 
-  fireEvent.change(pathInput(), { target: { value: "/work/slow" } });
+  fireEvent.change(startTyping(), { target: { value: "/work/slow" } });
   fireEvent.click(selectButton());
   fireEvent.click(selectButton());
 
@@ -235,6 +242,32 @@ it("a slow check blocks a second Select and is dropped once the draft changes", 
   expect(onSelect).toHaveBeenCalledWith(SPACED);
 });
 
+it("Escape discards a typed folder and supersedes its pending Select", async () => {
+  const slow = deferred<BrowseListing>();
+  answerLocal("/work/slow", () => slow.promise);
+  const onSelect = vi.fn();
+  const onClose = vi.fn();
+  renderWithClient(<Picker onSelect={onSelect} onClose={onClose} />);
+  await listed("nested");
+
+  const input = startTyping();
+  fireEvent.change(input, { target: { value: "/work/slow" } });
+  fireEvent.click(selectButton());
+  expect(selectButton()).toHaveProperty("disabled", true);
+  fireEvent.keyDown(input, { key: "Escape" });
+  expect(screen.queryByRole("textbox", { name: "Folder path" })).toBeNull();
+  const crumbs = screen.getByRole("navigation", { name: "Folder path" });
+  expect(within(crumbs).getByRole("button", { name: "old", current: "location" })).toBeTruthy();
+  expect(document.activeElement).toBe(screen.getByRole("button", { name: "Type a path" }));
+
+  await act(async () => slow.resolve(listing("/work/slow")));
+  expect(onSelect).not.toHaveBeenCalled();
+  expect(onClose).not.toHaveBeenCalled();
+
+  fireEvent.click(screen.getByRole("button", { name: "Choose “old”" }));
+  await waitFor(() => expect(onSelect).toHaveBeenCalledExactlyOnceWith(OLD));
+});
+
 it("a Select retried on the same path asks again instead of reusing the superseded check", async () => {
   // The first check is still running when the user edits away and back and
   // selects again. By then the folder is gone, and only the new answer counts.
@@ -246,7 +279,7 @@ it("a Select retried on the same path asks again instead of reusing the supersed
   renderWithClient(<Picker onSelect={onSelect} />);
   await listed("nested");
 
-  fireEvent.change(pathInput(), { target: { value: "/work/retry" } });
+  fireEvent.change(startTyping(), { target: { value: "/work/retry" } });
   fireEvent.click(selectButton());
   fireEvent.change(pathInput(), { target: { value: "/work/elsewhere" } });
   fireEvent.change(pathInput(), { target: { value: "/work/retry" } });
@@ -272,7 +305,7 @@ it("a double-clicked slow Select applies its folder exactly once", async () => {
   renderWithClient(<Picker onSelect={onSelect} />);
   await listed("nested");
 
-  fireEvent.change(pathInput(), { target: { value: "/work/slow" } });
+  fireEvent.change(startTyping(), { target: { value: "/work/slow" } });
   fireEvent.click(selectButton());
   fireEvent.click(selectButton());
   await act(async () => slow.resolve(listing("/work/slow")));
@@ -288,7 +321,7 @@ it("closing the picker drops a pending check, and reopening starts afresh", asyn
   const { rerender } = renderWithClient(<Picker onSelect={onSelect} />);
   await listed("nested");
 
-  fireEvent.change(pathInput(), { target: { value: "/work/slow" } });
+  fireEvent.change(startTyping(), { target: { value: "/work/slow" } });
   fireEvent.click(selectButton());
   rerender(<Picker open={false} onSelect={onSelect} />);
   await act(async () => slow.resolve(listing("/work/slow")));
@@ -296,7 +329,7 @@ it("closing the picker drops a pending check, and reopening starts afresh", asyn
 
   // Reopened before the exit transition finishes: a fresh draft, not a stuck Select.
   rerender(<Picker open onSelect={onSelect} initialPath={SPACED} />);
-  expect(pathInput().value).toBe(SPACED);
+  expect(selectButton().textContent).toBe("Choose “my folder ü”");
   expect(selectButton()).toHaveProperty("disabled", false);
   fireEvent.click(selectButton());
   await waitFor(() => expect(onSelect).toHaveBeenCalledWith(SPACED));
@@ -316,17 +349,19 @@ it("two pickers open at once each apply only their own answer", async () => {
       <Picker onSelect={onSecond} />
     </>,
   );
-  await waitFor(() => expect(screen.getAllByRole("dialog")).toHaveLength(2));
+  await waitFor(() =>
+    expect(screen.getAllByRole("button", { name: "Type a path" })).toHaveLength(2),
+  );
   const [one, two] = screen.getAllByRole("dialog");
 
-  fireEvent.change(within(one).getByPlaceholderText("/path/to/directory"), {
+  fireEvent.change(startTyping(within(one)), {
     target: { value: "/work/first" },
   });
-  fireEvent.change(within(two).getByPlaceholderText("/path/to/directory"), {
+  fireEvent.change(startTyping(within(two)), {
     target: { value: "/work/second" },
   });
-  fireEvent.click(within(one).getByRole("button", { name: "Select" }));
-  fireEvent.click(within(two).getByRole("button", { name: "Select" }));
+  fireEvent.click(selectButton(within(one)));
+  fireEvent.click(selectButton(within(two)));
   await act(async () => second.resolve(listing("/work/second")));
   await act(async () => first.resolve(listing("/work/first")));
 
@@ -347,9 +382,9 @@ it("an SSH picker resolves the typed path on that host", async () => {
   });
   const onSelect = vi.fn();
   renderWithClient(<Picker ssh={HOST_A} initialPath="" onSelect={onSelect} />);
-  await listed("Selected: /home/dev");
+  await screen.findByRole("button", { name: "Choose “dev”" });
 
-  fireEvent.change(pathInput("~/path/on/the/host"), { target: { value: "~/src/app" } });
+  fireEvent.change(startTyping(), { target: { value: "~/src/app" } });
   fireEvent.click(selectButton());
 
   await waitFor(() => expect(onSelect).toHaveBeenCalledWith("/home/dev/src/app"));
@@ -357,7 +392,7 @@ it("an SSH picker resolves the typed path on that host", async () => {
   expect(browseSsh).toHaveBeenCalledWith(HOST_A, "~/src/app", false, expect.anything());
   expect(api.browsePath).not.toHaveBeenCalled();
 
-  fireEvent.change(pathInput("~/path/on/the/host"), { target: { value: "~/gone" } });
+  fireEvent.change(pathInput(), { target: { value: "~/gone" } });
   fireEvent.click(selectButton());
   expect((await screen.findByRole("alert")).textContent).toContain("does not exist");
   expect(onSelect).toHaveBeenCalledTimes(1);
@@ -371,9 +406,9 @@ it("switching SSH host drops a pending check made against the old one", async ()
   });
   const onSelect = vi.fn();
   const { rerender } = renderWithClient(<Picker ssh={HOST_A} initialPath="" onSelect={onSelect} />);
-  await listed("Selected: /home/dev");
+  await screen.findByRole("button", { name: "Choose “dev”" });
 
-  fireEvent.change(pathInput("~/path/on/the/host"), { target: { value: "~/src" } });
+  fireEvent.change(startTyping(), { target: { value: "~/src" } });
   fireEvent.click(selectButton());
   rerender(<Picker ssh={HOST_B} initialPath="" onSelect={onSelect} />);
   await act(async () => slow.resolve(listing("/home/a/src")));
@@ -382,7 +417,7 @@ it("switching SSH host drops a pending check made against the old one", async ()
   // Switching back does not revive the old check either; Select works afresh.
   rerender(<Picker ssh={HOST_A} initialPath="" onSelect={onSelect} />);
   expect(selectButton()).toHaveProperty("disabled", false);
-  fireEvent.change(pathInput("~/path/on/the/host"), { target: { value: "~/other" } });
+  fireEvent.change(pathInput(), { target: { value: "~/other" } });
   fireEvent.click(selectButton());
   await waitFor(() => expect(onSelect).toHaveBeenCalledWith("/home/build-a.example/other"));
   expect(onSelect).toHaveBeenCalledTimes(1);
@@ -399,7 +434,7 @@ it("file pickers still apply the listed file, not the typed directory", async ()
 
   const key = await screen.findByRole("button", { name: "id_ed25519" });
   expect(selectButton()).toHaveProperty("disabled", true);
-  fireEvent.change(pathInput(), { target: { value: "/elsewhere" } });
+  fireEvent.change(startTyping(), { target: { value: "/elsewhere" } });
   expect(selectButton()).toHaveProperty("disabled", true);
 
   fireEvent.click(key);

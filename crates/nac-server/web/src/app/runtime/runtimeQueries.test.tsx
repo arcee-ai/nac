@@ -34,9 +34,14 @@ import { NativePresentationRoot } from "./NativePresentationRoot";
 const instances: NativeRuntime[] = [];
 // Past first run, so an empty store shows the projects empty state rather than
 // seeding a default project.
-beforeEach(() => localStorage.setItem("nac.default-project-seeded", "1"));
+beforeEach(() => {
+  const storage = new Map([["nac.default-project-seeded", "1"]]);
+  vi.stubGlobal("localStorage", {
+    getItem: (key: string) => storage.get(key) ?? null,
+    setItem: (key: string, value: string) => storage.set(key, value),
+  });
+});
 afterEach(() => {
-  localStorage.removeItem("nac.default-project-seeded");
   cleanup();
   for (const runtime of instances.splice(0)) runtime.close();
   vi.unstubAllGlobals();
