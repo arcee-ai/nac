@@ -59,46 +59,36 @@ final class OfflineProviderSmoke {
         """#, ["label": label, "value": value]) as? Bool == true else { throw OfflineProviderPolicy.Refusal.invalid }
     }
 
-    private func select(_ label: String, _ title: String) async throws {
-        guard try await js(Self.visible + #"""
-        const rows=[...document.querySelectorAll('[role=group][aria-labelledby]')].filter(e=>{
-          const l=document.getElementById(e.getAttribute('aria-labelledby'));
-          return visible(e)&&l&&l.textContent.trim().replace(/\*$/,'')===label;
-        });
-        if(rows.length!==1)return false;
-        const buttons=[...rows[0].querySelectorAll('button')].filter(visible);
-        if(buttons.length!==1)return false;buttons[0].click();return true;
-        """#, ["label": label]) as? Bool == true else { throw OfflineProviderPolicy.Refusal.invalid }
-        try await click(title)
-    }
-
     private func setup() async throws {
-        guard try await js(#"""
-        const r=await fetch('/model-configs');if(!r.ok)return false;
-        return (await r.json()).configurations.length===0;
-        """#) as? Bool == true else { throw OfflineProviderPolicy.Refusal.invalid }
-        // The project was seeded without a model/key. Home's composer opens
-        // the actual model setup form from its model chip, for this session.
+        // The project was seeded without a model/key. Connect the local
+        // provider through the production form, then choose a session model.
         try await wait { try await self.js(Self.visible + #"""
         const f=document.getElementById('home-composer');
         return !!f&&!f.disabled&&[...f.labels].some(l=>l.textContent.trim()==='What should we work on?')&&
-          [...document.querySelectorAll('button')].some(b=>visible(b)&&!b.disabled&&b.textContent.trim()==='Project default model');
+          [...document.querySelectorAll('button')].some(b=>visible(b)&&!b.disabled&&b.textContent.trim()==='Choose a model');
         """#) as? Bool == true }
-        try await click("Project default model")
-        try await click("Advanced presets and provider setup")
-        try await click("Browse Models")
-        try await click("Create New")
-        try await select("Model Provider", "Custom")
-        try await select("Protocol", "OpenAI Responses")
-        try await input("Name", OfflineProviderPolicy.setupName)
-        try await input("API Key", OfflineProviderPolicy.key)
-        try await input("Model", "gpt-5.6-sol")
-        try await input("Base URL", fence.origin.absoluteString)
-        // Verify the explicit choice; the fresh Custom form defaults to Arcee.
+        try await click("Choose a model")
+        try await click("Provider connections")
+        try await input("Endpoint URL (optional)", fence.origin.absoluteString)
+        try await input("API key", OfflineProviderPolicy.key)
+        try await click("Save connection")
+        try await wait { try await self.js("return document.body.innerText.includes('Provider connection saved.')") as? Bool == true }
+        // Connected providers sort first in the model picker. Verify the
+        // effective backend, route and model against the server after launch.
         guard try await js(Self.visible + #"""
-        const rows=[...document.querySelectorAll('[role=group][aria-labelledby]')];
-        return rows.some(e=>visible(e)&&document.getElementById(e.getAttribute('aria-labelledby'))?.textContent.trim().replace(/\*$/,'')==='Protocol'&&e.textContent.includes('Responses'));
+        const rows=[...document.querySelectorAll('[role=group][aria-labelledby]')].filter(e=>{
+          const l=document.getElementById(e.getAttribute('aria-labelledby'));
+          return visible(e)&&l&&l.textContent.trim().replace(/\*$/,'')==='Model';
+        });
+        const buttons=rows.length===1?[...rows[0].querySelectorAll('button')].filter(visible):[];
+        if(buttons.length!==1)return false;buttons[0].click();return true;
         """#) as? Bool == true else { throw OfflineProviderPolicy.Refusal.invalid }
+        try await input("Search models", "gpt-5.6-sol")
+        try await wait { try await self.js(Self.visible + #"""
+        const row=document.querySelector('[aria-label="Model results"] [data-row="0"]');
+        if(!visible(row)||!row.textContent.includes('gpt-5.6-sol'))return false;
+        row.click();return true;
+        """#) as? Bool == true }
         try await click("Use this model")
         // Starting always sends the typed prompt as the session's first run,
         // so the local response prompt is typed here and started by run().
@@ -112,13 +102,12 @@ final class OfflineProviderSmoke {
 
     private func saved() async throws -> [String: Any] {
         guard let config = try await js(#"""
-        const r=await fetch('/model-configs');if(!r.ok)throw new Error('readback');
-        const rows=(await r.json()).configurations.filter(x=>x.name===name);
-        if(rows.length!==1)throw new Error('readback');
-        const c=rows[0];
+        const id=location.hash.split('/')[2];
+        const r=await fetch('/sessions/'+encodeURIComponent(id)+'/config');if(!r.ok)throw new Error('readback');
+        const c=await r.json();
         if(c.backend!=='openai-responses'||c.model!=='gpt-5.6-sol'||c.base_url!==origin||!c.api_key_env||'api_key' in c)throw new Error('readback');
-        return {config_id:c.config_id,api_key_env:c.api_key_env,backend:c.backend,model:c.model,base_url:c.base_url};
-        """#, ["name": OfflineProviderPolicy.setupName, "origin": fence.origin.absoluteString]) as? [String: Any] else { throw OfflineProviderPolicy.Refusal.invalid }
+        return {api_key_env:c.api_key_env,backend:c.backend,model:c.model,base_url:c.base_url};
+        """#, ["origin": fence.origin.absoluteString]) as? [String: Any] else { throw OfflineProviderPolicy.Refusal.invalid }
         return config
     }
 
@@ -130,7 +119,7 @@ final class OfflineProviderSmoke {
             const current=await (await fetch('/sessions/'+location.hash.split('/')[2])).json();
             if(current.metadata.behavior!=='direct')throw new Error('control');
             const created=await post('/sessions',{project_id:current.metadata.project_id,behavior:'direct',backend:config.backend,model:config.model,
-              base_url:endpoint,allow_insecure_http:true,api_key_env:config.api_key_env,light_model:null,orchestrator_compaction_threshold:0});
+              base_url:endpoint,allow_insecure_http:true,api_key_env:config.api_key_env,orchestrator_compaction_threshold:0});
             const id=created.metadata.session_id;
             const run=await post('/sessions/'+id+'/runs',{prompt:'OFFLINE_TRANSPORT_CONTROL'});
             return {session:id,run:run.run_id};
@@ -162,7 +151,7 @@ final class OfflineProviderSmoke {
         try fence.requireStore(view)
         try await setup()
         let initialDocument = binding.document
-        // Start session saves the configured setup, creates the session and
+        // Start session saves the selected model, creates the session and
         // delivers its first prompt, so the streamed local response is
         // observed here and the outage controls follow once it has settled.
         let count = fence.policy.responseAccepted
