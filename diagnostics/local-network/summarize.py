@@ -36,7 +36,7 @@ def main():
         coverage = ('not_started', 'runner_unavailable', 'test_unavailable', 'test_failed', 'export_failed', 'attachment_invalid', 'ocr_complete')
         data.update({key: raw.get(key) if raw.get(key) in coverage else 'unknown'
                      for key in ('positive_coverage', 'before_coverage', 'after_coverage')})
-        builds = ('project_unavailable', 'fixture_unavailable', 'build_failed', 'complete')
+        builds = ('project_unavailable', 'fixture_unavailable', 'build_failed', 'engine_package_unavailable', 'complete')
         data['build_coverage'] = raw.get('build_coverage') if raw.get('build_coverage') in builds else 'unknown'
         data.update(scope='diagnostic_fixture_window', fixture_process_settlement='unknown')
     print(json.dumps(data, sort_keys=True))

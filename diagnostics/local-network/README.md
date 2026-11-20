@@ -5,7 +5,9 @@ The registered `stable-release.yml` workflow selects this diagnostic only on
 input set to `all-347-paths-macos26` and `native-paths-custody` set to the exact
 non-allocation sentinel `local-network-diagnostic-v1`. The ordinary paths
 admission is skipped only for that branch and sentinel. This manually
-dispatched diagnostic has four independent macOS 26 hosts. Its
+dispatch now selects only the paired `engine` and `panel` cells on independent
+macOS 26 hosts. Earlier runs selected the control and combined cells described
+below; this paired dispatch does not repeat them. Its
 fixed immutable H/P/Q/R sources match the failing investigation snapshot. Each
 cell uses a Python controller. The first three cells use a separately
 source-bound Q-prime XCTest and a disposable AppKit fixture with no network
@@ -14,7 +16,16 @@ emits only inferred `ocr_title_match` or `unknown` before and after the fixed
 operation; it sends no UI input and does not explicitly request permissions.
 `idle` runs two baseline snapshots; `provider` starts H's actual dummy Node
 provider; `loopback` adds H's numeric-loopback Python request to that same
-provider. A 404 is sufficient to show an HTTP
+provider. The `engine` cell additionally builds the exact pinned product using
+its committed package owner, verifies its signatures, and uses unchanged H/Q
+profile, configuration, direct-owned setup-engine and dummy model seeding
+owners. Its preparation builds before its baseline screenshot, and retains all
+private profiles until disposable-host teardown. The `panel` cell compiles the
+exact pinned P `NativeFolderPanel` and `NativeFolderSelection` into the Q-prime
+fixture and opens a directory sheet programmatically; it never clicks or
+selects within the sheet. Q-prime records `panel_sheet_observed` only after its
+own sheet query and screenshot/OCR complete. It is a fixture composition, not
+a normal P app launch or qualification. A 404 is sufficient to show an HTTP
 request was made, not a successful model call. The provider's own bounded
 stop/settlement owner remains in charge.
 

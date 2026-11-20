@@ -5,18 +5,23 @@ import XCTest
 import XCUIAutomation
 
 final class CheckpointJourneys: XCTestCase {
-    func testSnapshot() throws { try snapshot(positive: false) }
-    func testPositiveControl() throws { try snapshot(positive: true) }
+    func testSnapshot() throws { try snapshot(positive: false, folder: false) }
+    func testPositiveControl() throws { try snapshot(positive: true, folder: false) }
+    func testFolderControl() throws { try snapshot(positive: false, folder: true) }
 
-    private func snapshot(positive: Bool) throws {
+    private func snapshot(positive: Bool, folder: Bool) throws {
         guard let path = ProcessInfo.processInfo.environment["NAC_UI_FIXTURE"],
               path.hasPrefix("/") else { throw NSError(domain: "fixture", code: 1) }
         let app = XCUIApplication(url: URL(fileURLWithPath: path))
         if positive { app.launchArguments = ["--positive-control"] }
+        if folder { app.launchArguments = ["--folder-control"] }
         app.launch()
         defer { app.terminate() }
         guard app.windows.firstMatch.waitForExistence(timeout: 15) else {
             throw NSError(domain: "fixture", code: 2)
+        }
+        if folder && !app.sheets.firstMatch.waitForExistence(timeout: 15) {
+            throw NSError(domain: "panel", code: 1)
         }
         let data = app.windows.firstMatch.screenshot().pngRepresentation
         guard data.count > 0 && data.count <= 8 * 1024 * 1024 else {

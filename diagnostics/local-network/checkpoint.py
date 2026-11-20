@@ -18,7 +18,7 @@ TEST_ID = 'CheckpointJourneys/testSnapshot()'
 TEST_URL = 'test://com.apple.xcode/NACNativeUITests/NACDiagnosticUITests/CheckpointJourneys/testSnapshot'
 
 
-def parse_export(export, positive=False):
+def parse_export(export, positive=False, folder=False):
     """Read only the unique fixed Q-prime attachment; never print exported data."""
     try:
         raw = read_owned(export, ('manifest.json',), 256 * 1024)
@@ -31,8 +31,9 @@ def parse_export(export, positive=False):
         if type(manifest) is not list or len(manifest) != 1 or type(manifest[0]) is not dict:
             return ('unknown', 'attachment_invalid')
         group = manifest[0]
-        test_id = 'CheckpointJourneys/testPositiveControl()' if positive else TEST_ID
-        test_url = TEST_URL.replace('testSnapshot', 'testPositiveControl') if positive else TEST_URL
+        method = 'testPositiveControl' if positive else 'testFolderControl' if folder else 'testSnapshot'
+        test_id = 'CheckpointJourneys/' + method + '()'
+        test_url = TEST_URL.replace('testSnapshot', method)
         if group.get('testIdentifier') != test_id or group.get('testIdentifierURL', test_url) != test_url:
             return ('unknown', 'attachment_invalid')
         entries = group.get('attachments')
@@ -102,7 +103,7 @@ def project(h, diagnostic, output):
     return path
 
 
-def make_fixture(diagnostic, private):
+def make_fixture(diagnostic, product, private):
     app = private / 'Fixture.app'
     binary = app / 'Contents/MacOS/CheckpointFixture'
     binary.parent.mkdir(parents=True)
@@ -111,7 +112,9 @@ def make_fixture(diagnostic, private):
             'CFBundlePackageType': 'APPL', 'NSPrincipalClass': 'NSApplication'}
     (app / 'Contents/Info.plist').write_bytes(plistlib.dumps(info))
     source = diagnostic / 'diagnostics/local-network/CheckpointFixture.swift'
-    if not execute(['xcrun', 'swiftc', str(source), '-o', str(binary)], diagnostic, 120, private / 'fixture-build.log'):
+    owners = [product / 'desktop/macos/NativeFolderPanel.swift', product / 'desktop/macos/NativeFolderSelection.swift']
+    if not execute(['xcrun', 'swiftc', '-parse-as-library', str(source), *map(str, owners), '-o', str(binary)],
+                   diagnostic, 120, private / 'fixture-build.log'):
         return None
     if not execute(['/usr/bin/codesign', '--force', '--sign', '-', str(app)], diagnostic, 30, private / 'fixture-sign.log'):
         return None
@@ -124,7 +127,7 @@ def checkpoint(project_path, app, private, name):
     runners = list((derived / 'Build/Products').glob('*.xctestrun'))
     if len(runners) != 1:
         return ('unknown', 'runner_unavailable')
-    method = 'testPositiveControl' if name == 'positive' else 'testSnapshot'
+    method = 'testPositiveControl' if name == 'positive' else 'testFolderControl' if name == 'panel' else 'testSnapshot'
     test_url = TEST_URL.replace('testSnapshot', method)
     argv = ['xcodebuild', 'test-without-building', '-xctestrun', str(runners[0]),
             '-destination', 'platform=macOS,arch=arm64', '-parallel-testing-enabled', 'NO',
@@ -137,10 +140,10 @@ def checkpoint(project_path, app, private, name):
                     '--test-id', test_url, '--output-path', str(export)], project_path.parent, 60,
                    private / (name + '-export.log')):
         return ('unknown', 'export_failed')
-    return parse_export(export, positive=name == 'positive')
+    return parse_export(export, positive=name == 'positive', folder=name == 'panel')
 
 
-def compare(cell, snapshot, provider_factory, request):
+def compare(cell, snapshot, provider_factory, request, engine_operation=None):
     result = {'diagnostic_only': True, 'cell': cell, 'positive_image': 'unknown', 'positive_coverage': 'not_started',
               'before_image': 'unknown', 'before_coverage': 'not_started', 'after_image': 'unknown',
               'after_coverage': 'not_started', 'operation': 'not_started',
@@ -159,7 +162,11 @@ def compare(cell, snapshot, provider_factory, request):
         result['operation'] = 'completed'
         result['after_image'], result['after_coverage'] = sample('after')
         return result
-    if cell not in ('provider', 'loopback'):
+    if cell == 'panel':
+        result['after_image'], result['after_coverage'] = sample('panel')
+        result['operation'] = 'panel_sheet_observed' if result['after_coverage'] == 'ocr_complete' else 'unavailable'
+        return result
+    if cell not in ('provider', 'loopback', 'engine'):
         return result
     provider = provider_factory()
     try:
@@ -169,8 +176,15 @@ def compare(cell, snapshot, provider_factory, request):
                 request(base, '/')
             except HTTPError:
                 pass
-        result['operation'] = 'completed'
-        result['after_image'], result['after_coverage'] = sample('after')
+        if cell == 'engine':
+            if engine_operation is None:
+                raise ValueError('engine operation unavailable')
+            with engine_operation(base):
+                result['operation'] = 'completed'
+                result['after_image'], result['after_coverage'] = sample('after')
+        else:
+            result['operation'] = 'completed'
+            result['after_image'], result['after_coverage'] = sample('after')
     except Exception:
         result['operation'] = 'unavailable'
     finally:
@@ -183,8 +197,8 @@ def compare(cell, snapshot, provider_factory, request):
 
 
 def main():
-    cell, harness, controller, temp = sys.argv[1:]
-    h, diagnostic, temp = (Path(p).resolve(strict=True) for p in (harness, controller, temp))
+    cell, harness, controller, product, tests, temp = sys.argv[1:]
+    h, diagnostic, product, tests, temp = (Path(p).resolve(strict=True) for p in (harness, controller, product, tests, temp))
     result = {'diagnostic_only': True, 'cell': cell, 'positive_image': 'unknown', 'positive_coverage': 'not_started',
               'before_image': 'unknown', 'before_coverage': 'not_started', 'after_image': 'unknown',
               'after_coverage': 'not_started', 'build_coverage': 'project_unavailable', 'operation': 'unavailable',
@@ -196,7 +210,11 @@ def main():
         private = Path(tempfile.mkdtemp(prefix='nac-diagnostic-qprime-', dir=temp))
         selected = project(h, diagnostic, private / 'project')
         result['build_coverage'] = 'fixture_unavailable'
-        app = make_fixture(diagnostic, private)
+        sys.path.insert(0, str(h / 'desktop/macos'))
+        from ci_qualifications import require_checkout
+        require_checkout(product, H)
+        require_checkout(tests, '5306800fd6ea70471ecd372a4f495621e0f74695')
+        app = make_fixture(diagnostic, product, private)
         if app is None:
             raise ValueError('fixture unavailable')
         result['build_coverage'] = 'build_failed'
@@ -206,10 +224,14 @@ def main():
                  '-parallel-testing-enabled', 'NO', 'NAC_UI_FIXTURE=' + str(app)]
         if not execute(build, diagnostic, 180, private / 'build.log'):
             raise ValueError('test build unavailable')
-        sys.path.insert(0, str(h / 'desktop/macos'))
         from ci_startup_api import Provider, request
+        operation = None
+        if cell == 'engine':
+            from checkpoint_engine import prepare_engine_operation
+            result['build_coverage'] = 'engine_package_unavailable'
+            operation = prepare_engine_operation(h, product, tests, private)
         result['build_coverage'] = 'complete'
-        result = compare(cell, lambda name: checkpoint(selected, app, private, name), Provider, request)
+        result = compare(cell, lambda name: checkpoint(selected, app, private, name), Provider, request, operation)
     except Exception:
         pass
     print(json.dumps(result, sort_keys=True))

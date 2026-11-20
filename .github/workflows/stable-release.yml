@@ -1242,7 +1242,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        cell: [idle, provider, loopback, combined_journey]
+        cell: [engine, panel]
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
       CARGO_BUILD_JOBS: '4'
@@ -1279,7 +1279,7 @@ jobs:
           path: r
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@5059963b1731bf1580991b5f3b1eecfb5da406c0
-        if: matrix.cell == 'combined_journey'
+        if: matrix.cell == 'combined_journey' || matrix.cell == 'engine'
         with:
           toolchain: 1.98.0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
@@ -1311,7 +1311,7 @@ jobs:
               --test-source-root "$GITHUB_WORKSPACE/q" --protocol-source-root "$GITHUB_WORKSPACE/r" \
               --output "$RUNNER_TEMP/qualification-private") > "$RUNNER_TEMP/journey-private.log" 2>&1 || true
           else
-            python3 -B diagnostic/diagnostics/local-network/checkpoint.py "$CELL" "$GITHUB_WORKSPACE/h" "$GITHUB_WORKSPACE/diagnostic" "$RUNNER_TEMP" > "$RUNNER_TEMP/probe-private.json"
+            python3 -B diagnostic/diagnostics/local-network/checkpoint.py "$CELL" "$GITHUB_WORKSPACE/h" "$GITHUB_WORKSPACE/diagnostic" "$GITHUB_WORKSPACE/p" "$GITHUB_WORKSPACE/q" "$RUNNER_TEMP" > "$RUNNER_TEMP/probe-private.json"
           fi
           kill "$observer" 2>/dev/null || true
           wait "$observer" 2>/dev/null || true
