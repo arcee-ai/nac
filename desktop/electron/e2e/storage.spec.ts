@@ -37,7 +37,6 @@ async function launch(c: Candidate) {
       XDG_CONFIG_HOME: path.join(c.directory, "xdg"),
       TMPDIR: path.join(c.directory, "tmp"),
       NAC_E2E_API_KEY: "nac-e2e-dummy-only",
-      NAC_ORCHESTRATION: "1",
       MODELS_DEV_URL: `${c.provider.baseUrl}/models-dev`,
       BROWSER: "none",
       NAC_ELECTRON_ENGINE: path.join(root, "target/release/nac-web"),
