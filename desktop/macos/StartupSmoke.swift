@@ -96,27 +96,24 @@ final class StartupSmoke {
         }
     }
 
+    private struct LaunchModel {
+        let backend: String
+        let model: String
+        let displayName: String
+        let account: String
+        let endpoint: String
+        let credential: String
+    }
+
     private func configuredJourney() async throws {
         let vendor = scenario == "startup-real-arcee"
+        let selectionOnly = vendor && value("--smoke-selection-only") == "1"
         let responseText = vendor ? "NAC_LOCAL_ARCEE_OK" : "Finder configured local response."
-        if !vendor {
-        let provider = value("--smoke-provider")!
-        _ = try await js("""
-        const response = await fetch('/model-configs', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-          name:'Finder configured fixture', backend:'openai-responses', model:'gpt-5.6-sol',
-          base_url:'\(provider)', api_key:'preview-dummy-only', extra_headers:{}, orchestrator_compaction_threshold:0})});
-        if (!response.ok) throw new Error(await response.text());
-        return await response.json();
-        """)
-        _ = try await js("window.__startupReloading = true; return true;")
-        app.webView.reload()
-        try await waitJS("onboarding after configuration", "return !window.__startupReloading && [...document.querySelectorAll('button')].some(b => b.textContent.includes('Get Started'));")
-        }
-        _ = try await js("[...document.querySelectorAll('button')].find(b => b.textContent.includes('Get Started')).click(); return true;")
+        let model = try await (vendor ? vendorLaunchModel() : scriptedLaunchModel())
+        _ = try await js("[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Get Started').click(); return true;")
         try await waitJS("project creation dialog", "return document.body.innerText.includes('New Project');")
         let workspace = value("--smoke-workspace")!
-        let initial = app.launchConfiguration!.cwd.path
-        let workingFolder = "[...document.querySelectorAll('button')].find(b => b.textContent.trim() === \(json(initial)) || b.textContent.includes('/path/to/project'))"
+        let workingFolder = "document.querySelector('button[aria-label^=\"Choose Working Folder\"]')"
         try await waitJS("working-folder control", "return !!(\(workingFolder));")
         _ = try await js("\(workingFolder).click(); return true;")
         // LOCAL_APP hands Working Folder to the real AppKit sheet. The smoke
@@ -128,51 +125,81 @@ final class StartupSmoke {
         guard app.nativePaths?.smokeChooseFolder(workspace) == true else {
             throw DesktopStartupError.message("Native folder sheet had no pending request to settle")
         }
-        try await waitJS("selected working folder", "return [...document.querySelectorAll('button')].some(b => b.getAttribute('aria-label') === \(json("Choose Working Folder: " + workspace)));")
-        if vendor { try await selectVendorModel() }
-        try await waitJS("configured project ready", "return [...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Create Project' && !b.disabled);")
-        _ = try await js("[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Create Project' && !b.disabled).click(); return true;")
+        try await waitJS("selected working folder", "return \(workingFolder)?.getAttribute('aria-label') === \(json("Choose Working Folder: " + workspace));")
+        let create = "[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Create Project' && !b.disabled)"
+        try await waitJS("configured project ready", "return !!(\(create));")
+        _ = try await js("\(create).click(); return true;")
+        try await waitJS("new project's Home composer", """
+        return location.hash.startsWith('#/?project=') && !!document.querySelector('textarea#home-composer');
+        """)
+        let selectedProject = try await js("""
+        return new URLSearchParams(location.hash.split('?')[1]).get('project');
+        """)
+        guard let projectID = selectedProject as? String, !projectID.isEmpty else {
+            throw DesktopStartupError.message("Home did not select the newly created project")
+        }
+        let project = try await js("""
+        return (await (await fetch('/projects')).json()).projects.find(project => project.project_id === \(json(projectID)));
+        """) as? [String: Any]
+        guard project?["cwd"] as? String == URL(fileURLWithPath: workspace).resolvingSymlinksInPath().path,
+              project?["ssh_host"] == nil || project?["ssh_host"] is NSNull,
+              try await js("return (await (await fetch('/sessions')).json()).length === 0;") as? Bool == true else {
+            throw DesktopStartupError.message("Project creation must retain the selected local folder and wait for the first prompt")
+        }
+        evidence["project_created_in_shared_ui"] = true
+        let prompt = vendor ? "Do not use tools. Reply only with the uppercase sequence obtained by joining NAC, LOCAL, ARCEE, OK with underscores." : "FINDER_CONFIGURED_LOCAL_" + scenario
+        if vendor {
+            try await fenceVendorLaunch(model, projectID: projectID, prompt: prompt, selectionOnly: selectionOnly)
+        }
+        try await selectHomeModel(model)
+        _ = try await js("""
+        const input = document.querySelector('textarea#home-composer');
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,\(json(prompt)));
+        input.dispatchEvent(new Event('input',{bubbles:true})); return true;
+        """)
+        let start = "document.querySelector('button[aria-label=\"Start session\"]:not(:disabled)')"
+        try await waitJS("enabled Home Start session", "return !!(\(start));")
+        if vendor {
+            _ = try await js("""
+            if (window.__startupVendorGate?.arm() !== true) throw new Error('The vendor fixture transport is not guarded');
+            \(start).click(); return true;
+            """)
+        } else {
+            _ = try await js("\(start).click(); return true;")
+        }
         try await waitJS("configured local chat", "return location.hash.includes('/session/') && !!document.querySelector('[role=combobox][aria-label=Message]');")
         if vendor {
-            let selected = try await js("return (await (await fetch('/sessions/'+location.hash.split('/')[2])).json()).metadata;") as! [String: Any]
-            let expectedModel = evidence["selected_available_model"] as? String
-            guard expectedModel != nil, selected["model"] as? String == expectedModel,
-                  selected["backend"] as? String == "arcee-api", selected["api_key_env"] as? String == "ARCEE_API_KEY" else {
-                throw DesktopStartupError.message("Real-vendor fixture requires the exact discovered model and Arcee API environment selection before sending")
-            }
-            evidence["vendor_backend"] = "arcee-api"
+            try await waitJS("verified vendor session", "return window.__startupVendorGate?.session === location.hash.split('/')[2];")
+            evidence["vendor_backend"] = model.backend
             evidence["credential_source"] = "existing ARCEE_API_KEY environment reference"
-            evidence["vendor_model"] = selected["model"]
+            evidence["vendor_model"] = model.model
             evidence["vendor_selection_verified"] = true
-            if value("--smoke-selection-only") == "1" {
+            if selectionOnly {
                 evidence["model_requests_sent"] = 0
                 return
             }
         }
-        let prompt = vendor ? "Do not use tools. Reply only with the uppercase sequence obtained by joining NAC, LOCAL, ARCEE, OK with underscores." : "FINDER_CONFIGURED_LOCAL_" + scenario
-        _ = try await js("""
-        const input=document.querySelector('[role=combobox][aria-label=Message]');
-        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,\(json(prompt)));
-        input.dispatchEvent(new Event('input',{bubbles:true})); return true;
-        """)
-        try await waitJS("enabled shared Send", "return !!document.querySelector('button[aria-label=Send]:not(:disabled)');")
-        _ = try await js("document.querySelector('button[aria-label=Send]').click(); return true;")
         try await waitJS("configured local response", "return document.body.innerText.includes(\(json(responseText)));")
         try await waitJS("configured run settlement", "return (await (await fetch('/sessions/'+location.hash.split('/')[2])).json()).active_run == null;")
         let snapshot = try await js("return await (await fetch('/sessions/'+location.hash.split('/')[2])).json();") as! [String: Any]
         let metadata = snapshot["metadata"] as! [String: Any]
+        let config = try await js("return await (await fetch('/sessions/'+location.hash.split('/')[2]+'/config')).json();") as! [String: Any]
         let summaries = snapshot["sessions"] as? [[String: Any]] ?? []
         guard let summary = summaries.first(where: { ($0["session_id"] as? String) == (metadata["session_id"] as? String) }),
               summary["sandboxed"] as? Bool == false,
-              summary["ssh_host"] == nil || summary["ssh_host"] is NSNull else {
-            throw DesktopStartupError.message("Configured run did not retain Local execution")
+              summary["ssh_host"] == nil || summary["ssh_host"] is NSNull,
+              metadata["project_id"] as? String == projectID,
+              config["model"] as? String == model.model,
+              config["backend"] as? String == model.backend,
+              config["base_url"] as? String == model.endpoint,
+              config["api_key_env"] as? String == model.credential else {
+            throw DesktopStartupError.message("Configured run did not retain its Local project and exact selected model route")
         }
         evidence["session_id"] = metadata["session_id"]
         evidence["execution_backend"] = "local"
-        evidence["project_created_in_shared_ui"] = true
         evidence["configured_local_run"] = true
         evidence["real_vendor_run"] = vendor
-        evidence["behavior"] = (snapshot["metadata"] as? [String: Any])?["behavior"]
+        evidence["behavior"] = metadata["behavior"]
         _ = try await js("window.__startupReloading = true; return true;")
         app.webView.reload()
         try await waitJS("retained configured transcript", "return !window.__startupReloading && document.body.innerText.includes(\(json(responseText)));")
@@ -185,33 +212,155 @@ final class StartupSmoke {
         }
     }
 
-    func didStop() {
-        evidence["stopped"] = app.engine.pid == 0 && app.engine.receipt == nil
-        write()
+    private func scriptedLaunchModel() async throws -> LaunchModel {
+        let provider = value("--smoke-provider")!
+        let saved = try await js("""
+        const response = await fetch('/model-configs', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+          name:'Finder configured fixture', backend:'openai-responses', model:'gpt-5.6-sol',
+          base_url:\(json(provider)), api_key:'preview-dummy-only', extra_headers:{}, orchestrator_compaction_threshold:0})});
+        if (!response.ok) throw new Error(await response.text());
+        return await response.json();
+        """) as! [String: Any]
+        guard let credential = saved["api_key_env"] as? String,
+              let endpoint = saved["base_url"] as? String else {
+            throw DesktopStartupError.message("Scripted provider config did not expose its non-secret credential selector")
+        }
+        _ = try await js("window.__startupReloading = true; return true;")
+        app.webView.reload()
+        try await waitJS("onboarding after configuration", "return !window.__startupReloading && [...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Get Started');")
+        let displayName = try await js("""
+        const provider = (await (await fetch('/models')).json()).providers.find(p => p.id === 'openai-responses');
+        if (!provider || provider.connection?.base_url !== \(json(endpoint)) || provider.connection?.api_key_env !== \(json(credential)))
+          throw new Error('Scripted provider route is not in the shared model catalog');
+        const model = provider.models.find(m => m.id === 'gpt-5.6-sol');
+        if (!model) throw new Error('Scripted model is not in the shared model catalog');
+        return model.display_name || model.id;
+        """) as! String
+        return LaunchModel(backend: "openai-responses", model: "gpt-5.6-sol", displayName: displayName,
+                           account: "OpenAI", endpoint: endpoint, credential: credential)
     }
 
-    private func selectVendorModel() async throws {
+    private func vendorLaunchModel() async throws -> LaunchModel {
         let available = try await js("""
         const response = await fetch('/providers/models', {method:'POST', headers:{'Content-Type':'application/json'},
           body:JSON.stringify({backend:'arcee-api',api_key_env:'ARCEE_API_KEY'})});
         if (!response.ok) throw new Error('Existing provider model discovery returned HTTP '+response.status);
-        return (await response.json()).models.map(model => model.id);
-        """) as! [String]
-        guard let model = available.first(where: { $0 == "trinity-large-thinking" }) ?? available.first else {
+        return (await response.json()).models;
+        """) as! [[String: Any]]
+        let selected = available.first(where: { $0["id"] as? String == "trinity-large-thinking" }) ?? available.first
+        guard let model = selected?["id"] as? String else {
             throw DesktopStartupError.message("The existing API credential has no available model for qualification")
         }
+        let endpoint = try await js("""
+        const provider = (await (await fetch('/models')).json()).providers.find(p => p.id === 'arcee-api');
+        if (!provider || provider.connection?.api_key_env !== 'ARCEE_API_KEY')
+          throw new Error('Arcee catalog has no environment-backed route');
+        return provider.connection.base_url;
+        """) as! String
         evidence["vendor_discovery"] = "existing authenticated /providers/models using environment variable name"
         evidence["available_model_count"] = available.count
         evidence["selected_available_model"] = model
-        try await waitJS("ordinary Arcee catalog control", "return [...document.querySelectorAll('button[aria-expanded]')].some(b => b.textContent.includes('Arcee API (Key)'));")
-        _ = try await js("[...document.querySelectorAll('button[aria-expanded]')].find(b => b.textContent.includes('Arcee API (Key)')).click(); return true;")
-        try await waitJS("ordinary model search", "return !!document.querySelector('input[placeholder=\"Search models…\"]');")
-        try await fill("input[placeholder=\"Search models…\"]", model)
-        let selected = "[...document.querySelectorAll('button[data-row]')].find(b => b.textContent.includes(\(json(model))) && b.parentElement.textContent.includes('Arcee API (Key)'))"
-        try await waitJS("available Arcee model row", "return !!(\(selected));")
-        let label = try await js("return \(selected).querySelector('span').textContent.trim();") as! String
-        _ = try await js("\(selected).click(); return true;")
-        try await waitJS("committed Arcee model choice", "return !document.querySelector('input[placeholder=\"Search models…\"]') && [...document.querySelectorAll('button[aria-expanded=false]')].some(b => b.textContent.includes(\(json(label))) && b.textContent.includes('Arcee API (Key)'));")
+        return LaunchModel(backend: "arcee-api", model: model, displayName: selected?["display_name"] as? String ?? model,
+                           account: "Arcee (API key)", endpoint: endpoint, credential: "ARCEE_API_KEY")
+    }
+
+    private func selectHomeModel(_ model: LaunchModel) async throws {
+        let chip = "document.querySelector('button[aria-label^=\"Model: \"], button[aria-label=\"Choose a model\"]')"
+        try await waitJS("Home model chip", "return !!(\(chip)) && !\(chip).disabled;")
+        _ = try await js("\(chip).click(); return true;")
+        let search = "input[aria-label=\"Search models\"]"
+        let modelMenu = "[...document.querySelectorAll('[role=menu][aria-label=\"Model settings\"] [role=menuitem]')].find(row => row.firstElementChild?.textContent.trim() === 'Model')"
+        try await waitJS("Home model list entry", "return !!document.querySelector(\(json(search))) || !!(\(modelMenu));")
+        _ = try await js("if (!document.querySelector(\(json(search)))) \(modelMenu).click(); return true;")
+        try await waitJS("Home model search", "return !!document.querySelector(\(json(search)));")
+        try await fill(search, model.model)
+        let label = model.displayName.replacingOccurrences(of: #"^[^:]+:\s+"#, with: "", options: .regularExpression)
+        let selection = "[...document.querySelectorAll('[role=menu][aria-label=Model] [role=menuitemradio]')].find(row => row.parentElement.firstElementChild?.textContent.trim() === \(json(model.account)) && row.firstElementChild?.textContent.trim() === \(json(label)))"
+        try await waitJS("exact provider model row", "return !!(\(selection));")
+        _ = try await js("\(selection).click(); return true;")
+        try await waitJS("committed Home model choice", "return !document.querySelector(\(json(search))) && \(chip)?.getAttribute('aria-label')?.startsWith(\(json("Model: " + label))) === true;")
+    }
+
+    /// Home sends its first prompt once the session exists. The real-provider
+    /// smoke still checks the exact created model route before allowing any run.
+    private func fenceVendorLaunch(_ model: LaunchModel, projectID: String, prompt: String, selectionOnly: Bool) async throws {
+        guard let base = app.baseURL else {
+            throw DesktopStartupError.message("Cannot guard the vendor fixture without the owned engine origin")
+        }
+        let source = """
+        (() => {
+        if (location.origin !== new URL(\(json(base.absoluteString))).origin) return;
+        const originalFetch = window.fetch.bind(window);
+        const expected = record => record?.backend === \(json(model.backend)) && record.model === \(json(model.model))
+          && record.base_url === \(json(model.endpoint)) && record.api_key_env === \(json(model.credential));
+        const payload = async (input, options) => {
+          const body = options?.body ?? (input instanceof Request ? await input.clone().text() : null);
+          return typeof body === 'string' ? JSON.parse(body) : null;
+        };
+        let observedProjectRead = false, armed = false, creating = false, runSent = false, session = null;
+        Object.defineProperty(window, '__startupVendorGate', {value: Object.freeze({
+          get observedProjectRead() { return observedProjectRead; },
+          get session() { return session; },
+          arm() {
+            if (!observedProjectRead || armed) return false;
+            armed = true;
+            return true;
+          }
+        })});
+        window.fetch = async (input, options) => {
+          const path = new URL(input instanceof Request ? input.url : input, location.href);
+          const method = (options?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase();
+          if (path.origin !== location.origin) return originalFetch(input, options);
+          if (method === 'GET' && path.pathname === '/projects') {
+            const headers = new Headers(options?.headers ?? (input instanceof Request ? input.headers : undefined));
+            if (headers.has('x-nac-request-id')) observedProjectRead = true;
+          }
+          if (method === 'POST' && path.pathname === '/sessions') {
+            const body = await payload(input, options);
+            if (!armed || creating || body?.project_id !== \(json(projectID)) || !expected(body))
+              throw new Error('The vendor launch request did not select the verified model route');
+            creating = true;
+            const response = await originalFetch(input, options);
+            if (!response.ok) return response;
+            const created = await response.clone().json();
+            const createdID = created.metadata?.session_id;
+            if (!createdID) throw new Error('Vendor launch returned no session');
+            const config = await originalFetch('/sessions/' + encodeURIComponent(createdID) + '/config');
+            if (!config.ok || !expected(await config.json()))
+              throw new Error('Created vendor session did not retain the verified model route');
+            session = createdID;
+            return response;
+          }
+          if (method === 'POST' && /^\\/sessions\\/[^/]+\\/runs$/.test(path.pathname)) {
+            const body = await payload(input, options);
+            if (!armed || \(selectionOnly ? "true" : "false") || runSent || !session
+                || path.pathname !== '/sessions/' + encodeURIComponent(session) + '/runs'
+                || body?.prompt !== \(json(prompt)))
+              throw new Error('The vendor fixture did not authorize this model run');
+            runSent = true;
+          }
+          return originalFetch(input, options);
+        };
+        })();
+        """
+        // main.tsx binds fetch when the client is constructed. Install before
+        // reload so that binding captures this guard, then observe a real client
+        // read. The smoke deliberately sends no project probe during this wait.
+        app.webView.configuration.userContentController.addUserScript(
+            WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: true)
+        )
+        _ = try await js("window.__startupReloading = true; return true;")
+        app.webView.reload()
+        try await waitJS("vendor guard captured by the reloaded Home client", """
+        return !window.__startupReloading && window.__startupVendorGate?.observedProjectRead === true
+          && new URLSearchParams(location.hash.split('?')[1]).get('project') === \(json(projectID))
+          && !!document.querySelector('textarea#home-composer');
+        """)
+    }
+
+    func didStop() {
+        evidence["stopped"] = app.engine.pid == 0 && app.engine.receipt == nil
+        write()
     }
 
     private func commandJourney() async throws {
@@ -239,21 +388,33 @@ final class StartupSmoke {
             evidence["command_fixture"] = "controlled executable lookup through normal MCP settings"
             return
         }
-        _ = try await js("[...document.querySelectorAll('button')].find(b => b.textContent.includes('Get Started')).click(); return true;")
-        try await waitJS("environment choices", "return [...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'SSH');")
-        let mode = scenario == "startup-missing-ssh" ? "SSH" : "Sandbox"
-        _ = try await js("[...document.querySelectorAll('button')].find(b => b.textContent.trim() === \(json(mode))).click(); return true;")
-        if mode == "SSH" {
+        if scenario == "startup-missing-ssh" {
+            _ = try await js("[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Get Started').click(); return true;")
+            try await waitJS("SSH project location", "return [...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'SSH');")
+            _ = try await js("[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'SSH').click(); return true;")
             try await waitJS("SSH host control", "return !!document.querySelector('input[placeholder=\"example@192.0.2.10 or build-box\"]');")
             try await fill("input[placeholder=\"example@192.0.2.10 or build-box\"]", "fixture@missing-command.invalid")
             _ = try await js("[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Connect').click(); return true;")
             try await waitJS("missing SSH guidance", "return document.body.textContent.includes('SSH connect failed:');")
+            try await waitJS("SSH still selected", "return [...document.querySelectorAll('button[aria-pressed=true]')].some(b => b.textContent.trim() === 'SSH');")
+            evidence["selected_backend_preserved"] = "ssh"
         } else {
-            try await waitJS("missing Podman guidance", "return document.body.textContent.includes('podman is not installed');")
+            let launchFolder = "[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Use launch folder' && !b.disabled)"
+            try await waitJS("local launch folder", "return !!(\(launchFolder));")
+            _ = try await js("\(launchFolder).click(); return true;")
+            let settings = "document.querySelector('button[aria-label=\"Additional settings\"]:not(:disabled)')"
+            try await waitJS("local workspace settings", "return location.hash.startsWith('#/?project=') && !!(\(settings));")
+            _ = try await js("\(settings).click(); return true;")
+            let sandbox = "document.querySelector('[role=switch][aria-label=Sandbox]:not(:disabled)')"
+            try await waitJS("sandbox setting", "return !!(\(sandbox));")
+            _ = try await js("\(sandbox).click(); return true;")
+            try await waitJS("missing Podman guidance with sandbox retained", """
+            return \(sandbox)?.getAttribute('aria-checked') === 'true'
+              && document.body.textContent.toLowerCase().includes('podman is not installed')
+              && !!document.querySelector('button[aria-label="Start sandbox session"]:disabled');
+            """)
+            evidence["selected_backend_preserved"] = "sandbox"
         }
-        let selected = try await js("return [...document.querySelectorAll('button[aria-pressed=true]')].some(b => b.textContent.trim() === \(json(mode)));")
-        guard selected as? Bool == true else { throw DesktopStartupError.message("Missing command changed the selected backend") }
-        evidence["selected_backend_preserved"] = mode.lowercased()
         evidence["command_fixture"] = "controlled missing executable; real backend not qualified"
         evidence["command_guidance"] = try await js("return document.body.innerText;")
     }
