@@ -1,14 +1,30 @@
+import { useQueryClient } from "@tanstack/react-query";
+import { Effect } from "effect";
 import { useCallback } from "react";
 
 import { PopoverPlacement } from "@/app/atoms";
 import { standardEffort } from "@/app/components/modals/options";
 import { ModelPicker as ComposerModelChip } from "@/app/features/home/ComposerModelPickers";
 import { useManagedModelProfile } from "@/app/features/managed/controller/useManagedModelProfile";
+import {
+  classifySetupFailure,
+  setupFailureMessage,
+  setupReconciliation,
+} from "@/app/features/setup/browserAdapters";
+import { useSetupAction } from "@/app/features/setup/useSetupAction";
+import { setupSequence } from "@/app/features/setup/workflow";
 import { catalogBaseUrl, resolveCatalogModel, type CatalogPick } from "@/app/lib/catalog";
-import { humanErrorText, toRunError } from "@/app/lib/providerError";
 import { useToast } from "@/app/providers/ToastProvider";
-import { useModelCatalog, useUpdateConfig } from "@/app/services/queries";
-import type { BackendKind, ModelCatalog, ReasoningEffort, SessionMetadata } from "@/app/types/api";
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
+import { useModelCatalog, useSessionConfig, useSessionSnapshot } from "@/app/services/queries";
+import { queryKeys } from "@/app/services/queries/keys";
+import type {
+  BackendKind,
+  ModelCatalog,
+  ReasoningEffort,
+  SessionMetadata,
+  UpdateConfigRequest,
+} from "@/app/types/api";
 
 /**
  * The session's current model and reasoning, directly switchable beside the
@@ -31,10 +47,23 @@ export function ModelPicker({
   const toast = useToast();
   const catalog = useModelCatalog();
   const managedModel = useManagedModelProfile();
-  const updateConfig = useUpdateConfig();
-  const currentModel = metadata?.model ?? label;
-  const currentEffort = metadata?.reasoning_effort ?? "";
-  const resolved = resolveCatalogModel(catalog.data, metadata?.backend, currentModel);
+  const client = useQueryClient();
+  const config = useSessionConfig(metadata ? sessionId : null);
+  const snapshot = useSessionSnapshot(sessionId, { enabled: false });
+  const action = useSetupAction();
+  const { api } = useNativeRuntime();
+  const current = config.data ?? metadata;
+  const currentBackend = current?.backend ?? metadata?.backend;
+  const currentModel = current?.model ?? label;
+  const currentEffort = current?.reasoning_effort ?? "";
+  const resolved = resolveCatalogModel(catalog.data, currentBackend, currentModel);
+  const canChange =
+    !disabled &&
+    metadata != null &&
+    config.isSuccess &&
+    !snapshot.isError &&
+    !action.busy &&
+    !action.needsReview;
   const { credentialReady: managedReady, matches: managedMatches } = managedModel;
   // A managed host's mounted model is usable before its account reads as connected.
   const usableProvider = useCallback(
@@ -49,10 +78,50 @@ export function ModelPicker({
     [managedReady, managedMatches],
   );
 
-  const chooseModel = async (pick: CatalogPick) => {
-    if (!metadata || (pick.backend === metadata.backend && pick.model === metadata.model)) return;
+  const change = async (patch: UpdateConfigRequest, success: string) => {
+    const version = config.data?.config_version;
+    if (!canChange || version == null) return;
+    try {
+      const confirmed = await action.run((lease) =>
+        setupSequence(
+          {
+            current: lease.current,
+            classify: classifySetupFailure,
+            reconcile: setupReconciliation(client, sessionId),
+          },
+          (step) =>
+            Effect.gen(function* () {
+              yield* step("configuration", () =>
+                api.updateConfig(sessionId, {
+                  ...patch,
+                  expected_config_version: version,
+                }),
+              );
+              return true;
+            }),
+        ),
+      );
+      if (!confirmed) return;
+      if (
+        [queryKeys.sessionConfig(sessionId), queryKeys.sessionSnapshot(sessionId)].some(
+          (key) => client.getQueryState(key)?.status === "error",
+        )
+      ) {
+        toast.error(
+          "Settings were saved, but the latest session could not be loaded. Reload before editing again.",
+        );
+      } else {
+        toast.success(success);
+      }
+    } catch (error) {
+      toast.error(setupFailureMessage(error));
+    }
+  };
+
+  const chooseModel = (pick: CatalogPick) => {
+    if (!canChange || (pick.backend === currentBackend && pick.model === currentModel)) return;
     const provider = catalog.data?.providers.find((entry) => entry.id === pick.backend);
-    const preservesRoute = pick.backend === metadata.backend;
+    const preservesRoute = pick.backend === currentBackend;
     const providerReady = Boolean(
       provider?.auth_status === "ready" ||
       (managedModel.matches(pick) && managedModel.credentialReady),
@@ -84,41 +153,28 @@ export function ModelPicker({
           // Provider-specific headers must never leak into another backend.
           extra_headers: null,
         };
-    try {
-      await updateConfig.mutateAsync({ id: sessionId, patch });
-      toast.success(`Model switched to ${pick.model}`);
-    } catch (error) {
-      toast.error(`The model was not switched: ${humanErrorText(toRunError(error), pick.backend)}`);
-    }
+    void change(patch, `Model switched to ${pick.model}`);
   };
 
-  const chooseEffort = async (effort: string) => {
-    if (!metadata || effort === currentEffort) return;
-    try {
-      await updateConfig.mutateAsync({
-        id: sessionId,
-        patch: { reasoning_effort: effort },
-      });
-      toast.success(`Reasoning set to ${effort}`);
-    } catch (error) {
-      toast.error(
-        `Reasoning was not changed: ${humanErrorText(toRunError(error), metadata.backend)}`,
-      );
-    }
+  const chooseEffort = (effort: string) => {
+    if (effort === currentEffort) return;
+    void change({ reasoning_effort: effort }, `Reasoning set to ${effort}`);
   };
 
   return (
     <ComposerModelChip
       fallbackLabel={currentModel}
       pending={!metadata}
-      value={metadata ? { backend: metadata.backend as BackendKind, model: metadata.model } : null}
+      value={
+        currentBackend ? { backend: currentBackend as BackendKind, model: currentModel } : null
+      }
       effort={currentEffort}
       supportedEfforts={resolved.supportedEfforts}
-      disabled={disabled || !metadata || updateConfig.isPending}
+      disabled={!canChange}
       placement={PopoverPlacement.TopRight}
       usableProvider={usableProvider}
-      onPick={(pick) => void chooseModel(pick)}
-      onEffort={(effort) => void chooseEffort(effort)}
+      onPick={chooseModel}
+      onEffort={chooseEffort}
     />
   );
 }

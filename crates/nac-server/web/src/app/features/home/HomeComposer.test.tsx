@@ -19,6 +19,7 @@ const fakes = vi.hoisted(() => ({
   eligible: false,
   inheritedPending: false,
   inheritedError: null as Error | null,
+  configuredModel: null as string | null,
   inheritedEffort: "high" as string | null,
   inheritedModel: "glm-5",
 }));
@@ -35,20 +36,22 @@ vi.mock("./useStartSession", () => ({
 vi.mock("./modelChoice", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./modelChoice")>()),
   useInheritedModel: () => ({
-    inherited: fakes.inheritedError
-      ? null
-      : {
-          initial: {
-            model: fakes.inheritedModel,
-            reasoning_effort: fakes.inheritedEffort,
-            backend: "arcee-api",
+    inherited:
+      fakes.inheritedError || fakes.configuredModel
+        ? null
+        : {
+            initial: {
+              model: fakes.inheritedModel,
+              reasoning_effort: fakes.inheritedEffort,
+              backend: "arcee-api",
+            },
+            light: null,
+            source: "project-default",
           },
-          light: null,
-          source: "project-default",
-        },
     pending: fakes.inheritedPending,
     error: fakes.inheritedError,
   }),
+  useConfiguredLaunchModel: () => ({ model: fakes.configuredModel, pending: false, error: null }),
 }));
 vi.mock("./ModelOverrideModal", () => ({ ModelOverrideModal: () => null }));
 vi.mock("./suggestedModel", () => ({
@@ -133,6 +136,7 @@ beforeEach(() => {
   fakes.eligible = false;
   fakes.inheritedPending = false;
   fakes.inheritedError = null;
+  fakes.configuredModel = null;
   fakes.inheritedEffort = "high";
   fakes.inheritedModel = "glm-5";
   standaloneHomeDraftStore.update("", null);
@@ -269,6 +273,17 @@ describe("Home composer", () => {
       (screen.getByRole("button", { name: "Start session" }) as HTMLButtonElement).disabled,
     ).toBe(true);
     expect(fakes.start).not.toHaveBeenCalled();
+  });
+
+  it("lets the server use the launch location's configured model unchanged", async () => {
+    fakes.configuredModel = "project-configured-model";
+    mount();
+    expect(screen.getByRole("button", { name: "Model: project-configured-model" })).toBeTruthy();
+    fireEvent.change(prompt(), { target: { value: "Use the launch configuration" } });
+    fireEvent.keyDown(prompt(), { key: "Enter" });
+    await vi.waitFor(() =>
+      expect(fakes.start).toHaveBeenCalledWith(expect.objectContaining({ model: null })),
+    );
   });
 
   it("surfaces an unavailable inherited model without silently sending", () => {

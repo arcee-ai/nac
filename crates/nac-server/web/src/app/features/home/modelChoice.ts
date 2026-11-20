@@ -1,3 +1,4 @@
+import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 
 import type {
@@ -9,6 +10,7 @@ import type { UiPolicy } from "@/app/features/ui-policy/policy";
 import { creationBehavior } from "@/app/features/ui-policy/policy";
 import { inheritPrimaryCredential } from "@/app/lib/modelConfig";
 import { newestCreatedPrimarySessionForProject } from "@/app/lib/projects";
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import {
   useModelConfigs,
   useProjects,
@@ -20,6 +22,7 @@ import type {
   CreateSessionRequest,
   LightModelSettings,
   ModelConfigurationRecord,
+  ProjectRecord,
   RawSessionConfig,
   SessionBehavior,
 } from "@/app/types/api";
@@ -29,6 +32,28 @@ export interface InheritedModel {
   initial: ConfigurationsPanelInitial;
   light: LightModelSettings | null;
   source: "project-default" | "latest-session";
+}
+
+/** The serving runtime resolves file defaults in the actual launch location. */
+export function useConfiguredLaunchModel(project: ProjectRecord | null, enabled: boolean) {
+  const { api } = useNativeRuntime();
+  const target = project && {
+    cwd: project.cwd,
+    ssh_host: project.ssh_host,
+    ssh_port: project.ssh_port,
+    ssh_identity_file: project.ssh_identity_file,
+  };
+  const query = useQuery({
+    queryKey: ["launch-model-defaults", target],
+    queryFn: ({ signal }) => api.launchDefaults(target ?? {}, signal),
+    enabled: enabled && target != null,
+    retry: false,
+  });
+  return {
+    model: enabled ? (query.data?.configured_model ?? null) : null,
+    pending: enabled && query.isPending,
+    error: enabled ? query.error : null,
+  };
 }
 
 /** A model the user picked in the composer's model chip for this session only. */

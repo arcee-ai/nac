@@ -149,7 +149,7 @@ export function ModelPicker({
   const name = current ? modelName(current) : fallbackLabel;
   // A model that accepts no explicit level runs without one, shown as None;
   // the server rejects even "none" for it, so choosing None sends nothing.
-  const noEfforts = Boolean(catalog.data) && supportedEfforts.length === 0;
+  const noEfforts = value != null && Boolean(catalog.data) && supportedEfforts.length === 0;
   const efforts = noEfforts
     ? [{ id: "", label: "None" }]
     : reasoningOptionsFor(supportedEfforts, effort, EFFORT_LEVEL_OPTIONS);
@@ -307,6 +307,7 @@ export function ModelPicker({
     <Popover
       open={open}
       onClose={close}
+      className="min-w-0"
       sticky
       placement={placement}
       size={view === "model" ? "w-[360px]" : "w-max min-w-[200px] max-w-[280px]"}

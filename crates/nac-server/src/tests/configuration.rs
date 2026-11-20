@@ -48,10 +48,12 @@ async fn custom_public_https_endpoints_persist_for_primary_and_light_models() {
         .remove(&session_id);
     let updated_primary = "https://updated.noncanonical.example/v2";
     let updated_light = "https://updated-light.noncanonical.example/v2";
+    let reviewed_config = sessions::load_session_config(&store_path, &session_id).unwrap();
     manager
         .update_session_config(
             &session_id,
             UpdateConfigRequest {
+                expected_config_version: Some(reviewed_config.config_version),
                 base_url: RequestField::Value(updated_primary.to_string()),
                 light_model: RequestField::Value(LightModelSettings {
                     model: "custom-light-model-v2".to_string(),
@@ -74,6 +76,21 @@ async fn custom_public_https_endpoints_persist_for_primary_and_light_models() {
             .and_then(|light| light.base_url.as_deref()),
         Some(updated_light)
     );
+    let stale_edit = manager
+        .update_session_config(
+            &session_id,
+            UpdateConfigRequest {
+                expected_config_version: Some(reviewed_config.config_version),
+                base_url: RequestField::Value(primary_url.to_string()),
+                ..UpdateConfigRequest::default()
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(stale_edit.to_string().contains("session configuration changed"));
+    let current = sessions::load_session_config(&store_path, &session_id).unwrap();
+    assert_eq!(current.config_version, reviewed_config.config_version + 1);
+    assert_eq!(current.base_url, updated_primary);
 
     let _ = std::fs::remove_dir_all(root);
 }

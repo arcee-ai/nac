@@ -305,9 +305,6 @@ export function SessionTree({
           else projectActions.create();
         }}
       />
-      {projectsOpen && projects.length === 0 ? (
-        <p className="type-meta px-2.5 py-1 text-basic-muted">No projects yet</p>
-      ) : null}
       <div className="flex flex-col gap-3">
         {(projectsOpen ? projects : []).map((project) => {
           const roots = byProject.get(project.project_id) ?? [];

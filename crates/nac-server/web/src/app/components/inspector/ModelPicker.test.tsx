@@ -8,7 +8,12 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ModelPicker } from "@/app/components/inspector/ModelPicker";
 import { ToastProvider } from "@/app/providers/ToastProvider";
 import { api } from "@/app/services/api";
-import type { ManagedHostStatus, ModelCatalog, SessionMetadata } from "@/app/types/api";
+import type {
+  ManagedHostStatus,
+  ModelCatalog,
+  RawSessionConfig,
+  SessionMetadata,
+} from "@/app/types/api";
 
 const cost = { input: 0, output: 0, cache_read: 0, cache_write: 0 };
 const catalog = {
@@ -100,6 +105,19 @@ afterEach(() => {
 });
 
 function renderPicker(metadata: SessionMetadata, disabled = false) {
+  const config: RawSessionConfig = {
+    session_id: "session",
+    backend: metadata.backend,
+    model: metadata.model,
+    base_url: metadata.base_url ?? "",
+    allow_insecure_http: false,
+    api_key_env: metadata.api_key_env ?? null,
+    reasoning_effort: metadata.reasoning_effort ?? null,
+    extra_headers_json: null,
+    orchestrator_compaction_threshold: null,
+    config_version: 7,
+  };
+  vi.spyOn(api, "getConfig").mockResolvedValue(config);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const tree = (busy: boolean) => (
     <MemoryRouter>
@@ -158,6 +176,7 @@ it("switches from an Arcee account to Codex through one catalog mutation", async
         api_key_env: null,
         reasoning_effort: "high",
         extra_headers: null,
+        expected_config_version: 7,
       }),
     );
   } finally {
@@ -207,6 +226,7 @@ it("keeps managed mounted credentials server-side while selecting another entitl
       expect(update).toHaveBeenCalledExactlyOnceWith("session", {
         model: "moonshotai/kimi-k3",
         reasoning_effort: "high",
+        expected_config_version: 7,
       }),
     );
     expect(discovery).toHaveBeenCalledWith(
@@ -237,7 +257,10 @@ it("keeps an unset level until the user chooses a supported level", async () => 
     ]);
     fireEvent.click(screen.getByRole("menuitemradio", { name: "High" }));
     await waitFor(() =>
-      expect(update).toHaveBeenCalledExactlyOnceWith("session", { reasoning_effort: "high" }),
+      expect(update).toHaveBeenCalledExactlyOnceWith("session", {
+        reasoning_effort: "high",
+        expected_config_version: 7,
+      }),
     );
   } finally {
     view.unmount();
@@ -276,6 +299,7 @@ it("shows effort as None and sends none for a model that accepts no level", asyn
       expect(update).toHaveBeenCalledExactlyOnceWith("session", {
         model: "deepseek-flash",
         reasoning_effort: null,
+        expected_config_version: 7,
       }),
     );
   } finally {
@@ -297,6 +321,24 @@ it("shows effort as None and sends none for a model that accepts no level", asyn
   } finally {
     second.view.unmount();
     second.client.clear();
+  }
+});
+
+it("does not retry a write with an uncertain outcome", async () => {
+  const update = vi
+    .spyOn(api, "updateConfig")
+    .mockRejectedValue(new TypeError("Network disconnected"));
+  const { client, view } = renderPicker({ ...trinity, reasoning_effort: "low" } as SessionMetadata);
+  try {
+    const chip = await openChip("Model: Trinity, Low reasoning");
+    fireEvent.click(screen.getByRole("menuitem", { name: /^Effort/ }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "High" }));
+    await screen.findByText(/save outcome is unknown/i);
+    expect((chip as HTMLButtonElement).disabled).toBe(true);
+    expect(update).toHaveBeenCalledTimes(1);
+  } finally {
+    view.unmount();
+    client.clear();
   }
 });
 

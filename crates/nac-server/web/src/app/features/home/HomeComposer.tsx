@@ -29,6 +29,7 @@ import { WorkspaceSettings } from "./WorkspaceSettings";
 import {
   modelChipLabel,
   sessionRoute,
+  useConfiguredLaunchModel,
   useInheritedModel,
   withEffort,
   type ModelOverride,
@@ -136,8 +137,10 @@ export function HomeComposer({
   const effectiveBehavior = policy.orchestrationEnabled ? behavior : "direct";
 
   const model = useInheritedModel(projectId);
+  const noInherited = Boolean(projectId) && !model.pending && !model.inherited && !model.error;
+  const configured = useConfiguredLaunchModel(project, noInherited);
   const suggestion = useSuggestedModel(
-    Boolean(projectId) && !model.pending && !model.inherited && !model.error,
+    noInherited && !configured.model && !configured.pending && !configured.error,
   );
   // Nothing picked and nothing inherited: start on the suggested model rather
   // than leaving the server without one.
@@ -159,9 +162,10 @@ export function HomeComposer({
     route && effort !== route.effort
       ? withEffort(chosenModel, model.inherited, effort)
       : chosenModel;
-  const modelPending = model.pending || suggestion.pending;
+  const modelPending = model.pending || configured.pending || suggestion.pending;
   const needsProvider = !override && !model.inherited && suggestion.noProviders;
-  const modelError = !override && !model.inherited ? (model.error ?? suggestion.error) : null;
+  const modelError =
+    !override && !model.inherited ? (model.error ?? configured.error ?? suggestion.error) : null;
   const source = useTaskLaunchSource(projectId, effectiveBehavior === "direct");
   const isolationAvailable = effectiveBehavior === "direct" && source.data?.eligible === true;
   const useIsolation = projectId != null && isolatedProjectId === projectId;
@@ -294,7 +298,7 @@ export function HomeComposer({
             </div>
             {project && !needsProvider ? (
               <ModelPicker
-                fallbackLabel={modelChipLabel(chosenModel, model.inherited)}
+                fallbackLabel={modelChipLabel(chosenModel, model.inherited) ?? configured.model}
                 pending={modelPending}
                 value={route}
                 effort={effort}
