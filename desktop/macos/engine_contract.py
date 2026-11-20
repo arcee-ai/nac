@@ -147,10 +147,10 @@ def run_contract(binary, destination):
                                  '--client-id', 'fixture', 'get'], env=environment,
                                 input=b'protocol=https\nhost=unrelated.example.test\n\n', capture_output=True, timeout=5)
         assert helper.returncode == 0 and helper.stdout == b'', helper
-        worker = subprocess.run([str(binary), '__worker', '--help'], env=environment, capture_output=True, timeout=5)
-        assert worker.returncode == 0 and b'--session-id' in worker.stdout and b'--thread-name' in worker.stdout, worker
+        worker = subprocess.run([str(binary), '__worker'], env=environment, capture_output=True, timeout=5)
+        assert worker.returncode != 0 and b"unrecognized subcommand '__worker'" in worker.stderr, worker
         results.append(dict(scenario='bundled-helper-entrypoints', helper_code=helper.returncode,
-                            worker_help_code=worker.returncode, executable=str(binary)))
+                            worker_rejection_code=worker.returncode, executable=str(binary)))
     Path(destination).write_text(json.dumps(dict(identity=identity, cases=results), indent=2) + '\n')
     return results
 
