@@ -10,6 +10,8 @@ export declare const queryKeys: {
     managedHostStatus: readonly ["managed-host-status"];
     managedGitHub: readonly ["managed-github"];
     managedSecrets: readonly ["managed-secrets"];
+    sandboxAvailability: readonly ["sandbox-availability"];
+    sandboxActivity: readonly ["sandbox-activity"];
     credentials: readonly ["credentials"];
     managedAuth: readonly ["managed-auth"];
     modelConfigs: readonly ["model-configs"];

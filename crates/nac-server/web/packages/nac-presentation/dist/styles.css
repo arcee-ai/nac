@@ -1590,6 +1590,10 @@
     max-height: 50dvh;
   }
 
+[data-nac-runtime]:is(.max-h-\[55dvh\]), [data-nac-runtime] .max-h-\[55dvh\] {
+    max-height: 55dvh;
+  }
+
 [data-nac-runtime]:is(.max-h-\[70dvh\]), [data-nac-runtime] .max-h-\[70dvh\] {
     max-height: 70dvh;
   }

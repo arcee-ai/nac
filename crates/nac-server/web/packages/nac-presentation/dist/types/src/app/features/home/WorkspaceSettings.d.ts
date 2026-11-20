@@ -1,15 +1,25 @@
+import type { SandboxAvailability } from "../../types/api";
+import { type SandboxOptions } from "./workspaceSandbox";
 /**
  * The composer strip's "⋯" button: whether the session gets an isolated
- * checkout, and the ref it starts from. Folded away so a plain session never
- * meets checkout choices. The checkout needs a direct agent on a Local Git
- * project, so the switch is live only when `available`.
+ * checkout or a Podman sandbox. Each option preserves the ordinary composer
+ * and exposes the launch details only when selected.
  */
-export declare function WorkspaceSettings({ isolated, available, onIsolatedChange, gitRef, defaultRef, onRefChange, disabled, }: {
+export declare function WorkspaceSettings({ isolated, available, onIsolatedChange, gitRef, defaultRef, onRefChange, sandbox, disabled, }: {
     isolated: boolean;
     available: boolean;
     onIsolatedChange: (isolated: boolean) => void;
     gitRef: string;
     defaultRef: string | null;
     onRefChange: (ref: string) => void;
+    sandbox?: {
+        allowed: boolean;
+        options: SandboxOptions | null;
+        availability?: SandboxAvailability;
+        checking: boolean;
+        checkFailed: boolean;
+        onChange: (options: SandboxOptions | null) => void;
+        onRetry: () => void;
+    };
     disabled?: boolean;
 }): import("react").JSX.Element;

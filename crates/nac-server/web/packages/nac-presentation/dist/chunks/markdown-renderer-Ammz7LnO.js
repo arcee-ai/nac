@@ -1,7 +1,7 @@
 import { n as e, r as t, t as n } from "./rolldown-runtime-QGRDbDUS.js";
 import { M as r, j as i, k as a, n as o } from "./RuntimeContext-CKrbof3W.js";
 import { a as s } from "./PresentationBoundary-BAUfAcJZ.js";
-import { ar as c, dr as l, fr as u, n as d, o as f, ot as p, r as m, t as h } from "./workspaceLink-DeTr7vro.js";
+import { mr as c, n as l, o as u, ot as d, pr as f, r as p, sr as m, t as h } from "./workspaceLink-cHc9K7Cq.js";
 import { G as g, i as _, r as v } from "./Toast-DLhlVenn.js";
 import { a as y, c as b, l as x, o as S, r as C, s as w, t as T } from "./lib-rX7C_D5H.js";
 import { Suspense as E, createContext as D, isValidElement as O, memo as k, use as ee, useCallback as te, useLayoutEffect as A, useMemo as j, useRef as M, useState as ne } from "react";
@@ -6528,7 +6528,7 @@ function bl(e) {
 	}, [e]), te(async () => {
 		let e = new AbortController();
 		r.current = e;
-		let i = c.sessions(!1), a = n.getQueryState(i)?.dataUpdateCount;
+		let i = m.sessions(!1), a = n.getQueryState(i)?.dataUpdateCount;
 		try {
 			let r = await t.listSessions({}, e.signal);
 			if (e.signal.aborted) throw Error("Session inventory verification cancelled");
@@ -6549,7 +6549,7 @@ function xl(e, t) {
 	return !!e?.some(({ summary: e, lineage: n }) => e.session_id === t && e.behavior === "direct" && n == null);
 }
 function Sl({ id: e, children: t }) {
-	let n = p(0), r = o(), i = se(), a = oe(), s = M(0), c = j(() => ({
+	let n = d(0), r = o(), i = se(), a = oe(), s = M(0), c = j(() => ({
 		runtime: r,
 		path: a.pathname,
 		id: e
@@ -6557,13 +6557,13 @@ function Sl({ id: e, children: t }) {
 		r,
 		a.pathname,
 		e
-	]), u = bl(c), d = M(null), f = M(null), m = M(!1), h = M(!1), g = M(!1), _ = M(!1), v = M(null), y = M(null), b = M(null), [x, S] = ne(null), [C, w] = ne(null);
+	]), l = bl(c), u = M(null), p = M(null), m = M(!1), h = M(!1), g = M(!1), _ = M(!1), v = M(null), y = M(null), b = M(null), [x, S] = ne(null), [C, w] = ne(null);
 	A(() => (s.current += 1, () => {
-		s.current += 1, d.current === c && (d.current = null), f.current === c && (f.current = null), h.current = !1, g.current = !1;
+		s.current += 1, u.current === c && (u.current = null), p.current === c && (p.current = null), h.current = !1, g.current = !1;
 	}), [c]);
 	let T = x === c, E = C?.binding === c && (n.isError || n.dataUpdatedAt <= C.dataUpdatedAt), D = !n.isError && xl(n.data, e) && !E;
 	A(() => {
-		D && !T && h.current ? (h.current = !1, b.current?.focus()) : !D && !T && !n.isPending && g.current && (g.current = !1, y.current?.focus()), f.current === c && (T ? _.current || (_.current = !0, v.current?.focus()) : n.isPending || (m.current && (D ? b.current?.focus() : y.current?.focus()), m.current = !1, f.current = null));
+		D && !T && h.current ? (h.current = !1, b.current?.focus()) : !D && !T && !n.isPending && g.current && (g.current = !1, y.current?.focus()), p.current === c && (T ? _.current || (_.current = !0, v.current?.focus()) : n.isPending || (m.current && (D ? b.current?.focus() : y.current?.focus()), m.current = !1, p.current = null));
 	}, [
 		c,
 		T,
@@ -6571,12 +6571,12 @@ function Sl({ id: e, children: t }) {
 		D
 	]);
 	let O = (t, r) => {
-		if (d.current === c) return;
-		r && (h.current = !1, g.current = !1, f.current = c, _.current = !1), d.current = c;
+		if (u.current === c) return;
+		r && (h.current = !1, g.current = !1, p.current = c, _.current = !1), u.current = c;
 		let a = s.current;
 		S(c), (async () => {
 			try {
-				let n = await u();
+				let n = await l();
 				if (s.current !== a) return;
 				if (!xl(n, e)) {
 					w({
@@ -6585,7 +6585,7 @@ function Sl({ id: e, children: t }) {
 					});
 					return;
 				}
-				w(null), t && i(l.session(e));
+				w(null), t && i(f.session(e));
 			} catch {
 				if (s.current !== a) return;
 				w({
@@ -6593,7 +6593,7 @@ function Sl({ id: e, children: t }) {
 					dataUpdatedAt: n.dataUpdatedAt
 				});
 			} finally {
-				s.current === a && (d.current = null, S(null));
+				s.current === a && (u.current = null, S(null));
 			}
 		})();
 	}, k = T || n.isPending ? "Checking task availability" : D ? "" : "Task unavailable", ee = T || n.isPending ? "Checking whether the task is available." : D ? "The task is available." : "The task is unavailable.";
@@ -6658,7 +6658,7 @@ function Cl(e) {
 var wl = /* @__PURE__ */ e({ default: () => Hl }), Tl = [Xc], El = /* @__PURE__ */ new Map();
 function Dl(e) {
 	let t = El.get(e);
-	return t || (t = import("./markdown-mathjax-Dtuzr0Pc.js").then(({ createMathjaxPlugin: t, remarkMathPlugin: n }) => ({
+	return t || (t = import("./markdown-mathjax-DWlsjKh4.js").then(({ createMathjaxPlugin: t, remarkMathPlugin: n }) => ({
 		remark: [...Tl, n],
 		rehype: [t(e)]
 	})), El.set(e, t)), t;
@@ -6696,7 +6696,7 @@ function jl(e) {
 }
 var Ml = D(!1);
 function Nl({ href: e, children: t, ...n }) {
-	let r = ee(Ml), { selectRevision: i, selectFileListing: a, selectFile: s, revealSidePanel: d } = o().stores.sessionLayoutStore, { api: p } = o(), m = se(), _ = oe(), v = g(), y = f(), b = re(), x = u(_.pathname), S = x ? b.getQueryData(c.sessionSnapshot(x)) : void 0, C = h(e, [
+	let r = ee(Ml), { selectRevision: i, selectFileListing: a, selectFile: s, revealSidePanel: l } = o().stores.sessionLayoutStore, { api: d } = o(), p = se(), _ = oe(), v = g(), y = u(), b = re(), x = c(_.pathname), S = x ? b.getQueryData(m.sessionSnapshot(x)) : void 0, C = h(e, [
 		S?.workspace?.host_root,
 		S?.metadata.workspace_host_path,
 		S?.metadata.cwd
@@ -6706,13 +6706,13 @@ function Nl({ href: e, children: t, ...n }) {
 		children: t
 	}, w);
 	let T = (e) => {
-		x && (i(null), a("tree"), s(e), d(v), m(l.session(x, "files")));
+		x && (i(null), a("tree"), s(e), l(v), p(f.session(x, "files")));
 	};
 	return C.kind === "workspace" && x ? /* @__PURE__ */ P("a", {
 		...n,
 		href: e,
 		onClick: (e) => {
-			e.preventDefault(), p.openWorkspacePath(x, C.path).catch((e) => {
+			e.preventDefault(), d.openWorkspacePath(x, C.path).catch((e) => {
 				let t = e instanceof Error ? e.message : String(e);
 				/only available for local sessions|lives only inside the sandbox/i.test(t) || y.error(`Could not open file: ${t}`), T(C.path);
 			});
@@ -6785,7 +6785,7 @@ var Fl = Pl(!0), Il = Pl(!1);
 function Ll({ source: e, streaming: t }) {
 	let n = fl(e), r = t ? Fl : Il, i = /* @__PURE__ */ P(Xa, {
 		remarkPlugins: Tl,
-		urlTransform: d,
+		urlTransform: l,
 		components: r,
 		children: n.source
 	});
@@ -6808,7 +6808,7 @@ function Rl({ source: e, components: t }) {
 	return /* @__PURE__ */ P(Xa, {
 		remarkPlugins: i.remark,
 		rehypePlugins: i.rehype,
-		urlTransform: d,
+		urlTransform: l,
 		components: c,
 		children: e
 	});
@@ -6839,7 +6839,7 @@ var Hl = k(function({ children: e, streaming: t = !1, taskReferences: n = !1 }) 
 	let o = t || r && !Vl(e);
 	return /* @__PURE__ */ P(Ml, {
 		value: n,
-		children: /* @__PURE__ */ P(m, {
+		children: /* @__PURE__ */ P(p, {
 			id: "markdown",
 			children: o ? sl(e).map((e, t) => /* @__PURE__ */ P(zl, { source: e }, t)) : /* @__PURE__ */ P(Ll, {
 				source: e,

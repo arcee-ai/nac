@@ -3,6 +3,17 @@ export declare function useStoreInfo(): import("@tanstack/react-query").UseQuery
     store_path: string;
     worker_executable: string;
 }>, Error>;
+/** Probing starts Podman subprocesses, so only check after selecting Sandbox. */
+export declare function useSandboxAvailability(enabled: boolean): import("@tanstack/react-query").UseQueryResult<NoInfer<{
+    detail?: string | null;
+    guidance?: string | null;
+    status: import("../../types/openapi.generated").components["schemas"]["SandboxAvailabilityStatus"];
+}>, Error>;
+/** Poll only the current launch, using the correlation key sent at creation. */
+export declare function useSandboxActivity(key: string | null): import("@tanstack/react-query").UseQueryResult<NoInfer<{
+    phase: string;
+    since_epoch_ms: number;
+} | null>, Error>;
 /**
  * Which API key names have a value stored in NAC home. Used to tell the user
  * whether a session can authenticate without the environment variable being
