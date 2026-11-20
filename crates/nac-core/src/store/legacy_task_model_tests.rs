@@ -29,6 +29,43 @@ fn launch(selection: &serde_json::Value) -> serde_json::Value {
 fn command(selection: &serde_json::Value) -> serde_json::Value {
     serde_json::json!({"request_id":"command","schedule":{"schedule_id":"schedule","session_id":null,"version":1,"state":"active","binding":binding(selection),"spec":{"name":"name","instructions":"instructions","interval_ms":60000,"end_condition":"done","goal_id":null,"token_allowance":null},"anchor_ms":1,"next_due_ms":60001,"reason":null,"starts":0,"tokens_used":0,"time_used_ms":0,"usage_unknown":false,"created_at_ms":1,"updated_at_ms":1},"occurrence":null,"active_occurrence":null})
 }
+fn insert_destination(conn: &Connection, selection: &serde_json::Value) {
+    conn.execute("INSERT INTO heartbeat_fresh_destinations(schedule_id,destination_json,binding_json) VALUES('schedule',?1,?2)", params![destination(selection).to_string(),binding(selection).to_string()]).unwrap();
+}
+
+fn all_owner_fixture(selection: &serde_json::Value) -> Connection {
+    let conn = fixture();
+    let mut task: serde_json::Value = serde_json::from_str(&request(None)).unwrap();
+    task["model_selection"] = selection.clone();
+    let native = serde_json::json!({"request_id":"native","project_id":null,"title":"title","prompt":"prompt","_nac_model_selection":selection});
+    let mut receipt = launch(selection);
+    *receipt
+        .pointer_mut("/receipt/request/model_selection")
+        .unwrap() = selection.clone();
+    conn.execute(
+        "INSERT INTO task_launches(request_id,request_json) VALUES('request',?1)",
+        [task.to_string()],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO native_task_launches(request_id,request_json) VALUES('native',?1)",
+        [native.to_string()],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO heartbeat_schedules(schedule_id,binding_json) VALUES('schedule',?1)",
+        [binding(selection).to_string()],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO heartbeat_task_launches(occurrence_id,launch_json) VALUES('occurrence',?1)",
+        [receipt.to_string()],
+    )
+    .unwrap();
+    conn.execute("INSERT INTO heartbeat_commands(session_id,request_id,response_json) VALUES('project:project','command',?1)", [command(selection).to_string()]).unwrap();
+    insert_destination(&conn, selection);
+    conn
+}
 #[test]
 fn v54_marker_preserves_receipt_bytes_and_fences_current_records() {
     for threshold in [None, Some(8192)] {
@@ -86,6 +123,7 @@ fn v54_marker_survives_unrelated_progress_and_rejects_model_rebinding() {
         [&raw],
     )
     .unwrap();
+    insert_destination(&conn, &model(Some(42)));
     capture_v54(&conn).unwrap();
     conn.execute(
         "UPDATE heartbeat_schedules SET binding_json=json_set(binding_json,'$._attention',1)",
@@ -126,6 +164,7 @@ fn binding_project_and_creator_changes_revoke_legacy_authority() {
             [&raw],
         )
         .unwrap();
+        insert_destination(&conn, &model(Some(42)));
         capture_v54(&conn).unwrap();
         conn.execute("UPDATE heartbeat_schedules SET binding_json=json_set(binding_json,?1,'different') WHERE schedule_id='schedule'", [path]).unwrap();
         assert_eq!(
@@ -139,6 +178,235 @@ fn binding_project_and_creator_changes_revoke_legacy_authority() {
             "{path}"
         );
     }
+}
+
+#[test]
+fn schedule_and_destination_mismatches_roll_back_markers_and_preserve_bytes() {
+    let selection = model(Some(42));
+    for mismatch in ["model", "creator", "missing"] {
+        let conn = fixture();
+        let schedule = binding(&selection).to_string();
+        conn.execute(
+            "INSERT INTO heartbeat_schedules(schedule_id,binding_json) VALUES('schedule',?1)",
+            [&schedule],
+        )
+        .unwrap();
+        if mismatch != "missing" {
+            let selected = if mismatch == "model" {
+                model(Some(43))
+            } else {
+                selection.clone()
+            };
+            let mut saved_binding = binding(&selected);
+            if mismatch == "creator" {
+                saved_binding["creator_session_id"] = serde_json::json!("creator");
+            }
+            let creator = if mismatch == "creator" {
+                Some("creator")
+            } else {
+                None
+            };
+            conn.execute("INSERT INTO heartbeat_fresh_destinations(schedule_id,destination_json,binding_json,creator_session_id) VALUES('schedule',?1,?2,?3)", params![destination(&selected).to_string(),saved_binding.to_string(),creator]).unwrap();
+        }
+        conn.execute_batch("BEGIN IMMEDIATE").unwrap();
+        assert!(capture_v54(&conn).is_err(), "{mismatch}");
+        conn.execute_batch("ROLLBACK").unwrap();
+        assert_eq!(
+            conn.query_row::<i64, _, _>(
+                "SELECT count(*) FROM task_model_v54_provenance",
+                [],
+                |r| r.get(0)
+            )
+            .unwrap(),
+            0
+        );
+        assert_eq!(
+            conn.query_row::<String, _, _>(
+                "SELECT binding_json FROM heartbeat_schedules",
+                [],
+                |r| r.get(0)
+            )
+            .unwrap(),
+            schedule
+        );
+    }
+}
+
+#[test]
+fn related_schedule_and_destination_markers_revoke_together() {
+    for mutation in [
+        "UPDATE heartbeat_schedules SET binding_json=json_set(binding_json,'$.fresh_task.retained_limit',3)",
+        "UPDATE heartbeat_fresh_destinations SET destination_json=json_set(destination_json,'$.retained_limit',3)",
+        "DELETE FROM heartbeat_fresh_destinations",
+        "DELETE FROM heartbeat_schedules",
+    ] {
+        let conn = fixture();
+        let selection = model(Some(42));
+        conn.execute("INSERT INTO heartbeat_schedules(schedule_id,binding_json) VALUES('schedule',?1)", [binding(&selection).to_string()]).unwrap();
+        insert_destination(&conn, &selection);
+        capture_v54(&conn).unwrap();
+        assert_eq!(conn.query_row::<i64, _, _>("SELECT count(*) FROM task_model_v54_provenance", [], |r|r.get(0)).unwrap(), 3);
+        conn.execute_batch(mutation).unwrap();
+        assert_eq!(conn.query_row::<i64, _, _>("SELECT count(*) FROM task_model_v54_provenance", [], |r|r.get(0)).unwrap(), 0, "{mutation}");
+    }
+}
+
+#[test]
+fn missing_v54_threshold_and_malformed_shapes_fail_but_absent_selections_survive() {
+    for selection in [
+        serde_json::json!({"backend":"openai-responses","model":"gpt","base_url":"https://example.invalid","allow_insecure_http":false,"api_key_env":null,"reasoning_effort":null,"extra_headers":null}),
+        serde_json::json!("invalid"),
+    ] {
+        let conn = fixture();
+        let mut input: serde_json::Value = serde_json::from_str(&request(None)).unwrap();
+        input["model_selection"] = selection;
+        let raw = input.to_string();
+        conn.execute(
+            "INSERT INTO task_launches(request_id,request_json) VALUES('request',?1)",
+            [&raw],
+        )
+        .unwrap();
+        conn.execute_batch("BEGIN IMMEDIATE").unwrap();
+        assert!(capture_v54(&conn).is_err());
+        conn.execute_batch("ROLLBACK").unwrap();
+        assert_eq!(
+            conn.query_row::<String, _, _>("SELECT request_json FROM task_launches", [], |r| r
+                .get(0))
+                .unwrap(),
+            raw
+        );
+        assert_eq!(
+            conn.query_row::<i64, _, _>(
+                "SELECT count(*) FROM task_model_v54_provenance",
+                [],
+                |r| r.get(0)
+            )
+            .unwrap(),
+            0
+        );
+    }
+    for absent in [true, false] {
+        let conn = fixture();
+        let mut input: serde_json::Value = serde_json::from_str(&request(None)).unwrap();
+        if absent {
+            input.as_object_mut().unwrap().remove("model_selection");
+        } else {
+            input["model_selection"] = serde_json::Value::Null;
+        }
+        let raw = input.to_string();
+        conn.execute(
+            "INSERT INTO task_launches(request_id,request_json) VALUES('request',?1)",
+            [&raw],
+        )
+        .unwrap();
+        capture_v54(&conn).unwrap();
+        assert_eq!(
+            conn.query_row::<String, _, _>("SELECT request_json FROM task_launches", [], |r| r
+                .get(0))
+                .unwrap(),
+            raw
+        );
+        assert_eq!(
+            conn.query_row::<i64, _, _>(
+                "SELECT count(*) FROM task_model_v54_provenance",
+                [],
+                |r| r.get(0)
+            )
+            .unwrap(),
+            0
+        );
+    }
+}
+
+#[test]
+fn every_durable_model_path_requires_its_v54_threshold() {
+    for (table, column, path) in [
+        (
+            "task_launches",
+            "request_json",
+            "$.model_selection.orchestrator_compaction_threshold",
+        ),
+        (
+            "native_task_launches",
+            "request_json",
+            "$._nac_model_selection.orchestrator_compaction_threshold",
+        ),
+        (
+            "heartbeat_schedules",
+            "binding_json",
+            "$.fresh_task.model_selection.orchestrator_compaction_threshold",
+        ),
+        (
+            "heartbeat_fresh_destinations",
+            "destination_json",
+            "$.model_selection.orchestrator_compaction_threshold",
+        ),
+        (
+            "heartbeat_fresh_destinations",
+            "binding_json",
+            "$.fresh_task.model_selection.orchestrator_compaction_threshold",
+        ),
+        (
+            "heartbeat_task_launches",
+            "launch_json",
+            "$.receipt.request.model_selection.orchestrator_compaction_threshold",
+        ),
+        (
+            "heartbeat_task_launches",
+            "launch_json",
+            "$.receipt.destination.model_selection.orchestrator_compaction_threshold",
+        ),
+        (
+            "heartbeat_task_launches",
+            "launch_json",
+            "$.receipt.binding.fresh_task.model_selection.orchestrator_compaction_threshold",
+        ),
+        (
+            "heartbeat_commands",
+            "response_json",
+            "$.schedule.binding.fresh_task.model_selection.orchestrator_compaction_threshold",
+        ),
+    ] {
+        let conn = all_owner_fixture(&model(Some(42)));
+        conn.execute(
+            &format!("UPDATE {table} SET {column}=json_remove({column},?1)"),
+            [path],
+        )
+        .unwrap();
+        let before: String = conn
+            .query_row(&format!("SELECT {column} FROM {table}"), [], |r| r.get(0))
+            .unwrap();
+        conn.execute_batch("BEGIN IMMEDIATE").unwrap();
+        assert!(capture_v54(&conn).is_err(), "{table} {path}");
+        conn.execute_batch("ROLLBACK").unwrap();
+        assert_eq!(
+            conn.query_row::<i64, _, _>(
+                "SELECT count(*) FROM task_model_v54_provenance",
+                [],
+                |r| r.get(0)
+            )
+            .unwrap(),
+            0
+        );
+        assert_eq!(
+            conn.query_row::<String, _, _>(&format!("SELECT {column} FROM {table}"), [], |r| r
+                .get(0))
+                .unwrap(),
+            before
+        );
+    }
+}
+
+#[test]
+fn null_legacy_selections_across_all_owners_remain_unmarked() {
+    let conn = all_owner_fixture(&serde_json::Value::Null);
+    capture_v54(&conn).unwrap();
+    assert_eq!(
+        conn.query_row::<i64, _, _>("SELECT count(*) FROM task_model_v54_provenance", [], |r| r
+            .get(0))
+            .unwrap(),
+        0
+    );
 }
 #[test]
 fn duplicate_keys_collisions_and_invalid_legacy_shapes_fail_closed() {

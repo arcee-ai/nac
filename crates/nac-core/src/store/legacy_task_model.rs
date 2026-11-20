@@ -157,12 +157,13 @@ fn parsed(raw: &str, owner: Owner) -> Result<(serde_json::Value, bool, String)> 
         if selection.is_null() {
             continue;
         }
-        let Some(object) = selection.as_object_mut() else {
-            continue;
-        };
-        if !object.contains_key(OLD) {
-            continue;
-        }
+        let object = selection
+            .as_object_mut()
+            .context("legacy task model selection must be an object or null")?;
+        anyhow::ensure!(
+            object.contains_key(OLD),
+            "legacy task model selection is missing its v54 threshold"
+        );
         anyhow::ensure!(
             !object.contains_key(NEW)
                 && object.len() == FIELDS.len()
@@ -190,6 +191,43 @@ fn parsed(raw: &str, owner: Owner) -> Result<(serde_json::Value, bool, String)> 
         String::new()
     };
     Ok((value, legacy, digest))
+}
+
+// v54 wrote the schedule and both destination copies in one transaction.
+// Compare their typed authority fields, not mutable attention/progress data.
+fn verify_schedule_destination(conn: &Connection, schedule_id: &str) -> Result<()> {
+    let (session_id, schedule_raw): (Option<String>, String) = conn
+        .query_row(
+            "SELECT session_id,binding_json FROM heartbeat_schedules WHERE schedule_id=?1",
+            [schedule_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .context("legacy fresh schedule owner is missing")?;
+    anyhow::ensure!(
+        session_id.is_none(),
+        "legacy fresh schedule has a session owner"
+    );
+    let (project_id, creator_id, destination_raw, destination_binding_raw): (String,Option<String>,String,String) = conn.query_row(
+        "SELECT project_id,creator_session_id,destination_json,binding_json FROM heartbeat_fresh_destinations WHERE schedule_id=?1",
+        [schedule_id], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?)),
+    ).context("legacy fresh destination is missing")?;
+    let (schedule, _, _) = parsed(&schedule_raw, Owner::Schedule)?;
+    let (destination, _, _) = parsed(&destination_raw, Owner::Destination)?;
+    let (destination_binding, _, _) = parsed(&destination_binding_raw, Owner::DestinationBinding)?;
+    let schedule: HeartbeatBinding = serde_json::from_value(schedule)?;
+    let destination: FreshTaskDestination = serde_json::from_value(destination)?;
+    let destination_binding: HeartbeatBinding = serde_json::from_value(destination_binding)?;
+    anyhow::ensure!(
+        destination.project_id == project_id
+            && schedule.project_id.as_deref() == Some(project_id.as_str())
+            && destination_binding.project_id.as_deref() == Some(project_id.as_str())
+            && schedule.creator_session_id == creator_id
+            && destination_binding.creator_session_id == creator_id
+            && schedule.fresh_task.as_ref() == Some(&destination)
+            && destination_binding.fresh_task.as_ref() == Some(&destination),
+        "legacy fresh schedule and destination ownership differs"
+    );
+    Ok(())
 }
 
 // A marker grants the bounded v54 decoder access to durable authority. Bind
@@ -475,17 +513,23 @@ fn capture_v54(conn: &Connection) -> Result<()> {
             "binding_json",
         ),
     ] {
-        let sql = format!("SELECT {key1},{key2},{column} FROM {table} WHERE instr({column},?1)>0");
+        let sql = format!("SELECT {key1},{key2},{column} FROM {table}");
         let mut query = conn.prepare(&sql)?;
-        let mut rows = query.query([format!("\"{OLD}\"")])?;
+        let mut rows = query.query([])?;
         while let Some(row) = rows.next()? {
             let key1: String = row.get(0)?;
             let key2: String = row.get(1)?;
             let raw: String = row.get(2)?;
             let (value, legacy, digest) = parsed(&raw, owner)?;
+            verify_shape(owner, &value).context("malformed legacy task receipt")?;
+            if (matches!(owner, Owner::Schedule)
+                && value.pointer("/fresh_task").is_some_and(|v| !v.is_null()))
+                || matches!(owner, Owner::Destination | Owner::DestinationBinding)
+            {
+                verify_schedule_destination(conn, &key1)?;
+            }
             if legacy {
                 verify_owner(conn, owner, &key1, &key2, &value)?;
-                verify_shape(owner, &value).context("malformed legacy task receipt")?;
                 let identity = match owner {
                     Owner::Task | Owner::Native => Some(("/request_id", key1.as_str())),
                     Owner::Command => Some(("/request_id", key2.as_str())),
@@ -541,6 +585,11 @@ pub(super) fn create_schema(conn: &Connection) -> Result<()> {
         CREATE TRIGGER task_model_v54_launch_owner AFTER UPDATE OF occurrence_id,schedule_id,request_id,project_id,session_id ON heartbeat_task_launches WHEN OLD.occurrence_id IS NOT NEW.occurrence_id OR OLD.schedule_id IS NOT NEW.schedule_id OR OLD.request_id IS NOT NEW.request_id OR OLD.project_id IS NOT NEW.project_id OR OLD.session_id IS NOT NEW.session_id BEGIN DELETE FROM task_model_v54_provenance WHERE owner='launch' AND key1=OLD.occurrence_id AND key2=''; END;
         CREATE TRIGGER task_model_v54_command_owner AFTER UPDATE OF session_id,request_id,schedule_id ON heartbeat_commands WHEN OLD.session_id IS NOT NEW.session_id OR OLD.request_id IS NOT NEW.request_id OR OLD.schedule_id IS NOT NEW.schedule_id BEGIN DELETE FROM task_model_v54_provenance WHERE owner='command' AND key1=OLD.session_id AND key2=OLD.request_id; END;
         CREATE TRIGGER task_model_v54_destination_owner AFTER UPDATE OF schedule_id,project_id,creator_session_id ON heartbeat_fresh_destinations WHEN OLD.schedule_id IS NOT NEW.schedule_id OR OLD.project_id IS NOT NEW.project_id OR OLD.creator_session_id IS NOT NEW.creator_session_id BEGIN DELETE FROM task_model_v54_provenance WHERE owner IN ('destination','destination_binding') AND key1=OLD.schedule_id AND key2=''; END;")?;
+    conn.execute_batch("CREATE TRIGGER task_model_v54_schedule_cross_update AFTER UPDATE OF binding_json ON heartbeat_schedules WHEN CASE WHEN EXISTS(SELECT 1 FROM task_model_v54_provenance WHERE owner IN ('destination','destination_binding') AND key1=OLD.schedule_id AND key2='') THEN (json_extract(OLD.binding_json,'$.fresh_task') IS NOT json_extract(NEW.binding_json,'$.fresh_task') OR json_extract(OLD.binding_json,'$.project_id') IS NOT json_extract(NEW.binding_json,'$.project_id') OR json_extract(OLD.binding_json,'$.creator_session_id') IS NOT json_extract(NEW.binding_json,'$.creator_session_id')) ELSE 0 END BEGIN DELETE FROM task_model_v54_provenance WHERE owner IN ('destination','destination_binding') AND key1=OLD.schedule_id AND key2=''; END;
+        CREATE TRIGGER task_model_v54_schedule_cross_owner AFTER UPDATE OF schedule_id,session_id ON heartbeat_schedules WHEN OLD.schedule_id IS NOT NEW.schedule_id OR OLD.session_id IS NOT NEW.session_id BEGIN DELETE FROM task_model_v54_provenance WHERE owner IN ('destination','destination_binding') AND key1=OLD.schedule_id AND key2=''; END;
+        CREATE TRIGGER task_model_v54_schedule_cross_delete AFTER DELETE ON heartbeat_schedules BEGIN DELETE FROM task_model_v54_provenance WHERE owner IN ('destination','destination_binding') AND key1=OLD.schedule_id AND key2=''; END;
+        CREATE TRIGGER task_model_v54_destination_cross_update AFTER UPDATE OF destination_json,binding_json,project_id,creator_session_id,schedule_id ON heartbeat_fresh_destinations WHEN CASE WHEN EXISTS(SELECT 1 FROM task_model_v54_provenance WHERE owner IN ('schedule','destination','destination_binding') AND key1=OLD.schedule_id AND key2='') THEN (OLD.destination_json IS NOT NEW.destination_json OR OLD.project_id IS NOT NEW.project_id OR OLD.creator_session_id IS NOT NEW.creator_session_id OR OLD.schedule_id IS NOT NEW.schedule_id OR json_extract(OLD.binding_json,'$.fresh_task') IS NOT json_extract(NEW.binding_json,'$.fresh_task') OR json_extract(OLD.binding_json,'$.project_id') IS NOT json_extract(NEW.binding_json,'$.project_id') OR json_extract(OLD.binding_json,'$.creator_session_id') IS NOT json_extract(NEW.binding_json,'$.creator_session_id')) ELSE 0 END BEGIN DELETE FROM task_model_v54_provenance WHERE owner IN ('schedule','destination','destination_binding') AND key1=OLD.schedule_id AND key2=''; END;
+        CREATE TRIGGER task_model_v54_destination_cross_delete AFTER DELETE ON heartbeat_fresh_destinations BEGIN DELETE FROM task_model_v54_provenance WHERE owner='schedule' AND key1=OLD.schedule_id AND key2=''; END;")?;
     Ok(())
 }
 
