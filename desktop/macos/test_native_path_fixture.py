@@ -262,6 +262,62 @@ console.log('Actual form observer preserves observed path spelling, unique error
             subprocess.run(['xcrun','swiftc','-parse-as-library','-swift-version','5',str(source_path),'-o',str(binary)],check=True)
             subprocess.run([str(binary),str(folder),str(folder.resolve()),str(foreign)],check=True)
 
+    def test_actual_session_readback_requires_owned_fixture_launch(self):
+        source = SMOKE.read_text().split('private func verifySession(', 1)[1]
+        script = re.search(r'script\(#"""\n(.*?)\n        """#', source, re.S).group(1)
+        harness = r'''
+const assert = require('node:assert/strict');
+const verify = new (Object.getPrototypeOf(async function() {}).constructor)(
+  'revealLeaf', 'expectedHref', 'expectedPrompt', 'fixtureEndpoint', SCRIPT);
+const root = '/tmp/owned/Folder with spaces 日本語', leaf = 'reveal me 日本語';
+const href = 'http://127.0.0.1:4310/#/session/chat/chat';
+const prompt = 'MAC_PREVIEW_START ALL347_owned-run', endpoint = 'http://127.0.0.1:4311';
+const response = (data) => ({ok: true, json: async () => data});
+function setup() {
+  globalThis.location = {href, hash: '#/session/chat/chat'};
+  const snapshot = {
+    metadata: {session_id:'chat', project_id:'owned', workspace_host_path:root, sandbox_status:'off'},
+    sessions: [{session_id:'chat', project_id:'owned', last_user_prompt:prompt}],
+  };
+  const projects = [{project_id:'owned', cwd:root}];
+  const config = {backend:'openai-responses', model:'gpt-5.6-sol', base_url:endpoint};
+  const writes = [];
+  globalThis.fetch = async (url, request) => {
+    if (url === '/sessions/chat') return response(snapshot);
+    if (url === '/projects') return response({projects});
+    if (url === '/sessions/chat/config') return response(config);
+    assert.equal(url, '/sessions/chat/workspace/reveal');
+    assert.equal(request.method, 'POST');
+    writes.push(JSON.parse(request.body).path);
+    return {status: 400};
+  };
+  return {snapshot, projects, config, writes};
+}
+async function check() {
+  const canonical = setup();
+  const accepted = await verify(leaf, href, prompt, endpoint);
+  assert.equal(accepted.session, 'chat');
+  assert.equal(accepted.root, root);
+  assert.equal(accepted.denials.length, 6);
+  assert.equal(canonical.writes.length, 6);
+  for (const mutate of [
+    ({snapshot}) => { snapshot.metadata.project_id = 'foreign'; },
+    ({snapshot}) => { snapshot.metadata.session_id = 'foreign'; },
+    ({snapshot}) => { snapshot.sessions[0].last_user_prompt = 'MAC_PREVIEW_START ALL347_foreign'; },
+    ({snapshot}) => { snapshot.sessions.push({...snapshot.sessions[0], session_id:'duplicate'}); },
+    ({config}) => { config.model = 'other-model'; },
+    ({config}) => { config.base_url = 'http://127.0.0.1:9999'; },
+  ]) {
+    const state = setup();
+    mutate(state);
+    await assert.rejects(verify(leaf, href, prompt, endpoint), /did not start exactly one configured chat/);
+    assert.deepEqual(state.writes, []);
+  }
+}
+check().catch(error => { console.error(error); process.exitCode = 1; });
+'''.replace('SCRIPT', json.dumps(script), 1)
+        subprocess.run(['node', '-e', harness], check=True, cwd=ROOT)
+
     def test_source_audit_driver_has_no_filesystem_controls(self):
         source = JOURNEY.read_text()
         self.assertNotRegex(source, r'FileManager|\.write\(to:|contentsOf:|moveItem|Process\(')

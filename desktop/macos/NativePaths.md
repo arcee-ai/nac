@@ -97,11 +97,11 @@ and view; later phases must retain that exact successor. The failure case is
 Readiness and phase 0 are published in one atomic app record.
 
 The normal journey starts on Home's composer (no first-chat dialog), opens the
-create-project form from the composer's project chip (Add project…), uses its
-Local/SSH/Sandbox controls, and reaches Files through the session header's
-Session menu (Insights) and the drawer's Files tab. It proves the unconnected SSH form has no Local picker and
-Podman retains the API browser; live SSH/container execution is separate
-infrastructure coverage. After real NSOpenPanel Cancel, XCTest navigates inside
+create-project form from the composer's project chip (Add project…), and
+verifies the unconnected SSH form has no Local picker. The Sandbox controls
+live under Home's Additional settings and take text values for container paths.
+Live SSH and container execution require separate infrastructure coverage.
+After real NSOpenPanel Cancel, XCTest navigates inside
 the second actual panel through an ASCII parent and visible unique Unicode
 folder, without selecting. The app fixture observes its own pending panel's
 `directoryURL`, exact bridge choice/cancel counts and current document, then
@@ -117,8 +117,12 @@ that record, then submits the real form. The app requires the pinned form value
 and a visible error paragraph containing both the unique folder leaf and
 `does not exist`, restores its own directory, and publishes phase 3.
 XCTest independently verifies the error, waits for restoration, reselects via
-NSOpenPanel and explicitly retries normal project/first-chat creation. No
-form values, errors or server responses are synthesized by the fixture.
+NSOpenPanel and retries project creation. Once Home shows the new project,
+XCTest selects the scripted model, types the run's unique prompt and starts the
+first chat. It reaches Files through the session panel and its Files tab. The
+app verifies that the project owns exactly one chat with the prompt and exact
+loopback fixture model endpoint. The form and session use the normal server
+workflows.
 The driver's selected-folder UI assertion uses the unique run leaf without
 filesystem access; the app independently validates canonical roots for both
 actual selections and the final session. Equivalent macOS path spellings do

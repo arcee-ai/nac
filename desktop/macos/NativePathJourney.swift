@@ -171,8 +171,8 @@ enum NativePathJourney {
         // The disposable preview opens Home's composer for its seeded project
         // (no first-chat dialog). Its project chip's menu offers Add project…,
         // which opens the normal create-project form.
-        let home = app.webViews.descendants(matching: .any)
-            .matching(NSPredicate(format: "label == %@", "What should we work on?")).firstMatch
+        let home = app.webViews.textViews
+            .matching(NSPredicate(format: "label == %@ OR identifier == %@", "What should we work on?", "home-composer")).firstMatch
         try require(home.waitForExistence(timeout: 30), "Initial fixture Home composer did not open")
         let composer = app.webViews.descendants(matching: .any).matching(identifier: "Message").firstMatch
         func openCreateProject() throws {
@@ -186,13 +186,8 @@ enum NativePathJourney {
         try click(app.webViews.buttons["SSH"])
         try require(!folderButton.exists && app.sheets.count == 0,
                     "Unconnected SSH exposed a native Local folder picker")
-        try click(app.webViews.buttons["Sandbox"])
-        try click(folderButton)
-        let parentDirectory = app.webViews.buttons["Parent directory"]
-        try require(parentDirectory.waitForExistence(timeout: 10) && app.sheets.count == 0,
-                    "Podman browsing did not retain the shared API picker")
-        try click(app.webViews.buttons["Cancel"])
-        try require(parentDirectory.waitForNonExistence(timeout: 10), "Shared API picker did not close")
+        // Sandbox now configures a session from Home. It has no project
+        // directory picker of its own, and this journey selects a Local root.
         try click(app.webViews.buttons["Local"])
         try click(folderButton)
         try require(sheet.waitForExistence(timeout: 10), "Actual NSOpenPanel did not appear")
@@ -210,7 +205,7 @@ enum NativePathJourney {
         try chooseFolder()
         let create = app.webViews.buttons["Create Project"]
         try require(create.waitForExistence(timeout: 10) && create.isEnabled,
-                    "Fixture must resolve its existing saved model through the normal shared form")
+                    "The selected Local folder must enable project creation")
         try phases.wait(.folderMoved, observe: observePhase)
         try click(create)
         let missing = app.webViews.staticTexts.matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", folder.lastPathComponent, "does not exist")).firstMatch
@@ -218,11 +213,30 @@ enum NativePathJourney {
         try phases.wait(.folderRestored, observe: observePhase)
         try chooseFolder()
         try click(create)
-        try require(composer.waitForExistence(timeout: 30), "Normal project/first-chat creation did not finish")
-        // Session panels open in a drawer: the header's Session menu opens it
-        // on Insights, then the drawer's Files tab selects the Files panel.
-        try click(app.webViews.buttons["Session menu"])
-        try click(app.webViews.buttons["Insights"])
+        try require(create.waitForNonExistence(timeout: 30) && home.waitForExistence(timeout: 10),
+                    "Project creation did not return to Home")
+        let selectedProject = app.webViews.buttons["Project: \(folder.lastPathComponent)"]
+        try require(selectedProject.waitForExistence(timeout: 10) && !composer.exists,
+                    "Home must select the newly created project before the first chat")
+        let modelChip = app.webViews.buttons
+            .matching(NSPredicate(format: "label BEGINSWITH %@ OR label == %@", "Model: ", "Choose a model")).firstMatch
+        try click(modelChip)
+        let models = app.webViews.menuItems.matching(NSPredicate(format: "label BEGINSWITH %@", "Model ")).firstMatch
+        try click(models)
+        let search = app.webViews.textFields["Search models"]
+        try click(search)
+        try authorize()
+        search.typeText("gpt-5.6-sol")
+        let fixtureModel = app.webViews.menuItems.matching(NSPredicate(format: "label BEGINSWITH %@", "GPT-5.6 Sol")).firstMatch
+        try click(fixtureModel)
+        try click(home)
+        try authorize()
+        home.typeText("MAC_PREVIEW_START ALL347_\(runID)")
+        try click(app.webViews.buttons["Start session"])
+        try require(composer.waitForExistence(timeout: 30)
+                    && app.webViews.staticTexts["Preview session started."].waitForExistence(timeout: 30),
+                    "The selected project's first session did not receive the fixture prompt")
+        try click(app.webViews.buttons["Session panel"])
         try click(app.webViews.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Files")).firstMatch)
         let file = app.webViews.buttons.matching(NSPredicate(format: "label CONTAINS %@", revealLeaf)).firstMatch
         try click(file)
