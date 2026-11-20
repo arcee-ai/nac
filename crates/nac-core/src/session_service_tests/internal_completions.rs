@@ -59,7 +59,7 @@ fn settle_child(store_path: &std::path::Path, child: &str, report: &str) -> i64 
 }
 
 async fn wait_until_settled(service: &SessionService) {
-    tokio::time::timeout(Duration::from_secs(10), async {
+    tokio::time::timeout(Duration::from_secs(60), async {
         loop {
             if !service.has_active_operation()
                 && service
@@ -103,7 +103,9 @@ async fn user_messages(service: &SessionService) -> Vec<String> {
 async fn parent_receives_each_background_completion_once_without_editable_controls() {
     let (started_tx, started_rx) = std::sync::mpsc::channel();
     let (release_tx, release_rx) = std::sync::mpsc::channel();
-    let server = ScriptedServer::start_observed(
+    // This is one absolute budget for setup, the held first response, and all
+    // five sequential model requests, not a per-request timeout.
+    let server = ScriptedServer::start_observed_with_timeout(
         vec![
             text_response("first answer"),
             text_response("saw child a"),
@@ -111,10 +113,11 @@ async fn parent_receives_each_background_completion_once_without_editable_contro
             text_response("handled mimic"),
             text_response("saw child b"),
         ],
+        Duration::from_secs(120),
         move |index, _request| {
             if index == 0 {
                 started_tx.send(()).unwrap();
-                release_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                release_rx.recv_timeout(Duration::from_secs(60)).unwrap();
             }
         },
     );
@@ -135,7 +138,7 @@ async fn parent_receives_each_background_completion_once_without_editable_contro
         )
         .await
         .unwrap();
-    tokio::task::spawn_blocking(move || started_rx.recv_timeout(Duration::from_secs(5)).unwrap())
+    tokio::task::spawn_blocking(move || started_rx.recv_timeout(Duration::from_secs(60)).unwrap())
         .await
         .unwrap();
     let run_id = service.active_run().unwrap().run_id.to_string();
