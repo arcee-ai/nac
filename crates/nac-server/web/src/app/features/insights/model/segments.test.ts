@@ -174,7 +174,7 @@ describe("partitionModelTurn", () => {
     expect(unknown.group.durationMs).toBeNull();
   });
 
-  it("turns compact orchestrator tool blocks into segments without a presentation", () => {
+  it("turns compact tool blocks into segments without a presentation", () => {
     const [running] = groups([thoughts("thoughts-0"), compactTool("read-1-0", "read", true)]);
     const [settled] = groups([thoughts("thoughts-0"), compactTool("read-1-0", "read")]);
 
