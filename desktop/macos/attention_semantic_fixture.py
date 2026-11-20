@@ -13,7 +13,8 @@ import threading
 import time
 
 MARKER = 'NAC_SEMANTIC_FINITE_MARKER'
-BEHAVIORS = ('orchestrator', 'direct', 'direct-with-orchestrator')
+# Three distinct direct sessions retain the original workload and replay depth.
+CASES = ('first', 'second', 'third')
 
 
 def _string_values(value):

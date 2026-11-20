@@ -81,7 +81,7 @@ def completion_envelope(schemas):
                                                 baseline=False, more=False, items=items))
         return core, wire
     item = dict(sequence=maximum, session_id='"' * 512, run_id='"' * 512,
-                behavior='direct-with-orchestrator', kind='goal', goal_id='"' * 512, mark_version=maximum)
+                behavior='direct', kind='goal', goal_id='"' * 512, mark_version=maximum)
     items = []
     while len(items) < 128 and len(encode(pages(items + [item])[0])) <= 64 * 1024:
         items.append(item)

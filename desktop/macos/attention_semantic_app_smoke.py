@@ -19,7 +19,7 @@ import attention_app_smoke as attention_owner
 from attention_app_smoke import AttentionJourney
 from attention_feed_build import source_binding
 from attention_fixture_control import console_facts, require_console
-from attention_semantic_fixture import BEHAVIORS, MARKER, SemanticProvider
+from attention_semantic_fixture import CASES, MARKER, SemanticProvider
 from instance_contract import digest
 from attention_reset_readout import ResetReadout
 from attention_fixture_cleanup import cleanup_fixture, write_input
@@ -203,35 +203,35 @@ def run_contract(bundle, destination, observer, source_ref):
         assert not first.read()['window_visible']
         project = http(endpoint, '/projects', dict(name='Semantic native matrix', cwd=str(profile)))['project_id']
 
-        def session(behavior):
-            row = http(endpoint, '/sessions', dict(behavior=behavior, project_id=project,
+        def session():
+            row = http(endpoint, '/sessions', dict(behavior='direct', project_id=project,
                        model='gpt-5.6-sol', backend='openai-responses', base_url=provider.endpoint,
                        api_key_env='OPENAI_API_KEY'))['metadata']
-            assert row['behavior'] == behavior
+            assert row['behavior'] == 'direct'
             return row['session_id']
 
-        def request_case(behavior, label):
-            token = 'SEMANTIC_' + label + '_' + behavior
+        def request_case(case, label):
+            token = 'SEMANTIC_' + label + '_' + case
             provider.protocol.register(token)
-            sid = session(behavior)
+            sid = session()
             run = http(endpoint, '/sessions/' + sid + '/runs', dict(prompt=token))['run_id']
             provider.entered(token)
-            evidence['expected'].append(expected(sid, run, behavior))
+            evidence['expected'].append(expected(sid, run, 'direct'))
             return sid, run
 
-        for behavior in BEHAVIORS:
-            request_case(behavior, 'FIRST')
+        for case in CASES:
+            request_case(case, 'FIRST')
             count = len(evidence['expected'])
             state = native(first, lambda s: quiescent(s) and s['attention']['unread'] == count
                            and len(s['attention']['accepted_items']) == count and s['center']['adds'] == count,
-                           'Actual request completion ' + behavior)
+                           'Actual request completion ' + case)
             deliveries_match(state, evidence['expected'])
-        evidence['cases'].append('three-real-behavior-requests')
+        evidence['cases'].append('three-direct-session-requests')
 
-        for behavior in BEHAVIORS[1:]:
-            sid = session(behavior)
-            token = 'SEMANTIC_GOAL_' + behavior
-            queued = 'SEMANTIC_QUEUE_' + behavior
+        for case in CASES[1:]:
+            sid = session()
+            token = 'SEMANTIC_GOAL_' + case
+            queued = 'SEMANTIC_QUEUE_' + case
             provider.protocol.register(token, 'goal')
             provider.protocol.register(queued, 'queue', parent=token)
             goal = http(endpoint, '/sessions/' + sid + '/goal', dict(objective=token + ': read semantic-marker.txt before completing.'))
@@ -248,22 +248,22 @@ def run_contract(bundle, destination, observer, source_ref):
             before = first.read()
             assert before['attention']['unread'] == len(evidence['expected']), 'Mark before terminal cannot account completion'
             assert http(endpoint, '/sessions/' + sid + '/goal')['status'] == 'complete'
-            save('mark-' + behavior + '.json', dict(goal=goal, accounting=active_goal, mark=mark, before_terminal=before, inbox=inbox))
+            save('mark-' + case + '.json', dict(goal=goal, accounting=active_goal, mark=mark, before_terminal=before, inbox=inbox))
             provider.release(token + ':final-tail')
             provider.entered(queued)
             b = http(endpoint, '/sessions/' + sid + '?include_sessions=false&message_limit=1')['active_run']['run_id']
             assert b != run_a
-            evidence['expected'].append(expected(sid, run_a, behavior, goal['goal_id'], mark['version']))
+            evidence['expected'].append(expected(sid, run_a, 'direct', goal['goal_id'], mark['version']))
             count = len(evidence['expected'])
             state = native(first, lambda s: quiescent(s) and s['attention']['unread'] == count
-                           and s['center']['adds'] == count, 'Exact goal A while B active ' + behavior)
+                           and s['center']['adds'] == count, 'Exact goal A while B active ' + case)
             assert http(endpoint, '/sessions/' + sid + '?include_sessions=false&message_limit=1')['active_run']['run_id'] == b
             deliveries_match(state, evidence['expected'])
             provider.release(queued + ':finish-B')
-            evidence['expected'].append(expected(sid, b, behavior))
+            evidence['expected'].append(expected(sid, b, 'direct'))
             count = len(evidence['expected'])
             state = native(first, lambda s: quiescent(s) and s['attention']['unread'] == count
-                           and s['center']['adds'] == count, 'Distinct queued B request ' + behavior)
+                           and s['center']['adds'] == count, 'Distinct queued B request ' + case)
             deliveries_match(state, evidence['expected'])
         evidence['cases'].append('both-direct-goals-account-before-unrelated-B-finishes')
 
@@ -274,8 +274,8 @@ def run_contract(bundle, destination, observer, source_ref):
                         and s['attention']['observer_connections'] == s['attention']['observer_draining'] == 0,
                         'Single observation retired without preference mutation')
         assert {key: paused['attention'][key] for key in saved} == saved
-        for behavior in BEHAVIORS:
-            sid, run = request_case(behavior, 'OFFLINE')
+        for case in CASES:
+            sid, run = request_case(case, 'OFFLINE')
             attention_owner.wait_for('Offline canonical successful result', lambda: not http(endpoint, '/sessions/' + sid + '?include_sessions=false&message_limit=1').get('active_run'), timeout=20)
         unchanged = first.read()
         assert {key: unchanged['attention'][key] for key in saved} == saved
