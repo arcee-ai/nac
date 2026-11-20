@@ -12,10 +12,89 @@ const COMPLETION_COLUMN: &str = "behavior TEXT NOT NULL CHECK(behavior IN ('orch
 const INBOX_COLUMN: &str = "completion_source TEXT CHECK (completion_source IN ('traditional_child', 'managed_orchestrator'))";
 
 fn replace_once(sql: &str, old: &str, new: &str, table: &str) -> Result<String> {
-    if sql.matches(old).count() != 1 {
+    if sql.matches(old).count() != 1 || !is_column_definition(sql, old) {
         anyhow::bail!("unexpected {table} schema while tightening direct constraints");
     }
     Ok(sql.replacen(old, new, 1))
+}
+
+/// A byte match in sqlite_schema is not evidence of an actual constraint: it
+/// can be hidden in a comment, string, quoted identifier, or nested expression.
+/// The supported old definition must begin a top-level column of CREATE TABLE.
+fn is_column_definition(sql: &str, candidate: &str) -> bool {
+    let bytes = sql.as_bytes();
+    let mut index = 0;
+    let mut depth = 0usize;
+    let mut previous = None;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if depth == 1
+            && matches!(previous, Some(b'(' | b','))
+            && bytes[index..].starts_with(candidate.as_bytes())
+        {
+            return true;
+        }
+        match byte {
+            b'-' if bytes.get(index + 1) == Some(&b'-') => {
+                index += 2;
+                while index < bytes.len() && bytes[index] != b'\n' {
+                    index += 1;
+                }
+            }
+            b'/' if bytes.get(index + 1) == Some(&b'*') => {
+                index += 2;
+                while index + 1 < bytes.len() && &bytes[index..index + 2] != b"*/" {
+                    index += 1;
+                }
+                if index + 1 >= bytes.len() {
+                    return false;
+                }
+                index += 2;
+            }
+            b'\'' | b'"' | b'`' | b'[' => {
+                let terminator = if byte == b'[' { b']' } else { byte };
+                index += 1;
+                let mut closed = false;
+                while index < bytes.len() {
+                    if bytes[index] == terminator {
+                        if byte != b'[' && bytes.get(index + 1) == Some(&terminator) {
+                            index += 2;
+                        } else {
+                            index += 1;
+                            closed = true;
+                            break;
+                        }
+                    } else {
+                        index += 1;
+                    }
+                }
+                if !closed {
+                    return false;
+                }
+                previous = Some(byte);
+            }
+            b'(' => {
+                depth += 1;
+                previous = Some(byte);
+                index += 1;
+            }
+            b')' => {
+                let Some(next) = depth.checked_sub(1) else {
+                    return false;
+                };
+                depth = next;
+                previous = Some(byte);
+                index += 1;
+            }
+            _ => {
+                if !byte.is_ascii_whitespace() {
+                    previous = Some(byte);
+                }
+                index += 1;
+            }
+        }
+    }
+    false
 }
 
 pub(super) fn tighten(conn: &Connection) -> Result<()> {
@@ -385,6 +464,103 @@ mod tests {
             55
         );
         drop(conn);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn old_constraint_hidden_in_comment_is_rejected_atomically() {
+        let (root, path) = setup();
+        let conn = Connection::open(&path).unwrap();
+        let sql: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_schema WHERE name='session_completion_bindings'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let deceptive = sql.replace(
+            COMPLETION_COLUMN,
+            &format!("behavior TEXT NOT NULL CHECK(behavior IN ('direct','orchestrator','direct-with-orchestrator')) /* {COMPLETION_COLUMN} */"),
+        );
+        assert_ne!(sql, deceptive);
+        conn.execute_batch("PRAGMA writable_schema=ON").unwrap();
+        conn.execute(
+            "UPDATE sqlite_schema SET sql=?1 WHERE name='session_completion_bindings'",
+            [&deceptive],
+        )
+        .unwrap();
+        conn.execute_batch("PRAGMA writable_schema=OFF").unwrap();
+        drop(conn);
+        let original = catalog(&Connection::open(&path).unwrap());
+
+        assert!(initialize(&path).is_err());
+        let conn = Connection::open(&path).unwrap();
+        assert_eq!(catalog(&conn), original);
+        assert_eq!(
+            conn.pragma_query_value::<i64, _>(None, "user_version", |row| row.get(0))
+                .unwrap(),
+            55
+        );
+        assert_eq!(
+            conn.query_row::<i64, _, _>(
+                "SELECT count(*) FROM session_completion_marks",
+                [],
+                |row| row.get(0)
+            )
+            .unwrap(),
+            1
+        );
+        drop(conn);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn column_match_ignores_nested_and_quoted_sql() {
+        let actual = format!("CREATE TABLE t (id TEXT, {COMPLETION_COLUMN}, other TEXT)");
+        assert!(is_column_definition(&actual, COMPLETION_COLUMN));
+        for sql in [
+            format!("CREATE TABLE t (id TEXT /* {COMPLETION_COLUMN} */)"),
+            format!("CREATE TABLE t (id TEXT -- {COMPLETION_COLUMN}\n)"),
+            format!("CREATE TABLE t (\"{COMPLETION_COLUMN}\" TEXT)"),
+            format!("CREATE TABLE t (id TEXT CHECK({COMPLETION_COLUMN}))"),
+        ] {
+            assert!(!is_column_definition(&sql, COMPLETION_COLUMN), "{sql}");
+        }
+    }
+
+    #[test]
+    fn v52_upgrade_catalog_matches_fresh() {
+        let root = std::env::temp_dir().join(format!("nac-v52-catalog-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let old_path = root.join("old.db");
+        let old = Connection::open(&old_path).unwrap();
+        old.execute_batch(include_str!("fixtures/v52.sql")).unwrap();
+        drop(old);
+        let fresh_path = root.join("fresh.db");
+        initialize(&old_path).unwrap();
+        initialize(&fresh_path).unwrap();
+        let old = Connection::open(old_path).unwrap();
+        let fresh = Connection::open(fresh_path).unwrap();
+        let old_catalog = catalog(&old);
+        let fresh_catalog = catalog(&fresh);
+        let old_map: std::collections::BTreeMap<_, _> = old_catalog
+            .iter()
+            .map(|(kind, name, sql)| ((kind, name), sql))
+            .collect();
+        let fresh_map: std::collections::BTreeMap<_, _> = fresh_catalog
+            .iter()
+            .map(|(kind, name, sql)| ((kind, name), sql))
+            .collect();
+        let differences: Vec<_> = old_map
+            .keys()
+            .chain(fresh_map.keys())
+            .filter(|key| old_map.get(key) != fresh_map.get(key))
+            .collect();
+        assert!(
+            differences.is_empty(),
+            "catalog differences: {differences:?}"
+        );
+        drop((old, fresh));
         std::fs::remove_dir_all(root).unwrap();
     }
 }
