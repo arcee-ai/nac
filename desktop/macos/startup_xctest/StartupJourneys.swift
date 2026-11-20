@@ -811,6 +811,7 @@ final class StartupJourneys: XCTestCase {
                 if let coordinate { coordinate.click() } else { elements.firstMatch.click() }
             }
         }
+        try axClient?.admitInitial()
         try guardTarget()
         if ["invalidConfig", "futureStore"].contains(fixture.scenario) {
             if fixture.scenario == "futureStore" {

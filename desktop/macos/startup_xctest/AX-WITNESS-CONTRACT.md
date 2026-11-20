@@ -29,6 +29,16 @@ already older than 1s may await another publication within that same ticket, but
 stale data is never accepted. Final consumption still checks <=1s age. No
 predicate-refusal retry.
 
+Before the first guard only, configured-local startup has a ten-second bounded
+admission phase under the original case cutoff. It can observe at most two
+distinct deadline refusals from otherwise successful reads, or explicit
+AXWindows cannotComplete refusals; it binds the same exact helper, target,
+window, source, sequence, generation and port. It grants no ticket, evidence or
+input, and requires a distinct fresh positive before ordinary guard entry.
+Unknown, malformed, terminal, replaced or other predicate refusals fail closed.
+The first guard then still requires a separate newly begun fresh sample, and
+all ordinary guard and post-input refusals remain sticky with no retry.
+
 The canonical actor retains real CFEqual root/panel/GoTo handles through the
 case, including disappeared sheets. Exact original-root geometry, admitted PID,
 direct root→sheet→nested-sheet topology and membership of every AXWindows object

@@ -220,6 +220,86 @@ func lossRun(_ mode: String) -> [String: Any] {
     return ["inputs":inputs,"loads":loads,"pauses":pauses]
 }
 
+func admissionRun(_ mode: String) -> [String: Any] {
+    var base = URL(fileURLWithPath: ProcessInfo.processInfo.environment["NAC342_INERT_FILE_ROOT"]!).appendingPathComponent(UUID().uuidString)
+    var clock: UInt64 = 10_000_000_000, loads = 0, inputs = 0
+    do {
+        try FileManager.default.createDirectory(at: base.appendingPathComponent("requests"), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        defer { try? FileManager.default.removeItem(at: base) }
+        guard let physical = realpath(base.path, nil) else { throw StartupAXReceiptError.invalid }
+        base = URL(fileURLWithPath: String(cString: physical)); free(physical)
+        let path = base.appendingPathComponent("receipt.json").path
+        let requestPath = try StartupAXFiles.requestPath(path)
+        if mode == "request" { try Data("{}".utf8).write(to: URL(fileURLWithPath: requestPath)); chmod(requestPath, 0o400) }
+        let helper = StartupAXProcess(pid:300,parent:200,uid:Int32(getuid()),start_seconds:1,start_microseconds:0,executable:"/inert/helper")
+        let target = StartupAXProcess(pid:400,parent:1,uid:Int32(getuid()),start_seconds:2,start_microseconds:0,executable:"/inert/app")
+        let declaration = StartupAXDeclaration(path:path,nonce:String(repeating:"a",count:64),helper_path:helper.executable,helper_sha256:String(repeating:"b",count:64),support_sha256:["StartupAXGuard.swift":String(repeating:"c",count:64),"StartupAXReceipt.swift":String(repeating:"e",count:64)],owner_pid:200,deadline_ns:"50000000000")
+        var last = Data()
+        let client = StartupAXClient(declaration,configurationSHA:String(repeating:"d",count:64),pid:400,launch:10,window:7,executable:target.executable,
+            now:{ clock += 1_000_000; return clock },pause:{ clock += mode == "no_fresh" ? 11_000_000_000 : 100_000_000 },load:{
+                loads += 1
+                if (loads == 3 && !["exhaust", "after_admission_jump"].contains(mode)) || (mode == "no_fresh" && loads > 2) { return last }
+                if loads >= 4 || (loads == 2 && mode.hasPrefix("first_ready")) || (loads == 3 && mode == "after_admission_jump") { clock += 100_000_000 }
+                let refused = (loads == 1 && !mode.hasPrefix("first_ready")) || (mode == "exhaust" && loads <= 3)
+                let seq = loads == 4 ? 3 : loads
+                let began = refused ? clock - 1_200_000_000 : clock - 20_000_000
+                let ended = refused ? clock - 50_000_000 : clock - 10_000_000
+                let observation = refused ? nil : StartupAXSurface(surface:"form",root_id:"00000000-0000-0000-0000-000000000001",panel_id:nil,go_to_id:nil,root_frame:[10,20,100,30],focus:nil)
+                let receipt = StartupAXReceipt(schema:"nac342-ax-witness-v1",nonce:declaration.nonce,configuration_sha256:String(repeating:"d",count:64),helper_sha256:declaration.helper_sha256,support_sha256:declaration.support_sha256,trusted:true,helper:helper,target:target,app_launch_epoch:10,window_number:7,sequence:String(seq),refusal_generation:refused && mode == "exhaust" ? String(loads) : "1",began_ns:String(began),ended_ns:String(ended),status:refused ? "refused" : "ready",case_deadline_ns:"40000000000",observation:observation,refusal_stage:refused ? "sample_deadline" : nil,refusal:nil)
+                var body = try JSONSerialization.jsonObject(with: JSONEncoder().encode(receipt)) as! [String: Any]
+                if mode == "timeout" { body["refusal_generation"] = "2" }
+                if mode == "first_ready_zero" { body["refusal_generation"] = "0" }
+                if loads == 1 {
+                    switch mode {
+                    case "stage": body["refusal_stage"] = "ax_predicate_refused"
+                    case "retired": body["status"] = "retired"
+                    case "short": body["began_ns"] = String(clock - 100_000_000)
+                    case "too_long": body["began_ns"] = String(clock - 6_000_000_000)
+                    case "reason": body["refusal"] = Data("{}".utf8).base64EncodedString()
+                    case "timeout", "timeout_foreign", "timeout_bad_increment":
+                        let detail: [String: Any] = ["schema":"nac342-ax-refusal-v1", "acceptance":false,
+                            "first_observed_refusal":["stage":"attribute_timeout", "attribute":mode == "timeout_foreign" ? "AXRole" : "AXWindows", "api_code":-25204],
+                            "terminal_refusal":["stage":"windows_unavailable"]]
+                        body["refusal_stage"] = "ax_predicate_refused"
+                        body["refusal"] = try JSONSerialization.data(withJSONObject:detail).base64EncodedString()
+                    case "nonce": body["nonce"] = "foreign"
+                    case "window": body["window_number"] = 8
+                    default: break
+                    }
+                }
+                if loads == 2 {
+                    switch mode {
+                    case "generation": body["refusal_generation"] = "0"
+                    case "generation_jump": body["refusal_generation"] = "2"
+                    case "sequence": body["sequence"] = "0"
+                    case "sequence_skip": body["sequence"] = "3"
+                    case "duplicate_changed": body["sequence"] = "1"
+                    case "helper": var h = body["helper"] as! [String: Any]; h["start_seconds"] = 8; body["helper"] = h
+                    case "target": var t = body["target"] as! [String: Any]; t["start_seconds"] = 8; body["target"] = t
+                    case "stale": clock += 1_100_000_000
+                    default: break
+                    }
+                }
+                if loads == 4 && mode == "after_refusal" { body["status"] = "refused"; body["refusal_stage"] = "sample_deadline" }
+                if loads == 3 && mode == "after_admission_jump" { body["refusal_generation"] = "2" }
+                last = try JSONSerialization.data(withJSONObject:body); return last
+            })
+        do {
+            try client.admitInitial()
+            try StartupAXFiles.need(client.evidence.isEmpty && client.interactions.isEmpty)
+            let ticket = try client.begin()
+            _ = try client.consume(ticket,surface:.form,rootFrame:CGRect(x:10,y:20,width:100,height:30))
+            inputs += 1
+            return ["accepted":true,"inputs":inputs,"loads":loads,"initial_refusals":client.initialRefusalCount,
+                    "initial_stage":client.initialRefusalStage as Any,"guard_failure_cleared":client.failureData == nil]
+        } catch {
+            var denied = false
+            do { _ = try client.begin() } catch { denied = true }
+            return ["accepted":false,"inputs":inputs,"loads":loads,"denied":denied,"error":String(describing:error)]
+        }
+    } catch { return ["accepted":false,"inputs":inputs,"fixture_failure":true] }
+}
+
 func focusRun(_ mode: String) -> [String: Any] {
     var stamp: UInt64 = 3_000_000_000, call = 0, sequence = 1, last = Data(), pauses = 0
     let staleFocus = mode.hasPrefix("stale_")
@@ -1268,7 +1348,7 @@ func requestChildRun(_ mode: String) -> [String: Any] {
     } catch { return ["accepted":false,"family":StartupFailureEvidence.family(error)] }
 }
 
-let rows = modes.map { $0.hasPrefix("producer_hold_") ? producerHoldRun(String($0.dropFirst(14))) : $0.hasPrefix("handoff_") ? handoffRun(String($0.dropFirst(8))) : $0.hasPrefix("lease_") ? leaseRun(String($0.dropFirst(6))) : $0.hasPrefix("file_interleave_") ? fileInterleaveRun(String($0.dropFirst("file_interleave_".count))) : $0.hasPrefix("request_child_") ? requestChildRun(String($0.dropFirst("request_child_".count))) : $0.hasPrefix("retention_") ? refusalRetentionRun(String($0.dropFirst("retention_".count))) : $0.hasPrefix("errno_") ? publishErrnoRun(String($0.dropFirst(6))) : $0.hasPrefix("lifecycle_") ? lifecycleRun(String($0.dropFirst("lifecycle_".count))) : $0.hasPrefix("semantic_policy_") ? semanticPolicyRun(String($0.dropFirst("semantic_policy_".count))) : $0.hasPrefix("atomic_shape_") ? atomicShapeRun(String($0.dropFirst("atomic_shape_".count))) : $0.hasPrefix("semantic_compatibility_") ? semanticCompatibilityRun(String($0.dropFirst("semantic_compatibility_".count))) : $0.hasPrefix("publisher_checkpoint_") ? publisherCheckpointRun(String($0.dropFirst("publisher_checkpoint_".count))) : $0.hasPrefix("float_") ? floatSelectionRun($0) : $0.hasPrefix("first_") ? firstFailureRun($0) : $0.hasPrefix("request_") ? requestRun($0) : $0.hasPrefix("interaction_") ? interactionRun($0) : $0.hasPrefix("point_") ? interactionPolicyRun($0) : $0.hasPrefix("publication_") ? publicationRun($0) : $0.hasPrefix("loss_") ? lossRun($0) : $0 == "identity" ? identityProof() : ($0.hasPrefix("focus_") || $0.hasPrefix("stale_focus")) ? focusRun($0) : $0.hasPrefix("file_") ? fileRun($0) : run($0) }
+let rows = modes.map { $0.hasPrefix("admission_") ? admissionRun(String($0.dropFirst(10))) : $0.hasPrefix("producer_hold_") ? producerHoldRun(String($0.dropFirst(14))) : $0.hasPrefix("handoff_") ? handoffRun(String($0.dropFirst(8))) : $0.hasPrefix("lease_") ? leaseRun(String($0.dropFirst(6))) : $0.hasPrefix("file_interleave_") ? fileInterleaveRun(String($0.dropFirst("file_interleave_".count))) : $0.hasPrefix("request_child_") ? requestChildRun(String($0.dropFirst("request_child_".count))) : $0.hasPrefix("retention_") ? refusalRetentionRun(String($0.dropFirst("retention_".count))) : $0.hasPrefix("errno_") ? publishErrnoRun(String($0.dropFirst(6))) : $0.hasPrefix("lifecycle_") ? lifecycleRun(String($0.dropFirst("lifecycle_".count))) : $0.hasPrefix("semantic_policy_") ? semanticPolicyRun(String($0.dropFirst("semantic_policy_".count))) : $0.hasPrefix("atomic_shape_") ? atomicShapeRun(String($0.dropFirst("atomic_shape_".count))) : $0.hasPrefix("semantic_compatibility_") ? semanticCompatibilityRun(String($0.dropFirst("semantic_compatibility_".count))) : $0.hasPrefix("publisher_checkpoint_") ? publisherCheckpointRun(String($0.dropFirst("publisher_checkpoint_".count))) : $0.hasPrefix("float_") ? floatSelectionRun($0) : $0.hasPrefix("first_") ? firstFailureRun($0) : $0.hasPrefix("request_") ? requestRun($0) : $0.hasPrefix("interaction_") ? interactionRun($0) : $0.hasPrefix("point_") ? interactionPolicyRun($0) : $0.hasPrefix("publication_") ? publicationRun($0) : $0.hasPrefix("loss_") ? lossRun($0) : $0 == "identity" ? identityProof() : ($0.hasPrefix("focus_") || $0.hasPrefix("stale_focus")) ? focusRun($0) : $0.hasPrefix("file_") ? fileRun($0) : run($0) }
 FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject:rows))
 '''
 
@@ -1667,6 +1747,19 @@ class ReceiptControls(unittest.TestCase):
                 self.assertFalse(row['accepted'])
                 self.assertEqual(row['inputs'],0)
         self.assertEqual(self.rows(['refusal_overwritten'])[0]['loads'],2)
+        modes = ['positive', 'timeout', 'first_ready_zero', 'first_ready_nonzero', 'stage', 'retired', 'short', 'too_long', 'reason', 'timeout_foreign', 'timeout_bad_increment', 'nonce', 'window',
+                 'generation', 'generation_jump', 'sequence', 'sequence_skip', 'duplicate_changed', 'helper', 'target', 'stale', 'no_fresh', 'exhaust', 'request', 'after_refusal', 'after_admission_jump']
+        rows = self.rows(['admission_' + mode for mode in modes])
+        self.assertTrue(rows[0]['accepted'], rows[0])
+        self.assertTrue(rows[1]['accepted'], rows[1])
+        self.assertTrue(rows[2]['accepted'], rows[2])
+        self.assertEqual([row['initial_refusals'] for row in rows[:3]], [1, 1, 0])
+        self.assertTrue(all(row['guard_failure_cleared'] for row in rows[:3]))
+        for mode, row in zip(modes[3:], rows[3:]):
+            with self.subTest(admission=mode):
+                self.assertFalse(row['accepted'], row)
+                self.assertEqual(row['inputs'], 0)
+                self.assertTrue(row['denied'], row)
 
     def test_complete_client_compares_exact_focus_value_role_pid_geometry_and_ancestry(self):
         modes=['focus_positive','focus_pid','focus_role','focus_false','focus_ancestor','focus_frame','focus_value']
