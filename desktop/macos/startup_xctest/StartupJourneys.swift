@@ -652,14 +652,16 @@ final class StartupJourneys: XCTestCase {
             try require(StartupNativeFolderPolicy.surface(folderSurface, windows: ui.windows.count,
                 rootSheets: roots.count, nestedSheets: nested, allSheets: ui.descendants(matching: .sheet).count),
                 "Foreign, ambiguous or stale native folder surface")
+            let rootFrame = rootWindow.frame
             if folderSurface != .form {
-                let sheet = try panel()
-                try require(StartupNativeFolderPolicy.attached(exists: sheet.exists,
-                    frame: sheet.frame, owner: rootWindow.frame),
+                let sheet = try XCTUnwrap(roots.first)
+                let exists = sheet.exists, frame = sheet.frame
+                try require(StartupNativeFolderPolicy.attached(exists: exists,
+                    frame: frame, owner: rootFrame),
                     "Folder panel is not attached to the owned root")
                 if folderSurface == .panel {
-                    try require(StartupNativeFolderPolicy.usable(exists: sheet.exists, enabled: sheet.isEnabled,
-                        hittable: sheet.isHittable, frame: sheet.frame, owner: rootWindow.frame),
+                    try require(StartupNativeFolderPolicy.usable(exists: exists, enabled: sheet.isEnabled,
+                        hittable: sheet.isHittable, frame: frame, owner: rootFrame),
                         "Owned folder panel is not actionable")
                 }
             }
@@ -668,7 +670,7 @@ final class StartupJourneys: XCTestCase {
                 let target = try goToField()
                 field = (target.frame, try XCTUnwrap(target.value as? String))
             } else { field = nil }
-            return (folderSurface, rootWindow.frame, field)
+            return (folderSurface, rootFrame, field)
         }
         var postActionSurface: (surface: StartupNativeFolderPolicy.Surface, root: CGRect, field: (CGRect, String)?)?
         func capturePostActionGuard() throws {

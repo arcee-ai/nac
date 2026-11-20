@@ -13,6 +13,20 @@ def journey_failure_catch():
 
 
 class FailureScopeTests(unittest.TestCase):
+    def test_public_panel_snapshot_keeps_topology_and_all_actionability_guards(self):
+        source = Path(__file__).with_name('StartupJourneys.swift').read_text()
+        capture = source.split('func captureFolderSurface()', 1)[1].split('var postActionSurface:', 1)[0]
+        self.assertIn('rootSheets: roots.count, nestedSheets: nested, allSheets: ui.descendants(matching: .sheet).count', capture)
+        self.assertIn('windows: ui.windows.count', capture)
+        self.assertIn('let sheet = try XCTUnwrap(roots.first)', capture)
+        self.assertEqual(capture.count('sheet.exists'), 1)
+        self.assertEqual(capture.count('sheet.frame'), 1)
+        self.assertEqual(capture.count('rootWindow.frame'), 1)
+        self.assertIn('attached(exists: exists,\n                    frame: frame, owner: rootFrame)', capture)
+        self.assertIn('usable(exists: exists, enabled: sheet.isEnabled,\n                        hittable: sheet.isHittable, frame: frame, owner: rootFrame)', capture)
+        guard = source.split('func guardTarget() throws {', 1)[1].split('func dispatch(', 1)[0]
+        self.assertIn('consume(ticket, surface: captured.surface, rootFrame: captured.root, field: captured.field)', guard)
+
     def test_direct_model_actions_keep_bounded_guard_and_interaction_counts(self):
         root = Path(__file__).parent
         journey = (root / 'StartupJourneys.swift').read_text()
@@ -623,7 +637,7 @@ func handoffRun(_ mode: String) -> [String: Any] {
             let began = clock + 1_000_000, ended = began + 1_000_000
             clock = ended + 1_000_000
             var observed = StartupAXSurface(surface: inputs == 0 || (post != nil && mode == "post_surface") ? "form" : "panel",root_id:rootID,
-                panel_id:inputs == 0 ? nil : panelID,go_to_id:nil,
+                panel_id:inputs == 0 ? nil : (ordinaryRequested && mode == "boundary_panel_replaced" ? UUID().uuidString : panelID),go_to_id:nil,
                 root_frame:post != nil && mode == "post_frame" ? [11,20,100,30] : [10,20,100,30],focus:nil)
             if lease == nil, let request = try? StartupAXInteractionRequest.read(try StartupAXFiles.requestPath(path)) {
                 observed.interaction = StartupAXInteraction(request_id:request.id,target_id:targetID,point:request.point,
@@ -1324,7 +1338,7 @@ class ReceiptControls(unittest.TestCase):
         self.assertEqual((row['inputs'], row['postconditions'], row['operations']), (1, 1, 1))
         self.assertGreaterEqual(row['held_pre_loads'], 1)
         self.assertGreaterEqual(row['held_post_loads'], 2)
-        modes = ['boundary_generation', 'boundary_refused', 'boundary_malformed', 'boundary_wrong_marker', 'boundary_stale', 'boundary_foreign_ordinary', 'boundary_foreign_baseline']
+        modes = ['boundary_generation', 'boundary_refused', 'boundary_malformed', 'boundary_wrong_marker', 'boundary_stale', 'boundary_foreign_ordinary', 'boundary_foreign_baseline', 'boundary_panel_replaced']
         for mode, row in zip(modes, self.rows(['handoff_' + mode for mode in modes])):
             with self.subTest(mode=mode):
                 self.assertFalse(row['accepted'], row)

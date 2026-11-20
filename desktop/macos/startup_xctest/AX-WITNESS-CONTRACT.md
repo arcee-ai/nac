@@ -98,6 +98,10 @@ completed claim. H starts the first post-action sample only after that claim;
 Q compares it to the captured surface, root frame and field and requires the
 same original cutoff, freshness and request-drain checks before any next input.
 Refusals remain terminal; neither the checks nor completion renews the ticket.
+The public root-sheet enumeration supplies the unique panel for this snapshot;
+its existence and geometry are read once and passed to both attachment and
+usability predicates. Window and complete sheet counts, enabled/hittable checks,
+and the separately retained witness identity and frame match remain required.
 
 Coordinates are dynamic. A last-instant race between the final checks and OS
 input remains explicitly ACCEPTED. This does not claim atomic dispatch or an
