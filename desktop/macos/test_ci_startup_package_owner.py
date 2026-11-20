@@ -9,7 +9,7 @@ from ci_startup import product_package_owner
 
 
 class StartupPackageOwnerTests(unittest.TestCase):
-    def test_startup_deadline_reserves_ten_minutes_of_hosted_cleanup(self):
+    def test_startup_and_other_work_deadlines(self):
         from ci import qualification_deadline
         started = 1234.0
         self.assertEqual(qualification_deadline(started, 'startup'), started + 60 * 60)

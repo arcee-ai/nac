@@ -34,7 +34,8 @@ RUN_STARTED = time.monotonic()
 
 def qualification_deadline(started, suite):
     # The cold release build needs time in addition to four actual startup
-    # journeys. Both job budgets retain ten minutes for cleanup and upload.
+    # journeys. The hosted job limits are ten minutes longer, but checkout and
+    # toolchain setup consume some of that difference before this clock starts.
     return started + (60 if suite == 'startup' else 30) * 60
 
 
