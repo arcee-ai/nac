@@ -617,7 +617,9 @@ async function inspectorComposed(j: Journey, id: string) {
     if (await insightsTab.count()) await activate(j, insightsTab);
     else await expect(j.root.getByRole("dialog", { name: "Insights", exact: true })).toBeVisible();
     const selected = j.root.getByRole("button", { name: `${childTitle}, Check`, exact: true });
-    await expect(selected).toBeVisible();
+    // The list restores its scroll position after mounting. Wait until the
+    // browser can reach the row before sampling its exact center.
+    await selected.click({ trial: true });
     await activate(j, selected);
     await expect(status).toHaveAttribute("aria-current", "true");
     // Pointer list picks preserve their own interaction contract. Keyboard Back owns detail focus.
