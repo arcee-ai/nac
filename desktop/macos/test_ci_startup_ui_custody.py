@@ -259,6 +259,7 @@ class QualificationFailureControls(unittest.TestCase):
                 calls.append(log.name)
                 if log.name == 'startup-package-after-ui.log': raise final_error
             replacements = {'require_checkout': Mock(), 'test_contract': Mock(), 'protocol_sources': Mock(),
+                'product_package_owner': Mock(return_value=root / 'package.py'),
                 'build_protocol': Mock(return_value=(root, {})), 'verify_protocol': Mock(return_value={}),
                 'materialize_project': Mock(return_value={}), 'observer_sources': Mock(return_value=[]),
                 'digest': Mock(return_value='a' * 64), 'run_case': Mock(side_effect=primary)}

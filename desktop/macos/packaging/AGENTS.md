@@ -1,6 +1,11 @@
 # Mac package owner
 
-This source owner is carried onto exact Native source
+The ALL-616 integration carries commit `3cd02dc64` onto its own source tree.
+The exact current candidate, not the historical Native source below, must be
+bound by a fresh package and hosted qualification. Earlier receipts are not
+evidence for that candidate.
+
+The prior integration carried this source owner onto Native source
 `0949c09d43974343913c2ae165a6e25f4b47d34d` (immediate base
 `85252cebd4496e5197afb8a1966e5d59fc13b7bd`, landed dev
 `f27b5b4a92b38567580a1a43576137bf5b436f95`). Only the fourteen packaging
@@ -13,8 +18,8 @@ now requires the canonical writer's exact seventeen fixture exclusions.
 This is source integration only. P12's one consumed actual attempt/zero retries
 and all earlier evidence remain historical at their original source/scope. No
 current producer, CI, native runtime, signing or distribution acceptance is
-established by this carry; the actual clean packaging child, never this parent
-or an old donor SHA, must bind any separately admitted future artifact.
+established by either carry; the actual clean packaging candidate, never an
+old parent or donor SHA, must bind any separately admitted future artifact.
 
 ALL-355 owns this outer packaging/manifest/signature boundary. Read root and
 `desktop/macos/AGENTS.md`. Reuse the existing native builder and committed web

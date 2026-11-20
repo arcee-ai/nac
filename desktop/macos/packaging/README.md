@@ -1,6 +1,10 @@
 # Mac package preparation (ALL-355)
 
-This source owner is carried onto exact Native source
+ALL-616 carries the reviewed owner from commit `3cd02dc64` onto its own
+candidate. The historical source and evidence described below do not qualify
+that candidate; fresh package receipts and hosted runtime proof are required.
+
+The prior integration carried this source owner onto Native source
 `0949c09d43974343913c2ae165a6e25f4b47d34d` (immediate base
 `85252cebd4496e5197afb8a1966e5d59fc13b7bd`, landed dev
 `f27b5b4a92b38567580a1a43576137bf5b436f95`). Only the fourteen packaging
@@ -13,8 +17,8 @@ now requires the canonical writer's exact seventeen fixture exclusions.
 This is source integration only. P12's one consumed actual attempt/zero retries
 and all earlier evidence remain historical at their original source/scope. No
 current producer, CI, native runtime, signing or distribution acceptance is
-established by this carry; the actual clean packaging child, never this parent
-or an old donor SHA, must bind any separately admitted future artifact.
+established by either carry; the actual clean packaging candidate, never an
+old parent or donor SHA, must bind any separately admitted future artifact.
 
 The outer package writer reuses `desktop/macos/preview.sh`, the locked `nac-web`
 build, root `version.txt`, existing engine identity and committed embedded web
@@ -61,13 +65,11 @@ with a different output directory. Both can reuse the same private engine.
 ## Exact-source normal admission
 
 `normal` invokes the sole native builder's `app-build` mode and consumes its
-`Contents/Resources/build-receipt.json`. Current Native parent0949c09d supplies
+`Contents/Resources/build-receipt.json`. Historical Native source 0949c09d supplied
 the same closed39 source roster and exact LOCAL_APP/UserNotifications flags as
-the reviewed P12 donor. The carry adds only this packaging owner and its precise
-current fixture-exclusion admission; it changes no builder, track factory,
-lifecycle, generated outputs or test actor. BundleIdentity.sh is byte-identical
-to the donor, while preview.sh/build_receipt.py and selected source hashes have
-advanced. All actual hashes must come from the resulting clean full child.
+the reviewed P12 donor. The ALL-616 carry adds only this packaging owner; it
+changes no builder, track factory, lifecycle, generated outputs or test actor.
+All actual hashes must come from the clean nominated candidate.
 
 The current writer excludes the five offline fixture Swift sources from
 LOCAL_APP and emits exactly seventeen marker exclusions: the original eleven
