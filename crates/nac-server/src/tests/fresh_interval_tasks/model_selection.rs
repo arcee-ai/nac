@@ -58,7 +58,7 @@ async fn reservation(
                     "X-Fixture-Model".into(),
                     "original".into(),
                 )])),
-                orchestrator_compaction_threshold: None,
+                compaction_threshold: None,
             }
         })),
         pinned_commit: None,
@@ -626,7 +626,7 @@ async fn scheduled_codex_missing_compaction_is_explicitly_disabled() {
             reasoning_effort: None,
             service_tier: None,
             extra_headers: None,
-            orchestrator_compaction_threshold: None,
+            compaction_threshold: None,
         };
         let prepared =
             reservation(&root, &manager, git_project, false, false, Some(selection)).await;
@@ -640,7 +640,7 @@ async fn scheduled_codex_missing_compaction_is_explicitly_disabled() {
             snapshot.backend,
             nac_core::model::BackendKind::ChatGptCodexResponses
         );
-        assert_eq!(snapshot.orchestrator_compaction_threshold, None);
+        assert_eq!(snapshot.compaction_threshold, None);
         assert!(!snapshot.automatic_compaction);
         retire(manager).await;
         std::fs::remove_dir_all(root).unwrap();

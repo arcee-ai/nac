@@ -579,7 +579,7 @@ fn v53_writer_frozen_admission_replays_exact_model_without_rebinding() {
     snapshot.api_key_env = crate::model::auto_select_api_key_env(snapshot.backend);
     snapshot.reasoning_effort = Some(crate::model::ReasoningEffort::High);
     snapshot.service_tier = Some(crate::model::ServiceTier::Fast);
-    snapshot.orchestrator_compaction_threshold = Some(8192);
+    snapshot.compaction_threshold = Some(8192);
     let mut variants = Vec::new();
     let mut changed = snapshot.clone();
     changed.api_key_env = Some("UNRELATED_SELECTOR".into());
@@ -591,7 +591,7 @@ fn v53_writer_frozen_admission_replays_exact_model_without_rebinding() {
     changed.service_tier = Some(crate::model::ServiceTier::Standard);
     variants.push(changed);
     let mut changed = snapshot.clone();
-    changed.orchestrator_compaction_threshold = Some(8193);
+    changed.compaction_threshold = Some(8193);
     variants.push(changed);
     let mut changed = snapshot.clone();
     changed

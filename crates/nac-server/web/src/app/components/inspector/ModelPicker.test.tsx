@@ -117,7 +117,7 @@ function mockRawConfig(metadata: SessionMetadata) {
     reasoning_effort: metadata.reasoning_effort ?? null,
     service_tier: metadata.service_tier ?? null,
     extra_headers_json: null,
-    orchestrator_compaction_threshold: null,
+    compaction_threshold: null,
     config_version: 7,
   };
   vi.spyOn(api, "getConfig").mockImplementation(async () => {

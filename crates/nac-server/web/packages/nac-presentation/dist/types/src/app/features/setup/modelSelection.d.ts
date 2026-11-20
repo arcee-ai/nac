@@ -11,7 +11,7 @@ export interface LaunchModelSelection {
     reasoning_effort: string | null;
     service_tier?: ServiceTier | null;
     extra_headers: Record<string, string> | null;
-    orchestrator_compaction_threshold?: number | null;
+    compaction_threshold?: number | null;
 }
 export interface SessionModelInitial {
     backend: BackendKind;
@@ -22,6 +22,6 @@ export interface SessionModelInitial {
     reasoning_effort: string | null;
     service_tier?: ServiceTier | null;
     extra_headers: Record<string, string>;
-    orchestrator_compaction_threshold?: number | null;
+    compaction_threshold?: number | null;
 }
 export declare function sameModelSelection(left: LaunchModelSelection | null, right: LaunchModelSelection | null): boolean;

@@ -358,7 +358,7 @@ fn task_model_is_frozen_and_rejects_credential_headers_before_reservation() {
         api_key_env: Some("OPENAI_API_KEY".into()),
         reasoning_effort: None,
         extra_headers: None,
-        orchestrator_compaction_threshold: None,
+        compaction_threshold: None,
     });
     let first = reserve_task_launch(&path, request.clone(), source.clone()).unwrap();
     assert_eq!(first.request.model_selection, request.model_selection);
@@ -394,7 +394,7 @@ fn task_model_tier_round_trips_and_old_records_remain_readable() {
         "api_key_env": "OPENAI_API_KEY",
         "reasoning_effort": null,
         "extra_headers": null,
-        "orchestrator_compaction_threshold": null
+        "compaction_threshold": null
     });
     let old: TaskModelSelection = serde_json::from_value(base.clone()).unwrap();
     assert_eq!(old.service_tier, None);
@@ -443,7 +443,7 @@ fn referenced_model_headers_are_atomic_private_and_frozen_for_retry() {
         reasoning_effort: None,
         service_tier: None,
         extra_headers: None,
-        orchestrator_compaction_threshold: None,
+        compaction_threshold: None,
     });
     request.model_source = Some(crate::sessions::ProjectModelSourceRef {
         project_id: "project".into(),
@@ -564,4 +564,63 @@ fn referenced_model_headers_are_atomic_private_and_frozen_for_retry() {
         .to_string()
         .contains("identity"));
     std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}
+
+#[test]
+fn v54_retained_task_replay_keeps_original_request_bytes_and_identity() {
+    for threshold in [None, Some(8192)] {
+        let (path, mut request, source) = fixture();
+        request.model_selection = Some(TaskModelSelection {
+            backend: "openai-responses".into(),
+            model: "fixture-model".into(),
+            base_url: "https://example.invalid".into(),
+            allow_insecure_http: false,
+            api_key_env: None,
+            reasoning_effort: None,
+            service_tier: threshold.map(|_| "fast".to_owned()),
+            extra_headers: None,
+            compaction_threshold: threshold,
+        });
+        request.prompt = "literal orchestrator_compaction_threshold in user text".into();
+        let first = reserve_task_launch(&path, request.clone(), source.clone()).unwrap();
+        let conn = open_runtime_connection(&path).unwrap();
+        let raw: String = conn
+            .query_row(
+                "SELECT request_json FROM task_launches WHERE request_id=?1",
+                [&request.request_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let legacy = raw.replace(
+            "\"compaction_threshold\":",
+            "\"orchestrator_compaction_threshold\":",
+        );
+        conn.execute(
+            "UPDATE task_launches SET request_json=?2 WHERE request_id=?1",
+            params![request.request_id, legacy],
+        )
+        .unwrap();
+        legacy_task_model::capture_for_test(&conn).unwrap();
+        drop(conn);
+        initialize(&path).unwrap();
+        assert_eq!(
+            reserve_task_launch(&path, request.clone(), source.clone()).unwrap(),
+            first
+        );
+        let mut changed = request.clone();
+        changed.model_selection.as_mut().unwrap().model = "different".into();
+        assert!(reserve_task_launch(&path, changed, source).is_err());
+        let conn = open_runtime_connection(&path).unwrap();
+        assert_eq!(
+            conn.query_row::<String, _, _>(
+                "SELECT request_json FROM task_launches WHERE request_id=?1",
+                [&request.request_id],
+                |row| row.get(0)
+            )
+            .unwrap(),
+            legacy
+        );
+        drop(conn);
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
 }

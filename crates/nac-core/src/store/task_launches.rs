@@ -27,7 +27,7 @@ pub struct TaskModelSelection {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub service_tier: Option<String>,
     pub extra_headers: Option<std::collections::BTreeMap<String, String>>,
-    pub orchestrator_compaction_threshold: Option<u64>,
+    pub compaction_threshold: Option<u64>,
 }
 
 impl TaskModelSelection {
@@ -259,7 +259,14 @@ fn load(conn: &Connection, request_id: &str) -> Result<Option<TaskLaunchRecord>>
             created_at,
             updated_at,
         )| {
-            let request: TaskLaunchRequest = serde_json::from_str(&request)?;
+            let request: TaskLaunchRequest = super::legacy_task_model::decode(
+                conn,
+                super::legacy_task_model::Owner::Task,
+                request_id,
+                "",
+                &request,
+            )?
+            .0;
             let mut source: serde_json::Value = serde_json::from_str(&source)?;
             let frozen = source
                 .as_object_mut()

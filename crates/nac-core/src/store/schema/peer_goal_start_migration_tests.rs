@@ -11,7 +11,7 @@ fn schema_43_upgrades_actual_42_atomically_and_preserves_supplier_receipts() {
     }
     let conn = open_runtime_connection(&path).unwrap();
     conn.execute("INSERT INTO task_followups(caller_session_id,request_id,target_session_id,request_json,resolved_delivery,inbox_item_id,created_at) VALUES('caller','followup','target','{}','queue',123,'now')", []).unwrap();
-    conn.execute("INSERT INTO native_task_launches(request_id,caller_session_id,project_id,request_json,source_cwd,session_id,retained,phase,created_at,updated_at) VALUES('launch','caller','project','{}','/repo','launched',0,'reserved','now','now')", []).unwrap();
+    conn.execute("INSERT INTO native_task_launches(request_id,caller_session_id,project_id,request_json,source_cwd,session_id,retained,phase,created_at,updated_at) VALUES('launch','caller','project','{\"request_id\":\"launch\",\"project_id\":null,\"title\":\"Fixture\",\"prompt\":\"Fixture prompt\"}','/repo','launched',0,'reserved','now','now')", []).unwrap();
     conn.execute_batch("DROP TABLE peer_goal_starts; PRAGMA user_version=42;")
         .unwrap();
     drop(conn);

@@ -20,7 +20,7 @@ test("native OpenAI speed survives composer settings, protocol changes and resta
       reasoning_effort: "high",
       api_key_env: "OPENAI_API_KEY",
       extra_headers: {},
-      orchestrator_compaction_threshold: 0,
+      compaction_threshold: 0,
     },
   });
   expect(created.ok(), await created.text()).toBe(true);
@@ -111,7 +111,7 @@ test("native OpenAI speed survives composer settings, protocol changes and resta
   const newer = await request.patch(configUrl, {
     data: {
       expected_config_version: initial.config_version,
-      orchestrator_compaction_threshold: 1,
+      compaction_threshold: 1,
     },
   });
   expect(newer.ok(), await newer.text()).toBe(true);
@@ -390,7 +390,7 @@ test("native policy rejection remains repairable and a served receipt survives r
       reasoning_effort: "high",
       service_tier: "fast",
       extra_headers: {},
-      orchestrator_compaction_threshold: 0,
+      compaction_threshold: 0,
     },
   });
   expect(created.ok(), await created.text()).toBe(true);

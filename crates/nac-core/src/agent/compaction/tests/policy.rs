@@ -4,8 +4,8 @@ use super::{assistant, candidate, state, temp_store_path, user};
 use sha2::{Digest, Sha256};
 
 use crate::store;
-use crate::store::orchestrator_compaction::{
-    append_orchestrator_compaction_checkpoint, NewOrchestratorCompactionCheckpoint,
+use crate::store::session_compaction::{
+    append_session_compaction_checkpoint, NewSessionCompactionCheckpoint,
 };
 use crate::types::{FunctionCall, Message, ToolCall};
 
@@ -16,11 +16,11 @@ fn as_transcript(messages: &[Message]) -> crate::agent::TranscriptMessages {
 #[test]
 fn direct_prompt_matches_approved_bytes_hash_and_text() {
     const EXPECTED_SHA256: [u8; 32] = [
-        0xf6, 0x98, 0xd5, 0x18, 0x6a, 0x98, 0xa9, 0xe1, 0xe4, 0xc6, 0x04, 0x1e, 0xa3, 0x06, 0x1d,
-        0x02, 0xb7, 0xd8, 0x93, 0xb8, 0xd3, 0xbd, 0xd6, 0x62, 0x1d, 0xe1, 0xa4, 0xf5, 0x5a, 0x9c,
-        0xa4, 0x03,
+        0xf0, 0x45, 0xba, 0x00, 0x6c, 0x00, 0x31, 0x2b, 0x07, 0xa3, 0x00, 0xe2, 0xf2, 0x75, 0xb0,
+        0x81, 0x1e, 0xa2, 0xe5, 0x68, 0xe1, 0xc3, 0xc8, 0xbe, 0x38, 0x73, 0xab, 0x0f, 0x08, 0x66,
+        0xf9, 0x3f,
     ];
-    assert_eq!(NAC_DIRECT_COMPACTION_PROMPT.len(), 2_704);
+    assert_eq!(NAC_DIRECT_COMPACTION_PROMPT.len(), 2_668);
     assert!(NAC_DIRECT_COMPACTION_PROMPT.ends_with('\n'));
     assert!(!NAC_DIRECT_COMPACTION_PROMPT.ends_with("\n\n"));
     assert_eq!(
@@ -63,9 +63,9 @@ fn repeated_candidate_uses_previous_summary_and_only_newly_aged_messages() {
         user("current"),
     ];
     let (source, policy) = checkpoint_digests(&messages, 3);
-    let first = append_orchestrator_compaction_checkpoint(
+    let first = append_session_compaction_checkpoint(
         &path,
-        &NewOrchestratorCompactionCheckpoint {
+        &NewSessionCompactionCheckpoint {
             session_id: "session".to_string(),
             previous_checkpoint_id: None,
             summary: installed_summary("prior summary"),
@@ -108,9 +108,9 @@ fn repeated_candidate_uses_previous_summary_and_only_newly_aged_messages() {
     store::initialize(&end_path).unwrap();
     store::insert_test_session(&end_path, "session");
     let (end_source, end_policy) = checkpoint_digests(&end_messages, 1);
-    let end_parent = append_orchestrator_compaction_checkpoint(
+    let end_parent = append_session_compaction_checkpoint(
         &end_path,
-        &NewOrchestratorCompactionCheckpoint {
+        &NewSessionCompactionCheckpoint {
             session_id: "session".to_string(),
             previous_checkpoint_id: None,
             summary: installed_summary("parent summary"),
@@ -190,9 +190,9 @@ fn historical_orchestrator_digest_does_not_validate_as_direct() {
     let messages = vec![user("old"), assistant("answer"), user("current")];
     let (source, direct_policy) = checkpoint_digests(&messages, 2);
     assert_ne!(historical_policy, direct_policy);
-    append_orchestrator_compaction_checkpoint(
+    append_session_compaction_checkpoint(
         &path,
-        &NewOrchestratorCompactionCheckpoint {
+        &NewSessionCompactionCheckpoint {
             session_id: "session".to_string(),
             previous_checkpoint_id: None,
             summary: installed_summary("old policy summary"),
@@ -221,16 +221,16 @@ fn stale_policy_version_checkpoint_is_invalidated() {
     store::insert_test_session(&path, "session");
     let messages = vec![user("old"), assistant("answer"), user("current")];
     let (source, policy) = checkpoint_digests(&messages, 2);
-    append_orchestrator_compaction_checkpoint(
+    append_session_compaction_checkpoint(
         &path,
-        &NewOrchestratorCompactionCheckpoint {
+        &NewSessionCompactionCheckpoint {
             session_id: "session".to_string(),
             previous_checkpoint_id: None,
             summary: installed_summary("stale policy summary"),
             tail_start_message_index: 2,
             source_prefix_sha256: source,
             system_policy_sha256: policy,
-            prompt_policy_version: 2,
+            prompt_policy_version: DIRECT_PROMPT_POLICY_VERSION + 1,
             old_context_estimate: 100,
             summary_prompt_tokens: None,
             summary_completion_tokens: None,

@@ -120,11 +120,11 @@ async fn prepare_run_config_inner(
         .unwrap_or_else(|| default_config_cwd(&options.workspace_cwd, ssh_host.as_deref()));
     let settings = effective_model_settings(&options.model, config)?;
     let automatic_compaction = settings.backend == BackendKind::ChatGptCodexResponses
-        && options.orchestrator_compaction_threshold.is_none();
+        && options.compaction_threshold.is_none();
     let limits = settings.resolved.resolved_limits();
-    let orchestrator_compaction_threshold = effective_orchestrator_compaction_threshold(
+    let compaction_threshold = effective_compaction_threshold(
         options
-            .orchestrator_compaction_threshold
+            .compaction_threshold
             .or(limits.automatic_compaction_threshold),
         limits.effective_input_tokens,
     )?;
@@ -180,7 +180,7 @@ async fn prepare_run_config_inner(
             AgentConfig {
                 store_path: store_path.clone(),
                 session_id: Some(session_id.clone()),
-                orchestrator_compaction_threshold,
+                compaction_threshold,
                 initial_messages: Vec::new(),
                 event_sink: EventSink::none(),
                 workspace_cwd: remote_cwd.clone(),
@@ -214,7 +214,7 @@ async fn prepare_run_config_inner(
         session_snapshot.service_tier = settings.service_tier;
         session_snapshot.allow_insecure_http = settings.allow_insecure_http;
         session_snapshot.project_id = project_id.clone();
-        session_snapshot.orchestrator_compaction_threshold = orchestrator_compaction_threshold;
+        session_snapshot.compaction_threshold = compaction_threshold;
         session_snapshot.automatic_compaction = automatic_compaction;
         return Ok(PreparedSessionRunConfig::new(
             SessionRunConfig {
@@ -313,7 +313,7 @@ async fn prepare_run_config_inner(
             AgentConfig {
                 store_path: store_path.clone(),
                 session_id: Some(session_id.clone()),
-                orchestrator_compaction_threshold,
+                compaction_threshold,
                 initial_messages: Vec::new(),
                 event_sink: EventSink::none(),
                 workspace_cwd: workspace_cwd.clone(),
@@ -347,7 +347,7 @@ async fn prepare_run_config_inner(
         session_snapshot.service_tier = settings.service_tier;
         session_snapshot.allow_insecure_http = settings.allow_insecure_http;
         session_snapshot.project_id = project_id;
-        session_snapshot.orchestrator_compaction_threshold = orchestrator_compaction_threshold;
+        session_snapshot.compaction_threshold = compaction_threshold;
         session_snapshot.automatic_compaction = automatic_compaction;
         Ok(SessionRunConfig {
             agent,

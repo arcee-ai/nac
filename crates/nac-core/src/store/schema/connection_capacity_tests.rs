@@ -79,7 +79,7 @@ fn cached_writers_and_event_subscribers_hold_no_connection_capacity() {
     assert_eq!(active_connection_counts(&path).unwrap().1, 0);
 
     let transcript = TranscriptLogWriter::new(&path).unwrap();
-    let events = crate::events::SessionEventBus::with_thread_event_store(
+    let events = crate::events::SessionEventBus::with_session_event_store(
         Some("idle-session".to_string()),
         path.clone(),
     );

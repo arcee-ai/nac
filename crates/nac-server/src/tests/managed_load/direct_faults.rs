@@ -602,7 +602,7 @@ async fn direct_child_append_failure_and_reconstruction() {
         let connection = rusqlite::Connection::open(path).unwrap();
         connection.execute_batch("CREATE TABLE all612_append_fault_target (session_id TEXT NOT NULL);").unwrap();
         connection.execute("INSERT INTO all612_append_fault_target VALUES (?1)", [&child_id]).unwrap();
-        connection.execute_batch("CREATE TRIGGER all612_fail_child_append BEFORE INSERT ON thread_events WHEN NEW.session_id IN (SELECT session_id FROM all612_append_fault_target) BEGIN SELECT RAISE(ABORT, 'injected direct append failure'); END;").unwrap();
+        connection.execute_batch("CREATE TRIGGER all612_fail_child_append BEFORE INSERT ON session_events WHEN NEW.session_id IN (SELECT session_id FROM all612_append_fault_target) BEGIN SELECT RAISE(ABORT, 'injected direct append failure'); END;").unwrap();
     }).await.unwrap();
     model.child_gate.release();
     let store = manager.inner.store_path.clone();

@@ -2,6 +2,9 @@
 use super::*;
 
 pub(super) fn backfill_session_summaries(conn: &Connection) -> Result<()> {
+    // This backfill runs only before the v55 ledger rename. Adapt its read-only
+    // projection to the current transcript helpers without changing old rows.
+    conn.execute_batch("CREATE TEMP VIEW session_events AS SELECT id, session_id, CASE WHEN thread_name='__orchestrator__' THEN '__nac_transcript__' ELSE thread_name END AS event_target, event_json, created_at FROM main.thread_events")?;
     let rows = {
         let mut statement = conn.prepare("SELECT session_id, messages_json FROM sessions")?;
         let rows = statement
@@ -37,5 +40,6 @@ pub(super) fn backfill_session_summaries(conn: &Connection) -> Result<()> {
             params![visible_count, last_user_prompt, session_id],
         )?;
     }
+    conn.execute_batch("DROP VIEW temp.session_events")?;
     Ok(())
 }

@@ -652,7 +652,7 @@ fn native_and_scheduled_reservations_reject_shared_request_identity_in_both_orde
                         api_key_env: None,
                         reasoning_effort: None,
                         extra_headers: None,
-                        orchestrator_compaction_threshold: None,
+                        compaction_threshold: None,
                     }),
                     pinned_commit: None,
                     default_ref: None,
@@ -803,4 +803,63 @@ fn native_task_freezes_speed_and_does_not_inherit_it_for_a_different_model() {
         reserve_native_task_launch(&path, "caller", "p", &cwd(&path), false, changed).unwrap();
     assert_eq!(other.model_selection.unwrap().service_tier, None);
     std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}
+
+#[test]
+fn v54_native_sidecar_replay_preserves_raw_request_and_selection() {
+    for threshold in [None, Some(8192)] {
+        let (path, request) = fixture();
+        let conn = open_runtime_connection(&path).unwrap();
+        conn.execute(
+            "UPDATE sessions SET compaction_threshold=?1,service_tier=?2 WHERE session_id='caller'",
+            params![threshold, threshold.map(|_| "fast")],
+        )
+        .unwrap();
+        drop(conn);
+        let first =
+            reserve_native_task_launch(&path, "caller", "p", &cwd(&path), false, request.clone())
+                .unwrap();
+        let conn = open_runtime_connection(&path).unwrap();
+        let raw: String = conn
+            .query_row(
+                "SELECT request_json FROM native_task_launches WHERE request_id=?1",
+                [&request.request_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let legacy = raw.replace(
+            "\"compaction_threshold\":",
+            "\"orchestrator_compaction_threshold\":",
+        );
+        conn.execute(
+            "UPDATE native_task_launches SET request_json=?2 WHERE request_id=?1",
+            params![request.request_id, legacy],
+        )
+        .unwrap();
+        legacy_task_model::capture_for_test(&conn).unwrap();
+        drop(conn);
+        initialize(&path).unwrap();
+        assert_eq!(
+            reserve_native_task_launch(&path, "caller", "p", &cwd(&path), false, request.clone())
+                .unwrap(),
+            first
+        );
+        let mut changed = request.clone();
+        changed.prompt.push('!');
+        assert!(
+            reserve_native_task_launch(&path, "caller", "p", &cwd(&path), false, changed).is_err()
+        );
+        let conn = open_runtime_connection(&path).unwrap();
+        assert_eq!(
+            conn.query_row::<String, _, _>(
+                "SELECT request_json FROM native_task_launches WHERE request_id=?1",
+                [&request.request_id],
+                |row| row.get(0)
+            )
+            .unwrap(),
+            legacy
+        );
+        drop(conn);
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
 }

@@ -1,4 +1,4 @@
--- Direct-only schema for a new store. Historical stores use versioned migrations.
+-- Current direct-session schema. Historical stores use versioned migrations.
 
 CREATE TABLE "heartbeat_commands" (
             session_id TEXT NOT NULL,
@@ -9,7 +9,6 @@ CREATE TABLE "heartbeat_commands" (
             created_at_ms INTEGER NOT NULL,
             PRIMARY KEY(session_id,request_id)
         );
-
 CREATE TABLE heartbeat_fresh_destinations (
             schedule_id TEXT PRIMARY KEY REFERENCES heartbeat_schedules(schedule_id) ON DELETE CASCADE,
             project_id TEXT NOT NULL,
@@ -17,7 +16,6 @@ CREATE TABLE heartbeat_fresh_destinations (
             destination_json TEXT NOT NULL,
             binding_json TEXT NOT NULL
         );
-
 CREATE TABLE "heartbeat_occurrences" (
             occurrence_id TEXT PRIMARY KEY,
             schedule_id TEXT NOT NULL REFERENCES heartbeat_schedules(schedule_id) ON DELETE CASCADE,
@@ -44,19 +42,16 @@ CREATE TABLE "heartbeat_occurrences" (
             settlement_sequence INTEGER UNIQUE CHECK(settlement_sequence > 0),
             CHECK ((state IN ('settled','withdrawn')) = (settlement_sequence IS NOT NULL))
         );
-
 CREATE TABLE heartbeat_retained_allowance (
             singleton INTEGER PRIMARY KEY CHECK(singleton=1),
             retained_limit INTEGER NOT NULL CHECK(retained_limit BETWEEN 1 AND 10000),
             revision INTEGER NOT NULL DEFAULT 1 CHECK(revision>=1)
         );
-
 CREATE TABLE heartbeat_retained_commands (
             request_id TEXT PRIMARY KEY,
             canonical_digest TEXT NOT NULL,
             response_json TEXT NOT NULL
         );
-
 CREATE TABLE "heartbeat_schedules" (
             schedule_id TEXT PRIMARY KEY,
             session_id TEXT REFERENCES sessions(session_id) ON DELETE CASCADE,
@@ -74,7 +69,6 @@ CREATE TABLE "heartbeat_schedules" (
             created_at_ms INTEGER NOT NULL,
             updated_at_ms INTEGER NOT NULL
         );
-
 CREATE TABLE heartbeat_task_launches (
             occurrence_id TEXT PRIMARY KEY,
             schedule_id TEXT NOT NULL,
@@ -90,7 +84,6 @@ CREATE TABLE heartbeat_task_launches (
             created_at_ms INTEGER NOT NULL,
             CHECK((initial_run_id IS NULL)=(initial_generation IS NULL))
         );
-
 CREATE TABLE human_shell_operations (
         session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
         request_id TEXT NOT NULL,
@@ -101,7 +94,6 @@ CREATE TABLE human_shell_operations (
         PRIMARY KEY (session_id, request_id),
         UNIQUE (session_id, operation_id)
     );
-
 CREATE TABLE managed_control_attempts (
              jti TEXT PRIMARY KEY,
              operation_id TEXT NOT NULL,
@@ -112,7 +104,6 @@ CREATE TABLE managed_control_attempts (
              FOREIGN KEY (operation_id) REFERENCES managed_control_operations(operation_id)
                  ON DELETE RESTRICT
          );
-
 CREATE TABLE managed_control_operations (
              operation_id TEXT PRIMARY KEY,
              binding_json TEXT NOT NULL,
@@ -121,7 +112,6 @@ CREATE TABLE managed_control_operations (
              updated_at TEXT NOT NULL,
              version INTEGER NOT NULL DEFAULT 0 CHECK (version >= 0)
          );
-
 CREATE TABLE managed_host_maintenance (
              singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
              state TEXT NOT NULL CHECK (state IN ('serving', 'maintenance')),
@@ -136,7 +126,6 @@ CREATE TABLE managed_host_maintenance (
                  (state = 'maintenance' AND operation_id IS NOT NULL AND target_json IS NOT NULL AND prepared_at IS NOT NULL)
              )
          );
-
 CREATE TABLE native_task_launches (
         request_id TEXT PRIMARY KEY, caller_session_id TEXT NOT NULL,
         project_id TEXT NOT NULL, request_json TEXT NOT NULL,
@@ -145,8 +134,7 @@ CREATE TABLE native_task_launches (
         phase TEXT NOT NULL CHECK(phase IN ('reserved','preparing_runtime','ready','failed','cancelled')),
         error TEXT, first_input_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
     );
-
-CREATE TABLE orchestrator_compaction_checkpoints (
+CREATE TABLE "session_compaction_checkpoints" (
              id INTEGER PRIMARY KEY AUTOINCREMENT,
              session_id TEXT NOT NULL
                  REFERENCES sessions(session_id) ON DELETE CASCADE,
@@ -178,10 +166,9 @@ CREATE TABLE orchestrator_compaction_checkpoints (
              created_at TEXT NOT NULL,
              UNIQUE (session_id, id),
              FOREIGN KEY (session_id, previous_checkpoint_id)
-                 REFERENCES orchestrator_compaction_checkpoints(session_id, id)
+                 REFERENCES "session_compaction_checkpoints"(session_id, id)
                  ON DELETE CASCADE
          );
-
 CREATE TABLE peer_goal_starts (
             caller_session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
             request_id TEXT NOT NULL CHECK (length(request_id) BETWEEN 1 AND 160),
@@ -190,7 +177,6 @@ CREATE TABLE peer_goal_starts (
             response_json TEXT NOT NULL,
             PRIMARY KEY(caller_session_id, request_id)
         );
-
 CREATE TABLE permission_grants (
              id TEXT PRIMARY KEY,
              session_id TEXT NOT NULL
@@ -203,11 +189,9 @@ CREATE TABLE permission_grants (
              created_at TEXT NOT NULL,
              UNIQUE (session_id, action, resource, backend, session_config_version)
          );
-
 CREATE TABLE project_git_sources (
         project_id TEXT PRIMARY KEY, source_json TEXT NOT NULL
     );
-
 CREATE TABLE projects (
              project_id TEXT PRIMARY KEY,
              name TEXT NOT NULL CHECK (length(trim(name)) > 0),
@@ -223,7 +207,6 @@ CREATE TABLE projects (
                  OR (ssh_host IS NOT NULL AND length(trim(ssh_host)) > 0)
              )
          );
-
 CREATE TABLE provider_connections (
              connection_id TEXT PRIMARY KEY,
              backend TEXT NOT NULL,
@@ -233,28 +216,24 @@ CREATE TABLE provider_connections (
              created_at TEXT NOT NULL,
              updated_at TEXT NOT NULL
          );
-
 CREATE TABLE session_completion_bindings (
              session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
-             run_id TEXT NOT NULL, submitted_message_id INTEGER NOT NULL REFERENCES thread_events(id) ON DELETE CASCADE,
+             run_id TEXT NOT NULL, submitted_message_id INTEGER NOT NULL REFERENCES "session_events"(id) ON DELETE CASCADE,
              behavior TEXT NOT NULL CHECK(behavior IN ('orchestrator','direct','direct-with-orchestrator')),
              eligible INTEGER NOT NULL CHECK(eligible IN (0,1)),
              goal_participated INTEGER NOT NULL DEFAULT 0 CHECK(goal_participated IN (0,1)),
              question_yield INTEGER NOT NULL DEFAULT 0 CHECK(question_yield IN (0,1)),
              PRIMARY KEY(session_id,run_id)
          );
-
 CREATE TABLE session_completion_feed (
              singleton INTEGER PRIMARY KEY CHECK(singleton=1), store_id TEXT NOT NULL UNIQUE
          );
-
 CREATE TABLE session_completion_marks (
              session_id TEXT NOT NULL, run_id TEXT NOT NULL, goal_id TEXT NOT NULL,
              mark_version INTEGER NOT NULL CHECK(mark_version>=0),
              PRIMARY KEY(session_id,goal_id,mark_version),
              FOREIGN KEY(session_id,run_id) REFERENCES session_completion_bindings(session_id,run_id) ON DELETE CASCADE
          );
-
 CREATE TABLE session_completion_occurrences (
              sequence INTEGER PRIMARY KEY AUTOINCREMENT,
              session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
@@ -266,7 +245,6 @@ CREATE TABLE session_completion_occurrences (
              CHECK((kind='request' AND goal_id IS NULL AND mark_version IS NULL) OR
                    (kind='goal' AND goal_id IS NOT NULL AND mark_version IS NOT NULL AND mark_version>=0))
          );
-
 CREATE TABLE session_forks (
              source_session_id TEXT NOT NULL,
              fork_session_id TEXT NOT NULL,
@@ -276,7 +254,6 @@ CREATE TABLE session_forks (
              source_title TEXT,
              PRIMARY KEY (source_session_id, fork_session_id)
          );
-
 CREATE TABLE session_goal_outcomes (
              id INTEGER PRIMARY KEY AUTOINCREMENT,
              session_id TEXT NOT NULL
@@ -296,7 +273,6 @@ CREATE TABLE session_goal_outcomes (
              last_run_id TEXT,
              UNIQUE (session_id, goal_id)
          );
-
 CREATE TABLE session_goals (
              session_id TEXT PRIMARY KEY
                  REFERENCES sessions(session_id) ON DELETE CASCADE,
@@ -331,7 +307,6 @@ CREATE TABLE session_goals (
                   AND (continuation_run_id IS NULL OR continuation_run_id = accounting_run_id))
              )
          );
-
 CREATE TABLE session_inbox (
              id INTEGER PRIMARY KEY AUTOINCREMENT,
              session_id TEXT NOT NULL
@@ -355,13 +330,11 @@ CREATE TABLE session_inbox (
                  OR (status = 'cancelled' AND delivered_run_id IS NULL AND delivered_at IS NULL AND cancelled_at IS NOT NULL)
              )
          );
-
 CREATE TABLE session_mcp_refresh (
              session_id TEXT PRIMARY KEY NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
              revision INTEGER NOT NULL CHECK (revision > 0),
              requested_at TEXT NOT NULL
          );
-
 CREATE TABLE session_presentations (
              session_id TEXT PRIMARY KEY
                  REFERENCES sessions(session_id) ON DELETE CASCADE,
@@ -370,14 +343,12 @@ CREATE TABLE session_presentations (
              sort_order INTEGER NOT NULL DEFAULT 0 CHECK (sort_order >= 0),
              version INTEGER NOT NULL DEFAULT 0 CHECK (version >= 0)
          );
-
 CREATE TABLE session_projects (
              session_id TEXT PRIMARY KEY
                  REFERENCES sessions(session_id) ON DELETE CASCADE,
              project_id TEXT NOT NULL
                  REFERENCES projects(project_id) ON DELETE RESTRICT
          );
-
 CREATE TABLE session_run_outcomes (
              id INTEGER PRIMARY KEY AUTOINCREMENT,
              session_id TEXT NOT NULL
@@ -391,19 +362,17 @@ CREATE TABLE session_run_outcomes (
              finished_at TEXT NOT NULL,
              UNIQUE (session_id, run_id)
          );
-
 CREATE TABLE session_run_recovery (
              session_id TEXT PRIMARY KEY
                  REFERENCES sessions(session_id) ON DELETE CASCADE,
              run_id TEXT NOT NULL CHECK (length(trim(run_id)) > 0),
              submitted_message_id INTEGER NOT NULL
-                 REFERENCES thread_events(id) ON DELETE CASCADE,
+                 REFERENCES "session_events"(id) ON DELETE CASCADE,
              status TEXT NOT NULL CHECK (status IN ('active', 'interrupted', 'failed')),
              terminal_disposition TEXT
                  CHECK (terminal_disposition IN ('completed', 'cancelled')),
              failure_json TEXT
          );
-
 CREATE TABLE sessions (
              session_id TEXT PRIMARY KEY,
              behavior TEXT NOT NULL DEFAULT 'direct'
@@ -434,15 +403,14 @@ CREATE TABLE sessions (
              token_usages_json TEXT,
              config_version INTEGER NOT NULL DEFAULT 0 CHECK (config_version >= 0),
              run_count INTEGER NOT NULL DEFAULT 0 CHECK (run_count >= 0),
-             orchestrator_compaction_threshold INTEGER
-                 CHECK (orchestrator_compaction_threshold IS NULL OR
-                        (typeof(orchestrator_compaction_threshold) = 'integer' AND
-                         orchestrator_compaction_threshold > 0 AND
-                         orchestrator_compaction_threshold <= 9007199254740991)),
+             compaction_threshold INTEGER
+                 CHECK (compaction_threshold IS NULL OR
+                        (typeof(compaction_threshold) = 'integer' AND
+                         compaction_threshold > 0 AND
+                         compaction_threshold <= 9007199254740991)),
              created_at TEXT NOT NULL,
              updated_at TEXT NOT NULL
          , host_id TEXT, automatic_compaction INTEGER NOT NULL DEFAULT 0, ssh_port INTEGER CHECK (ssh_port IS NULL OR (ssh_port > 0 AND ssh_port <= 65535)), ssh_identity_file TEXT, permission_reviewer TEXT NOT NULL DEFAULT 'user' CHECK (permission_reviewer IN ('user', 'auto_review') AND (permission_reviewer = 'user' OR permission_approval_mode = 'manual')), permission_review_intent TEXT, service_tier TEXT);
-
 CREATE TABLE ssh_configurations (
              config_id TEXT PRIMARY KEY,
              name TEXT NOT NULL UNIQUE,
@@ -452,7 +420,6 @@ CREATE TABLE ssh_configurations (
              created_at TEXT NOT NULL,
              updated_at TEXT NOT NULL
          );
-
 CREATE TABLE task_followup_delegations (
             id TEXT PRIMARY KEY,
             caller_session_id TEXT NOT NULL,
@@ -467,7 +434,6 @@ CREATE TABLE task_followup_delegations (
             revoked_at TEXT,
             UNIQUE(caller_session_id,human_request_id)
         );
-
 CREATE TABLE task_followups (
             caller_session_id TEXT NOT NULL,
             request_id TEXT NOT NULL,
@@ -479,7 +445,6 @@ CREATE TABLE task_followups (
             created_at TEXT NOT NULL, delegation_id TEXT REFERENCES task_followup_delegations(id),
             PRIMARY KEY (caller_session_id, request_id)
         );
-
 CREATE TABLE task_launches (
         request_id TEXT PRIMARY KEY, project_id TEXT NOT NULL,
         session_id TEXT NOT NULL UNIQUE, request_json TEXT NOT NULL,
@@ -487,7 +452,6 @@ CREATE TABLE task_launches (
         phase TEXT NOT NULL CHECK(phase IN ('pinned','preparing_workspace','preparing_runtime','ready','failed','cancelled')),
         error TEXT, first_input_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
     );
-
 CREATE TABLE task_questions (
         id INTEGER PRIMARY KEY,
         session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
@@ -512,7 +476,6 @@ CREATE TABLE task_questions (
         CHECK((answer_json IS NULL)=(continuation_run_id IS NULL)),
         CHECK((answer_json IS NULL)=(continuation_state IS NULL))
     );
-
 CREATE TABLE terminal_remote_cleanups (
              session_id TEXT NOT NULL,
              pidfile TEXT NOT NULL,
@@ -520,16 +483,14 @@ CREATE TABLE terminal_remote_cleanups (
              PRIMARY KEY (session_id, pidfile),
              FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE RESTRICT
          );
-
-CREATE TABLE thread_events (
+CREATE TABLE "session_events" (
              id INTEGER PRIMARY KEY AUTOINCREMENT,
              session_id TEXT NOT NULL
                  REFERENCES sessions(session_id) ON DELETE CASCADE,
-             thread_name TEXT NOT NULL,
+             event_target TEXT NOT NULL,
              event_json TEXT NOT NULL,
              created_at TEXT NOT NULL
          );
-
 CREATE TABLE traditional_child_terminal_receipts (
              child_session_id TEXT NOT NULL
                  REFERENCES traditional_children(child_session_id) ON DELETE CASCADE,
@@ -539,7 +500,6 @@ CREATE TABLE traditional_child_terminal_receipts (
              PRIMARY KEY (child_session_id, generation),
              UNIQUE (child_session_id, run_id)
          );
-
 CREATE TABLE traditional_children (
              child_session_id TEXT PRIMARY KEY
                  REFERENCES sessions(session_id) ON DELETE CASCADE,
@@ -585,7 +545,6 @@ CREATE TABLE traditional_children (
                   AND execution_mode IS NOT NULL)
              )
          );
-
 CREATE TABLE transcript_append_receipts (
              session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
              operation_id TEXT NOT NULL,
@@ -594,11 +553,10 @@ CREATE TABLE transcript_append_receipts (
              generation INTEGER,
              start_idx INTEGER NOT NULL CHECK (start_idx >= 0),
              end_idx INTEGER NOT NULL CHECK (end_idx > start_idx),
-             last_message_id INTEGER NOT NULL REFERENCES thread_events(id) ON DELETE CASCADE,
+             last_message_id INTEGER NOT NULL REFERENCES "session_events"(id) ON DELETE CASCADE,
              result_json TEXT,
              PRIMARY KEY (session_id, operation_id)
          );
-
 CREATE TABLE workspace_revisions (
              id INTEGER PRIMARY KEY AUTOINCREMENT,
              session_id TEXT NOT NULL
@@ -615,19 +573,10 @@ CREATE TABLE workspace_revisions (
              transcript_len INTEGER CHECK (transcript_len IS NULL OR transcript_len >= 0),
              UNIQUE (session_id, run_id)
          );
-
 CREATE INDEX idx_sessions_updated_at
              ON sessions(updated_at DESC);
-
-CREATE INDEX idx_thread_events_session_thread_id
-             ON thread_events(session_id, thread_name, id DESC);
-
-CREATE INDEX idx_orchestrator_compaction_checkpoints_latest
-             ON orchestrator_compaction_checkpoints(session_id, id DESC);
-
 CREATE INDEX idx_workspace_revisions_session
              ON workspace_revisions(session_id, id DESC);
-
 CREATE UNIQUE INDEX idx_projects_location
              ON projects (
                  cwd,
@@ -635,91 +584,60 @@ CREATE UNIQUE INDEX idx_projects_location
                  COALESCE(ssh_port, 0),
                  COALESCE(ssh_identity_file, '')
              );
-
 CREATE INDEX idx_session_projects_project
              ON session_projects(project_id, session_id);
-
 CREATE INDEX idx_ssh_configurations_name ON ssh_configurations(name);
-
 CREATE INDEX idx_session_inbox_pending
              ON session_inbox(session_id, status, id);
-
 CREATE INDEX idx_session_inbox_target
              ON session_inbox(session_id, target_run_id, status, id);
-
 CREATE UNIQUE INDEX idx_session_inbox_admission ON session_inbox(session_id,admission_id) WHERE admission_id IS NOT NULL;
-
 CREATE INDEX idx_permission_grants_session
              ON permission_grants(session_id, backend, session_config_version, created_at, id);
-
 CREATE INDEX idx_session_goals_status
              ON session_goals(status, updated_at, session_id);
-
 CREATE INDEX idx_traditional_children_parent
              ON traditional_children(parent_session_id, created_at, child_session_id);
-
 CREATE INDEX idx_traditional_children_root_running
              ON traditional_children(root_session_id, status, updated_at, child_session_id);
-
 CREATE INDEX idx_session_forks_source
              ON session_forks(source_session_id, source_message_idx);
-
 CREATE UNIQUE INDEX idx_session_forks_fork
              ON session_forks(fork_session_id);
-
 CREATE INDEX idx_managed_control_attempts_operation
              ON managed_control_attempts(operation_id);
-
 CREATE INDEX idx_session_run_outcomes_session
              ON session_run_outcomes(session_id, id DESC);
-
 CREATE INDEX idx_session_goal_outcomes_session
              ON session_goal_outcomes(session_id, id DESC);
-
 CREATE UNIQUE INDEX task_followup_delegations_active
         ON task_followup_delegations(caller_session_id,target_session_id,action)
         WHERE revoked_at IS NULL;
-
 CREATE INDEX idx_peer_goal_starts_target ON peer_goal_starts(target_session_id);
-
 CREATE UNIQUE INDEX one_pending_task_question
         ON task_questions(session_id) WHERE status='pending';
-
 CREATE INDEX idx_heartbeat_due ON heartbeat_schedules(state,next_due_ms);
-
 CREATE INDEX idx_heartbeat_session ON heartbeat_schedules(session_id);
-
 CREATE INDEX idx_heartbeat_fresh_project ON heartbeat_fresh_destinations(project_id);
-
 CREATE INDEX idx_heartbeat_retained_schedule ON heartbeat_task_launches(schedule_id);
-
 CREATE UNIQUE INDEX idx_completion_request
              ON session_completion_occurrences(session_id,run_id) WHERE kind='request';
-
 CREATE UNIQUE INDEX idx_completion_goal
              ON session_completion_occurrences(session_id,goal_id,mark_version) WHERE kind='goal';
-
 CREATE INDEX idx_completion_session
              ON session_completion_occurrences(session_id,sequence);
-
 CREATE UNIQUE INDEX idx_heartbeat_pending
             ON heartbeat_occurrences(schedule_id) WHERE state='pending';
-
 CREATE UNIQUE INDEX idx_heartbeat_active
             ON heartbeat_occurrences(schedule_id) WHERE state='admitted';
-
 CREATE INDEX idx_heartbeat_history ON heartbeat_occurrences(schedule_id,due_last_ms DESC);
-
 CREATE INDEX idx_heartbeat_run ON heartbeat_occurrences(session_id,run_id);
-
 CREATE INDEX idx_provider_connections_backend
              ON provider_connections(backend, updated_at);
-
 CREATE TRIGGER session_direct_only_update BEFORE UPDATE OF behavior ON sessions
          WHEN NEW.behavior <> 'direct' BEGIN SELECT RAISE(ABORT, 'retired session behavior'); END;
-
 CREATE TRIGGER session_direct_inbox_origin_insert BEFORE INSERT ON session_inbox WHEN NEW.completion_source = 'managed_orchestrator' BEGIN SELECT RAISE(ABORT, 'retired inbox origin'); END;
-
 CREATE TRIGGER session_direct_inbox_origin_update BEFORE UPDATE OF completion_source ON session_inbox WHEN NEW.completion_source = 'managed_orchestrator' BEGIN SELECT RAISE(ABORT, 'retired inbox origin'); END;
-
 CREATE TRIGGER session_direct_only_insert BEFORE INSERT ON sessions WHEN NEW.behavior <> 'direct' BEGIN SELECT RAISE(ABORT, 'retired session behavior'); END;
+CREATE INDEX idx_session_events_session_target_id ON session_events(session_id, event_target, id DESC);
+CREATE INDEX idx_session_compaction_checkpoints_latest ON session_compaction_checkpoints(session_id, id DESC);

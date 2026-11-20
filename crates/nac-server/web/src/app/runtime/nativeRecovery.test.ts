@@ -94,7 +94,7 @@ function snapshot(text: string): SessionSnapshotResponse {
     message_page: { start: 0, end: 1, total: 1, has_older: false },
     response_timing: {},
     sessions: [],
-    thread_event_boundary: { epoch_id: "epoch-one", sequence_id: 1 },
+    session_event_boundary: { epoch_id: "epoch-one", sequence_id: 1 },
     workspace: {
       changed_files: [],
       total_additions: 0,

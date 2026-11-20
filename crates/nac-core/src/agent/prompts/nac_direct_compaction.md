@@ -16,7 +16,7 @@ Record important approaches selected or rejected, their rationale, assumptions, 
 Record consequential implementation, investigation, review, and side effects. Include relevant files, modules, migrations, commits, branches, processes, services, ports, and ownership boundaries. Preserve whether changes were merely proposed, applied, verified, committed, or published.
 
 ## Tools, terminals, and delegated work
-Record tool calls only when their outcome or state matters. Preserve active or retained terminal handles, background processes, cancellation state, approvals or denials, durable child-session identifiers and status, managed orchestrator relationships, and completion delivery that a resumed agent must understand. Treat child reports as reports unless independently verified.
+Record tool calls only when their outcome or state matters. Preserve active or retained terminal handles, background processes, cancellation state, approvals or denials, durable child-session identifiers and status, and completion delivery that a resumed agent must understand. Treat child reports as reports unless independently verified.
 
 ## Verification and failures
 Record material commands, cwd or execution backend, observed outcomes, pass/fail counts, decisive diagnostics, skipped checks, and caveats. Distinguish independently observed evidence from reported evidence and note when later changes may have invalidated earlier verification.

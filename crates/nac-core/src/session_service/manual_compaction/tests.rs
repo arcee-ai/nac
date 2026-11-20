@@ -113,7 +113,7 @@ async fn committed_manual_compaction_drop_returns_success_and_cleans_up() {
         snapshot
             .as_ref()
             .and_then(|snapshot| snapshot.unattributed_token_usage.as_ref())
-            .map(|usage| usage.orchestrator_context_tokens),
+            .map(|usage| usage.context_tokens),
         Some(256)
     );
     drop(snapshot);
@@ -130,7 +130,7 @@ async fn committed_manual_compaction_drop_returns_success_and_cleans_up() {
         stored
             .unattributed_token_usage
             .as_ref()
-            .map(|usage| usage.orchestrator_context_tokens),
+            .map(|usage| usage.context_tokens),
         Some(256)
     );
     let events = parts.service.recent_events(None, 64).1;
@@ -139,8 +139,8 @@ async fn committed_manual_compaction_drop_returns_success_and_cleans_up() {
             .iter()
             .filter(
                 |event| matches!(event.event, crate::events::SessionEvent::Agent {
-                event: AgentEvent::OrchestratorCompactionCompleted { compaction_id, .. }
-                    | AgentEvent::OrchestratorCompactionFailed { compaction_id, .. }
+                event: AgentEvent::CompactionCompleted { compaction_id, .. }
+                    | AgentEvent::CompactionFailed { compaction_id, .. }
             } if compaction_id == id)
             )
             .count(),
@@ -282,13 +282,13 @@ async fn manual_compaction_and_run_admission_are_mutually_exclusive() {
     assert!(matches!(
         published[0].event,
         SessionEvent::Agent {
-            event: AgentEvent::OrchestratorCompactionStarted { .. }
+            event: AgentEvent::CompactionStarted { .. }
         }
     ));
     assert!(matches!(
         published[1].event,
         SessionEvent::Agent {
-            event: AgentEvent::OrchestratorCompactionSkipped {
+            event: AgentEvent::CompactionSkipped {
                 cause: CompactionSkipReason::NoEligibleBoundary,
                 ..
             }
@@ -497,15 +497,14 @@ async fn assert_two_service_admissions_refresh_external_checkpoint(
         parts_a.service.try_compact().unwrap().wait().await.unwrap(),
         SessionCompactionResult::Compacted { .. }
     ));
-    let first_checkpoint =
-        crate::store::orchestrator_compaction::load_orchestrator_compaction_checkpoints(
-            &store_path,
-            &session_id,
-        )
-        .unwrap()
-        .into_iter()
-        .next()
-        .unwrap();
+    let first_checkpoint = crate::store::session_compaction::load_session_compaction_checkpoints(
+        &store_path,
+        &session_id,
+    )
+    .unwrap()
+    .into_iter()
+    .next()
+    .unwrap();
 
     let mut events = parts_b.service.subscribe_events();
     let run = if supplied_leases {
@@ -571,12 +570,11 @@ async fn assert_two_service_admissions_refresh_external_checkpoint(
     assert!(!manual_request.contains("old request"));
     assert!(!manual_request.contains("old answer"));
 
-    let checkpoints =
-        crate::store::orchestrator_compaction::load_orchestrator_compaction_checkpoints(
-            &store_path,
-            &session_id,
-        )
-        .unwrap();
+    let checkpoints = crate::store::session_compaction::load_session_compaction_checkpoints(
+        &store_path,
+        &session_id,
+    )
+    .unwrap();
     assert_eq!(checkpoints.len(), 2);
     assert_eq!(
         checkpoints[0].previous_checkpoint_id,
@@ -693,7 +691,7 @@ async fn sequential_run_admission_preserves_provider_context_sample_for_threshol
             .filter(|envelope| matches!(
                 envelope.event,
                 SessionEvent::Agent {
-                    event: AgentEvent::OrchestratorCompactionStarted {
+                    event: AgentEvent::CompactionStarted {
                         reason: CompactionReason::Auto,
                         ..
                     },
@@ -703,7 +701,7 @@ async fn sequential_run_admission_preserves_provider_context_sample_for_threshol
         0
     );
     assert!(
-        crate::store::orchestrator_compaction::load_orchestrator_compaction_checkpoints(
+        crate::store::session_compaction::load_session_compaction_checkpoints(
             &store_path,
             session_id,
         )
@@ -827,7 +825,7 @@ async fn manual_compaction_success_preserves_snapshot_and_emits_context_before_r
         persisted_before.last_response_duration_ms
     );
     let unattributed = snapshot_after.unattributed_token_usage.as_ref().unwrap();
-    assert!(unattributed.orchestrator_context_tokens > 0);
+    assert!(unattributed.context_tokens > 0);
     let agent = parts.service.agent.lock().await;
     assert_eq!(
         serde_json::to_vec(&agent.messages).unwrap(),
@@ -840,7 +838,7 @@ async fn manual_compaction_success_preserves_snapshot_and_emits_context_before_r
         vec![queued_input]
     );
     assert_eq!(
-        crate::store::orchestrator_compaction::load_orchestrator_compaction_checkpoints(
+        crate::store::session_compaction::load_session_compaction_checkpoints(
             &store_path,
             "success-session"
         )
@@ -857,7 +855,7 @@ async fn manual_compaction_success_preserves_snapshot_and_emits_context_before_r
     assert!(matches!(
         published[0].event,
         SessionEvent::Agent {
-            event: AgentEvent::OrchestratorCompactionStarted {
+            event: AgentEvent::CompactionStarted {
                 compaction_id,
                 reason: CompactionReason::Manual,
             }
@@ -872,7 +870,7 @@ async fn manual_compaction_success_preserves_snapshot_and_emits_context_before_r
     assert!(matches!(
         published[2].event,
         SessionEvent::Agent {
-            event: AgentEvent::OrchestratorCompactionCompleted {
+            event: AgentEvent::CompactionCompleted {
                 compaction_id,
                 reason: CompactionReason::Manual,
             }
@@ -918,7 +916,7 @@ async fn manual_compaction_failure_and_cancellation_emit_terminal_and_clear_oper
     assert!(matches!(
         failed_published[1].event,
         SessionEvent::Agent {
-            event: AgentEvent::OrchestratorCompactionFailed {
+            event: AgentEvent::CompactionFailed {
                 compaction_id,
                 failure: CompactionFailure::SummaryRequestFailed,
                 ..
@@ -966,7 +964,7 @@ async fn manual_compaction_failure_and_cancellation_emit_terminal_and_clear_oper
     release_tx.send(()).unwrap();
     assert_eq!(cancel_server.finish().len(), 1);
     assert!(
-        crate::store::orchestrator_compaction::load_orchestrator_compaction_checkpoints(
+        crate::store::session_compaction::load_session_compaction_checkpoints(
             &cancel_store,
             "cancel-session"
         )
@@ -985,7 +983,7 @@ async fn manual_compaction_failure_and_cancellation_emit_terminal_and_clear_oper
     assert!(matches!(
         cancelled[1].event,
         SessionEvent::Agent {
-            event: AgentEvent::OrchestratorCompactionFailed {
+            event: AgentEvent::CompactionFailed {
                 compaction_id,
                 failure: CompactionFailure::Cancelled,
                 ..
@@ -1022,7 +1020,7 @@ async fn abort_after_manual_compaction_commit_cannot_supersede_completion() {
         if matches!(
             envelope.event,
             SessionEvent::Agent {
-                event: AgentEvent::OrchestratorCompactionCompleted { compaction_id, .. }
+                event: AgentEvent::CompactionCompleted { compaction_id, .. }
             } if compaction_id == id
         ) {
             break;
@@ -1045,10 +1043,10 @@ async fn abort_after_manual_compaction_commit_cannot_supersede_completion() {
             matches!(
                 envelope.event,
                 SessionEvent::Agent {
-                    event: AgentEvent::OrchestratorCompactionStarted { compaction_id, .. }
-                        | AgentEvent::OrchestratorCompactionCompleted { compaction_id, .. }
-                        | AgentEvent::OrchestratorCompactionSkipped { compaction_id, .. }
-                        | AgentEvent::OrchestratorCompactionFailed { compaction_id, .. }
+                    event: AgentEvent::CompactionStarted { compaction_id, .. }
+                        | AgentEvent::CompactionCompleted { compaction_id, .. }
+                        | AgentEvent::CompactionSkipped { compaction_id, .. }
+                        | AgentEvent::CompactionFailed { compaction_id, .. }
                 } if compaction_id == id
             )
         })
@@ -1057,7 +1055,7 @@ async fn abort_after_manual_compaction_commit_cannot_supersede_completion() {
     assert!(matches!(
         lifecycle[1].event,
         SessionEvent::Agent {
-            event: AgentEvent::OrchestratorCompactionCompleted { .. }
+            event: AgentEvent::CompactionCompleted { .. }
         }
     ));
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());

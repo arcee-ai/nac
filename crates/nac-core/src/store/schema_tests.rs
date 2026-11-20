@@ -3,6 +3,8 @@ use super::*;
 mod dependency_tests;
 #[path = "schema/http_policy_tests.rs"]
 mod http_policy_tests;
+#[path = "schema/speed_task_replay_tests.rs"]
+mod speed_task_replay_tests;
 
 pub(super) fn temp_store_path(label: &str) -> PathBuf {
     let unique = std::time::SystemTime::now()
@@ -102,7 +104,7 @@ fn insert_raw_checkpoint(
     new_estimate: i64,
 ) -> rusqlite::Result<usize> {
     conn.execute(
-        "INSERT INTO orchestrator_compaction_checkpoints
+        "INSERT INTO session_compaction_checkpoints
              (session_id, summary, tail_start_message_index,
               source_prefix_sha256, system_policy_sha256, prompt_policy_version,
               old_context_estimate, summary_prompt_tokens,
@@ -174,7 +176,7 @@ fn assert_current_schema(conn: &Connection) {
         "permission_approval_revision",
         "permission_reviewer",
         "allow_insecure_http",
-        "orchestrator_compaction_threshold",
+        "compaction_threshold",
         "visible_message_count",
         "last_user_prompt",
         "ssh_port",
@@ -182,24 +184,31 @@ fn assert_current_schema(conn: &Connection) {
     ] {
         assert!(session_columns.iter().any(|column| column == expected));
     }
-    // The direct-only cutover removes orchestration-owned storage.
     for retired in [
         "thread_steering",
+        "threads",
+        "episodes",
+        "worksets",
+        "workset_items",
+        "worker_dispatches",
         "managed_orchestrators",
         "managed_orchestrator_terminal_receipts",
         "model_configurations",
     ] {
         assert!(
-            !table_exists(conn, retired).unwrap(),
-            "retired table remains: {retired}"
+            table_columns(conn, retired).is_empty(),
+            "retired table {retired}"
         );
     }
+    assert!(!session_columns
+        .iter()
+        .any(|column| column == "light_model_json"));
     assert_eq!(
-        table_columns(conn, "thread_events"),
+        table_columns(conn, "session_events"),
         [
             "id",
             "session_id",
-            "thread_name",
+            "event_target",
             "event_json",
             "created_at"
         ]
@@ -320,7 +329,7 @@ fn assert_current_schema(conn: &Connection) {
         ["session_id", "pidfile", "created_at"]
     );
     for table in [
-        "thread_events",
+        "session_events",
         "session_inbox",
         "session_goals",
         "session_goal_outcomes",
@@ -330,7 +339,7 @@ fn assert_current_schema(conn: &Connection) {
         assert_session_cascade(conn, table);
     }
     assert_eq!(
-        table_columns(conn, "orchestrator_compaction_checkpoints"),
+        table_columns(conn, "session_compaction_checkpoints"),
         [
             "id",
             "session_id",
@@ -348,7 +357,7 @@ fn assert_current_schema(conn: &Connection) {
         ]
     );
     let checkpoint_foreign_keys = conn
-        .prepare("PRAGMA foreign_key_list(orchestrator_compaction_checkpoints)")
+        .prepare("PRAGMA foreign_key_list(session_compaction_checkpoints)")
         .unwrap()
         .query_map([], |row| {
             Ok((
@@ -371,7 +380,7 @@ fn assert_current_schema(conn: &Connection) {
     let self_foreign_keys = checkpoint_foreign_keys
         .iter()
         .filter(|(_, table, _, _, on_delete)| {
-            table == "orchestrator_compaction_checkpoints" && on_delete == "CASCADE"
+            table == "session_compaction_checkpoints" && on_delete == "CASCADE"
         })
         .map(|(id, _, from, to, _)| (*id, from.as_str(), to.as_str()))
         .collect::<Vec<_>>();
@@ -388,7 +397,7 @@ fn assert_current_schema(conn: &Connection) {
             "SELECT EXISTS(
                  SELECT 1 FROM sqlite_master
                  WHERE type = 'index'
-                   AND name = 'idx_orchestrator_compaction_checkpoints_latest'
+                   AND name = 'idx_session_compaction_checkpoints_latest'
              )",
             [],
             |row| row.get(0),
@@ -466,8 +475,8 @@ fn v16_store_purges_pre_behavior_sessions_and_establishes_downgrade_barrier() {
     insert_legacy_session(&legacy, "legacy-session");
     legacy
         .execute_batch(
-            "DROP TRIGGER IF EXISTS session_direct_only_insert;
-             DROP TRIGGER IF EXISTS session_direct_only_update;
+            "DROP TRIGGER session_direct_only_insert;
+             DROP TRIGGER session_direct_only_update;
              ALTER TABLE sessions DROP COLUMN behavior;
              PRAGMA user_version = 16;",
         )
@@ -784,7 +793,7 @@ fn v20_store_adds_durable_traditional_children() {
 }
 
 #[test]
-fn v21_store_adds_durable_managed_orchestrators() {
+fn v21_store_retires_managed_orchestrator_storage() {
     let path = temp_store_path("v21_managed_orchestrators");
     initialize_synthetic_predecessor(&path).unwrap();
     let legacy = Connection::open(&path).unwrap();
@@ -795,7 +804,7 @@ fn v21_store_adds_durable_managed_orchestrators() {
 
     initialize(&path).unwrap();
     let migrated = Connection::open(&path).unwrap();
-    assert!(!table_exists(&migrated, "managed_orchestrators").unwrap());
+    assert!(table_columns(&migrated, "managed_orchestrators").is_empty());
     assert_eq!(
         migrated
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
@@ -824,7 +833,7 @@ fn v22_store_adds_relationship_completion_obligations() {
     let migrated = Connection::open(&path).unwrap();
     assert!(table_columns(&migrated, "traditional_children")
         .contains(&"completion_suppressed".to_string()));
-    assert!(!table_exists(&migrated, "managed_orchestrators").unwrap());
+    assert!(table_columns(&migrated, "managed_orchestrators").is_empty());
     assert!(table_columns(&migrated, "session_run_recovery")
         .contains(&"terminal_disposition".to_string()));
     assert_eq!(
@@ -866,7 +875,7 @@ fn main_v0_store_retires_pre_behavior_sessions() {
         .unwrap();
     assert_eq!(version, STORE_SCHEMA_VERSION);
     assert_current_schema(&migrated);
-    assert!(!table_exists(&migrated, "episodes").unwrap());
+    assert!(table_columns(&migrated, "episodes").is_empty());
     let remaining: i64 = migrated
         .query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get(0))
         .unwrap();
@@ -942,7 +951,7 @@ fn partial_v1_tables_are_rebuilt_then_retired() {
     let migrated = Connection::open(&path).unwrap();
     assert_current_schema(&migrated);
     let remaining: i64 = migrated
-        .query_row("SELECT COUNT(*) FROM thread_events", [], |row| row.get(0))
+        .query_row("SELECT COUNT(*) FROM session_events", [], |row| row.get(0))
         .unwrap();
     assert_eq!(remaining, 0);
     drop(migrated);
@@ -1010,8 +1019,7 @@ fn v1_to_current_retires_owned_and_orphan_rows_preserving_event_sequence() {
     let migrated = open_runtime_connection(&path).unwrap();
     assert_current_schema(&migrated);
 
-    assert!(!table_exists(&migrated, "thread_steering").unwrap());
-    for table in ["sessions", "thread_events"] {
+    for table in ["sessions", "session_events"] {
         let count: i64 = migrated
             .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
                 row.get(0)
@@ -1021,7 +1029,7 @@ fn v1_to_current_retires_owned_and_orphan_rows_preserving_event_sequence() {
     }
     let event_sequence: i64 = migrated
         .query_row(
-            "SELECT seq FROM sqlite_sequence WHERE name='thread_events'",
+            "SELECT seq FROM sqlite_sequence WHERE name='session_events'",
             [],
             |row| row.get(0),
         )
@@ -1032,7 +1040,7 @@ fn v1_to_current_retires_owned_and_orphan_rows_preserving_event_sequence() {
 }
 
 #[test]
-fn pre_behavior_transcript_rows_are_retired_after_thread_events_rebuild() {
+fn pre_behavior_transcript_rows_are_retired_after_session_events_rebuild() {
     // Pre-behavior identities are retired even when their older event table
     // first needs rebuilding. Direct transcript preservation has its own fixture.
     let path = temp_store_path("transcript_survival");
@@ -1099,7 +1107,7 @@ fn pre_behavior_transcript_rows_are_retired_after_thread_events_rebuild() {
     let migrated = open_runtime_connection(&path).unwrap();
     assert_current_schema(&migrated);
     let rows = migrated
-        .prepare("SELECT id, thread_name, event_json FROM thread_events ORDER BY id")
+        .prepare("SELECT id, event_target, event_json FROM session_events ORDER BY id")
         .unwrap()
         .query_map([], |row| {
             Ok((
@@ -1146,14 +1154,14 @@ fn v2_to_v4_adds_threshold_and_empty_checkpoint_storage() {
     let migrated = open_runtime_connection(&path).unwrap();
     assert_current_schema(&migrated);
     let event: (i64, String) = migrated
-        .query_row("SELECT id, event_json FROM thread_events", [], |row| {
+        .query_row("SELECT id, event_json FROM session_events", [], |row| {
             Ok((row.get(0)?, row.get(1)?))
         })
         .unwrap();
     assert_eq!(event, (event_id, "{legacy-v2-event".to_string()));
     let checkpoint_count: i64 = migrated
         .query_row(
-            "SELECT COUNT(*) FROM orchestrator_compaction_checkpoints",
+            "SELECT COUNT(*) FROM session_compaction_checkpoints",
             [],
             |row| row.get(0),
         )
@@ -1161,7 +1169,7 @@ fn v2_to_v4_adds_threshold_and_empty_checkpoint_storage() {
     assert_eq!(checkpoint_count, 0);
     let threshold: Option<i64> = migrated
         .query_row(
-            "SELECT orchestrator_compaction_threshold FROM sessions WHERE session_id = 'owned'",
+            "SELECT compaction_threshold FROM sessions WHERE session_id = 'owned'",
             [],
             |row| row.get(0),
         )
@@ -1171,7 +1179,7 @@ fn v2_to_v4_adds_threshold_and_empty_checkpoint_storage() {
         assert!(migrated
             .execute(
                 &format!(
-                    "UPDATE sessions SET orchestrator_compaction_threshold = {invalid} WHERE session_id = 'owned'"
+                    "UPDATE sessions SET compaction_threshold = {invalid} WHERE session_id = 'owned'"
                 ),
                 [],
             )
@@ -1179,19 +1187,19 @@ fn v2_to_v4_adds_threshold_and_empty_checkpoint_storage() {
     }
     assert!(migrated
         .execute(
-            "UPDATE sessions SET orchestrator_compaction_threshold = ?1 WHERE session_id = 'owned'",
+            "UPDATE sessions SET compaction_threshold = ?1 WHERE session_id = 'owned'",
             params![(crate::MAX_SUPPORTED_TOKEN_COUNT + 1) as i64],
         )
         .is_err());
     migrated
         .execute(
-            "UPDATE sessions SET orchestrator_compaction_threshold = ?1 WHERE session_id = 'owned'",
+            "UPDATE sessions SET compaction_threshold = ?1 WHERE session_id = 'owned'",
             params![crate::MAX_SUPPORTED_TOKEN_COUNT as i64],
         )
         .unwrap();
     migrated
         .execute(
-            "UPDATE sessions SET orchestrator_compaction_threshold = 8192 WHERE session_id = 'owned'",
+            "UPDATE sessions SET compaction_threshold = 8192 WHERE session_id = 'owned'",
             [],
         )
         .unwrap();
@@ -1245,7 +1253,7 @@ fn v3_to_v4_backfills_materialized_session_summaries() {
     conn.execute(
         "INSERT INTO thread_events (session_id, thread_name, event_json, created_at)
          VALUES ('owned', ?1, ?2, 'created')",
-        params![ORCHESTRATOR_STEERING_TARGET, covered_log_entry],
+        params!["__orchestrator__", covered_log_entry],
     )
     .unwrap();
     let log_entry = encode_transcript_log_entry(
@@ -1258,7 +1266,7 @@ fn v3_to_v4_backfills_materialized_session_summaries() {
     conn.execute(
         "INSERT INTO thread_events (session_id, thread_name, event_json, created_at)
          VALUES ('owned', ?1, ?2, 'created')",
-        params![ORCHESTRATOR_STEERING_TARGET, log_entry],
+        params!["__orchestrator__", log_entry],
     )
     .unwrap();
     conn.execute_batch(
@@ -1375,7 +1383,7 @@ fn checkpoint_table_enforces_completed_row_constraints() {
     }
     let row_count: i64 = conn
         .query_row(
-            "SELECT COUNT(*) FROM orchestrator_compaction_checkpoints",
+            "SELECT COUNT(*) FROM session_compaction_checkpoints",
             [],
             |row| row.get(0),
         )
@@ -1722,8 +1730,8 @@ fn opening_v4_store_is_idempotent() {
     let conn = open_runtime_connection(&path).unwrap();
     insert_legacy_session(&conn, "owned");
     conn.execute(
-        "INSERT INTO thread_events
-             (session_id, thread_name, event_json, created_at)
+        "INSERT INTO session_events
+             (session_id, event_target, event_json, created_at)
          VALUES ('owned', 'worker', '{\"type\":\"thread_started\"}', 'created')",
         [],
     )
@@ -1736,7 +1744,7 @@ fn opening_v4_store_is_idempotent() {
     let reopened = open_runtime_connection(&path).unwrap();
     assert_current_schema(&reopened);
     let stored_id: i64 = reopened
-        .query_row("SELECT id FROM thread_events", [], |row| row.get(0))
+        .query_row("SELECT id FROM session_events", [], |row| row.get(0))
         .unwrap();
     assert_eq!(stored_id, event_id);
     drop(reopened);
@@ -1835,5 +1843,108 @@ fn speed_v53_upgrade_preserves_session_tier_receipt_and_provider_credential() {
     drop(conn);
     let session = crate::sessions::load_session_config(&path, "speed-direct").unwrap();
     assert_eq!(session.service_tier.as_deref(), Some("fast"));
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}
+
+#[test]
+fn speed_upgraded_v54_does_not_recopy_changed_provider_connection() {
+    let path = temp_store_path("speed_upgraded_v54");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let conn = Connection::open(&path).unwrap();
+    conn.execute_batch(include_str!("schema/fixtures/speed_v54_upgraded.sql"))
+        .unwrap();
+    drop(conn);
+    initialize(&path).unwrap();
+    let conn = Connection::open(&path).unwrap();
+    let version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    assert_eq!(version, STORE_SCHEMA_VERSION);
+    let selector: String = conn
+        .query_row(
+            "SELECT api_key_env FROM provider_connections WHERE connection_id='speed-preset'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(selector, "EDITED_SPEED_KEY");
+    let retired: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='model_configurations'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(retired, 0);
+    assert!(conn
+        .prepare("PRAGMA foreign_key_check")
+        .unwrap()
+        .query([])
+        .unwrap()
+        .next()
+        .unwrap()
+        .is_none());
+    drop(conn);
+    assert_eq!(
+        crate::sessions::load_session_config(&path, "speed-direct")
+            .unwrap()
+            .service_tier
+            .as_deref(),
+        Some("fast")
+    );
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}
+
+#[test]
+fn speed_upgraded_v55_renames_session_storage_without_losing_speed() {
+    let path = temp_store_path("speed_upgraded_v55");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let conn = Connection::open(&path).unwrap();
+    conn.execute_batch(include_str!("schema/fixtures/speed_v55_upgraded.sql"))
+        .unwrap();
+    drop(conn);
+    initialize(&path).unwrap();
+    let conn = Connection::open(&path).unwrap();
+    let version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    assert_eq!(version, STORE_SCHEMA_VERSION);
+    let selector: String = conn
+        .query_row(
+            "SELECT api_key_env FROM provider_connections WHERE connection_id='speed-preset'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(selector, "EDITED_SPEED_KEY");
+    let messages: String = conn
+        .query_row(
+            "SELECT messages_json FROM sessions WHERE session_id='speed-direct'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let parsed: Vec<crate::types::Message> = serde_json::from_str(&messages).unwrap();
+    assert!(
+        matches!(&parsed[..], [crate::types::Message::Assistant { service_tier_receipt: Some(receipt), .. }] if receipt.requested == Some(crate::model::ServiceTier::Fast) && receipt.served.as_deref() == Some("priority"))
+    );
+    assert!(column_exists(&conn, "sessions", "compaction_threshold").unwrap());
+    assert!(!column_exists(&conn, "sessions", "orchestrator_compaction_threshold").unwrap());
+    assert!(conn
+        .prepare("PRAGMA foreign_key_check")
+        .unwrap()
+        .query([])
+        .unwrap()
+        .next()
+        .unwrap()
+        .is_none());
+    drop(conn);
+    assert_eq!(
+        crate::sessions::load_session_config(&path, "speed-direct")
+            .unwrap()
+            .service_tier
+            .as_deref(),
+        Some("fast")
+    );
     std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
 }

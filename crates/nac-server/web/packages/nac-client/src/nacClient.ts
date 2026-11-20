@@ -103,7 +103,7 @@ export type CommandAdmission<T> =
 
 export interface SessionSnapshotOptions {
   messageLimit?: number;
-  threadEventLimit?: number;
+  sessionEventLimit?: number;
   includeSessions?: boolean;
   includeSystem?: boolean;
   signal?: AbortSignal;
@@ -391,8 +391,8 @@ export class NacClient {
     const params = new URLSearchParams();
     if (options.messageLimit !== undefined)
       params.set("message_limit", String(options.messageLimit));
-    if (options.threadEventLimit !== undefined) {
-      params.set("thread_event_limit", String(options.threadEventLimit));
+    if (options.sessionEventLimit !== undefined) {
+      params.set("session_event_limit", String(options.sessionEventLimit));
     }
     if (options.includeSessions !== undefined) {
       params.set("include_sessions", String(options.includeSessions));

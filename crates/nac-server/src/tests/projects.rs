@@ -395,7 +395,7 @@ async fn project_session_uses_explicit_model_and_filters_membership() {
         backend: RequestField::Value("openai-responses".to_string()),
         base_url: RequestField::Value("https://session-gateway.example/v1".to_string()),
         reasoning_effort: RequestField::Value("low".to_string()),
-        orchestrator_compaction_threshold: RequestField::Value(32_000),
+        compaction_threshold: RequestField::Value(32_000),
         ..CreateSessionRequest::default()
     };
     let (created, duplicate) = tokio::join!(
@@ -421,7 +421,7 @@ async fn project_session_uses_explicit_model_and_filters_membership() {
     assert!(!stored.allow_insecure_http);
     assert_eq!(stored.reasoning_effort, Some(ReasoningEffort::Low));
     assert!(!stored.extra_headers.contains_key("X-Project"));
-    assert_eq!(stored.orchestrator_compaction_threshold, Some(32_000));
+    assert_eq!(stored.compaction_threshold, Some(32_000));
 
     let filtered = manager
         .session_catalog()
@@ -658,8 +658,8 @@ async fn first_chat_matching_selection_is_opt_in_and_refuses_changed_routes() {
         ("allow_insecure_http", serde_json::json!(true)),
         ("api_key_env", serde_json::json!("DIFFERENT_KEY")),
         ("extra_headers", serde_json::json!({"x-test": "other"})),
-        ("orchestrator_compaction_threshold", serde_json::json!(0)),
-        ("orchestrator_compaction_threshold", serde_json::Value::Null),
+        ("compaction_threshold", serde_json::json!(0)),
+        ("compaction_threshold", serde_json::Value::Null),
     ] {
         let mut different = request.clone();
         different[field] = value;

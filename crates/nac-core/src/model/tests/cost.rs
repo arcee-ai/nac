@@ -12,24 +12,24 @@ fn token_usage_validation_and_accumulation_are_overflow_safe() {
         cache_read_tokens: 2,
         cache_write_tokens: 3,
         reasoning_tokens: 4,
-        orchestrator_context_tokens: 20,
+        context_tokens: 20,
         cost: TokenCostMicros::default(),
     };
     assert_eq!(valid.valid_provider_context(), Some(20));
 
     let mut inconsistent = valid.clone();
-    inconsistent.orchestrator_context_tokens = 19;
+    inconsistent.context_tokens = 19;
     assert_eq!(inconsistent.valid_provider_context(), None);
 
     let mut maximum_total = valid.clone();
-    maximum_total.orchestrator_context_tokens = crate::MAX_SUPPORTED_TOKEN_COUNT;
+    maximum_total.context_tokens = crate::MAX_SUPPORTED_TOKEN_COUNT;
     assert_eq!(
         maximum_total.valid_provider_context(),
         Some(crate::MAX_SUPPORTED_TOKEN_COUNT)
     );
 
     let mut oversized_total = valid.clone();
-    oversized_total.orchestrator_context_tokens = crate::MAX_SUPPORTED_TOKEN_COUNT + 1;
+    oversized_total.context_tokens = crate::MAX_SUPPORTED_TOKEN_COUNT + 1;
     assert_eq!(oversized_total.valid_provider_context(), None);
 
     let hostile = TokenUsage {
@@ -39,7 +39,7 @@ fn token_usage_validation_and_accumulation_are_overflow_safe() {
         cache_read_tokens: u64::MAX,
         cache_write_tokens: u64::MAX,
         reasoning_tokens: u64::MAX,
-        orchestrator_context_tokens: u64::MAX,
+        context_tokens: u64::MAX,
         cost: TokenCostMicros {
             input: u64::MAX,
             output: u64::MAX,
@@ -59,7 +59,7 @@ fn token_usage_validation_and_accumulation_are_overflow_safe() {
         cache_read_tokens: 2,
         cache_write_tokens: 3,
         reasoning_tokens: 0,
-        orchestrator_context_tokens: 0,
+        context_tokens: 0,
         cost: TokenCostMicros::default(),
     };
     assert_eq!(no_total.valid_provider_context(), Some(20));
@@ -72,7 +72,7 @@ fn token_usage_validation_and_accumulation_are_overflow_safe() {
     accumulated += hostile;
     assert_eq!(accumulated.input_tokens, u64::MAX);
     assert_eq!(accumulated.output_tokens, u64::MAX);
-    assert_eq!(accumulated.orchestrator_context_tokens, u64::MAX);
+    assert_eq!(accumulated.context_tokens, u64::MAX);
     assert_eq!(accumulated.cost.input, u64::MAX);
     assert_eq!(accumulated.cost.cache_write, u64::MAX);
     assert_eq!(accumulated.cost.total, u64::MAX);
@@ -95,7 +95,7 @@ fn calculate_cost_bills_each_bucket_at_its_catalog_rate() {
         cache_read_tokens: 200,
         cache_write_tokens: 32,
         reasoning_tokens: 0,
-        orchestrator_context_tokens: 382,
+        context_tokens: 382,
         cost: TokenCostMicros::default(),
     };
 
@@ -124,7 +124,7 @@ fn calculate_cost_rounds_half_up_once_at_the_micro_conversion() {
         cache_read_tokens: 1,
         cache_write_tokens: 2,
         reasoning_tokens: 0,
-        orchestrator_context_tokens: 0,
+        context_tokens: 0,
         cost: TokenCostMicros::default(),
     };
 
@@ -145,7 +145,7 @@ fn calculate_cost_saturates_and_treats_hostile_rates_as_zero() {
         cache_read_tokens: 10,
         cache_write_tokens: 10,
         reasoning_tokens: 0,
-        orchestrator_context_tokens: 0,
+        context_tokens: 0,
         cost: TokenCostMicros::default(),
     };
 
@@ -201,7 +201,7 @@ fn calculate_cost_bills_1h_cache_writes_at_the_1h_rate() {
         cache_read_tokens: 0,
         cache_write_tokens: 100,
         reasoning_tokens: 0,
-        orchestrator_context_tokens: 0,
+        context_tokens: 0,
         cost: TokenCostMicros::default(),
     };
 
@@ -236,7 +236,7 @@ fn calculate_cost_bills_reasoning_at_the_output_rate() {
         cache_read_tokens: 0,
         cache_write_tokens: 0,
         reasoning_tokens: 30,
-        orchestrator_context_tokens: 0,
+        context_tokens: 0,
         cost: TokenCostMicros::default(),
     };
     let cost = calculate_cost(&rates, None, &included);
@@ -293,7 +293,7 @@ fn calculate_cost_selects_the_highest_matching_context_tier() {
         cache_read_tokens: cache_read,
         cache_write_tokens: 0,
         reasoning_tokens: 0,
-        orchestrator_context_tokens: 0,
+        context_tokens: 0,
         cost: TokenCostMicros::default(),
     };
 
@@ -335,7 +335,7 @@ fn old_catalog_rates_without_tiers_still_deserialize() {
         cache_read_tokens: 0,
         cache_write_tokens: 0,
         reasoning_tokens: 0,
-        orchestrator_context_tokens: 0,
+        context_tokens: 0,
         cost: TokenCostMicros::default(),
     };
     assert_eq!(calculate_cost(&rates, None, &usage).input, 900_000);
@@ -354,7 +354,7 @@ fn old_token_usage_rows_deserialize_with_zero_cost() {
     });
     let usage: TokenUsage = serde_json::from_value(old_usage).unwrap();
     assert_eq!(usage.input_tokens, 100);
-    assert_eq!(usage.orchestrator_context_tokens, 380);
+    assert_eq!(usage.context_tokens, 380);
     assert_eq!(usage.cost, TokenCostMicros::default());
 
     // A stored token_usages_json row (Vec<Option<TokenUsage>>) from before

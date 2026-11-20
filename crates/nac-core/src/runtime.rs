@@ -63,7 +63,7 @@ pub use contracts::{
 };
 use model_resolution::default_config_cwd;
 pub use model_resolution::{
-    effective_model_settings, effective_orchestrator_compaction_threshold, resolve_store_path,
+    effective_compaction_threshold, effective_model_settings, resolve_store_path,
     resolve_store_path_for_track, session_model_matches,
 };
 pub use prepared_session::{PreparedSessionResources, PreparedSessionRunConfig};

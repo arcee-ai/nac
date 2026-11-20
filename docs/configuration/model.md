@@ -4,21 +4,20 @@ Choose a model for each new session in the web client or pass it explicitly when
 
 NAC never reads `OPENAI_MODEL` or `OPENAI_BASE_URL`. An explicit backend may be selected or resolved from the selected model through the catalog. An unknown model ID requires an explicit backend. If no endpoint is supplied, the provider's endpoint is used; an explicitly supplied endpoint is validated.
 
-Persisted session settings remain editable. In `nac-web`, open a session's **Settings** dialog; the equivalent API is `GET /sessions/{session_id}/config` and `PATCH /sessions/{session_id}/config`. PATCH validates the complete prospective model settings and current credentials before committing and leaves the previous snapshot unchanged on failure. Omitted fields are preserved; `null` clears `reasoning_effort` or `api_key_env`, `null` or `{}` clears `extra_headers`, `null` or `false` disables `allow_insecure_http`, and `null` or `0` disables `orchestrator_compaction_threshold`. Required `backend`, `model`, and `base_url` cannot be cleared. Settings can be opened and repaired even when an invalid or incomplete persisted snapshot cannot resume. A session with an active run must be cancelled before editing its settings; an active manual compaction must be allowed to finish.
+Persisted session settings remain editable. In `nac-web`, open a session's **Settings** dialog; the equivalent API is `GET /sessions/{session_id}/config` and `PATCH /sessions/{session_id}/config`. PATCH validates the complete prospective model settings and current credentials before committing and leaves the previous snapshot unchanged on failure. Omitted fields are preserved; `null` clears `reasoning_effort` or `api_key_env`, `null` or `{}` clears `extra_headers`, `null` or `false` disables `allow_insecure_http`, and `null` or `0` disables `compaction_threshold`. Required `backend`, `model`, and `base_url` cannot be cleared. Settings can be opened and repaired even when an invalid or incomplete persisted snapshot cannot resume. A session with an active run must be cancelled before editing its settings; an active manual compaction must be allowed to finish.
 
 A new session requires its own model selection. Optional `reasoning_effort`, credential selector and headers are chosen for that session; `null` clears an optional value. A provider connection stores a credential independently and makes its endpoint available when selecting a session model. A project supplies its working location, not model settings.
 
 ## Compaction threshold
 
-The current API spelling `orchestrator_compaction_threshold` also controls
-checkpoint creation for direct sessions. It is an optional absolute token count;
-omission defaults to 70% of the planning budget, while `null` or `0` disables
+`compaction_threshold` controls checkpoint creation for a session. It is an
+optional absolute token count; omission defaults to 70% of the planning budget,
+while `null` or `0` disables
 new checkpoints. For Codex, the budget is the effective input limit, capped by
 any lower provider auto-compaction limit. GET returns the current resolved value
 for automatic sessions and the persisted value for fixed sessions; PATCH omission
 preserves the policy and `null` or `0` disables it. Existing valid checkpoints remain
-active on resume. The neutral-contract retirement slice (ALL-615) owns renaming
-this wire key.
+active on resume.
 
 Automatic compaction preserves the canonical transcript and keeps checkpoint
 rows private. `POST /sessions/{session_id}/compact` requests compaction without

@@ -26,7 +26,7 @@ command-admission and error contracts, snapshot/replay behavior,
 transitive generated schemas required by the full resource facade.
 
 `createNacApi(client)` exposes the same native resource methods as the web client:
-projects/sessions, durable input/goals, permissions, child/orchestrator sessions,
+projects/sessions, durable input/goals, permissions, child sessions,
 workspace files/Git, providers/credentials, MCP/SSH, skills and managed product
 resources. It uses the supplied transport's endpoint, headers and credentials;
 it does not retry commands. `NAC_API_SURFACE` deliberately classifies all 123

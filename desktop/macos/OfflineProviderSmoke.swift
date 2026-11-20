@@ -127,7 +127,7 @@ final class OfflineProviderSmoke {
             const current=await (await fetch('/sessions/'+location.hash.split('/')[2])).json();
             if(current.metadata.behavior!=='direct')throw new Error('control');
             const created=await post('/sessions',{project_id:current.metadata.project_id,behavior:'direct',backend:config.backend,model:config.model,
-              base_url:endpoint,allow_insecure_http:true,api_key_env:config.api_key_env,orchestrator_compaction_threshold:0});
+              base_url:endpoint,allow_insecure_http:true,api_key_env:config.api_key_env,compaction_threshold:0});
             const id=created.metadata.session_id;
             const run=await post('/sessions/'+id+'/runs',{prompt:'OFFLINE_TRANSPORT_CONTROL'});
             return {session:id,run:run.run_id};

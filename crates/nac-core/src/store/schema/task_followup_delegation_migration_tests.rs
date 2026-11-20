@@ -71,7 +71,7 @@ fn heartbeat_layout(conn: &Connection) -> Vec<(String, String)> {
 
 fn seed(conn: &Connection, version: i64) {
     if version >= 42 {
-        conn.execute_batch("INSERT INTO native_task_launches VALUES('launch-key','caller','project','{}','/repo','launched',0,'failed','retained failure',NULL,'created','updated');").unwrap();
+        conn.execute_batch("INSERT INTO native_task_launches VALUES('launch-key','caller','project','{\"request_id\":\"launch-key\",\"project_id\":null,\"title\":\"Fixture\",\"prompt\":\"Fixture prompt\"}','/repo','launched',0,'failed','retained failure',NULL,'created','updated');").unwrap();
     }
     if version >= 43 {
         conn.execute_batch("INSERT INTO peer_goal_starts VALUES('caller','peer-goal','target','{}','{\"retained\":true}');").unwrap();
@@ -145,6 +145,7 @@ fn followup_schema47_upgrades_each_allocated_predecessor_without_inventing_autho
             }
         }
         seed(&conn, version);
+        fixture_receipts::populate(&conn);
         conn.pragma_update(None, "user_version", version).unwrap();
         let mut preserved = vec!["sessions", "session_inbox", "task_followups"];
         for (allocation, tables) in ALLOCATIONS {
@@ -240,7 +241,7 @@ fn followup_schema47_upgrades_each_allocated_predecessor_without_inventing_autho
                 .unwrap(),
             STORE_SCHEMA_VERSION
         );
-        assert_eq!(STORE_SCHEMA_VERSION, 55);
+        assert_eq!(STORE_SCHEMA_VERSION, 56);
         assert_eq!(
             heartbeat_layout(&conn),
             current_heartbeat_layout,
@@ -270,7 +271,9 @@ fn followup_schema47_upgrades_each_allocated_predecessor_without_inventing_autho
                     .1
                     .clone()
             } else if table == "sessions" {
-                definition.replace(", light_model_json TEXT", "")
+                definition
+                    .replace(", light_model_json TEXT", "")
+                    .replace("orchestrator_compaction_threshold", "compaction_threshold")
             } else {
                 definition
             };

@@ -528,7 +528,7 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
           isError: false,
         });
         return "none";
-      case "orchestrator_compaction_started":
+      case "compaction_started":
         setState({ activity: "Compacting context…" });
         pushEvent({
           seq,
@@ -537,7 +537,7 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
           isError: false,
         });
         return "none";
-      case "orchestrator_compaction_completed":
+      case "compaction_completed":
         setState({ activity: "" });
         pushEvent({
           seq,
@@ -546,7 +546,7 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
           isError: false,
         });
         return "replace-snapshot";
-      case "orchestrator_compaction_skipped":
+      case "compaction_skipped":
         setState({ activity: "" });
         pushEvent({
           seq,
@@ -555,7 +555,7 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
           isError: false,
         });
         return "none";
-      case "orchestrator_compaction_failed":
+      case "compaction_failed":
         setState({ activity: "" });
         pushEvent({
           seq,

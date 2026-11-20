@@ -149,8 +149,8 @@ fn blockers_leave_admission_open_and_retry_can_prepare() {
     insert_test_session(&path, "root");
     let conn = Connection::open(&path).unwrap();
     conn.execute(
-        "INSERT INTO thread_events (id, session_id, thread_name, event_json, created_at)
-         VALUES (1, 'root', '__orchestrator__', '{}', 'created')",
+        "INSERT INTO session_events (id, session_id, event_target, event_json, created_at)
+         VALUES (1, 'root', '__nac_transcript__', '{}', 'created')",
         [],
     )
     .unwrap();

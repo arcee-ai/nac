@@ -96,12 +96,52 @@ async fn mcp_rejects_retired_creation_and_thread_steering_inputs() {
     rejected(
         call(
             &manager,
+            "create_session",
+            json!({"orchestrator_compaction_threshold":1024}),
+        )
+        .await,
+        "Unsupported session fields",
+    );
+    rejected(
+        call(
+            &manager,
             "update_session",
             json!({"session_id":"missing", "light_model":null}),
         )
         .await,
         "Unsupported session fields",
     );
+    for key in [
+        "behavior",
+        "api_key_env",
+        "extra_headers",
+        "ssh_host",
+        "sandbox",
+        "default_model_config_id",
+    ] {
+        let mut arguments = json!({"session_id":"missing"});
+        arguments[key] = json!("unsupported");
+        rejected(
+            call(&manager, "update_session", arguments).await,
+            "Unsupported session fields",
+        );
+    }
+    rejected(
+        call(
+            &manager,
+            "create_session",
+            json!({"default_model_config_id":"retired"}),
+        )
+        .await,
+        "Unsupported session fields",
+    );
+    let extension = call(
+        &manager,
+        "update_session",
+        json!({"session_id":"missing", "extension_hint":true}),
+    )
+    .await;
+    assert_eq!(success(extension)["status"], "ok");
     for thread_name in [json!("worker"), Value::Null] {
         rejected(
             call(
@@ -113,6 +153,63 @@ async fn mcp_rejects_retired_creation_and_thread_steering_inputs() {
             "thread_name is retired",
         );
     }
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn mcp_updates_and_clears_session_compaction_threshold() {
+    let _lock = crate::tests::SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = root();
+    let _env = crate::tests::ScopedModelEnv::isolated(&root.join("home"), Some("fixture-key"));
+    crate::tests::seed_direct_session_with_base_url(
+        &root,
+        "direct",
+        "http://127.0.0.1:12345".to_string(),
+    );
+    let manager = crate::tests::test_manager(&root);
+    let store = root.join("store.db");
+    success(
+        call(
+            &manager,
+            "update_session",
+            json!({"session_id":"direct", "compaction_threshold":2048}),
+        )
+        .await,
+    );
+    assert_eq!(
+        sessions::load_session_config(&store, "direct")
+            .unwrap()
+            .compaction_threshold,
+        Some(2048)
+    );
+    success(
+        call(
+            &manager,
+            "update_session",
+            json!({"session_id":"direct", "extension_hint":true}),
+        )
+        .await,
+    );
+    assert_eq!(
+        sessions::load_session_config(&store, "direct")
+            .unwrap()
+            .compaction_threshold,
+        Some(2048)
+    );
+    success(
+        call(
+            &manager,
+            "update_session",
+            json!({"session_id":"direct", "compaction_threshold":null}),
+        )
+        .await,
+    );
+    assert_eq!(
+        sessions::load_session_config(&store, "direct")
+            .unwrap()
+            .compaction_threshold,
+        None
+    );
     let _ = std::fs::remove_dir_all(root);
 }
 

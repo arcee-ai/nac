@@ -184,7 +184,7 @@ impl PreparedFreshTaskLaunch {
                 .clone()
                 .or_else(|| frozen.service_tier.clone()),
             extra_headers: Some(frozen.extra_headers.clone()),
-            orchestrator_compaction_threshold: frozen.orchestrator_compaction_threshold,
+            compaction_threshold: frozen.orchestrator_compaction_threshold,
         };
         selection
             .validate()

@@ -19,7 +19,7 @@ fn load(conn: &Connection, request_id: &str) -> Result<Option<NativeTaskLaunch>>
         FROM native_task_launches WHERE request_id=?1", params![request_id], |row| {
             Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?,row.get::<_,String>(3)?,row.get::<_,String>(4)?,row.get::<_,bool>(5)?,row.get::<_,String>(6)?,row.get::<_,Option<String>>(7)?,row.get::<_,Option<i64>>(8)?,row.get::<_,String>(9)?,row.get::<_,String>(10)?))
         }).optional()?.map(|(request,caller_session_id,project_id,cwd,session_id,retained,phase,error,first_input_id,created_at,updated_at)| {
-            let mut value: serde_json::Value = serde_json::from_str(&request)?;
+            let (mut value, _): (serde_json::Value, bool) = super::legacy_task_model::decode(conn, super::legacy_task_model::Owner::Native, request_id, "", &request)?;
             let selection = value.as_object_mut().ok_or_else(|| anyhow!("invalid native launch request"))?
                 .remove("_nac_model_selection").map(serde_json::from_value).transpose()?;
             Ok(NativeTaskLaunch {
@@ -134,14 +134,14 @@ pub fn reserve_native_task_launch(path: &Path, caller: &str, project_id: &str, s
     }
     let (backend, model, base_url, allow_insecure_http, api_key_env, reasoning_effort, headers, threshold, service_tier):
         SessionModelRow =
-        tx.query_row("SELECT backend,model,base_url,allow_insecure_http,api_key_env,reasoning_effort,extra_headers_json,orchestrator_compaction_threshold,service_tier FROM sessions WHERE session_id=?1", params![caller], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?,row.get(6)?,row.get(7)?,row.get(8)?)))?;
+        tx.query_row("SELECT backend,model,base_url,allow_insecure_http,api_key_env,reasoning_effort,extra_headers_json,compaction_threshold,service_tier FROM sessions WHERE session_id=?1", params![caller], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?,row.get(6)?,row.get(7)?,row.get(8)?)))?;
     let backend = backend.ok_or_else(|| anyhow!("stored session has no backend; session settings repair required: select an explicit backend"))?;
     let selection = TaskModelSelection {
         backend, model: request.model.clone().unwrap_or_else(|| model.clone()), base_url, allow_insecure_http,
         api_key_env, reasoning_effort: request.reasoning_effort.clone().or(reasoning_effort),
         service_tier: request.service_tier.clone().or_else(|| if request.model.as_ref().is_none_or(|selected| selected == &model) { service_tier } else { None }),
         extra_headers: headers.filter(|json| !json.is_empty()).map(|json| serde_json::from_str(&json)).transpose()?,
-        orchestrator_compaction_threshold: threshold,
+        compaction_threshold: threshold,
     };
     selection.validate()?;
     let mut durable_request = serde_json::to_value(&request)?;

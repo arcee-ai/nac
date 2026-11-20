@@ -115,7 +115,7 @@ async fn direct_behavior_builds_and_resumes_a_persistent_direct_primary() {
                 store_path: Some(store_path.clone()),
             },
             model: direct_model,
-            orchestrator_compaction_threshold: Some(32_000),
+            compaction_threshold: Some(32_000),
             sandbox: SandboxOptions::default(),
             ssh: SshOptions::default(),
         },
@@ -174,41 +174,36 @@ fn compaction_threshold_defaults_to_70pct_context_normalizes_zero_and_rejects_ou
 {
     // No request: defaults to 70% of the context window (rounded).
     assert_eq!(
-        effective_orchestrator_compaction_threshold(None, 200_000).unwrap(),
+        effective_compaction_threshold(None, 200_000).unwrap(),
         Some(140_000)
     );
     // Explicit request wins over the 0.7×context default.
     assert_eq!(
-        effective_orchestrator_compaction_threshold(Some(12_000), 200_000).unwrap(),
+        effective_compaction_threshold(Some(12_000), 200_000).unwrap(),
         Some(12_000)
     );
     // Some(0) explicitly disables compaction regardless of context window.
     assert_eq!(
-        effective_orchestrator_compaction_threshold(Some(0), 200_000).unwrap(),
+        effective_compaction_threshold(Some(0), 200_000).unwrap(),
         None
     );
     // The boundary value is accepted.
     assert_eq!(
-        effective_orchestrator_compaction_threshold(
-            Some(crate::MAX_SUPPORTED_TOKEN_COUNT),
-            200_000,
-        )
-        .unwrap(),
+        effective_compaction_threshold(Some(crate::MAX_SUPPORTED_TOKEN_COUNT), 200_000,).unwrap(),
         Some(crate::MAX_SUPPORTED_TOKEN_COUNT)
     );
     // Above the boundary is rejected.
-    assert!(effective_orchestrator_compaction_threshold(
-        Some(crate::MAX_SUPPORTED_TOKEN_COUNT + 1),
-        200_000,
-    )
-    .is_err());
+    assert!(
+        effective_compaction_threshold(Some(crate::MAX_SUPPORTED_TOKEN_COUNT + 1), 200_000,)
+            .is_err()
+    );
 
     // The `[compaction]` section is no longer consulted: a config that
     // has one produces the same result as one without.
     let config_with_compaction: NacConfig =
         toml::from_str("[compaction]\nthreshold_tokens = 64000\n").unwrap();
     assert_eq!(
-        effective_orchestrator_compaction_threshold(None, 200_000).unwrap(),
+        effective_compaction_threshold(None, 200_000).unwrap(),
         Some(140_000)
     );
     // The field still parses (backward compat) but is dead.
@@ -1494,7 +1489,7 @@ async fn persisted_settings_are_identical_across_create_snapshot_resume_and_work
                 trusted_api_key_file: None,
                 extra_headers: Some(headers.clone()),
             },
-            orchestrator_compaction_threshold: Some(48_000),
+            compaction_threshold: Some(48_000),
             sandbox: SandboxOptions::default(),
             ssh: SshOptions::default(),
         },
@@ -1511,7 +1506,7 @@ async fn persisted_settings_are_identical_across_create_snapshot_resume_and_work
     let snapshot = sessions::load_session(&store_path, &session_id).unwrap();
     assert_eq!(snapshot.reasoning_effort, Some(ReasoningEffort::Xhigh));
     assert_eq!(snapshot.extra_headers, headers);
-    assert_eq!(snapshot.orchestrator_compaction_threshold, Some(48_000));
+    assert_eq!(snapshot.compaction_threshold, Some(48_000));
 
     let mut conflicting_config = NacConfig::default();
     conflicting_config.compaction.threshold_tokens = Some(96_000);
@@ -1537,7 +1532,7 @@ async fn persisted_settings_are_identical_across_create_snapshot_resume_and_work
     assert_eq!(resumed.client.extra_headers(), &headers);
     match &resumed.session {
         RuntimeSession::Active { snapshot, .. } => assert_eq!(
-            snapshot.orchestrator_compaction_threshold,
+            snapshot.compaction_threshold,
             Some(48_000),
             "resume must ignore the current compaction config"
         ),

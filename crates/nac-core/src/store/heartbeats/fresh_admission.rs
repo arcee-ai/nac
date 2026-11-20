@@ -71,13 +71,13 @@ pub(super) fn load_reserved(
 ) -> Result<Option<PreparedFreshTaskLaunch>> {
     let row:Option<ReservedLaunchRow>=conn.query_row("SELECT launch_json,first_input_id,stop_requested,initial_run_id,initial_outcome_json FROM heartbeat_task_launches WHERE occurrence_id=?1",[occurrence_id],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?))).optional()?;
     row.map(|(json, input, stop, run, outcome)| {
-        let ReservedReceipt { mut receipt } = serde_json::from_str(&json)?;
+        let (ReservedReceipt { mut receipt }, _) = crate::store::legacy_task_model::decode(conn, crate::store::legacy_task_model::Owner::Launch, occurrence_id, "", &json)?;
         let (model_defaults, legacy_binding_id) = if receipt.destination.model_selection.is_some()
             || receipt.request.model_selection.is_some()
         {
             (None, None)
         } else {
-            let ReservedLaunch { model_defaults, .. } = serde_json::from_str(&json)?;
+            let (ReservedLaunch { model_defaults, .. }, _) = crate::store::legacy_task_model::decode(conn, crate::store::legacy_task_model::Owner::Launch, occurrence_id, "", &json)?;
             let binding_id = serde_json::from_str::<LegacyEnvelope>(&json)
                 .map_err(|_| anyhow!("invalid historical scheduled model binding"))?
                 .receipt.binding.model_configuration_id;

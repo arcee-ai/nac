@@ -395,7 +395,7 @@ async fn run(case: Case) {
         // A changed canonical configuration cannot keep the old service's proof.
         if case == Case::Complete {
             let mut updated = sessions::load_session(&path, "session").unwrap();
-            updated.orchestrator_compaction_threshold = Some(64000);
+            updated.compaction_threshold = Some(64000);
             let value = updated.clone();
             let changing_path = path.clone();
             nac_core::store::spawn_blocking_store_caller(move || {

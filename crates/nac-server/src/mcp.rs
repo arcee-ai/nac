@@ -3,7 +3,7 @@
 //! Exposes session management and passive product-context tools over the
 //! streamable-http transport at `/mcp`.
 
-use crate::orchestration::OrchestrationOperations;
+use crate::session_operations::SessionOperations;
 use crate::{
     CreateSessionRequest, HeadersRequest, RequestField, SandboxRequest, SessionManager,
     SubmitPromptRequest, UpdateConfigRequest,
@@ -33,7 +33,7 @@ use serde_json::json;
 
 #[derive(Clone)]
 pub struct NacMcpService {
-    operations: OrchestrationOperations,
+    operations: SessionOperations,
     product_context: crate::ProductContextApplication,
 }
 
@@ -92,10 +92,12 @@ struct CreateSessionParams {
         description = "Extra HTTP headers to send with model API requests (JSON object of header name to value)"
     )]
     extra_headers: Option<serde_json::Value>,
+    #[serde(default)]
     #[schemars(
-        description = "Compaction threshold in tokens (0 disables, blank defaults to 70% of context window)"
+        with = "Option<u64>",
+        description = "Compaction threshold in tokens (null or 0 disables, omission defaults to 70% of context window)"
     )]
-    compaction_threshold: Option<u64>,
+    compaction_threshold: RequestField<u64>,
     #[serde(flatten)]
     #[schemars(skip)]
     extra: std::collections::BTreeMap<String, serde_json::Value>,
@@ -181,6 +183,12 @@ struct UpdateSessionParams {
         description = "Speed preference: standard, fast, or ultrafast; null clears the override"
     )]
     service_tier: Option<Option<String>>,
+    #[serde(default)]
+    #[schemars(
+        with = "Option<u64>",
+        description = "Compaction threshold in tokens; null or zero disables it"
+    )]
+    compaction_threshold: RequestField<u64>,
     #[serde(flatten)]
     #[schemars(skip)]
     extra: std::collections::BTreeMap<String, serde_json::Value>,
@@ -199,6 +207,43 @@ fn nullable_field<T>(value: Option<Option<T>>) -> RequestField<T> {
         Some(None) => RequestField::Null,
         Some(Some(value)) => RequestField::Value(value),
     }
+}
+
+fn contains_retired_session_field(
+    extra: &std::collections::BTreeMap<String, serde_json::Value>,
+) -> bool {
+    const RETIRED: &[&str] = &[
+        "light_model",
+        "light_model_json",
+        "light_backend",
+        "light_base_url",
+        "light_api_key_env",
+        "light_reasoning_effort",
+        "light_extra_headers",
+        "model_config_id",
+        "model_configuration_id",
+        "default_model_config_id",
+        "worker_executable",
+        "orchestrator_compaction_threshold",
+    ];
+    RETIRED.iter().any(|key| extra.contains_key(*key))
+}
+
+fn contains_unsupported_session_update(
+    extra: &std::collections::BTreeMap<String, serde_json::Value>,
+) -> bool {
+    const UNSUPPORTED: &[&str] = &[
+        "behavior",
+        "api_key_env",
+        "extra_headers",
+        "ssh_host",
+        "ssh_port",
+        "ssh_identity_file",
+        "sandbox",
+        "cwd",
+        "project_id",
+    ];
+    contains_retired_session_field(extra) || UNSUPPORTED.iter().any(|key| extra.contains_key(*key))
 }
 
 // ---------------------------------------------------------------------------
@@ -293,7 +338,7 @@ impl NacMcpService {
                 "Only direct session behavior is supported",
             )]));
         }
-        if !params.extra.is_empty() {
+        if contains_retired_session_field(&params.extra) {
             return Ok(CallToolResult::error(vec![Content::text(
                 "Unsupported session fields",
             )]));
@@ -332,10 +377,7 @@ impl NacMcpService {
             service_tier: nullable_field(params.service_tier),
             api_key_env: field(params.api_key_env),
             extra_headers,
-            orchestrator_compaction_threshold: params
-                .compaction_threshold
-                .map(RequestField::Value)
-                .unwrap_or(RequestField::Omitted),
+            compaction_threshold: params.compaction_threshold,
             ssh_host: params.ssh_host,
             ssh_port: params.ssh_port,
             ssh_identity_file: params.ssh_identity_file,
@@ -555,7 +597,7 @@ impl NacMcpService {
         &self,
         Parameters(params): Parameters<UpdateSessionParams>,
     ) -> Result<CallToolResult, ErrorData> {
-        if !params.extra.is_empty() {
+        if contains_unsupported_session_update(&params.extra) {
             return Ok(CallToolResult::error(vec![Content::text(
                 "Unsupported session fields",
             )]));
@@ -573,7 +615,7 @@ impl NacMcpService {
             service_tier: nullable_field(params.service_tier),
             api_key_env: RequestField::Omitted,
             extra_headers: RequestField::Omitted,
-            orchestrator_compaction_threshold: RequestField::Omitted,
+            compaction_threshold: params.compaction_threshold,
         };
         match self
             .operations
@@ -595,7 +637,7 @@ impl NacMcpService {
         description = "List available model providers and their models. Each model includes supported reasoning efforts and context window. Use the model id when calling create_session — the backend is auto-detected."
     )]
     async fn list_models(&self) -> Result<CallToolResult, ErrorData> {
-        let result = OrchestrationOperations::model_listing();
+        let result = SessionOperations::model_listing();
         Ok(CallToolResult::success(vec![Content::text(
             serde_json::to_string_pretty(&result)
                 .unwrap_or_else(|e| format!("Error serializing: {e}")),
@@ -620,7 +662,7 @@ pub fn streamable_http_service(
     StreamableHttpService::new(
         move || {
             Ok(NacMcpService {
-                operations: OrchestrationOperations::new(manager.clone()),
+                operations: SessionOperations::new(manager.clone()),
                 product_context: crate::ProductContextApplication::new(manager.clone()),
             })
         },

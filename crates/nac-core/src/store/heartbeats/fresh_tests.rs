@@ -48,7 +48,7 @@ impl Fixture {
                     api_key_env: None,
                     reasoning_effort: None,
                     extra_headers: None,
-                    orchestrator_compaction_threshold: None,
+                    compaction_threshold: None,
                 }),
                 pinned_commit: None,
                 default_ref: Some("refs/heads/dev".into()),
@@ -145,9 +145,7 @@ pub(super) fn prepared_shared_snapshot(
         .as_ref()
         .or(selected.service_tier.as_ref())
         .map(|value| value.parse().unwrap());
-    snapshot.orchestrator_compaction_threshold = selected
-        .orchestrator_compaction_threshold
-        .filter(|value| *value != 0);
+    snapshot.compaction_threshold = selected.compaction_threshold.filter(|value| *value != 0);
     snapshot
 }
 
@@ -163,7 +161,7 @@ fn scheduled_model_selection_is_frozen_in_the_durable_launch_receipt() {
         api_key_env: Some("FIXTURE_API_KEY".into()),
         reasoning_effort: Some("high".into()),
         extra_headers: None,
-        orchestrator_compaction_threshold: None,
+        compaction_threshold: None,
     };
     f.binding.fresh_task.as_mut().unwrap().model_selection = Some(selection.clone());
     f.create();
@@ -878,6 +876,225 @@ fn fresh_calendar_create_and_edit_refuse_without_durable_effects() {
 }
 
 #[test]
+fn v54_fresh_receipts_replay_and_resume_without_rewriting_evidence() {
+    for threshold in [None, Some(8192)] {
+        let mut f = Fixture::new();
+        f.binding
+            .fresh_task
+            .as_mut()
+            .unwrap()
+            .model_selection
+            .as_mut()
+            .unwrap()
+            .compaction_threshold = threshold;
+        let destination = f.binding.fresh_task.as_mut().unwrap();
+        destination.service_tier = threshold.map(|_| "fast".to_owned());
+        destination.model_selection.as_mut().unwrap().service_tier =
+            threshold.map(|_| "fast".to_owned());
+        let create_id = uuid::Uuid::new_v4().to_string();
+        let create_action = HeartbeatAction::Create {
+            spec: super::tests::spec(),
+        };
+        let original = control_heartbeat(
+            &f.path,
+            "project:project",
+            &create_id,
+            &create_action,
+            "Human schedule",
+            &f.binding,
+            1_000,
+        )
+        .unwrap();
+        let edit_id = uuid::Uuid::new_v4().to_string();
+        let mut spec = super::tests::spec();
+        spec.instructions.push_str(" edited");
+        let edit_action = HeartbeatAction::Edit {
+            schedule_id: original.schedule.schedule_id.clone(),
+            expected_version: 1,
+            spec,
+        };
+        let edited = control_heartbeat(
+            &f.path,
+            "project:project",
+            &edit_id,
+            &edit_action,
+            "Human edit",
+            &f.binding,
+            2_000,
+        )
+        .unwrap();
+        let pending = f.pending();
+        let reserved = reserve_fresh_heartbeat_launch(
+            &f.path,
+            &pending.occurrence_id,
+            pending.revision,
+            61_000,
+        )
+        .unwrap()
+        .unwrap();
+        let before_schedule =
+            read_heartbeat(&f.path, "project:project", &original.schedule.schedule_id).unwrap();
+        let conn = open_runtime_connection(&f.path).unwrap();
+        let old_key = |value: String| {
+            value.replace(
+                "\"compaction_threshold\":",
+                "\"orchestrator_compaction_threshold\":",
+            )
+        };
+        for (table, key, column, id) in [
+            (
+                "heartbeat_schedules",
+                "schedule_id",
+                "binding_json",
+                original.schedule.schedule_id.as_str(),
+            ),
+            (
+                "heartbeat_fresh_destinations",
+                "schedule_id",
+                "destination_json",
+                original.schedule.schedule_id.as_str(),
+            ),
+            (
+                "heartbeat_fresh_destinations",
+                "schedule_id",
+                "binding_json",
+                original.schedule.schedule_id.as_str(),
+            ),
+            (
+                "heartbeat_task_launches",
+                "occurrence_id",
+                "launch_json",
+                pending.occurrence_id.as_str(),
+            ),
+        ] {
+            let raw: String = conn
+                .query_row(
+                    &format!("SELECT {column} FROM {table} WHERE {key}=?1"),
+                    [id],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            conn.execute(
+                &format!("UPDATE {table} SET {column}=?2 WHERE {key}=?1"),
+                params![id, old_key(raw)],
+            )
+            .unwrap();
+        }
+        for (id, action) in [(&create_id, &create_action), (&edit_id, &edit_action)] {
+            let raw: String = conn
+                .query_row(
+                    "SELECT response_json FROM heartbeat_commands WHERE request_id=?1",
+                    [id],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            let digest =
+                super::v54_receipt::digest(action, f.binding.fresh_task.as_ref().unwrap()).unwrap();
+            conn.execute("UPDATE heartbeat_commands SET response_json=?2,canonical_digest=?3 WHERE request_id=?1",params![id,old_key(raw),digest]).unwrap();
+        }
+        let before: (String, String) = conn
+            .query_row(
+                "SELECT response_json,canonical_digest FROM heartbeat_commands WHERE request_id=?1",
+                [&create_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        // Reconstruct the predecessor catalog, then exercise the real v54
+        // upgrade and reopen instead of manually manufacturing provenance.
+        let triggers: Vec<String> = conn.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'task_model_v54_%'").unwrap().query_map([], |row|row.get(0)).unwrap().collect::<rusqlite::Result<_>>().unwrap();
+        for trigger in triggers {
+            conn.execute_batch(&format!("DROP TRIGGER {trigger}"))
+                .unwrap();
+        }
+        conn.execute_batch("DROP TABLE task_model_v54_provenance;
+            ALTER TABLE session_events RENAME COLUMN event_target TO thread_name;
+            ALTER TABLE session_events RENAME TO thread_events;
+            ALTER TABLE session_compaction_checkpoints RENAME TO orchestrator_compaction_checkpoints;
+            ALTER TABLE sessions RENAME COLUMN compaction_threshold TO orchestrator_compaction_threshold;
+            DROP INDEX idx_session_events_session_target_id;
+            DROP INDEX idx_session_compaction_checkpoints_latest;
+            CREATE INDEX idx_thread_events_session_thread_id ON thread_events(session_id,thread_name,id DESC);
+            CREATE INDEX idx_orchestrator_compaction_checkpoints_latest ON orchestrator_compaction_checkpoints(session_id,id DESC);
+            PRAGMA user_version=55;").unwrap();
+        drop(conn);
+        initialize(&f.path).unwrap();
+        assert_eq!(
+            read_heartbeat(&f.path, "project:project", &original.schedule.schedule_id).unwrap(),
+            before_schedule
+        );
+        assert_eq!(
+            read_fresh_heartbeat_launch(&f.path, &pending.occurrence_id)
+                .unwrap()
+                .unwrap()
+                .receipt(),
+            reserved.receipt()
+        );
+        for (id, action, expected) in [
+            (&create_id, &create_action, &original),
+            (&edit_id, &edit_action, &edited),
+        ] {
+            let replay = control_heartbeat(
+                &f.path,
+                "project:project",
+                id,
+                action,
+                "different prose ignored on receipt replay",
+                &f.binding,
+                99_000,
+            )
+            .unwrap();
+            assert_eq!(&replay, expected);
+        }
+        let mut changed = f.binding.clone();
+        changed
+            .fresh_task
+            .as_mut()
+            .unwrap()
+            .model_selection
+            .as_mut()
+            .unwrap()
+            .compaction_threshold = Some(9999);
+        assert!(control_heartbeat(
+            &f.path,
+            "project:project",
+            &create_id,
+            &create_action,
+            "ignored",
+            &changed,
+            99_000
+        )
+        .is_err());
+        let conn = open_runtime_connection(&f.path).unwrap();
+        assert_eq!(
+            conn.query_row::<(String, String), _, _>(
+                "SELECT response_json,canonical_digest FROM heartbeat_commands WHERE request_id=?1",
+                [&create_id],
+                |r| Ok((r.get(0)?, r.get(1)?))
+            )
+            .unwrap(),
+            before
+        );
+        conn.execute("UPDATE heartbeat_task_launches SET launch_json=json_set(launch_json,'$.preparation_attempts',2) WHERE occurrence_id=?1",[&pending.occurrence_id]).unwrap();
+        conn.execute("UPDATE heartbeat_schedules SET binding_json=json_set(binding_json,'$._attention_base_updated_at','x') WHERE schedule_id=?1",[&original.schedule.schedule_id]).unwrap();
+        drop(conn);
+        assert_eq!(
+            read_fresh_heartbeat_launch(&f.path, &pending.occurrence_id)
+                .unwrap()
+                .unwrap()
+                .receipt(),
+            reserved.receipt()
+        );
+        assert_eq!(
+            read_heartbeat(&f.path, "project:project", &original.schedule.schedule_id)
+                .unwrap()
+                .binding
+                .fresh_task,
+            f.binding.fresh_task
+        );
+    }
+}
+
+#[test]
 fn current_scheduled_publication_binds_selected_settings_and_tier_override() {
     for retained in [false, true] {
         let mut f = Fixture::new();
@@ -892,7 +1109,7 @@ fn current_scheduled_publication_binds_selected_settings_and_tier_override() {
             "x-fixture".into(),
             "private".into(),
         )]));
-        selected.orchestrator_compaction_threshold = Some(8192);
+        selected.compaction_threshold = Some(8192);
         f.create();
         let pending = f.pending();
         let prepared = reserve_fresh_heartbeat_launch(
@@ -962,7 +1179,7 @@ fn current_scheduled_publication_binds_selected_settings_and_tier_override() {
         changed.service_tier = Some(crate::model::ServiceTier::Fast);
         variants.push(changed);
         let mut changed = snapshot.clone();
-        changed.orchestrator_compaction_threshold = Some(8193);
+        changed.compaction_threshold = Some(8193);
         variants.push(changed);
         for changed in variants {
             let mut conn = open_runtime_connection(&f.path).unwrap();
@@ -1027,7 +1244,7 @@ fn current_scheduled_publication_accepts_normalized_defaults_and_zero_threshold(
         let selected = destination.model_selection.as_mut().unwrap();
         selected.model = " fixture-model ".into();
         selected.base_url = " https://fixture.invalid/v1 ".into();
-        selected.orchestrator_compaction_threshold = threshold;
+        selected.compaction_threshold = threshold;
         assert!(selected.extra_headers.is_none());
         assert!(selected.api_key_env.is_none());
         f.create();
@@ -1045,7 +1262,7 @@ fn current_scheduled_publication_accepts_normalized_defaults_and_zero_threshold(
         assert_eq!(snapshot.model, "fixture-model");
         assert_eq!(snapshot.base_url, "https://fixture.invalid/v1");
         assert!(snapshot.extra_headers.is_empty());
-        assert!(snapshot.orchestrator_compaction_threshold.is_none());
+        assert!(snapshot.compaction_threshold.is_none());
         let mut conn = open_runtime_connection(&f.path).unwrap();
         let tx = conn.transaction().unwrap();
         crate::sessions::insert_new_session_in_transaction(&tx, &f.path, &snapshot).unwrap();

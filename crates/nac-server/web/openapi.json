@@ -3808,7 +3808,7 @@
             }
           },
           {
-            "name": "thread_event_limit",
+            "name": "session_event_limit",
             "in": "query",
             "required": false,
             "schema": {
@@ -10933,7 +10933,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "orchestrator_compaction_started"
+                  "compaction_started"
                 ]
               }
             }
@@ -10956,7 +10956,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "orchestrator_compaction_completed"
+                  "compaction_completed"
                 ]
               }
             }
@@ -10983,7 +10983,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "orchestrator_compaction_skipped"
+                  "compaction_skipped"
                 ]
               }
             }
@@ -11010,7 +11010,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "orchestrator_compaction_failed"
+                  "compaction_failed"
                 ]
               }
             }
@@ -12551,6 +12551,10 @@
             "$ref": "#/components/schemas/SessionBehavior",
             "description": "Direct session behavior. Omission selects direct."
           },
+          "compaction_threshold": {
+            "$ref": "#/components/schemas/RequestField_u64_u64",
+            "description": "Omitted defaults to 70% of the model's context window; null or zero disables."
+          },
           "cwd": {
             "type": [
               "string",
@@ -12586,10 +12590,6 @@
                 "type": "null"
               }
             ]
-          },
-          "orchestrator_compaction_threshold": {
-            "$ref": "#/components/schemas/RequestField_u64_u64",
-            "description": "Omitted defaults to 70% of the model's context window; null or zero disables."
           },
           "project_id": {
             "type": [
@@ -18207,7 +18207,7 @@
           "reasoning_effort",
           "api_key_env",
           "extra_headers_json",
-          "orchestrator_compaction_threshold",
+          "compaction_threshold",
           "config_version"
         ],
         "properties": {
@@ -18233,6 +18233,14 @@
           "base_url": {
             "type": "string"
           },
+          "compaction_threshold": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
           "config_version": {
             "type": "integer",
             "format": "int64"
@@ -18252,14 +18260,6 @@
           },
           "model": {
             "type": "string"
-          },
-          "orchestrator_compaction_threshold": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64",
-            "minimum": 0
           },
           "reasoning_effort": {
             "type": [
@@ -19646,6 +19646,30 @@
           }
         }
       },
+      "SessionEventDecodeDiagnostic": {
+        "type": "object",
+        "required": [
+          "id",
+          "event_target",
+          "created_at",
+          "error"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "event_target": {
+            "type": "string"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
       "SessionEventEnvelope": {
         "type": "object",
         "required": [
@@ -19748,7 +19772,7 @@
           "messages",
           "response_timing",
           "sessions",
-          "thread_event_boundary",
+          "session_event_boundary",
           "workspace"
         ],
         "properties": {
@@ -19818,6 +19842,15 @@
               }
             ]
           },
+          "session_event_boundary": {
+            "$ref": "#/components/schemas/SessionEventBoundary"
+          },
+          "session_event_diagnostics": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SessionEventDecodeDiagnostic"
+            }
+          },
           "sessions": {
             "type": "array",
             "items": {
@@ -19828,15 +19861,6 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/ShellCommandSnapshot"
-            }
-          },
-          "thread_event_boundary": {
-            "$ref": "#/components/schemas/SessionEventBoundary"
-          },
-          "thread_event_diagnostics": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ThreadEventDecodeDiagnostic"
             }
           },
           "transcript_recovery_warning": {
@@ -21162,6 +21186,14 @@
           "base_url": {
             "type": "string"
           },
+          "compaction_threshold": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
           "extra_headers": {
             "type": [
               "object",
@@ -21176,14 +21208,6 @@
           },
           "model": {
             "type": "string"
-          },
-          "orchestrator_compaction_threshold": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64",
-            "minimum": 0
           },
           "reasoning_effort": {
             "type": [
@@ -21838,30 +21862,6 @@
           }
         }
       },
-      "ThreadEventDecodeDiagnostic": {
-        "type": "object",
-        "required": [
-          "id",
-          "thread_name",
-          "created_at",
-          "error"
-        ],
-        "properties": {
-          "created_at": {
-            "type": "string"
-          },
-          "error": {
-            "type": "string"
-          },
-          "id": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "thread_name": {
-            "type": "string"
-          }
-        }
-      },
       "TokenCostMicros": {
         "type": "object",
         "description": "Per-response cost in micro-USD (1e-6 USD), stored as u64 so `TokenUsage`\nstays `Eq`. All-zero = unknown pricing (pi's zero-cost fallback). `total`\nis the saturating sum of the four buckets, stored so consumers read it\ndirectly. Missing fields deserialize as zero so partial records stay\nloadable.",
@@ -21940,7 +21940,7 @@
           "total_tokens": {
             "type": "integer",
             "format": "int64",
-            "description": "Current context window size from the last ordinary orchestrator call.",
+            "description": "Current context window size from the last ordinary model call.",
             "minimum": 0
           }
         }
@@ -22243,6 +22243,10 @@
           "base_url": {
             "$ref": "#/components/schemas/RequestField_String_String"
           },
+          "compaction_threshold": {
+            "$ref": "#/components/schemas/RequestField_u64_u64",
+            "description": "Omitted preserves; null or zero disables."
+          },
           "expected_config_version": {
             "type": [
               "integer",
@@ -22257,10 +22261,6 @@
           },
           "model": {
             "$ref": "#/components/schemas/RequestField_String_String"
-          },
-          "orchestrator_compaction_threshold": {
-            "$ref": "#/components/schemas/RequestField_u64_u64",
-            "description": "Omitted preserves; null or zero disables."
           },
           "reasoning_effort": {
             "$ref": "#/components/schemas/RequestField_String_String"

@@ -13,7 +13,7 @@ fn run_options(root: &Path, store_path: &Path) -> RunOptions {
             store_path: Some(store_path.to_path_buf()),
         },
         model: test_openai_model_options(),
-        orchestrator_compaction_threshold: Some(32_000),
+        compaction_threshold: Some(32_000),
         sandbox: SandboxOptions::default(),
         ssh: SshOptions::default(),
     }

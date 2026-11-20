@@ -49,7 +49,7 @@ fn test_direct_active_service_at(
         AgentConfig {
             store_path: path.clone(),
             session_id: Some(session_id.into()),
-            orchestrator_compaction_threshold: None,
+            compaction_threshold: None,
             initial_messages: Vec::new(),
             event_sink: EventSink::none(),
             workspace_cwd: cwd.clone(),

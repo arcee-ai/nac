@@ -15,9 +15,8 @@ pub(crate) struct StartTraditionalChild {
 
 /// Durable child-session use cases.
 ///
-/// Traditional children and managed orchestrators intentionally remain
-/// distinct topologies. This service owns their parent eligibility checks and
-/// foreground/background completion behavior without exposing HTTP concerns.
+/// This service owns parent eligibility checks and foreground/background
+/// completion behavior without exposing HTTP concerns.
 pub(crate) struct DelegationApplication<'a> {
     manager: &'a SessionManager,
 }
