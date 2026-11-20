@@ -13,9 +13,11 @@ import { cn } from "@/app/lib/cn";
 
 export function SmallSelect({
   items,
+  checkedChoices = false,
   value,
   onValueChange,
   placeholder,
+  triggerLabel,
   disabled = false,
   size = ButtonSize.Medium,
   trailingIcon,
@@ -25,11 +27,14 @@ export function SmallSelect({
   presentation,
   "aria-invalid": ariaInvalid,
   "aria-describedby": ariaDescribedBy,
+  "aria-label": ariaLabel,
 }: {
   items: SelectItem[];
+  checkedChoices?: boolean;
   value: string;
   onValueChange: (id: string) => void;
   placeholder?: string;
+  triggerLabel?: string;
   disabled?: boolean;
   size?: ButtonSize;
   trailingIcon?: IconName | null;
@@ -37,17 +42,20 @@ export function SmallSelect({
   placement?: PopoverPlacement;
   onOpenChange?: (open: boolean) => void;
   presentation?: "form";
-} & Pick<AriaAttributes, "aria-invalid" | "aria-describedby">) {
+} & Pick<AriaAttributes, "aria-invalid" | "aria-describedby" | "aria-label">) {
   const isMobile = useIsMobile();
   return (
     <Select
       items={items}
+      checkedChoices={checkedChoices}
       value={value}
       onValueChange={onValueChange}
       placeholder={placeholder}
+      triggerLabel={triggerLabel}
       disabled={disabled}
       aria-invalid={ariaInvalid}
       aria-describedby={ariaDescribedBy}
+      aria-label={ariaLabel}
       size={presentation === "form" && isMobile ? ButtonSize.Large : size}
       trailingIcon={trailingIcon}
       className={presentation === "form" ? "w-full md:w-auto" : undefined}

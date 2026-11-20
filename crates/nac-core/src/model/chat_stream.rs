@@ -17,6 +17,7 @@ pub(super) struct ChatStreamFold<'sink> {
     reasoning: String,
     finish_reason: Option<String>,
     usage: Option<Value>,
+    service_tier: Option<String>,
     /// Tool calls arrive spread over many chunks, identified by their position
     /// in the call list: identity comes once and the arguments accumulate.
     tool_calls: BTreeMap<u64, PartialToolCall>,
@@ -42,6 +43,7 @@ impl<'sink> ChatStreamFold<'sink> {
             reasoning: String::new(),
             finish_reason: None,
             usage: None,
+            service_tier: None,
             tool_calls: BTreeMap::new(),
             saw_choice: false,
             observable_delta: false,
@@ -96,6 +98,12 @@ impl StreamFold for ChatStreamFold<'_> {
 
         if let Some(usage) = event.get("usage").filter(|usage| !usage.is_null()) {
             self.usage = Some(usage.clone());
+        }
+
+        // Usage-only chunks can also carry the served tier. Preserve it before
+        // returning for chunks without choices. Null does not erase a prior value.
+        if let Some(tier) = event.get("service_tier").and_then(Value::as_str) {
+            self.service_tier = Some(tier.to_owned());
         }
 
         let Some(choice) = event
@@ -184,6 +192,40 @@ impl StreamFold for ChatStreamFold<'_> {
         if let Some(usage) = self.usage {
             response["usage"] = usage;
         }
+        if let Some(tier) = self.service_tier {
+            response["service_tier"] = Value::String(tier);
+        }
         Ok(response)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preserves_served_tier_from_usage_only_chunks() {
+        for tier in ["default", "fast", "priority", "ultrafast", "future-tier"] {
+            let mut fold = ChatStreamFold::new(None, "reasoning_content");
+            fold.push(
+                &json!({"choices": [{"delta": {"content": "done"}, "finish_reason": "stop"}]}),
+            )
+            .unwrap();
+            fold.push(&json!({"choices": [], "service_tier": tier, "usage": {"prompt_tokens": 1}}))
+                .unwrap();
+            fold.push(&json!({"choices": [], "service_tier": null}))
+                .unwrap();
+            let response = fold.finish().unwrap();
+            assert_eq!(response["service_tier"], tier);
+            assert_eq!(response["usage"]["prompt_tokens"], 1);
+        }
+    }
+
+    #[test]
+    fn missing_tier_remains_absent() {
+        let mut fold = ChatStreamFold::new(None, "reasoning_content");
+        fold.push(&json!({"choices": [{"delta": {"content": "done"}}]}))
+            .unwrap();
+        assert!(fold.finish().unwrap().get("service_tier").is_none());
     }
 }

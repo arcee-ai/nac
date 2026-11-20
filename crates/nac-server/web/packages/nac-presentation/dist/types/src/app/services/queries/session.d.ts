@@ -407,6 +407,7 @@ export declare function useSessionConfig(id: string | null): import("@tanstack/r
     model: string;
     orchestrator_compaction_threshold: number | null;
     reasoning_effort: string | null;
+    service_tier?: string | null;
     session_id: string;
 }>, Error>;
 export declare function useCreateSession(): import("@tanstack/react-query").UseMutationResult<{
@@ -454,6 +455,7 @@ export declare function useCreateSession(): import("@tanstack/react-query").UseM
     project_id?: string | null;
     reasoning_effort?: import("../../types/openapi.generated").components["schemas"]["RequestField_String_String"];
     sandbox?: import("../../types/openapi.generated").components["schemas"]["SandboxRequest"];
+    service_tier?: import("../../types/openapi.generated").components["schemas"]["RequestField_String_String"];
     ssh_host?: string | null;
     ssh_identity_file?: string | null;
     ssh_port?: number | null;
@@ -482,6 +484,7 @@ export declare function useUpdatePresentation(): import("@tanstack/react-query")
     sandboxed: boolean;
     session_id: string;
     sort_order?: number;
+    speed_tier_charges_excluded?: boolean;
     ssh_host: string | null;
     ssh_identity_file?: string | null;
     ssh_port?: number | null;
@@ -509,6 +512,7 @@ export declare function useTogglePin(): {
         sandboxed: boolean;
         session_id: string;
         sort_order?: number;
+        speed_tier_charges_excluded?: boolean;
         ssh_host: string | null;
         ssh_identity_file?: string | null;
         ssh_port?: number | null;
@@ -542,6 +546,7 @@ export declare function useTogglePin(): {
         sandboxed: boolean;
         session_id: string;
         sort_order?: number;
+        speed_tier_charges_excluded?: boolean;
         ssh_host: string | null;
         ssh_identity_file?: string | null;
         ssh_port?: number | null;
@@ -573,6 +578,7 @@ export declare function useTogglePin(): {
         sandboxed: boolean;
         session_id: string;
         sort_order?: number;
+        speed_tier_charges_excluded?: boolean;
         ssh_host: string | null;
         ssh_identity_file?: string | null;
         ssh_port?: number | null;
@@ -599,6 +605,7 @@ export declare function useTogglePin(): {
         sandboxed: boolean;
         session_id: string;
         sort_order?: number;
+        speed_tier_charges_excluded?: boolean;
         ssh_host: string | null;
         ssh_identity_file?: string | null;
         ssh_port?: number | null;
@@ -632,6 +639,7 @@ export declare function useTogglePin(): {
         sandboxed: boolean;
         session_id: string;
         sort_order?: number;
+        speed_tier_charges_excluded?: boolean;
         ssh_host: string | null;
         ssh_identity_file?: string | null;
         ssh_port?: number | null;
@@ -663,6 +671,7 @@ export declare function useTogglePin(): {
         sandboxed: boolean;
         session_id: string;
         sort_order?: number;
+        speed_tier_charges_excluded?: boolean;
         ssh_host: string | null;
         ssh_identity_file?: string | null;
         ssh_port?: number | null;
@@ -689,6 +698,7 @@ export declare function useTogglePin(): {
         sandboxed: boolean;
         session_id: string;
         sort_order?: number;
+        speed_tier_charges_excluded?: boolean;
         ssh_host: string | null;
         ssh_identity_file?: string | null;
         ssh_port?: number | null;
@@ -722,6 +732,7 @@ export declare function useTogglePin(): {
         sandboxed: boolean;
         session_id: string;
         sort_order?: number;
+        speed_tier_charges_excluded?: boolean;
         ssh_host: string | null;
         ssh_identity_file?: string | null;
         ssh_port?: number | null;
@@ -753,6 +764,7 @@ export declare function useTogglePin(): {
         sandboxed: boolean;
         session_id: string;
         sort_order?: number;
+        speed_tier_charges_excluded?: boolean;
         ssh_host: string | null;
         ssh_identity_file?: string | null;
         ssh_port?: number | null;
@@ -779,6 +791,7 @@ export declare function useTogglePin(): {
         sandboxed: boolean;
         session_id: string;
         sort_order?: number;
+        speed_tier_charges_excluded?: boolean;
         ssh_host: string | null;
         ssh_identity_file?: string | null;
         ssh_port?: number | null;
@@ -804,6 +817,7 @@ export declare function useTogglePin(): {
         sandboxed: boolean;
         session_id: string;
         sort_order?: number;
+        speed_tier_charges_excluded?: boolean;
         ssh_host: string | null;
         ssh_identity_file?: string | null;
         ssh_port?: number | null;
@@ -836,6 +850,7 @@ export declare function useTogglePin(): {
         sandboxed: boolean;
         session_id: string;
         sort_order?: number;
+        speed_tier_charges_excluded?: boolean;
         ssh_host: string | null;
         ssh_identity_file?: string | null;
         ssh_port?: number | null;
@@ -867,6 +882,7 @@ export declare function useTogglePin(): {
         sandboxed: boolean;
         session_id: string;
         sort_order?: number;
+        speed_tier_charges_excluded?: boolean;
         ssh_host: string | null;
         ssh_identity_file?: string | null;
         ssh_port?: number | null;

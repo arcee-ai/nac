@@ -51,6 +51,7 @@ async fn finish_run_persists_snapshot_before_completion_event() {
             .unwrap();
         agent
             .push_and_log_for_test(Message::Assistant {
+                service_tier_receipt: None,
                 content: Some("done".to_string()),
                 reasoning_text: None,
                 reasoning_details: None,
@@ -221,6 +222,7 @@ async fn run_end_persists_run_state_without_rewriting_messages_json() {
                 .unwrap();
             agent
                 .push_and_log_for_test(Message::Assistant {
+                    service_tier_receipt: None,
                     content: Some(response.to_string()),
                     reasoning_text: None,
                     reasoning_details: None,
@@ -309,6 +311,7 @@ async fn real_run_diffs_token_timing_from_the_run_start_store_count() {
         content: "legacy prompt".to_string(),
     });
     agent.messages.push(Message::Assistant {
+        service_tier_receipt: None,
         content: Some("legacy answer".to_string()),
         reasoning_text: None,
         reasoning_details: None,
@@ -571,6 +574,7 @@ async fn finish_run_persists_token_usage() {
             .unwrap();
         agent
             .push_and_log_for_test(Message::Assistant {
+                service_tier_receipt: None,
                 content: Some("done".to_string()),
                 reasoning_text: None,
                 reasoning_details: None,
@@ -584,6 +588,7 @@ async fn finish_run_persists_token_usage() {
     }
 
     let test_usage = crate::model::TokenUsage {
+        speed_tier_charges_excluded: false,
         input_tokens: 500,
         output_tokens: 120,
         cache_read_tokens: 80,
@@ -694,6 +699,7 @@ async fn failed_run_without_visible_response_round_trips_token_usage() {
     // Simulate usage that was accumulated during the run (including
     // worker thread tokens from a prior tool round) before the run failed.
     let test_usage = crate::model::TokenUsage {
+        speed_tier_charges_excluded: false,
         input_tokens: 500,
         output_tokens: 120,
         cache_read_tokens: 80,

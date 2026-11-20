@@ -105,12 +105,14 @@ async function launchComposed(j: Journey) {
   fixture.catalogGate.release();
   await model.click();
   await root
-    .getByRole("menu", { name: "Model settings", exact: true })
-    .getByRole("menuitem", { name: /^Model / })
+    .getByRole("dialog", { name: "Model settings", exact: true })
+    .getByRole("button", { name: /^Choose model/ })
     .click();
   const search = root.getByRole("textbox", { name: "Search models", exact: true });
   await search.fill("gpt-5.6-sol");
   await search.press("Enter");
+  await expect(root.getByRole("button", { name: /^Choose model: GPT-5\.6 Sol/i })).toBeVisible();
+  await page.keyboard.press("Escape");
   await expect(model).toHaveAttribute("aria-expanded", "false");
 
   const prompt = "COMPOSED_BROWSER_LAUNCH";

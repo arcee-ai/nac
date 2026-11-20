@@ -24,6 +24,7 @@ const fakes = vi.hoisted(() => ({
   configuredModel: null as string | null,
   inheritedEffort: "high" as string | null,
   inheritedModel: "glm-5",
+  nativeSpeed: undefined as "fast" | "standard" | undefined,
 }));
 
 vi.mock("./useStartSession", () => ({
@@ -45,7 +46,9 @@ vi.mock("./modelChoice", async (importOriginal) => ({
             initial: {
               model: fakes.inheritedModel,
               reasoning_effort: fakes.inheritedEffort,
-              backend: "arcee-api",
+              backend: fakes.nativeSpeed ? "openai-chat-completions" : "arcee-api",
+              base_url: fakes.nativeSpeed ? "https://api.openai.com/v1" : "https://api.arcee.ai/v1",
+              service_tier: fakes.nativeSpeed,
             },
             light: null,
             source: "project-default",
@@ -84,6 +87,14 @@ vi.mock("@/app/services/queries", () => ({
           auth_status: "ready",
           models: [{ id: "glm-5", supported_efforts: ["low", "medium", "high"] }],
           default_limits: { supported_efforts: [] },
+        },
+        {
+          id: "openai-chat-completions",
+          auth_status: "ready",
+          default_base_url: "https://api.openai.com/v1",
+          models: [{ id: "gpt-6.1-sol", supported_efforts: ["low", "high"] }],
+          default_limits: { supported_efforts: [] },
+          speed_profiles: { "gpt-6.1-sol": { tiers: ["standard", "fast"] } },
         },
       ],
     },
@@ -162,6 +173,7 @@ beforeEach(() => {
   fakes.configuredModel = null;
   fakes.inheritedEffort = "high";
   fakes.inheritedModel = "glm-5";
+  fakes.nativeSpeed = undefined;
   standaloneHomeDraftStore.update("", null);
 });
 afterEach(() => {
@@ -297,13 +309,9 @@ describe("Home composer", () => {
   it("offers only the model's reasoning levels and sends the one picked", async () => {
     mount("/", false);
     fireEvent.click(screen.getByRole("button", { name: "Model: glm-5, High reasoning" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: /^Effort/ }));
-    expect(screen.getAllByRole("menuitemradio").map((item) => item.textContent)).toEqual([
-      "Low",
-      "Medium",
-      "High",
-    ]);
-    fireEvent.click(screen.getByRole("menuitemradio", { name: "Low" }));
+    expect(screen.getAllByRole("radio")).toHaveLength(3);
+    expect(screen.getByRole("radio", { name: "High", checked: true })).toBeTruthy();
+    fireEvent.click(screen.getByRole("radio", { name: "Low" }));
     expect(screen.getByRole("button", { name: "Model: glm-5, Low reasoning" })).toBeTruthy();
     fireEvent.change(prompt(), { target: { value: "Go" } });
     fireEvent.keyDown(prompt(), { key: "Enter" });
@@ -335,15 +343,39 @@ describe("Home composer", () => {
     );
   });
 
+  it("switches inherited Fast to explicit Standard without changing routing or reasoning", async () => {
+    fakes.inheritedModel = "gpt-6.1-sol";
+    fakes.nativeSpeed = "fast";
+    mount("/", false);
+    fireEvent.click(screen.getByRole("button", { name: /High reasoning, Fast speed$/ }));
+    const fast = screen.getByRole("switch", { name: "Fast speed", checked: true });
+    expect(screen.queryByRole("button", { name: /Use provider default/ })).toBeNull();
+    fireEvent.click(fast);
+    fireEvent.change(prompt(), { target: { value: "Go" } });
+    fireEvent.keyDown(prompt(), { key: "Enter" });
+    await vi.waitFor(() =>
+      expect(fakes.start).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: expect.objectContaining({
+            selection: expect.objectContaining({
+              backend: "openai-chat-completions",
+              model: "gpt-6.1-sol",
+              reasoning_effort: "high",
+              service_tier: "standard",
+            }),
+          }),
+        }),
+      ),
+    );
+  });
+
   it("shows effort as None and sends none for a model that accepts no level", async () => {
     fakes.inheritedEffort = null;
     fakes.inheritedModel = "no-levels";
     mount("/", false);
     const chip = screen.getByRole("button", { name: /, None reasoning$/ });
     fireEvent.click(chip);
-    fireEvent.click(screen.getByRole("menuitem", { name: /^Effort\s*None/ }));
-    expect(screen.getAllByRole("menuitemradio").map((item) => item.textContent)).toEqual(["None"]);
-    fireEvent.click(screen.getByRole("menuitemradio", { name: "None" }));
+    expect(screen.queryByRole("group", { name: /^Reasoning/ })).toBeNull();
     fireEvent.change(prompt(), { target: { value: "Go" } });
     fireEvent.keyDown(prompt(), { key: "Enter" });
     await vi.waitFor(() => expect(fakes.start).toHaveBeenCalled());

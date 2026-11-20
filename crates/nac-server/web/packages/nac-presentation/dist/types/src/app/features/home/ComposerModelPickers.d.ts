@@ -1,14 +1,14 @@
 import { PopoverPlacement } from "../../atoms";
 import { type CatalogPick } from "../../lib/catalog";
+import { type ServiceTier, type speedForRoute } from "../../lib/serviceTier";
 import type { BackendKind, ModelCatalog, ReasoningEffort } from "../../types/api";
 type CatalogProvider = ModelCatalog["providers"][number];
 /**
- * The composer's model chip, "GPT-6.1 Sol High": the model a session runs on
- * and its reasoning effort, on Home and in a session. Opens on an overview of
- * both; each row leads to its own list. Lists every model on a connected
- * provider; accounts and keys are added in Settings.
+ * One composer control for model, reasoning and speed. The current model
+ * opens the searchable catalog; the overview exposes the capabilities of
+ * just that model and route.
  */
-export declare function ModelPicker({ fallbackLabel, pending, value, effort, supportedEfforts, inheritedLabel, usingInherited, disabled, placement, usableProvider, onPick, onEffort, onUseInherited, onAdvanced, }: {
+export declare function ModelPicker({ fallbackLabel, pending, value, effort, supportedEfforts, speed, disabled, placement, usableProvider, onPick, onEffort, onAdvanced, }: {
     /** Shown when the model is not in the catalog (an older saved setup). */
     fallbackLabel: string | null;
     pending: boolean;
@@ -19,16 +19,22 @@ export declare function ModelPicker({ fallbackLabel, pending, value, effort, sup
     /** A reasoning level; "" only while there is no model. */
     effort: string;
     supportedEfforts: readonly ReasoningEffort[];
-    /** The project's own model, offered as a way back after picking another. */
-    inheritedLabel?: string | null;
-    usingInherited?: boolean;
+    speed?: ReturnType<typeof speedForRoute> & {
+        value: ServiceTier | null;
+        onChange: (tier: ServiceTier | null) => void;
+    };
     disabled?: boolean;
     placement?: PopoverPlacement;
     /** Whose models are listed: connected providers unless a host mounts its own. */
     usableProvider?: (provider: CatalogProvider) => boolean;
-    onPick: (pick: CatalogPick) => void;
+    /** Rejected selections keep the model list open with an explanation. */
+    onPick: (pick: CatalogPick, clearIncompatibleSpeed: boolean) => {
+        error: string;
+        confirmSpeedClear?: boolean;
+    } | {
+        notice: string;
+    } | void;
     onEffort: (effort: string) => void;
-    onUseInherited?: () => void;
     /** Light-model and preset options, where orchestration still offers them. */
     onAdvanced?: () => void;
 }): import("react").JSX.Element;

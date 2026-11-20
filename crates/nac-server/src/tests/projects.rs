@@ -1,6 +1,105 @@
 use super::*;
 
 #[tokio::test]
+async fn inherited_speed_retains_compatible_native_route_and_requires_repair_elsewhere() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("project_speed_reconciliation");
+    let workspace = root.join("workspace");
+    let nac_home = root.join("nac-home");
+    std::fs::create_dir_all(&workspace).unwrap();
+    std::fs::create_dir_all(&nac_home).unwrap();
+    let _env = ScopedModelEnv::isolated(&nac_home, Some("project-test-key"));
+    let manager = test_manager(&root);
+    let store_path = root.join("store.db");
+    model_configurations::insert_model_configuration(
+        &store_path,
+        "codex-fast",
+        model_configurations::NewModelConfiguration {
+            name: "Codex Fast".into(),
+            backend: "chatgpt-codex-responses".into(),
+            model: "gpt-6.1-sol".into(),
+            base_url: "https://chatgpt.com/backend-api".into(),
+            allow_insecure_http: false,
+            api_key_env: None,
+            reasoning_effort: None,
+            service_tier: Some("fast".into()),
+            extra_headers: BTreeMap::new(),
+            orchestrator_compaction_threshold: None,
+            initial_prompt: None,
+            light_model: None,
+        },
+    )
+    .unwrap();
+    let project = manager
+        .projects()
+        .create(application::projects::CreateProject {
+            name: Some("Project".into()),
+            description: None,
+            cwd: workspace,
+            ssh_host: None,
+            ssh_port: None,
+            ssh_identity_file: None,
+            default_model_config_id: Some("codex-fast".into()),
+        })
+        .await
+        .unwrap();
+    let app = router(manager);
+    let base = serde_json::json!({
+        "project_id": project.project_id,
+        "backend": "openai-responses", "model": "gpt-5.2",
+        "base_url": "https://api.openai.com/v1", "api_key_env": "OPENAI_API_KEY"
+    });
+    for tier in [None, Some(serde_json::json!("fast"))] {
+        let mut request = base.clone();
+        if let Some(tier) = tier {
+            request["service_tier"] = tier;
+        }
+        let response = post_json(app.clone(), "/sessions", request).await;
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let created: serde_json::Value =
+            serde_json::from_slice(&response_body(response).await).unwrap();
+        let id = created["metadata"]["session_id"].as_str().unwrap();
+        assert_eq!(
+            sessions::load_session(&store_path, id)
+                .unwrap()
+                .service_tier,
+            Some(nac_core::model::ServiceTier::Fast)
+        );
+    }
+    let mut unsupported = base;
+    unsupported["base_url"] = serde_json::json!("https://example.com/v1");
+    for tier in [None, Some(serde_json::json!("fast"))] {
+        let mut request = unsupported.clone();
+        if let Some(tier) = tier {
+            request["service_tier"] = tier;
+        }
+        let response = post_json(app.clone(), "/sessions", request).await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = String::from_utf8(response_body(response).await.to_vec()).unwrap();
+        assert!(body.contains("clear the speed preference"), "{body}");
+    }
+    assert_eq!(sessions::list_sessions(&store_path).unwrap().len(), 2);
+    let mut repaired = unsupported;
+    repaired["service_tier"] = serde_json::Value::Null;
+    let response = post_json(app, "/sessions", repaired).await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let created: serde_json::Value =
+        serde_json::from_slice(&response_body(response).await).unwrap();
+    let id = created["metadata"]["session_id"].as_str().unwrap();
+    let saved = sessions::load_session(&store_path, id).unwrap();
+    assert_eq!(saved.service_tier, None);
+    assert_eq!(saved.backend, BackendKind::OpenAiResponses);
+    assert_eq!(
+        model_configurations::load_model_configuration(&store_path, "codex-fast")
+            .unwrap()
+            .service_tier
+            .as_deref(),
+        Some("fast")
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
 async fn project_http_create_list_patch_and_location_conflict() {
     let root = temp_root("project_http");
     let workspace = root.join("workspace");
@@ -119,6 +218,7 @@ async fn literal_local_path_project_and_first_chat_keep_the_selected_inode() {
         &store_path,
         "literal-path-default",
         model_configurations::NewModelConfiguration {
+            service_tier: None,
             name: "Literal path default".into(),
             backend: "openai-responses".into(),
             model: "gpt-5.2".into(),
@@ -312,6 +412,7 @@ async fn project_session_materializes_defaults_and_filters_membership() {
         &store_path,
         "project-default",
         model_configurations::NewModelConfiguration {
+            service_tier: None,
             name: "Project default".to_string(),
             backend: "openai-responses".to_string(),
             model: "gpt-5.2".to_string(),

@@ -146,6 +146,8 @@ pub struct RawSessionConfig {
     pub backend: Option<String>,
     #[cfg_attr(feature = "openapi", schema(required))]
     pub reasoning_effort: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service_tier: Option<String>,
     #[cfg_attr(feature = "openapi", schema(required))]
     pub api_key_env: Option<String>,
     #[cfg_attr(feature = "openapi", schema(required))]
@@ -219,6 +221,7 @@ pub struct SessionSnapshot {
     pub allow_insecure_http: bool,
     pub backend: BackendKind,
     pub reasoning_effort: Option<ReasoningEffort>,
+    pub service_tier: Option<crate::model::ServiceTier>,
     pub sandbox_spec: Option<SandboxSpec>,
     /// How to reach the host of a remote session; `None` for local sessions.
     /// Persisted in full so resume reaches the same machine the same way,
@@ -281,6 +284,7 @@ pub struct SessionSummary {
     /// Micro-USD spend accumulated over the session, or `None` when no response
     /// ever reported usage. Zero means the catalog had no rates for the model.
     pub total_cost_micros: Option<u64>,
+    pub speed_tier_charges_excluded: bool,
     /// Number of runs ever started in this session.
     pub run_count: u64,
     /// Present when this chat was forked from another session.

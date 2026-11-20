@@ -37,6 +37,23 @@ import { perfRender } from "@/app/lib/perfDebug";
 import { RUN_CANCELLED_MARKER, type ModelTurn, type TranscriptTurn } from "@/app/lib/transcript";
 import type { SessionForkLink, WorkspaceRevision } from "@/app/types/api";
 
+function receiptSpeedLabel(value: string | null): string {
+  switch (value) {
+    case "default":
+    case "standard":
+      return "Standard";
+    case "priority":
+    case "fast":
+      return "Fast";
+    case "ultrafast":
+      return "Ultrafast";
+    case null:
+      return "Unknown";
+    default:
+      return `Unknown (provider reported: ${value})`;
+  }
+}
+
 /** Visible prose from the turn — what Copy puts on the clipboard. */
 function modelCopyText(turn: ModelTurn): string {
   return turn.blocks
@@ -239,6 +256,20 @@ const ModelMessageBody = memo(function ModelMessageBody({
         );
       })}
 
+      {turn.serviceTierReceipts?.map((receipt, index) => {
+        const served = receiptSpeedLabel(receipt.served);
+        const requested =
+          receipt.requested == null ? "Provider default" : receiptSpeedLabel(receipt.requested);
+        const downgraded =
+          ((requested === "Fast" || requested === "Ultrafast") && served === "Standard") ||
+          (requested === "Ultrafast" && served === "Fast");
+        return (
+          <p key={index} className="type-meta text-basic-muted">
+            Requested speed: {requested}; served tier: {served}
+            {downgraded ? " (provider downgrade)" : ""}
+          </p>
+        );
+      })}
       {!active && snapshotRevision && filesPanel ? (
         <SnapshotBadge revision={snapshotRevision} panel={filesPanel} />
       ) : null}

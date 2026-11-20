@@ -65,7 +65,8 @@ async fn projects(manager: &SessionManager) -> Result<Vec<SavedTaskProject>> {
             Ok(SavedTaskProject { project_id:project.project_id, name:project.name, cwd:project.cwd,
                 ssh_host:project.ssh_host, default_model_config_id:project.default_model_config_id,
                 default_model:defaults.as_ref().map(|d|d.model.clone()),
-                default_reasoning_effort:defaults.and_then(|d|d.reasoning_effort),
+                default_reasoning_effort:defaults.as_ref().and_then(|d|d.reasoning_effort.clone()),
+                default_service_tier:defaults.and_then(|d|d.service_tier),
                 default_ref:bound.map(|source| source.default_ref), eligible,
                 eligibility_detail:if eligible { "Local launch eligible; source and runtime readiness are validated at admission" } else { "SSH launch is unavailable; no Local fallback" }.into() })
         }).collect()

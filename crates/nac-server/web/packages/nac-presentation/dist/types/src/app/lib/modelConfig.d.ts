@@ -53,6 +53,7 @@ export interface ModelFormValues {
     orchestrator_compaction_threshold: string;
 }
 export interface SettingsInitialValues {
+    service_tier?: import("./serviceTier").ServiceTier | null;
     model: string;
     base_url: string;
     allow_insecure_http: boolean;

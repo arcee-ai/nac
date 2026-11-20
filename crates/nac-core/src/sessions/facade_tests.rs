@@ -98,6 +98,7 @@ fn create_and_load_session_round_trip() {
     snapshot.response_durations_ms = Some(vec![Some(1_000), None, Some(12_345)]);
     snapshot.token_usages = vec![
         Some(crate::model::TokenUsage {
+            speed_tier_charges_excluded: false,
             input_tokens: 100,
             output_tokens: 50,
             cache_read_tokens: 20,
@@ -108,6 +109,7 @@ fn create_and_load_session_round_trip() {
         }),
         None,
         Some(crate::model::TokenUsage {
+            speed_tier_charges_excluded: false,
             input_tokens: 200,
             output_tokens: 80,
             cache_read_tokens: 40,
@@ -723,6 +725,7 @@ fn list_sessions_returns_summaries_in_presentation_order() {
                 content: "latest prompt".to_string(),
             },
             Message::Assistant {
+                service_tier_receipt: None,
                 content: Some("reply".to_string()),
                 reasoning_text: None,
                 reasoning_details: None,
@@ -1021,6 +1024,7 @@ fn config_and_history_writes_preserve_each_other_in_both_orders() {
                 content: "new prompt".to_string(),
             },
             Message::Assistant {
+                service_tier_receipt: None,
                 content: Some("new response".to_string()),
                 reasoning_text: None,
                 reasoning_details: None,
@@ -1034,6 +1038,7 @@ fn config_and_history_writes_preserve_each_other_in_both_orders() {
         completed_run.previous_response_duration_ms = Some(125);
         completed_run.response_durations_ms = Some(vec![Some(250)]);
         completed_run.token_usages = vec![Some(crate::model::TokenUsage {
+            speed_tier_charges_excluded: false,
             input_tokens: 10,
             output_tokens: 20,
             cache_read_tokens: 3,
@@ -1780,6 +1785,7 @@ fn save_session_run_state_preserves_messages_and_config_columns() {
         token_usages: vec![
             None,
             Some(crate::model::TokenUsage {
+                speed_tier_charges_excluded: false,
                 input_tokens: 10,
                 output_tokens: 20,
                 cache_read_tokens: 3,
@@ -1881,6 +1887,7 @@ fn session_summaries_merge_blob_stats_with_transcript_log_tail() {
             content: "blob prompt".to_string(),
         },
         Message::Assistant {
+            service_tier_receipt: None,
             content: Some("blob answer".to_string()),
             reasoning_text: None,
             reasoning_details: None,
@@ -1909,6 +1916,7 @@ fn session_summaries_merge_blob_stats_with_transcript_log_tail() {
                     content: "log prompt".to_string(),
                 },
                 Message::Assistant {
+                    service_tier_receipt: None,
                     content: Some("log answer".to_string()),
                     reasoning_text: None,
                     reasoning_details: None,
@@ -1918,6 +1926,7 @@ fn session_summaries_merge_blob_stats_with_transcript_log_tail() {
                     reasoning_field: None,
                 },
                 Message::Assistant {
+                    service_tier_receipt: None,
                     content: None,
                     reasoning_text: None,
                     reasoning_details: None,

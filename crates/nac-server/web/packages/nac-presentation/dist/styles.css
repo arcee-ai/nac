@@ -268,6 +268,7 @@
     --font-weight-semibold: 600;
     --tracking-tight: -.025em;
     --tracking-normal: 0em;
+    --leading-normal: 1.5;
     --radius-xs: 4px;
     --radius-sm: 6px;
     --radius-md: 8px;
@@ -2152,10 +2153,6 @@
 
 [data-nac-runtime]:is(.min-w-\[180px\]), [data-nac-runtime] .min-w-\[180px\] {
     min-width: 180px;
-  }
-
-[data-nac-runtime]:is(.min-w-\[200px\]), [data-nac-runtime] .min-w-\[200px\] {
-    min-width: 200px;
   }
 
 [data-nac-runtime]:is(.min-w-\[220px\]), [data-nac-runtime] .min-w-\[220px\] {
@@ -4066,6 +4063,11 @@
     line-height: 1;
   }
 
+[data-nac-runtime]:is(.leading-normal), [data-nac-runtime] .leading-normal {
+    --nac-presentation-tw-leading: var(--leading-normal);
+    line-height: var(--leading-normal);
+  }
+
 [data-nac-runtime]:is(.font-medium), [data-nac-runtime] .font-medium {
     --nac-presentation-tw-font-weight: var(--font-weight-medium);
     font-weight: var(--font-weight-medium);
@@ -4503,10 +4505,6 @@
     filter: var(--nac-presentation-tw-blur, ) var(--nac-presentation-tw-brightness, ) var(--nac-presentation-tw-contrast, ) var(--nac-presentation-tw-grayscale, ) var(--nac-presentation-tw-hue-rotate, ) var(--nac-presentation-tw-invert, ) var(--nac-presentation-tw-saturate, ) var(--nac-presentation-tw-sepia, ) var(--nac-presentation-tw-drop-shadow, );
   }
 
-[data-nac-runtime]:is(.\!filter), [data-nac-runtime] .\!filter {
-    filter: var(--nac-presentation-tw-blur, ) var(--nac-presentation-tw-brightness, ) var(--nac-presentation-tw-contrast, ) var(--nac-presentation-tw-grayscale, ) var(--nac-presentation-tw-hue-rotate, ) var(--nac-presentation-tw-invert, ) var(--nac-presentation-tw-saturate, ) var(--nac-presentation-tw-sepia, ) var(--nac-presentation-tw-drop-shadow, ) !important;
-  }
-
 [data-nac-runtime]:is(.filter), [data-nac-runtime] .filter {
     filter: var(--nac-presentation-tw-blur, ) var(--nac-presentation-tw-brightness, ) var(--nac-presentation-tw-contrast, ) var(--nac-presentation-tw-grayscale, ) var(--nac-presentation-tw-hue-rotate, ) var(--nac-presentation-tw-invert, ) var(--nac-presentation-tw-saturate, ) var(--nac-presentation-tw-sepia, ) var(--nac-presentation-tw-drop-shadow, );
   }
@@ -4902,8 +4900,30 @@
     color: var(--color-fill-btn-secondary-disabled);
   }
 
+[data-nac-runtime]:is(.peer-checked\:bg-elevation-level-1:is(:where(.peer):checked ~ *)), [data-nac-runtime] .peer-checked\:bg-elevation-level-1:is(:where(.peer):checked ~ *) {
+    background-color: var(--color-bg-elevation-level-1);
+  }
+
+[data-nac-runtime]:is(.peer-checked\:text-basic-primary:is(:where(.peer):checked ~ *)), [data-nac-runtime] .peer-checked\:text-basic-primary:is(:where(.peer):checked ~ *) {
+    color: var(--color-text-basic-primary);
+  }
+
+[data-nac-runtime]:is(.peer-checked\:shadow-sm:is(:where(.peer):checked ~ *)), [data-nac-runtime] .peer-checked\:shadow-sm:is(:where(.peer):checked ~ *) {
+    --nac-presentation-tw-shadow: 0 1px 3px 0 var(--nac-presentation-tw-shadow-color, #0000001a), 0 1px 2px -1px var(--nac-presentation-tw-shadow-color, #0000001a);
+    box-shadow: var(--nac-presentation-tw-inset-shadow), var(--nac-presentation-tw-inset-ring-shadow), var(--nac-presentation-tw-ring-offset-shadow), var(--nac-presentation-tw-ring-shadow), var(--nac-presentation-tw-shadow);
+  }
+
 [data-nac-runtime]:is(.peer-focus-visible\:opacity-100:is(:where(.peer):focus-visible ~ *)), [data-nac-runtime] .peer-focus-visible\:opacity-100:is(:where(.peer):focus-visible ~ *) {
     opacity: 1;
+  }
+
+[data-nac-runtime]:is(.peer-focus-visible\:ring-2:is(:where(.peer):focus-visible ~ *)), [data-nac-runtime] .peer-focus-visible\:ring-2:is(:where(.peer):focus-visible ~ *) {
+    --nac-presentation-tw-ring-shadow: var(--nac-presentation-tw-ring-inset, ) 0 0 0 calc(2px + var(--nac-presentation-tw-ring-offset-width)) var(--nac-presentation-tw-ring-color, currentcolor);
+    box-shadow: var(--nac-presentation-tw-inset-shadow), var(--nac-presentation-tw-inset-ring-shadow), var(--nac-presentation-tw-ring-offset-shadow), var(--nac-presentation-tw-ring-shadow), var(--nac-presentation-tw-shadow);
+  }
+
+[data-nac-runtime]:is(.peer-focus-visible\:ring-\[var\(--f-focus\)\]:is(:where(.peer):focus-visible ~ *)), [data-nac-runtime] .peer-focus-visible\:ring-\[var\(--f-focus\)\]:is(:where(.peer):focus-visible ~ *) {
+    --nac-presentation-tw-ring-color: var(--f-focus);
   }
 
 [data-nac-runtime] .placeholder\:whitespace-nowrap::placeholder {

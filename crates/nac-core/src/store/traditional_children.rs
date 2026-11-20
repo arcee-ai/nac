@@ -1002,6 +1002,7 @@ mod tests {
                     "child",
                     1,
                     &crate::types::Message::Assistant {
+                        service_tier_receipt: None,
                         content: Some(assistant_content.to_string()),
                         reasoning_text: None,
                         reasoning_details: None,

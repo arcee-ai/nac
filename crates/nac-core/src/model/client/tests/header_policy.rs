@@ -88,6 +88,7 @@ async fn arcee_sensitive_extra_header_still_fails_before_connection() {
         model: "test-model".to_string(),
         backend: BackendKind::ArceeApi,
         reasoning_effort: None,
+        service_tier: None,
         api_key_env: None,
         trusted_api_key_file: None,
         extra_headers: std::collections::BTreeMap::from([(

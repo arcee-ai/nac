@@ -14,6 +14,12 @@ import {
 import { useSetupAction } from "@/app/features/setup/useSetupAction";
 import { setupSequence } from "@/app/features/setup/workflow";
 import { catalogBaseUrl, resolveCatalogModel, type CatalogPick } from "@/app/lib/catalog";
+import {
+  speedForCatalogRoute,
+  speedLabel,
+  supportsSpeed,
+  type ServiceTier,
+} from "@/app/lib/serviceTier";
 import { useToast } from "@/app/providers/ToastProvider";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useModelCatalog, useSessionConfig, useSessionSnapshot } from "@/app/services/queries";
@@ -27,7 +33,7 @@ import type {
 } from "@/app/types/api";
 
 /**
- * The session's current model and reasoning, directly switchable beside the
+ * The session's model, reasoning, and speed, directly switchable beside the
  * composer from one catalog spanning every connected provider. Cross-provider
  * changes send the complete routing tuple in one revisioned server mutation.
  */
@@ -56,6 +62,11 @@ export function ModelPicker({
   const currentBackend = current?.backend ?? metadata?.backend;
   const currentModel = current?.model ?? label;
   const currentEffort = current?.reasoning_effort ?? "";
+  const currentSpeed = (current?.service_tier ?? null) as ServiceTier | null;
+  const route = currentBackend
+    ? { backend: currentBackend as BackendKind, model: currentModel, baseUrl: current?.base_url }
+    : null;
+  const speedCapability = speedForCatalogRoute(catalog.data, route);
   const resolved = resolveCatalogModel(catalog.data, currentBackend, currentModel);
   const canChange =
     !disabled &&
@@ -118,7 +129,7 @@ export function ModelPicker({
     }
   };
 
-  const chooseModel = (pick: CatalogPick) => {
+  const chooseModel = (pick: CatalogPick, clearIncompatibleSpeed: boolean) => {
     if (!canChange || (pick.backend === currentBackend && pick.model === currentModel)) return;
     const provider = catalog.data?.providers.find((entry) => entry.id === pick.backend);
     const preservesRoute = pick.backend === currentBackend;
@@ -140,8 +151,24 @@ export function ModelPicker({
       currentEffort && supported.includes(currentEffort as ReasoningEffort)
         ? currentEffort
         : standardEffort(supported);
+    const targetSpeed = speedForCatalogRoute(catalog.data, {
+      ...pick,
+      baseUrl: preservesRoute ? current?.base_url : pick.baseUrl,
+    });
+    const incompatible = currentSpeed != null && !targetSpeed.explicitTiersAllowed;
+    if (incompatible && !clearIncompatibleSpeed)
+      return {
+        error: "This model does not accept the selected speed.",
+        confirmSpeedClear: true,
+      };
+    const speed = incompatible
+      ? null
+      : currentSpeed && !supportsSpeed(targetSpeed.tiers, currentSpeed)
+        ? "standard"
+        : currentSpeed;
+    const speedPatch = speed !== currentSpeed ? { service_tier: speed } : {};
     const patch = preservesRoute
-      ? { model: pick.model, reasoning_effort: compatibleEffort }
+      ? { model: pick.model, reasoning_effort: compatibleEffort, ...speedPatch }
       : {
           backend: pick.backend,
           model: pick.model,
@@ -150,10 +177,16 @@ export function ModelPicker({
           // selected backend to resolve its managed login or conventional env.
           api_key_env: provider?.connection?.api_key_env ?? null,
           reasoning_effort: compatibleEffort,
+          ...speedPatch,
           // Provider-specific headers must never leak into another backend.
           extra_headers: null,
         };
-    void change(patch, `Model switched to ${pick.model}`);
+    const notice = incompatible
+      ? ". Speed preference cleared."
+      : speed !== currentSpeed
+        ? ". Speed changed to Standard."
+        : "";
+    void change(patch, `Model switched to ${pick.model}${notice}`);
   };
 
   const chooseEffort = (effort: string) => {
@@ -161,15 +194,20 @@ export function ModelPicker({
     void change({ reasoning_effort: effort }, `Reasoning set to ${effort}`);
   };
 
+  const chooseSpeed = (speed: ServiceTier | null) => {
+    if (speed === currentSpeed) return;
+    void change({ service_tier: speed }, `Speed set to ${speedLabel(speed)}`);
+  };
+
   return (
     <ComposerModelChip
+      key={action.needsReview || config.isError || snapshot.isError ? "reload-needed" : "current"}
       fallbackLabel={currentModel}
       pending={!metadata}
-      value={
-        currentBackend ? { backend: currentBackend as BackendKind, model: currentModel } : null
-      }
+      value={route}
       effort={currentEffort}
       supportedEfforts={resolved.supportedEfforts}
+      speed={{ ...speedCapability, value: currentSpeed, onChange: chooseSpeed }}
       disabled={!canChange}
       placement={PopoverPlacement.TopRight}
       usableProvider={usableProvider}

@@ -9,6 +9,13 @@ import {
 } from "@/app/components/modals/ConfigurationsPanel";
 import { ConfigRow } from "@/app/components/modals/ConfigRow";
 import { EFFORT_LEVEL_OPTIONS, reasoningOptionsFor } from "@/app/components/modals/options";
+import { SpeedControl } from "@/app/components/modals/SpeedControl";
+import {
+  providerSpeedProfiles,
+  speedForRoute,
+  supportsSpeed,
+  type ServiceTier,
+} from "@/app/lib/serviceTier";
 import { SmallSelect } from "@/app/components/modals/SmallSelect";
 import { type CatalogPick, defaultCatalogPick, resolveCatalogModel } from "@/app/lib/catalog";
 import { providerLabel, providerUsesApiKey } from "@/app/lib/providers";
@@ -30,6 +37,7 @@ const PRIMARY_EFFORT_OPTIONS: SelectItem[] = [
 interface PrimaryChoice {
   pick: CatalogPick;
   effort: ReasoningEffort | "";
+  speed: ServiceTier | null | undefined;
 }
 
 /**
@@ -52,6 +60,7 @@ export function PrimaryModelSection({
   const managedModel = useManagedModelProfile();
   const liveByBackend = useReadyProviderModels(catalog.data);
   const [chosen, setChosen] = useState<PrimaryChoice | null>(null);
+  const [speedNotice, setSpeedNotice] = useState("");
   const saved = useModelConfigs(inheritSavedDefault && !suppliedInitial);
   const latest =
     inheritSavedDefault && !suppliedInitial ? saved.data?.configurations.at(-1) : undefined;
@@ -59,7 +68,10 @@ export function PrimaryModelSection({
     () =>
       suppliedInitial ??
       (latest
-        ? { ...savedModelSelection(latest), extra_headers: latest.extra_headers }
+        ? {
+            ...savedModelSelection(latest),
+            extra_headers: latest.extra_headers,
+          }
         : undefined),
     [suppliedInitial, latest],
   );
@@ -80,6 +92,7 @@ export function PrimaryModelSection({
               baseUrl: initial.base_url,
             },
             effort: (initial.reasoning_effort ?? "") as ReasoningEffort | "",
+            speed: initial.service_tier,
           }
         : null,
     [initial],
@@ -104,10 +117,10 @@ export function PrimaryModelSection({
       initialChoice ??
       (managedModel.configured
         ? managedDefault
-          ? { pick: managedDefault, effort: "" }
+          ? { pick: managedDefault, effort: "", speed: undefined }
           : null
         : fallback
-          ? { pick: fallback, effort: "" }
+          ? { pick: fallback, effort: "", speed: undefined }
           : null),
     [chosen, initialChoice, fallback, managedDefault, managedModel.configured],
   );
@@ -151,6 +164,7 @@ export function PrimaryModelSection({
         allow_insecure_http: initial.allow_insecure_http ?? false,
         api_key_env: initial.api_key_env,
         reasoning_effort: effective.effort || null,
+        ...(effective.speed !== undefined ? { service_tier: effective.speed } : {}),
         extra_headers: initial.extra_headers,
         light_model: initial.light_model,
         orchestrator_compaction_threshold: initial.orchestrator_compaction_threshold,
@@ -168,6 +182,7 @@ export function PrimaryModelSection({
       // resolved server-side; the browser never receives credential values.
       api_key_env: provider?.connection?.api_key_env ?? null,
       reasoning_effort: effective.effort || null,
+      ...(effective.speed !== undefined ? { service_tier: effective.speed } : {}),
       extra_headers: null,
       light_model: undefined,
     };
@@ -194,6 +209,13 @@ export function PrimaryModelSection({
     effective?.effort ?? "",
     PRIMARY_EFFORT_OPTIONS,
   );
+  const speedCapability = speedForRoute(
+    resolveCatalogModel(catalog.data, effective?.pick.backend, effective?.pick.model).model,
+    effective?.pick.model ?? "",
+    effective?.pick.backend,
+    preservesInitialRoute ? initial?.base_url : effective?.pick.baseUrl,
+    providerSpeedProfiles(provider),
+  );
 
   return (
     <FormSection title="Primary model" description="Choose from the providers you've connected.">
@@ -216,9 +238,29 @@ export function PrimaryModelSection({
                 pick.model,
               ).supportedEfforts;
               const current = effective?.effort ?? "";
+              const oldSpeed = effective?.speed;
+              const target = speedForRoute(
+                resolveCatalogModel(catalog.data, pick.backend, pick.model).model,
+                pick.model,
+                pick.backend,
+                initial && pick.backend === initial.backend ? initial.base_url : pick.baseUrl,
+                providerSpeedProfiles(
+                  catalog.data?.providers.find((entry) => entry.id === pick.backend),
+                ),
+              );
+              const tiers = target.tiers;
+              if (oldSpeed && pick.backend !== "chatgpt-codex-responses" && !target.openAiApi) {
+                setSpeedNotice("Clear the speed preference before choosing this model.");
+                return;
+              }
+              const nextSpeed = oldSpeed && !supportsSpeed(tiers, oldSpeed) ? "standard" : oldSpeed;
+              setSpeedNotice(
+                nextSpeed !== oldSpeed ? "Speed reset to Standard for the selected model." : "",
+              );
               setChosen({
                 pick,
                 effort: current && !supported.includes(current) ? "" : current,
+                speed: nextSpeed,
               });
             }}
           />
@@ -237,11 +279,36 @@ export function PrimaryModelSection({
             disabled={!effective}
             onValueChange={(effort) => {
               if (!effective) return;
-              setChosen({ ...effective, effort: effort as ReasoningEffort | "" });
+              setChosen({
+                ...effective,
+                effort: effort as ReasoningEffort | "",
+              });
             }}
           />
         }
       />
+      {effective?.pick.backend === "chatgpt-codex-responses" ||
+      speedCapability.openAiApi ||
+      effective?.speed ? (
+        <ConfigRow
+          presentation="form"
+          label="Speed"
+          hint="Use provider default to clear the speed override."
+          control={
+            <SpeedControl
+              form
+              tiers={speedCapability.tiers}
+              openAiApi={speedCapability.openAiApi}
+              fastContextLimit={speedCapability.fastContextLimit}
+              value={effective?.speed ?? null}
+              onChange={(speed) => {
+                if (effective) setChosen({ ...effective, speed });
+              }}
+            />
+          }
+        />
+      ) : null}
+      {speedNotice ? <p role="status">{speedNotice}</p> : null}
       {latest && resolved.isError ? (
         <p role="alert" className="text-small !leading-[22px] text-error-primary">
           The saved project setup could not be resolved. Review it in Advanced or choose another

@@ -1,3 +1,4 @@
+import type { ServiceTier } from "../../lib/serviceTier";
 import type { ConfigurationsPanelInitial, LaunchModelSelection } from "../../components/modals/ConfigurationsPanel";
 import type { LightSelection } from "../../components/modals/LightModelSection";
 import type { UiPolicy } from "../ui-policy/policy";
@@ -33,14 +34,17 @@ export declare function useInheritedModel(projectId: string | null): {
 };
 /** The model chip's label; reasoning effort has its own chip. */
 export declare function modelChipLabel(override: ModelOverride | null, inherited: InheritedModel | null): string | null;
-/** The backend, model and effort a session will start on, whichever way it was chosen. */
+/** The route and preferences a session will start with. */
 export declare function sessionRoute(override: ModelOverride | null, inherited: InheritedModel | null): {
     backend: BackendKind;
     model: string;
+    baseUrl: string;
     effort: string;
+    speed: ServiceTier | null | undefined;
 } | null;
 /** `override` (or the inherited model) with a different reasoning effort; "" is the model's default. */
 export declare function withEffort(override: ModelOverride | null, inherited: InheritedModel | null, effort: string): ModelOverride | null;
+export declare function withSpeed(override: ModelOverride | null, inherited: InheritedModel | null, speed: ServiceTier | null): ModelOverride | null;
 /** The resolved tuple a configured session is created with. */
 export interface ResolvedModel {
     backend: BackendKind;
@@ -49,6 +53,7 @@ export interface ResolvedModel {
     allow_insecure_http: boolean;
     api_key_env: string | null;
     reasoning_effort: string | null;
+    service_tier?: ServiceTier | null;
     extra_headers: Record<string, string> | null;
     orchestrator_compaction_threshold?: number | null;
 }

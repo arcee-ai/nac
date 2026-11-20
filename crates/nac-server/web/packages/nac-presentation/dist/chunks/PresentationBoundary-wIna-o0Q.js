@@ -245,6 +245,7 @@ function K(e, t, n) {
 		cache_write_tokens: (e?.cache_write_tokens ?? 0) + t.cache_write_tokens,
 		reasoning_tokens: (e?.reasoning_tokens ?? 0) + (t.reasoning_tokens ?? 0),
 		total_tokens: n,
+		speed_tier_charges_excluded: !!(e?.speed_tier_charges_excluded || t.speed_tier_charges_excluded),
 		cost: e?.cost || t.cost ? {
 			input: (e?.cost?.input ?? 0) + (t.cost?.input ?? 0),
 			output: (e?.cost?.output ?? 0) + (t.cost?.output ?? 0),
@@ -255,7 +256,7 @@ function K(e, t, n) {
 	};
 }
 function q(e) {
-	return e ? e.input_tokens + e.output_tokens + e.cache_read_tokens + e.cache_write_tokens + (e.cost?.total ?? 0) > 0 : !1;
+	return e ? !!e.speed_tier_charges_excluded || e.input_tokens + e.output_tokens + e.cache_read_tokens + e.cache_write_tokens + (e.cost?.total ?? 0) > 0 : !1;
 }
 function J(e, t) {
 	return q(e) ? !e || !q(t) || !t ? e ?? null : {
@@ -265,6 +266,7 @@ function J(e, t) {
 		cache_write_tokens: Math.max(e.cache_write_tokens, t.cache_write_tokens),
 		reasoning_tokens: Math.max(e.reasoning_tokens ?? 0, t.reasoning_tokens ?? 0),
 		total_tokens: e.total_tokens || t.total_tokens,
+		speed_tier_charges_excluded: !!(e.speed_tier_charges_excluded || t.speed_tier_charges_excluded),
 		cost: e.cost || t.cost ? {
 			input: Math.max(e.cost?.input ?? 0, t.cost?.input ?? 0),
 			output: Math.max(e.cost?.output ?? 0, t.cost?.output ?? 0),

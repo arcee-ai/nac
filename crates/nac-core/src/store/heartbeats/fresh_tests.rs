@@ -44,6 +44,7 @@ impl Fixture {
                 default_ref: Some("refs/heads/dev".into()),
                 model: None,
                 reasoning_effort: None,
+                service_tier: None,
                 retained_limit: 2,
             },
             Some("creator"),
@@ -671,6 +672,7 @@ fn each_launch_reservation_freezes_destination_defaults_without_exposing_configu
             allow_insecure_http: false,
             api_key_env: None,
             reasoning_effort: Some("high".into()),
+            service_tier: None,
             extra_headers: std::collections::BTreeMap::from([(
                 "X-Fixture".into(),
                 "private-configuration-value".into(),

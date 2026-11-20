@@ -71,8 +71,8 @@ export function homeComposer(page: Page): Locator {
 export async function openModelList(scope: Page | Locator): Promise<Locator> {
   await scope.getByRole("button", { name: /^(Model: |Choose a model$)/ }).click();
   await scope
-    .getByRole("menu", { name: "Model settings", exact: true })
-    .getByRole("menuitem", { name: /^Model / })
+    .getByRole("dialog", { name: "Model settings", exact: true })
+    .getByRole("button", { name: /^Choose model/ })
     .click();
   const list = scope.getByRole("menu", { name: "Model", exact: true });
   await expect(list).toBeVisible();

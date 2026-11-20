@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -8,11 +8,13 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ModelPicker } from "@/app/components/inspector/ModelPicker";
 import { ToastProvider } from "@/app/providers/ToastProvider";
 import { api } from "@/app/services/api";
+import { queryKeys, useSessionSnapshot } from "@/app/services/queries";
 import type {
   ManagedHostStatus,
   ModelCatalog,
   RawSessionConfig,
   SessionMetadata,
+  SessionSnapshotResponse,
 } from "@/app/types/api";
 
 const cost = { input: 0, output: 0, cache_read: 0, cache_write: 0 };
@@ -104,7 +106,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function renderPicker(metadata: SessionMetadata, disabled = false) {
+function mockRawConfig(metadata: SessionMetadata) {
   const config: RawSessionConfig = {
     session_id: "session",
     backend: metadata.backend,
@@ -113,11 +115,16 @@ function renderPicker(metadata: SessionMetadata, disabled = false) {
     allow_insecure_http: false,
     api_key_env: metadata.api_key_env ?? null,
     reasoning_effort: metadata.reasoning_effort ?? null,
+    service_tier: metadata.service_tier ?? null,
     extra_headers_json: null,
     orchestrator_compaction_threshold: null,
     config_version: 7,
   };
   vi.spyOn(api, "getConfig").mockResolvedValue(config);
+}
+
+function renderPicker(metadata: SessionMetadata, disabled = false) {
+  mockRawConfig(metadata);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const tree = (busy: boolean) => (
     <MemoryRouter>
@@ -146,7 +153,7 @@ async function openChip(name: string | RegExp) {
 
 async function pickModel(chipName: string | RegExp, model: string) {
   await openChip(chipName);
-  fireEvent.click(screen.getByRole("menuitem", { name: /^Model/ }));
+  fireEvent.click(screen.getByRole("button", { name: /^Choose model/ }));
   fireEvent.change(screen.getByRole("textbox", { name: "Search models" }), {
     target: { value: model },
   });
@@ -250,12 +257,9 @@ it("keeps an unset level until the user chooses a supported level", async () => 
   try {
     await openChip("Model: Trinity");
     expect(update).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("menuitem", { name: /^Effort/ }));
-    expect(screen.getAllByRole("menuitemradio").map((item) => item.textContent)).toEqual([
-      "Low",
-      "High",
-    ]);
-    fireEvent.click(screen.getByRole("menuitemradio", { name: "High" }));
+    expect(screen.getAllByRole("radio")).toHaveLength(2);
+    expect(screen.getByRole("radio", { name: "Low" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("radio", { name: "High" }));
     await waitFor(() =>
       expect(update).toHaveBeenCalledExactlyOnceWith("session", {
         reasoning_effort: "high",
@@ -315,8 +319,7 @@ it("shows effort as None and sends none for a model that accepts no level", asyn
   } as SessionMetadata);
   try {
     await openChip("Model: DeepSeek Flash, None reasoning");
-    fireEvent.click(screen.getByRole("menuitem", { name: /^Effort\s*None/ }));
-    fireEvent.click(screen.getByRole("menuitemradio", { name: "None" }));
+    expect(screen.queryByRole("group", { name: /^Reasoning/ })).toBeNull();
     expect(update).not.toHaveBeenCalled();
   } finally {
     second.view.unmount();
@@ -330,11 +333,12 @@ it("does not retry a write with an uncertain outcome", async () => {
     .mockRejectedValue(new TypeError("Network disconnected"));
   const { client, view } = renderPicker({ ...trinity, reasoning_effort: "low" } as SessionMetadata);
   try {
-    const chip = await openChip("Model: Trinity, Low reasoning");
-    fireEvent.click(screen.getByRole("menuitem", { name: /^Effort/ }));
-    fireEvent.click(screen.getByRole("menuitemradio", { name: "High" }));
+    await openChip("Model: Trinity, Low reasoning");
+    fireEvent.click(screen.getByRole("radio", { name: "High" }));
     await screen.findByText(/save outcome is unknown/i);
-    expect((chip as HTMLButtonElement).disabled).toBe(true);
+    expect(
+      screen.getByRole<HTMLButtonElement>("button", { name: /^Model: Trinity/ }).disabled,
+    ).toBe(true);
     expect(update).toHaveBeenCalledTimes(1);
   } finally {
     view.unmount();
@@ -389,5 +393,184 @@ it("lists a managed host's mounted provider before its account reads as connecte
   } finally {
     view.unmount();
     client.clear();
+  }
+});
+
+it("atomically resets Fast to Standard when the target Codex capability is unknown", async () => {
+  const update = vi.spyOn(api, "updateConfig").mockResolvedValue(undefined);
+  const { client, view } = renderPicker({
+    backend: "chatgpt-codex-responses",
+    model: "previous-model",
+    base_url: "https://chatgpt.com/backend-api",
+    api_key_env: null,
+    reasoning_effort: "high",
+    service_tier: "fast",
+  } as SessionMetadata);
+  try {
+    await pickModel(/^Model: previous-model/, "GPT-5.6 Sol");
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledExactlyOnceWith("session", {
+        model: "gpt-5.6-sol",
+        reasoning_effort: "high",
+        service_tier: "standard",
+        expected_config_version: 7,
+      }),
+    );
+    expect(await screen.findByText(/speed changed to Standard/i)).toBeTruthy();
+  } finally {
+    view.unmount();
+    client.clear();
+  }
+});
+
+it("requires explicit confirmation to switch to a model that does not accept speed", async () => {
+  const update = vi.spyOn(api, "updateConfig").mockResolvedValue(undefined);
+  const { client, view } = renderPicker({
+    backend: "chatgpt-codex-responses",
+    model: "gpt-5.6-sol",
+    base_url: "https://chatgpt.com/backend-api",
+    api_key_env: null,
+    reasoning_effort: "high",
+    service_tier: "fast",
+  } as SessionMetadata);
+  try {
+    await pickModel(/^Model: GPT-5.6 Sol/, "Trinity");
+    expect(update).not.toHaveBeenCalled();
+    expect(screen.getByText("This model does not accept the selected speed.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Switch model and clear speed" }));
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledExactlyOnceWith("session", {
+        ...trinity,
+        reasoning_effort: "high",
+        service_tier: null,
+        expected_config_version: 7,
+        extra_headers: null,
+      }),
+    );
+  } finally {
+    view.unmount();
+    client.clear();
+  }
+});
+
+it("keeps controls locked when the accepted change cannot refresh the snapshot", async () => {
+  const update = vi.spyOn(api, "updateConfig").mockResolvedValue(undefined);
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  const metadata = {
+    backend: "arcee-auth",
+    model: "trinity-large-thinking",
+    base_url: "https://api.arcee.ai/api/v1",
+    api_key_env: null,
+    reasoning_effort: "high",
+  } as SessionMetadata;
+  mockRawConfig(metadata);
+  function ActiveSnapshot() {
+    useQuery({
+      queryKey: queryKeys.sessionSnapshot("session"),
+      queryFn: () => Promise.reject(new Error("offline")),
+      initialData: { metadata },
+      staleTime: Infinity,
+      retry: false,
+    });
+    return (
+      <ModelPicker
+        sessionId="session"
+        metadata={metadata}
+        label={metadata.model}
+        disabled={false}
+      />
+    );
+  }
+  const view = render(
+    <MemoryRouter>
+      <QueryClientProvider client={client}>
+        <ToastProvider>
+          <ActiveSnapshot />
+        </ToastProvider>
+      </QueryClientProvider>
+    </MemoryRouter>,
+  );
+  try {
+    await pickModel(/^Model: Trinity/, "GPT-5.6 Sol");
+    await waitFor(() => expect(update).toHaveBeenCalledOnce());
+    await screen.findByText(/Reload before editing again/);
+    const chip = screen.getByRole<HTMLButtonElement>("button", { name: /^Model: Trinity/ });
+    expect(chip.disabled).toBe(true);
+    expect(screen.queryByRole("dialog", { name: "Model settings" })).toBeNull();
+    expect(
+      await screen.findByText(/Settings were saved, but the latest session could not be loaded/),
+    ).toBeTruthy();
+  } finally {
+    view.unmount();
+    client.clear();
+    update.mockRestore();
+  }
+});
+
+it("preserves snapshot retry behavior with the passive guard mounted", async () => {
+  const metadata = {
+    session_id: "session",
+    backend: "arcee-auth",
+    model: "trinity-large-thinking",
+    base_url: "https://api.arcee.ai/api/v1",
+    api_key_env: null,
+    reasoning_effort: "high",
+  } as SessionMetadata;
+  const snapshot = {
+    metadata,
+    messages: [],
+    message_created_at: [],
+    message_page: { start: 0, end: 0, total: 0, has_older: false },
+    response_timing: {
+      response_durations_ms: [],
+      last_response_duration_ms: null,
+      previous_response_duration_ms: null,
+    },
+    thread_events: {},
+    worksets: { items: [], error: null },
+  } as unknown as SessionSnapshotResponse;
+  const update = vi.spyOn(api, "updateConfig").mockResolvedValueOnce(undefined);
+  const fetch = vi
+    .spyOn(api, "getSession")
+    .mockRejectedValueOnce(new Error("transient"))
+    .mockResolvedValueOnce(snapshot);
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: 1, retryDelay: 0 }, mutations: { retry: false } },
+  });
+  mockRawConfig(metadata);
+  function ActiveSnapshot() {
+    useSessionSnapshot("session", { initialData: snapshot, staleTime: Infinity });
+    return (
+      <ModelPicker
+        sessionId="session"
+        metadata={metadata}
+        label={metadata.model}
+        disabled={false}
+      />
+    );
+  }
+  const view = render(
+    <MemoryRouter>
+      <QueryClientProvider client={client}>
+        <ToastProvider>
+          <ActiveSnapshot />
+        </ToastProvider>
+      </QueryClientProvider>
+    </MemoryRouter>,
+  );
+  try {
+    const button = await screen.findByRole("button", { name: /^Model: Trinity/ });
+    await pickModel(/^Model: Trinity/, "GPT-5.6 Sol");
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+    expect(update).toHaveBeenCalledOnce();
+    expect(client.getQueryState(queryKeys.sessionSnapshot("session"))?.status).toBe("success");
+  } finally {
+    view.unmount();
+    client.clear();
+    fetch.mockRestore();
+    update.mockRestore();
   }
 });

@@ -53,6 +53,7 @@ pub(crate) fn normalize_history(messages: Vec<Message>, current: &ModelOrigin) -
                 duration_ms,
                 model_origin,
                 reasoning_field,
+                service_tier_receipt: _,
             } => {
                 // `None` origin = legacy message = assumed same-model (the
                 // safety rail above); only a stamped, different origin
@@ -68,6 +69,7 @@ pub(crate) fn normalize_history(messages: Vec<Message>, current: &ModelOrigin) -
                     duration_ms,
                     model_origin,
                     reasoning_field,
+                    service_tier_receipt: None,
                 }
             }
             other => other,
@@ -144,6 +146,7 @@ mod tests {
         tool_calls: Option<Vec<ToolCall>>,
     ) -> Message {
         Message::Assistant {
+            service_tier_receipt: None,
             content: Some("answer".to_string()),
             reasoning_text: reasoning_text.map(str::to_string),
             reasoning_details,
@@ -190,6 +193,27 @@ mod tests {
         };
         assert_eq!(reasoning_text.as_deref(), Some("thinking"));
         assert_eq!(reasoning_details, &Some(thinking_blocks()));
+    }
+
+    #[test]
+    fn local_tier_receipt_is_not_replayed() {
+        let mut message = assistant(Some(current()), None, None, None);
+        if let Message::Assistant {
+            service_tier_receipt,
+            ..
+        } = &mut message
+        {
+            *service_tier_receipt = Some(crate::types::ServiceTierReceipt {
+                requested: Some(crate::model::ServiceTier::Fast),
+                served: Some("default".into()),
+            });
+        }
+        let stored = serde_json::to_string(&message).unwrap();
+        assert!(stored.contains("service_tier_receipt"));
+        let replay = normalize_history(vec![message], &current());
+        assert!(!serde_json::to_string(&replay)
+            .unwrap()
+            .contains("service_tier_receipt"));
     }
 
     #[test]

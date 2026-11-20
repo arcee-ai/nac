@@ -1020,6 +1020,7 @@ async fn child_terminal_crash_window_recovers_report_and_delivers_once() {
             session_id,
             start_idx + 1,
             &Message::Assistant {
+                service_tier_receipt: None,
                 content: Some("durable child report".to_string()),
                 reasoning_text: None,
                 reasoning_details: None,
@@ -1474,6 +1475,7 @@ fn covered_ids_from_scan_matches_the_reference_pairing() {
         content: content.to_string(),
     };
     let assistant = || Message::Assistant {
+        service_tier_receipt: None,
         content: Some("answer".to_string()),
         reasoning_text: None,
         reasoning_details: None,

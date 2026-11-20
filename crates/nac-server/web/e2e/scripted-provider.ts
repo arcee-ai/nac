@@ -8,6 +8,7 @@ export type ScriptedResponse =
       reasoning?: string;
       failAfterReasoning?: boolean;
       usage?: { input_tokens: number; output_tokens: number; total_tokens: number };
+      service_tier?: string;
     }
   | {
       kind: "function_call";
@@ -16,7 +17,7 @@ export type ScriptedResponse =
       arguments: Record<string, unknown>;
       stream?: boolean | "request";
     }
-  | { kind: "http_error"; status: number; body: string };
+  | { kind: "http_error"; status: number; body: string | Record<string, unknown> };
 
 export type ScriptMatch = {
   token?: string;
@@ -162,7 +163,7 @@ export class ScriptedProvider {
       response.writeHead(304).end();
       return;
     }
-    if (method !== "POST" || path !== "/responses") {
+    if (method !== "POST" || !["/responses", "/v1/responses"].includes(path)) {
       this.writeJson(response, 404, { error: `unexpected provider route ${method} ${path}` });
       return;
     }
@@ -295,6 +296,9 @@ export class ScriptedProvider {
       object: "response",
       status: "completed",
       model: "gpt-5.6-sol",
+      ...(scripted.kind === "text" && scripted.service_tier
+        ? { service_tier: scripted.service_tier }
+        : {}),
       output:
         scripted.kind === "text" && scripted.reasoning
           ? [

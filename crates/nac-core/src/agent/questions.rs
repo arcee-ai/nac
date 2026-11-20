@@ -46,6 +46,7 @@ impl Agent {
             duration_ms: None,
             model_origin: None,
             reasoning_field: None,
+            service_tier_receipt: None,
         })
         .await?;
         self.tool_runtime.terminal_manager.settle_run().await?;

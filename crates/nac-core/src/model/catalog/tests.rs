@@ -1388,3 +1388,33 @@ fn catalog_version_bumps_on_reload() {
     let after = api_listing().catalog_version;
     assert_eq!(after, before + 1);
 }
+
+#[test]
+fn native_speed_profiles_are_exact_even_without_snapshot_model_metadata() {
+    let listing = api_listing();
+    let responses = listing
+        .providers
+        .iter()
+        .find(|p| p.id == BackendKind::OpenAiResponses)
+        .unwrap();
+    let chat = listing
+        .providers
+        .iter()
+        .find(|p| p.id == BackendKind::OpenAiChatCompletions)
+        .unwrap();
+    let response_profiles = responses.speed_profiles.as_ref().unwrap();
+    let chat_profiles = chat.speed_profiles.as_ref().unwrap();
+    assert!(response_profiles["gpt-6.2-sol"]
+        .tiers
+        .contains(&crate::model::ServiceTier::Ultrafast));
+    assert!(!chat_profiles["gpt-6.2-sol"]
+        .tiers
+        .contains(&crate::model::ServiceTier::Ultrafast));
+    assert!(!response_profiles.contains_key("gpt-6.2-sol-20261118"));
+    assert_eq!(
+        response_profiles["gpt-5.5"].fast_input_tokens_below,
+        Some(272_000)
+    );
+    assert!(response_profiles.contains_key("gpt-5.3-codex"));
+    assert!(!chat_profiles.contains_key("gpt-5.3-codex"));
+}

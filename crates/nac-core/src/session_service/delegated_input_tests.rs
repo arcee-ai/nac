@@ -216,6 +216,7 @@ async fn private_child_read_fault_retains_generation_for_exactly_once_settlement
             "child",
             start + 1,
             &Message::Assistant {
+                service_tier_receipt: None,
                 content: Some("report".into()),
                 reasoning_text: None,
                 reasoning_details: None,

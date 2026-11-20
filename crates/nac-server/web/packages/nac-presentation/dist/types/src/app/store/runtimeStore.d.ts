@@ -278,6 +278,7 @@ export declare function createRuntimeStore(_storage?: Pick<Storage, "getItem" | 
         input_tokens: number;
         output_tokens: number;
         reasoning_tokens?: number;
+        speed_tier_charges_excluded?: boolean;
         total_tokens: number;
     } | null;
     useSessionSpend: () => {
@@ -287,6 +288,7 @@ export declare function createRuntimeStore(_storage?: Pick<Storage, "getItem" | 
         input_tokens: number;
         output_tokens: number;
         reasoning_tokens?: number;
+        speed_tier_charges_excluded?: boolean;
         total_tokens: number;
     } | null;
     useRunStartedAt: () => number | null;
@@ -441,6 +443,7 @@ export declare const release: () => void, runtimeStore: import("../lib/store").S
     input_tokens: number;
     output_tokens: number;
     reasoning_tokens?: number;
+    speed_tier_charges_excluded?: boolean;
     total_tokens: number;
 } | null, useSessionSpend: () => {
     cache_read_tokens: number;
@@ -449,5 +452,6 @@ export declare const release: () => void, runtimeStore: import("../lib/store").S
     input_tokens: number;
     output_tokens: number;
     reasoning_tokens?: number;
+    speed_tier_charges_excluded?: boolean;
     total_tokens: number;
 } | null, useRunStartedAt: () => number | null, useLastElapsedMs: () => number | null, useWorkspaceEpoch: () => number, useStreamText: () => string, useStreamReasoning: () => string, useOptimisticUserPrompt: () => string | null, getRuntimeState: () => RuntimeState;

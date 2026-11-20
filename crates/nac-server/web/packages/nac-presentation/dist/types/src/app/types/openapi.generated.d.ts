@@ -402,6 +402,7 @@ export interface components {
             name: string;
             orchestrator_compaction_threshold?: number | null;
             reasoning_effort?: components["schemas"]["ReasoningEffort"] | null;
+            service_tier?: components["schemas"]["ServiceTier"] | null;
         };
         CreateProjectRequest: {
             cwd: string;
@@ -428,6 +429,7 @@ export interface components {
             project_id?: string | null;
             reasoning_effort?: components["schemas"]["RequestField_String_String"];
             sandbox?: components["schemas"]["SandboxRequest"];
+            service_tier?: components["schemas"]["RequestField_String_String"];
             ssh_host?: string | null;
             ssh_identity_file?: string | null;
             ssh_port?: number | null;
@@ -627,6 +629,7 @@ export interface components {
             project_id: string;
             reasoning_effort?: string | null;
             retained_limit: number;
+            service_tier?: string | null;
         };
         FreshTaskLaunchReceipt: {
             binding: components["schemas"]["HeartbeatBinding"];
@@ -933,6 +936,7 @@ export interface components {
         LaunchModelDefaults: {
             configured_model?: string | null;
             configured_reasoning_effort?: components["schemas"]["ReasoningEffort"] | null;
+            configured_service_tier?: components["schemas"]["ServiceTier"] | null;
         };
         LaunchModelDefaultsRequest: {
             cwd?: string | null;
@@ -1220,6 +1224,7 @@ export interface components {
             reasoning_field?: string | null;
             reasoning_text?: string | null;
             role: "assistant";
+            service_tier_receipt?: components["schemas"]["ServiceTierReceipt"] | null;
             tool_calls?: components["schemas"]["ToolCall"][] | null;
         } | {
             content: components["schemas"]["ToolContentSchema"];
@@ -1263,6 +1268,7 @@ export interface components {
             name: string;
             orchestrator_compaction_threshold?: number | null;
             reasoning_effort?: string | null;
+            service_tier?: string | null;
             updated_at: string;
         };
         ModelCostRates: {
@@ -1275,11 +1281,14 @@ export interface components {
         ModelEntry: {
             context_window: number;
             cost: components["schemas"]["ModelCostRates"];
+            default_service_tier?: string | null;
             display_name: string | null;
+            fast_input_tokens_below?: number | null;
             id: string;
             limits?: components["schemas"]["ResolvedLimits"] | null;
             max_tokens: number;
             reasoning: boolean;
+            service_tiers?: components["schemas"]["ModelServiceTier"][] | null;
             source: components["schemas"]["ModelSource"];
             supported_efforts: components["schemas"]["ReasoningEffort"][];
         };
@@ -1291,7 +1300,16 @@ export interface components {
             backend: components["schemas"]["BackendKind"];
             model: string;
         };
+        ModelServiceTier: {
+            description: string;
+            id: string;
+            name: string;
+        };
         ModelSource: "baseline" | "overlay" | "user_override" | "provider_default" | "fallback";
+        NativeSpeedProfile: {
+            fast_input_tokens_below?: number | null;
+            tiers: components["schemas"]["ServiceTier"][];
+        };
         OpenLocalPathResult: {
             fell_back_to_parent: boolean;
             opened: string;
@@ -1461,6 +1479,7 @@ export interface components {
             id: components["schemas"]["BackendKind"];
             managed_base_url: string | null;
             models: components["schemas"]["ModelEntry"][];
+            speed_profiles?: Record<string, components["schemas"]["NativeSpeedProfile"]> | null;
         };
         ProviderModel: {
             display_name: string | null;
@@ -1535,6 +1554,7 @@ export interface components {
             model: string;
             orchestrator_compaction_threshold: number | null;
             reasoning_effort: string | null;
+            service_tier?: string | null;
             session_id: string;
         };
         ReadinessCheck: {
@@ -1615,6 +1635,7 @@ export interface components {
         RequestField_McpProtocolSelection_McpProtocolSelection: null | ("legacy" | "auto" | "current");
         RequestField_McpToolApproval_McpToolApproval: null | ("allow" | "ask");
         RequestField_ReasoningEffort_ReasoningEffort: null | ("none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max");
+        RequestField_ServiceTier_ServiceTier: null | ("standard" | "fast" | "ultrafast");
         RequestField_String_String: null | string;
         RequestField_u16_u16: null | number;
         RequestField_u64_u64: null | number;
@@ -1652,6 +1673,7 @@ export interface components {
             models: components["schemas"]["ProviderModel"][];
             models_error: string | null;
             reasoning_effort: components["schemas"]["ReasoningEffort"] | null;
+            service_tier?: components["schemas"]["ServiceTier"] | null;
         };
         ResponseTimingSnapshot: {
             cumulative_token_usage?: components["schemas"]["TokenUsage"] | null;
@@ -1721,6 +1743,11 @@ export interface components {
             session_key?: string | null;
             shm_size?: string | null;
             workdir?: string | null;
+        };
+        ServiceTier: "standard" | "fast" | "ultrafast";
+        ServiceTierReceipt: {
+            requested?: components["schemas"]["ServiceTier"] | null;
+            served?: string | null;
         };
         SessionBehavior: "orchestrator" | "direct" | "direct-with-orchestrator";
         SessionClientId: string;
@@ -1866,6 +1893,7 @@ export interface components {
             project_id?: string | null;
             reasoning_effort?: string | null;
             sandbox_status: string;
+            service_tier?: string | null;
             session_id?: string | null;
             store_path: string;
             workspace_host_path?: string | null;
@@ -1898,6 +1926,7 @@ export interface components {
             sandboxed: boolean;
             session_id: string;
             sort_order?: number;
+            speed_tier_charges_excluded?: boolean;
             ssh_host: string | null;
             ssh_identity_file?: string | null;
             ssh_port?: number | null;
@@ -2255,6 +2284,7 @@ export interface components {
             input_tokens: number;
             output_tokens: number;
             reasoning_tokens?: number;
+            speed_tier_charges_excluded?: boolean;
             total_tokens: number;
         };
         ToolCall: {
@@ -2325,6 +2355,7 @@ export interface components {
             model?: components["schemas"]["RequestField_String_String"];
             orchestrator_compaction_threshold?: components["schemas"]["RequestField_u64_u64"];
             reasoning_effort?: components["schemas"]["RequestField_String_String"];
+            service_tier?: components["schemas"]["RequestField_String_String"];
         };
         UpdateGitIdentityRequest: {
             email: string;
@@ -2385,6 +2416,7 @@ export interface components {
             name?: components["schemas"]["RequestField_String_String"];
             orchestrator_compaction_threshold?: components["schemas"]["RequestField_u64_u64"];
             reasoning_effort?: components["schemas"]["RequestField_ReasoningEffort_ReasoningEffort"];
+            service_tier?: components["schemas"]["RequestField_ServiceTier_ServiceTier"];
         };
         UpdatePermissionApprovalModeRequest: {
             mode: components["schemas"]["PermissionApprovalMode"];

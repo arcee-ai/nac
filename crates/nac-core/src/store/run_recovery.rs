@@ -712,6 +712,7 @@ mod tests {
 
     fn assistant(content: &str) -> Message {
         Message::Assistant {
+            service_tier_receipt: None,
             content: Some(content.to_string()),
             reasoning_text: None,
             reasoning_details: None,

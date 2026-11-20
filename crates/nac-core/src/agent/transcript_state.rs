@@ -186,6 +186,7 @@ impl Agent {
                 duration_ms: None,
                 model_origin: Some(self.client.model_origin()),
                 reasoning_field: None,
+                service_tier_receipt: None,
             });
         }
         messages.push(Message::Assistant {
@@ -196,6 +197,7 @@ impl Agent {
             duration_ms: None,
             model_origin: None,
             reasoning_field: None,
+            service_tier_receipt: None,
         });
         self.push_terminal_batch_and_log(messages).await
     }

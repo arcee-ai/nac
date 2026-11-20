@@ -40,6 +40,7 @@ fn sample_messages() -> Vec<Message> {
             content: "prompt".to_string(),
         },
         Message::Assistant {
+            service_tier_receipt: None,
             content: Some("answer".to_string()),
             reasoning_text: Some("thinking".to_string()),
             reasoning_details: None,
@@ -81,6 +82,7 @@ fn payload_stores_canonical_message_bytes_and_kind_tag() {
         ),
         (
             Message::Assistant {
+                service_tier_receipt: None,
                 content: Some("a".to_string()),
                 reasoning_text: None,
                 reasoning_details: None,
@@ -761,6 +763,7 @@ fn transcript_log_summary_refresh_ignores_blob_covered_rows() {
                     content: "stale covered prompt".to_string(),
                 },
                 Message::Assistant {
+                    service_tier_receipt: None,
                     content: Some("stale covered answer".to_string()),
                     reasoning_text: None,
                     reasoning_details: None,
@@ -779,6 +782,7 @@ fn transcript_log_summary_refresh_ignores_blob_covered_rows() {
             content: "blob replacement prompt".to_string(),
         },
         Message::Assistant {
+            service_tier_receipt: None,
             content: Some("blob replacement answer".to_string()),
             reasoning_text: None,
             reasoning_details: None,
@@ -799,6 +803,7 @@ fn transcript_log_summary_refresh_ignores_blob_covered_rows() {
                     content: "live prompt".to_string(),
                 },
                 Message::Assistant {
+                    service_tier_receipt: None,
                     content: Some("live answer".to_string()),
                     reasoning_text: None,
                     reasoning_details: None,
@@ -1051,6 +1056,7 @@ fn transcript_log_summary_stats_match_the_blob_visibility_predicate() {
                     content: "first prompt".to_string(),
                 },
                 Message::Assistant {
+                    service_tier_receipt: None,
                     content: Some("visible answer".to_string()),
                     reasoning_text: None,
                     reasoning_details: None,
@@ -1061,6 +1067,7 @@ fn transcript_log_summary_stats_match_the_blob_visibility_predicate() {
                 },
                 // Assistant with tool calls: not visible even with content.
                 Message::Assistant {
+                    service_tier_receipt: None,
                     content: Some("working".to_string()),
                     reasoning_text: None,
                     reasoning_details: None,
@@ -1075,6 +1082,7 @@ fn transcript_log_summary_stats_match_the_blob_visibility_predicate() {
                 },
                 // Assistant without content: not visible.
                 Message::Assistant {
+                    service_tier_receipt: None,
                     content: None,
                     reasoning_text: Some("reasoning only".to_string()),
                     reasoning_details: None,
@@ -1085,6 +1093,7 @@ fn transcript_log_summary_stats_match_the_blob_visibility_predicate() {
                 },
                 // Assistant with an empty tool-call list: visible.
                 Message::Assistant {
+                    service_tier_receipt: None,
                     content: Some("another answer".to_string()),
                     reasoning_text: None,
                     reasoning_details: None,

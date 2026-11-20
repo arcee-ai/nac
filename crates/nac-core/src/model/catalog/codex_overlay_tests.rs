@@ -376,3 +376,91 @@ fn explicit_modalities_override_lower_layers_but_missing_fields_do_not() {
             .image_input
     );
 }
+
+#[test]
+fn account_discovery_preserves_speed_metadata_and_distinguishes_empty_from_unknown() {
+    let models = parse_index(r#"{"models":[
+        {"slug":"new-model","service_tiers":[{"id":"priority","name":"Fast","description":"Priority processing"},{"id":"ultrafast","name":"Ultrafast","description":"Fastest"}],"default_service_tier":"priority"},
+        {"slug":"revoked","service_tiers":[],"default_service_tier":null},
+        {"slug":"unknown"},
+        {"slug":"malformed","service_tiers":[{"id":"priority","name":42}]}
+    ]}"#).unwrap();
+    let tiers = models[0].service_tiers.as_ref().unwrap();
+    assert_eq!(tiers.len(), 2);
+    assert_eq!(tiers[0].id, "priority");
+    assert_eq!(tiers[0].name, "Fast");
+    assert_eq!(tiers[0].description, "Priority processing");
+    assert_eq!(models[0].default_service_tier.as_deref(), Some("priority"));
+    assert_eq!(models[1].service_tiers, Some(vec![]));
+    assert!(models[1].default_service_tier_known);
+    assert_eq!(models[1].default_service_tier, None);
+    assert!(!models[2].default_service_tier_known);
+    assert_eq!(models[2].service_tiers, None);
+    assert_eq!(models[3].service_tiers, None);
+}
+
+#[cfg(feature = "codex-e2e-fixture")]
+#[test]
+fn fixture_managed_discovery_is_local_and_expired_auth_fails_before_refresh() {
+    let _lock = crate::TEST_ENV_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let guard = super::super::test_support::EnvGuard::new(
+        "codex-fixture-discovery",
+        &["NAC_HOME", "NAC_CODEX_E2E_FIXTURE_URL"],
+        &[],
+    );
+    unsafe {
+        std::env::set_var(
+            "NAC_CODEX_E2E_FIXTURE_URL",
+            "http://127.0.0.1:1234/responses",
+        )
+    };
+    let auth_path = guard.path().join("auth.json");
+    let auth = |expires_at_ms| {
+        serde_json::json!({
+            "type":"chatgpt-codex", "access":"e2e-only", "refresh":"e2e-only",
+            "expires_at_ms":expires_at_ms, "account_id":"codex-e2e-account"
+        })
+        .to_string()
+    };
+    nac_credential_store::write_auth_string_to_path(&auth_path, &auth(u64::MAX)).unwrap();
+    record_discovery(
+        "codex-e2e-account",
+        r#"{"models":[{"slug":"fixture-model","display_name":"Fixture"}]}"#,
+    );
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let list = || {
+        runtime.block_on(async {
+            tokio::time::timeout(
+                Duration::from_secs(1),
+                crate::model::list_managed_provider_models(
+                    crate::model::ManagedAuthProvider::Codex,
+                ),
+            )
+            .await
+            .expect("fixture discovery must not wait for network")
+        })
+    };
+    let models = list().unwrap();
+    assert_eq!(models.len(), 1);
+    assert_eq!(models[0].id, "fixture-model");
+    let expired = auth(0);
+    nac_credential_store::write_auth_string_to_path(&auth_path, &expired).unwrap();
+    assert!(list()
+        .unwrap_err()
+        .to_string()
+        .contains("must not be expired"));
+    assert_eq!(std::fs::read_to_string(&auth_path).unwrap(), expired);
+    let direct_error = runtime
+        .block_on(crate::model::chatgpt_codex::stored_auth_for_request(
+            &reqwest::Client::new(),
+        ))
+        .unwrap_err();
+    assert!(direct_error
+        .to_string()
+        .contains("cannot be used for public discovery"));
+}

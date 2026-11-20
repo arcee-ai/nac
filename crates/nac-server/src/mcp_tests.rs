@@ -2,6 +2,24 @@ use super::*;
 use rmcp::model::{ClientCapabilities, ClientConfig, ProtocolVersion};
 
 #[test]
+fn speed_field_distinguishes_omission_null_and_value() {
+    for (json, expected) in [
+        (serde_json::json!({"session_id":"s"}), RequestField::Omitted),
+        (
+            serde_json::json!({"session_id":"s", "service_tier":null}),
+            RequestField::Null,
+        ),
+        (
+            serde_json::json!({"session_id":"s", "service_tier":"fast"}),
+            RequestField::Value("fast".to_owned()),
+        ),
+    ] {
+        let params: UpdateSessionParams = serde_json::from_value(json).unwrap();
+        assert_eq!(nullable_field(params.service_tier), expected);
+    }
+}
+
+#[test]
 fn create_session_schema_exposes_optional_project_id() {
     let schema = serde_json::to_value(schemars::schema_for!(CreateSessionParams)).unwrap();
     let properties = schema["properties"].as_object().unwrap();

@@ -14,6 +14,7 @@ fn request(project: Option<String>) -> NativeTaskRequest {
         skill: Some("qa".into()),
         model: None,
         reasoning_effort: None,
+        service_tier: None,
         workspace: TaskWorkspace::Auto,
         git_ref: None,
         default_ref: Some("dev".into()),

@@ -79,6 +79,8 @@ pub struct LaunchModelDefaults {
     pub configured_model: Option<String>,
     /// Configured reasoning effort, if any.
     pub configured_reasoning_effort: Option<ReasoningEffort>,
+    /// Configured speed preference, if explicitly set.
+    pub configured_service_tier: Option<nac_core::model::ServiceTier>,
 }
 
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
@@ -275,6 +277,9 @@ pub struct CreateSessionRequest {
     pub backend: RequestField<String>,
     #[serde(default)]
     pub reasoning_effort: RequestField<String>,
+    /// Explicit speed preference; null clears the override.
+    #[serde(default)]
+    pub service_tier: RequestField<String>,
     #[serde(default)]
     pub api_key_env: RequestField<String>,
     /// Prefer a JSON object. A JSON-encoded object string remains accepted for compatibility.
@@ -342,6 +347,7 @@ impl CreateSessionRequest {
             allow_insecure_http: application_field(self.allow_insecure_http),
             backend: application_field(self.backend),
             reasoning_effort: application_field(self.reasoning_effort),
+            service_tier: application_field(self.service_tier),
             api_key_env: application_field(self.api_key_env),
             extra_headers: match application_field(self.extra_headers) {
                 application::Field::Unchanged => application::Field::Unchanged,
@@ -421,6 +427,9 @@ pub struct UpdateConfigRequest {
     pub backend: RequestField<String>,
     #[serde(default)]
     pub reasoning_effort: RequestField<String>,
+    /// Explicit speed preference; null clears the override.
+    #[serde(default)]
+    pub service_tier: RequestField<String>,
     #[serde(default)]
     pub api_key_env: RequestField<String>,
     /// Prefer a JSON object. Null or an empty object clears the persisted map.
@@ -443,6 +452,7 @@ impl UpdateConfigRequest {
             allow_insecure_http: application_field(self.allow_insecure_http),
             backend: application_field(self.backend),
             reasoning_effort: application_field(self.reasoning_effort),
+            service_tier: application_field(self.service_tier),
             api_key_env: application_field(self.api_key_env),
             extra_headers: match application_field(self.extra_headers) {
                 application::Field::Unchanged => application::Field::Unchanged,

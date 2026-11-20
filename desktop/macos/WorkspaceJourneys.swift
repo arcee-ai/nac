@@ -385,8 +385,9 @@ extension WorkspaceSmoke {
             try await waitJS("modal focus return", "return document.activeElement === window.__wkModalOpener;")
             try await waitJS("model chip", "return !!document.querySelector('button[aria-label^=\"Model: \"]:not(:disabled)');")
             _ = try await js("const chip=document.querySelector('button[aria-label^=\"Model: \"]'); window.__wkPopoverOpener=chip; chip.focus(); chip.click(); return true;")
-            try await waitJS("model settings menu", "return !!document.querySelector('[role=menu][aria-label=\"Model settings\"]');")
-            _ = try await js("const menu=document.querySelector('[role=menu][aria-label=\"Model settings\"]'); const row=[...menu.querySelectorAll('[role=menuitem]')].find(b => b.firstElementChild?.textContent === 'Model'); if(!row)throw Error('Missing model list control'); row.click(); return true;")
+            let modelList = "document.querySelector('[role=dialog][aria-label=\"Model settings\"] button[aria-label^=\"Choose model\"]')"
+            try await waitJS("model settings dialog", "return !!(\(modelList));")
+            _ = try await js("\(modelList).click(); return true;")
             try await waitJS("production model popover", "return !!document.querySelector('input[aria-label=\"Search models\"]') && window.__wkPopoverOpener.getAttribute('aria-expanded') === 'true';")
             try await require("Popover overflows viewport", "const input=document.querySelector('input[aria-label=\"Search models\"]');const panel=input.closest('[data-radix-popper-content-wrapper]');if(!panel)return false;const r=panel.getBoundingClientRect();return r.left>=-1 && r.right<=innerWidth+1;")
             _ = try await js("document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));return true;")

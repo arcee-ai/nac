@@ -15,6 +15,10 @@ test-support = []
 managed-fault-fixture = []
 # Scripted automatic reviewer for production-build browser journeys only.
 review-fixture = []
+# Local scripted Codex endpoint for isolated production-browser tests only.
+codex-e2e-fixture = []
+# Loopback-only native OpenAI transport for production-browser tests.
+openai-e2e-fixture = []
 openapi = ["dep:utoipa", "nac-contracts/openapi"]
 
 [dependencies]

@@ -317,6 +317,7 @@ async fn together_reasoning_round_trips_under_the_reasoning_field() {
             content: "start".to_string(),
         },
         Message::Assistant {
+            service_tier_receipt: None,
             content: first.assistant.content.clone(),
             reasoning_text: first.assistant.reasoning_text.clone(),
             reasoning_details: None,

@@ -21,6 +21,7 @@ pub(crate) struct SessionConfigPatch {
     pub(crate) allow_insecure_http: Field<bool>,
     pub(crate) backend: Field<String>,
     pub(crate) reasoning_effort: Field<String>,
+    pub(crate) service_tier: Field<String>,
     pub(crate) api_key_env: Field<String>,
     pub(crate) extra_headers: Field<BTreeMap<String, String>>,
     pub(crate) orchestrator_compaction_threshold: Field<u64>,
@@ -34,6 +35,7 @@ impl SessionConfigPatch {
             && matches!(self.allow_insecure_http, Field::Unchanged)
             && matches!(self.backend, Field::Unchanged)
             && matches!(self.reasoning_effort, Field::Unchanged)
+            && matches!(self.service_tier, Field::Unchanged)
             && matches!(self.api_key_env, Field::Unchanged)
             && matches!(self.extra_headers, Field::Unchanged)
             && matches!(self.orchestrator_compaction_threshold, Field::Unchanged)
@@ -77,6 +79,7 @@ impl<'a> SessionConfigurationApplication<'a> {
             .await?;
 
         let backend_selected = matches!(&request.backend, Field::Set(_));
+        let tier_unchanged = matches!(&request.service_tier, Field::Unchanged);
         let base_url_omitted = matches!(&request.base_url, Field::Unchanged);
         let api_key_env_omitted = matches!(&request.api_key_env, Field::Unchanged);
 
@@ -193,7 +196,7 @@ impl<'a> SessionConfigurationApplication<'a> {
             }
         }
 
-        let _settings = EffectiveModelSettings::new_with_http_policy(
+        let settings = EffectiveModelSettings::new_with_http_policy(
             backend,
             prospective.model.clone(),
             prospective.base_url.clone(),
@@ -202,6 +205,31 @@ impl<'a> SessionConfigurationApplication<'a> {
             extra_headers.clone(),
             prospective.allow_insecure_http,
         )?;
+        let tier = prospective
+            .service_tier
+            .as_deref()
+            .map(str::parse::<nac_core::model::ServiceTier>)
+            .transpose()
+            .map_err(|error| {
+                request_configuration_error(format!("invalid service_tier: {error}"))
+            })?;
+        let route_changed = current.model != prospective.model
+            || current.backend != prospective.backend
+            || current.base_url != prospective.base_url;
+        if route_changed || !tier_unchanged {
+            if let Err(error) = settings.with_service_tier(tier) {
+                if route_changed
+                    && tier_unchanged
+                    && tier.is_some()
+                    && backend == BackendKind::ChatGptCodexResponses
+                {
+                    prospective.service_tier =
+                        Some(nac_core::model::ServiceTier::Standard.as_str().to_owned());
+                } else {
+                    return Err(request_configuration_error_from(error));
+                }
+            }
+        }
         if prospective.automatic_compaction && backend != BackendKind::ChatGptCodexResponses {
             // A Codex automatic policy must not follow later non-Codex
             // catalog changes; freeze that provider's default on the switch.
@@ -315,6 +343,17 @@ fn apply_patch(config: &mut sessions::RawSessionConfig, request: SessionConfigPa
         Field::Clear => config.reasoning_effort = None,
         Field::Set(value) => {
             config.reasoning_effort = Some(nonblank_request_string(value, "reasoning_effort")?);
+        }
+    }
+    match request.service_tier {
+        Field::Unchanged => {}
+        Field::Clear => config.service_tier = None,
+        Field::Set(value) => {
+            let value = nonblank_request_string(value, "service_tier")?;
+            let tier: nac_core::model::ServiceTier = value.parse().map_err(|error| {
+                request_configuration_error(format!("invalid service_tier: {error}"))
+            })?;
+            config.service_tier = Some(tier.as_str().to_owned());
         }
     }
     match request.api_key_env {

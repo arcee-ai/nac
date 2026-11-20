@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import type { ServiceTier } from "@/app/lib/serviceTier";
 import { useMemo } from "react";
 
 import type {
@@ -86,6 +87,7 @@ function fromSavedConfiguration(record: ModelConfigurationRecord): InheritedMode
       allow_insecure_http: record.allow_insecure_http,
       api_key_env: record.api_key_env ?? null,
       reasoning_effort: record.reasoning_effort ?? null,
+      ...(record.service_tier != null ? { service_tier: record.service_tier as ServiceTier } : {}),
       extra_headers: record.extra_headers,
       orchestrator_compaction_threshold: record.orchestrator_compaction_threshold,
       light_model: record.light_model ?? null,
@@ -110,6 +112,7 @@ function fromSessionConfiguration(
       allow_insecure_http: config.allow_insecure_http,
       api_key_env: config.api_key_env ?? null,
       reasoning_effort: config.reasoning_effort ?? null,
+      ...(config.service_tier != null ? { service_tier: config.service_tier as ServiceTier } : {}),
       extra_headers: parseHeaders(config.extra_headers_json),
       orchestrator_compaction_threshold: config.orchestrator_compaction_threshold,
       light_model: config.light_model ?? null,
@@ -178,24 +181,34 @@ export function modelChipLabel(
   return inherited ? shortModel(inherited.initial.model) : null;
 }
 
-/** The backend, model and effort a session will start on, whichever way it was chosen. */
+/** The route and preferences a session will start with. */
 export function sessionRoute(
   override: ModelOverride | null,
   inherited: InheritedModel | null,
-): { backend: BackendKind; model: string; effort: string } | null {
+): {
+  backend: BackendKind;
+  model: string;
+  baseUrl: string;
+  effort: string;
+  speed: ServiceTier | null | undefined;
+} | null {
   const selection = override?.selection;
   if (selection?.kind === "resolved") {
     return {
       backend: selection.backend,
       model: selection.model,
+      baseUrl: selection.base_url,
       effort: selection.reasoning_effort ?? "",
+      speed: selection.service_tier,
     };
   }
   if (selection || !inherited) return null;
   return {
     backend: inherited.initial.backend,
     model: inherited.initial.model,
+    baseUrl: inherited.initial.base_url,
     effort: inherited.initial.reasoning_effort ?? "",
+    speed: inherited.initial.service_tier,
   };
 }
 
@@ -211,6 +224,7 @@ function inheritedOverride(inherited: InheritedModel): ModelOverride {
       allow_insecure_http: initial.allow_insecure_http ?? false,
       api_key_env: initial.api_key_env,
       reasoning_effort: initial.reasoning_effort,
+      service_tier: initial.service_tier,
       extra_headers: initial.extra_headers,
       orchestrator_compaction_threshold: initial.orchestrator_compaction_threshold,
       light_model: inherited.light,
@@ -234,6 +248,16 @@ export function withEffort(
   return { ...base, selection: { ...base.selection, reasoning_effort: effort || null } };
 }
 
+export function withSpeed(
+  override: ModelOverride | null,
+  inherited: InheritedModel | null,
+  speed: ServiceTier | null,
+): ModelOverride | null {
+  const base = override ?? (inherited ? inheritedOverride(inherited) : null);
+  if (base?.selection.kind !== "resolved") return base;
+  return { ...base, selection: { ...base.selection, service_tier: speed } };
+}
+
 /** The resolved tuple a configured session is created with. */
 export interface ResolvedModel {
   backend: BackendKind;
@@ -242,6 +266,7 @@ export interface ResolvedModel {
   allow_insecure_http: boolean;
   api_key_env: string | null;
   reasoning_effort: string | null;
+  service_tier?: ServiceTier | null;
   extra_headers: Record<string, string> | null;
   orchestrator_compaction_threshold?: number | null;
 }
@@ -283,6 +308,7 @@ export function configuredSessionRequest({
     allow_insecure_http: selected.allow_insecure_http,
     api_key_env: selected.api_key_env,
     reasoning_effort: selected.reasoning_effort,
+    ...(selected.service_tier !== undefined ? { service_tier: selected.service_tier } : {}),
     extra_headers: selected.extra_headers,
     // Explicit null matters: it lets a user turn an inherited dual-model
     // project default into a single-model session without changing the project.

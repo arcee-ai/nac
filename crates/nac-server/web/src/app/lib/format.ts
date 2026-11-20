@@ -413,6 +413,9 @@ export function addTokenUsage(
     cache_write_tokens: (base?.cache_write_tokens ?? 0) + delta.cache_write_tokens,
     reasoning_tokens: (base?.reasoning_tokens ?? 0) + (delta.reasoning_tokens ?? 0),
     total_tokens: contextTokens,
+    speed_tier_charges_excluded: Boolean(
+      base?.speed_tier_charges_excluded || delta.speed_tier_charges_excluded,
+    ),
     cost:
       base?.cost || delta.cost
         ? {
@@ -429,12 +432,13 @@ export function addTokenUsage(
 export function tokenUsageHasSpend(usage: TokenUsage | null | undefined): boolean {
   if (!usage) return false;
   return (
+    Boolean(usage.speed_tier_charges_excluded) ||
     usage.input_tokens +
       usage.output_tokens +
       usage.cache_read_tokens +
       usage.cache_write_tokens +
       (usage.cost?.total ?? 0) >
-    0
+      0
   );
 }
 
@@ -456,6 +460,9 @@ export function maxBillableUsage(
     cache_write_tokens: Math.max(a.cache_write_tokens, b.cache_write_tokens),
     reasoning_tokens: Math.max(a.reasoning_tokens ?? 0, b.reasoning_tokens ?? 0),
     total_tokens: a.total_tokens || b.total_tokens,
+    speed_tier_charges_excluded: Boolean(
+      a.speed_tier_charges_excluded || b.speed_tier_charges_excluded,
+    ),
     cost:
       a.cost || b.cost
         ? {

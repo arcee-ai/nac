@@ -2288,6 +2288,142 @@
             "xhigh": "xhigh"
           }
         }
+      },
+      "service_tiers": {
+        "gpt-4.1": {
+          "tiers": [
+            "standard",
+            "fast"
+          ]
+        },
+        "gpt-4.1-mini": {
+          "tiers": [
+            "standard",
+            "fast"
+          ]
+        },
+        "gpt-4o": {
+          "tiers": [
+            "standard",
+            "fast"
+          ]
+        },
+        "gpt-4o-mini": {
+          "tiers": [
+            "standard",
+            "fast"
+          ]
+        },
+        "gpt-5": {
+          "tiers": [
+            "standard",
+            "fast"
+          ]
+        },
+        "gpt-5-mini": {
+          "tiers": [
+            "standard",
+            "fast"
+          ]
+        },
+        "gpt-5.1": {
+          "tiers": [
+            "standard",
+            "fast"
+          ]
+        },
+        "gpt-5.2": {
+          "tiers": [
+            "standard",
+            "fast"
+          ]
+        },
+        "gpt-5.4": {
+          "tiers": [
+            "standard",
+            "fast"
+          ],
+          "fast_input_tokens_below": 272000
+        },
+        "gpt-5.4-mini": {
+          "tiers": [
+            "standard",
+            "fast"
+          ]
+        },
+        "gpt-5.5": {
+          "tiers": [
+            "standard",
+            "fast"
+          ],
+          "fast_input_tokens_below": 272000
+        },
+        "gpt-5.6-luna": {
+          "tiers": [
+            "standard",
+            "fast"
+          ]
+        },
+        "gpt-5.6-sol": {
+          "tiers": [
+            "standard",
+            "fast"
+          ]
+        },
+        "gpt-5.6-terra": {
+          "tiers": [
+            "standard",
+            "fast"
+          ]
+        },
+        "gpt-6-astra": {
+          "tiers": [
+            "standard",
+            "fast"
+          ]
+        },
+        "gpt-6-luna": {
+          "tiers": [
+            "standard",
+            "fast"
+          ]
+        },
+        "gpt-6-sol": {
+          "tiers": [
+            "standard",
+            "fast"
+          ]
+        },
+        "gpt-6.1-sol": {
+          "tiers": [
+            "standard",
+            "fast"
+          ]
+        },
+        "gpt-6.1-terra": {
+          "tiers": [
+            "standard",
+            "fast"
+          ]
+        },
+        "gpt-6.2-astra": {
+          "tiers": [
+            "standard",
+            "fast"
+          ]
+        },
+        "gpt-6.2-sol": {
+          "tiers": [
+            "standard",
+            "fast"
+          ]
+        },
+        "o3": {
+          "tiers": [
+            "standard",
+            "fast"
+          ]
+        }
       }
     },
     "openai-responses": {
@@ -3121,6 +3257,152 @@
             "none": "none",
             "xhigh": "xhigh"
           }
+        }
+      },
+      "service_tiers": {
+        "gpt-4.1": {
+          "tiers": [
+            "standard",
+            "fast"
+          ]
+        },
+        "gpt-4.1-mini": {
+          "tiers": [
+            "standard",
+            "fast"
+          ]
+        },
+        "gpt-4o": {
+          "tiers": [
+            "standard",
+            "fast"
+          ]
+        },
+        "gpt-4o-mini": {
+          "tiers": [
+            "standard",
+            "fast"
+          ]
+        },
+        "gpt-5": {
+          "tiers": [
+            "standard",
+            "fast"
+          ]
+        },
+        "gpt-5-mini": {
+          "tiers": [
+            "standard",
+            "fast"
+          ]
+        },
+        "gpt-5.1": {
+          "tiers": [
+            "standard",
+            "fast"
+          ]
+        },
+        "gpt-5.2": {
+          "tiers": [
+            "standard",
+            "fast"
+          ]
+        },
+        "gpt-5.3-codex": {
+          "tiers": [
+            "standard",
+            "fast"
+          ]
+        },
+        "gpt-5.4": {
+          "tiers": [
+            "standard",
+            "fast"
+          ],
+          "fast_input_tokens_below": 272000
+        },
+        "gpt-5.4-mini": {
+          "tiers": [
+            "standard",
+            "fast"
+          ]
+        },
+        "gpt-5.5": {
+          "tiers": [
+            "standard",
+            "fast"
+          ],
+          "fast_input_tokens_below": 272000
+        },
+        "gpt-5.6-luna": {
+          "tiers": [
+            "standard",
+            "fast"
+          ]
+        },
+        "gpt-5.6-sol": {
+          "tiers": [
+            "standard",
+            "fast"
+          ]
+        },
+        "gpt-5.6-terra": {
+          "tiers": [
+            "standard",
+            "fast"
+          ]
+        },
+        "gpt-6-astra": {
+          "tiers": [
+            "standard",
+            "fast",
+            "ultrafast"
+          ]
+        },
+        "gpt-6-luna": {
+          "tiers": [
+            "standard",
+            "fast"
+          ]
+        },
+        "gpt-6-sol": {
+          "tiers": [
+            "standard",
+            "fast"
+          ]
+        },
+        "gpt-6.1-sol": {
+          "tiers": [
+            "standard",
+            "fast",
+            "ultrafast"
+          ]
+        },
+        "gpt-6.1-terra": {
+          "tiers": [
+            "standard",
+            "fast"
+          ]
+        },
+        "gpt-6.2-astra": {
+          "tiers": [
+            "standard",
+            "fast",
+            "ultrafast"
+          ]
+        },
+        "gpt-6.2-sol": {
+          "tiers": [
+            "standard",
+            "fast",
+            "ultrafast"
+          ]
+        },
+        "o3": {
+          "tiers": [
+            "standard",
+            "fast"
+          ]
         }
       }
     },

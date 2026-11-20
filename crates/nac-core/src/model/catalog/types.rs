@@ -234,6 +234,15 @@ pub struct ResolvedLimits {
     pub output_origin: LimitOrigin,
 }
 
+/// An account-discovered Codex service tier, preserving upstream metadata.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ModelServiceTier {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+}
+
 /// Central model metadata record resolved from the catalog.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModelMetadata {
@@ -247,6 +256,8 @@ pub struct ModelMetadata {
     pub max_tokens: u64,
     pub max_input_tokens: Option<u64>,
     pub auto_compact_token_limit: Option<u64>,
+    pub service_tiers: Option<Vec<ModelServiceTier>>,
+    pub default_service_tier: Option<String>,
     pub context_origin: LimitOrigin,
     pub input_origin: LimitOrigin,
     pub output_origin: LimitOrigin,
@@ -379,6 +390,8 @@ impl ModelMetadata {
             max_tokens: FALLBACK_MAX_TOKENS,
             max_input_tokens: None,
             auto_compact_token_limit: None,
+            service_tiers: None,
+            default_service_tier: None,
             context_origin: LimitOrigin::Estimated,
             input_origin: LimitOrigin::Estimated,
             output_origin: LimitOrigin::Estimated,
@@ -450,6 +463,12 @@ pub struct ModelEntry {
     pub id: String,
     #[cfg_attr(feature = "openapi", schema(required))]
     pub display_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service_tiers: Option<Vec<ModelServiceTier>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_service_tier: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fast_input_tokens_below: Option<u64>,
     pub context_window: u64,
     pub max_tokens: u64,
     pub cost: ModelCostRates,
@@ -469,6 +488,15 @@ pub struct ProviderConnection {
     pub base_url: String,
     #[cfg_attr(feature = "openapi", schema(required))]
     pub api_key_env: Option<String>,
+}
+
+/// Reviewed native API support, independent of model limits and account access.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct NativeSpeedProfile {
+    pub tiers: Vec<crate::model::ServiceTier>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fast_input_tokens_below: Option<u64>,
 }
 
 /// One provider group in the `GET /models` listing.
@@ -499,6 +527,8 @@ pub struct ProviderListing {
     #[cfg_attr(feature = "openapi", schema(required))]
     pub default_base_url: Option<String>,
     pub default_limits: DefaultLimits,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub speed_profiles: Option<std::collections::BTreeMap<String, NativeSpeedProfile>>,
     pub models: Vec<ModelEntry>,
 }
 

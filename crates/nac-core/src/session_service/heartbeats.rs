@@ -75,6 +75,7 @@ impl SessionService {
                 default_ref: None,
                 model: None,
                 reasoning_effort: None,
+                service_tier: None,
                 retained_limit: 1,
             };
             let binding = crate::store::fresh_heartbeat_binding(

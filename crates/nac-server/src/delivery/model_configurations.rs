@@ -7,7 +7,7 @@ use axum::{
 };
 use nac_core::{
     light_model::LightModelSettings,
-    model::{BackendKind, ProviderModel, ReasoningEffort},
+    model::{BackendKind, ProviderModel, ReasoningEffort, ServiceTier},
     model_configurations::ModelConfigurationRecord,
 };
 use serde::{Deserialize, Serialize};
@@ -28,6 +28,7 @@ pub struct CreateModelConfigurationRequest {
     #[schema(write_only, example = "fake-api-key")]
     pub api_key: Option<String>,
     pub reasoning_effort: Option<ReasoningEffort>,
+    pub service_tier: Option<ServiceTier>,
     pub extra_headers: Option<BTreeMap<String, String>>,
     pub orchestrator_compaction_threshold: Option<u64>,
     pub initial_prompt: Option<String>,
@@ -52,6 +53,8 @@ pub struct UpdateModelConfigurationRequest {
     pub api_key: RequestField<String>,
     #[serde(default)]
     pub reasoning_effort: RequestField<ReasoningEffort>,
+    #[serde(default)]
+    pub service_tier: RequestField<ServiceTier>,
     #[serde(default)]
     pub extra_headers: RequestField<BTreeMap<String, String>>,
     #[serde(default)]
@@ -78,6 +81,8 @@ pub struct ResolvedModelConfiguration {
     pub api_key_env: Option<String>,
     #[schema(required)]
     pub reasoning_effort: Option<ReasoningEffort>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service_tier: Option<ServiceTier>,
     pub models: Vec<ProviderModel>,
     #[schema(required)]
     pub models_error: Option<String>,
@@ -94,6 +99,7 @@ impl From<application::model_configurations::ResolvedModelConfiguration>
             allow_insecure_http: value.allow_insecure_http,
             api_key_env: value.api_key_env,
             reasoning_effort: value.reasoning_effort,
+            service_tier: value.service_tier,
             models: value.models,
             models_error: value.models_error,
         }
@@ -150,6 +156,7 @@ pub(crate) async fn create_handler(
             allow_insecure_http: request.allow_insecure_http,
             api_key: request.api_key,
             reasoning_effort: request.reasoning_effort,
+            service_tier: request.service_tier,
             extra_headers: request.extra_headers,
             orchestrator_compaction_threshold: request.orchestrator_compaction_threshold,
             initial_prompt: request.initial_prompt,
@@ -184,6 +191,7 @@ pub(crate) async fn update_handler(
             allow_insecure_http: field(request.allow_insecure_http),
             api_key: field(request.api_key),
             reasoning_effort: field(request.reasoning_effort),
+            service_tier: field(request.service_tier),
             extra_headers: field(request.extra_headers),
             orchestrator_compaction_threshold: field(request.orchestrator_compaction_threshold),
             initial_prompt: field(request.initial_prompt),

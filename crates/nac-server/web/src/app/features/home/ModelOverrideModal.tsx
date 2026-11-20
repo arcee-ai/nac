@@ -95,7 +95,19 @@ function ModelOverrideForm({
       ? { ...current.selection, extra_headers: current.selection.extra_headers ?? {} }
       : inherited?.initial;
 
+  const selectedValues = selection?.kind === "resolved" ? selection : selection?.request;
+  const needsSpeedReconciliation = Boolean(
+    inherited?.initial.service_tier &&
+    selectedValues &&
+    selectedValues.service_tier === undefined &&
+    selectedValues.backend !== "chatgpt-codex-responses",
+  );
+
   const apply = () => {
+    if (needsSpeedReconciliation) {
+      setError("Use provider default for speed before switching to this model.");
+      return;
+    }
     if (!selection) {
       setError("Choose the primary model first.");
       return;
@@ -164,6 +176,24 @@ function ModelOverrideForm({
             <p role="alert" className="type-body-chrome text-error-primary">
               {error}
             </p>
+          ) : null}
+          {needsSpeedReconciliation ? (
+            <Button
+              variant={ButtonVariant.Secondary}
+              className="min-h-11 self-start"
+              onClick={() => {
+                setSelection((value) =>
+                  value?.kind === "resolved"
+                    ? { ...value, service_tier: null }
+                    : value?.kind === "save"
+                      ? { ...value, request: { ...value.request, service_tier: null } }
+                      : value,
+                );
+                setError("");
+              }}
+            >
+              Use provider default for speed
+            </Button>
           ) : null}
           {policy.orchestrationEnabled ? (
             <LightModelSection

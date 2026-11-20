@@ -333,6 +333,7 @@ async fn native_command(label: &str) -> (CreateSessionWithSnapshot, PathBuf, Str
         skill: Some("qa".into()),
         model: None,
         reasoning_effort: None,
+        service_tier: None,
         workspace: crate::task_launch_control::TaskWorkspace::ExistingCheckout,
         git_ref: None,
         default_ref: None,

@@ -15,6 +15,8 @@ pub struct FreshTaskDestination {
     pub default_ref: Option<String>,
     pub model: Option<String>,
     pub reasoning_effort: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service_tier: Option<String>,
     pub retained_limit: i64,
 }
 
@@ -39,6 +41,7 @@ impl FreshTaskDestination {
             (&self.default_ref, 1_024, "default branch"),
             (&self.model, 256, "model"),
             (&self.reasoning_effort, 64, "reasoning effort"),
+            (&self.service_tier, 64, "service tier"),
         ] {
             ensure!(
                 value.as_ref().is_none_or(|value| {
@@ -46,6 +49,10 @@ impl FreshTaskDestination {
                 }),
                 "fresh task {label} must be nonblank and bounded"
             );
+        }
+        if let Some(tier) = &self.service_tier {
+            tier.parse::<crate::model::ServiceTier>()
+                .map_err(|error| anyhow::anyhow!(error))?;
         }
         ensure!(
             self.default_ref
@@ -116,6 +123,7 @@ mod tests {
             default_ref: None,
             model: None,
             reasoning_effort: None,
+            service_tier: None,
             retained_limit: 10,
         };
         destination.validate().unwrap();
@@ -138,6 +146,14 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<FreshTaskDestination>(&saved).unwrap(),
             destination
+        );
+        let mut old = serde_json::to_value(&destination).unwrap();
+        old.as_object_mut().unwrap().remove("service_tier");
+        assert_eq!(
+            serde_json::from_value::<FreshTaskDestination>(old)
+                .unwrap()
+                .service_tier,
+            None
         );
         for limit in [0, -1, 1_001, i64::MAX] {
             destination.retained_limit = limit;

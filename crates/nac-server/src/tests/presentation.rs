@@ -257,6 +257,7 @@ async fn session_snapshot_recovers_non_contiguous_transcript_tail() {
             content: "first prompt".to_string(),
         },
         Message::Assistant {
+            service_tier_receipt: None,
             content: Some("first answer".to_string()),
             reasoning_text: None,
             reasoning_details: None,
@@ -269,6 +270,7 @@ async fn session_snapshot_recovers_non_contiguous_transcript_tail() {
             content: "second prompt".to_string(),
         },
         Message::Assistant {
+            service_tier_receipt: None,
             content: Some("second answer".to_string()),
             reasoning_text: None,
             reasoning_details: None,
@@ -281,6 +283,7 @@ async fn session_snapshot_recovers_non_contiguous_transcript_tail() {
             content: "third prompt".to_string(),
         },
         Message::Assistant {
+            service_tier_receipt: None,
             content: Some("third answer".to_string()),
             reasoning_text: None,
             reasoning_details: None,

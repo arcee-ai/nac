@@ -8,6 +8,7 @@ use crate::types::Message;
 #[test]
 fn full_summary_prompt_usage_aggregates_uncached_cache_read_and_cache_write_tokens() {
     let usage = TokenUsage {
+        speed_tier_charges_excluded: false,
         input_tokens: 60_000,
         output_tokens: 500,
         cache_read_tokens: 70_000,
@@ -20,6 +21,7 @@ fn full_summary_prompt_usage_aggregates_uncached_cache_read_and_cache_write_toke
     assert_eq!(full_summary_prompt_tokens(&usage), Some(180_000));
 
     let overflow = TokenUsage {
+        speed_tier_charges_excluded: false,
         input_tokens: u64::MAX,
         output_tokens: 0,
         cache_read_tokens: 1,
@@ -42,6 +44,7 @@ fn large_persistent_system_is_not_counted_as_reclaimed_summary_source() {
     ];
 
     let summary_usage = TokenUsage {
+        speed_tier_charges_excluded: false,
         input_tokens: 60_000,
         output_tokens: 500,
         cache_read_tokens: 70_000,

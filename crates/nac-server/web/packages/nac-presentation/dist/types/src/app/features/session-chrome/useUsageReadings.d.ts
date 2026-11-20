@@ -11,6 +11,8 @@ export declare function useUsageReadings(sessionId: string, snapshot: SessionSna
     output: string;
     cacheRead: string | null;
     cost: string;
+    speedTierChargesExcluded: boolean;
+    subscriptionEstimate: boolean;
     running: boolean;
     startedAt: number | null;
     lastElapsedMs: number | null;

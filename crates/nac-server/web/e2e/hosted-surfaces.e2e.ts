@@ -543,11 +543,7 @@ test("composer fences configuration writes after uncertain settlement or a newer
   const notices = page.getByRole("region", { name: "Notifications", exact: true });
   const openEffort = async () => {
     await chip.click();
-    await page
-      .getByRole("menu", { name: "Model settings", exact: true })
-      .getByRole("menuitem", { name: /^Effort / })
-      .click();
-    return page.getByRole("menu", { name: "Effort", exact: true });
+    return page.getByRole("dialog", { name: "Model settings", exact: true });
   };
   const writes = () =>
     fixture.calls.filter((call) => call.method === "PATCH" && call.path === resource);
@@ -559,7 +555,7 @@ test("composer fences configuration writes after uncertain settlement or a newer
     const sent = page.waitForRequest(
       (req) => req.method() === "PATCH" && req.url().endsWith(resource),
     );
-    await effort.getByRole("menuitemradio", { name: "Medium", exact: true }).click();
+    await effort.getByRole("radio", { name: "Medium", exact: true }).press("Space");
     expect((await sent).postDataJSON()).toMatchObject({
       expected_config_version: initial.config_version,
       reasoning_effort: "medium",
@@ -585,7 +581,7 @@ test("composer fences configuration writes after uncertain settlement or a newer
       data: { expected_config_version: accepted.config_version, reasoning_effort: "low" },
     });
     expect(newer.ok()).toBe(true);
-    await effort.getByRole("menuitemradio", { name: "High", exact: true }).click();
+    await effort.getByRole("radio", { name: "High", exact: true }).press("Space");
     await expect(
       notices.getByRole("alert").filter({ hasText: "changed or is busy" }),
     ).toBeVisible();

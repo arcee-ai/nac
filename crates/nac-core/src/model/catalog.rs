@@ -55,6 +55,13 @@ pub(super) fn codex_refresh_after_login() {
     codex_overlay::request_refresh(true);
 }
 
+#[cfg(feature = "codex-e2e-fixture")]
+pub(super) fn codex_e2e_models(
+    fingerprint: &str,
+) -> Result<Vec<crate::model::ProviderModel>, String> {
+    codex_overlay::fixture_models(fingerprint)
+}
+
 pub(super) fn record_codex_discovery(account: &str, body: &str) {
     codex_overlay::record_discovery(account, body);
 }
@@ -62,8 +69,8 @@ pub use overlay::spawn_overlay_refresh;
 pub use types::{
     ApiKind, AuthStatus, Compat, CompletionsThinkingFormat, CompletionsTokenLimit, CostTier,
     DefaultLimits, LimitOrigin, ModelCostRates, ModelEntry, ModelListing, ModelMetadata,
-    ModelSource, ProviderAuth, ProviderConnection, ProviderListing, ThinkingLevelMap,
-    FALLBACK_CONTEXT_WINDOW, FALLBACK_MAX_TOKENS,
+    ModelServiceTier, ModelSource, ProviderAuth, ProviderConnection, ProviderListing,
+    ThinkingLevelMap, FALLBACK_CONTEXT_WINDOW, FALLBACK_MAX_TOKENS,
 };
 
 /// Well-known id of each provider's fallback entry.
@@ -245,6 +252,9 @@ impl ProviderCatalog {
             if let Some(metadata) = self.models.get(family) {
                 let mut resolved = metadata.clone();
                 resolved.id = model.to_string();
+                // Family matching may provide limits, never account entitlements.
+                resolved.service_tiers = None;
+                resolved.default_service_tier = None;
                 return resolved;
             }
         }
@@ -470,6 +480,49 @@ fn provider_auth(provider: BackendKind) -> ProviderAuth {
     }
 }
 
+fn native_listing_profile(
+    provider: BackendKind,
+    model: &ModelMetadata,
+) -> Option<&'static serde_json::Value> {
+    let id = match (provider, model.api) {
+        (BackendKind::OpenAiResponses, ApiKind::OpenAiResponses) => "openai-responses",
+        (BackendKind::OpenAiChatCompletions, ApiKind::OpenAiCompletions) => {
+            "openai-chat-completions"
+        }
+        _ => return None,
+    };
+    super::service_tier::native_profile(id, &model.id)
+}
+
+fn native_listing_tiers(
+    provider: BackendKind,
+    model: &ModelMetadata,
+) -> Option<Vec<ModelServiceTier>> {
+    native_listing_profile(provider, model)?
+        .get("tiers")?
+        .as_array()
+        .map(|tiers| {
+            tiers
+                .iter()
+                .filter_map(|v| match v.as_str()? {
+                    "fast" => Some(ModelServiceTier {
+                        id: "priority".into(),
+                        name: "Fast".into(),
+                        description: "Higher token cost; subject to your OpenAI project's access"
+                            .into(),
+                    }),
+                    "ultrafast" => Some(ModelServiceTier {
+                        id: "ultrafast".into(),
+                        name: "Ultrafast".into(),
+                        description: "Higher token cost; subject to your OpenAI project's access"
+                            .into(),
+                    }),
+                    _ => None,
+                })
+                .collect()
+        })
+}
+
 /// Build the `GET /models` listing from the process-global catalog: every
 /// provider with its auth requirements, managed base URL, catalog endpoint
 /// default, `_default` limits and real entries. Synthesis products
@@ -537,6 +590,32 @@ pub fn api_listing_for_invocation(invocation_name: &str) -> ModelListing {
                         .supported_efforts(),
                     limits: Some(provider_catalog.default.resolved_limits()),
                 },
+                speed_profiles: match provider {
+                    BackendKind::OpenAiResponses | BackendKind::OpenAiChatCompletions => {
+                        let id = if *provider == BackendKind::OpenAiResponses {
+                            "openai-responses"
+                        } else {
+                            "openai-chat-completions"
+                        };
+                        super::service_tier::native_profiles(id).map(|profiles| {
+                            profiles
+                                .iter()
+                                .filter_map(|(model, value)| {
+                                    let resolved = catalog.resolve(*provider, model);
+                                    native_listing_profile(*provider, &resolved)?;
+                                    Some((
+                                        model.clone(),
+                                        serde_json::from_value::<types::NativeSpeedProfile>(
+                                            value.clone(),
+                                        )
+                                        .ok()?,
+                                    ))
+                                })
+                                .collect()
+                        })
+                    }
+                    _ => None,
+                },
                 models: provider_catalog
                     .models
                     .values()
@@ -544,6 +623,12 @@ pub fn api_listing_for_invocation(invocation_name: &str) -> ModelListing {
                     .map(|metadata| ModelEntry {
                         id: metadata.id.clone(),
                         display_name: metadata.display_name.clone(),
+                        service_tiers: native_listing_tiers(*provider, metadata)
+                            .or_else(|| metadata.service_tiers.clone()),
+                        fast_input_tokens_below: native_listing_profile(*provider, metadata)
+                            .and_then(|p| p.get("fast_input_tokens_below"))
+                            .and_then(serde_json::Value::as_u64),
+                        default_service_tier: metadata.default_service_tier.clone(),
                         context_window: metadata.context_window,
                         max_tokens: metadata.max_tokens,
                         cost: metadata.cost.clone(),

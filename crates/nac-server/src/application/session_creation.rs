@@ -64,7 +64,11 @@ fn inherit_project_field<T>(field: &mut Field<T>, inherited: Field<T>) {
 fn apply_project_model_defaults(
     request: &mut SessionCreationCommand,
     defaults: ModelConfigurationRecord,
-) {
+) -> bool {
+    let reconcile = matches!(request.service_tier, Field::Unchanged)
+        && (matches!(&request.model, Field::Set(value) if value != &defaults.model)
+            || matches!(&request.backend, Field::Set(value) if value != &defaults.backend)
+            || matches!(&request.base_url, Field::Set(value) if value != &defaults.base_url));
     inherit_project_field(&mut request.model, Field::Set(defaults.model));
     inherit_project_field(&mut request.base_url, Field::Set(defaults.base_url));
     inherit_project_field(
@@ -76,6 +80,13 @@ fn apply_project_model_defaults(
         &mut request.reasoning_effort,
         defaults
             .reasoning_effort
+            .map(Field::Set)
+            .unwrap_or(Field::Clear),
+    );
+    inherit_project_field(
+        &mut request.service_tier,
+        defaults
+            .service_tier
             .map(Field::Set)
             .unwrap_or(Field::Clear),
     );
@@ -97,6 +108,7 @@ fn apply_project_model_defaults(
         &mut request.light_model,
         defaults.light_model.map(Field::Set).unwrap_or(Field::Clear),
     );
+    reconcile
 }
 
 /// The chat a project's model settings are read off when the project names no
@@ -130,7 +142,11 @@ fn newest_project_session(
 fn apply_sibling_model_defaults(
     request: &mut SessionCreationCommand,
     sibling: sessions::SessionSnapshot,
-) {
+) -> bool {
+    let reconcile = matches!(request.service_tier, Field::Unchanged)
+        && (matches!(&request.model, Field::Set(value) if value != &sibling.model)
+            || matches!(&request.backend, Field::Set(value) if value != sibling.backend.as_str())
+            || matches!(&request.base_url, Field::Set(value) if value != &sibling.base_url));
     inherit_project_field(&mut request.model, Field::Set(sibling.model));
     inherit_project_field(&mut request.base_url, Field::Set(sibling.base_url));
     inherit_project_field(
@@ -146,6 +162,13 @@ fn apply_sibling_model_defaults(
         sibling
             .reasoning_effort
             .map(|effort| Field::Set(effort.as_str().to_string()))
+            .unwrap_or(Field::Clear),
+    );
+    inherit_project_field(
+        &mut request.service_tier,
+        sibling
+            .service_tier
+            .map(|tier| Field::Set(tier.as_str().to_owned()))
             .unwrap_or(Field::Clear),
     );
     inherit_project_field(
@@ -169,6 +192,7 @@ fn apply_sibling_model_defaults(
         &mut request.light_model,
         sibling.light_model.map(Field::Set).unwrap_or(Field::Clear),
     );
+    reconcile
 }
 
 fn newest_primary_project_session_id(
@@ -206,6 +230,7 @@ pub(crate) struct SessionCreationCommand {
     pub(crate) allow_insecure_http: Field<bool>,
     pub(crate) backend: Field<String>,
     pub(crate) reasoning_effort: Field<String>,
+    pub(crate) service_tier: Field<String>,
     pub(crate) api_key_env: Field<String>,
     pub(crate) extra_headers: Field<BTreeMap<String, String>>,
     pub(crate) orchestrator_compaction_threshold: Field<u64>,
@@ -258,7 +283,7 @@ impl<'a> SessionCreationApplication<'a> {
         &self,
         request: SessionCreationCommand,
     ) -> Result<SessionFrontendSnapshot> {
-        self.create_prepared_session(request, None, None, None)
+        self.create_prepared_session(request, None, None, None, false)
             .await
     }
 
@@ -280,7 +305,7 @@ impl<'a> SessionCreationApplication<'a> {
         if let Some(native) = &native {
             apply_native_settings(&mut request, native);
         }
-        self.create_prepared_session(request, Some(launch), None, None)
+        self.create_prepared_session(request, Some(launch), None, None, false)
             .await
     }
 
@@ -294,7 +319,7 @@ impl<'a> SessionCreationApplication<'a> {
             ..Default::default()
         };
         apply_native_settings(&mut request, &launch);
-        self.create_prepared_session(request, None, Some(launch), None)
+        self.create_prepared_session(request, None, Some(launch), None, false)
             .await
     }
 
@@ -321,12 +346,17 @@ impl<'a> SessionCreationApplication<'a> {
                 .clone()
                 .map(Field::Set)
                 .unwrap_or(Field::Unchanged),
+            service_tier: destination
+                .service_tier
+                .clone()
+                .map(Field::Set)
+                .unwrap_or(Field::Unchanged),
             ..SessionCreationCommand::default()
         };
-        if let Some(defaults) = scheduled.model_defaults() {
-            apply_project_model_defaults(&mut request, defaults.clone());
-        }
-        self.create_prepared_session(request, retained, None, Some(scheduled))
+        let reconcile = scheduled
+            .model_defaults()
+            .is_some_and(|defaults| apply_project_model_defaults(&mut request, defaults.clone()));
+        self.create_prepared_session(request, retained, None, Some(scheduled), reconcile)
             .await
     }
 
@@ -336,6 +366,7 @@ impl<'a> SessionCreationApplication<'a> {
         retained: Option<nac_core::store::TaskLaunchRecord>,
         native: Option<nac_core::task_launch_control::NativeTaskLaunch>,
         scheduled: Option<nac_core::store::PreparedFreshTaskLaunch>,
+        mut reconcile_speed: bool,
     ) -> Result<SessionFrontendSnapshot> {
         anyhow::ensure!(
             native.is_none() || (retained.is_none() && scheduled.is_none()),
@@ -391,12 +422,12 @@ impl<'a> SessionCreationApplication<'a> {
                 .is_some_and(|scheduled| scheduled.model_defaults().is_some())
             {
                 if let Some(defaults) = context.default_model_config {
-                    apply_project_model_defaults(&mut request, defaults);
+                    reconcile_speed = apply_project_model_defaults(&mut request, defaults);
                 } else if let Some(sibling) = newest_project_session(
                     &self.manager.inner.store_path,
                     &context.project.project_id,
                 ) {
-                    apply_sibling_model_defaults(&mut request, sibling);
+                    reconcile_speed = apply_sibling_model_defaults(&mut request, sibling);
                 }
             }
             let project = context.project;
@@ -482,6 +513,20 @@ impl<'a> SessionCreationApplication<'a> {
             request.extra_headers,
             request.allow_insecure_http,
         )?;
+        model.service_tier =
+            crate::application::request_validation::service_tier_option(request.service_tier)?;
+        if reconcile_speed && matches!(model.service_tier, OptionalModelOption::Value(_)) {
+            if let Err(error) = runtime::effective_model_settings(&model, &config) {
+                if model.backend == Some(nac_core::model::BackendKind::ChatGptCodexResponses) {
+                    model.service_tier =
+                        OptionalModelOption::Value(nac_core::model::ServiceTier::Standard);
+                    runtime::effective_model_settings(&model, &config)
+                        .map_err(request_configuration_error_from)?;
+                } else {
+                    return Err(request_configuration_error_from(error));
+                }
+            }
+        }
         if let Some(profile) = self.manager.managed_model() {
             model.trusted_light_credential = profile.trusted_light_credential();
             let uses_host_credentials = model.backend == Some(profile.backend)
@@ -582,6 +627,7 @@ impl<'a> SessionCreationApplication<'a> {
                     reasoning_effort: snapshot
                         .reasoning_effort
                         .map(|effort| effort.as_str().into()),
+                    service_tier: snapshot.service_tier.map(|tier| tier.as_str().into()),
                     extra_headers: snapshot.extra_headers.clone(),
                     orchestrator_compaction_threshold: snapshot.orchestrator_compaction_threshold,
                     initial_prompt: None,
@@ -747,5 +793,8 @@ fn apply_native_settings(
     }
     if let Some(reasoning) = &launch.request.reasoning_effort {
         request.reasoning_effort = Field::Set(reasoning.clone());
+    }
+    if let Some(tier) = &launch.request.service_tier {
+        request.service_tier = Field::Set(tier.clone());
     }
 }

@@ -269,7 +269,7 @@ final class StartupSmoke {
         try await waitJS("Home model chip", "return !!(\(chip)) && !\(chip).disabled;")
         _ = try await js("\(chip).click(); return true;")
         let search = "input[aria-label=\"Search models\"]"
-        let modelMenu = "[...document.querySelectorAll('[role=menu][aria-label=\"Model settings\"] [role=menuitem]')].find(row => row.firstElementChild?.textContent.trim() === 'Model')"
+        let modelMenu = "document.querySelector('[role=dialog][aria-label=\"Model settings\"] button[aria-label^=\"Choose model\"]')"
         try await waitJS("Home model list entry", "return !!document.querySelector(\(json(search))) || !!(\(modelMenu));")
         _ = try await js("if (!document.querySelector(\(json(search)))) \(modelMenu).click(); return true;")
         try await waitJS("Home model search", "return !!document.querySelector(\(json(search)));")

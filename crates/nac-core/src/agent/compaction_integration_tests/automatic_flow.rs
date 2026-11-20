@@ -201,6 +201,7 @@ async fn rejected_summary_accounts_cost_and_falls_back_to_canonical_request() {
             content: "old".to_string(),
         },
         Message::Assistant {
+            service_tier_receipt: None,
             content: Some("answer".to_string()),
             reasoning_text: None,
             reasoning_details: None,
@@ -328,6 +329,7 @@ async fn complete_tool_result_batch_reenters_threshold_hook_before_next_ordinary
             content: "old".to_string(),
         },
         Message::Assistant {
+            service_tier_receipt: None,
             content: Some("old answer".to_string()),
             reasoning_text: None,
             reasoning_details: None,

@@ -9,6 +9,14 @@ fn configuration(model: &str) -> NewModelConfiguration {
         allow_insecure_http: false,
         api_key_env: None,
         reasoning_effort: Some("high".into()),
+        service_tier: Some(
+            if model == "model-a" {
+                "fast"
+            } else {
+                "standard"
+            }
+            .into(),
+        ),
         extra_headers: std::collections::BTreeMap::new(),
         orchestrator_compaction_threshold: None,
         initial_prompt: None,
@@ -202,6 +210,10 @@ fn reserved_defaults_survive_reopen_publication_and_initial_admission_after_poin
         .unwrap();
     assert_eq!(replay.receipt(), prepared.receipt());
     assert_eq!(replay.model_defaults(), prepared.model_defaults());
+    assert_eq!(
+        replay.model_defaults().unwrap().service_tier.as_deref(),
+        Some("fast")
+    );
     let snapshot = publish(&f, &pending, &replay);
     select(&f, None);
     let published = heartbeat_history(&f.path, "project:project", &pending.schedule_id)

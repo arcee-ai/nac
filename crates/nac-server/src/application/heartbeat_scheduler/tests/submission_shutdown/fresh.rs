@@ -101,6 +101,7 @@ async fn observe_fresh(boundary: Boundary, git: bool) -> Result<()> {
             &setup_path,
             "fresh-model",
             store::NewModelConfiguration {
+                service_tier: None,
                 name: "Fresh Stop fixture".into(),
                 backend: "openai-responses".into(),
                 model: "gpt-5.2".into(),
@@ -137,6 +138,7 @@ async fn observe_fresh(boundary: Boundary, git: bool) -> Result<()> {
             default_ref: git.then(|| "refs/heads/dev".into()),
             model: None,
             reasoning_effort: None,
+            service_tier: None,
             retained_limit: 2,
         };
         let binding = store::fresh_heartbeat_binding(

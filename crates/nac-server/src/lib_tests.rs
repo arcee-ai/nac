@@ -740,6 +740,7 @@ fn test_transcript() -> Vec<Message> {
             content: "old cycle".to_string(),
         },
         Message::Assistant {
+            service_tier_receipt: None,
             content: Some("old answer".to_string()),
             reasoning_text: None,
             reasoning_details: None,
@@ -752,6 +753,7 @@ fn test_transcript() -> Vec<Message> {
             content: "current cycle".to_string(),
         },
         Message::Assistant {
+            service_tier_receipt: None,
             content: None,
             reasoning_text: Some("thinking".to_string()),
             reasoning_details: None,
@@ -761,6 +763,7 @@ fn test_transcript() -> Vec<Message> {
             reasoning_field: None,
         },
         Message::Assistant {
+            service_tier_receipt: None,
             content: None,
             reasoning_text: None,
             reasoning_details: None,
@@ -780,6 +783,7 @@ fn test_transcript() -> Vec<Message> {
             content: "hidden tail".to_string(),
         },
         Message::Assistant {
+            service_tier_receipt: None,
             content: Some("done".to_string()),
             reasoning_text: None,
             reasoning_details: None,

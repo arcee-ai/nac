@@ -16,8 +16,12 @@ export interface SelectItem {
   hoverHint?: HoverHintConfig;
 }
 
-interface SelectProps extends Pick<React.AriaAttributes, "aria-invalid" | "aria-describedby"> {
+interface SelectProps extends Pick<
+  React.AriaAttributes,
+  "aria-invalid" | "aria-describedby" | "aria-label"
+> {
   items?: SelectItem[];
+  checkedChoices?: boolean;
   value?: string;
   onValueChange?: (id: string) => void;
   size?: ButtonSize;
@@ -64,6 +68,7 @@ const tabSizeFor = {
 /** Dropdown select: a `Popover` whose panel is a list of single-choice rows. */
 const Select: React.FC<SelectProps> = ({
   items = [],
+  checkedChoices = false,
   value,
   onValueChange,
   size = ButtonSize.Medium,
@@ -82,6 +87,7 @@ const Select: React.FC<SelectProps> = ({
   onOpenChange,
   "aria-invalid": ariaInvalid,
   "aria-describedby": ariaDescribedBy,
+  "aria-label": ariaLabel,
 }) => {
   const [open, setOpen] = useState(false);
   const selected = items.find((item) => item.id === value);
@@ -105,6 +111,7 @@ const Select: React.FC<SelectProps> = ({
     "aria-expanded": open,
     "aria-invalid": ariaInvalid,
     "aria-describedby": ariaDescribedBy,
+    "aria-label": ariaLabel,
   };
   const triggerClass = `${triggerClassName} overflow-hidden max-w-full`;
   const triggerFace = (
@@ -137,18 +144,24 @@ const Select: React.FC<SelectProps> = ({
       className={className}
       panelClassName={panelClassName}
       content={
-        <div className="flex flex-col gap-1 px-2 md:px-0">
+        <div
+          className="flex flex-col gap-1 px-2 md:px-0"
+          role={checkedChoices ? "menu" : undefined}
+        >
           {items.map((item) => (
             <TabButton
               key={item.id}
               size={rowSize}
               variant={TabButtonVariant.Regular}
               active={item.id === value}
+              role={checkedChoices ? "menuitemradio" : undefined}
+              aria-checked={checkedChoices ? item.id === value : undefined}
               hoverHint={item.hoverHint}
               onClick={() => select(item.id)}
             >
               {item.icon ? <Icon iconName={item.icon} /> : null}
               <span className="text-left flex-grow">{item.label}</span>
+              {checkedChoices && item.id === value ? <Icon iconName={IconName.Check} /> : null}
             </TabButton>
           ))}
         </div>

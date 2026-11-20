@@ -10,8 +10,9 @@ import { useMediaQuery } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
 import { routes } from "@/app/lib/routes";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
-import { resolveCatalogModel } from "@/app/lib/catalog";
+import { resolveCatalogModel, type CatalogPick } from "@/app/lib/catalog";
 import { standardEffort } from "@/app/components/modals/options";
+import { speedForCatalogRoute, supportsSpeed } from "@/app/lib/serviceTier";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { useModelCatalog, useSandboxAvailability } from "@/app/services/queries";
 import type {
@@ -32,6 +33,7 @@ import {
   useConfiguredLaunchModel,
   useInheritedModel,
   withEffort,
+  withSpeed,
   type ModelOverride,
 } from "./modelChoice";
 import { ModelOverrideModal } from "./ModelOverrideModal";
@@ -152,6 +154,7 @@ export function HomeComposer({
   const chosenModel = override ?? (model.inherited ? null : suggestion.override);
   const route = sessionRoute(chosenModel, model.inherited);
   const catalog = useModelCatalog(Boolean(route));
+  const speedCapability = speedForCatalogRoute(catalog.data, route);
   const supported = route
     ? resolveCatalogModel(catalog.data, route.backend, route.model).supportedEfforts
     : [];
@@ -168,6 +171,29 @@ export function HomeComposer({
       ? withEffort(chosenModel, model.inherited, effort)
       : chosenModel;
   const modelPending = model.pending || configured.pending || suggestion.pending;
+  const chooseModel = (pick: CatalogPick, clearIncompatibleSpeed: boolean) => {
+    if (!catalog.data || (route?.backend === pick.backend && route.model === pick.model)) return;
+    const targetSpeed = speedForCatalogRoute(catalog.data, pick);
+    const incompatible = Boolean(route?.speed) && !targetSpeed.explicitTiersAllowed;
+    if (incompatible && !clearIncompatibleSpeed)
+      return {
+        error: "This model does not accept the selected speed.",
+        confirmSpeedClear: true,
+      };
+    const next = catalogOverride(catalog.data, pick);
+    if (route?.speed === undefined) {
+      setOverride(next);
+    } else {
+      const speed = incompatible
+        ? null
+        : route.speed && !supportsSpeed(targetSpeed.tiers, route.speed)
+          ? "standard"
+          : route.speed;
+      setOverride(withSpeed(next, null, speed));
+      if (incompatible) return { notice: "Speed preference cleared for this model." };
+      if (speed !== route.speed) return { notice: "Speed changed to Standard for this model." };
+    }
+  };
   const needsProvider = !override && !model.inherited && suggestion.noProviders;
   const modelError =
     !override && !model.inherited ? (model.error ?? configured.error ?? suggestion.error) : null;
@@ -324,15 +350,14 @@ export function HomeComposer({
                 value={route}
                 effort={effort}
                 supportedEfforts={supported}
-                inheritedLabel={model.inherited ? modelChipLabel(null, model.inherited) : null}
-                usingInherited={!override && model.inherited != null}
-                disabled={busy}
-                onPick={(pick) => catalog.data && setOverride(catalogOverride(catalog.data, pick))}
-                onEffort={setEffortChoice}
-                onUseInherited={() => {
-                  setOverride(null);
-                  setEffortChoice(null);
+                speed={{
+                  ...speedCapability,
+                  value: route?.speed ?? null,
+                  onChange: (speed) => setOverride(withSpeed(sessionModel, model.inherited, speed)),
                 }}
+                disabled={busy}
+                onPick={chooseModel}
+                onEffort={setEffortChoice}
                 onAdvanced={policy.orchestrationEnabled ? () => setModelOpen(true) : undefined}
               />
             ) : null}

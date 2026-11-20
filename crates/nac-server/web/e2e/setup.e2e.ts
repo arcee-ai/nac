@@ -106,8 +106,7 @@ for (const mobile of [false, true]) {
 
     const chooseEffort = async (label: "Low" | "High") => {
       await modelChip.click();
-      await page.getByRole("menuitem", { name: /^Effort / }).click();
-      await page.getByRole("menuitemradio", { name: label, exact: true }).click();
+      await page.getByRole("radio", { name: label, exact: true }).press("Space");
     };
     await chooseEffort("Low");
     await expect(page.getByText("Reasoning set to low", { exact: true })).toBeVisible();

@@ -13742,6 +13742,16 @@
                 "type": "null"
               }
             ]
+          },
+          "service_tier": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ServiceTier"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       },
@@ -13855,6 +13865,10 @@
           },
           "sandbox": {
             "$ref": "#/components/schemas/SandboxRequest"
+          },
+          "service_tier": {
+            "$ref": "#/components/schemas/RequestField_String_String",
+            "description": "Explicit speed preference; null clears the override."
           },
           "ssh_host": {
             "type": [
@@ -14940,6 +14954,12 @@
           "retained_limit": {
             "type": "integer",
             "format": "int64"
+          },
+          "service_tier": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "additionalProperties": false
@@ -16526,6 +16546,17 @@
                 "type": "null"
               }
             ]
+          },
+          "configured_service_tier": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ServiceTier",
+                "description": "Configured speed preference, if explicitly set."
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       },
@@ -18083,6 +18114,17 @@
                   "assistant"
                 ]
               },
+              "service_tier_receipt": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/ServiceTierReceipt",
+                    "description": "Local receipt metadata; provider history adapters must not replay it."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
               "tool_calls": {
                 "type": [
                   "array",
@@ -18314,6 +18356,12 @@
               "null"
             ]
           },
+          "service_tier": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "updated_at": {
             "type": "string"
           }
@@ -18378,11 +18426,25 @@
           "cost": {
             "$ref": "#/components/schemas/ModelCostRates"
           },
+          "default_service_tier": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "display_name": {
             "type": [
               "string",
               "null"
             ]
+          },
+          "fast_input_tokens_below": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
           },
           "id": {
             "type": "string"
@@ -18404,6 +18466,15 @@
           },
           "reasoning": {
             "type": "boolean"
+          },
+          "service_tiers": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/ModelServiceTier"
+            }
           },
           "source": {
             "$ref": "#/components/schemas/ModelSource"
@@ -18454,6 +18525,26 @@
           }
         }
       },
+      "ModelServiceTier": {
+        "type": "object",
+        "description": "An account-discovered Codex service tier, preserving upstream metadata.",
+        "required": [
+          "id",
+          "name",
+          "description"
+        ],
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
       "ModelSource": {
         "type": "string",
         "description": "Where the metadata for a resolved model came from. Served by the\n`/models` listing (snake_case wire names) — the frontend badges\nuser-overridden and unrecognized (provider-default) models from it.",
@@ -18464,6 +18555,29 @@
           "provider_default",
           "fallback"
         ]
+      },
+      "NativeSpeedProfile": {
+        "type": "object",
+        "description": "Reviewed native API support, independent of model limits and account access.",
+        "required": [
+          "tiers"
+        ],
+        "properties": {
+          "fast_input_tokens_below": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "tiers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServiceTier"
+            }
+          }
+        }
       },
       "OpenLocalPathResult": {
         "type": "object",
@@ -19347,6 +19461,18 @@
             "items": {
               "$ref": "#/components/schemas/ModelEntry"
             }
+          },
+          "speed_profiles": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "$ref": "#/components/schemas/NativeSpeedProfile"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
           }
         }
       },
@@ -19713,6 +19839,12 @@
             "minimum": 0
           },
           "reasoning_effort": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "service_tier": {
             "type": [
               "string",
               "null"
@@ -20222,6 +20354,22 @@
           }
         ]
       },
+      "RequestField_ServiceTier_ServiceTier": {
+        "oneOf": [
+          {
+            "type": "null"
+          },
+          {
+            "type": "string",
+            "description": "A person's explicit Codex speed selection. Absence inherits provider defaults.",
+            "enum": [
+              "standard",
+              "fast",
+              "ultrafast"
+            ]
+          }
+        ]
+      },
       "RequestField_String_String": {
         "oneOf": [
           {
@@ -20476,6 +20624,16 @@
             "oneOf": [
               {
                 "$ref": "#/components/schemas/ReasoningEffort"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "service_tier": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ServiceTier"
               },
               {
                 "type": "null"
@@ -20874,6 +21032,36 @@
             ]
           },
           "workdir": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "ServiceTier": {
+        "type": "string",
+        "description": "A person's explicit Codex speed selection. Absence inherits provider defaults.",
+        "enum": [
+          "standard",
+          "fast",
+          "ultrafast"
+        ]
+      },
+      "ServiceTierReceipt": {
+        "type": "object",
+        "properties": {
+          "requested": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ServiceTier"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "served": {
             "type": [
               "string",
               "null"
@@ -21738,6 +21926,12 @@
           "sandbox_status": {
             "type": "string"
           },
+          "service_tier": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "session_id": {
             "type": [
               "string",
@@ -21916,6 +22110,9 @@
           "sort_order": {
             "type": "integer",
             "format": "int64"
+          },
+          "speed_tier_charges_excluded": {
+            "type": "boolean"
           },
           "ssh_host": {
             "type": [
@@ -23683,6 +23880,10 @@
             "format": "int64",
             "minimum": 0
           },
+          "speed_tier_charges_excluded": {
+            "type": "boolean",
+            "description": "Catalog rates do not account for speed-tier charges."
+          },
           "total_tokens": {
             "type": "integer",
             "format": "int64",
@@ -24031,6 +24232,10 @@
           },
           "reasoning_effort": {
             "$ref": "#/components/schemas/RequestField_String_String"
+          },
+          "service_tier": {
+            "$ref": "#/components/schemas/RequestField_String_String",
+            "description": "Explicit speed preference; null clears the override."
           }
         }
       },
@@ -24260,6 +24465,9 @@
           },
           "reasoning_effort": {
             "$ref": "#/components/schemas/RequestField_ReasoningEffort_ReasoningEffort"
+          },
+          "service_tier": {
+            "$ref": "#/components/schemas/RequestField_ServiceTier_ServiceTier"
           }
         }
       },

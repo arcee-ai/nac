@@ -63,6 +63,7 @@ async fn compaction_is_durable_before_ordinary_request_and_preserves_canonical_t
             content: "old user".to_string(),
         },
         Message::Assistant {
+            service_tier_receipt: None,
             content: Some("old assistant".to_string()),
             reasoning_text: None,
             reasoning_details: None,
@@ -271,6 +272,7 @@ async fn long_single_prompt_can_compact_once_per_hook_and_again_after_steering()
             content: "raw oldest".to_string(),
         },
         Message::Assistant {
+            service_tier_receipt: None,
             content: Some("raw old answer".to_string()),
             reasoning_text: None,
             reasoning_details: None,
@@ -383,6 +385,7 @@ async fn valid_checkpoint_projects_after_restore_when_generation_is_disabled() {
             content: "old".to_string(),
         },
         Message::Assistant {
+            service_tier_receipt: None,
             content: Some("old answer".to_string()),
             reasoning_text: None,
             reasoning_details: None,

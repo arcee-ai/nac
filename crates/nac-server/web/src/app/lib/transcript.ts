@@ -119,6 +119,7 @@ export interface ModelTurn {
   blocks: TranscriptBlock[];
   /** How long the run behind this turn took, once it finished. */
   durationMs: number | null;
+  serviceTierReceipts?: { requested: string | null; served: string | null }[];
   /**
    * Raw snapshot index of the turn's first message, which is what places it
    * against the transcript lengths the workspace revisions were captured at.
@@ -707,6 +708,12 @@ export function buildTranscript(
       };
       turns.push(current);
     }
+    const receipt = (
+      message as typeof message & {
+        service_tier_receipt?: { requested: string | null; served: string | null } | null;
+      }
+    ).service_tier_receipt;
+    if (receipt) (current.serviceTierReceipts ??= []).push(receipt);
     current.key = `model-${absoluteIndex}`;
     current.messageIndex = absoluteIndex;
     const blocks = current.blocks;

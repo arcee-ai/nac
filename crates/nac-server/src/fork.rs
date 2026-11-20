@@ -254,6 +254,7 @@ fn persist_fork(
         source.api_key_env,
         source.extra_headers,
     );
+    fork.service_tier = source.service_tier;
     fork.project_id = source.project_id;
     // Session behavior is immutable identity. A conversation fork starts a
     // new independent lifecycle, but it remains the same kind of top-level
@@ -500,6 +501,7 @@ mod tests {
 
     fn assistant(content: &str) -> Message {
         Message::Assistant {
+            service_tier_receipt: None,
             content: Some(content.to_string()),
             reasoning_text: None,
             reasoning_details: None,

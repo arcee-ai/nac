@@ -221,8 +221,9 @@ enum NativePathJourney {
         let modelChip = app.webViews.buttons
             .matching(NSPredicate(format: "label BEGINSWITH %@ OR label == %@", "Model: ", "Choose a model")).firstMatch
         try click(modelChip)
-        let models = app.webViews.menuItems.matching(NSPredicate(format: "label BEGINSWITH %@", "Model ")).firstMatch
-        try click(models)
+        let chooser = app.webViews.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Choose model")).firstMatch
+        let legacyModels = app.webViews.menuItems.matching(NSPredicate(format: "label BEGINSWITH %@", "Model ")).firstMatch
+        try click(chooser.exists ? chooser : legacyModels)
         let search = app.webViews.textFields["Search models"]
         try click(search)
         try authorize()

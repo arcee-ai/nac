@@ -298,6 +298,7 @@ export declare function useResolvedModelConfig(configId: string | null, filePath
     models: import("../../types/openapi.generated").components["schemas"]["ProviderModel"][];
     models_error: string | null;
     reasoning_effort: import("../../types/openapi.generated").components["schemas"]["ReasoningEffort"] | null;
+    service_tier?: import("../../types/openapi.generated").components["schemas"]["ServiceTier"] | null;
 }>, Error>;
 export declare function useCreateModelConfig(): import("@tanstack/react-query").UseMutationResult<{
     allow_insecure_http: boolean;
@@ -313,6 +314,7 @@ export declare function useCreateModelConfig(): import("@tanstack/react-query").
     name: string;
     orchestrator_compaction_threshold?: number | null;
     reasoning_effort?: string | null;
+    service_tier?: string | null;
     updated_at: string;
 }, Error, {
     allow_insecure_http?: boolean;
@@ -326,5 +328,6 @@ export declare function useCreateModelConfig(): import("@tanstack/react-query").
     name: string;
     orchestrator_compaction_threshold?: number | null;
     reasoning_effort?: import("../../types/openapi.generated").components["schemas"]["ReasoningEffort"] | null;
+    service_tier?: import("../../types/openapi.generated").components["schemas"]["ServiceTier"] | null;
 }, unknown>;
 export declare function useDeleteModelConfig(): import("@tanstack/react-query").UseMutationResult<void, Error, string, unknown>;
