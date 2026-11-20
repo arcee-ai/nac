@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { UncertainCommandAdmissionError } from "@/app/services/nacClient";
 import { useStartSession } from "./useStartSession";
+import { EMPTY_SANDBOX } from "./workspaceSandbox";
 
 const fakes = vi.hoisted(() => ({
   create: vi.fn(),
@@ -32,6 +33,7 @@ vi.mock("@/app/services/queries", () => ({
   useCreateModelConfig: () => ({ mutateAsync: vi.fn() }),
   useSubmitRun: () => ({ mutateAsync: fakes.submit, isPending: false }),
   useSessions: () => ({ data: [] }),
+  useSandboxActivity: () => ({}),
 }));
 const request = {
   projectId: "project",
@@ -81,6 +83,34 @@ it("does not deliver or navigate after Home detaches while creation is pending",
   expect(await start).toBe(false);
   expect(fakes.submit).not.toHaveBeenCalled();
   expect(fakes.navigate).not.toHaveBeenCalled();
+});
+
+it("creates a new sandbox session without reusing an ordinary first chat", async () => {
+  const hook = mount();
+  await act(async () =>
+    expect(
+      await hook.result.current.start({
+        ...request,
+        sandbox: { ...EMPTY_SANDBOX, gpu: "all, device=1", shm: "2g" },
+      }),
+    ).toBe(true),
+  );
+  expect(fakes.create).toHaveBeenCalledExactlyOnceWith({
+    project_id: "project",
+    behavior: "direct",
+    first_chat: false,
+    first_chat_same_behavior: true,
+    sandbox: {
+      enabled: true,
+      activity_key: expect.any(String),
+      image: null,
+      workdir: null,
+      gpus: ["all", "device=1"],
+      shm_size: "2g",
+      mounts: [],
+      no_mount_cwd: false,
+    },
+  });
 });
 
 it("keeps one creation and stages first delivery for the owning session composer", async () => {

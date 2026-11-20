@@ -17,8 +17,13 @@ import {
 } from "@/app/features/ui-policy/policy";
 import { routes } from "@/app/lib/routes";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
-import { useCreateModelConfig, useCreateSession, useSessions } from "@/app/services/queries";
-import type { BackendKind, SessionBehavior } from "@/app/types/api";
+import {
+  useCreateModelConfig,
+  useCreateSession,
+  useSandboxActivity,
+  useSessions,
+} from "@/app/services/queries";
+import type { BackendKind, CreateSessionRequest, SessionBehavior } from "@/app/types/api";
 
 import {
   configuredSessionRequest,
@@ -26,6 +31,7 @@ import {
   type ModelOverride,
   type ResolvedModel,
 } from "./modelChoice";
+import { sandboxRequest, type SandboxOptions } from "./workspaceSandbox";
 
 export interface StartRequest {
   projectId: string;
@@ -33,6 +39,7 @@ export interface StartRequest {
   prompt: string;
   /** Null: the server inherits the project's model, as for any plain create. */
   model: ModelOverride | null;
+  sandbox?: SandboxOptions;
 }
 
 /**
@@ -51,6 +58,8 @@ export function useStartSession() {
   const createSession = useCreateSession();
   const createModelConfig = useCreateModelConfig();
   const { data: allSessions = [] } = useSessions();
+  const [sandboxActivityKey, setSandboxActivityKey] = useState<string | null>(null);
+  const sandboxActivity = useSandboxActivity(sandboxActivityKey);
 
   /**
    * A project's first primary session keeps the server's first-chat
@@ -70,6 +79,26 @@ export function useStartSession() {
   const { stores } = useNativeRuntime();
   const { update: updateDraft } = stores.promptDraftStore;
   const [error, setError] = useState<string | null>(null);
+
+  const createChat = async (body: CreateSessionRequest, sandbox?: SandboxOptions) => {
+    const activityKey = sandbox ? crypto.randomUUID() : null;
+    if (activityKey) setSandboxActivityKey(activityKey);
+    try {
+      const snapshot = await createSession.mutateAsync(
+        sandbox && activityKey
+          ? {
+              ...body,
+              // First-chat reuse can return an existing Local or SSH session.
+              first_chat: false,
+              sandbox: sandboxRequest(sandbox, activityKey),
+            }
+          : body,
+      );
+      return snapshot.metadata.session_id ?? null;
+    } finally {
+      if (activityKey) setSandboxActivityKey(null);
+    }
+  };
 
   const createWithOverride = (
     request: StartRequest,
@@ -104,30 +133,32 @@ export function useStartSession() {
           orchestrator_compaction_threshold: record.orchestrator_compaction_threshold ?? null,
         };
       },
-      chat: async (selected) => {
-        const snapshot = await createSession.mutateAsync({
-          ...configuredSessionRequest({
-            policy,
-            projectId: request.projectId,
-            behavior: request.behavior,
-            selected,
-            light: overrideLight(policy, override, selected),
-          }),
-          ...firstChat(request.projectId),
-        });
-        return snapshot.metadata.session_id ?? null;
-      },
+      chat: (selected) =>
+        createChat(
+          {
+            ...configuredSessionRequest({
+              policy,
+              projectId: request.projectId,
+              behavior: request.behavior,
+              selected,
+              light: overrideLight(policy, override, selected),
+            }),
+            ...firstChat(request.projectId),
+          },
+          request.sandbox,
+        ),
     });
   };
 
-  const createPlain = async (request: StartRequest) => {
-    const snapshot = await createSession.mutateAsync({
-      project_id: request.projectId,
-      behavior: creationBehavior(policy, request.behavior),
-      ...firstChat(request.projectId),
-    });
-    return snapshot.metadata.session_id ?? null;
-  };
+  const createPlain = (request: StartRequest) =>
+    createChat(
+      {
+        project_id: request.projectId,
+        behavior: creationBehavior(policy, request.behavior),
+        ...firstChat(request.projectId),
+      },
+      request.sandbox,
+    );
 
   /** Opens an empty session (no prompt typed): the composer there takes over. */
   const start = async (request: StartRequest): Promise<boolean> => {
@@ -164,6 +195,9 @@ export function useStartSession() {
     /** An uncertain configured create needs a fresh review (reload) before retrying. */
     needsReview: action.needsReview,
     error,
+    sandboxProgress: sandboxActivityKey
+      ? (sandboxActivity.data?.phase ?? "Creating the sandbox…")
+      : null,
     clearError: () => setError(null),
   };
 }

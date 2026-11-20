@@ -17,6 +17,8 @@ const fakes = vi.hoisted(() => ({
   addRepository: vi.fn(),
   managed: false,
   eligible: false,
+  sandboxStatus: "ready" as "ready" | "missing",
+  sandboxProbe: vi.fn(),
   inheritedPending: false,
   inheritedError: null as Error | null,
   configuredModel: null as string | null,
@@ -59,6 +61,21 @@ vi.mock("./suggestedModel", () => ({
   catalogOverride: vi.fn(),
 }));
 vi.mock("@/app/services/queries", () => ({
+  useSandboxAvailability: (enabled: boolean) => {
+    fakes.sandboxProbe(enabled);
+    return {
+      data: enabled
+        ? {
+            status: fakes.sandboxStatus,
+            guidance: fakes.sandboxStatus === "missing" ? "Install Podman to continue." : null,
+          }
+        : undefined,
+      isFetching: false,
+      isPending: !enabled,
+      isError: false,
+      refetch: vi.fn(),
+    };
+  },
   useModelCatalog: () => ({
     data: {
       providers: [
@@ -97,7 +114,11 @@ vi.mock("@/app/features/task-launches/TaskLaunchModal", () => ({
   ),
 }));
 vi.mock("@/app/features/managed/controller/useManagedHost", () => ({
-  useManagedHost: () => ({ isManaged: fakes.managed, addRepository: fakes.addRepository }),
+  useManagedHost: () => ({
+    isManaged: fakes.managed,
+    isUnmanaged: !fakes.managed,
+    addRepository: fakes.addRepository,
+  }),
 }));
 vi.mock("@/app/providers/ProjectActionsProvider", () => ({
   useProjectActions: () => ({ create: fakes.create }),
@@ -134,6 +155,8 @@ beforeEach(() => {
   fakes.addRepository.mockReset();
   fakes.managed = false;
   fakes.eligible = false;
+  fakes.sandboxStatus = "ready";
+  fakes.sandboxProbe.mockClear();
   fakes.inheritedPending = false;
   fakes.inheritedError = null;
   fakes.configuredModel = null;
@@ -149,6 +172,72 @@ afterEach(() => {
 function prompt() {
   return screen.getByRole("textbox", { name: "What should we work on?" });
 }
+
+describe("Sandbox launch", () => {
+  it("checks Podman only after selecting Sandbox and submits the chosen options", async () => {
+    fakes.eligible = true;
+    mount("/", false);
+    fireEvent.change(prompt(), { target: { value: "Run in the container" } });
+    fireEvent.click(screen.getByRole("button", { name: "Additional settings" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Isolated checkout" }));
+    expect(fakes.sandboxProbe).not.toHaveBeenCalledWith(true);
+    fireEvent.click(screen.getByRole("switch", { name: "Sandbox" }));
+    expect(fakes.sandboxProbe).toHaveBeenCalledWith(true);
+    expect(screen.getByRole("switch", { name: "Isolated checkout", checked: false })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Sandbox options" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Container image" }), {
+      target: { value: "alpine" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Container workdir" }), {
+      target: { value: "/work" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Additional mounts" }), {
+      target: { value: "/cache:/cache" },
+    });
+    fireEvent.click(screen.getByRole("switch", { name: "Don’t mount the working folder" }));
+    fireEvent.click(screen.getByRole("button", { name: "Additional settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start sandbox session" }));
+    await vi.waitFor(() => expect(fakes.start).toHaveBeenCalledOnce());
+    expect(fakes.start).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: "p2",
+        sandbox: expect.objectContaining({
+          image: "alpine",
+          workdir: "/work",
+          mounts: "/cache:/cache",
+          noMount: true,
+        }),
+      }),
+    );
+  });
+
+  it("keeps the draft when Podman is missing and only starts Locally after explicit deselection", async () => {
+    fakes.sandboxStatus = "missing";
+    mount("/", false);
+    fireEvent.change(prompt(), { target: { value: "Do not run Locally" } });
+    fireEvent.click(screen.getByRole("button", { name: "Additional settings" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Sandbox" }));
+    expect(screen.getByText("Install Podman to continue.")).toBeTruthy();
+    fireEvent.keyDown(prompt(), { key: "Enter" });
+    expect(fakes.start).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("switch", { name: "Sandbox" }));
+    fireEvent.keyDown(prompt(), { key: "Enter" });
+    await vi.waitFor(() => expect(fakes.start).toHaveBeenCalledOnce());
+    expect(fakes.start.mock.calls[0]?.[0]).not.toHaveProperty("sandbox");
+  });
+
+  it.each(["managed", "ssh"])("omits Sandbox on %s projects", (mode) => {
+    fakes.managed = mode === "managed";
+    mount(
+      "/?project=p2",
+      false,
+      mode === "ssh" ? [projects[0]!, { ...projects[1]!, ssh_host: "build-box" }] : projects,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Additional settings" }));
+    expect(screen.queryByRole("switch", { name: "Sandbox" })).toBeNull();
+    expect(fakes.sandboxProbe).not.toHaveBeenCalledWith(true);
+  });
+});
 
 describe("Home composer", () => {
   it("starts a session in the most recent project with the prompt as its first message", async () => {

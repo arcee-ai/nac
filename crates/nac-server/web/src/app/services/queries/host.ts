@@ -11,7 +11,13 @@ import {
   refreshUnifiedProviderCatalog,
 } from "@/app/services/queries/configuration";
 import { queryKeys } from "@/app/services/queries/keys";
-import type { ManagedAuthProvider, StoredCredentialList, StoreInfo } from "@/app/types/api";
+import type {
+  ManagedAuthProvider,
+  SandboxActivity,
+  SandboxAvailability,
+  StoredCredentialList,
+  StoreInfo,
+} from "@/app/types/api";
 
 export function useStoreInfo() {
   const { api } = useNativeRuntime();
@@ -20,6 +26,30 @@ export function useStoreInfo() {
     queryKey: queryKeys.storeInfo,
     queryFn: ({ signal }) => api.getStore(signal),
     staleTime: Infinity,
+  });
+}
+
+/** Probing starts Podman subprocesses, so only check after selecting Sandbox. */
+export function useSandboxAvailability(enabled: boolean) {
+  const { api } = useNativeRuntime();
+  return useQuery<SandboxAvailability>({
+    queryKey: queryKeys.sandboxAvailability,
+    queryFn: ({ signal }) => api.getSandboxAvailability(signal),
+    enabled,
+    staleTime: 30_000,
+    retry: false,
+  });
+}
+
+/** Poll only the current launch, using the correlation key sent at creation. */
+export function useSandboxActivity(key: string | null) {
+  const { api } = useNativeRuntime();
+  return useQuery<SandboxActivity | null>({
+    queryKey: [...queryKeys.sandboxActivity, key],
+    queryFn: ({ signal }) => (key ? api.getSandboxActivity(key, signal) : null),
+    enabled: key !== null,
+    refetchInterval: 1000,
+    retry: false,
   });
 }
 

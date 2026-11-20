@@ -1,5 +1,5 @@
 import { createProject, createSession, expect, test, waitForRunIdle } from "./harness";
-import type { ModelCatalog } from "../src/app/types/api";
+import type { CreateSessionRequest, ModelCatalog } from "../src/app/types/api";
 import { homeComposer, openModelList, startSessionFromHome } from "./focus-embedded-helpers";
 
 test.use({ orchestration: "0" });
@@ -19,6 +19,46 @@ test("offers the launch folder without creating projects until the user chooses 
   await expect(page).toHaveURL(/#\/\?project=[^&]+$/);
   await expect(homeComposer(page)).toBeFocused();
   expect((await (await request.get(projectsUrl)).json()).projects).toHaveLength(1);
+  expect(await (await request.get(`${harness.baseUrl}/sessions`)).json()).toEqual([]);
+});
+
+test("a rejected Sandbox launch keeps the draft and never starts a Local session", async ({
+  harness,
+  page,
+  request,
+}) => {
+  const projectId = await createProject(request, harness);
+  let probes = 0;
+  await page.route("**/sandbox/availability", (route) => {
+    probes++;
+    return route.fulfill({ json: { status: "ready" } });
+  });
+  const launches: CreateSessionRequest[] = [];
+  await page.route("**/sessions", (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    launches.push(route.request().postDataJSON() as CreateSessionRequest);
+    return route.fulfill({ status: 400, json: { error: "Fixture Podman launch rejected" } });
+  });
+  await page.goto(`${harness.baseUrl}/#/?project=${projectId}`);
+  const draft = homeComposer(page);
+  await draft.fill("Run the fixture in a sandbox");
+  await expect(page.getByRole("button", { name: "Start session", exact: true })).toBeEnabled();
+  expect(probes).toBe(0);
+  const workspace = page.getByRole("button", { name: "Additional settings" });
+  await workspace.click();
+  await page.getByRole("switch", { name: "Sandbox", exact: true }).click();
+  await page.getByRole("button", { name: "Sandbox options" }).click();
+  await page.getByRole("textbox", { name: "Container image" }).fill("fixture-image");
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Start sandbox session" }).click();
+  await expect(page.getByRole("alert")).toContainText("Fixture Podman launch rejected");
+  await expect(draft).toHaveValue("Run the fixture in a sandbox");
+  expect(launches).toHaveLength(1);
+  expect(launches[0]).toMatchObject({
+    project_id: projectId,
+    first_chat: false,
+    sandbox: { enabled: true, image: "fixture-image" },
+  });
   expect(await (await request.get(`${harness.baseUrl}/sessions`)).json()).toEqual([]);
 });
 

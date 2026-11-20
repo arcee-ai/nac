@@ -68,7 +68,7 @@ export function HomePage() {
   // Without the project list, neither "no projects" nor a project choice is true.
   const projectsKnown = !loading && !projectsQuery.error;
   const launchFolder = managed.isUnmanaged ? storeInfo?.root_cwd : undefined;
-  const useLaunchFolder = async () => {
+  const chooseLaunchFolder = async () => {
     const lease = launchProjectLifetime.current;
     if (!lease?.current() || !launchFolder || creatingLaunchProject.current) return;
     creatingLaunchProject.current = true;
@@ -104,7 +104,7 @@ export function HomePage() {
             launchFolder={launchFolder}
             launchFolderPending={createProject.isPending}
             launchFolderError={launchProjectError}
-            onUseLaunchFolder={() => void useLaunchFolder()}
+            onUseLaunchFolder={() => void chooseLaunchFolder()}
             onAddRepository={managed.isManaged ? managed.addRepository : undefined}
             onManagedSettings={managed.isManaged ? managed.openSettings : undefined}
             modelReady={managed.status?.model_ready}

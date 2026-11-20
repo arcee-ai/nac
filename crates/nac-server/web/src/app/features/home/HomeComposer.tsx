@@ -13,7 +13,7 @@ import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
 import { resolveCatalogModel } from "@/app/lib/catalog";
 import { standardEffort } from "@/app/components/modals/options";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
-import { useModelCatalog } from "@/app/services/queries";
+import { useModelCatalog, useSandboxAvailability } from "@/app/services/queries";
 import type {
   ManagedSessionSummary,
   ProjectRecord,
@@ -37,6 +37,7 @@ import {
 import { ModelOverrideModal } from "./ModelOverrideModal";
 import { catalogOverride, useSuggestedModel } from "./suggestedModel";
 import { useStartSession } from "./useStartSession";
+import type { SandboxOptions } from "./workspaceSandbox";
 
 const MAX_TITLE = 120;
 
@@ -123,6 +124,10 @@ export function HomeComposer({
     setOverrideFor(value ? { projectId, value } : null);
   const [modelOpen, setModelOpen] = useState(false);
   const [isolatedProjectId, setIsolatedProjectId] = useState<string | null>(null);
+  const [sandboxFor, setSandboxFor] = useState<{
+    projectId: string | null;
+    options: SandboxOptions;
+  } | null>(null);
   const [isolatedTask, setIsolatedTask] = useState<{
     projectId: string;
     prompt: string;
@@ -169,6 +174,14 @@ export function HomeComposer({
   const source = useTaskLaunchSource(projectId, effectiveBehavior === "direct");
   const isolationAvailable = effectiveBehavior === "direct" && source.data?.eligible === true;
   const useIsolation = projectId != null && isolatedProjectId === projectId;
+  const sandboxAllowed = Boolean(project && !project.ssh_host && managed.isUnmanaged);
+  const sandbox = sandboxFor?.projectId === projectId ? sandboxFor.options : null;
+  const sandboxCheck = useSandboxAvailability(sandboxAllowed && sandbox != null);
+  const sandboxReady =
+    sandboxAllowed &&
+    !sandboxCheck.isError &&
+    !sandboxCheck.isFetching &&
+    sandboxCheck.data?.status === "ready";
   const starter = useStartSession();
 
   // "New session" from anywhere (sidebar, ⌘⇧O, a project's +) lands here.
@@ -198,7 +211,14 @@ export function HomeComposer({
     !needsProvider &&
     !modelError &&
     (!useIsolation || isolationAvailable) &&
+    (!sandbox || sandboxReady) &&
     (!modelPending || override != null);
+
+  const sendLabel = useIsolation
+    ? "Set up isolated task"
+    : sandbox
+      ? "Start sandbox session"
+      : "Start session";
 
   const send = async () => {
     if (!canSend || !projectId) return;
@@ -220,6 +240,7 @@ export function HomeComposer({
       behavior: effectiveBehavior,
       prompt: text,
       model: sessionModel,
+      ...(sandbox ? { sandbox } : {}),
     });
     if (started) {
       draft.acknowledge(revision);
@@ -315,10 +336,10 @@ export function HomeComposer({
                 onAdvanced={policy.orchestrationEnabled ? () => setModelOpen(true) : undefined}
               />
             ) : null}
-            <Tooltip title={useIsolation ? "Set up isolated task" : "Start session"} sticky>
+            <Tooltip title={sendLabel} sticky>
               <button
                 type="button"
-                aria-label={useIsolation ? "Set up isolated task" : "Start session"}
+                aria-label={sendLabel}
                 disabled={!canSend}
                 onClick={() => void send()}
                 className={cn(
@@ -354,12 +375,33 @@ export function HomeComposer({
           {project ? (
             <span className="shrink-0">
               <WorkspaceSettings
+                key={projectId}
                 isolated={useIsolation}
                 available={isolationAvailable}
-                onIsolatedChange={(isolated) => setIsolatedProjectId(isolated ? projectId : null)}
+                onIsolatedChange={(isolated) => {
+                  if (isolated && sandbox) setSandboxFor(null);
+                  setIsolatedProjectId(isolated ? projectId : null);
+                }}
                 gitRef={gitRef}
                 defaultRef={source.data?.default_ref ?? null}
                 onRefChange={(ref) => setRefFor({ projectId, ref })}
+                sandbox={
+                  sandboxAllowed || sandbox
+                    ? {
+                        allowed: sandboxAllowed,
+                        options: sandbox,
+                        availability: sandboxCheck.data,
+                        checking: sandboxCheck.isFetching || sandboxCheck.isPending,
+                        checkFailed: sandboxCheck.isError,
+                        onChange: (options) => {
+                          if (options && useIsolation) setIsolatedProjectId(null);
+                          setSandboxFor(options ? { projectId, options } : null);
+                          starter.clearError();
+                        },
+                        onRetry: () => void sandboxCheck.refetch(),
+                      }
+                    : undefined
+                }
                 disabled={busy}
               />
             </span>
@@ -367,7 +409,11 @@ export function HomeComposer({
         </div>
       </div>
       <div className="px-5 md:min-h-5" aria-live="polite">
-        {project && needsProvider ? (
+        {starter.sandboxProgress ? (
+          <p role="status" className="type-meta text-basic-secondary">
+            {starter.sandboxProgress}
+          </p>
+        ) : project && needsProvider ? (
           <p className="type-meta text-basic-tertiary">
             Connect a model provider in Settings to start a session.
           </p>
