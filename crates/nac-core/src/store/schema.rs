@@ -3,6 +3,7 @@ use std::sync::Mutex;
 
 #[cfg(test)]
 mod completion_migration_tests;
+mod checkpoint_v54;
 mod completion_tables;
 mod connection;
 mod delegation_receipts;
@@ -535,7 +536,11 @@ fn open_connection_with_hooks(
     if schema_version == 54 {
         let session_ids = retirement::all_session_ids(&transaction)?;
         let _leases = retirement::acquire_retirement_leases(path, &session_ids)?;
-        // Checkpoint evidence must be verified before the v54 names change.
+        checkpoint_v54::rehash_v54_checkpoints(
+            &transaction,
+            include_str!("../agent/prompts/nac_direct_compaction.md"),
+            2,
+        )?;
         neutral_session::rename_storage(&transaction)?;
         before_commit()?;
         transaction.pragma_update(None, "user_version", STORE_SCHEMA_VERSION)?;
@@ -862,7 +867,11 @@ fn open_connection_with_hooks(
     )?;
     verify_auxiliary_foreign_keys(&transaction)?;
     retire_worker_storage(&transaction)?;
-    // Checkpoint evidence must be verified before the v54 names change.
+    checkpoint_v54::rehash_v54_checkpoints(
+        &transaction,
+        include_str!("../agent/prompts/nac_direct_compaction.md"),
+        2,
+    )?;
     neutral_session::rename_storage(&transaction)?;
 
     before_commit()?;
