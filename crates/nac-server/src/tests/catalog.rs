@@ -1236,6 +1236,7 @@ async fn stored_arcee_auth_config_errors_are_400_and_store_failures_are_500() {
             .update_session_config(
                 "session",
                 UpdateConfigRequest {
+                    expected_config_version: None,
                     model: RequestField::Value("trinity-large-thinking".to_string()),
                     base_url: RequestField::Value("https://api.arcee.ai".to_string()),
                     allow_insecure_http: RequestField::Omitted,
@@ -1280,6 +1281,7 @@ async fn stored_arcee_auth_config_errors_are_400_and_store_failures_are_500() {
             .update_session_config(
                 "session",
                 UpdateConfigRequest {
+                    expected_config_version: None,
                     model: RequestField::Value("trinity-large-thinking".to_string()),
                     base_url: RequestField::Value("https://api.arcee.ai".to_string()),
                     allow_insecure_http: RequestField::Omitted,
@@ -1317,6 +1319,7 @@ async fn stored_arcee_auth_config_errors_are_400_and_store_failures_are_500() {
             .update_session_config(
                 "session",
                 UpdateConfigRequest {
+                    expected_config_version: None,
                     model: RequestField::Value("trinity-large-thinking".to_string()),
                     base_url: RequestField::Value("https://api.arcee.ai".to_string()),
                     allow_insecure_http: RequestField::Omitted,

@@ -1347,6 +1347,7 @@ async fn patch_round_trips_every_state_and_rebuilds_from_persisted_settings() {
         .update_session_config(
             "session",
             UpdateConfigRequest {
+                expected_config_version: None,
                 model: RequestField::Value(" replacement-model ".to_string()),
                 base_url: RequestField::Value(" https://api.openai.com/v1 ".to_string()),
                 allow_insecure_http: RequestField::Omitted,
@@ -1636,6 +1637,7 @@ async fn removed_backend_updates_are_bad_requests_and_are_not_persisted() {
             .update_session_config(
                 "session",
                 UpdateConfigRequest {
+                    expected_config_version: None,
                     model: RequestField::Omitted,
                     base_url: RequestField::Value("https://api.arcee.ai".to_string()),
                     allow_insecure_http: RequestField::Omitted,
@@ -1737,6 +1739,7 @@ async fn server_arcee_configuration_status_and_persistence_are_consistent() {
             .update_session_config(
                 "update",
                 UpdateConfigRequest {
+                    expected_config_version: None,
                     model: RequestField::Omitted,
                     base_url: RequestField::Value(invalid_base_url.to_string()),
                     allow_insecure_http: RequestField::Omitted,
@@ -1767,6 +1770,7 @@ async fn server_arcee_configuration_status_and_persistence_are_consistent() {
         .update_session_config(
             "update",
             UpdateConfigRequest {
+                expected_config_version: None,
                 model: RequestField::Value("trinity-large-thinking".to_string()),
                 base_url: RequestField::Value("https://tenant.arcee.ai/api/v1".to_string()),
                 allow_insecure_http: RequestField::Omitted,
@@ -1789,6 +1793,7 @@ async fn server_arcee_configuration_status_and_persistence_are_consistent() {
         .update_session_config(
             "update",
             UpdateConfigRequest {
+                expected_config_version: None,
                 model: RequestField::Value("trinity-large-thinking".to_string()),
                 base_url: RequestField::Value("https://api.arcee.ai/api".to_string()),
                 allow_insecure_http: RequestField::Omitted,
@@ -1861,6 +1866,7 @@ async fn null_update_clears_legacy_arcee_api_key_env() {
         .update_session_config(
             "legacy-arcee",
             UpdateConfigRequest {
+                expected_config_version: None,
                 model: RequestField::Value("trinity-large-thinking".to_string()),
                 base_url: RequestField::Omitted,
                 allow_insecure_http: RequestField::Omitted,
