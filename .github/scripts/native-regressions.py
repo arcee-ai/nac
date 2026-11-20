@@ -20,7 +20,7 @@ CORE_TESTS = [
     'terminal::manager::user::tests::native::close_is_prompt_but_output_drain_retains_entry_and_leases_until_final_append',
     'terminal::manager::user::tests::native::concurrent_admission_never_holds_observation_map_while_waiting_for_history',
     'terminal::manager::tests::successful_one_shot_kills_background_descendants',
-    'terminal::manager::tests::worker_one_shot_does_not_hang_on_descendant_inherited_pipes',
+    'terminal::manager::tests::direct_one_shot_does_not_hang_on_descendant_inherited_pipes',
     'terminal::manager::tests::explicit_cancellation_is_structured_and_stops_late_side_effects',
     'terminal::manager::tests::pty_cancellation_stops_waiting_and_late_side_effects',
     'terminal::session::tests::kill_removes_background_jobs_from_pty_shell',

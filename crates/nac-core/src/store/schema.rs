@@ -7,6 +7,8 @@ mod completion_tables;
 mod connection;
 mod delegation_receipts;
 #[cfg(test)]
+mod fresh_schema_tests;
+#[cfg(test)]
 mod fresh_task_migration_tests;
 mod fresh_task_tables;
 mod heartbeat_calendar;
@@ -503,6 +505,32 @@ fn open_connection_with_hooks(
         [],
         |row| row.get(0),
     )?;
+    if schema_version == 0 && !established_store {
+        // New stores do not pass through historical worker or preset schemas.
+        // Keep this catalog in parity with the result of the v53 upgrade.
+        transaction.execute_batch(include_str!("schema/current.sql"))?;
+        transaction.execute_batch(
+            "INSERT INTO heartbeat_retained_allowance VALUES(1,100,1);
+             INSERT INTO managed_host_maintenance VALUES(1,'serving',NULL,NULL,NULL,NULL,0);",
+        )?;
+        transaction.execute(
+            "INSERT INTO session_completion_feed VALUES(1,?1)",
+            [uuid::Uuid::new_v4().to_string()],
+        )?;
+        heartbeat_calendar::verify_format(&transaction)?;
+        if transaction
+            .prepare("PRAGMA foreign_key_check")?
+            .query([])?
+            .next()?
+            .is_some()
+        {
+            return Err(anyhow!("foreign key check failed for fresh store"));
+        }
+        before_commit()?;
+        transaction.pragma_update(None, "user_version", STORE_SCHEMA_VERSION)?;
+        transaction.commit()?;
+        return Ok(conn);
+    }
     let needs_session_summary_backfill = schema_version < SESSION_SUMMARY_BACKFILL_VERSION;
     match schema_version {
         0 | 1 => {
