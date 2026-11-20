@@ -23,7 +23,16 @@ class FailureScopeTests(unittest.TestCase):
         self.assertEqual(capture.count('sheet.frame'), 1)
         self.assertEqual(capture.count('rootWindow.frame'), 1)
         self.assertIn('attached(exists: exists,\n                    frame: frame, owner: rootFrame)', capture)
-        self.assertIn('usable(exists: exists, enabled: sheet.isEnabled,\n                        hittable: sheet.isHittable, frame: frame, owner: rootFrame)', capture)
+        self.assertIn('usable(exists: exists, enabled: enabled,\n                        hittable: hittable, frame: frame, owner: rootFrame)', capture)
+        for name, expression in [('root_frame', 'rootWindow.frame'), ('panel_exists', 'sheet.exists'),
+                                 ('panel_frame', 'sheet.frame'), ('panel_enabled', 'sheet.isEnabled'),
+                                 ('panel_hittable', 'sheet.isHittable')]:
+            with self.subTest(name=name):
+                begin = capture.index('emit(.' + name + ', .begin)')
+                end = capture.index('emit(.' + name + ', .end)')
+                self.assertLess(begin, capture.index(expression, begin))
+                self.assertLess(capture.index(expression, begin), end)
+                self.assertEqual(capture.count(expression), 1)
         guard = source.split('func guardTarget() throws {', 1)[1].split('func dispatch(', 1)[0]
         self.assertIn('consume(ticket, surface: captured.surface, rootFrame: captured.root, field: captured.field)', guard)
 
@@ -67,6 +76,21 @@ import CoreFoundation
 import CoreGraphics
 import Darwin
 __PRODUCER_DIAGNOSTIC_STAGE__
+__PANEL_CHECKPOINTS__
+
+func panelCheckpointRun() -> [String: Any] {
+    var lines: [String] = [], writes = 0
+    for stage in StartupPanelCheckpoint.allCases {
+        for phase in [StartupPanelCheckpoint.Phase.begin, .end] {
+            StartupPanelCheckpoint.emit(stage, phase, write: { bytes in
+                writes += 1
+                lines.append(String(decoding: bytes, as: UTF8.self))
+            })
+        }
+    }
+    StartupPanelCheckpoint.emit(.panel_frame, .begin, write: { _ in throw StartupAXReceiptError.invalid })
+    return ["lines": lines, "writes": writes, "continued_after_write_error": true]
+}
 
 // Test-only syscall ports. The one-shot read hook runs after the REAL open
 // and before the unmodified canonical reader performs its own metadata check.
@@ -1348,7 +1372,7 @@ func requestChildRun(_ mode: String) -> [String: Any] {
     } catch { return ["accepted":false,"family":StartupFailureEvidence.family(error)] }
 }
 
-let rows = modes.map { $0.hasPrefix("admission_") ? admissionRun(String($0.dropFirst(10))) : $0.hasPrefix("producer_hold_") ? producerHoldRun(String($0.dropFirst(14))) : $0.hasPrefix("handoff_") ? handoffRun(String($0.dropFirst(8))) : $0.hasPrefix("lease_") ? leaseRun(String($0.dropFirst(6))) : $0.hasPrefix("file_interleave_") ? fileInterleaveRun(String($0.dropFirst("file_interleave_".count))) : $0.hasPrefix("request_child_") ? requestChildRun(String($0.dropFirst("request_child_".count))) : $0.hasPrefix("retention_") ? refusalRetentionRun(String($0.dropFirst("retention_".count))) : $0.hasPrefix("errno_") ? publishErrnoRun(String($0.dropFirst(6))) : $0.hasPrefix("lifecycle_") ? lifecycleRun(String($0.dropFirst("lifecycle_".count))) : $0.hasPrefix("semantic_policy_") ? semanticPolicyRun(String($0.dropFirst("semantic_policy_".count))) : $0.hasPrefix("atomic_shape_") ? atomicShapeRun(String($0.dropFirst("atomic_shape_".count))) : $0.hasPrefix("semantic_compatibility_") ? semanticCompatibilityRun(String($0.dropFirst("semantic_compatibility_".count))) : $0.hasPrefix("publisher_checkpoint_") ? publisherCheckpointRun(String($0.dropFirst("publisher_checkpoint_".count))) : $0.hasPrefix("float_") ? floatSelectionRun($0) : $0.hasPrefix("first_") ? firstFailureRun($0) : $0.hasPrefix("request_") ? requestRun($0) : $0.hasPrefix("interaction_") ? interactionRun($0) : $0.hasPrefix("point_") ? interactionPolicyRun($0) : $0.hasPrefix("publication_") ? publicationRun($0) : $0.hasPrefix("loss_") ? lossRun($0) : $0 == "identity" ? identityProof() : ($0.hasPrefix("focus_") || $0.hasPrefix("stale_focus")) ? focusRun($0) : $0.hasPrefix("file_") ? fileRun($0) : run($0) }
+let rows = modes.map { $0 == "panel_checkpoint" ? panelCheckpointRun() : $0.hasPrefix("admission_") ? admissionRun(String($0.dropFirst(10))) : $0.hasPrefix("producer_hold_") ? producerHoldRun(String($0.dropFirst(14))) : $0.hasPrefix("handoff_") ? handoffRun(String($0.dropFirst(8))) : $0.hasPrefix("lease_") ? leaseRun(String($0.dropFirst(6))) : $0.hasPrefix("file_interleave_") ? fileInterleaveRun(String($0.dropFirst("file_interleave_".count))) : $0.hasPrefix("request_child_") ? requestChildRun(String($0.dropFirst("request_child_".count))) : $0.hasPrefix("retention_") ? refusalRetentionRun(String($0.dropFirst("retention_".count))) : $0.hasPrefix("errno_") ? publishErrnoRun(String($0.dropFirst(6))) : $0.hasPrefix("lifecycle_") ? lifecycleRun(String($0.dropFirst("lifecycle_".count))) : $0.hasPrefix("semantic_policy_") ? semanticPolicyRun(String($0.dropFirst("semantic_policy_".count))) : $0.hasPrefix("atomic_shape_") ? atomicShapeRun(String($0.dropFirst("atomic_shape_".count))) : $0.hasPrefix("semantic_compatibility_") ? semanticCompatibilityRun(String($0.dropFirst("semantic_compatibility_".count))) : $0.hasPrefix("publisher_checkpoint_") ? publisherCheckpointRun(String($0.dropFirst("publisher_checkpoint_".count))) : $0.hasPrefix("float_") ? floatSelectionRun($0) : $0.hasPrefix("first_") ? firstFailureRun($0) : $0.hasPrefix("request_") ? requestRun($0) : $0.hasPrefix("interaction_") ? interactionRun($0) : $0.hasPrefix("point_") ? interactionPolicyRun($0) : $0.hasPrefix("publication_") ? publicationRun($0) : $0.hasPrefix("loss_") ? lossRun($0) : $0 == "identity" ? identityProof() : ($0.hasPrefix("focus_") || $0.hasPrefix("stale_focus")) ? focusRun($0) : $0.hasPrefix("file_") ? fileRun($0) : run($0) }
 FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject:rows))
 '''
 
@@ -1365,6 +1389,7 @@ class ReceiptControls(unittest.TestCase):
         teardown = '        // Cleanup is exact public application termination.' + Path(__file__).with_name('StartupJourneys.swift').read_text().split('        // Cleanup is exact public application termination.', 1)[1].split('        let failureEvidence = ', 1)[0]
         import re
         journey = Path(__file__).with_name('StartupJourneys.swift').read_text()
+        checkpoint = journey.split('// BEGIN PANEL CHECKPOINTS (passive closed metadata, never acceptance)', 1)[1].split('// END PANEL CHECKPOINTS', 1)[0]
         request_name = re.search(r'client\.prepareInteraction\(ticket, point: point, anchor: anchor, kind: kind, label: ([^,\n]+),', journey).group(1)
         recheck = '                func namedTargetMatches(' + journey.split('                func namedTargetMatches(', 1)[1].split('                let semanticName:', 1)[0]
         guard_catch = '            } catch {' + journey.split('        func guardTarget() throws {', 1)[1].split('        func dispatch(', 1)[0].split('            } catch {', 1)[1].rsplit('\n        }', 1)[0]
@@ -1373,7 +1398,7 @@ class ReceiptControls(unittest.TestCase):
         producer_hold = '                    var lease = StartupAXActionLease' + producer.split('                    var lease = StartupAXActionLease', 1)[1].split('                } else if let completed', 1)[0]
         producer_post = producer.split('                } else if let completed = postAction, let original = postRequest {', 1)[1].split('                RunLoop.current.run(until: Date().addingTimeInterval(0.05))', 1)[0].rsplit('                }', 1)[0]
         action_handoff = '            failureEvidence.step = .input' + journey.split('            failureEvidence.step = .input', 1)[1].split('            failureEvidence.step = .after_record', 1)[0]
-        driver.write_text(DRIVER.replace('__PRODUCER_DIAGNOSTIC_STAGE__', diagnostic_stage).replace('__PRODUCER_POST_HOLD__', producer_post).replace('__PRODUCER_ACTION_HOLD__', producer_hold).replace('__JOURNEY_ACTION_HANDOFF__', action_handoff).replace('__JOURNEY_GUARD_CATCH__', guard_catch).replace('        __JOURNEY_FAILURE_CATCH__', catch).replace('        __JOURNEY_TEARDOWN__', teardown)
+        driver.write_text(DRIVER.replace('__PANEL_CHECKPOINTS__', checkpoint).replace('__PRODUCER_DIAGNOSTIC_STAGE__', diagnostic_stage).replace('__PRODUCER_POST_HOLD__', producer_post).replace('__PRODUCER_ACTION_HOLD__', producer_hold).replace('__JOURNEY_ACTION_HANDOFF__', action_handoff).replace('__JOURNEY_GUARD_CATCH__', guard_catch).replace('        __JOURNEY_FAILURE_CATCH__', catch).replace('        __JOURNEY_TEARDOWN__', teardown)
                           .replace('__JOURNEY_REQUEST_NAME__', request_name)
                           .replace('__JOURNEY_SEMANTIC_RECHECK__', recheck))
         cls.binary = root / 'inert-client'
@@ -1737,6 +1762,12 @@ class ReceiptControls(unittest.TestCase):
 
     def test_actual_client_accepts_only_fresh_bound_receipt_before_next_input(self):
         self.assertEqual(self.rows(['positive'])[0], dict(accepted=True,inputs=1,loads=2,proof=1))
+        checkpoint = self.rows(['panel_checkpoint'])[0]
+        self.assertEqual(checkpoint['writes'], 10)
+        self.assertTrue(checkpoint['continued_after_write_error'])
+        self.assertEqual(checkpoint['lines'], [f'nac342-panel-checkpoint {name} {phase}\n'
+            for name in ('root_frame', 'panel_exists', 'panel_frame', 'panel_enabled', 'panel_hittable')
+            for phase in ('begin', 'end')])
 
     def test_every_refusal_binding_freshness_shape_error_prevents_next_input(self):
         modes = ['nonce','config','source','binary','helper','target','pid','window','trust','old_begin','future_end',

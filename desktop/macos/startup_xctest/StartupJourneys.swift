@@ -8,6 +8,19 @@ import IOKit
 import XCTest
 import XCUIAutomation
 
+// BEGIN PANEL CHECKPOINTS (passive closed metadata, never acceptance)
+enum StartupPanelCheckpoint: String, CaseIterable {
+    case root_frame, panel_exists, panel_frame, panel_enabled, panel_hittable
+
+    enum Phase: String { case begin, end }
+    static func emit(_ checkpoint: Self, _ phase: Phase,
+                     write: (Data) throws -> Void = { try FileHandle.standardError.write(contentsOf: $0) }) {
+        let line = "nac342-panel-checkpoint " + checkpoint.rawValue + " " + phase.rawValue + "\n"
+        do { try write(Data(line.utf8)) } catch { /* Passive diagnostics never change a guard. */ }
+    }
+}
+// END PANEL CHECKPOINTS
+
 // BEGIN CONSOLE POLICY (also compiled as a Foundation-only fixture proof)
 enum StartupConsolePolicy {
     static func boolean(_ value: Any?) -> Bool? {
@@ -652,16 +665,29 @@ final class StartupJourneys: XCTestCase {
             try require(StartupNativeFolderPolicy.surface(folderSurface, windows: ui.windows.count,
                 rootSheets: roots.count, nestedSheets: nested, allSheets: ui.descendants(matching: .sheet).count),
                 "Foreign, ambiguous or stale native folder surface")
+            StartupPanelCheckpoint.emit(.root_frame, .begin)
             let rootFrame = rootWindow.frame
+            StartupPanelCheckpoint.emit(.root_frame, .end)
             if folderSurface != .form {
                 let sheet = try XCTUnwrap(roots.first)
-                let exists = sheet.exists, frame = sheet.frame
+                StartupPanelCheckpoint.emit(.panel_exists, .begin)
+                let exists = sheet.exists
+                StartupPanelCheckpoint.emit(.panel_exists, .end)
+                StartupPanelCheckpoint.emit(.panel_frame, .begin)
+                let frame = sheet.frame
+                StartupPanelCheckpoint.emit(.panel_frame, .end)
                 try require(StartupNativeFolderPolicy.attached(exists: exists,
                     frame: frame, owner: rootFrame),
                     "Folder panel is not attached to the owned root")
                 if folderSurface == .panel {
-                    try require(StartupNativeFolderPolicy.usable(exists: exists, enabled: sheet.isEnabled,
-                        hittable: sheet.isHittable, frame: frame, owner: rootFrame),
+                    StartupPanelCheckpoint.emit(.panel_enabled, .begin)
+                    let enabled = sheet.isEnabled
+                    StartupPanelCheckpoint.emit(.panel_enabled, .end)
+                    StartupPanelCheckpoint.emit(.panel_hittable, .begin)
+                    let hittable = sheet.isHittable
+                    StartupPanelCheckpoint.emit(.panel_hittable, .end)
+                    try require(StartupNativeFolderPolicy.usable(exists: exists, enabled: enabled,
+                        hittable: hittable, frame: frame, owner: rootFrame),
                         "Owned folder panel is not actionable")
                 }
             }
