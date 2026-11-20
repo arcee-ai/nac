@@ -190,11 +190,35 @@ fn contains_retired_session_field(
     const RETIRED: &[&str] = &[
         "light_model",
         "light_model_json",
+        "light_backend",
+        "light_base_url",
+        "light_api_key_env",
+        "light_reasoning_effort",
+        "light_extra_headers",
         "model_config_id",
+        "model_configuration_id",
+        "default_model_config_id",
         "worker_executable",
         "orchestrator_compaction_threshold",
     ];
     RETIRED.iter().any(|key| extra.contains_key(*key))
+}
+
+fn contains_unsupported_session_update(
+    extra: &std::collections::BTreeMap<String, serde_json::Value>,
+) -> bool {
+    const UNSUPPORTED: &[&str] = &[
+        "behavior",
+        "api_key_env",
+        "extra_headers",
+        "ssh_host",
+        "ssh_port",
+        "ssh_identity_file",
+        "sandbox",
+        "cwd",
+        "project_id",
+    ];
+    contains_retired_session_field(extra) || UNSUPPORTED.iter().any(|key| extra.contains_key(*key))
 }
 
 // ---------------------------------------------------------------------------
@@ -545,7 +569,7 @@ impl NacMcpService {
         &self,
         Parameters(params): Parameters<UpdateSessionParams>,
     ) -> Result<CallToolResult, ErrorData> {
-        if contains_retired_session_field(&params.extra) {
+        if contains_unsupported_session_update(&params.extra) {
             return Ok(CallToolResult::error(vec![Content::text(
                 "Unsupported session fields",
             )]));

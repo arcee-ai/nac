@@ -111,6 +111,30 @@ async fn mcp_rejects_retired_creation_and_thread_steering_inputs() {
         .await,
         "Unsupported session fields",
     );
+    for key in [
+        "behavior",
+        "api_key_env",
+        "extra_headers",
+        "ssh_host",
+        "sandbox",
+        "default_model_config_id",
+    ] {
+        let mut arguments = json!({"session_id":"missing"});
+        arguments[key] = json!("unsupported");
+        rejected(
+            call(&manager, "update_session", arguments).await,
+            "Unsupported session fields",
+        );
+    }
+    rejected(
+        call(
+            &manager,
+            "create_session",
+            json!({"default_model_config_id":"retired"}),
+        )
+        .await,
+        "Unsupported session fields",
+    );
     let extension = call(
         &manager,
         "update_session",
