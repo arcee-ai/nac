@@ -202,7 +202,7 @@ def environment(root):
     nac = home / 'fixture nac'
     nac.mkdir(parents=True, mode=0o700)
     return dict(HOME=str(home), NAC_HOME=str(nac), PATH='/usr/bin:/bin:/usr/sbin:/sbin',
-                LANG='en_US.UTF-8', NAC_TELEMETRY='disabled', NAC_ORCHESTRATION='0', BROWSER='none',
+                LANG='en_US.UTF-8', NAC_TELEMETRY='disabled', BROWSER='none',
                 GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL='/dev/null',
                 MODELS_DEV_URL='http://127.0.0.1:1/models-dev', OPENAI_API_KEY='instance-fixture-dummy-only')
 
