@@ -256,18 +256,22 @@ fn compaction_enum_json_values_are_exact_and_round_trip() {
 
 #[test]
 fn compaction_agent_event_json_is_exact_and_nested_under_agent() {
+    assert!(serde_json::from_str::<AgentEvent>(
+        r#"{"type":"orchestrator_compaction_started","compaction_id":"00000000-0000-4000-8000-000000000000","reason":"auto"}"#
+    )
+    .is_err());
     let expected = [
         format!(
-            r#"{{"type":"orchestrator_compaction_started","compaction_id":"{TEST_COMPACTION_ID}","reason":"auto"}}"#
+            r#"{{"type":"compaction_started","compaction_id":"{TEST_COMPACTION_ID}","reason":"auto"}}"#
         ),
         format!(
-            r#"{{"type":"orchestrator_compaction_completed","compaction_id":"{TEST_COMPACTION_ID}","reason":"manual"}}"#
+            r#"{{"type":"compaction_completed","compaction_id":"{TEST_COMPACTION_ID}","reason":"manual"}}"#
         ),
         format!(
-            r#"{{"type":"orchestrator_compaction_skipped","compaction_id":"{TEST_COMPACTION_ID}","reason":"auto","cause":"no_eligible_boundary"}}"#
+            r#"{{"type":"compaction_skipped","compaction_id":"{TEST_COMPACTION_ID}","reason":"auto","cause":"no_eligible_boundary"}}"#
         ),
         format!(
-            r#"{{"type":"orchestrator_compaction_failed","compaction_id":"{TEST_COMPACTION_ID}","reason":"manual","failure":"checkpoint_persistence_failed"}}"#
+            r#"{{"type":"compaction_failed","compaction_id":"{TEST_COMPACTION_ID}","reason":"manual","failure":"checkpoint_persistence_failed"}}"#
         ),
     ];
 
@@ -286,7 +290,7 @@ fn compaction_agent_event_json_is_exact_and_nested_under_agent() {
     assert_eq!(
         serde_json::to_string(&SessionEvent::Agent { event }).unwrap(),
         format!(
-            r#"{{"type":"agent","event":{{"type":"orchestrator_compaction_started","compaction_id":"{TEST_COMPACTION_ID}","reason":"manual"}}}}"#
+            r#"{{"type":"agent","event":{{"type":"compaction_started","compaction_id":"{TEST_COMPACTION_ID}","reason":"manual"}}}}"#
         )
     );
 }
@@ -299,7 +303,7 @@ fn compaction_event_sanitization_preserves_only_typed_safe_fields() {
 
     let encoded = format!(
         r#"{{
-            "type":"orchestrator_compaction_failed",
+            "type":"compaction_failed",
             "compaction_id":"{TEST_COMPACTION_ID}",
             "reason":"manual",
             "failure":"summary_request_failed",
@@ -321,7 +325,7 @@ fn compaction_event_sanitization_preserves_only_typed_safe_fields() {
     assert_eq!(
         serialized,
         format!(
-            r#"{{"type":"orchestrator_compaction_failed","compaction_id":"{TEST_COMPACTION_ID}","reason":"manual","failure":"summary_request_failed"}}"#
+            r#"{{"type":"compaction_failed","compaction_id":"{TEST_COMPACTION_ID}","reason":"manual","failure":"summary_request_failed"}}"#
         )
     );
     assert!(!serialized.contains("CANARY"));
