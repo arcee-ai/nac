@@ -881,6 +881,77 @@ async fn models_endpoint_serves_the_catalog_listing() {
 }
 
 #[tokio::test]
+async fn stored_openai_key_updates_both_catalog_routes_without_exposing_its_value() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("models_endpoint_stored_key");
+    let nac_home = root.join("nac-home");
+    std::fs::create_dir_all(&nac_home).unwrap();
+    let _env = ScopedModelEnv::isolated(&nac_home, None);
+    let app = router(test_manager(&root));
+    let key = "fixture-only-api-key-3190";
+    let route = "/credentials/OPENAI_API_KEY";
+    assert_eq!(
+        put_json(app.clone(), route, serde_json::json!({ "value": key }))
+            .await
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    let credentials = response_json(get_response(app.clone(), "/credentials", None).await).await;
+    assert_eq!(
+        credentials["credentials"],
+        serde_json::json!([{ "name": "OPENAI_API_KEY", "last_four": "3190" }])
+    );
+    assert!(!credentials.to_string().contains(key));
+
+    let catalog = response_json(get_response(app.clone(), "/models", None).await).await;
+    let providers = catalog["providers"].as_array().unwrap();
+    for id in ["openai-responses", "openai-chat-completions"] {
+        let provider = providers
+            .iter()
+            .find(|provider| provider["id"] == id)
+            .unwrap();
+        assert_eq!(provider["auth_status"], "ready");
+        assert_eq!(provider["connection"]["api_key_env"], "OPENAI_API_KEY");
+        assert!(provider["auth_hint"].is_null());
+    }
+    assert!(!catalog.to_string().contains(key));
+
+    unsafe { std::env::set_var("OPENAI_API_KEY", "fixture-environment-key") };
+    assert_eq!(
+        nac_core::model::resolve_backend_api_key(
+            BackendKind::OpenAiResponses,
+            Some("OPENAI_API_KEY")
+        )
+        .unwrap(),
+        "fixture-environment-key"
+    );
+    unsafe { std::env::remove_var("OPENAI_API_KEY") };
+    let deleted = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(route)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(deleted.status(), StatusCode::NO_CONTENT);
+    let catalog = response_json(get_response(app, "/models", None).await).await;
+    let openai = catalog["providers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|provider| provider["id"] == "openai-responses")
+        .unwrap();
+    assert_eq!(openai["auth_status"], "no_credential");
+    assert_eq!(openai["auth_hint"], "OPENAI_API_KEY");
+    assert!(openai["connection"].is_null());
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
 async fn models_endpoint_computes_auth_status_from_the_environment() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let root = temp_root("models_endpoint_status");

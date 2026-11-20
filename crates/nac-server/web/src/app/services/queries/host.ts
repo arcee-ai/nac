@@ -6,7 +6,10 @@ import {
   runAuthentication,
 } from "@/app/features/managed/controller/authenticationWorkflow";
 
-import { refreshProviderAuthentication } from "@/app/services/queries/configuration";
+import {
+  refreshProviderAuthentication,
+  refreshUnifiedProviderCatalog,
+} from "@/app/services/queries/configuration";
 import { queryKeys } from "@/app/services/queries/keys";
 import type { ManagedAuthProvider, StoredCredentialList, StoreInfo } from "@/app/types/api";
 
@@ -42,9 +45,15 @@ export function useStoreCredential() {
 
   const client = useQueryClient();
   return useMutation({
+    gcTime: 0,
     mutationFn: ({ name, value }: { name: string; value: string }) =>
       api.storeCredential(name, value),
-    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.credentials }),
+    onSuccess: async () => {
+      await Promise.all([
+        client.invalidateQueries({ queryKey: queryKeys.credentials }),
+        refreshUnifiedProviderCatalog(client),
+      ]);
+    },
   });
 }
 
@@ -68,7 +77,12 @@ export function useDeleteCredential() {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (name: string) => api.deleteCredential(name),
-    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.credentials }),
+    onSuccess: async () => {
+      await Promise.all([
+        client.invalidateQueries({ queryKey: queryKeys.credentials }),
+        refreshUnifiedProviderCatalog(client),
+      ]);
+    },
   });
 }
 

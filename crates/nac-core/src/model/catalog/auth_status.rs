@@ -1,9 +1,8 @@
 //! Per-request auth-status computation for `GET /models`.
 //!
 //! The badge is a HINT only — it never changes how auth works. An API-key
-//! provider reads ready when its conventional credential variable is set
-//! in the process environment — the same variable session resolution
-//! auto-selects when no explicit `api_key_env` selector is supplied;
+//! provider reads ready when its conventional selector resolves through the
+//! process environment or the NAC credential store;
 //! managed providers read ready when their stored credential file exists
 //! and parses. Status is computed from the process environment and the
 //! credential files at request time (both change outside the catalog),
@@ -38,9 +37,9 @@ fn managed_credential_present(provider: BackendKind) -> bool {
 
 /// Compute one provider's `(auth_status, auth_hint)` pair.
 ///
-/// API-key providers are ready when the provider's conventional env var
-/// (catalog `credential_env_var`) names a set variable — the same variable
-/// session resolution auto-selects. Otherwise returns `no_credential` with
+/// API-key providers are ready when the provider's conventional selector
+/// (catalog `credential_env_var`) resolves using session credential rules.
+/// Otherwise returns `no_credential` with
 /// the conventional var name as the hint (`None` when no conventional name
 /// is known). Managed providers are ready when their stored credential
 /// exists and parses; otherwise `no_credential` with the login command as
@@ -51,7 +50,9 @@ pub(super) fn provider_auth_status(
     invocation_name: &str,
 ) -> (AuthStatus, Option<String>) {
     if backend::api_key_backend(provider) {
-        if credential_env_var.is_some_and(backend::env_var_is_set) {
+        if credential_env_var
+            .is_some_and(|name| backend::api_key_for_backend(provider, Some(name)).is_ok())
+        {
             return (AuthStatus::Ready, None);
         }
         return (
