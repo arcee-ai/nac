@@ -10815,7 +10815,7 @@ function bm({ projects: e, sessions: t, compact: n = !1 }) {
 								checking: je.isFetching || je.isPending,
 								checkFailed: je.isError,
 								onChange: (e) => {
-									e && Oe && ne(null), ie(e ? {
+									e && m(y.project_id), e && Oe && ne(null), ie(e ? {
 										projectId: x,
 										options: e
 									} : null), Ne.clearError();
