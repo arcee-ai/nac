@@ -9,16 +9,38 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
+from types import SimpleNamespace
 
 from attention_feed_build import (COMMON_SOURCES, SWIFT_PROGRAMS, swift_commands,
                                   source_binding, producer_receipts, build_environment, completion_envelope)
-from attention_feed_contract import serializer_envelope, completion_frame
+from attention_feed_contract import Engine, serializer_envelope, completion_frame
 
 OWNER = Path(__file__).resolve().parent
 ROOT = OWNER.parent.parent
 
 
 class ProgramContracts(unittest.TestCase):
+    def test_attention_fixture_selects_model_on_each_session(self):
+        engine = Engine.__new__(Engine)
+        engine.incarnation, engine.base = 'instance', 'http://fixture'
+        engine.workspace = Path('/private/fixture-workspace')
+        provider = SimpleNamespace(base='http://127.0.0.1:9999/v1')
+        with patch('attention_feed_contract.request', side_effect=[
+            {'project_id': 'project'}, {'metadata': {'session_id': 'first'}},
+            {'metadata': {'session_id': 'second'}},
+        ]) as send:
+            self.assertEqual(engine.session(provider), 'first')
+            self.assertEqual(engine.new_session(provider, engine.project_id), 'second')
+        calls = send.call_args_list
+        self.assertEqual([call.args[1] for call in calls], ['/projects', '/sessions', '/sessions'])
+        self.assertNotIn('default_model_config_id', calls[0].args[2])
+        for call in calls[1:]:
+            self.assertEqual(call.args[2]['project_id'], 'project')
+            self.assertEqual(call.args[2]['base_url'], provider.base)
+            self.assertEqual(call.args[2]['api_key_env'], 'OPENAI_API_KEY')
+            self.assertNotIn('light_model', call.args[2])
+
     def test_cli_imports_do_not_create_untracked_cache_before_source_guard(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
