@@ -26,8 +26,7 @@ pub struct ToolRuntime {
     /// global operation boundary without a model-visible snapshot.
     pub allowed_tools: Option<Arc<std::collections::HashSet<String>>>,
     /// Present only for persistent direct primaries after their session
-    /// service attaches. Workers and the existing orchestrator retain their
-    /// established allow-through behavior.
+    /// service attaches. Headless callers retain their configured policy.
     pub permission_broker: Option<Arc<crate::permissions::PermissionBroker>>,
     /// Automatic reviewer installed on the broker when it is created. `None`
     /// selects the default Jev reviewer; tests inject fakes here.

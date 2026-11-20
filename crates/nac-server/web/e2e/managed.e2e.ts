@@ -418,7 +418,6 @@ async function installManagedDouble(page: Page, initiallyConnected = false) {
                 ssh_host: null,
                 ssh_port: null,
                 ssh_identity_file: null,
-                default_model_config_id: null,
                 created_at: "2026-08-27T00:00:00Z",
                 updated_at: "2026-08-27T00:00:00Z",
                 pinned: false,

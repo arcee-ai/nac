@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stdlib installer/orchestration controls; optional real pinned-tool leak proof."""
+"""Stdlib installer/coordination controls; optional real pinned-tool leak proof."""
 
 import contextlib
 import importlib.util

@@ -61,9 +61,7 @@ test("injected UI capability opens shared owners once without submitting a sessi
     const route = new URL(event.url()).pathname;
     // Both POST routes resolve model catalogs; neither saves configuration or
     // admits a session. Keep every other non-GET operation in the mutation guard.
-    const catalogQuery =
-      event.method() === "POST" &&
-      (route === "/providers/models" || /^\/model-configs\/[^/]+\/models$/.test(route));
+    const catalogQuery = event.method() === "POST" && route === "/providers/models";
     if (event.method() !== "GET" && !catalogQuery) {
       mutations.push(`${event.method()} ${route}`);
     }

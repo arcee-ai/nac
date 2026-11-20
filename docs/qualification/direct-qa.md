@@ -26,7 +26,7 @@ reports, source identity and model-visible tools:
   no additional sessions or descendant children.
 - Setup's literal assignment contracts survive in RUN.json and each worker's
   retained input, including the same committed project revision, root and paths.
-- Child tool sets exclude subagent nesting, goal creation and orchestrator control.
+- Child tool sets exclude subagent nesting and goal creation.
 - A seeded finding remains a worker outcome and is counted separately from a pass.
 - Cancelling the exact owned second child retains its cancelled terminal state;
   aggregate receives actual structured outcomes and writes the missing report as

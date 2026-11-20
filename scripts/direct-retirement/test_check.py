@@ -38,6 +38,7 @@ class RetirementGuardTests(unittest.TestCase):
     def test_real_v53_fixture_is_an_explicit_hash_bound_exception(self):
         manifest = json.loads((check.ROOT / check.DIRECTORY / 'rules.json').read_text())
         path = 'crates/nac-core/src/store/schema/fixtures/v53-fresh.sql'
+        manifest['exceptions'] = [entry for entry in manifest['exceptions'] if entry['path'] == path]
         self.assertEqual(check.audit({path: (check.ROOT / path).read_bytes()}, manifest)[0], [])
 
     def test_exact_line_exceptions_do_not_allow_new_or_stale_lines(self):

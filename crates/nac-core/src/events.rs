@@ -562,7 +562,7 @@ pub enum SessionEvent {
     SnapshotSaved {
         session_id: String,
     },
-    /// Live-only signal that the orchestrator transcript log gained rows
+    /// Live-only signal that the session transcript log gained rows
     /// (DB-direct transcript workset, step 3). `transcript_len` is the raw
     /// merged transcript length after the append. Emitted at each transcript
     /// commit point so subscribers refetch the store-backed transcript

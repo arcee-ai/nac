@@ -274,7 +274,7 @@ and completion mutations.
 
 The public NAC implementation deliberately stops at this host-side contract.
 ALL-44 must supply controller-side assertion minting, operation persistence,
-lost-response retry, and rollout orchestration. ALL-45 may add mutual TLS to the
+lost-response retry, and rollout coordination. ALL-45 may add mutual TLS to the
 private Service without weakening compact-JWS validation. ALL-42 must preserve
 the same forward-only lifecycle and safe-stop evidence when wiring deployment
 rollout behavior.

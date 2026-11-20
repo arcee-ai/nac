@@ -1,4 +1,4 @@
-//! Per-session worktree orchestration for sandboxed sessions.
+//! Per-session worktree coordination for sandboxed sessions.
 //!
 //! A sandboxed session whose working directory is a git repository runs in a
 //! throwaway worktree forked from HEAD rather than the user's live checkout.

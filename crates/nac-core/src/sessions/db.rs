@@ -150,7 +150,7 @@ coordinated_command! {
 /// never-fold): UPDATEs only run-state and row-context columns.
 /// `messages_json` is written once at session creation
 /// (`insert_or_replace_session`) and never rewritten at run end — the live
-/// transcript is the orchestrator transcript log (store/transcript.rs), so
+/// transcript is the session transcript log (store/transcript.rs), so
 /// the blob stays the system head ++ legacy prefix forever. Model
 /// configuration columns stay CAS-only (`update_raw_session_config`).
 ///
@@ -649,9 +649,8 @@ coordinated_command! {
 ///
 /// Traditional children resolve through their durable root ownership record,
 /// including any future deeper descendant whose record preserves that root.
-/// Managed orchestrators deliberately remain outside this lookup: their
-/// relationship is a separate topology and cannot inherit a direct parent's
-/// approval authority accidentally.
+/// Independent tasks remain outside this lookup and cannot inherit another
+/// session's approval authority accidentally.
 pub(crate) fn load_effective_permission_approval_state(
     path: &Path,
     requesting_session_id: &str,
@@ -694,7 +693,7 @@ coordinated_command! {
 /// Loads the messages a person typed to the session tree that owns the
 /// answer policy for a requester. Traditional children
 /// resolve to their durable root. Only input a person typed on a
-/// human-facing route is recorded, so model, child, orchestrator, MCP and
+/// human-facing route is recorded, so model, child, MCP and
 /// NAC-generated text never stands in for user intent. `Err` is only a
 /// store failure.
 pub(crate) fn load_permission_review_intent(
@@ -1441,7 +1440,7 @@ impl SessionSummaryRow {
             }
         };
         // Never-fold (step 4): the blob is write-once (system head ++ legacy
-        // prefix) and the recent transcript lives in the orchestrator
+        // prefix) and the recent transcript lives in the session
         // transcript log, so these two are materialized columns rather than a
         // count over the blob: the log writer adds its delta on every append,
         // a truncation rebuilds them, and the migration backfills blob ++ log.
@@ -1499,7 +1498,7 @@ pub(crate) fn insert_or_replace_session(
     // NEVER-FOLD (DB-direct transcript workset, step 4): this is the only
     // writer of messages_json — session creation and the legacy full upsert
     // below. Run end never rewrites the blob (`save_session_run_state`):
-    // the live transcript is the orchestrator transcript log
+    // the live transcript is the session transcript log
     // (store/transcript.rs) and the blob is the write-once system head ++
     // legacy prefix. DOWNGRADE CAVEAT (user-accepted): builds older than
     // the transcript-log workset read only messages_json, so they show this

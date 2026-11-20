@@ -227,11 +227,11 @@ pub struct ModelClient {
     api_key_env: Option<String>,
     extra_headers: std::collections::BTreeMap<String, String>,
     arcee_credential_source: Option<ArceeCredentialSource>,
-    /// Anthropic prompt-cache TTL. `None` = default 5-minute TTL (workers);
-    /// `Some("1h")` = 1-hour TTL with beta header (orchestrator).
+    /// Anthropic prompt-cache TTL. `None` uses the default 5-minute TTL;
+    /// `Some("1h")` uses a 1-hour TTL with the beta header.
     cache_ttl: Option<&'static str>,
     /// Stable OpenAI cache-routing identity. Session UUIDs are reused by the
-    /// orchestrator and its workers so related prefixes reach the same cache.
+    /// related requests so their prefixes reach the same cache.
     prompt_cache_key: Option<String>,
     /// Catalog metadata resolved with the effective settings; drives
     /// per-response cost, effort wire translation, and api-axis dispatch.
@@ -462,7 +462,7 @@ impl ModelClient {
     }
 
     /// Attach per-response cost computed from the resolved catalog metadata
-    /// (S3). Anthropic 1-hour-TTL cache writes (orchestrator clients) bill at
+    /// (S3). Anthropic 1-hour-TTL cache writes bill at
     /// the metadata's 1h rate — 2x input when the catalog has no explicit
     /// value; everything else bills at the standard rates. Unknown pricing
     /// (all-zero rates) yields zero cost, never an error.

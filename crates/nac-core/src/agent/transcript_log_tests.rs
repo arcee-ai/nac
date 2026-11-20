@@ -1792,7 +1792,7 @@ async fn successful_turn_stamps_assistant_origin_on_transcript_and_log() {
             "status": "completed",
             "output": [
                 {"type": "reasoning", "id": "rs_1",
-                 "summary": [{"type": "summary_text", "text": "orchestrator thinking"}]},
+                 "summary": [{"type": "summary_text", "text": "session thinking"}]},
                 {"type": "message", "content": [{"type": "output_text", "text": "stamped answer"}]}
             ],
             "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
@@ -1822,7 +1822,7 @@ async fn successful_turn_stamps_assistant_origin_on_transcript_and_log() {
         Some((crate::model::BackendKind::OpenAiResponses, "gpt-5.5")),
         "the push site stamps the client identity"
     );
-    assert_eq!(reasoning_text.as_deref(), Some("orchestrator thinking"));
+    assert_eq!(reasoning_text.as_deref(), Some("session thinking"));
     assert_eq!(
         reasoning_field, &None,
         "responses-api reasoning is details-based; no completions field stamp"

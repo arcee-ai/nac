@@ -130,7 +130,7 @@ impl std::error::Error for InternalInboxItemError {}
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SessionInboxRecord {
-    /// Set only for an owned child/managed-orchestrator completion. Keep the
+    /// Set only for an owned child completion. Keep the
     /// established serialized durable record shape unchanged.
     #[serde(skip)]
     #[cfg_attr(feature = "openapi", schema(ignore))]

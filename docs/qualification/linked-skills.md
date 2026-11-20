@@ -70,7 +70,7 @@ NAC's native `read`, including every listed resource. These results are
 | feature-shaping | `contributors/allisoneer/skills/feature-shaping` | codex | Product-discovery workflow unexercised |
 | goal-prompt | `contributors/allisoneer/skills/goal-prompt` | codex | No NAC goal adapter qualified here; ALL-422 remains separate |
 | linear-planning | `contributors/allisoneer/skills/linear-planning` | codex, claude-code | Relative planning references readable; tracker operations unexercised |
-| parallel-work | `contributors/allisoneer/skills/parallel-work` | codex | Native peer coordination and task orchestration unqualified |
+| parallel-work | `contributors/allisoneer/skills/parallel-work` | codex | Native peer and task coordination unqualified |
 | pr-ready | `contributors/allisoneer/skills/pr-ready` | codex, claude-code, cursor | Relative review references readable; NAC PR/review workflow unexercised |
 | pr-review | `contributors/allisoneer/skills/pr-review` | codex | Relative feedback/re-review references readable; reviewer workflow unexercised |
 | slack | `contributors/allisoneer/skills/slack` | codex, claude-code | Connector discovery/delivery unexercised |
