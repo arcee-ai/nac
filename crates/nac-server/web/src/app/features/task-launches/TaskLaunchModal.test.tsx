@@ -17,7 +17,10 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function modal(validateModel?: (signal: AbortSignal) => Promise<void>) {
+function modal(
+  validateModel?: (signal: AbortSignal) => Promise<void>,
+  serviceTier?: "standard" | "fast" | "ultrafast" | null,
+) {
   const requests: TaskLaunchRequest[] = [];
   const fetch = vi.fn<typeof globalThis.fetch>(async (_url, init) => {
     if (init?.method === "POST") {
@@ -62,6 +65,7 @@ function modal(validateModel?: (signal: AbortSignal) => Promise<void>) {
               allow_insecure_http: false,
               api_key_env: "OPENAI_API_KEY",
               reasoning_effort: null,
+              ...(serviceTier !== undefined ? { service_tier: serviceTier } : {}),
               extra_headers: null,
             }}
             defaultRef="dev"
@@ -163,4 +167,22 @@ it("retries a frozen task without changing its retained request after source inv
   await waitFor(() => expect(requests).toHaveLength(2));
   expect(requests[1]).toEqual(first);
   expect(validate).toHaveBeenCalledOnce();
+});
+
+it.each([
+  { label: "omitted", tier: undefined },
+  { label: "provider default", tier: null },
+  { label: "Fast", tier: "fast" as const },
+])("retains $label speed on task creation and exact retry", async ({ tier }) => {
+  const requests = modal(undefined, tier);
+  fireEvent.click(screen.getByRole("button", { name: "Start isolated task" }));
+  await screen.findByRole("alert");
+  expect(requests).toHaveLength(1);
+  const first = structuredClone(requests[0]);
+  expect(first.model_selection).toBeTruthy();
+  if (tier === undefined) expect(first.model_selection).not.toHaveProperty("service_tier");
+  else expect(first.model_selection).toHaveProperty("service_tier", tier);
+  fireEvent.click(screen.getByRole("button", { name: "Retry same request" }));
+  await waitFor(() => expect(requests).toHaveLength(2));
+  expect(requests[1]).toEqual(first);
 });

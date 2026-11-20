@@ -7,6 +7,7 @@ mod completion_migration_tests;
 mod completion_tables;
 mod connection;
 mod delegation_receipts;
+mod direct_constraints;
 #[cfg(test)]
 mod fixture_receipts;
 #[cfg(test)]
@@ -100,6 +101,8 @@ use connection::{connect, connect_existing, connect_probe_read_only, connect_rea
 pub(crate) use connection::{track_connection_opens, tracked_connection_opens};
 use wal_preflight::read_schema_version_header;
 
+// 57 tightens remaining behavior and completion-source constraints.
+// 56 neutralizes session event and checkpoint storage names.
 // 55 removes retired worker storage and saved model presets.
 // 54 retires legacy ownership trees under exclusive, cleanup-safe authority.
 // 53 retains explicit session speed selections.
@@ -148,7 +151,7 @@ use wal_preflight::read_schema_version_header;
 // early whenever the stored version already equals this one. (12 carries the
 // same schema as 11, which added episodes.status; 10 added the
 // ssh_configurations table; 9 the per-session ssh port and key columns.)
-const STORE_SCHEMA_VERSION: i64 = 56;
+const STORE_SCHEMA_VERSION: i64 = 57;
 const HTTP_OPT_IN_COLUMN: &str = "INTEGER NOT NULL DEFAULT 0 CHECK (allow_insecure_http IN (0, 1))";
 pub const MINIMUM_MIGRATABLE_SCHEMA_VERSION: i64 = 0;
 
@@ -499,7 +502,7 @@ fn open_connection_with_hooks(
         return Ok(conn);
     }
     // Preserve the calendar format fence before upgrading established stores.
-    if matches!(schema_version, 50..=55) {
+    if matches!(schema_version, 50..=56) {
         heartbeat_calendar::verify_format(&transaction)?;
     }
     // A genuinely empty database has no prior session or resource authority
@@ -512,7 +515,7 @@ fn open_connection_with_hooks(
     )?;
     if schema_version == 0 && !established_store {
         // New stores do not pass through historical worker or preset schemas.
-        // Keep this catalog in parity with the result of the v53 upgrade.
+        // Keep this catalog in parity with the result of the retirement upgrade.
         transaction.execute_batch(include_str!("schema/current.sql"))?;
         super::legacy_task_model::create_schema(&transaction)?;
         transaction.execute_batch(
@@ -537,6 +540,15 @@ fn open_connection_with_hooks(
         transaction.commit()?;
         return Ok(conn);
     }
+    if schema_version == 56 {
+        let session_ids = retirement::all_session_ids(&transaction)?;
+        let _leases = retirement::acquire_retirement_leases(path, &session_ids)?;
+        direct_constraints::tighten(&transaction)?;
+        before_commit()?;
+        transaction.pragma_update(None, "user_version", STORE_SCHEMA_VERSION)?;
+        transaction.commit()?;
+        return Ok(conn);
+    }
     if schema_version == 55 {
         let session_ids = retirement::all_session_ids(&transaction)?;
         let _leases = retirement::acquire_retirement_leases(path, &session_ids)?;
@@ -547,6 +559,7 @@ fn open_connection_with_hooks(
             2,
         )?;
         neutral_session::rename_storage(&transaction)?;
+        direct_constraints::tighten(&transaction)?;
         before_commit()?;
         transaction.pragma_update(None, "user_version", STORE_SCHEMA_VERSION)?;
         transaction.commit()?;
@@ -595,7 +608,7 @@ fn open_connection_with_hooks(
             migrate_thread_events(&transaction)?;
             transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
-        2..=55 => {}
+        2..=56 => {}
         unsupported => {
             if unsupported > STORE_SCHEMA_VERSION {
                 return Err(StoreFutureSchemaError::new(unsupported).into());
@@ -879,8 +892,8 @@ fn open_connection_with_hooks(
         2,
     )?;
     neutral_session::rename_storage(&transaction)?;
-
     ensure_column(&transaction, "sessions", "service_tier", "TEXT")?;
+    direct_constraints::tighten(&transaction)?;
     before_commit()?;
     transaction.pragma_update(None, "user_version", STORE_SCHEMA_VERSION)?;
     transaction.commit()?;

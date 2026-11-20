@@ -143,18 +143,29 @@ class StartupAPITests(unittest.TestCase):
             with self.subTest(changed=changed), self.assertRaises(RuntimeError):
                 require_readiness({**row, **changed}, identity)
 
-    def test_model_fixture_seeds_only_a_preset_through_normal_rust_settings_api(self):
-        with patch('ci_startup_api.request', side_effect=[{'projects': []}, [], {'config_id': 'owned'},
-                                                        {'projects': []}, []]) as call:
+    def test_model_fixture_seeds_only_a_provider_connection_through_rust_settings_api(self):
+        with patch('ci_startup_api.request', side_effect=[{'projects': []}, [], {'connection_id': 'owned'},
+                    {'providers': [{'id': 'openai-responses', 'auth_status': 'ready',
+                        'connection': {'base_url': 'http://127.0.0.1:4321', 'api_key_env': 'fixture-selector'}}]},
+                    {'projects': []}, []]) as call:
             proof = seed_model('http://127.0.0.1:1234', 'http://127.0.0.1:4321')
         self.assertFalse(proof['project_seeded'])
         writes = [entry.args for entry in call.call_args_list if len(entry.args) == 3]
         self.assertEqual(len(writes), 1)
-        self.assertEqual(writes[0][1], '/model-configs')
+        self.assertEqual(writes[0][1], '/provider-connections')
         self.assertEqual(writes[0][2]['api_key'], 'preview-dummy-only')
-        self.assertEqual(writes[0][2]['model'], 'gpt-5.6-sol')
+        self.assertEqual(proof['api_key_env'], 'fixture-selector')
         with patch('ci_startup_api.request', return_value={'projects': [{'project_id': 'foreign'}]}), self.assertRaises(RuntimeError):
             seed_model('http://127.0.0.1:1234', 'http://127.0.0.1:4321')
+
+    def test_fixture_provider_rejects_wrong_route_or_selector(self):
+        for connection in [{'base_url': 'http://127.0.0.1:9999', 'api_key_env': 'fixture'},
+                           {'base_url': 'http://127.0.0.1:4321', 'api_key_env': ''},
+                           {'base_url': 'http://127.0.0.1:4321', 'api_key_env': 'fixture', 'api_key': 'leak'}]:
+            responses = [{'projects': []}, [], {'connection_id': 'owned'},
+                {'providers': [{'id': 'openai-responses', 'auth_status': 'ready', 'connection': connection}]}]
+            with self.subTest(connection=connection), patch('ci_startup_api.request', side_effect=responses), self.assertRaises(RuntimeError):
+                seed_model('http://127.0.0.1:1234', 'http://127.0.0.1:4321')
 
     def test_listener_requires_kernel_generation_and_one_actual_owned_loopback_address(self):
         node = {'pid': 123, 'parent': 50, 'uid': 501, 'start_seconds': 1234,

@@ -5,6 +5,8 @@ mod dependency_tests;
 mod http_policy_tests;
 #[path = "schema/speed_task_replay_tests.rs"]
 mod speed_task_replay_tests;
+#[path = "schema/speed_upgrade_tests.rs"]
+mod speed_upgrade_tests;
 
 pub(super) fn temp_store_path(label: &str) -> PathBuf {
     let unique = std::time::SystemTime::now()
@@ -1793,7 +1795,7 @@ fn speed_v53_upgrade_preserves_session_tier_receipt_and_provider_credential() {
     let path = temp_store_path("speed_v53_upgrade");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     let conn = Connection::open(&path).unwrap();
-    conn.execute_batch(include_str!("schema/fixtures/speed_v53.sql"))
+    conn.execute_batch(include_str!("schema/fixtures/v53-speed.sql"))
         .unwrap();
     drop(conn);
     initialize(&path).unwrap();
@@ -1851,7 +1853,7 @@ fn speed_upgraded_v54_does_not_recopy_changed_provider_connection() {
     let path = temp_store_path("speed_upgraded_v54");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     let conn = Connection::open(&path).unwrap();
-    conn.execute_batch(include_str!("schema/fixtures/speed_v54_upgraded.sql"))
+    conn.execute_batch(include_str!("schema/fixtures/v54-speed-upgraded.sql"))
         .unwrap();
     drop(conn);
     initialize(&path).unwrap();
@@ -1900,7 +1902,7 @@ fn speed_upgraded_v55_renames_session_storage_without_losing_speed() {
     let path = temp_store_path("speed_upgraded_v55");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     let conn = Connection::open(&path).unwrap();
-    conn.execute_batch(include_str!("schema/fixtures/speed_v55_upgraded.sql"))
+    conn.execute_batch(include_str!("schema/fixtures/v55-speed-upgraded.sql"))
         .unwrap();
     drop(conn);
     initialize(&path).unwrap();

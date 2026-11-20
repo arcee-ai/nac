@@ -86,7 +86,14 @@ async function productMarkup(expected, { readOnly = false } = {}) {
       attentionStore: { clearAttention: noop },
       sshConnectionStore: { useSshConnectionStatus: () => null, sshTargetFromSummary: () => null },
       runtimeStore: new Proxy(
-        { useActivity: () => "", useCancelArmed: () => false },
+        {
+          useActivity: () => "",
+          useCancelArmed: () => false,
+          runtimeStore: {
+            useStore: (select) => select({ sessionId: null, streamRunId: null, streamIdentityEpoch: 0 }),
+          },
+          captureRuntimeActivation: () => () => false,
+        },
         { get: (o, k) => o[k] || emptyHook },
       ),
     },
@@ -185,6 +192,8 @@ async function productMarkup(expected, { readOnly = false } = {}) {
           Markdown: ({ children }) =>
             React.createElement("div", null, React.createElement(ReactMarkdown, null, children)),
         };
+      if (id.endsWith("/foldLayout"))
+        return { layoutModelTurn: () => null, keepWorkFoldKeys: (layout) => layout };
       if (id.endsWith("/segments"))
         return {
           partitionModelTurn: (turn) => turn.blocks.map((block) => ({ kind: "text", block })),

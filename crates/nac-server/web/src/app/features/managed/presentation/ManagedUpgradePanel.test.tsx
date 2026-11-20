@@ -71,7 +71,6 @@ const fakes = {
   start: vi.fn(),
   cancelExactRun: vi.fn(),
   cancelChild: vi.fn(),
-  cancelOrchestrator: vi.fn(),
   terminateTerminal: vi.fn(),
   cancelClone: vi.fn(),
 };
@@ -105,7 +104,6 @@ beforeEach(() => {
   fakes.start.mockReset().mockResolvedValue(operation("preparing"));
   fakes.cancelExactRun.mockReset().mockResolvedValue(undefined);
   fakes.cancelChild.mockReset().mockResolvedValue({ status: "cancelled" });
-  fakes.cancelOrchestrator.mockReset().mockResolvedValue({ status: "cancelled" });
   fakes.terminateTerminal.mockReset().mockResolvedValue(undefined);
   fakes.cancelClone.mockReset().mockResolvedValue({ status: "cancelled" });
   vi.stubGlobal("crypto", { randomUUID: () => "018f47a5-34a7-7c91-bf7e-8f1042757999" });

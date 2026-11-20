@@ -10,6 +10,7 @@ export interface TranscriptModel {
     baseTurns: TranscriptTurn[];
     running: boolean;
     optimisticPrompt: string | null;
+    optimisticPromptToken: number | null;
     /** The prompt the active run stored, while the session is running. */
     submitted: SubmittedUserMessageSnapshot | null | undefined;
     pendingText: string;

@@ -96,6 +96,7 @@ async fn closed_fixture_allows_session_list_bootstrap_but_refuses_effects_before
         (Method::PUT, "/sessions"),
         (Method::PATCH, "/sessions"),
         (Method::DELETE, "/sessions"),
+        (Method::GET, "/model-configs"),
         (Method::POST, "/model-configs"),
         (Method::POST, "/auth/codex/login"),
         (Method::GET, "/sessions/id"),

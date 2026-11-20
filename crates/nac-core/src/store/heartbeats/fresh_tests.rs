@@ -999,8 +999,87 @@ fn v54_fresh_receipts_replay_and_resume_without_rewriting_evidence() {
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .unwrap();
-        // Reconstruct the predecessor catalog, then exercise the real v54
-        // upgrade and reopen instead of manually manufacturing provenance.
+        // Restore the exact v55 predecessor constraints and triggers before
+        // reconstructing v54. Version 56 tightened these definitions in place;
+        // merely changing user_version would create an impossible predecessor.
+        let predecessor = rusqlite::Connection::open_in_memory().unwrap();
+        predecessor
+            .execute_batch(include_str!("../schema/fixtures/v55.sql"))
+            .unwrap();
+        // This transitional predecessor has already received the speed column;
+        // retain the full catalog equality check rather than erasing that shape.
+        predecessor
+            .execute_batch("ALTER TABLE sessions ADD COLUMN service_tier TEXT;")
+            .unwrap();
+        conn.execute_batch("PRAGMA writable_schema=ON").unwrap();
+        for table in [
+            "sessions",
+            "session_inbox",
+            "session_completion_bindings",
+            "session_completion_occurrences",
+        ] {
+            let actual: String = conn
+                .query_row(
+                    "SELECT sql FROM sqlite_schema WHERE type='table' AND name=?1",
+                    [table],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            let restored = actual
+                .replace(
+                    "CHECK (behavior = 'direct')",
+                    "CHECK (behavior IN ('orchestrator', 'direct', 'direct-with-orchestrator'))",
+                )
+                .replace(
+                    "CHECK(behavior = 'direct')",
+                    "CHECK(behavior IN ('orchestrator','direct','direct-with-orchestrator'))",
+                )
+                .replace(
+                    "CHECK (completion_source = 'traditional_child')",
+                    "CHECK (completion_source IN ('traditional_child', 'managed_orchestrator'))",
+                );
+            let expected: String = predecessor
+                .query_row(
+                    "SELECT sql FROM sqlite_schema WHERE type='table' AND name=?1",
+                    [table],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_ne!(actual, restored, "missing v56 constraint for {table}");
+            assert_eq!(restored, expected, "predecessor schema differs for {table}");
+            assert_eq!(
+                conn.execute(
+                    "UPDATE sqlite_schema SET sql=?2 WHERE type='table' AND name=?1",
+                    params![table, restored]
+                )
+                .unwrap(),
+                1
+            );
+        }
+        conn.execute_batch("PRAGMA writable_schema=OFF").unwrap();
+        let cookie: i64 = conn
+            .pragma_query_value(None, "schema_version", |row| row.get(0))
+            .unwrap();
+        conn.pragma_update(None, "schema_version", cookie + 1)
+            .unwrap();
+        drop(conn);
+        let conn = open_runtime_connection(&f.path).unwrap();
+        for trigger in [
+            "session_direct_only_insert",
+            "session_direct_only_update",
+            "session_direct_inbox_origin_insert",
+            "session_direct_inbox_origin_update",
+        ] {
+            let sql: String = predecessor
+                .query_row(
+                    "SELECT sql FROM sqlite_schema WHERE type='trigger' AND name=?1",
+                    [trigger],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            conn.execute_batch(&sql).unwrap();
+        }
+        // Exercise the real v54 upgrade instead of manually manufacturing provenance.
         let triggers: Vec<String> = conn.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'task_model_v54_%'").unwrap().query_map([], |row|row.get(0)).unwrap().collect::<rusqlite::Result<_>>().unwrap();
         for trigger in triggers {
             conn.execute_batch(&format!("DROP TRIGGER {trigger}"))
@@ -1274,4 +1353,111 @@ fn current_scheduled_publication_accepts_normalized_defaults_and_zero_threshold(
         .unwrap();
         tx.commit().unwrap();
     }
+}
+
+#[test]
+fn v55_writer_command_preflight_uses_hash_bound_decoder() {
+    let root = std::env::temp_dir().join(format!(
+        "nac-v55-command-preflight-{}",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir_all(&root).unwrap();
+    let path = root.join("store.db");
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    conn.execute_batch(include_str!(
+        "../schema/fixtures/v55-legacy-command-speed.sql"
+    ))
+    .unwrap();
+    drop(conn);
+    initialize(&path).unwrap();
+    let scope = "project:project";
+    let create_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    let edit_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    let conn = open_runtime_connection(&path).unwrap();
+    let evidence: (String, String) = conn.query_row("SELECT c.response_json,p.evidence_sha256 FROM heartbeat_commands c JOIN task_model_v54_provenance p ON p.owner='command' AND p.key1=c.session_id AND p.key2=c.request_id WHERE c.session_id=?1 AND c.request_id=?2", (scope,create_id),|r| Ok((r.get(0)?,r.get(1)?))).unwrap();
+    drop(conn);
+    let created = read_heartbeat_command_receipt(&path, scope, create_id)
+        .unwrap()
+        .unwrap();
+    let edited = read_heartbeat_command_receipt(&path, scope, edit_id)
+        .unwrap()
+        .unwrap();
+    let destination = read_heartbeat_destination_at_version(
+        &path,
+        scope,
+        &created.schedule.schedule_id,
+        created.schedule.version,
+    )
+    .unwrap()
+    .unwrap();
+    let selection = destination.model_selection.as_ref().unwrap();
+    assert_eq!(selection.service_tier.as_deref(), Some("fast"));
+    assert_eq!(selection.compaction_threshold, Some(8192));
+    let action = HeartbeatAction::Create {
+        spec: created.schedule.spec.clone(),
+    };
+    assert_eq!(
+        control_heartbeat(
+            &path,
+            scope,
+            create_id,
+            &action,
+            "retry",
+            &created.schedule.binding,
+            5_000
+        )
+        .unwrap(),
+        created
+    );
+    assert_ne!(
+        edited.schedule.binding.fresh_task,
+        created.schedule.binding.fresh_task
+    );
+    let edit = HeartbeatAction::Edit {
+        schedule_id: created.schedule.schedule_id.clone(),
+        expected_version: created.schedule.version,
+        spec: edited.schedule.spec.clone(),
+    };
+    assert_eq!(
+        control_heartbeat(
+            &path,
+            scope,
+            edit_id,
+            &edit,
+            "retry",
+            &edited.schedule.binding,
+            5_000
+        )
+        .unwrap(),
+        edited
+    );
+    let conn = open_runtime_connection(&path).unwrap();
+    let unchanged: (String, String) = conn.query_row("SELECT c.response_json,p.evidence_sha256 FROM heartbeat_commands c JOIN task_model_v54_provenance p ON p.owner='command' AND p.key1=c.session_id AND p.key2=c.request_id WHERE c.session_id=?1 AND c.request_id=?2", (scope,create_id),|r| Ok((r.get(0)?,r.get(1)?))).unwrap();
+    assert_eq!(unchanged, evidence);
+    conn.execute("UPDATE heartbeat_commands SET response_json=replace(response_json, 'fixture-model', 'changed-model') WHERE session_id=?1 AND request_id=?2", (scope,create_id)).unwrap();
+    drop(conn);
+    // The normal update trigger discards the old marker: strict current
+    // decoding must reject this modified predecessor shape without it.
+    assert!(read_heartbeat_command_receipt(&path, scope, create_id).is_err());
+    // Simulate a stale marker as well: both readers must validate its bound hash.
+    let conn = open_runtime_connection(&path).unwrap();
+    conn.execute("INSERT INTO task_model_v54_provenance(owner,key1,key2,evidence_sha256) VALUES('command',?1,?2,?3)", params![scope, create_id, evidence.1]).unwrap();
+    drop(conn);
+    let error = read_heartbeat_command_receipt(&path, scope, create_id).unwrap_err();
+    assert!(
+        format!("{error:#}").contains("evidence changed"),
+        "{error:#}"
+    );
+    let error = read_heartbeat_destination_at_version(
+        &path,
+        scope,
+        &created.schedule.schedule_id,
+        created.schedule.version,
+    )
+    .unwrap_err();
+    assert!(
+        format!("{error:#}").contains("evidence changed"),
+        "{error:#}"
+    );
+    std::fs::remove_dir_all(root).unwrap();
 }

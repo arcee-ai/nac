@@ -29,7 +29,17 @@ from ci_lifecycle_contract import require_capsule as require_lifecycle_capsule
 from ci_lifecycle_finalization import finalize as finalize_lifecycle, gui_guard as lifecycle_gui_guard
 
 ROOT = Path(__file__).resolve().parents[2]
-RUN_DEADLINE = time.monotonic() + 30 * 60  # Leave ten job minutes for cleanup/upload.
+RUN_STARTED = time.monotonic()
+
+
+def qualification_deadline(started, suite):
+    # The cold release build needs time in addition to four actual startup
+    # journeys. The hosted job limits are ten minutes longer, but checkout and
+    # toolchain setup consume some of that difference before this clock starts.
+    return started + (60 if suite == 'startup' else 30) * 60
+
+
+RUN_DEADLINE = qualification_deadline(RUN_STARTED, None)
 
 
 def command(args, cwd=ROOT):
@@ -263,6 +273,7 @@ def run_preview_smoke(raw, source_root):
 
 
 def main():
+    global RUN_DEADLINE
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--expected-sha', required=True)
     parser.add_argument('--output', required=True, type=Path)
@@ -310,6 +321,7 @@ def main():
             instances = target['suite'] == 'instances'
             terminal = target['suite'] == 'terminal'
             startup = target['suite'] == 'startup'
+            RUN_DEADLINE = qualification_deadline(RUN_STARTED, target['suite'])
             lifecycle = target['suite'] == 'lifecycle'
             paths = target['suite'] == 'paths'
             if paths:

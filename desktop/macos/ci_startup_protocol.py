@@ -12,12 +12,12 @@ from ci_startup_fixture import FUTURE_MESSAGE, PRODUCT, canonical, digest
 from ci_xctest_attachments import bounded_file
 from ci_support import COMPLETE_LOG_LIMIT
 
-REVISION = '7325c48b3c9ec7036e255a6bd92f31c1a98c1607'
-FILES = {'Cargo.lock': '8eaf3c5626b70caa5c613f551b5f98ce4746a21bf438f2df13f21410c58eabfa',
-         'crates/nac-server/Cargo.toml': 'b909a14e90ef379a3335a8fec6b9c0408ff6f1a2be6b56b3b22644d31e1f10c3',
-         'crates/nac-server/tests/desktop_schema_contract.rs': '0eb70e49c7aba12bdb8c8c350246e892e2a5418403ca14a55674f2419a0aab1e'}
+REVISION = '1638a9f36b4978bfe790859d0d42ce3bea96a5cf'
+FILES = {'Cargo.lock': '018d1117cb054541ccc62a72d7c535efb08a281071800e5061e0515ed9595277',
+         'crates/nac-server/Cargo.toml': 'f59a3763521df4303c927b425ed8d0b3a804f4952248b10f4b08192e55f6f1bf',
+         'crates/nac-server/tests/desktop_schema_contract.rs': '869a863cc8d67c9707ac4f43d5cbdb58adcc827ae41f0c597dff3816dbe7439d'}
 SCHEMA_PATH = 'crates/nac-core/src/store/schema.rs'
-SCHEMA_SHA256 = 'f737575607380e154ac5b8be7f9116af73bb56e3874a886050f6175a94ba6407'
+SCHEMA_SHA256 = 'ab4f4bdcc88501b4bb9b26f9177d9c69e2b8c1e50c272778976a4161332cc81f'
 TESTS = ('future_main_store_is_selected_then_rejected_with_guidance',
          'future_wal_store_is_selected_then_rejected_without_pager_changes',
          'owned_future_store_retains_store_owned_priority', 'unrelated_invalid_store_retains_generic_failure')

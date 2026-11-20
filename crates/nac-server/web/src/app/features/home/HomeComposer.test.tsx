@@ -158,7 +158,7 @@ const sessions = [
 
 function mount(
   path = "/",
-  _orchestration = true,
+  _unused = true,
   list: readonly ProjectRecord[] = projects,
   sessionList: readonly ManagedSessionSummary[] = sessions,
 ) {

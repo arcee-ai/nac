@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import plistlib
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -348,16 +349,32 @@ def observer_sources(harness, tests):
         str(tests / 'desktop/macos/startup_xctest' / name) for name in ('StartupAXGuard.swift', 'StartupAXReceipt.swift')]
 
 
+def product_package_owner(product):
+    """Resolve only the exact nominated product's committed package writer."""
+    relative = 'desktop/macos/packaging/package.py'
+    owner = product / relative
+    if any(path.is_symlink() for path in (product / 'desktop', product / 'desktop/macos', owner.parent, owner)):
+        raise RuntimeError('Startup product package owner must not use symlinks')
+    try:
+        committed = subprocess.check_output(['git', 'show', PRODUCT + ':' + relative], cwd=product,
+                                            timeout=15, stderr=subprocess.PIPE)
+        if not owner.is_file() or owner.read_bytes() != committed:
+            raise RuntimeError('Startup product package owner differs from nominated source')
+    except (OSError, subprocess.SubprocessError) as error:
+        raise RuntimeError('Startup product lacks its committed package owner') from error
+    return owner
+
+
 def qualify(raw, product, tests, protocol, harness_sha, run, command, native_report):
     require_checkout(product, PRODUCT)
     test_contract(tests)
     protocol_sources(protocol)
     require_checkout(ROOT, harness_sha)
-    owner = product / 'desktop/macos/packaging/package.py'
+    owner = product_package_owner(product)
     engine = raw / 'startup-engine'
     package = raw / 'startup-package'
     run([sys.executable, '-B', str(owner), 'prepare-engine', '--track', 'dev', '--output', str(engine)],
-        raw / 'startup-engine-build.log', 900, cwd=product)
+        raw / 'startup-engine-build.log', 1800, cwd=product)
     run([sys.executable, '-B', str(owner), 'normal', '--engine-receipt', str(engine / 'engine-build.json'),
          '--output', str(package)], raw / 'startup-package-build.log', 240, cwd=product)
     app, manifest = package / 'NAC.app', package / 'manifest.json'

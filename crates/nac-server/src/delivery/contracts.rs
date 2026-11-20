@@ -586,6 +586,8 @@ pub struct EventsQuery {
 #[derive(Debug, Clone, Default, Deserialize, utoipa::IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct SessionSnapshotQuery {
+    /// Optional accepted run to check for a retained committed prompt receipt.
+    pub prompt_run_id: Option<String>,
     pub message_limit: Option<usize>,
     pub session_event_limit: Option<usize>,
     pub include_sessions: Option<bool>,
@@ -683,7 +685,17 @@ pub struct MessageCycleMetadata {
 }
 
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+pub struct CommittedPromptEvidence {
+    pub run_id: String,
+    pub canonical_index: u64,
+}
+
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct SessionSnapshotResponse {
+    /// Historical commit evidence for the specifically requested run; it does
+    /// not claim the row still exists after this response was observed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub committed_prompt: Option<CommittedPromptEvidence>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tool_call_occurrences: Vec<Option<String>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

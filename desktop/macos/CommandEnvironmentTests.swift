@@ -11,12 +11,12 @@ enum CommandEnvironmentTests {
         let fixture = commands.appendingPathComponent("fixture-mcp")
         try Data("#!/bin/sh\nexit 0\n".utf8).write(to: fixture)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: fixture.path)
-        let inherited = ["HOME": root.path, "NAC_HOME": "relative nac", "NAC_ORCHESTRATION": "01",
+        let inherited = ["HOME": root.path, "NAC_HOME": "relative nac", "FIXTURE_ENVIRONMENT_CANARY": "01",
                          "PATH": "custom tools:/usr/bin:/bin", "FIXTURE_SECRET": "memory-only-canary"]
         let resolved = try CommandEnvironment.resolve(inherited, cwd: root)
         precondition(CommandEnvironment.executable("fixture-mcp", in: resolved) == fixture)
         precondition(resolved["HOME"] == inherited["HOME"] && resolved["NAC_HOME"] == "relative nac")
-        precondition(resolved["NAC_ORCHESTRATION"] == "01")
+        precondition(resolved["FIXTURE_ENVIRONMENT_CANARY"] == "01")
         precondition(resolved["FIXTURE_SECRET"] == inherited["FIXTURE_SECRET"])
         precondition(CommandEnvironment.executable("missing-fixture-mcp", in: resolved) == nil)
         let finder = try CommandEnvironment.resolve(["HOME": root.path], cwd: root)

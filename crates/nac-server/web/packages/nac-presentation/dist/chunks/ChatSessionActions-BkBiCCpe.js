@@ -4538,7 +4538,7 @@ function rs() {
 // src/app/lib/markdownChunk.ts
 var is = null, as = !1;
 function os() {
-	return is ??= import("./markdown-renderer-BgyELtwl.js").then((e) => e.t).then((e) => (as = !0, e)), is;
+	return is ??= import("./markdown-renderer-ClQ3HNFS.js").then((e) => e.t).then((e) => (as = !0, e)), is;
 }
 function ss() {
 	return as;

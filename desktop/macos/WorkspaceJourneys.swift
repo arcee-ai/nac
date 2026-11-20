@@ -36,7 +36,7 @@ extension WorkspaceSmoke {
     """#
 
     func directJourney() async {
-        await check("orchestration-opt-in") {
+        await check("direct-only-policy") {
             try await self.require("Direct-only policy or behavior choices changed", "return (await fetch('/ui-config')).status === 404 && !!document.getElementById('home-composer') && !document.querySelector('button[aria-label^=\"Behavior: \"]');")
             return "Retired policy endpoint returns 404 and Home's direct composer is visible"
         }

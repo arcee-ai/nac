@@ -2,6 +2,7 @@ from pathlib import Path
 import copy
 import hashlib
 import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -23,9 +24,10 @@ class ExactSourceTests(unittest.TestCase):
         terminal = select_target('all-352-macos26')
         self.assertEqual(terminal['source_sha'], 'a02f0c06b3c75c8f8fd62b6c233d1cfd923be6e1')
         startup = select_target('all-342-startup-macos26')
-        self.assertEqual(startup['source_sha'], '4b7a1f3e0bf6175a77c5ebf627fe965860e99976')
-        self.assertEqual(startup['test_source_sha'], 'f671fd15f002e3bda4df5040df998e80be1f6dd8')
-        self.assertEqual(startup['protocol_source_sha'], '7325c48b3c9ec7036e255a6bd92f31c1a98c1607')
+        self.assertEqual(startup['source_sha'], os.environ.get('NAC_STARTUP_PRODUCT_SHA') or
+                         '1638a9f36b4978bfe790859d0d42ce3bea96a5cf')
+        self.assertEqual(startup['test_source_sha'], '5306800fd6ea70471ecd372a4f495621e0f74695')
+        self.assertEqual(startup['protocol_source_sha'], '1638a9f36b4978bfe790859d0d42ce3bea96a5cf')
         self.assertEqual(startup['scenarios'], ['onboarding', 'configuredLocal', 'invalidConfig', 'futureStore'])
         self.assertEqual(terminal['suite'], 'terminal')
         self.assertEqual(terminal['phase_count'], 6)
@@ -57,10 +59,38 @@ class ExactSourceTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'exact repository root'):
                 require_checkout(root / 'subdirectory', sha)
 
+    def test_startup_candidate_is_bound_to_exact_explicit_ci_sha(self):
+        import os
+        import subprocess
+        import sys
+        program = ("import json; from ci_qualifications import select_target; "
+                   "from ci_startup_fixture import PRODUCT; from ci_startup_environment import PRODUCT as ENV_PRODUCT; "
+                   "t=select_target('all-342-startup-macos26'); "
+                   "print(json.dumps([t['source_sha'],PRODUCT,ENV_PRODUCT,t['test_source_sha'],t['protocol_source_sha']]))")
+        default = '1638a9f36b4978bfe790859d0d42ce3bea96a5cf'
+        env = {**os.environ, 'PYTHONPATH': 'desktop/macos'}
+        env.pop('NAC_STARTUP_PRODUCT_SHA', None)
+        for override in (None, '', 'a' * 40, default):
+            selected = default if not override else override
+            run_env = dict(env)
+            if override is not None:
+                run_env['NAC_STARTUP_PRODUCT_SHA'] = override
+            result = subprocess.run([sys.executable, '-B', '-c', program], capture_output=True, text=True, env=run_env)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout), [selected, selected, selected,
+                '5306800fd6ea70471ecd372a4f495621e0f74695', default])
+        for invalid in ('HEAD', 'a' * 39, 'A' * 40):
+            result = subprocess.run([sys.executable, '-B', '-c', program], capture_output=True, text=True,
+                env={**os.environ, 'PYTHONPATH': 'desktop/macos', 'NAC_STARTUP_PRODUCT_SHA': invalid})
+            self.assertNotEqual(result.returncode, 0)
+
     def test_startup_contract_cannot_substitute_sources_cases_or_file_rosters(self):
         selected = select_target('all-342-startup-macos26')
         target = {key: value for key, value in selected.items()
                   if key not in ('runner', 'envelope', 'developer_directory')}
+        # The catalog keeps the reviewed default even when the resolved product is overridden.
+        from ci_startup_fixture import DEFAULT_PRODUCT
+        target['source_sha'] = DEFAULT_PRODUCT
         for changed in ({'source_sha': '9ec88bd3397ccca192b2e9a95b6bd9a80b4067e3'},
                         {'source_sha': '6c578a2c18050e218b83daf80f46731040e4b3e4'},
                         {'source_sha': 'ff8c9609abf7bf7ddabe983c96ff31cf80362956'},

@@ -1,4 +1,4 @@
-import { memo, useMemo } from "react";
+import { memo, useMemo, useState } from "react";
 
 import {
   Button,
@@ -20,6 +20,7 @@ import { liveTurnLabel } from "@/app/components/inspector/transcript/stepLabels"
 import { WorkFoldView } from "@/app/components/inspector/transcript/WorkFold";
 import {
   layoutModelTurn,
+  keepWorkFoldKeys,
   type TurnLayoutItem,
 } from "@/app/components/inspector/transcript/foldLayout";
 import type { ModelTurnItem } from "@/app/features/insights/model/types";
@@ -33,6 +34,7 @@ import {
 import { cn } from "@/app/lib/cn";
 import { Markdown } from "@/app/lib/markdown";
 import { perfRender } from "@/app/lib/perfDebug";
+import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import { RUN_CANCELLED_MARKER, type ModelTurn, type TranscriptTurn } from "@/app/lib/transcript";
 import type { SessionForkLink, WorkspaceRevision } from "@/app/types/api";
 
@@ -167,8 +169,56 @@ const ModelMessageBody = memo(function ModelMessageBody({
   interactive = true,
 }: ModelMessageBodyProps) {
   perfRender("ModelMessage");
+  const { runtimeStore, captureRuntimeActivation } = useNativeRuntime().stores.runtimeStore;
+  const sessionId = runtimeStore.useStore((state) => state.sessionId);
+  const runId = runtimeStore.useStore((state) => state.streamRunId);
+  const epoch = runtimeStore.useStore((state) => state.streamIdentityEpoch);
   const items = useMemo(() => partitionModelTurn(turn, previous), [turn, previous]);
-  const layout = useMemo(() => layoutModelTurn(items) ?? plainLayout(items), [items]);
+  const nextLayout = useMemo(() => layoutModelTurn(items) ?? plainLayout(items), [items]);
+  const [drawnLayout, setDrawnLayout] = useState<{
+    turnKey: string;
+    runtime: typeof runtimeStore;
+    sessionId: string | null;
+    runId: string | null;
+    epoch: number;
+    generation: number;
+    isActive: () => boolean;
+    source: TurnLayoutItem[];
+    layout: TurnLayoutItem[];
+  } | null>(null);
+  let drawn = drawnLayout;
+  if (
+    drawn?.source !== nextLayout ||
+    drawn.turnKey !== turn.key ||
+    drawn.runtime !== runtimeStore ||
+    drawn.sessionId !== sessionId ||
+    drawn.runId !== runId ||
+    drawn.epoch !== epoch ||
+    !drawn.isActive()
+  ) {
+    const provisional = turn.key.startsWith('["pending-reply",');
+    const sameLifetime =
+      drawn?.turnKey === turn.key &&
+      drawn.runtime === runtimeStore &&
+      drawn.sessionId === sessionId &&
+      drawn.runId === runId &&
+      drawn.epoch === epoch &&
+      drawn.isActive();
+    const canCarry = provisional && runId != null && sessionId != null && sameLifetime;
+    drawn = {
+      turnKey: turn.key,
+      runtime: runtimeStore,
+      sessionId: sessionId,
+      runId: runId,
+      epoch: epoch,
+      generation: (drawn?.generation ?? 0) + Number(provisional && !sameLifetime),
+      isActive: sessionId ? captureRuntimeActivation(sessionId) : () => true,
+      source: nextLayout,
+      layout: keepWorkFoldKeys(nextLayout, canCarry ? drawn!.layout : []),
+    };
+    setDrawnLayout(drawn);
+  }
+  const layout = drawn.layout;
   const compacting = active && activity === COMPACTION_ACTIVITY;
   const canRefresh = !readOnly && onRefresh != null && userMessageIndex != null;
   const canRevert = !readOnly && onRevert != null && userMessageIndex != null;
@@ -204,8 +254,8 @@ const ModelMessageBody = memo(function ModelMessageBody({
         if (entry.kind === "fold") {
           return (
             <WorkFoldView
-              key={entry.key}
-              turnKey={turn.key}
+              key={JSON.stringify([drawn.generation, entry.key])}
+              turnKey={JSON.stringify([turn.key, drawn.generation])}
               fold={entry}
               active={active && index === lastFold}
               turnDurationMs={index === lastFold ? turn.durationMs : null}

@@ -67,12 +67,22 @@ export interface RuntimeState {
   // The buffers hold output from before the prompt sent last, and its run has
   // neither started nor streamed since, so none of that output answers it.
   streamPredatesPrompt: boolean;
+  /** Run identity only when every retained delta carries that same identity. */
+  streamRunId: string | null;
+  streamIdentityEpoch: number;
   /**
    * Prompt shown in the chat from the moment Send is pressed until the
    * snapshot (or active_run) catches up. Without this the model pill appears
    * first and jumps down when the user bubble finally lands.
    */
   optimisticUserPrompt: string | null;
+  optimisticPromptToken: number | null;
+  optimisticPromptEpoch: number | null;
+  optimisticPromptRunId: string | null;
+  optimisticObservedRunId: string | null;
+  optimisticIdentityTainted: boolean;
+  optimisticPromptUncertain: boolean;
+  dismissedPromptRunIds: string[];
   /**
    * What the current run has spent so far, summed from the usage events the
    * model calls emit. The snapshot only learns the run's usage once the run
@@ -108,9 +118,13 @@ export interface RuntimeState {
   cancelArmed: boolean;
 }
 
+export const MAX_DISMISSED_PROMPT_RUNS = 128;
+let runtimeIdentitySequence = 0;
+
 export type RefreshKind = "none" | "messages" | "snapshot" | "replace-snapshot";
 /** One presentation lifetime; hosted preferences are ephemeral. */
 export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem">) {
+  const runtimeIdentity = ++runtimeIdentitySequence;
   const runtimeStore = createStore<RuntimeState>(
     {
       sessionId: null,
@@ -127,7 +141,16 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
       streamReasoning: "",
       streamSettled: false,
       streamPredatesPrompt: false,
+      streamRunId: null,
+      streamIdentityEpoch: 0,
       optimisticUserPrompt: null,
+      optimisticPromptToken: null,
+      optimisticPromptEpoch: null,
+      optimisticPromptRunId: null,
+      optimisticObservedRunId: null,
+      optimisticIdentityTainted: false,
+      optimisticPromptUncertain: false,
+      dismissedPromptRunIds: [],
       runUsage: null,
       sessionSpend: null,
       runStartedAt: null,
@@ -144,6 +167,7 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
   const MAX_EVENTS = 300;
 
   let runtimeActivation = {};
+  let promptTokenSequence = 0;
 
   /** Capture this presentation activation, including same-session reopen/StrictMode. */
   function captureRuntimeActivation(sessionId: string): () => boolean {
@@ -168,7 +192,16 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
       streamReasoning: "",
       streamSettled: false,
       streamPredatesPrompt: false,
+      streamRunId: null,
+      streamIdentityEpoch: getState().streamIdentityEpoch + 1,
       optimisticUserPrompt: null,
+      optimisticPromptToken: null,
+      optimisticPromptEpoch: null,
+      optimisticPromptRunId: null,
+      optimisticObservedRunId: null,
+      optimisticIdentityTainted: false,
+      optimisticPromptUncertain: false,
+      dismissedPromptRunIds: [],
       runUsage: null,
       sessionSpend: null,
       runStartedAt: null,
@@ -204,13 +237,97 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
   function setOptimisticUserPrompt(
     prompt: string | null,
     settlement: "rejected" | "committed" = "rejected",
-  ): void {
+  ): number | null {
     if (prompt === null) {
       setState((state) => ({
         optimisticUserPrompt: null,
+        optimisticPromptToken: null,
+        optimisticPromptEpoch: null,
+        optimisticPromptRunId: null,
+        optimisticObservedRunId: null,
+        optimisticIdentityTainted: false,
+        optimisticPromptUncertain: false,
         streamPredatesPrompt: settlement === "committed" && state.streamPredatesPrompt,
       }));
-    } else setState({ optimisticUserPrompt: prompt, streamPredatesPrompt: true });
+      return null;
+    }
+    const token = ++promptTokenSequence;
+    const epoch = getState().streamIdentityEpoch + 1;
+    setState({
+      optimisticUserPrompt: prompt,
+      optimisticPromptToken: token,
+      optimisticPromptEpoch: epoch,
+      streamIdentityEpoch: epoch,
+      optimisticPromptRunId: null,
+      optimisticObservedRunId: null,
+      optimisticIdentityTainted: false,
+      optimisticPromptUncertain: false,
+      streamPredatesPrompt: true,
+      streamRunId: null,
+    });
+    return token;
+  }
+
+  function bindOptimisticPrompt(token: number, runId: string): void {
+    setState((state) => {
+      if (state.optimisticPromptToken !== token) return {};
+      const mismatch =
+        state.optimisticObservedRunId != null && state.optimisticObservedRunId !== runId;
+      return {
+        optimisticPromptRunId: runId,
+        streamIdentityEpoch: state.streamIdentityEpoch + Number(mismatch),
+      };
+    });
+  }
+
+  function markOptimisticPromptUncertain(token: number): void {
+    if (getState().optimisticPromptToken === token) setState({ optimisticPromptUncertain: true });
+  }
+
+  function dismissOptimisticPrompt(token: number): void {
+    const state = getState();
+    if (
+      state.optimisticPromptToken === token &&
+      (!state.running || state.streamStatus !== "live") &&
+      (state.optimisticPromptRunId || state.optimisticPromptUncertain)
+    ) {
+      if (
+        state.optimisticPromptRunId &&
+        !state.dismissedPromptRunIds.includes(state.optimisticPromptRunId)
+      ) {
+        if (state.dismissedPromptRunIds.length >= MAX_DISMISSED_PROMPT_RUNS) return;
+        setState({
+          dismissedPromptRunIds: [...state.dismissedPromptRunIds, state.optimisticPromptRunId],
+        });
+      }
+      setOptimisticUserPrompt(null);
+    }
+  }
+
+  function retireOptimisticPrompt(token: number): void {
+    if (getState().optimisticPromptToken === token) setOptimisticUserPrompt(null, "committed");
+  }
+
+  /** An unbound POST may observe one exact run before its response. It is
+   * only eligible for a later handoff if every observation agrees with the
+   * run ID eventually accepted for this token. Unknown or mixed IDs taint it. */
+  function observeStreamIdentity(state: RuntimeState, runId: string | null | undefined) {
+    if (state.optimisticPromptToken != null && !state.optimisticPromptRunId) {
+      const tainted =
+        state.optimisticIdentityTainted ||
+        !runId ||
+        (state.optimisticObservedRunId != null && state.optimisticObservedRunId !== runId);
+      return {
+        optimisticObservedRunId: state.optimisticObservedRunId ?? runId ?? null,
+        optimisticIdentityTainted: tainted,
+        streamIdentityEpoch:
+          state.streamIdentityEpoch + Number(tainted && !state.optimisticIdentityTainted),
+      };
+    }
+    const mismatch =
+      (state.optimisticPromptToken != null && runId !== state.optimisticPromptRunId) ||
+      (state.streamRunId != null && runId !== state.streamRunId);
+    return { streamIdentityEpoch: state.streamIdentityEpoch + Number(mismatch) };
   }
 
   /**
@@ -218,13 +335,15 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
    */
   function applyAssistantDelta(delta: AssistantStreamDelta): void {
     if (delta.reset) {
-      setState({
+      setState((state) => ({
         streamSettled: false,
         streamPredatesPrompt: false,
         streamText: "",
         streamReasoning: "",
         modelRetryAttempt: delta.retry_attempt ?? null,
-      });
+        streamRunId: delta.run_id ?? null,
+        ...observeStreamIdentity(state, delta.run_id),
+      }));
       return;
     }
     setState((state) => {
@@ -239,12 +358,27 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
         streamPredatesPrompt: false,
         streamText: base.streamText + (delta.text ?? ""),
         streamReasoning: base.streamReasoning + (delta.reasoning ?? ""),
+        ...observeStreamIdentity(state, delta.run_id),
+        streamRunId:
+          !base.streamText && !base.streamReasoning
+            ? (delta.run_id ?? null)
+            : state.streamRunId && state.streamRunId === delta.run_id
+              ? state.streamRunId
+              : null,
       };
     });
   }
 
   function setStreamStatus(streamStatus: StreamStatus): void {
-    setState({ streamStatus });
+    setState((state) => ({
+      streamStatus,
+      ...(streamStatus !== "live" && state.streamStatus !== streamStatus
+        ? {
+            streamRunId: null,
+            streamIdentityEpoch: state.streamIdentityEpoch + 1,
+          }
+        : {}),
+    }));
   }
 
   /**
@@ -364,7 +498,7 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
     const event = envelope.event;
     switch (event.type) {
       case "run_started":
-        setState({
+        setState((state) => ({
           running: true,
           // Keep the chat chrome as a plain live ModelMessage (pill + model);
           // Tool events fill activity once there is something to name.
@@ -377,13 +511,15 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
           streamReasoning: "",
           streamSettled: false,
           streamPredatesPrompt: false,
+          streamRunId: null,
+          ...observeStreamIdentity(state, envelope.run_id),
           // Only this run's live delta resets. Session spend lives on the
           // snapshot, including unattributed usage from cancelled or rewound turns.
           runUsage: null,
           runStartedAt: event.started_at_epoch_ms,
           lastElapsedMs: null,
           cancelArmed: false,
-        });
+        }));
         pushEvent({
           seq,
           kind: "run",
@@ -400,6 +536,9 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
           running: false,
           activity: "",
           streamText: event.response,
+          streamRunId:
+            state.streamRunId && state.streamRunId === envelope.run_id ? state.streamRunId : null,
+          ...observeStreamIdentity(state, envelope.run_id),
           streamSettled: true,
           runFailure: null,
           modelRetryAttempt: null,
@@ -419,6 +558,7 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
           error: message,
           runFailure: event.failure ?? null,
           modelRetryAttempt: null,
+          ...observeStreamIdentity(state, envelope.run_id),
           streamSettled: true,
           cancelArmed: false,
           lastElapsedMs: freezeElapsed(state),
@@ -436,6 +576,7 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
           modelError: null,
           runFailure: null,
           modelRetryAttempt: null,
+          ...observeStreamIdentity(state, envelope.run_id),
           streamSettled: true,
           cancelArmed: false,
           lastElapsedMs: freezeElapsed(state),
@@ -454,12 +595,14 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
         // leftovers would be replayed against a transcript that never had them.
         // Live tool events went with those messages, and a rerun that dispatches
         // the same name again would otherwise inherit the discarded run's log.
-        setState({
+        setState((state) => ({
           streamSettled: true,
           streamText: "",
           streamReasoning: "",
+          streamRunId: null,
+          streamIdentityEpoch: state.streamIdentityEpoch + 1,
           primaryToolEvents: [],
-        });
+        }));
         return "replace-snapshot";
       case "agent":
         return applyAgent(seq, event.event);
@@ -613,13 +756,19 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
   const useOptimisticUserPrompt = () => useStore((s) => s.optimisticUserPrompt);
   return {
     release: () => {
+      runtimeActivation = {};
       runtimeStore.setState(initial_runtimeStore);
     },
     runtimeStore,
+    runtimeIdentity,
     captureRuntimeActivation,
     resetRuntime,
     liftSessionSpend,
     setOptimisticUserPrompt,
+    bindOptimisticPrompt,
+    markOptimisticPromptUncertain,
+    dismissOptimisticPrompt,
+    retireOptimisticPrompt,
     applyAssistantDelta,
     setStreamStatus,
     syncRunFromSnapshot,
@@ -652,10 +801,15 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
 export const {
   release,
   runtimeStore,
+  runtimeIdentity,
   captureRuntimeActivation,
   resetRuntime,
   liftSessionSpend,
   setOptimisticUserPrompt,
+  bindOptimisticPrompt,
+  markOptimisticPromptUncertain,
+  dismissOptimisticPrompt,
+  retireOptimisticPrompt,
   applyAssistantDelta,
   setStreamStatus,
   syncRunFromSnapshot,

@@ -172,7 +172,14 @@ fn retired_behavior_in_corrupt_current_store_is_rejected_before_mutation() {
         "2026-01-01T00:00:02Z",
     );
     let conn = open_runtime_connection(&path).unwrap();
-    conn.execute_batch("DROP TRIGGER session_direct_only_update; UPDATE sessions SET behavior='direct-with-orchestrator' WHERE session_id='parent';").unwrap();
+    assert!(conn
+        .execute(
+            "UPDATE sessions SET behavior='direct-with-orchestrator' WHERE session_id='parent'",
+            []
+        )
+        .is_err());
+    // Simulate corruption by bypassing the v56 CHECK on this fixture connection only.
+    conn.execute_batch("PRAGMA ignore_check_constraints=ON; UPDATE sessions SET behavior='direct-with-orchestrator' WHERE session_id='parent';").unwrap();
     drop(conn);
     assert!(load_direct_task(&path, "parent").is_err());
     assert!(read_attention_metadata(&path, Some("parent")).is_err());

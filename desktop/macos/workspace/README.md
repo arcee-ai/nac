@@ -18,14 +18,13 @@ no source budget or generic allowance renews a native case.
 `inventory.json` retains the supplier feature/OS vocabulary. Current route and
 native-flow completeness remains a qualification obligation. Product routes come from
 `src/App.tsx` and `src/app/lib/routes.ts`: projects, project entry, and session
-Insights/Subagents/Files/Terminal/Worksets/History. Legacy Threads resolves to
+Insights/Subagents/Files/Terminal/History. Legacy Threads resolves to
 Insights; invalid panels redirect through the existing behavior policy.
-Provider configurations and MCP servers are Settings page sections
+Provider connections and MCP servers are Settings page sections
 (`#/settings/models`, `#/settings/mcp`); session panels open in the session
 drawer; session settings is a dialog from the Session menu; approvals are the
 non-modal card above the composer.
-The design route remains orchestration-gated. Terminal protocol/trusted-input
-qualification belongs to ALL-352.
+Terminal protocol/trusted-input qualification belongs to ALL-352.
 
 ## Build and run
 

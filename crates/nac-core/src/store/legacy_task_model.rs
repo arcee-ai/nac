@@ -1,4 +1,4 @@
-//! Version-54 model selection evidence retained by durable task receipts.
+//! Version-55 model selection evidence retained by durable task receipts.
 //!
 //! Only exact, transactionally marked predecessor records may use this private
 //! decoder; public request deserialization always uses the strict current type.
@@ -20,7 +20,7 @@ const FIELDS: &[&str] = &[
     OLD,
 ];
 
-// A v54 writer could not emit duplicate JSON keys. Reject duplicates before
+// A v55 writer could not emit duplicate JSON keys. Reject duplicates before
 // forming a map, so contradictory old/current evidence cannot be hidden by
 // serde_json's normal last-key-wins Value decoding.
 struct UniqueValue(serde_json::Value);

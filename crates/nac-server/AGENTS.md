@@ -48,8 +48,7 @@ bundle, and builds the `nac-web` binary. Product use cases live in focused
   open session event stream, holds `InteractivePresence`, so Ask waits for the
   attached human instead of failing closed; it never answers anything.
   It covers primary direct sessions and direct traditional children (child
-  decisions attributed only to the child); orchestration topologies stay
-  unsupported.
+  decisions attributed only to the child).
 
 ## Starting points
 

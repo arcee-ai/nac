@@ -27,7 +27,10 @@ def select_target(key):
         if key != 'all-344-lifecycle-macos26' or not exact(target, TARGET):
             raise RuntimeError('Lifecycle fixed source/allocation/order contract differs')
     if target['suite'] == 'startup':
-        from ci_startup_fixture import CASES, PRODUCT, TEST_SOURCE, TEST_FILES
+        from ci_startup_fixture import CASES, PRODUCT, DEFAULT_PRODUCT, TEST_SOURCE, TEST_FILES
+        if target.get('source_sha') != DEFAULT_PRODUCT:
+            raise RuntimeError('Startup P/Q/R initial product contract differs')
+        target = {**target, 'source_sha': PRODUCT}
         from ci_startup_protocol import FILES, REVISION
         if key != 'all-342-startup-macos26' or target != {
             'source_sha': PRODUCT, 'test_source_sha': TEST_SOURCE, 'protocol_source_sha': REVISION,

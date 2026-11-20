@@ -6,7 +6,7 @@ import {
   stopRun,
 } from "@/app/features/direct-session/commandWorkflow";
 import { makeStopPorts } from "@/app/features/direct-session/commandAdapters";
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import {
   keepPreviousData,
   useMutation,
@@ -140,10 +140,11 @@ export function useSessionSnapshot(
   id: string | null,
   options?: Partial<UseQueryOptions<SessionSnapshotResponse>>,
 ) {
-  const { api } = useNativeRuntime();
+  const { api, stores } = useNativeRuntime();
 
   const client = useQueryClient();
-  return useQuery<SessionSnapshotResponse>({
+  const observedActiveRun = useRef<string | null>(null);
+  const result = useQuery<SessionSnapshotResponse>({
     queryKey: queryKeys.sessionSnapshot(id ?? ""),
     queryFn: async ({ signal }) => {
       const token = beginSnapshotFetch(sessionRefreshKey(client, id!));
@@ -152,6 +153,13 @@ export function useSessionSnapshot(
         sessionEventLimit: SNAPSHOT_THREAD_EVENT_LIMIT,
         includeSessions: false,
         includeSystem: true,
+        promptRunId:
+          (stores.runtimeStore.runtimeStore.getState().sessionId === id
+            ? stores.runtimeStore.runtimeStore.getState().optimisticPromptRunId
+            : null) ??
+          client.getQueryData<SessionSnapshotResponse>(queryKeys.sessionSnapshot(id!))?.active_run
+            ?.submitted_user_message?.run_id ??
+          undefined,
         signal,
       });
       if (!validSnapshotWindow(incoming)) {
@@ -178,6 +186,18 @@ export function useSessionSnapshot(
     placeholderData: previousDataFrom(id ?? ""),
     ...options,
   });
+  const activeRun = result.data?.active_run?.submitted_user_message?.run_id;
+  useEffect(() => {
+    if (!id || options?.enabled === false || !activeRun) {
+      observedActiveRun.current = null;
+      return;
+    }
+    const key = `${id}:${activeRun}`;
+    if (observedActiveRun.current === key) return;
+    observedActiveRun.current = key;
+    void client.invalidateQueries({ queryKey: queryKeys.sessionSnapshot(id), exact: true });
+  }, [activeRun, client, id, options?.enabled]);
+  return result;
 }
 export function useLoadOlderMessages(id: string) {
   const { api } = useNativeRuntime();
@@ -409,8 +429,13 @@ export function useUpdateConfig() {
 
 export function useSubmitRun() {
   const { api } = useNativeRuntime();
-  const { captureRuntimeActivation, setOptimisticUserPrompt } =
-    useNativeRuntime().stores.runtimeStore;
+  const {
+    captureRuntimeActivation,
+    setOptimisticUserPrompt,
+    bindOptimisticPrompt,
+    markOptimisticPromptUncertain,
+    runtimeStore,
+  } = useNativeRuntime().stores.runtimeStore;
 
   const invalidate = useQueryInvalidators();
   const client = useQueryClient();
@@ -418,17 +443,32 @@ export function useSubmitRun() {
     retry: false,
     mutationFn: ({ id, prompt, signal }: { id: string; prompt: string; signal?: AbortSignal }) => {
       const current = captureRuntimeActivation(id);
+      let promptToken: number | null = null;
       return runCommand(
         submitPrompt({
           optimistic: () => {
-            if (current()) setOptimisticUserPrompt(prompt);
+            if (current()) promptToken = setOptimisticUserPrompt(prompt);
           },
           admit: async () => {
             const admission = await (signal
               ? api.submitRun(id, prompt, signal)
               : api.submitRun(id, prompt));
-            if (admission.status === "accepted")
+            if (admission.status === "accepted") {
+              if (
+                current() &&
+                promptToken !== null &&
+                runtimeStore.getState().optimisticPromptToken === promptToken
+              ) {
+                fenceSessionSnapshot(sessionRefreshKey(client, id));
+                await client.cancelQueries({
+                  queryKey: queryKeys.sessionSnapshot(id),
+                  exact: true,
+                });
+                if (current() && runtimeStore.getState().optimisticPromptToken === promptToken)
+                  bindOptimisticPrompt(promptToken, admission.response.run_id);
+              }
               return { kind: "accepted", value: admission.response };
+            }
             if (admission.status === "not-sent")
               return {
                 kind: "not-sent",
@@ -437,13 +477,15 @@ export function useSubmitRun() {
                   "AbortError",
                 ),
               };
+            if (current() && promptToken !== null) markOptimisticPromptUncertain(promptToken);
             return {
               kind: "uncertain",
               error: new UncertainCommandAdmissionError(admission.requestId, admission.error),
             };
           },
           rejected: () => {
-            if (current()) setOptimisticUserPrompt(null);
+            if (current() && runtimeStore.getState().optimisticPromptToken === promptToken)
+              setOptimisticUserPrompt(null);
           },
           reconcile: (replace) => {
             if (replace) {

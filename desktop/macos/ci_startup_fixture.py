@@ -1,5 +1,7 @@
 """Owned ordinary-startup fixtures and phase-aware immutable source admission."""
 import hashlib
+import os
+import re
 from contextlib import closing
 import importlib.util
 import json
@@ -15,20 +17,23 @@ from ci_startup_process import capture, package_contract
 from ci_startup_environment import resolve_environment
 from ci_xctest_attachments import bounded_file
 
-PRODUCT = '4b7a1f3e0bf6175a77c5ebf627fe965860e99976'
-TEST_SOURCE = 'f671fd15f002e3bda4df5040df998e80be1f6dd8'
+DEFAULT_PRODUCT = '1638a9f36b4978bfe790859d0d42ce3bea96a5cf'
+PRODUCT = os.environ.get('NAC_STARTUP_PRODUCT_SHA') or DEFAULT_PRODUCT
+if not re.fullmatch('[0-9a-f]{40}', PRODUCT):
+    raise RuntimeError('Startup product must be an exact immutable commit SHA')
+TEST_SOURCE = '5306800fd6ea70471ecd372a4f495621e0f74695'
 BASELINE = 'ec4f3a9a8ab2e80d98ff76ca8c536e1e41b413c8'
 SCHEMA = 'nac342-startup-xctest-v1'
 CASES = ('onboarding', 'configuredLocal', 'invalidConfig', 'futureStore')
 TEST_FILES = {
-    'README.md': 'eeb6d84c341b0e68ad6af24d08f6a7a2493bf8c0d7071efc2cd67a53d3db2f00',
-    'StartupJourneys.swift': '90ccceb82d6593c5714e43078a2f35a74f7d57f890883e0ba08f4c65505738b3',
-    'contract.py': 'd159672bb8eda5d3bf4e5d462813452c83a673974749ed4f7f07b3bb9341b91b',
-    'test_contract.py': 'c33ac0f526d8213758970c2f671ab71b08afa2fc4fd9287f9e56942012735f5e',
-    'StartupAXGuard.swift': '266e73c6362b12f6df51ef3f4d349b3d22b71a1eab5139e71e2336b1d4c3778d',
-    'StartupAXReceipt.swift': '94e3f3512a9caaebc42841d8cffc34e8a1275cdff2bc4d43501e5deaba202247',
-    'AX-WITNESS-CONTRACT.md': '67ef84950affed7cf3ab5cff9df9127a5081b3a93d1dff1469e67a83fddb0191',
-    'test_ax_witness.py': '4400ffed7d2b30ed1613e3829d0e2d61b740f7a3fd352a092f22eac9f7fee878',
+    'README.md': '23a181bf5ddff1dcce0a06b22e438026646d55b267f0b7205c5f58d9e22dfb54',
+    'StartupJourneys.swift': 'acb6f7157225cffbc8e1fd0d4f4ebd3cb22a198cf6fa7bdb66ed0725a00122e1',
+    'contract.py': 'e9e5b9e477ab975acedeecdef7a8ab58da2222377630644e0d5e649009c8192e',
+    'test_contract.py': '99449dbae247c877b2a8960b4a1147c45d0c133e585cdbeec2cb4c6b57e53046',
+    'StartupAXGuard.swift': '4c13fb3fd042d55d209228186f40991e78c53506e743efb29491bb7840e0c50b',
+    'StartupAXReceipt.swift': '01521dec562cd322152f17b4578585bbca5c6edb9cd87240c97303b56393e035',
+    'AX-WITNESS-CONTRACT.md': '1c7527943668bc5731db633ef5f23c85c527be54b96c71ac0b569718f55f0837',
+    'test_ax_witness.py': '3da894fd6e8c029b41d5bd602f0f0aa56c836161765c524890c6c68d4c91898f',
     'AGENTS.md': '3e24e5b29e32356d08895b2c162407a1be5cf9d71c1740d1dcc50fc566bc89e6',
     'test_title_assertion.py': 'e4389c84259f0f8dbbd3b42eef153757b8f9da26d337010b8affd1719f415cef'
 }
@@ -67,7 +72,8 @@ def operations(config):
         return []
     return ['click:Get Started', 'click:Choose Working Folder: ' + config['home'], 'key:command-shift-g-native-folder',
             'key:command-a-native-go-to-folder', 'type:owned-workspace', 'key:return-native-go-to-folder',
-            'click:native-folder-Select', 'click:Create Project', 'click:Message',
+            'click:native-folder-Select', 'click:session-model', 'click:Search models',
+            'type:model-query', 'key:return-model-query', 'click:Create Project', 'click:Message',
             'type:FINDER_CONFIGURED_LOCAL_startup-home', 'click:Send']
 
 
@@ -75,7 +81,7 @@ def environment(root, catalog_url):
     home = root / 'home with spaces'
     return {'HOME': str(home), 'NAC_HOME': str(home / 'selected nac'),
             'PATH': '/usr/bin:/bin:/usr/sbin:/sbin', 'LANG': 'en_US.UTF-8',
-            'NAC_TELEMETRY': 'disabled', 'NAC_ORCHESTRATION': '0', 'GIT_CONFIG_NOSYSTEM': '1',
+            'NAC_TELEMETRY': 'disabled', 'GIT_CONFIG_NOSYSTEM': '1',
             'GIT_CONFIG_GLOBAL': '/dev/null', 'BROWSER': 'none', 'MODELS_DEV_URL': catalog_url}
 
 

@@ -23,6 +23,7 @@ import {
 
 import { ScriptGate } from "./scripted-provider";
 import { assertInspectorReadable } from "./inspector-readability";
+import { streamLifecycle } from "./stream-lifecycle.cjs";
 
 test.use({ hasTouch: true });
 
@@ -39,6 +40,7 @@ const CHILD = "Audit captured changes and preserve the complete verification his
 async function observeParentStream(page: Page, baseUrl: string, parent: string) {
   const cdp = await page.context().newCDPSession(page);
   const active = new Set<string>();
+  const lifecycle = streamLifecycle();
   let reasoning = "";
   await cdp.send("Page.enable");
   let loader = (await cdp.send("Page.getFrameTree")).frameTree.frame.loaderId;
@@ -50,8 +52,21 @@ async function observeParentStream(page: Page, baseUrl: string, parent: string) 
     active.clear();
     reasoning = "";
   });
+  cdp.on("Network.requestWillBeSent", (event) => {
+    const url = new URL(event.request.url);
+    if (
+      url.origin === new URL(baseUrl).origin &&
+      url.pathname === `/sessions/${parent}/events/stream`
+    )
+      lifecycle.request(event.requestId);
+  });
   cdp.on("Network.responseReceived", (event) => {
     const url = new URL(event.response.url);
+    if (
+      url.origin === new URL(baseUrl).origin &&
+      url.pathname === `/sessions/${parent}/events/stream`
+    )
+      lifecycle.response(event.requestId, event.type, event.response.status);
     if (
       event.type === "EventSource" &&
       event.loaderId === loader &&
@@ -61,9 +76,14 @@ async function observeParentStream(page: Page, baseUrl: string, parent: string) 
     )
       active.add(event.requestId);
   });
-  const remove = (event: { requestId: string }) => active.delete(event.requestId);
-  cdp.on("Network.loadingFailed", remove);
-  cdp.on("Network.loadingFinished", remove);
+  cdp.on("Network.loadingFailed", (event) => {
+    lifecycle.failed(event.requestId, event.errorText);
+    active.delete(event.requestId);
+  });
+  cdp.on("Network.loadingFinished", (event) => {
+    lifecycle.finished(event.requestId);
+    active.delete(event.requestId);
+  });
   cdp.on("Network.eventSourceMessageReceived", (event) => {
     if (!active.has(event.requestId) || event.eventName !== "assistant_delta") return;
     const delta = JSON.parse(event.data) as {
@@ -76,7 +96,21 @@ async function observeParentStream(page: Page, baseUrl: string, parent: string) 
   await cdp.send("Network.enable");
   return {
     ready: () => expect.poll(() => active.size).toBeGreaterThan(0),
-    absent: () => expect.poll(() => active.size).toBe(0),
+    absent: async () => {
+      try {
+        await expect.poll(() => active.size).toBe(0);
+      } catch (error) {
+        try {
+          await test.info().attach("parent-stream-lifecycle", {
+            body: JSON.stringify(lifecycle.snapshot(active)),
+            contentType: "application/json",
+          });
+        } catch {
+          /* Preserve the original assertion if evidence cannot be attached. */
+        }
+        throw error;
+      }
+    },
     sawReasoning: (text: string) => expect.poll(() => reasoning).toContain(text),
     close: () => cdp.detach(),
   };

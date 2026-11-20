@@ -138,8 +138,8 @@ class StartupAuditTests(unittest.TestCase):
         rows = {'/projects': {'projects': [{'project_id': 'owned-project', 'cwd': config['workspace'], 'ssh_host': None}]},
                 '/sessions': [{'summary': summary, 'active_run': None}],
                 '/sessions/owned-session': {'metadata': metadata, 'messages': messages},
-                '/model-configs': {'configurations': [{'config_id': 'owned-model', 'backend': 'openai-responses',
-                    'model': 'gpt-5.6-sol', 'base_url': config['provider_base'], 'extra_headers': {}}]},
+                '/sessions/owned-session/config': {'backend': 'openai-responses', 'model': 'gpt-5.6-sol',
+                    'base_url': config['provider_base'], 'api_key_env': 'fixture-selector', 'extra_headers': {}},
                 '/sessions/owned-session/messages': {'messages': messages},
                 '/sessions/owned-session/user-terminals': {'terminals': []},
                 '/sessions/owned-session/events': {'events': [{'event': {'type': 'run_completed', 'response': RESPONSE},
@@ -148,7 +148,7 @@ class StartupAuditTests(unittest.TestCase):
 
     def facts(self, config, rows, live=True):
         with patch('ci_startup_audit.request', side_effect=lambda base, path: rows[path]):
-            return session_facts('http://127.0.0.1:4321', config, {'config_id': 'owned-model'}, live=live)
+            return session_facts('http://127.0.0.1:4321', config, {'connection_id': 'owned-model', 'api_key_env': 'fixture-selector'}, live=live)
 
     def test_canonical_settlement_and_restart_read_are_separate_from_ui_reload(self):
         config, rows = self.fixture()
@@ -156,10 +156,16 @@ class StartupAuditTests(unittest.TestCase):
         self.assertEqual(live['completed_run_id'], 'owned-run')
         self.assertEqual(live['execution'], {'ssh_host': None, 'sandboxed': False, 'sandbox_status': 'off'})
         with patch('ci_startup_audit.request', side_effect=lambda base, path: rows[path]):
-            saved = persisted_audit('http://127.0.0.1:4321', config, {'config_id': 'owned-model'}, {'facts': live})
+            saved = persisted_audit('http://127.0.0.1:4321', config, {'connection_id': 'owned-model', 'api_key_env': 'fixture-selector'}, {'facts': live})
             self.assertIn('no UI reload', saved['scope'])
             with self.assertRaises(RuntimeError):
-                persisted_audit('http://127.0.0.1:4321', config, {'config_id': 'owned-model'}, {'facts': {}})
+                persisted_audit('http://127.0.0.1:4321', config, {'connection_id': 'owned-model', 'api_key_env': 'fixture-selector'}, {'facts': {}})
+
+    def test_session_model_must_keep_the_owned_provider_selector(self):
+        config, rows = self.fixture()
+        rows['/sessions/owned-session/config']['api_key_env'] = 'foreign-selector'
+        with self.assertRaises(RuntimeError):
+            self.facts(config, rows)
 
     def test_pending_unknown_or_failure_never_becomes_settled(self):
         for path, key, value in (('/sessions', 'active_run', {'run_id': 'pending'}),

@@ -1,4 +1,4 @@
-//! Passive reads of independent tasks: visible direct sessions, never children or managed orchestrators.
+//! Passive reads of independent tasks: visible direct sessions, never children.
 use super::*;
 
 /// Candidates returned by one search page.

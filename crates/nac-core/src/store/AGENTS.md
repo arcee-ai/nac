@@ -50,8 +50,8 @@ workspace revisions, recovery markers, and cross-process coordination.
   migrations, including composition with the retained-task schema.
 - `managed_probe.rs` — committed store/maintenance readiness observations that
   remain available while durable write admission is saturated.
-- `transcript.rs` and `thread_events.rs` — canonical durable transcript and
-  event history; historical table names remain until the next migration.
+- `transcript.rs` and `session_events.rs` — canonical durable transcript and
+  event history.
 - `transcript_selection.rs` — verified selection annotations on existing
   canonical log wrappers, included-fork copying, and bounded provenance scans.
 - `transcript_append.rs` — identified transcript transactions, run/generation
@@ -59,7 +59,7 @@ workspace revisions, recovery markers, and cross-process coordination.
   owns deterministic append fault and concurrency contracts.
 - `traditional_children.rs` — child relationships and completion state.
 - `session_inbox.rs` and `session_goals.rs` — durable continuation.
-- `run_recovery.rs`, `orchestrator_compaction.rs` — recovery markers.
+- `run_recovery.rs`, `session_compaction.rs` — recovery markers.
 - `permission_grants.rs` — remembered authorization persistence.
 - `review_intent.rs` — the messages a person typed to a session tree,
   recorded inside the transactions that deliver them to the model and read

@@ -3799,6 +3799,15 @@
         "operationId": "get_sessions_session_id",
         "parameters": [
           {
+            "name": "prompt_run_id",
+            "in": "query",
+            "description": "Optional accepted run to check for a retained committed prompt receipt.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "message_limit",
             "in": "query",
             "required": false,
@@ -11190,6 +11199,17 @@
             "format": "int32",
             "minimum": 0
           },
+          "run_id": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SessionRunId",
+                "description": "The run that produced this live-only output, when known."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "text": {
             "type": [
               "string",
@@ -11980,6 +12000,23 @@
         ],
         "properties": {
           "message": {
+            "type": "string"
+          }
+        }
+      },
+      "CommittedPromptEvidence": {
+        "type": "object",
+        "required": [
+          "run_id",
+          "canonical_index"
+        ],
+        "properties": {
+          "canonical_index": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "run_id": {
             "type": "string"
           }
         }
@@ -19587,7 +19624,7 @@
           },
           {
             "type": "object",
-            "description": "Live-only signal that the orchestrator transcript log gained rows\n(DB-direct transcript workset, step 3). `transcript_len` is the raw\nmerged transcript length after the append. Emitted at each transcript\ncommit point so subscribers refetch the store-backed transcript\nmid-run. Never persisted: the bus persists only Agent events.",
+            "description": "Live-only signal that the session transcript log gained rows\n(DB-direct transcript workset, step 3). `transcript_len` is the raw\nmerged transcript length after the append. Emitted at each transcript\ncommit point so subscribers refetch the store-backed transcript\nmid-run. Never persisted: the bus persists only Agent events.",
             "required": [
               "transcript_len",
               "type"
@@ -20186,6 +20223,17 @@
           {
             "type": "object",
             "properties": {
+              "committed_prompt": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/CommittedPromptEvidence",
+                    "description": "Historical commit evidence for the specifically requested run; it does\nnot claim the row still exists after this response was observed."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
               "lineage": {
                 "oneOf": [
                   {

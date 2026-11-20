@@ -22,7 +22,7 @@ FUTURE_RECOVERY_MESSAGE = (
     'Keep your configuration and data; do not delete or downgrade the store. No alternative store was selected.'
 )
 ENVIRONMENT = {'HOME', 'NAC_HOME', 'PATH', 'LANG', 'NAC_TELEMETRY',
-               'NAC_ORCHESTRATION', 'GIT_CONFIG_NOSYSTEM', 'GIT_CONFIG_GLOBAL',
+               'GIT_CONFIG_NOSYSTEM', 'GIT_CONFIG_GLOBAL',
                'BROWSER', 'MODELS_DEV_URL'}
 
 
@@ -87,7 +87,6 @@ def _declarations(config, receipt):
     require(all(isinstance(value, str) and '\0' not in value and len(value) <= 4096
                 for value in environment.values()), 'Invalid fixture environment')
     require(environment['HOME'] == home and environment['NAC_HOME'] == nac
-            and environment['NAC_ORCHESTRATION'] == '0'
             and environment['NAC_TELEMETRY'] == 'disabled'
             and environment['GIT_CONFIG_NOSYSTEM'] == '1'
             and environment['GIT_CONFIG_GLOBAL'] == '/dev/null'

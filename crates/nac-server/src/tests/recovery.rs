@@ -14,8 +14,6 @@ backend = "auto"
 api_key_env = ["invalid-selector-shape"]
 extra_headers = "invalid-header-shape"
 
-[worker]
-thread_timeout_secs = 7200
 "#,
     )
     .unwrap();

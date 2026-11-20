@@ -102,6 +102,7 @@ export type CommandAdmission<T> =
   | { status: "uncertain"; requestId: string; error: unknown };
 
 export interface SessionSnapshotOptions {
+  promptRunId?: string;
   messageLimit?: number;
   sessionEventLimit?: number;
   includeSessions?: boolean;
@@ -389,6 +390,7 @@ export class NacClient {
     options: SessionSnapshotOptions = {},
   ): Promise<SessionSnapshotResponse> {
     const params = new URLSearchParams();
+    if (options.promptRunId !== undefined) params.set("prompt_run_id", options.promptRunId);
     if (options.messageLimit !== undefined)
       params.set("message_limit", String(options.messageLimit));
     if (options.sessionEventLimit !== undefined) {

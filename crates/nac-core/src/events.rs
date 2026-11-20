@@ -562,7 +562,7 @@ pub enum SessionEvent {
     SnapshotSaved {
         session_id: String,
     },
-    /// Live-only signal that the orchestrator transcript log gained rows
+    /// Live-only signal that the session transcript log gained rows
     /// (DB-direct transcript workset, step 3). `transcript_len` is the raw
     /// merged transcript length after the append. Emitted at each transcript
     /// commit point so subscribers refetch the store-backed transcript
@@ -588,6 +588,9 @@ pub enum SessionEvent {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct AssistantStreamDelta {
+    /// The run that produced this live-only output, when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<SessionRunId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -602,6 +605,7 @@ pub struct AssistantStreamDelta {
 impl AssistantStreamDelta {
     pub(crate) fn from_model(delta: crate::model::ModelStreamDelta) -> Self {
         Self {
+            run_id: None,
             text: (!delta.text.is_empty()).then_some(delta.text),
             reasoning: (!delta.reasoning.is_empty()).then_some(delta.reasoning),
             reset: delta.reset,
@@ -1703,8 +1707,9 @@ impl EventSink {
     /// Live-only model output, for the transcript to render before the
     /// assistant message is committed. Bus-only: the stderr and channel sinks
     /// carry the durable event log, which deltas are deliberately not part of.
-    pub fn emit_assistant_delta(&self, delta: AssistantStreamDelta) {
+    pub fn emit_assistant_delta(&self, mut delta: AssistantStreamDelta) {
         if let Some(bus) = &self.bus {
+            delta.run_id = self.run_id.clone();
             bus.emit_assistant_delta(delta);
         }
     }

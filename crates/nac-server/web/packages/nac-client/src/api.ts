@@ -139,6 +139,7 @@ export interface ListSessionsOptions {
 }
 
 interface SessionSnapshotOptions {
+  promptRunId?: string;
   messageLimit?: number;
   sessionEventLimit?: number;
   includeSessions?: boolean;

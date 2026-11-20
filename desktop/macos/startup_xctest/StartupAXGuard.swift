@@ -128,10 +128,13 @@ enum StartupInteractionPolicy {
             id = request; target = candidate; return true
         }
     }
+    static func targetKey(kind: String, label: String) -> String {
+        ["field", "panel"].contains(kind) ? kind : kind + ":" + label
+    }
     struct Targets<Token: Equatable> {
         private var values: [String: Token] = [:]
         mutating func accept(_ key: String, target: Token) -> Bool {
-            guard values.count < 11 || values[key] != nil, values[key] == nil || values[key] == target else { return false }
+            guard values.count < 15 || values[key] != nil, values[key] == nil || values[key] == target else { return false }
             values[key] = target; return true
         }
     }
@@ -139,6 +142,18 @@ enum StartupInteractionPolicy {
                           root: CGRect, expectedRoot: CGRect) -> Bool {
         [point.x, point.y].allSatisfy { $0.isFinite } && point == expected
             && anchor == expectedAnchor && root == expectedRoot && anchor.contains(point)
+    }
+    static func focusedWithin<Token: Equatable>(focus: Token, owner: Token, pid: Int32, focused: Bool,
+        process: (Token) -> Int32?, parent: (Token) -> Token?) -> Bool {
+        guard pid > 0 && focused else { return false }
+        var node = focus
+        for _ in 0..<16 {
+            guard process(node) == pid else { return false }
+            if node == owner { return true }
+            guard let next = parent(node), next != node else { return false }
+            node = next
+        }
+        return false
     }
     static func target<Token: Equatable>(hit: Token, owner: Token, pid: Int32, anchor: CGRect,
         roles: Set<String>, label: String?, project: (Token) throws -> (Int32, String, CGRect, String?),
@@ -457,16 +472,15 @@ final class StartupAXReader {
                   let flag = axRead(focus, kAXFocusedAttribute) as? NSNumber,
                   CFGetTypeID(flag) == CFBooleanGetTypeID(), flag.boolValue else { throw StartupAXReceiptError.refused }
             if request.kind == "panel" {
-                var ancestor = focus, attached = false
-                for _ in 0..<16 {
-                    var ancestorPID: pid_t = 0
-                    guard AXUIElementGetPid(ancestor, &ancestorPID) == .success, ancestorPID == pid else { break }
-                    if CFEqual(ancestor, target) { attached = true; break }
-                    guard let raw = axRead(ancestor, kAXParentAttribute), CFGetTypeID(raw) == AXUIElementGetTypeID() else { break }
-                    let next = raw as! AXUIElement
-                    if CFEqual(next, ancestor) { break }
-                    ancestor = next
-                }
+                let attached = StartupInteractionPolicy.focusedWithin(focus: AXIdentity(element: focus),
+                    owner: AXIdentity(element: target), pid: pid, focused: flag.boolValue, process: { token in
+                        var actual: pid_t = 0
+                        return AXUIElementGetPid(token.element as! AXUIElement, &actual) == .success ? actual : nil
+                    }, parent: { token in
+                        guard let raw = self.axRead(token.element as! AXUIElement, kAXParentAttribute),
+                              CFGetTypeID(raw) == AXUIElementGetTypeID() else { return nil }
+                        return AXIdentity(element: raw)
+                    })
                 guard attached else { throw StartupAXReceiptError.refused }
             } else {
                 guard CFEqual(focus, target), let expected = request.value,
@@ -479,12 +493,30 @@ final class StartupAXReader {
     func interaction(_ request: StartupAXInteractionRequest, pid: pid_t) throws -> StartupAXInteraction {
         try request.validate()
         let target = try hitTarget(request, pid: pid)
-        let key = ["field", "message", "panel"].contains(request.kind) ? request.kind : request.kind + ":" + request.label
+        let key = StartupInteractionPolicy.targetKey(kind: request.kind, label: request.label)
         guard inputTargets.accept(key, target: AXIdentity(element: target)),
               interactionBinding.accept(request.id, target: AXIdentity(element: target)) else { throw StartupAXReceiptError.refused }
         if inputTargetIDs[key] == nil { inputTargetIDs[key] = UUID().uuidString }
         return StartupAXInteraction(request_id: request.id, target_id: inputTargetIDs[key]!,
             point: request.point, anchor_frame: request.anchor_frame, keyboard: request.keyboard, focus_checked: request.keyboard)
+    }
+
+    // A post-action panel guard proves a concrete globally reachable point on
+    // the same retained sheet. It grants no input or action lease.
+    func panelProof(pid: pid_t, rootFrame: CGRect) throws -> StartupAXPanelProof {
+        guard let projected, projected.0 == .panel, let panel = projected.2,
+              let frame = axFrame(panel), frame.intersects(rootFrame),
+              frame.width > 0, frame.height > 0 else { throw StartupAXReceiptError.refused }
+        let point = CGPoint(x: Double(Float(frame.midX)), y: Double(Float(frame.midY)))
+        guard point.x.isFinite, point.y.isFinite, frame.contains(point), rootFrame.contains(point) else { throw StartupAXReceiptError.refused }
+        let request = StartupAXInteractionRequest(schema: "", nonce: "", configuration_sha256: "", id: "", root_id: rootID,
+            entered_ns: "0", deadline_ns: "0", baseline_sequence: "0", refusal_generation: "0",
+            surface: "panel", kind: "panel", label: "", keyboard: true,
+            point: [point.x, point.y], anchor_frame: [frame.minX, frame.minY, frame.width, frame.height],
+            root_frame: [rootFrame.minX, rootFrame.minY, rootFrame.width, rootFrame.height], value: nil)
+        let hit = try hitTarget(request, pid: pid)
+        guard CFEqual(hit, panel) else { throw StartupAXReceiptError.refused }
+        return StartupAXPanelProof(panel_id: panelID, frame: request.anchor_frame, point: request.point)
     }
 
     func observe(pid: pid_t, frame: CGRect) throws -> StartupAXSurface {

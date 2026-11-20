@@ -33,7 +33,7 @@ and rich results. Individual families own their native operation and tests.
   atomic. Search/read behavior remains bounded and backend-consistent.
 - Native web retrieval is a tool/provider family. It receives credentials via
   the narrow command-environment contract and must not depend on managed-host
-  orchestration.
+  product coordination.
 
 ## Starting points
 
@@ -45,7 +45,7 @@ and rich results. Individual families own their native operation and tests.
 - `terminal_tools.rs`, `run_admission.rs` and `run_cancellation.rs` — process-tool
   adapter, generation-bound admission, and nested cancellation/mutation fencing.
 - `mcp_adapter.rs` — dynamic imported capability adapter.
-- `discovery.rs` and `discovery/` — glob/grep orchestration and traversal.
+- `discovery.rs` and `discovery/` — glob/grep scheduling and traversal.
 - `mutation.rs`, `mutation_remote.rs`, `mutation_tests.rs` — local/remote edit
   protocol and atomicity regressions.
 - `web.rs` / `web_tests.rs` — Exa schema, URL policy, transport and redaction.

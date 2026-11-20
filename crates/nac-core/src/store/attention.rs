@@ -325,8 +325,7 @@ fn metadata_with_connection(
     Ok(output)
 }
 
-/// Delegated topology of a session. Only traditional children are linked;
-/// managed orchestrators and legacy worker threads remain distinct and unlinked.
+/// Delegated topology of a session. Only traditional children are linked.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AttentionLineageKind {
     TraditionalChild,

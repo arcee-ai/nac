@@ -2,6 +2,7 @@ import { test, expect, showTerminalPanel } from "./fixture";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { prepareNewShell } from "./ui-readiness";
+import { continuationDiagnostics } from "./continuation-diagnostics.cjs";
 
 test("production workspace streams, asks permission and a question, and keeps Mac document on close", async ({
   candidate: c,
@@ -108,9 +109,19 @@ test("production workspace streams, asks permission and a question, and keeps Ma
   );
   await c.page.getByRole("button", { name: "JSON", exact: true }).click();
   await c.page.getByRole("button", { name: "Send answer", exact: true }).click();
-  await expect(
-    c.page.getByText("The selected JSON answer reached the exact continuation.", { exact: true }),
-  ).toBeVisible();
+  const continuationAnswer = "The selected JSON answer reached the exact continuation.";
+  const continuation = c.page.getByText(continuationAnswer, { exact: true });
+  try {
+    await expect(continuation).toBeVisible();
+  } catch (error) {
+    try {
+      const diagnostics = await continuationDiagnostics(continuation, c.endpoint, session, continuationAnswer);
+      console.error("continuation-failure-diagnostics", JSON.stringify(diagnostics));
+    } catch {
+      console.error("continuation-failure-diagnostics unavailable");
+    }
+    throw error;
+  }
   await expect
     .poll(async () => (await c.api(`/sessions/${session}/questions`))[0].continuation_state)
     .toBe("delivered");

@@ -257,8 +257,7 @@ fn persist_fork(
     fork.service_tier = source.service_tier;
     fork.project_id = source.project_id;
     // Session behavior is immutable identity. A conversation fork starts a
-    // new independent lifecycle, but it remains the same kind of top-level
-    // agent rather than silently reverting direct sessions to orchestrator.
+    // new independent lifecycle, while retaining the source session behavior.
     fork.behavior = source_behavior;
     fork.compaction_threshold = source.compaction_threshold;
     fork.automatic_compaction = source.automatic_compaction;

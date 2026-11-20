@@ -237,7 +237,7 @@ describe("unknown facets", () => {
   });
 });
 
-it("reports unsupported orchestration coverage as unavailable rather than a clear Inbox", () => {
+it("reports unsupported coverage as unavailable rather than a clear Inbox", () => {
   const model = derive(
     [session("legacy")],
     [

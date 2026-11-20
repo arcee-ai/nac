@@ -255,10 +255,13 @@ class QualificationFailureControls(unittest.TestCase):
             profiles = root / 'owned-profiles'; profiles.mkdir()
             final_error = OSError('inert final package verification fault')
             calls = []
+            timeouts = {}
             def run(argv, log, *args, **kwargs):
                 calls.append(log.name)
+                timeouts[log.name] = args[0]
                 if log.name == 'startup-package-after-ui.log': raise final_error
             replacements = {'require_checkout': Mock(), 'test_contract': Mock(), 'protocol_sources': Mock(),
+                'product_package_owner': Mock(return_value=root / 'package.py'),
                 'build_protocol': Mock(return_value=(root, {})), 'verify_protocol': Mock(return_value={}),
                 'materialize_project': Mock(return_value={}), 'observer_sources': Mock(return_value=[]),
                 'digest': Mock(return_value='a' * 64), 'run_case': Mock(side_effect=primary)}
@@ -271,4 +274,5 @@ class QualificationFailureControls(unittest.TestCase):
             replacements['run_case'].assert_called_once()
             self.assertEqual(replacements['run_case'].call_args.args[2], 'onboarding')
             self.assertEqual(calls[-1], 'startup-package-after-ui.log')
+            self.assertEqual(timeouts['startup-engine-build.log'], 1800)
             self.assertFalse(profiles.exists())

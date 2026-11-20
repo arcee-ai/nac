@@ -50,7 +50,7 @@ describe("chat session behavior identity", () => {
       <>
         <ChatSessionList
           sessions={[
-            session("orchestrator", "Plan the release", "direct"),
+            session("planning", "Plan the release", "direct"),
             session("direct", "Fix the parser", "direct"),
             session("hybrid", "Coordinate the migration", "direct"),
           ]}

@@ -230,7 +230,7 @@ pub struct SessionSnapshot {
     /// Custom HTTP headers captured at session creation time.
     /// Stored per-session so resume uses the same headers, not current config.
     pub extra_headers: BTreeMap<String, String>,
-    /// Absolute compaction threshold captured for this orchestrator session.
+    /// Absolute compaction threshold captured for this session.
     /// `None` disables new checkpoint generation; valid stored checkpoints still project.
     pub compaction_threshold: Option<u64>,
     pub automatic_compaction: bool,

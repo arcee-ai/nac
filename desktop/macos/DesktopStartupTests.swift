@@ -21,13 +21,13 @@ enum DesktopStartupTests {
         let config = nac.appendingPathComponent("config.toml")
         try Data("[storage]\nstore_path = 'selected store.db'\n".utf8).write(to: config)
         let options = try DesktopStartup.Options(arguments: ["--directory", home.path, "--command-path", "custom tools"])
-        let inherited = ["HOME": home.path, "NAC_HOME": "custom nac", "NAC_ORCHESTRATION": "true"]
+        let inherited = ["HOME": home.path, "NAC_HOME": "custom nac", "FIXTURE_ENVIRONMENT_CANARY": "true"]
         let finder = try await DesktopStartup.select(executable: executable, identity: identity, options: options, inherited: inherited)
         let terminal = try await DesktopStartup.select(executable: executable, identity: identity, options: options,
             inherited: inherited.merging(["PATH": "/custom tools:/usr/bin:/bin"]) { _, new in new })
         precondition(finder.cwd == terminal.cwd && finder.store == terminal.store)
         precondition(finder.store.lastPathComponent == "selected store.db")
-        precondition(finder.environment["NAC_ORCHESTRATION"] == "true")
+        precondition(finder.environment["FIXTURE_ENVIRONMENT_CANARY"] == "true")
         precondition(!FileManager.default.fileExists(atPath: finder.store.path))
         // Exercise the real Rust preflight without consulting the operator's
         // actual fallback home or creating/opening a personal store.

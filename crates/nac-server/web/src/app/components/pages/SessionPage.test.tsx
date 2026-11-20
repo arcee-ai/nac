@@ -56,7 +56,6 @@ vi.mock("@/app/features/terminal-selection/TerminalWorkspace", () => ({
   TerminalWorkspace: () => <div>terminal</div>,
 }));
 vi.mock("@/app/components/inspector/HistoryView", () => ({ HistoryView: () => null }));
-vi.mock("@/app/components/inspector/WorksetsView", () => ({ WorksetsView: () => null }));
 
 // Stands in for the Insights panel with state only a surviving instance keeps:
 // a local pick and a scrolled list.

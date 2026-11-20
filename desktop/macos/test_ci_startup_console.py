@@ -35,11 +35,16 @@ class StartupConsoleTests(unittest.TestCase):
         guard = main.split('func guardTarget() throws {', 1)[1].split('func dispatch(', 1)[0]
         self.assertEqual(guard.count('try guardWindow('), 1)
         self.assertIn('try guardWindow(ui, running: running, paths: paths, launch: launch, number: number)\n', guard)
+        post = main.split('func capturePostActionGuard() throws {', 1)[1].split('var guardTicket:', 1)[0]
+        self.assertEqual(post.count('try guardWindow('), 1)
+        self.assertIn('try guardWindow(ui, running: running, paths: paths, launch: launch, number: number)\n', post)
         dispatch = main.split('func dispatch(', 1)[1].split('func text(', 1)[0]
         self.assertEqual(dispatch.count('try guardTarget()'), 2)
-        # Each of the eleven configured-local inputs repeats the checked console
+        self.assertEqual(dispatch.count('try capturePostActionGuard()'), 1)
+        self.assertLess(dispatch.index('try capturePostActionGuard()'), dispatch.index('completeInteraction(request)'))
+        # Each of the fifteen configured-local inputs repeats the checked console
         # guard immediately before dispatch without adding an exported observation.
-        self.assertEqual(main.count('try guardWindow('), 2)
+        self.assertEqual(main.count('try guardWindow('), 3)
         self.assertEqual(main.count('record: false'), 1)
         self.assertIn('try guardWindow(ui, running: running, paths: paths, launch: launch, number: number, record: false)\n', dispatch)
         for anchor in ('try guardTarget()\n        if ["invalidConfig", "futureStore"]',
@@ -48,7 +53,7 @@ class StartupConsoleTests(unittest.TestCase):
             self.assertEqual(main.count(anchor), 1)
         proof = main.split('try guardTarget()\n        if let axClient', 1)[1].split('let expectedPrivateFailure', 1)[0]
         self.assertNotIn('try guardTarget()', proof)
-        self.assertIn('axClient.evidence.count == 26', proof)
+        self.assertIn('axClient.evidence.count == 34', proof)
         callback = main.split('}, window: { window.frame }, verify: {', 1)[1].split('})', 1)[0]
         self.assertEqual(callback.count('(try? guardTarget())'), 1)
         self.assertIn('Data(contentsOf: URL(fileURLWithPath: path))) == bytes', callback)
@@ -71,7 +76,7 @@ class StartupConsoleTests(unittest.TestCase):
     def test_current_title_verify_adds_exactly_one_guard_to_successful_normal_cases(self):
         if not os.environ.get('NAC_STARTUP_TEST_SOURCE'):
             self.skipTest('Optional local Q trace not supplied; required CI uses ci_startup_console_check')
-        for case, count in (('onboarding', 5), ('configuredLocal', 27), ('invalidConfig', 4), ('futureStore', 4)):
+        for case, count in (('onboarding', 5), ('configuredLocal', 35), ('invalidConfig', 4), ('futureStore', 4)):
             with self.subTest(case=case):
                 trace = self.source_trace(case)
                 self.assertEqual(len(trace), count)

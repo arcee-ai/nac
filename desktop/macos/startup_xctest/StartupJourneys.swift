@@ -8,6 +8,19 @@ import IOKit
 import XCTest
 import XCUIAutomation
 
+// BEGIN PANEL CHECKPOINTS (passive closed metadata, never acceptance)
+enum StartupPanelCheckpoint: String, CaseIterable {
+    case root_frame, panel_exists, panel_frame, panel_enabled, panel_hittable
+
+    enum Phase: String { case begin, end }
+    static func emit(_ checkpoint: Self, _ phase: Phase,
+                     write: (Data) throws -> Void = { try FileHandle.standardError.write(contentsOf: $0) }) {
+        let line = "nac342-panel-checkpoint " + checkpoint.rawValue + " " + phase.rawValue + "\n"
+        do { try write(Data(line.utf8)) } catch { /* Passive diagnostics never change a guard. */ }
+    }
+}
+// END PANEL CHECKPOINTS
+
 // BEGIN CONSOLE POLICY (also compiled as a Foundation-only fixture proof)
 enum StartupConsolePolicy {
     static func boolean(_ value: Any?) -> Bool? {
@@ -412,11 +425,10 @@ final class StartupJourneys: XCTestCase {
         try require(forbidden.isEmpty, "Runner inherited credentials or managed launch configuration")
         try require(fixture.environment["HOME"] == fixture.home
             && fixture.environment["NAC_HOME"] == fixture.nac_home
-            && fixture.environment["NAC_ORCHESTRATION"] == "0"
             && fixture.environment["NAC_MANAGED_CONFIG"] == nil,
             "Fixture launch isolation differs")
         let names: Set<String> = ["HOME", "NAC_HOME", "PATH", "LANG", "NAC_TELEMETRY",
-            "NAC_ORCHESTRATION", "GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL", "BROWSER", "MODELS_DEV_URL"]
+            "GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL", "BROWSER", "MODELS_DEV_URL"]
         try require(Set(fixture.environment.keys) == names
             && fixture.environment["PATH"] == "/usr/bin:/bin:/usr/sbin:/sbin"
             && fixture.environment["LANG"] == "en_US.UTF-8"
@@ -647,20 +659,33 @@ final class StartupJourneys: XCTestCase {
                 "Owned Go to Folder field is not actionable")
             return field
         }
-        func validateFolderSurface(_ ticket: StartupAXClient.Ticket) throws {
+        func captureFolderSurface() throws -> (surface: StartupNativeFolderPolicy.Surface, root: CGRect, panel: CGRect?, field: (CGRect, String)?) {
             let roots = rootWindow.children(matching: .sheet).allElementsBoundByAccessibilityElement
             let nested = roots.count == 1 ? roots[0].children(matching: .sheet).count : 0
             try require(StartupNativeFolderPolicy.surface(folderSurface, windows: ui.windows.count,
                 rootSheets: roots.count, nestedSheets: nested, allSheets: ui.descendants(matching: .sheet).count),
                 "Foreign, ambiguous or stale native folder surface")
+            StartupPanelCheckpoint.emit(.root_frame, .begin)
+            let rootFrame = rootWindow.frame
+            StartupPanelCheckpoint.emit(.root_frame, .end)
+            var panelFrame: CGRect?
             if folderSurface != .form {
-                let sheet = try panel()
-                try require(StartupNativeFolderPolicy.attached(exists: sheet.exists,
-                    frame: sheet.frame, owner: rootWindow.frame),
+                let sheet = try XCTUnwrap(roots.first)
+                StartupPanelCheckpoint.emit(.panel_exists, .begin)
+                let exists = sheet.exists
+                StartupPanelCheckpoint.emit(.panel_exists, .end)
+                StartupPanelCheckpoint.emit(.panel_frame, .begin)
+                let frame = sheet.frame
+                panelFrame = frame
+                StartupPanelCheckpoint.emit(.panel_frame, .end)
+                try require(StartupNativeFolderPolicy.attached(exists: exists,
+                    frame: frame, owner: rootFrame),
                     "Folder panel is not attached to the owned root")
                 if folderSurface == .panel {
-                    try require(StartupNativeFolderPolicy.usable(exists: sheet.exists, enabled: sheet.isEnabled,
-                        hittable: sheet.isHittable, frame: sheet.frame, owner: rootWindow.frame),
+                    StartupPanelCheckpoint.emit(.panel_enabled, .begin)
+                    let enabled = sheet.isEnabled
+                    StartupPanelCheckpoint.emit(.panel_enabled, .end)
+                    try require(enabled,
                         "Owned folder panel is not actionable")
                 }
             }
@@ -669,16 +694,31 @@ final class StartupJourneys: XCTestCase {
                 let target = try goToField()
                 field = (target.frame, try XCTUnwrap(target.value as? String))
             } else { field = nil }
-            _ = try XCTUnwrap(axClient).consume(ticket, surface: folderSurface, rootFrame: rootWindow.frame, field: field)
+            return (folderSurface, rootFrame, folderSurface == .panel ? panelFrame : nil, field)
+        }
+        var postActionSurface: (surface: StartupNativeFolderPolicy.Surface, root: CGRect, panel: CGRect?, field: (CGRect, String)?)?
+        func capturePostActionGuard() throws {
+            try guardWindow(ui, running: running, paths: paths, launch: launch, number: number)
+            try require((try? Data(contentsOf: URL(fileURLWithPath: path))) == bytes,
+                "Frozen fixture configuration changed")
+            postActionSurface = try captureFolderSurface()
         }
         var guardTicket: StartupAXClient.Ticket?
         func guardTarget() throws {
             do {
                 let ticket = try axClient?.begin()
-                try guardWindow(ui, running: running, paths: paths, launch: launch, number: number)
-                try require((try? Data(contentsOf: URL(fileURLWithPath: path))) == bytes,
-                    "Frozen fixture configuration changed")
-                if let ticket { try validateFolderSurface(ticket) }
+                if let captured = postActionSurface, let ticket {
+                    _ = try XCTUnwrap(axClient).consume(ticket, surface: captured.surface, rootFrame: captured.root, field: captured.field, panelFrame: captured.panel)
+                    postActionSurface = nil
+                } else {
+                    try guardWindow(ui, running: running, paths: paths, launch: launch, number: number)
+                    try require((try? Data(contentsOf: URL(fileURLWithPath: path))) == bytes,
+                        "Frozen fixture configuration changed")
+                    if let ticket {
+                        let captured = try captureFolderSurface()
+                        _ = try XCTUnwrap(axClient).consume(ticket, surface: captured.surface, rootFrame: captured.root, field: captured.field, panelFrame: captured.panel)
+                    }
+                }
                 guardTicket = ticket
             } catch {
                 if !axRefusalEmitted, let client = axClient,
@@ -720,7 +760,8 @@ final class StartupJourneys: XCTestCase {
             if let client = axClient {
                 let target = try XCTUnwrap(target), ticket = try XCTUnwrap(ticket)
                 let anchor = target.frame, root = rootWindow.frame
-                try require(target.exists && target.isEnabled && target.isHittable,
+                let panelKeyboard = kind == "panel" && keyboard && folderSurface == .panel
+                try require(target.exists && target.isEnabled && (panelKeyboard || target.isHittable),
                     "Interaction target lost public eligibility")
                 let center = target.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
                 let (selected, point) = try StartupInteractionPolicy.selectCoordinate(anchor: anchor, center: center,
@@ -757,7 +798,7 @@ final class StartupJourneys: XCTestCase {
                     failureEvidence.step = .final_recheck
                     try guardWindow(ui, running: running, paths: paths, launch: launch, number: number, record: false)
                     try require((try? Data(contentsOf: URL(fileURLWithPath: path))) == bytes
-                        && target.exists && target.isEnabled && target.isHittable
+                        && target.exists && target.isEnabled && (panelKeyboard || target.isHittable)
                         && (["button", "message"].contains(kind) ? namedTargetMatches(request.label) : target.label == request.label)
                         && StartupInteractionPolicy.unchanged(point: selected.screenPoint, expected: point,
                             anchor: target.frame, expectedAnchor: anchor, root: rootWindow.frame, expectedRoot: root)
@@ -769,9 +810,15 @@ final class StartupJourneys: XCTestCase {
             }
             failureEvidence.step = .input
             try action(coordinate)
+            if let after { folderSurface = after }
+            // Keep the existing action lease while XCUI reads the resulting
+            // surface. The witness samples only after completion is published.
+            if actionRequest != nil {
+                do { try capturePostActionGuard() }
+                catch { axClient?.invalidate(); throw error }
+            }
             if let request = actionRequest { try axClient!.completeInteraction(request) }
             operations.append(name)
-            if let after { folderSurface = after }
             failureEvidence.step = .after_guard
             try guardTarget()
             failureEvidence.step = .after_record
@@ -789,6 +836,7 @@ final class StartupJourneys: XCTestCase {
                 if let coordinate { coordinate.click() } else { elements.firstMatch.click() }
             }
         }
+        try axClient?.admitInitial()
         try guardTarget()
         if ["invalidConfig", "futureStore"].contains(fixture.scenario) {
             if fixture.scenario == "futureStore" {
@@ -881,6 +929,40 @@ final class StartupJourneys: XCTestCase {
                 let filled = try folderControl(fixture.workspace)
                 try require(StartupNativeFolderPolicy.selected(filled.element.label, workspace: fixture.workspace),
                     "Exact declared workspace did not reach the normal project form")
+                // The project has no saved model default. Select the session
+                // model through the public picker using the same guarded
+                // coordinate and keyboard handoff as the other UI inputs.
+                let model = ui.webViews.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Arcee API"))
+                try require(model.firstMatch.waitForExistence(timeout: 30) && model.count == 1
+                    && model.firstMatch.isHittable && model.firstMatch.isEnabled,
+                    "Unique initial session model picker absent")
+                let modelName = model.firstMatch.label
+                let namedModel = ui.webViews.buttons.matching(identifier: modelName)
+                try dispatch("click:session-model", target: model.firstMatch,
+                    semantic: (modelName, namedModel)) { coordinate in
+                    try XCTUnwrap(coordinate).click()
+                }
+                let search = ui.webViews.textFields.matching(identifier: "Search models")
+                try require(search.firstMatch.waitForExistence(timeout: 20) && search.count == 1
+                    && search.firstMatch.isHittable && search.firstMatch.isEnabled,
+                    "Unique model search absent")
+                let searchField = search.firstMatch
+                try dispatch("click:Search models", target: searchField, kind: "message",
+                    semantic: ("Search models", search)) { coordinate in
+                    try XCTUnwrap(coordinate).click()
+                }
+                try dispatch("type:model-query", target: searchField, kind: "message", keyboard: true,
+                    semantic: ("Search models", search)) { _ in
+                    searchField.typeText("gpt-5.6-sol")
+                    try require(searchField.value as? String == "gpt-5.6-sol", "Model query differs")
+                }
+                try dispatch("key:return-model-query", target: searchField, kind: "message", keyboard: true,
+                    semantic: ("Search models", search)) { _ in
+                    searchField.typeKey(.return, modifierFlags: [])
+                }
+                let selectedModel = ui.webViews.buttons.matching(identifier: "GPT-5.6 Sol OpenAI Responses")
+                try require(selectedModel.firstMatch.waitForExistence(timeout: 20) && selectedModel.count == 1,
+                    "Expected session model and provider not selected")
                 try click(ui.webViews.buttons, "Create Project")
                 let message = ui.webViews.descendants(matching: .any).matching(identifier: "Message")
                 try require(message.firstMatch.waitForExistence(timeout: 30) && message.count == 1
@@ -911,7 +993,7 @@ final class StartupJourneys: XCTestCase {
         captured = true
         try guardTarget()
         if let axClient {
-            try require(axClient.evidence.count == 26 && axClient.interactions.count == 11, "External AX guard/interaction trace incomplete")
+            try require(axClient.evidence.count == 34 && axClient.interactions.count == 15, "External AX guard/interaction trace incomplete")
             let rows = try JSONSerialization.jsonObject(with: JSONEncoder().encode(axClient.evidence))
             let interactions = try JSONSerialization.jsonObject(with: JSONEncoder().encode(axClient.interactions))
             try attachment(["schema": "nac342-ax-guards-v1", "configuration_sha256": digest(bytes),

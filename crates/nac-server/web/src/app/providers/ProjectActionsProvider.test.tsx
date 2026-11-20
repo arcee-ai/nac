@@ -55,7 +55,7 @@ function Harness() {
   );
 }
 
-function tree(_orchestration = false, path = "/project/project-1") {
+function tree(path = "/project/project-1") {
   return (
     <MemoryRouter initialEntries={[path]}>
       <>
@@ -96,7 +96,7 @@ it.each([
   [{ summary: { session_id: "s", project_id: "project-1" }, lineage: {} }, null],
 ])("binds the current session source only within its project and ownership", (entry, expected) => {
   fakes.sessions = [entry];
-  render(tree(false, "/session/s/delegated"));
+  render(tree("/session/s/delegated"));
   fireEvent.click(screen.getByRole("button", { name: "New session" }));
   const state = JSON.parse(screen.getByTestId("navigation-state").textContent!);
   expect(state.sourceSessionId ?? null).toBe(expected);
@@ -118,12 +118,12 @@ describe("project actions", () => {
   });
 });
 
-it("keeps hidden orchestration navigation memory while pruning genuinely deleted sessions", () => {
+it("keeps direct session navigation memory while pruning deleted sessions", () => {
   fakes.projects = [{ project_id: "project-1" }];
-  fakes.sessions = ["direct", "orchestrator", "direct-with-orchestrator"].map((behavior) => ({
-    summary: { session_id: behavior, behavior, project_id: "project-1" },
+  fakes.sessions = ["first", "second", "third"].map((session_id) => ({
+    summary: { session_id, behavior: "direct", project_id: "project-1" },
   }));
-  const ids = ["orchestrator", "direct", "direct-with-orchestrator", "deleted"];
+  const ids = ["first", "second", "third", "deleted"];
   for (const id of ids) {
     dismissChatTab(id);
     toggleSessionNavigationPin(id);
@@ -144,6 +144,6 @@ it("keeps hidden orchestration navigation memory while pruning genuinely deleted
     );
   };
   assertRetained();
-  view.rerender(tree(true));
+  view.rerender(tree());
   assertRetained();
 });

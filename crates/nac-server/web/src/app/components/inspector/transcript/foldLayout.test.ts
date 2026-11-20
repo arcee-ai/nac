@@ -2,7 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import type { InsightSegment, ModelTurnItem } from "@/app/features/insights/model/types";
 
-import { formatWorkDuration, layoutModelTurn, settledFoldLabel, workSentence } from "./foldLayout";
+import {
+  formatWorkDuration,
+  keepWorkFoldKeys,
+  layoutModelTurn,
+  settledFoldLabel,
+  workSentence,
+} from "./foldLayout";
 import { liveStepLabel, liveTurnLabel, stepLabel } from "./stepLabels";
 
 function tool(
@@ -246,4 +252,61 @@ describe("subagent work rows", () => {
     segment.presentation.status = "error";
     expect(stepLabel(segment)).toMatchObject({ verb: "Subagent request failed", status: "failed" });
   });
+});
+
+it("retains only one-to-one overlapping fold identity", () => {
+  const fold = (key: string, steps: string[]) => ({
+    kind: "fold" as const,
+    key,
+    groupIds: [],
+    steps: steps.map((step) => ({ kind: "note" as const, key: step, text: "note" })),
+  });
+  const keyOf = (item: ReturnType<typeof keepWorkFoldKeys>[number]) =>
+    item.kind === "session" ? item.id : item.key;
+  const old = fold("old", ["thought"]);
+  const differentText = {
+    ...old,
+    key: "new",
+    steps: [{ kind: "note" as const, key: "thought", text: "different" }],
+  };
+  expect(keyOf(keepWorkFoldKeys([differentText], [old])[0])).toBe("new");
+  const differentKind = {
+    ...old,
+    key: "new",
+    steps: [
+      {
+        kind: "segment" as const,
+        key: "thought",
+        groupId: "g",
+        segment: {
+          kind: "reasoning" as const,
+          key: "thought",
+          text: "note",
+          durationMs: null,
+          streaming: true,
+        },
+      },
+    ],
+  };
+  expect(keyOf(keepWorkFoldKeys([differentKind], [old])[0])).toBe("new");
+  expect(keyOf(keepWorkFoldKeys([fold("new", ["tool", "thought"])], [old])[0])).toBe("old");
+  expect(keyOf(keepWorkFoldKeys([fold("new", ["other"])], [old])[0])).toBe("new");
+  expect(
+    keepWorkFoldKeys([fold("a", ["one"]), fold("b", ["two"])], [fold("old", ["one", "two"])]).map(
+      keyOf,
+    ),
+  ).toEqual(["a", "b"]);
+  expect(
+    keyOf(
+      keepWorkFoldKeys(
+        [fold("new", ["one", "two"])],
+        [fold("old-a", ["one"]), fold("old-b", ["two"])],
+      )[0],
+    ),
+  ).toBe("new");
+  expect(
+    keyOf(
+      keepWorkFoldKeys([fold("new", ["one"]), fold("old", ["other"])], [fold("old", ["one"])])[0],
+    ),
+  ).toBe("new");
 });

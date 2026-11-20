@@ -21,8 +21,10 @@ export function reverseDirectEvidence(workflow, name) {
     const lane = steps.find(step => step.name === 'Preserve source, size, and lifecycle contracts on every PR');
     assert.deepEqual(lane, {
       name: 'Preserve source, size, and lifecycle contracts on every PR',
-      run: 'make test-nac-guide\nmake test-source-size test-source-workflow test-source-binary\nmake test-durability test-managed-load test-managed-image-contract\n',
+      run: 'make test-nac-guide\nmake test-source-size test-direct-retirement test-source-workflow test-source-binary\nmake test-durability test-managed-load test-managed-image-contract\n',
     });
+    // Restore only the checked addition when comparing historical workflows.
+    lane.run = 'make test-nac-guide\nmake test-source-size test-source-workflow test-source-binary\nmake test-durability test-managed-load test-managed-image-contract\n';
     const clearIndex = removeExact(steps, {
       name: 'Clear cached load evidence', id: 'evidence_cleanup', run: 'rm -rf target/direct-load',
     });

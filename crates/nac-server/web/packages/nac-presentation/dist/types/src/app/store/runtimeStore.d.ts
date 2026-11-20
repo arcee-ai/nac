@@ -40,12 +40,22 @@ export interface RuntimeState {
      */
     streamSettled: boolean;
     streamPredatesPrompt: boolean;
+    /** Run identity only when every retained delta carries that same identity. */
+    streamRunId: string | null;
+    streamIdentityEpoch: number;
     /**
      * Prompt shown in the chat from the moment Send is pressed until the
      * snapshot (or active_run) catches up. Without this the model pill appears
      * first and jumps down when the user bubble finally lands.
      */
     optimisticUserPrompt: string | null;
+    optimisticPromptToken: number | null;
+    optimisticPromptEpoch: number | null;
+    optimisticPromptRunId: string | null;
+    optimisticObservedRunId: string | null;
+    optimisticIdentityTainted: boolean;
+    optimisticPromptUncertain: boolean;
+    dismissedPromptRunIds: string[];
     /**
      * What the current run has spent so far, summed from the usage events the
      * model calls emit. The snapshot only learns the run's usage once the run
@@ -80,15 +90,21 @@ export interface RuntimeState {
      */
     cancelArmed: boolean;
 }
+export declare const MAX_DISMISSED_PROMPT_RUNS = 128;
 export type RefreshKind = "none" | "messages" | "snapshot" | "replace-snapshot";
 /** One presentation lifetime; hosted preferences are ephemeral. */
 export declare function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem">): {
     release: () => void;
     runtimeStore: import("../lib/store").Store<RuntimeState>;
+    runtimeIdentity: number;
     captureRuntimeActivation: (sessionId: string) => () => boolean;
     resetRuntime: (sessionId: string | null) => void;
     liftSessionSpend: (persisted: TokenUsage | null | undefined) => void;
-    setOptimisticUserPrompt: (prompt: string | null, settlement?: "rejected" | "committed") => void;
+    setOptimisticUserPrompt: (prompt: string | null, settlement?: "rejected" | "committed") => number | null;
+    bindOptimisticPrompt: (token: number, runId: string) => void;
+    markOptimisticPromptUncertain: (token: number) => void;
+    dismissOptimisticPrompt: (token: number) => void;
+    retireOptimisticPrompt: (token: number) => void;
     applyAssistantDelta: (delta: AssistantStreamDelta) => void;
     setStreamStatus: (streamStatus: StreamStatus) => void;
     syncRunFromSnapshot: (activeRun: ActiveRunSnapshot | null | undefined) => void;
@@ -217,7 +233,7 @@ export declare function createRuntimeStore(_storage?: Pick<Storage, "getItem" | 
     useOptimisticUserPrompt: () => string | null;
     getRuntimeState: () => RuntimeState;
 };
-export declare const release: () => void, runtimeStore: import("../lib/store").Store<RuntimeState>, captureRuntimeActivation: (sessionId: string) => () => boolean, resetRuntime: (sessionId: string | null) => void, liftSessionSpend: (persisted: TokenUsage | null | undefined) => void, setOptimisticUserPrompt: (prompt: string | null, settlement?: "rejected" | "committed") => void, applyAssistantDelta: (delta: AssistantStreamDelta) => void, setStreamStatus: (streamStatus: StreamStatus) => void, syncRunFromSnapshot: (activeRun: ActiveRunSnapshot | null | undefined) => void, pushLocalEvent: (kind: RuntimeEventKind, text: string, isError?: boolean) => void, requestRunCancel: () => RuntimeState, restoreRunCancel: (previous: RuntimeState) => void, finishRunCancel: () => void, applyEnvelope: (envelope: SessionEventEnvelope) => RefreshKind, useRunning: (sessionId: string | null) => boolean, useCancelArmed: (sessionId: string | null) => boolean, useActivity: () => string, useRunError: () => string | null, useRunFailure: () => {
+export declare const release: () => void, runtimeStore: import("../lib/store").Store<RuntimeState>, runtimeIdentity: number, captureRuntimeActivation: (sessionId: string) => () => boolean, resetRuntime: (sessionId: string | null) => void, liftSessionSpend: (persisted: TokenUsage | null | undefined) => void, setOptimisticUserPrompt: (prompt: string | null, settlement?: "rejected" | "committed") => number | null, bindOptimisticPrompt: (token: number, runId: string) => void, markOptimisticPromptUncertain: (token: number) => void, dismissOptimisticPrompt: (token: number) => void, retireOptimisticPrompt: (token: number) => void, applyAssistantDelta: (delta: AssistantStreamDelta) => void, setStreamStatus: (streamStatus: StreamStatus) => void, syncRunFromSnapshot: (activeRun: ActiveRunSnapshot | null | undefined) => void, pushLocalEvent: (kind: RuntimeEventKind, text: string, isError?: boolean) => void, requestRunCancel: () => RuntimeState, restoreRunCancel: (previous: RuntimeState) => void, finishRunCancel: () => void, applyEnvelope: (envelope: SessionEventEnvelope) => RefreshKind, useRunning: (sessionId: string | null) => boolean, useCancelArmed: (sessionId: string | null) => boolean, useActivity: () => string, useRunError: () => string | null, useRunFailure: () => {
     attempt_count: number;
     diagnostic: string;
     http_status?: number | null;
