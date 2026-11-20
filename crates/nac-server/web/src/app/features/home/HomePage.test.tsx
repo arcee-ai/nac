@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -20,12 +20,17 @@ const fakes = vi.hoisted(() => ({
   mobile: false,
   managed: false,
   create: vi.fn(),
+  createProject: vi.fn(),
+  newChat: vi.fn(),
+  refetchProjects: vi.fn(),
   addRepository: vi.fn(),
 }));
 
 vi.mock("@/app/services/queries", () => ({
-  useProjects: () => ({ refetch: vi.fn(), ...fakes.projects }),
+  useProjects: () => ({ refetch: fakes.refetchProjects, ...fakes.projects }),
   useSessions: () => ({ refetch: vi.fn(), ...fakes.sessions }),
+  useCreateProject: () => ({ mutateAsync: fakes.createProject, isPending: false }),
+  useStoreInfo: () => ({ data: { root_cwd: "/fixture/launch-folder" } }),
 }));
 vi.mock("@/app/hooks/useMediaQuery", () => ({ useIsMobile: () => fakes.mobile }));
 vi.mock("@/app/features/managed/controller/useManagedHost", () => ({
@@ -33,13 +38,12 @@ vi.mock("@/app/features/managed/controller/useManagedHost", () => ({
     isManaged: fakes.managed,
     addRepository: fakes.addRepository,
     openSettings: vi.fn(),
-    status: { model_ready: true, github_status: "connected" },
+    status: { managed: fakes.managed, model_ready: true, github_status: "connected" },
   }),
 }));
 vi.mock("@/app/providers/ProjectActionsProvider", () => ({
-  useProjectActions: () => ({ create: fakes.create }),
+  useProjectActions: () => ({ create: fakes.create, newChat: fakes.newChat }),
 }));
-vi.mock("./useDefaultProject", () => ({ useDefaultProject: () => false }));
 vi.mock("./HomeComposer", () => ({ HomeComposer: () => <div data-testid="composer" /> }));
 vi.mock("./NeedsYouLine", () => ({ NeedsYouLine: () => null }));
 vi.mock("@/app/components/LeftSidebar", () => ({ LeftSidebar: () => null }));
@@ -77,6 +81,9 @@ beforeEach(() => {
   fakes.mobile = false;
   fakes.managed = false;
   fakes.create.mockReset();
+  fakes.createProject.mockReset();
+  fakes.newChat.mockReset();
+  fakes.refetchProjects.mockReset();
   fakes.addRepository.mockReset();
 });
 afterEach(() => {
@@ -134,6 +141,35 @@ describe("Home below the composer", () => {
     for (const label of labels) expect(screen.getByRole("button", { name: label })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: labels.at(-1) }));
     expect(fakes.create).toHaveBeenCalledOnce();
+  });
+
+  it("creates the launch-folder project only after the user chooses it and opens its composer", async () => {
+    fakes.projects = { data: { projects: [] }, isPending: false, error: null };
+    fakes.createProject.mockResolvedValue(project);
+    mount();
+    expect(fakes.createProject).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Use launch folder" }));
+    await waitFor(() => expect(fakes.newChat).toHaveBeenCalledWith("p1"));
+    expect(fakes.createProject).toHaveBeenCalledExactlyOnceWith({ cwd: "/fixture/launch-folder" });
+  });
+
+  it("keeps project choices available after a failed launch-folder request", async () => {
+    fakes.projects = { data: { projects: [] }, isPending: false, error: null };
+    fakes.createProject.mockRejectedValue(new Error("Folder unavailable"));
+    mount();
+    fireEvent.click(screen.getByRole("button", { name: "Use launch folder" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("Folder unavailable");
+    expect(fakes.newChat).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Get Started" }));
+    expect(fakes.create).toHaveBeenCalledOnce();
+  });
+
+  it("keeps managed onboarding on its repository and existing-path journeys", () => {
+    fakes.managed = true;
+    fakes.projects = { data: { projects: [] }, isPending: false, error: null };
+    mount();
+    expect(screen.queryByRole("button", { name: "Use launch folder" })).toBeNull();
+    expect(fakes.createProject).not.toHaveBeenCalled();
   });
 
   it("is not offered while projects are loading", () => {

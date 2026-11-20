@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Button, ButtonContent, ButtonSize, ButtonVariant } from "@/app/atoms";
 import { LeftSidebar } from "@/app/components/LeftSidebar";
@@ -11,15 +11,15 @@ import { visibleSessions } from "@/app/features/ui-policy/policy";
 import { useIsMobile } from "@/app/hooks/useMediaQuery";
 import { cn } from "@/app/lib/cn";
 import { projectListItems } from "@/app/lib/projects";
+import { toRunError } from "@/app/lib/providerError";
 import { useProjectActions } from "@/app/providers/ProjectActionsProvider";
 import { errorMessage } from "@/app/providers/ToastProvider";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
-import { useProjects, useSessions } from "@/app/services/queries";
+import { useCreateProject, useProjects, useSessions, useStoreInfo } from "@/app/services/queries";
 
 import { AddProjectAction } from "./AddProjectAction";
 import { HomeComposer } from "./HomeComposer";
 import { NeedsYouLine } from "./NeedsYouLine";
-import { useDefaultProject } from "./useDefaultProject";
 
 function LoadingHome() {
   return (
@@ -43,6 +43,10 @@ export function HomePage() {
   const projectActions = useProjectActions();
   const sessionsQuery = useSessions();
   const projectsQuery = useProjects();
+  const { data: storeInfo } = useStoreInfo();
+  const createProject = useCreateProject();
+  const creatingLaunchProject = useRef(false);
+  const [launchProjectError, setLaunchProjectError] = useState<string | null>(null);
   const sessions = useMemo(
     () => visibleSessions(policy, sessionsQuery.data ?? []),
     [sessionsQuery.data, policy],
@@ -56,12 +60,27 @@ export function HomePage() {
     if (data) trackAttention(data, null);
   }, [data, trackAttention]);
 
-  const seedingDefault = useDefaultProject();
-  const loading = projectsQuery.isPending || sessionsQuery.isPending || seedingDefault;
+  const loading = projectsQuery.isPending || sessionsQuery.isPending;
   const error = projectsQuery.error ?? sessionsQuery.error;
   const empty = !loading && !error && items.length === 0;
   // Without the project list, neither "no projects" nor a project choice is true.
   const projectsKnown = !loading && !projectsQuery.error;
+  const launchFolder = managed.status?.managed === false ? storeInfo?.root_cwd : undefined;
+  const useLaunchFolder = async () => {
+    if (!launchFolder || creatingLaunchProject.current) return;
+    creatingLaunchProject.current = true;
+    setLaunchProjectError(null);
+    try {
+      const project = await createProject.mutateAsync({ cwd: launchFolder });
+      await projectActions.newChat(project.project_id);
+    } catch (cause) {
+      // Another tab may have created the project while this request was running.
+      await projectsQuery.refetch();
+      setLaunchProjectError(errorMessage(toRunError(cause)));
+    } finally {
+      creatingLaunchProject.current = false;
+    }
+  };
 
   const retry = () => {
     void projectsQuery.refetch();
@@ -81,6 +100,10 @@ export function HomePage() {
           <ProjectsEmptyState
             mobile={isMobile}
             onStart={projectActions.create}
+            launchFolder={launchFolder}
+            launchFolderPending={createProject.isPending}
+            launchFolderError={launchProjectError}
+            onUseLaunchFolder={() => void useLaunchFolder()}
             onAddRepository={managed.isManaged ? managed.addRepository : undefined}
             onManagedSettings={managed.isManaged ? managed.openSettings : undefined}
             modelReady={managed.status?.model_ready}
