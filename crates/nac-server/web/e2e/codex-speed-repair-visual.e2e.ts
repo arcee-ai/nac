@@ -1,6 +1,7 @@
 import path from "node:path";
 import type { APIRequestContext, Page, Request, Route } from "@playwright/test";
 import { createDirectSession, expect, test, type EmbeddedHarness } from "./harness";
+import { ScriptGate } from "./scripted-provider";
 import { modelChip, openModelCatalog, openModelSettings } from "./speed-controls";
 
 test.use({ orchestration: "0", codexCatalogFixture: true });
@@ -45,16 +46,15 @@ for (const mobile of [false, true]) {
     const before = await (await request.get(configUrl)).json();
     const isConfigWrite = (write: Request) =>
       write.url() === configUrl && write.method() === "PATCH";
-    const readStarted = Promise.withResolvers<void>();
-    const releaseRead = Promise.withResolvers<void>();
+    const readback = new ScriptGate();
     let writes = 0;
     page.on("request", (write) => {
       if (isConfigWrite(write)) writes++;
     });
     const holdRead = async (route: Route) => {
       if (route.request().method() !== "GET" || writes === 0) return route.fallback();
-      readStarted.resolve();
-      await releaseRead.promise;
+      readback.markAccepted();
+      await readback.waitForRelease();
       await route.fallback().catch(() => {});
     };
     await page.route(configUrl, holdRead);
@@ -63,7 +63,7 @@ for (const mobile of [false, true]) {
       const saved = page.waitForResponse((response) => isConfigWrite(response.request()));
       await page.getByRole("menuitemradio", { name: "Fast", exact: true }).click();
       expect((await saved).status()).toBe(200);
-      await readStarted.promise;
+      await readback.accepted;
       await expect(page.getByText(/Reload before editing again/)).toBeVisible({
         timeout: 15_000,
       });
@@ -74,7 +74,7 @@ for (const mobile of [false, true]) {
       expect(committed.service_tier).toBe("fast");
       expect(committed.config_version).toBe(before.config_version + 1);
     } finally {
-      releaseRead.resolve();
+      readback.release();
       await page.unroute(configUrl, holdRead);
     }
     await expect(modelChip(page)).toHaveAccessibleName(/Fast speed/);
