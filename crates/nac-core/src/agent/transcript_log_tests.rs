@@ -22,7 +22,7 @@ pub(super) fn transcript_test_agent(
         AgentConfig {
             store_path,
             session_id: session_id.map(str::to_string),
-            orchestrator_compaction_threshold: None,
+            compaction_threshold: None,
             initial_messages: Vec::new(),
             event_sink: EventSink::none(),
             workspace_cwd: PathBuf::from("."),
@@ -444,10 +444,10 @@ async fn restore_recovers_a_non_contiguous_log_tail() {
     ];
     store_snapshot_messages(&store_path, &blob);
     for (idx, content) in [(8, "orphaned tail"), (9, "later orphan")] {
-        crate::store::append_thread_event(
+        crate::store::append_session_event(
             &store_path,
             "session",
-            crate::store::ORCHESTRATOR_STEERING_TARGET,
+            crate::store::TRANSCRIPT_EVENT_TARGET,
             &crate::store::encode_transcript_log_entry(idx, &user_message(content)).unwrap(),
         )
         .unwrap();
@@ -508,10 +508,10 @@ async fn gap_recovery_normalizes_a_dangling_turn_in_the_snapshot() {
         tool_call_assistant(&["call-1"]),
     ];
     store_snapshot_messages(&store_path, &blob);
-    crate::store::append_thread_event(
+    crate::store::append_session_event(
         &store_path,
         "session",
-        crate::store::ORCHESTRATOR_STEERING_TARGET,
+        crate::store::TRANSCRIPT_EVENT_TARGET,
         &crate::store::encode_transcript_log_entry(8, &user_message("orphaned tail")).unwrap(),
     )
     .unwrap();
@@ -968,7 +968,7 @@ async fn fenced_prompt_failed_reload_retains_canonical_input_on_retry() {
         // A real SQLite read failure after commit, without altering the row.
         let connection = crate::store::open_runtime_connection(&path).unwrap();
         connection
-            .execute_batch("ALTER TABLE thread_events RENAME TO unavailable_events")
+            .execute_batch("ALTER TABLE session_events RENAME TO unavailable_events")
             .unwrap();
         if cancelling {
             agent
@@ -982,7 +982,7 @@ async fn fenced_prompt_failed_reload_retains_canonical_input_on_retry() {
         assert_eq!(agent.pending_log_end, Some(2));
         assert!(agent.prompt_commit_pending);
         connection
-            .execute_batch("ALTER TABLE unavailable_events RENAME TO thread_events")
+            .execute_batch("ALTER TABLE unavailable_events RENAME TO session_events")
             .unwrap();
         if cancelling {
             agent
@@ -1048,7 +1048,7 @@ async fn fenced_prompt_definitive_error_clears_pending_state() {
     let path = test_store_path("prompt_definitive_error");
     let (mut agent, _lease) = fenced_prompt_agent(&path);
     crate::store::open_runtime_connection(&path).unwrap().execute_batch(
-        "CREATE TRIGGER reject_prompt BEFORE INSERT ON thread_events BEGIN SELECT RAISE(ABORT, 'prompt rejected'); END;",
+        "CREATE TRIGGER reject_prompt BEFORE INSERT ON session_events BEGIN SELECT RAISE(ABORT, 'prompt rejected'); END;",
     ).unwrap();
     let run_id = SessionRunId::from_stored("prompt-run".into());
     agent
@@ -1570,7 +1570,7 @@ async fn steering_log_failure_leaves_claim_retryable_without_acknowledgement() {
     connection
         .execute_batch(
             "CREATE TRIGGER fail_steering_log_append
-             BEFORE INSERT ON thread_events
+             BEFORE INSERT ON session_events
              WHEN NEW.event_json LIKE '%steer now%'
              BEGIN
                  SELECT RAISE(ABORT, 'injected steering log failure');
@@ -1665,7 +1665,7 @@ async fn cancellation_adopts_result_after_aborting_failed_atomic_steering_commit
     trigger
         .execute_batch(
             "CREATE TRIGGER fail_aborted_steering_log_append
-             BEFORE INSERT ON thread_events
+             BEFORE INSERT ON session_events
              WHEN NEW.event_json LIKE '%steer while cancelling%'
              BEGIN
                  SELECT RAISE(ABORT, 'injected aborted steering failure');
@@ -1740,7 +1740,7 @@ async fn send_emits_transcript_appended_at_each_commit_point_live_only() {
     let mut agent =
         direct_transcript_agent(store_path.clone(), "session", Some(server.base_url.clone()));
     store_snapshot_messages(&store_path, &agent.messages);
-    let bus = crate::events::SessionEventBus::with_thread_event_store(
+    let bus = crate::events::SessionEventBus::with_session_event_store(
         Some("session".to_string()),
         store_path.clone(),
     );
@@ -1766,8 +1766,9 @@ async fn send_emits_transcript_appended_at_each_commit_point_live_only() {
     // intentionally persists only the sanitized top-level tool lifecycle so
     // primary transcript detail survives reload.
     assert_eq!(read_log(&store_path, "session").len(), 5);
-    let thread_events = crate::store::load_all_thread_events(&store_path, "session", 100).unwrap();
-    let primary = thread_events
+    let session_events =
+        crate::store::load_all_session_events(&store_path, "session", 100).unwrap();
+    let primary = session_events
         .get(crate::events::PRIMARY_TOOL_EVENT_TARGET)
         .expect("sanitized primary tool rows should be durable");
     assert_eq!(primary.len(), 2);

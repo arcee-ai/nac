@@ -141,7 +141,7 @@ async function assertCanaryAbsentFromRetainedState(
   sessionId: string,
 ): Promise<void> {
   const surfaces = [
-    `/sessions/${sessionId}?include_system=true&message_limit=200&thread_event_limit=200`,
+    `/sessions/${sessionId}?include_system=true&message_limit=200&session_event_limit=200`,
     `/sessions/${sessionId}/messages?include_system=true&limit=200`,
     `/sessions/${sessionId}/events?limit=500`,
   ];

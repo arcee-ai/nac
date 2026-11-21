@@ -1,5 +1,4 @@
-//! Protocol-independent session operations shared by the outgoing MCP adapter
-//! and the native direct-with-orchestrator controller.
+//! Protocol-independent session operations used by the outgoing MCP adapter.
 
 use anyhow::{anyhow, Result};
 use nac_core::session_service::{
@@ -13,11 +12,11 @@ use crate::{
 };
 
 #[derive(Clone)]
-pub(crate) struct OrchestrationOperations {
+pub(crate) struct SessionOperations {
     manager: SessionManager,
 }
 
-impl OrchestrationOperations {
+impl SessionOperations {
     pub(crate) fn new(manager: SessionManager) -> Self {
         Self { manager }
     }

@@ -81,7 +81,7 @@ export function TaskLaunchModal({
         reasoning_effort: model.reasoning_effort,
         ...(model.service_tier !== undefined ? { service_tier: model.service_tier } : {}),
         extra_headers: model.extra_headers,
-        orchestrator_compaction_threshold: model.orchestrator_compaction_threshold ?? null,
+        compaction_threshold: model.compaction_threshold ?? null,
       },
       git_ref: gitRef.trim() || null,
       default_ref: defaultRef ? null : branch.trim(),

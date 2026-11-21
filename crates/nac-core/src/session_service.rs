@@ -156,7 +156,7 @@ impl From<&SessionSnapshot> for ResponseTimingSnapshot {
         let last_token_usage = snapshot.token_usages.last().cloned().flatten();
 
         // Sum input/output/cache tokens across all non-None per-response
-        // entries.  `orchestrator_context_tokens` is a context-window size,
+        // entries.  `context_tokens` is a context-window size,
         // not a cumulative metric, so it is set to the last non-None entry's
         // value rather than summed.
         let cumulative_token_usage = {
@@ -172,14 +172,11 @@ impl From<&SessionSnapshot> for ResponseTimingSnapshot {
                 for u in &non_none {
                     cumulative += (*u).clone();
                 }
-                cumulative.orchestrator_context_tokens = non_none
-                    .last()
-                    .map(|u| u.orchestrator_context_tokens)
-                    .unwrap_or(0);
+                cumulative.context_tokens = non_none.last().map(|u| u.context_tokens).unwrap_or(0);
                 if let Some(unattributed) = &snapshot.unattributed_token_usage {
                     cumulative.add_cost_saturating(unattributed);
-                    if unattributed.orchestrator_context_tokens != 0 {
-                        cumulative.replace_context(unattributed.orchestrator_context_tokens);
+                    if unattributed.context_tokens != 0 {
+                        cumulative.replace_context(unattributed.context_tokens);
                     }
                 }
                 Some(cumulative)
@@ -268,9 +265,9 @@ pub struct SessionFrontendSnapshot {
     /// delegated topology and the web never needs raw transcript payloads.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub primary_tool_events: Vec<AgentEvent>,
-    pub thread_event_boundary: SessionEventBoundary,
+    pub session_event_boundary: SessionEventBoundary,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub thread_event_diagnostics: Vec<ThreadEventDecodeDiagnostic>,
+    pub session_event_diagnostics: Vec<SessionEventDecodeDiagnostic>,
     /// Conversation forks created from a model turn in this session.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub forks: Vec<crate::store::SessionForkLink>,
@@ -296,7 +293,7 @@ pub enum FrontendSnapshotMessages {
 /// snapshot. The default exactly preserves the historical snapshot contract.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FrontendSnapshotLoadOptions {
-    pub thread_event_limit: usize,
+    pub session_event_limit: usize,
     pub include_sessions: bool,
     pub messages: FrontendSnapshotMessages,
 }
@@ -304,7 +301,7 @@ pub struct FrontendSnapshotLoadOptions {
 impl Default for FrontendSnapshotLoadOptions {
     fn default() -> Self {
         Self {
-            thread_event_limit: 512,
+            session_event_limit: 512,
             include_sessions: true,
             messages: FrontendSnapshotMessages::All,
         }
@@ -364,9 +361,9 @@ pub struct SessionFrontendSnapshotLoad {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct ThreadEventDecodeDiagnostic {
+pub struct SessionEventDecodeDiagnostic {
     pub id: i64,
-    pub thread_name: String,
+    pub event_target: String,
     pub created_at: String,
     pub error: String,
 }
@@ -376,15 +373,15 @@ const INTERRUPTED_RUN_WARNING: &str =
     "The previous run was interrupted when the nac process stopped. Resubmit the prompt to continue.";
 const INTERRUPTED_RUN_EVENT_MESSAGE: &str = "run interrupted by process restart";
 
-struct DecodedThreadEvents {
+struct DecodedSessionEvents {
     primary_tool_events: Vec<AgentEvent>,
-    diagnostics: Vec<ThreadEventDecodeDiagnostic>,
+    diagnostics: Vec<SessionEventDecodeDiagnostic>,
 }
 
 struct FrontendSnapshotBlockingLoad {
     sessions: Vec<SessionSummarySnapshot>,
-    thread_events: DecodedThreadEvents,
-    thread_event_boundary: SessionEventBoundary,
+    session_events: DecodedSessionEvents,
+    session_event_boundary: SessionEventBoundary,
     forks: Vec<crate::store::SessionForkLink>,
     run_failure: Option<crate::run_failure::RunFailure>,
     workspace: WorkspaceSnapshot,
@@ -998,17 +995,17 @@ fn page_messages(messages: &[Message], request: MessagePageRequest) -> MessagesP
     }
 }
 
-fn decode_thread_event(
-    record: crate::store::ThreadEventRecord,
-    diagnostics: &mut Vec<ThreadEventDecodeDiagnostic>,
+fn decode_session_event(
+    record: crate::store::SessionEventRecord,
+    diagnostics: &mut Vec<SessionEventDecodeDiagnostic>,
 ) -> Option<AgentEvent> {
     let decoded = serde_json::from_str::<AgentEvent>(&record.event_json)
         .ok()
         .and_then(crate::events::sanitize_external_agent_event);
     if decoded.is_none() && diagnostics.len() < MAX_THREAD_EVENT_DIAGNOSTICS {
-        diagnostics.push(ThreadEventDecodeDiagnostic {
+        diagnostics.push(SessionEventDecodeDiagnostic {
             id: record.id,
-            thread_name: record.thread_name,
+            event_target: record.event_target,
             created_at: record.created_at,
             error: "malformed, unsupported, or internal event omitted".to_string(),
         });
@@ -1225,8 +1222,8 @@ fn unattributed_usage_after_run(
     };
     let mut cumulative = existing.unwrap_or_default();
     cumulative.add_cost_saturating(&completed_usage);
-    if completed_usage.orchestrator_context_tokens != 0 {
-        cumulative.replace_context(completed_usage.orchestrator_context_tokens);
+    if completed_usage.context_tokens != 0 {
+        cumulative.replace_context(completed_usage.context_tokens);
     }
     Some(cumulative)
 }

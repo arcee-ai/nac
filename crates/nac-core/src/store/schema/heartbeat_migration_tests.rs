@@ -94,7 +94,7 @@ fn schema_44_heartbeats_upgrade_actual_43_atomically_and_preserve_all_supplier_r
     {
         let conn = open_runtime_connection(&path).unwrap();
         conn.execute("INSERT INTO task_followups(caller_session_id,request_id,target_session_id,request_json,resolved_delivery,inbox_item_id,created_at) VALUES('caller','followup','target','{}','queue',?1,'now')",[inbox.id]).unwrap();
-        conn.execute("INSERT INTO native_task_launches(request_id,caller_session_id,project_id,request_json,source_cwd,session_id,retained,phase,created_at,updated_at) VALUES('launch','caller','project','{}','/repo','launched',0,'reserved','now','now')",[]).unwrap();
+        conn.execute("INSERT INTO native_task_launches(request_id,caller_session_id,project_id,request_json,source_cwd,session_id,retained,phase,created_at,updated_at) VALUES('launch','caller','project','{\"request_id\":\"launch\",\"project_id\":null,\"title\":\"Fixture\",\"prompt\":\"Fixture prompt\"}','/repo','launched',0,'reserved','now','now')",[]).unwrap();
         conn.execute("INSERT INTO peer_goal_starts(caller_session_id,request_id,target_session_id,request_json,response_json) VALUES('caller','start','target','canonical arguments','original admission')",[]).unwrap();
         // 44 adds only these tables/indexes. Removing them reconstructs the
         // verified supplier43 catalog, with actual41/42/43 receipts retained.

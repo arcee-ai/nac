@@ -39,6 +39,7 @@ class ProgramContracts(unittest.TestCase):
             self.assertEqual(call.args[2]['project_id'], 'project')
             self.assertEqual(call.args[2]['base_url'], provider.base)
             self.assertEqual(call.args[2]['api_key_env'], 'OPENAI_API_KEY')
+            self.assertEqual(call.args[2]['compaction_threshold'], 0)
             self.assertNotIn('light_model', call.args[2])
 
     def test_cli_imports_do_not_create_untracked_cache_before_source_guard(self):

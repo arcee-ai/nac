@@ -22,7 +22,7 @@ async fn checkpoint_store_failure_keeps_prior_view_and_continues_ordinary_call()
         .unwrap()
         .execute_batch(
             "CREATE TRIGGER fail_checkpoint_inserts
-             BEFORE INSERT ON orchestrator_compaction_checkpoints
+             BEFORE INSERT ON session_compaction_checkpoints
              BEGIN
                  SELECT RAISE(ABORT, 'injected checkpoint store failure');
              END;",
@@ -81,7 +81,7 @@ async fn checkpoint_store_failure_keeps_prior_view_and_continues_ordinary_call()
         .active_checkpoint_for_test()
         .is_none());
     assert!(
-        crate::store::orchestrator_compaction::load_orchestrator_compaction_checkpoints(
+        crate::store::session_compaction::load_session_compaction_checkpoints(
             &store_path,
             "session"
         )
@@ -94,7 +94,7 @@ async fn checkpoint_store_failure_keeps_prior_view_and_continues_ordinary_call()
         .position(|event| {
             matches!(
                 event,
-                AgentEvent::OrchestratorCompactionStarted {
+                AgentEvent::CompactionStarted {
                     reason: crate::events::CompactionReason::Auto,
                     ..
                 }
@@ -106,7 +106,7 @@ async fn checkpoint_store_failure_keeps_prior_view_and_continues_ordinary_call()
         .position(|event| {
             matches!(
                 event,
-                AgentEvent::OrchestratorCompactionFailed {
+                AgentEvent::CompactionFailed {
                     reason: crate::events::CompactionReason::Auto,
                     failure: crate::events::CompactionFailure::CheckpointPersistenceFailed,
                     ..
@@ -118,14 +118,14 @@ async fn checkpoint_store_failure_keeps_prior_view_and_continues_ordinary_call()
     assert_eq!(
         events
             .iter()
-            .filter(|event| matches!(event, AgentEvent::OrchestratorCompactionStarted { .. }))
+            .filter(|event| matches!(event, AgentEvent::CompactionStarted { .. }))
             .count(),
         1
     );
     assert_eq!(
         events
             .iter()
-            .filter(|event| matches!(event, AgentEvent::OrchestratorCompactionFailed { .. }))
+            .filter(|event| matches!(event, AgentEvent::CompactionFailed { .. }))
             .count(),
         1
     );
@@ -224,9 +224,9 @@ async fn cancellation_during_summary_keeps_the_prior_checkpoint() {
         },
     ];
     let (source, policy) = compaction::checkpoint_digests(&messages, 2);
-    let prior = crate::store::orchestrator_compaction::append_orchestrator_compaction_checkpoint(
+    let prior = crate::store::session_compaction::append_session_compaction_checkpoint(
         &store_path,
-        &crate::store::orchestrator_compaction::NewOrchestratorCompactionCheckpoint {
+        &crate::store::session_compaction::NewSessionCompactionCheckpoint {
             session_id: "session".to_string(),
             previous_checkpoint_id: None,
             summary: compaction::installed_summary("prior"),
@@ -279,7 +279,7 @@ async fn cancellation_during_summary_keeps_the_prior_checkpoint() {
     );
     drop(guard);
     assert_eq!(
-        crate::store::orchestrator_compaction::load_orchestrator_compaction_checkpoints(
+        crate::store::session_compaction::load_session_compaction_checkpoints(
             &store_path,
             "session"
         )
@@ -288,7 +288,7 @@ async fn cancellation_during_summary_keeps_the_prior_checkpoint() {
         1
     );
     let events = drain_events(&mut events_rx);
-    let AgentEvent::OrchestratorCompactionStarted {
+    let AgentEvent::CompactionStarted {
         compaction_id,
         reason: crate::events::CompactionReason::Auto,
     } = events[1]
@@ -297,7 +297,7 @@ async fn cancellation_during_summary_keeps_the_prior_checkpoint() {
     };
     assert!(matches!(
         events[2],
-        AgentEvent::OrchestratorCompactionFailed {
+        AgentEvent::CompactionFailed {
             compaction_id: id,
             reason: crate::events::CompactionReason::Auto,
             failure: crate::events::CompactionFailure::Cancelled,
@@ -379,12 +379,11 @@ async fn cancellation_after_checkpoint_commit_keeps_the_committed_projection() {
     wait_until_observed(&ordinary_observed).await;
     task.abort();
     assert!(task.await.unwrap_err().is_cancelled());
-    let checkpoints =
-        crate::store::orchestrator_compaction::load_orchestrator_compaction_checkpoints(
-            &store_path,
-            "session",
-        )
-        .unwrap();
+    let checkpoints = crate::store::session_compaction::load_session_compaction_checkpoints(
+        &store_path,
+        "session",
+    )
+    .unwrap();
     assert_eq!(checkpoints.len(), 1);
     let guard = agent.lock().await;
     assert_eq!(
@@ -410,7 +409,7 @@ async fn cancellation_after_checkpoint_commit_keeps_the_committed_projection() {
             .iter()
             .filter(|event| matches!(
                 event,
-                AgentEvent::OrchestratorCompactionCompleted {
+                AgentEvent::CompactionCompleted {
                     reason: crate::events::CompactionReason::Auto,
                     ..
                 }
@@ -420,7 +419,7 @@ async fn cancellation_after_checkpoint_commit_keeps_the_committed_projection() {
     );
     assert!(!events.iter().any(|event| matches!(
         event,
-        AgentEvent::OrchestratorCompactionFailed {
+        AgentEvent::CompactionFailed {
             failure: crate::events::CompactionFailure::Cancelled,
             ..
         }
@@ -474,7 +473,7 @@ async fn manual_summary_request_and_rejection_failures_are_typed_and_terminal() 
         agent.last_usage = Some(TokenUsage {
             input_tokens: 44,
             output_tokens: 5,
-            orchestrator_context_tokens: 99,
+            context_tokens: 99,
             ..TokenUsage::default()
         });
         let canonical_before = serde_json::to_vec(&agent.messages).unwrap();
@@ -490,7 +489,7 @@ async fn manual_summary_request_and_rejection_failures_are_typed_and_terminal() 
         );
         assert_eq!(agent.last_usage, usage_before);
         assert!(
-            crate::store::orchestrator_compaction::load_orchestrator_compaction_checkpoints(
+            crate::store::session_compaction::load_session_compaction_checkpoints(
                 &store_path,
                 "session"
             )
@@ -502,7 +501,7 @@ async fn manual_summary_request_and_rejection_failures_are_typed_and_terminal() 
         assert_eq!(events.len(), if has_usage { 3 } else { 2 });
         assert!(matches!(
             events[0],
-            AgentEvent::OrchestratorCompactionStarted {
+            AgentEvent::CompactionStarted {
                 compaction_id: id,
                 reason: CompactionReason::Manual,
             } if id == compaction_id
@@ -512,7 +511,7 @@ async fn manual_summary_request_and_rejection_failures_are_typed_and_terminal() 
         }
         assert!(matches!(
             events[events.len() - 1],
-            AgentEvent::OrchestratorCompactionFailed {
+            AgentEvent::CompactionFailed {
                 compaction_id: id,
                 reason: CompactionReason::Manual,
                 failure,
@@ -539,7 +538,7 @@ async fn manual_checkpoint_store_failure_is_hard_and_keeps_the_prior_view() {
     crate::store::insert_test_session(&store_path, "session");
     crate::store::open_runtime_connection(&store_path)
         .unwrap()
-        .execute_batch("CREATE TRIGGER fail_manual_checkpoint BEFORE INSERT ON orchestrator_compaction_checkpoints BEGIN SELECT RAISE(ABORT, 'injected checkpoint store failure'); END;")
+        .execute_batch("CREATE TRIGGER fail_manual_checkpoint BEFORE INSERT ON session_compaction_checkpoints BEGIN SELECT RAISE(ABORT, 'injected checkpoint store failure'); END;")
         .unwrap();
     let server = ScriptedServer::start(vec![ScriptedResponse::json(
         "200 OK",
@@ -579,7 +578,7 @@ async fn manual_checkpoint_store_failure_is_hard_and_keeps_the_prior_view() {
     assert_eq!(events.len(), 3);
     assert!(matches!(
         events[0],
-        AgentEvent::OrchestratorCompactionStarted {
+        AgentEvent::CompactionStarted {
             compaction_id: id,
             reason: CompactionReason::Manual,
         } if id == compaction_id
@@ -587,7 +586,7 @@ async fn manual_checkpoint_store_failure_is_hard_and_keeps_the_prior_view() {
     assert!(matches!(events[1], AgentEvent::TokenUsageUpdated { .. }));
     assert!(matches!(
         events[2],
-        AgentEvent::OrchestratorCompactionFailed {
+        AgentEvent::CompactionFailed {
             compaction_id: id,
             reason: CompactionReason::Manual,
             failure: CompactionFailure::CheckpointPersistenceFailed,
@@ -652,7 +651,7 @@ async fn manual_cancellation_emits_cancelled_and_preserves_state() {
         .is_none());
     drop(guard);
     assert!(
-        crate::store::orchestrator_compaction::load_orchestrator_compaction_checkpoints(
+        crate::store::session_compaction::load_session_compaction_checkpoints(
             &store_path,
             "session"
         )
@@ -662,7 +661,7 @@ async fn manual_cancellation_emits_cancelled_and_preserves_state() {
 
     let events = drain_events(&mut events_rx);
     assert_eq!(events.len(), 2);
-    let AgentEvent::OrchestratorCompactionStarted {
+    let AgentEvent::CompactionStarted {
         compaction_id,
         reason: CompactionReason::Manual,
     } = events[0]
@@ -671,7 +670,7 @@ async fn manual_cancellation_emits_cancelled_and_preserves_state() {
     };
     assert!(matches!(
         events[1],
-        AgentEvent::OrchestratorCompactionFailed {
+        AgentEvent::CompactionFailed {
             compaction_id: id,
             reason: CompactionReason::Manual,
             failure: CompactionFailure::Cancelled,

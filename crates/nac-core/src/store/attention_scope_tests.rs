@@ -65,7 +65,7 @@ fn setup(change: Change) -> (PathBuf, sessions::RawSessionConfig) {
     )
     .unwrap();
     let mut config = sessions::load_session_config(&path, "session").unwrap();
-    config.orchestrator_compaction_threshold = Some(64_000);
+    config.compaction_threshold = Some(64_000);
     (path, config)
 }
 async fn mutate(

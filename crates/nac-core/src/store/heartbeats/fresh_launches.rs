@@ -63,16 +63,13 @@ fn validate_publication(
         .as_deref()
         .or(selection.service_tier.as_deref());
     let threshold_matches = if legacy.is_some() {
-        selection
-            .orchestrator_compaction_threshold
-            .is_none_or(|threshold| {
-                snapshot.orchestrator_compaction_threshold == Some(threshold)
-                    && !snapshot.automatic_compaction
-            })
+        selection.compaction_threshold.is_none_or(|threshold| {
+            snapshot.compaction_threshold == Some(threshold) && !snapshot.automatic_compaction
+        })
     } else {
-        snapshot.orchestrator_compaction_threshold
+        snapshot.compaction_threshold
             == selection
-                .orchestrator_compaction_threshold
+                .compaction_threshold
                 .filter(|threshold| *threshold != 0)
             && !snapshot.automatic_compaction
     };

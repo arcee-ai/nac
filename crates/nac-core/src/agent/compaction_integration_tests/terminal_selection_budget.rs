@@ -141,11 +141,9 @@ async fn selection_provenance_tight_actual_provider_budget_with_ten_thousand_ref
         compaction::CompactionResult::Compacted { .. }
     ));
     let checkpoint =
-        crate::store::orchestrator_compaction::load_orchestrator_compaction_checkpoints(
-            &path, "session",
-        )
-        .unwrap()
-        .remove(0);
+        crate::store::session_compaction::load_session_compaction_checkpoints(&path, "session")
+            .unwrap()
+            .remove(0);
     let json = checkpoint
         .summary
         .strip_prefix(compaction::HISTORICAL_CONTEXT_PREFIX)
@@ -190,11 +188,9 @@ async fn selection_provenance_tight_actual_provider_budget_with_ten_thousand_ref
         serde_json::to_value(&messages).unwrap()
     );
     assert_eq!(
-        crate::store::orchestrator_compaction::load_orchestrator_compaction_checkpoints(
-            &path, "session"
-        )
-        .unwrap()
-        .len(),
+        crate::store::session_compaction::load_session_compaction_checkpoints(&path, "session")
+            .unwrap()
+            .len(),
         1
     );
     let requests = server.finish();

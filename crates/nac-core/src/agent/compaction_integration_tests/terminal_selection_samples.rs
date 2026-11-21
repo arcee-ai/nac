@@ -180,7 +180,7 @@ async fn selection_provenance_ordinary_response_samples_survive_restore_and_fork
 
     // Metadata-only mutation must invalidate the unchanged canonical sample.
     let connection = crate::store::open_runtime_connection(&path).unwrap();
-    connection.execute("UPDATE thread_events SET event_json=json_remove(event_json,'$.nac_transcript_message.terminal_selection_attribution') WHERE session_id='session'", []).unwrap();
+    connection.execute("UPDATE session_events SET event_json=json_remove(event_json,'$.nac_transcript_message.terminal_selection_attribution') WHERE session_id='session'", []).unwrap();
     let view = agent
         .prepare_provider_view(&mut TokenUsage::default(), &[])
         .await

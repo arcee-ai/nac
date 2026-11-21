@@ -34,7 +34,7 @@ impl ApprovalFixture {
         .unwrap()
         .unwrap();
         let conn = store::open_runtime_connection(&runtime.store_path).unwrap();
-        conn.execute("INSERT INTO thread_events (session_id, thread_name, event_json, created_at) VALUES ('peer-a', '__direct__', '{}', 'now')", []).unwrap();
+        conn.execute("INSERT INTO session_events (session_id, event_target, event_json, created_at) VALUES ('peer-a', '__direct__', '{}', 'now')", []).unwrap();
         conn.execute("INSERT INTO session_run_recovery (session_id, run_id, submitted_message_id, status) VALUES ('peer-a', 'approval-run', ?1, 'active')", [conn.last_insert_rowid()]).unwrap();
         drop(conn);
         let inbox = store::create_session_inbox_item(

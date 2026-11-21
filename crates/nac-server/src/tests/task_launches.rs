@@ -59,7 +59,7 @@ pub(super) async fn fixture(root: &std::path::Path, manager: &SessionManager) ->
             api_key_env: Some("OPENAI_API_KEY".into()),
             reasoning_effort: None,
             extra_headers: None,
-            orchestrator_compaction_threshold: None,
+            compaction_threshold: None,
         }),
         git_ref: Some("dev".into()),
         default_ref: Some("dev".into()),

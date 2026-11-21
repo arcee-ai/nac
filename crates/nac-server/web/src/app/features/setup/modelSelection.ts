@@ -12,7 +12,7 @@ export interface LaunchModelSelection {
   reasoning_effort: string | null;
   service_tier?: ServiceTier | null;
   extra_headers: Record<string, string> | null;
-  orchestrator_compaction_threshold?: number | null;
+  compaction_threshold?: number | null;
 }
 
 export interface SessionModelInitial {
@@ -24,7 +24,7 @@ export interface SessionModelInitial {
   reasoning_effort: string | null;
   service_tier?: ServiceTier | null;
   extra_headers: Record<string, string>;
-  orchestrator_compaction_threshold?: number | null;
+  compaction_threshold?: number | null;
 }
 
 export function sameModelSelection(
@@ -50,6 +50,6 @@ export function sameModelSelection(
     left.reasoning_effort === right.reasoning_effort &&
     left.service_tier === right.service_tier &&
     headersEqual &&
-    left.orchestrator_compaction_threshold === right.orchestrator_compaction_threshold
+    left.compaction_threshold === right.compaction_threshold
   );
 }

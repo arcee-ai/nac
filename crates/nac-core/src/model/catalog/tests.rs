@@ -45,7 +45,7 @@ fn input_limit_is_not_reduced_by_output_a_second_time() {
     model.max_tokens = 128_000;
     assert_eq!(model.resolved_limits().effective_input_tokens, 272_000);
     assert_eq!(
-        crate::runtime::effective_orchestrator_compaction_threshold(
+        crate::runtime::effective_compaction_threshold(
             None,
             model.resolved_limits().effective_input_tokens
         )

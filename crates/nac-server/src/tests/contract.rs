@@ -14,6 +14,7 @@ async fn retired_creation_selections_are_rejected_with_bad_request() {
         serde_json::json!({"behavior": "unknown"}),
         serde_json::json!({"behavior": "direct", "light_model": {"model": "test"}}),
         serde_json::json!({"behavior": "direct", "light_model": null}),
+        serde_json::json!({"behavior": "direct", "orchestrator_compaction_threshold": 1024}),
     ] {
         let response = post_json(app.clone(), "/sessions", body.clone()).await;
         assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{body}");
@@ -206,7 +207,7 @@ fn model_request_fields_distinguish_omitted_null_and_values() {
                 "reasoning_effort":"xhigh",
                 "api_key_env":null,
                 "extra_headers":{"X-Trace":"launch"},
-                "orchestrator_compaction_threshold":0
+                "compaction_threshold":0
             }"#,
     )
     .unwrap();
@@ -230,10 +231,7 @@ fn model_request_fields_distinguish_omitted_null_and_values() {
             "launch".to_string()
         )])))
     );
-    assert_eq!(
-        request.orchestrator_compaction_threshold,
-        RequestField::Value(0)
-    );
+    assert_eq!(request.compaction_threshold, RequestField::Value(0));
     assert_eq!(request.cwd, None);
 }
 

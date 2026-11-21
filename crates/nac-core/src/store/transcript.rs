@@ -8,10 +8,10 @@
 //! # Storage
 //!
 //! The orchestrator transcript is an append-only log in the existing
-//! `thread_events` table: one row per transcript message, written under the
-//! reserved thread name `__orchestrator__` (`ORCHESTRATOR_STEERING_TARGET`).
+//! `session_events` table: one row per transcript message, written under the
+//! reserved thread name `__nac_transcript__` (`TRANSCRIPT_EVENT_TARGET`).
 //! No schema change: the table already has the needed shape (session_id FK,
-//! thread_name, event_json, created_at) and index (session_id, thread_name,
+//! event_target, event_json, created_at) and index (session_id, event_target,
 //! id).
 //!
 //! # Payload format (load-bearing)
@@ -105,24 +105,24 @@
 //!
 //! # Guards (landed with step 1)
 //!
-//! 1. `load_all_thread_events` / `load_thread_events_page` exclude
-//!    `__orchestrator__` rows in SQL (thread_events.rs), so transcript rows
+//! 1. `load_all_session_events` / `load_session_events_page` exclude
+//!    `__nac_transcript__` rows in SQL (session_events.rs), so transcript rows
 //!    never enter the event/tile paths.
-//! 2. `migrate_thread_events` (schema.rs) carries transcript rows through
+//! 2. `migrate_session_events` (schema.rs) carries transcript rows through
 //!    table rebuilds verbatim via [`is_transcript_log_payload`]; a schema test
-//!    pins survival. Any future rebuild-migration of thread_events MUST do
+//!    pins survival. Any future rebuild-migration of session_events MUST do
 //!    the same.
 //! 3. `store::delete_thread` rejects the reserved name before any DELETE
-//!    (threads.rs), so a model-callable `thread_delete("__orchestrator__")`
+//!    (threads.rs), so a model-callable `thread_delete("__nac_transcript__")`
 //!    cannot wipe the transcript tail.
 
 use super::*;
 
-/// Top-level JSON key identifying a transcript log row in `thread_events`.
+/// Top-level JSON key identifying a transcript log row in `session_events`.
 pub const TRANSCRIPT_PAYLOAD_KEY: &str = "nac_transcript_message";
 
-/// Conservative predicate: true when a `thread_events` payload claims to be a
-/// transcript log entry. Used by `migrate_thread_events` (schema.rs) to carry
+/// Conservative predicate: true when a `session_events` payload claims to be a
+/// transcript log entry. Used by `migrate_session_events` (schema.rs) to carry
 /// transcript rows through table rebuilds verbatim instead of running them
 /// through AgentEvent sanitize-drop. Deliberately loose — preserving a row
 /// that merely claims to be a transcript entry is safe, while dropping a real
@@ -226,8 +226,8 @@ pub fn count_visible_transcript_log_messages(
 ) -> Result<usize> {
     let count = conn.query_row(
         "SELECT COUNT(*)
-         FROM thread_events
-         WHERE session_id = ?1 AND thread_name = ?2
+         FROM session_events
+         WHERE session_id = ?1 AND event_target = ?2
            AND json_extract(event_json, '$.nac_transcript_message.idx') >= ?3
            AND (
                json_extract(event_json, '$.nac_transcript_message.kind') = 'user'
@@ -246,7 +246,7 @@ pub fn count_visible_transcript_log_messages(
                    ) = 0
                )
            )",
-        params![session_id, ORCHESTRATOR_STEERING_TARGET, from_idx],
+        params![session_id, TRANSCRIPT_EVENT_TARGET, from_idx],
         |row| row.get::<_, i64>(0),
     )?;
     usize::try_from(count).context("transcript log visible message count overflowed")
@@ -264,13 +264,13 @@ pub fn last_transcript_log_user_prompt(
              json_extract(event_json, '$.nac_transcript_message.message'),
              '$.content'
          )
-         FROM thread_events
-         WHERE session_id = ?1 AND thread_name = ?2
+         FROM session_events
+         WHERE session_id = ?1 AND event_target = ?2
            AND json_extract(event_json, '$.nac_transcript_message.kind') = 'user'
            AND json_extract(event_json, '$.nac_transcript_message.idx') >= ?3
          ORDER BY id DESC
          LIMIT 1",
-        params![session_id, ORCHESTRATOR_STEERING_TARGET, from_idx],
+        params![session_id, TRANSCRIPT_EVENT_TARGET, from_idx],
         |row| row.get::<_, Option<String>>(0),
     )
     .optional()
@@ -302,10 +302,10 @@ fn read_assistant_batch_in_snapshot(
     row_id: i64,
 ) -> Result<Option<Vec<TranscriptLogRow>>> {
     let mut statement = connection.prepare(
-        "SELECT id, event_json FROM thread_events
-         WHERE session_id = ?1 AND thread_name = ?2 AND id >= ?3 ORDER BY id ASC",
+        "SELECT id, event_json FROM session_events
+         WHERE session_id = ?1 AND event_target = ?2 AND id >= ?3 ORDER BY id ASC",
     )?;
-    let mut rows = statement.query(params![session_id, ORCHESTRATOR_STEERING_TARGET, row_id])?;
+    let mut rows = statement.query(params![session_id, TRANSCRIPT_EVENT_TARGET, row_id])?;
     let mut batch: Vec<TranscriptLogRow> = Vec::new();
     while let Some(row) = rows.next()? {
         let id: i64 = row.get(0)?;
@@ -314,9 +314,9 @@ fn read_assistant_batch_in_snapshot(
         }
         let json: String = row.get(1)?;
         let entry = decode_transcript_log_entry(&json)
-            .ok_or_else(|| anyhow!("thread_events row {id} is not a transcript log entry"))?;
+            .ok_or_else(|| anyhow!("session_events row {id} is not a transcript log entry"))?;
         let message: Message = serde_json::from_str(&entry.message_json).with_context(|| {
-            format!("thread_events row {id} holds an undecodable transcript message")
+            format!("session_events row {id} holds an undecodable transcript message")
         })?;
         if batch.is_empty() {
             if !matches!(message, Message::Assistant { .. }) {
@@ -365,13 +365,13 @@ pub struct TranscriptLogWriter {
 fn tail_len_of(connection: &Connection, session_id: &str, blob_len: u64) -> Result<u64> {
     let mut statement = connection.prepare(
         "SELECT id, event_json
-         FROM thread_events
-         WHERE session_id = ?1 AND thread_name = ?2
+         FROM session_events
+         WHERE session_id = ?1 AND event_target = ?2
          ORDER BY id DESC
          LIMIT 1",
     )?;
     let last_row = statement
-        .query_row(params![session_id, ORCHESTRATOR_STEERING_TARGET], |row| {
+        .query_row(params![session_id, TRANSCRIPT_EVENT_TARGET], |row| {
             Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
         })
         .optional()?;
@@ -380,7 +380,7 @@ fn tail_len_of(connection: &Connection, session_id: &str, blob_len: u64) -> Resu
         Some((id, event_json)) => {
             let entry = decode_transcript_log_entry(&event_json).ok_or_else(|| {
                 anyhow!(
-                    "thread_events row {id} under '{ORCHESTRATOR_STEERING_TARGET}' is not a transcript log entry"
+                    "session_events row {id} under '{TRANSCRIPT_EVENT_TARGET}' is not a transcript log entry"
                 )
             })?;
             Ok((entry.idx + 1).saturating_sub(blob_len))
@@ -401,11 +401,11 @@ pub(super) fn next_append_idx(transaction: &Transaction<'_>, session_id: &str) -
     let last_row = transaction
         .query_row(
             "SELECT id, event_json
-             FROM thread_events
-             WHERE session_id = ?1 AND thread_name = ?2
+             FROM session_events
+             WHERE session_id = ?1 AND event_target = ?2
              ORDER BY id DESC
              LIMIT 1",
-            params![session_id, ORCHESTRATOR_STEERING_TARGET],
+            params![session_id, TRANSCRIPT_EVENT_TARGET],
             |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
         )
         .optional()?;
@@ -414,7 +414,7 @@ pub(super) fn next_append_idx(transaction: &Transaction<'_>, session_id: &str) -
         Some((id, event_json)) => {
             let entry = decode_transcript_log_entry(&event_json).ok_or_else(|| {
                 anyhow!(
-                    "thread_events row {id} under '{ORCHESTRATOR_STEERING_TARGET}' is not a transcript log entry"
+                    "session_events row {id} under '{TRANSCRIPT_EVENT_TARGET}' is not a transcript log entry"
                 )
             })?;
             entry
@@ -449,14 +449,9 @@ pub(super) fn append_messages_in_transaction(
     for (offset, message) in messages.iter().enumerate() {
         let event_json = encode_transcript_log_entry(start_idx + offset as u64, message)?;
         transaction.execute(
-            "INSERT INTO thread_events (session_id, thread_name, event_json, created_at)
+            "INSERT INTO session_events (session_id, event_target, event_json, created_at)
              VALUES (?1, ?2, ?3, ?4)",
-            params![
-                session_id,
-                ORCHESTRATOR_STEERING_TARGET,
-                event_json,
-                now_utc()
-            ],
+            params![session_id, TRANSCRIPT_EVENT_TARGET, event_json, now_utc()],
         )?;
         last_inserted_id = transaction.last_insert_rowid();
     }
@@ -906,22 +901,22 @@ impl TranscriptLogWriter {
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Deferred)?;
         let retained: i64 = snapshot.query_row(
             "SELECT COUNT(*)
-             FROM thread_events
-             WHERE session_id = ?1 AND thread_name = ?2 AND id <= ?3",
-            params![session_id, ORCHESTRATOR_STEERING_TARGET, after_row_id],
+             FROM session_events
+             WHERE session_id = ?1 AND event_target = ?2 AND id <= ?3",
+            params![session_id, TRANSCRIPT_EVENT_TARGET, after_row_id],
             |row| row.get(0),
         )?;
         let mut statement = snapshot.prepare(
             "SELECT id, event_json
-             FROM thread_events
-             WHERE session_id = ?1 AND thread_name = ?2 AND id > ?3
+             FROM session_events
+             WHERE session_id = ?1 AND event_target = ?2 AND id > ?3
              ORDER BY id ASC
              LIMIT ?4",
         )?;
         let rows = statement.query_map(
             params![
                 session_id,
-                ORCHESTRATOR_STEERING_TARGET,
+                TRANSCRIPT_EVENT_TARGET,
                 after_row_id,
                 i64::try_from(limit).unwrap_or(i64::MAX)
             ],
@@ -932,12 +927,12 @@ impl TranscriptLogWriter {
             let (id, event_json) = row?;
             let entry = decode_transcript_log_entry(&event_json).ok_or_else(|| {
                 anyhow!(
-                    "thread_events row {id} under '{ORCHESTRATOR_STEERING_TARGET}' is not a transcript log entry"
+                    "session_events row {id} under '{TRANSCRIPT_EVENT_TARGET}' is not a transcript log entry"
                 )
             })?;
             let message: Message =
                 serde_json::from_str(&entry.message_json).with_context(|| {
-                    format!("thread_events row {id} holds an undecodable transcript message")
+                    format!("session_events row {id} holds an undecodable transcript message")
                 })?;
             entries.push((id, entry.idx, message));
         }
@@ -1041,15 +1036,15 @@ impl TranscriptLogWriter {
         let skip_from_end = tail_len - end;
         let mut statement = snapshot.prepare(
             "SELECT id, event_json
-             FROM thread_events
-             WHERE session_id = ?1 AND thread_name = ?2
+             FROM session_events
+             WHERE session_id = ?1 AND event_target = ?2
              ORDER BY id DESC
              LIMIT ?3 OFFSET ?4",
         )?;
         let rows = statement.query_map(
             params![
                 session_id,
-                ORCHESTRATOR_STEERING_TARGET,
+                TRANSCRIPT_EVENT_TARGET,
                 count as i64,
                 skip_from_end as i64
             ],
@@ -1060,12 +1055,12 @@ impl TranscriptLogWriter {
             let (id, event_json) = row?;
             let entry = decode_transcript_log_entry(&event_json).ok_or_else(|| {
                 anyhow!(
-                    "thread_events row {id} under '{ORCHESTRATOR_STEERING_TARGET}' is not a transcript log entry"
+                    "session_events row {id} under '{TRANSCRIPT_EVENT_TARGET}' is not a transcript log entry"
                 )
             })?;
             let message: Message =
                 serde_json::from_str(&entry.message_json).with_context(|| {
-                    format!("thread_events row {id} holds an undecodable transcript message")
+                    format!("session_events row {id} holds an undecodable transcript message")
                 })?;
             entries.push((id, entry.idx, message));
         }
@@ -1141,15 +1136,15 @@ impl TranscriptLogWriter {
         let skip_from_end = tail_len - end;
         let mut statement = snapshot.prepare(
             "SELECT created_at
-             FROM thread_events
-             WHERE session_id = ?1 AND thread_name = ?2
+             FROM session_events
+             WHERE session_id = ?1 AND event_target = ?2
              ORDER BY id DESC
              LIMIT ?3 OFFSET ?4",
         )?;
         let rows = statement.query_map(
             params![
                 session_id,
-                ORCHESTRATOR_STEERING_TARGET,
+                TRANSCRIPT_EVENT_TARGET,
                 count as i64,
                 skip_from_end as i64
             ],
@@ -1205,20 +1200,19 @@ impl TranscriptLogWriter {
         let connection = open_runtime_connection(&self.store_path)?;
         let mut statement = connection.prepare(
             "SELECT id, event_json
-             FROM thread_events
-             WHERE session_id = ?1 AND thread_name = ?2
+             FROM session_events
+             WHERE session_id = ?1 AND event_target = ?2
              ORDER BY id ASC",
         )?;
-        let rows = statement
-            .query_map(params![session_id, ORCHESTRATOR_STEERING_TARGET], |row| {
-                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-            })?;
+        let rows = statement.query_map(params![session_id, TRANSCRIPT_EVENT_TARGET], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?;
         let mut entries = Vec::new();
         for row in rows {
             let (id, event_json) = row?;
             let entry = decode_transcript_log_entry(&event_json).ok_or_else(|| {
                 anyhow!(
-                    "thread_events row {id} under '{ORCHESTRATOR_STEERING_TARGET}' is not a transcript log entry"
+                    "session_events row {id} under '{TRANSCRIPT_EVENT_TARGET}' is not a transcript log entry"
                 )
             })?;
             if entry.idx < from_idx {
@@ -1226,7 +1220,7 @@ impl TranscriptLogWriter {
             }
             let message: Message =
                 serde_json::from_str(&entry.message_json).with_context(|| {
-                    format!("thread_events row {id} holds an undecodable transcript message")
+                    format!("session_events row {id} holds an undecodable transcript message")
                 })?;
             entries.push((entry.idx, message));
         }
@@ -1263,12 +1257,12 @@ impl TranscriptLogWriter {
         let decoded_rows = {
             let mut statement = transaction.prepare(
                 "SELECT id, event_json
-                 FROM thread_events
-                 WHERE session_id = ?1 AND thread_name = ?2
+                 FROM session_events
+                 WHERE session_id = ?1 AND event_target = ?2
                  ORDER BY id ASC",
             )?;
             let rows = statement
-                .query_map(params![session_id, ORCHESTRATOR_STEERING_TARGET], |row| {
+                .query_map(params![session_id, TRANSCRIPT_EVENT_TARGET], |row| {
                     Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
                 })?;
             let mut decoded = Vec::new();
@@ -1276,12 +1270,12 @@ impl TranscriptLogWriter {
                 let (id, event_json) = row?;
                 let entry = decode_transcript_log_entry(&event_json).ok_or_else(|| {
                     anyhow!(
-                        "thread_events row {id} under '{ORCHESTRATOR_STEERING_TARGET}' is not a transcript log entry"
+                        "session_events row {id} under '{TRANSCRIPT_EVENT_TARGET}' is not a transcript log entry"
                     )
                 })?;
                 let message: Message =
                     serde_json::from_str(&entry.message_json).with_context(|| {
-                        format!("thread_events row {id} holds an undecodable transcript message")
+                        format!("session_events row {id} holds an undecodable transcript message")
                     })?;
                 decoded.push((id, entry, message));
             }
@@ -1319,7 +1313,7 @@ impl TranscriptLogWriter {
                 super::review_intent::invalidate_review_intent(&transaction, session_id)?;
             }
             for (id, _, _) in &decoded_rows[position..] {
-                transaction.execute("DELETE FROM thread_events WHERE id = ?1", params![id])?;
+                transaction.execute("DELETE FROM session_events WHERE id = ?1", params![id])?;
             }
             refresh_session_summary(&transaction, session_id)?;
             Some(TranscriptLogRecovery {
@@ -1355,12 +1349,12 @@ impl TranscriptLogWriter {
         let (row_ids, removed_user) = {
             let mut statement = transaction.prepare(
                 "SELECT id, event_json
-                 FROM thread_events
-                 WHERE session_id = ?1 AND thread_name = ?2
+                 FROM session_events
+                 WHERE session_id = ?1 AND event_target = ?2
                  ORDER BY id ASC",
             )?;
             let rows = statement
-                .query_map(params![session_id, ORCHESTRATOR_STEERING_TARGET], |row| {
+                .query_map(params![session_id, TRANSCRIPT_EVENT_TARGET], |row| {
                     Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
                 })?;
             let mut row_ids = Vec::new();
@@ -1369,7 +1363,7 @@ impl TranscriptLogWriter {
                 let (id, event_json) = row?;
                 let entry = decode_transcript_log_entry(&event_json).ok_or_else(|| {
                     anyhow!(
-                        "thread_events row {id} under '{ORCHESTRATOR_STEERING_TARGET}' is not a transcript log entry"
+                        "session_events row {id} under '{TRANSCRIPT_EVENT_TARGET}' is not a transcript log entry"
                     )
                 })?;
                 if entry.idx >= from_idx {
@@ -1380,7 +1374,7 @@ impl TranscriptLogWriter {
             (row_ids, removed_user)
         };
         for id in &row_ids {
-            transaction.execute("DELETE FROM thread_events WHERE id = ?1", params![id])?;
+            transaction.execute("DELETE FROM session_events WHERE id = ?1", params![id])?;
         }
         if removed_user {
             super::review_intent::invalidate_review_intent(&transaction, session_id)?;
@@ -1421,12 +1415,12 @@ impl TranscriptLogWriter {
         let (row_ids, removed_user) = {
             let mut statement = transaction.prepare(
                 "SELECT id, event_json
-                 FROM thread_events
-                 WHERE session_id = ?1 AND thread_name = ?2
+                 FROM session_events
+                 WHERE session_id = ?1 AND event_target = ?2
                  ORDER BY id ASC",
             )?;
             let rows = statement
-                .query_map(params![session_id, ORCHESTRATOR_STEERING_TARGET], |row| {
+                .query_map(params![session_id, TRANSCRIPT_EVENT_TARGET], |row| {
                     Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
                 })?;
             let mut row_ids = Vec::new();
@@ -1435,7 +1429,7 @@ impl TranscriptLogWriter {
                 let (id, event_json) = row?;
                 let entry = decode_transcript_log_entry(&event_json).ok_or_else(|| {
                     anyhow!(
-                        "thread_events row {id} under '{ORCHESTRATOR_STEERING_TARGET}' is not a transcript log entry"
+                        "session_events row {id} under '{TRANSCRIPT_EVENT_TARGET}' is not a transcript log entry"
                     )
                 })?;
                 if entry.idx >= from_idx {
@@ -1472,7 +1466,7 @@ impl TranscriptLogWriter {
             ));
         }
         for id in &row_ids {
-            transaction.execute("DELETE FROM thread_events WHERE id = ?1", params![id])?;
+            transaction.execute("DELETE FROM session_events WHERE id = ?1", params![id])?;
         }
         refresh_session_summary(&transaction, session_id)?;
         transaction.commit()?;

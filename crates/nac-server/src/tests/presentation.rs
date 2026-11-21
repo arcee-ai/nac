@@ -302,10 +302,10 @@ async fn session_snapshot_recovers_non_contiguous_transcript_tail() {
     let orphan = Message::User {
         content: "must not be exposed".to_string(),
     };
-    nac_core::test_support::store::append_thread_event(
+    nac_core::test_support::store::append_session_event(
         &root.join("store.db"),
         "target",
-        nac_core::test_support::store::ORCHESTRATOR_STEERING_TARGET,
+        nac_core::test_support::store::TRANSCRIPT_EVENT_TARGET,
         &nac_core::test_support::store::encode_transcript_log_entry(8, &orphan).unwrap(),
     )
     .unwrap();
@@ -368,7 +368,7 @@ async fn snapshot_projection_preserves_defaults_and_all_non_session_fields() {
     );
     seed_session(&root, "other", "2026-01-01 00:00:00.000000000");
     let app = router(test_manager(&root));
-    let query = "message_limit=2&thread_event_limit=24";
+    let query = "message_limit=2&session_event_limit=24";
 
     let default_response =
         get_response(app.clone(), &format!("/sessions/target?{query}"), None).await;
@@ -475,7 +475,7 @@ async fn paged_routes_preserve_raw_indexes_timestamps_and_projection_caps() {
 
     let response = get_response(
             app,
-            "/sessions/target?message_limit=3&thread_event_limit=1&include_sessions=false&include_system=true",
+            "/sessions/target?message_limit=3&session_event_limit=1&include_sessions=false&include_system=true",
             None,
         )
         .await;
@@ -499,7 +499,7 @@ async fn paged_routes_preserve_raw_indexes_timestamps_and_projection_caps() {
         .all(serde_json::Value::is_null));
     assert!(message_created_at[2].is_string());
     assert_eq!(snapshot["sessions"], serde_json::json!([]));
-    assert!(snapshot.get("thread_events").is_none());
+    assert!(snapshot.get("session_events").is_none());
     assert!(snapshot
         .get("primary_tool_events")
         .and_then(serde_json::Value::as_array)

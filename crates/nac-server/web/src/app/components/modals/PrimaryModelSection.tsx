@@ -141,7 +141,7 @@ export function PrimaryModelSection({
         reasoning_effort: effective.effort || null,
         ...(effective.speed !== undefined ? { service_tier: effective.speed } : {}),
         extra_headers: initial.extra_headers,
-        orchestrator_compaction_threshold: initial.orchestrator_compaction_threshold,
+        compaction_threshold: initial.compaction_threshold,
       };
     }
     if (!providerReady) return null;

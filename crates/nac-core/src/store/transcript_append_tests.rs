@@ -410,17 +410,28 @@ fn transcript_append_generation_change_rejects_even_the_same_run_id() {
 #[test]
 fn transcript_append_v29_upgrade_preserves_legacy_payload_and_recovery() {
     let (_dir, path) = setup_with_historical_schema(true);
+    let connection = open_runtime_connection(&path).unwrap();
+    connection
+        .execute_batch(
+            "ALTER TABLE thread_events RENAME TO session_events;
+        ALTER TABLE session_events RENAME COLUMN thread_name TO event_target;",
+        )
+        .unwrap();
+    drop(connection);
     let writer = TranscriptLogWriter::new(&path).unwrap();
     writer
         .append_run_prompt("session", 0, &message("legacy prompt"), "legacy-run")
         .unwrap();
     let connection = open_runtime_connection(&path).unwrap();
     let payload: String = connection
-        .query_row("SELECT event_json FROM thread_events", [], |r| r.get(0))
+        .query_row("SELECT event_json FROM session_events", [], |r| r.get(0))
         .unwrap();
     let recovery = load_run_recovery(&path, "session").unwrap();
     connection
-        .execute_batch("DROP TABLE transcript_append_receipts; PRAGMA user_version = 29;")
+        .execute_batch("UPDATE session_events SET event_target='__orchestrator__' WHERE event_target='__nac_transcript__';
+            ALTER TABLE session_events RENAME COLUMN event_target TO thread_name;
+            ALTER TABLE session_events RENAME TO thread_events;
+            DROP TABLE transcript_append_receipts; PRAGMA user_version = 29;")
         .unwrap();
     drop(connection);
     initialize(&path).unwrap();
@@ -433,7 +444,7 @@ fn transcript_append_v29_upgrade_preserves_legacy_payload_and_recovery() {
     );
     assert_eq!(
         connection
-            .query_row::<String, _, _>("SELECT event_json FROM thread_events", [], |r| r.get(0))
+            .query_row::<String, _, _>("SELECT event_json FROM session_events", [], |r| r.get(0))
             .unwrap(),
         payload
     );
@@ -454,7 +465,7 @@ fn transcript_append_statement_abort_rolls_back_the_entire_batch_and_receipt() {
     let connection = open_runtime_connection(&path).unwrap();
     connection
         .execute_batch(
-            "CREATE TRIGGER fail_second_append BEFORE INSERT ON thread_events
+            "CREATE TRIGGER fail_second_append BEFORE INSERT ON session_events
         WHEN NEW.event_json LIKE '%second%' BEGIN SELECT RAISE(ABORT, 'statement failure'); END;",
         )
         .unwrap();

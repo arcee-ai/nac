@@ -69,7 +69,7 @@ export type CommandAdmission<T> = {
 };
 export interface SessionSnapshotOptions {
     messageLimit?: number;
-    threadEventLimit?: number;
+    sessionEventLimit?: number;
     includeSessions?: boolean;
     includeSystem?: boolean;
     signal?: AbortSignal;

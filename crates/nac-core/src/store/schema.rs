@@ -1,11 +1,14 @@
 use super::*;
 use std::sync::Mutex;
 
+mod checkpoint_v54;
 #[cfg(test)]
 mod completion_migration_tests;
 mod completion_tables;
 mod connection;
 mod delegation_receipts;
+#[cfg(test)]
+mod fixture_receipts;
 #[cfg(test)]
 mod fresh_schema_tests;
 #[cfg(test)]
@@ -21,6 +24,7 @@ mod internal_completions;
 #[cfg(test)]
 mod native_task_launch_migration_tests;
 mod native_task_launches;
+mod neutral_session;
 #[cfg(test)]
 mod peer_goal_start_migration_tests;
 mod peer_goal_starts;
@@ -144,7 +148,7 @@ use wal_preflight::read_schema_version_header;
 // early whenever the stored version already equals this one. (12 carries the
 // same schema as 11, which added episodes.status; 10 added the
 // ssh_configurations table; 9 the per-session ssh port and key columns.)
-const STORE_SCHEMA_VERSION: i64 = 55;
+const STORE_SCHEMA_VERSION: i64 = 56;
 const HTTP_OPT_IN_COLUMN: &str = "INTEGER NOT NULL DEFAULT 0 CHECK (allow_insecure_http IN (0, 1))";
 pub const MINIMUM_MIGRATABLE_SCHEMA_VERSION: i64 = 0;
 
@@ -495,7 +499,7 @@ fn open_connection_with_hooks(
         return Ok(conn);
     }
     // Preserve the calendar format fence before upgrading established stores.
-    if matches!(schema_version, 50..=54) {
+    if matches!(schema_version, 50..=55) {
         heartbeat_calendar::verify_format(&transaction)?;
     }
     // A genuinely empty database has no prior session or resource authority
@@ -510,6 +514,7 @@ fn open_connection_with_hooks(
         // New stores do not pass through historical worker or preset schemas.
         // Keep this catalog in parity with the result of the v53 upgrade.
         transaction.execute_batch(include_str!("schema/current.sql"))?;
+        super::legacy_task_model::create_schema(&transaction)?;
         transaction.execute_batch(
             "INSERT INTO heartbeat_retained_allowance VALUES(1,100,1);
              INSERT INTO managed_host_maintenance VALUES(1,'serving',NULL,NULL,NULL,NULL,0);",
@@ -527,6 +532,21 @@ fn open_connection_with_hooks(
         {
             return Err(anyhow!("foreign key check failed for fresh store"));
         }
+        before_commit()?;
+        transaction.pragma_update(None, "user_version", STORE_SCHEMA_VERSION)?;
+        transaction.commit()?;
+        return Ok(conn);
+    }
+    if schema_version == 55 {
+        let session_ids = retirement::all_session_ids(&transaction)?;
+        let _leases = retirement::acquire_retirement_leases(path, &session_ids)?;
+        super::legacy_task_model::migrate(&transaction)?;
+        checkpoint_v54::rehash_v54_checkpoints(
+            &transaction,
+            include_str!("../agent/prompts/nac_direct_compaction.md"),
+            2,
+        )?;
+        neutral_session::rename_storage(&transaction)?;
         before_commit()?;
         transaction.pragma_update(None, "user_version", STORE_SCHEMA_VERSION)?;
         transaction.commit()?;
@@ -575,7 +595,7 @@ fn open_connection_with_hooks(
             migrate_thread_events(&transaction)?;
             transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
-        2..=54 => {}
+        2..=55 => {}
         unsupported => {
             if unsupported > STORE_SCHEMA_VERSION {
                 return Err(StoreFutureSchemaError::new(unsupported).into());
@@ -852,6 +872,13 @@ fn open_connection_with_hooks(
     )?;
     verify_auxiliary_foreign_keys(&transaction)?;
     retire_worker_storage(&transaction)?;
+    super::legacy_task_model::migrate(&transaction)?;
+    checkpoint_v54::rehash_v54_checkpoints(
+        &transaction,
+        include_str!("../agent/prompts/nac_direct_compaction.md"),
+        2,
+    )?;
+    neutral_session::rename_storage(&transaction)?;
 
     ensure_column(&transaction, "sessions", "service_tier", "TEXT")?;
     before_commit()?;

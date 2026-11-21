@@ -298,7 +298,7 @@ async fn selected_compaction_terminal_survives_cancelled_publication_wait() {
             let events = parts.service.recent_events(None, 64).1;
             if events.iter().any(|e| {
                 matches!(e.event, SessionEvent::Agent {
-                event: AgentEvent::OrchestratorCompactionCompleted { compaction_id, .. }
+                event: AgentEvent::CompactionCompleted { compaction_id, .. }
             } if compaction_id == id)
             }) {
                 break;
@@ -314,8 +314,8 @@ async fn selected_compaction_terminal_survives_cancelled_publication_wait() {
         events
             .iter()
             .filter(|e| matches!(e.event, SessionEvent::Agent {
-        event: AgentEvent::OrchestratorCompactionCompleted { compaction_id, .. }
-            | AgentEvent::OrchestratorCompactionFailed { compaction_id, .. }
+        event: AgentEvent::CompactionCompleted { compaction_id, .. }
+            | AgentEvent::CompactionFailed { compaction_id, .. }
     } if compaction_id == id))
             .count(),
         1
@@ -356,7 +356,7 @@ async fn committed_compaction_drop_cannot_publish_cancelled() {
             let events = parts.service.recent_events(None, 64).1;
             if events.iter().any(|event| {
                 matches!(event.event, SessionEvent::Agent {
-                    event: AgentEvent::OrchestratorCompactionCompleted { compaction_id, .. }
+                    event: AgentEvent::CompactionCompleted { compaction_id, .. }
                 } if compaction_id == id)
             }) {
                 break;
@@ -371,8 +371,8 @@ async fn committed_compaction_drop_cannot_publish_cancelled() {
         events
             .iter()
             .filter(|event| matches!(event.event, SessionEvent::Agent {
-                event: AgentEvent::OrchestratorCompactionCompleted { compaction_id, .. }
-                    | AgentEvent::OrchestratorCompactionFailed { compaction_id, .. }
+                event: AgentEvent::CompactionCompleted { compaction_id, .. }
+                    | AgentEvent::CompactionFailed { compaction_id, .. }
             } if compaction_id == id))
             .count(),
         1
@@ -380,7 +380,7 @@ async fn committed_compaction_drop_cannot_publish_cancelled() {
     assert!(!events
         .iter()
         .any(|event| matches!(event.event, SessionEvent::Agent {
-        event: AgentEvent::OrchestratorCompactionFailed {
+        event: AgentEvent::CompactionFailed {
             compaction_id,
             failure: crate::events::CompactionFailure::Cancelled,
             ..

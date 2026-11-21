@@ -20,7 +20,7 @@ interface ItemCodeFieldProps {
   shortContent: string;
   source: ItemCodeFieldSource;
   sessionId: string;
-  /** `segmentCall(segment)`; null for the compact tool blocks of orchestrator sessions. */
+  /** `segmentCall(segment)`; null when the transcript contains a compact tool block. */
   call: ToolCallRef | null;
 }
 

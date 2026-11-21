@@ -8,7 +8,7 @@ fn agent() -> Agent {
         AgentConfig {
             store_path: root.join("unused-guide-test.db"),
             session_id: None,
-            orchestrator_compaction_threshold: None,
+            compaction_threshold: None,
             initial_messages: Vec::new(),
             event_sink: EventSink::none(),
             workspace_cwd: root.clone(),

@@ -296,6 +296,17 @@ fn previous_schema_upgrade_rolls_back_and_retries_as_one_transaction() {
                  PRAGMA user_version=52;",
             ).unwrap();
     }
+    conn.execute(
+        "UPDATE thread_events SET event_json=?1 WHERE id=100",
+        [crate::store::encode_transcript_log_entry(
+            0,
+            &crate::types::Message::User {
+                content: "preserved direct transcript".into(),
+            },
+        )
+        .unwrap()],
+    )
+    .unwrap();
     drop(conn);
     assert!(initialize_with_hooks(&path, || {}, || {}, || Err(anyhow!("before commit"))).is_err());
     {
@@ -374,7 +385,7 @@ fn previous_schema_upgrade_rolls_back_and_retries_as_one_transaction() {
         );
         assert_eq!(
             conn.query_row::<String, _, _>(
-                "SELECT summary FROM orchestrator_compaction_checkpoints WHERE session_id='direct'",
+                "SELECT summary FROM session_compaction_checkpoints WHERE session_id='direct'",
                 [],
                 |row| row.get(0)
             )
@@ -384,7 +395,7 @@ fn previous_schema_upgrade_rolls_back_and_retries_as_one_transaction() {
         assert_eq!(conn.query_row::<i64,_,_>("SELECT last_message_id FROM transcript_append_receipts WHERE session_id='direct' AND operation_id='direct-op'", [], |row| row.get(0)).unwrap(), 100);
         assert_eq!(
             conn.query_row::<i64, _, _>(
-                "SELECT seq FROM sqlite_sequence WHERE name='thread_events'",
+                "SELECT seq FROM sqlite_sequence WHERE name='session_events'",
                 [],
                 |row| row.get(0)
             )
@@ -395,8 +406,8 @@ fn previous_schema_upgrade_rolls_back_and_retries_as_one_transaction() {
             "session_goals",
             "session_inbox",
             "permission_grants",
-            "orchestrator_compaction_checkpoints",
-            "thread_events",
+            "session_compaction_checkpoints",
+            "session_events",
             "transcript_append_receipts",
         ] {
             assert_eq!(
@@ -844,7 +855,7 @@ fn v54_retirement_preserves_live_direct_data_and_edited_connections() {
     assert!(conn.execute("UPDATE session_inbox SET completion_source='managed_orchestrator', completion_session_id='missing', completion_generation=1 WHERE session_id='direct'", []).is_err());
     assert_eq!(
         conn.query_row::<i64, _, _>(
-            "SELECT id FROM thread_events WHERE session_id='direct'",
+            "SELECT id FROM session_events WHERE session_id='direct'",
             [],
             |r| r.get(0)
         )

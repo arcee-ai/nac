@@ -24,7 +24,7 @@ it("accepts a credentialless API-key selection only with an explicit caller capa
     api_key_env: null,
     reasoning_effort: null,
     extra_headers: {},
-    orchestrator_compaction_threshold: null,
+    compaction_threshold: null,
   };
   const values: ModelFormValues = {
     ...initial,
@@ -33,7 +33,7 @@ it("accepts a credentialless API-key selection only with an explicit caller capa
     credential_mode: "none",
     reasoning_effort: "",
     extra_headers: "",
-    orchestrator_compaction_threshold: "",
+    compaction_threshold: "",
   };
   expect(buildSettingsPatch(values, initial, true)).toEqual({ model: values.model });
   expect(() => buildSettingsPatch(values, initial)).toThrow("requires an API key");
@@ -48,7 +48,7 @@ it("emits the insecure HTTP acknowledgement only when it changes", () => {
     api_key_env: "OPENAI_API_KEY",
     reasoning_effort: null,
     extra_headers: {},
-    orchestrator_compaction_threshold: null,
+    compaction_threshold: null,
   };
   const values: ModelFormValues = {
     ...initial,
@@ -57,7 +57,7 @@ it("emits the insecure HTTP acknowledgement only when it changes", () => {
     credential_mode: "variable",
     reasoning_effort: "",
     extra_headers: "",
-    orchestrator_compaction_threshold: "",
+    compaction_threshold: "",
   };
   expect(buildSettingsPatch(values, initial)).toEqual({ allow_insecure_http: true });
 });
@@ -71,7 +71,7 @@ it("preserves the exact accepted OAuth route and explicit headers instead of res
     api_key_env: null,
     reasoning_effort: "high",
     extra_headers: { "X-Account": "chosen-account" },
-    orchestrator_compaction_threshold: null,
+    compaction_threshold: null,
   };
   expect(
     buildSettingsPatch(
@@ -81,7 +81,7 @@ it("preserves the exact accepted OAuth route and explicit headers instead of res
         credential_mode: "none",
         api_key_env: "",
         extra_headers: '{"X-Account":"chosen-account"}',
-        orchestrator_compaction_threshold: "",
+        compaction_threshold: "",
       },
       initial,
     ),

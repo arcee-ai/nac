@@ -83,7 +83,7 @@ pub(super) fn parse_completions_response(
             cache_read_tokens: cache_read,
             cache_write_tokens: cache_write,
             reasoning_tokens,
-            orchestrator_context_tokens: u
+            context_tokens: u
                 .get("total_tokens")
                 .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0),

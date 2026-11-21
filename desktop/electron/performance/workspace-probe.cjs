@@ -30,7 +30,7 @@ async function nacWorkspaceProbe(config) {
   const create = async () => {
     const result = await api('/sessions', { behavior: 'direct', backend: 'openai-responses',
       model: 'gpt-5.6-sol', base_url: config.providerURL, api_key_env: 'NAC_E2E_API_KEY',
-      reasoning_effort: 'high', extra_headers: {}, orchestrator_compaction_threshold: 0 });
+      reasoning_effort: 'high', extra_headers: {}, compaction_threshold: 0 });
     results.session_ids.push(result.metadata.session_id);
     return result.metadata.session_id;
   };

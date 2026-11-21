@@ -30,7 +30,7 @@ export async function exerciseOwnedDirect({provider, base, workspace, enginePID}
     await request("/credentials/FINDER_HELPER_KEY", { value: "nac-finder-dummy-only" }, "PUT");
     const session = await request("/sessions", { behavior: "direct", cwd: workspace,
       backend: "openai-responses", model: "gpt-5.6-sol", base_url: provider.baseUrl,
-      api_key_env: "FINDER_HELPER_KEY", extra_headers: {}, orchestrator_compaction_threshold: 0 });
+      api_key_env: "FINDER_HELPER_KEY", extra_headers: {}, compaction_threshold: 0 });
     const id = session.metadata.session_id;
     await request(`/sessions/${id}/runs`, { prompt: "FINDER_HELPER_PARENT" });
     await bounded(childGate.accepted, 15000, "bundled direct child provider request");

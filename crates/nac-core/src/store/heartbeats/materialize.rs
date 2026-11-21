@@ -49,7 +49,7 @@ pub fn materialize_heartbeats(path:&Path,now_ms:i64) -> Result<Vec<HeartbeatOccu
     let tx=conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     let due={
         let mut query=tx.prepare(&format!("SELECT {SCHEDULE_COLUMNS} FROM heartbeat_schedules WHERE state='active' AND next_due_ms<=?1 ORDER BY next_due_ms,schedule_id LIMIT ?2"))?;
-        let rows=query.query_map(params![now_ms,MAX_HEARTBEAT_SCHEDULES],schedule_row)?.collect::<rusqlite::Result<Vec<_>>>()?;
+        let rows=query.query_map(params![now_ms,MAX_HEARTBEAT_SCHEDULES],|row|schedule_row(&tx,row))?.collect::<rusqlite::Result<Vec<_>>>()?;
         rows
     };
     for schedule in due {

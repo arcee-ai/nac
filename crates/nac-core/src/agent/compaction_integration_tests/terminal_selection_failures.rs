@@ -76,7 +76,7 @@ async fn selection_provenance_transient_failures_preserve_checkpoint_and_block_p
     // Only the private fixture schema is hidden; no production bypass is added.
     let connection = rusqlite::Connection::open(&path).unwrap();
     connection
-        .execute_batch("ALTER TABLE thread_events RENAME TO temporarily_unavailable_events")
+        .execute_batch("ALTER TABLE session_events RENAME TO temporarily_unavailable_events")
         .unwrap();
     let tools = agent.tool_defs.clone();
     assert!(agent
@@ -86,7 +86,7 @@ async fn selection_provenance_transient_failures_preserve_checkpoint_and_block_p
     assert_eq!(observed.load(Ordering::SeqCst), 1);
     assert_eq!(format!("{:?}", agent.compaction), retained);
     connection
-        .execute_batch("ALTER TABLE temporarily_unavailable_events RENAME TO thread_events")
+        .execute_batch("ALTER TABLE temporarily_unavailable_events RENAME TO session_events")
         .unwrap();
 
     // A later explicit turn re-verifies and uses the same checkpoint, with its
@@ -136,7 +136,7 @@ async fn selection_provenance_transient_failures_preserve_checkpoint_and_block_p
 
     // Successful verification of actual source removal still invalidates old
     // attribution, even though the canonical User bytes have not changed.
-    connection.execute("UPDATE thread_events SET event_json=json_remove(event_json,'$.nac_transcript_message.terminal_selection_attribution') WHERE session_id='session'", []).unwrap();
+    connection.execute("UPDATE session_events SET event_json=json_remove(event_json,'$.nac_transcript_message.terminal_selection_attribution') WHERE session_id='session'", []).unwrap();
     // A failure after the first successful read must not partially publish its
     // candidate invalidation or metadata. No unverified model request is sent.
     owner

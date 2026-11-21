@@ -521,10 +521,10 @@ fn transcript_log_gap_repair_keeps_the_trusted_prefix_and_refreshes_summary() {
         (4, "first orphan"),
         (5, "later orphan"),
     ] {
-        crate::store::append_thread_event(
+        crate::store::append_session_event(
             &path,
             "session-a",
-            ORCHESTRATOR_STEERING_TARGET,
+            TRANSCRIPT_EVENT_TARGET,
             &encode_transcript_log_entry(
                 idx,
                 &Message::User {
@@ -569,10 +569,10 @@ fn transcript_log_gap_repair_keeps_the_trusted_prefix_and_refreshes_summary() {
     let (_, clean_recovery) = writer.read_tail_repairing_gap("session-a", 2).unwrap();
     assert!(clean_recovery.is_none());
 
-    crate::store::append_thread_event(
+    crate::store::append_session_event(
         &path,
         "session-a",
-        ORCHESTRATOR_STEERING_TARGET,
+        TRANSCRIPT_EVENT_TARGET,
         &encode_transcript_log_entry(
             4,
             &Message::User {
@@ -582,10 +582,10 @@ fn transcript_log_gap_repair_keeps_the_trusted_prefix_and_refreshes_summary() {
         .unwrap(),
     )
     .unwrap();
-    crate::store::append_thread_event(
+    crate::store::append_session_event(
         &path,
         "session-a",
-        ORCHESTRATOR_STEERING_TARGET,
+        TRANSCRIPT_EVENT_TARGET,
         "{\"type\":\"run_started\"}",
     )
     .unwrap();
@@ -593,9 +593,9 @@ fn transcript_log_gap_repair_keeps_the_trusted_prefix_and_refreshes_summary() {
     let connection = open_connection(&path).unwrap();
     let row_count: i64 = connection
         .query_row(
-            "SELECT COUNT(*) FROM thread_events
-                 WHERE session_id = 'session-a' AND thread_name = ?1",
-            params![ORCHESTRATOR_STEERING_TARGET],
+            "SELECT COUNT(*) FROM session_events
+                 WHERE session_id = 'session-a' AND event_target = ?1",
+            params![TRANSCRIPT_EVENT_TARGET],
             |row| row.get(0),
         )
         .unwrap();
@@ -815,10 +815,10 @@ fn transcript_log_read_tail_window_fails_loudly_on_gaps_and_foreign_rows() {
     }
     // A hand-inserted row that skips idx 2: the tail [1, 3] is not
     // contiguous and must fail the window read loudly.
-    crate::store::append_thread_event(
+    crate::store::append_session_event(
         &path,
         "session-a",
-        ORCHESTRATOR_STEERING_TARGET,
+        TRANSCRIPT_EVENT_TARGET,
         &encode_transcript_log_entry(
             3,
             &Message::User {
@@ -836,10 +836,10 @@ fn transcript_log_read_tail_window_fails_loudly_on_gaps_and_foreign_rows() {
     assert_eq!(writer.read_tail_window("session-a", 1, 0, 0).unwrap().0, 3);
 
     // A foreign row under the reserved name fails even the extent probe.
-    crate::store::append_thread_event(
+    crate::store::append_session_event(
         &path,
         "session-a",
-        ORCHESTRATOR_STEERING_TARGET,
+        TRANSCRIPT_EVENT_TARGET,
         "{\"type\":\"run_started\",\"prompt_preview\":\"run started\"}",
     )
     .unwrap();
@@ -856,7 +856,7 @@ fn window_reader_with_peer_append(path: &Path) -> TranscriptLogWriter {
         .append_batch("session-a", 0, &sample_messages()[..2])
         .unwrap();
     open_runtime_connection(path).unwrap().execute(
-        "UPDATE thread_events SET created_at = CAST(json_extract(event_json, '$.nac_transcript_message.idx') AS TEXT)", [],
+        "UPDATE session_events SET created_at = CAST(json_extract(event_json, '$.nac_transcript_message.idx') AS TEXT)", [],
     ).unwrap();
     let peer_path = path.to_path_buf();
     *writer.after_extent_read.lock().unwrap() = Some(Box::new(move || {
@@ -917,10 +917,10 @@ fn transcript_log_reads_fail_loudly_on_foreign_rows() {
         )
         .unwrap();
     // A non-transcript row under the reserved name is corruption.
-    crate::store::append_thread_event(
+    crate::store::append_session_event(
         &path,
         "session-a",
-        ORCHESTRATOR_STEERING_TARGET,
+        TRANSCRIPT_EVENT_TARGET,
         "{\"type\":\"run_started\",\"prompt_preview\":\"run started\"}",
     )
     .unwrap();
@@ -1023,10 +1023,10 @@ fn transcript_log_summary_stats_match_the_blob_visibility_predicate() {
         .unwrap();
     // A foreign (valid JSON, non-transcript) row under the reserved name
     // extracts a NULL kind and is ignored by both stats.
-    crate::store::append_thread_event(
+    crate::store::append_session_event(
         &path,
         "session-a",
-        ORCHESTRATOR_STEERING_TARGET,
+        TRANSCRIPT_EVENT_TARGET,
         "{\"type\":\"run_started\",\"prompt_preview\":\"run started\"}",
     )
     .unwrap();
@@ -1294,10 +1294,10 @@ fn gap_repair_invalidates_intent_only_when_it_discards_user_history() {
                 content: "orphaned".into(),
             }
         };
-        append_thread_event(
+        append_session_event(
             &path,
             "session",
-            ORCHESTRATOR_STEERING_TARGET,
+            TRANSCRIPT_EVENT_TARGET,
             &encode_transcript_log_entry(1, &orphan).unwrap(),
         )
         .unwrap();

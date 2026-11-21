@@ -27,7 +27,7 @@ pub struct PermissionConfig {
 
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 pub struct CompactionConfig {
-    /// Absolute orchestrator context threshold for new sessions. Zero disables it.
+    /// Absolute session context threshold for new sessions. Zero disables it.
     pub threshold_tokens: Option<u64>,
 }
 
@@ -76,7 +76,7 @@ impl NacConfig {
         Self::load_from_path(path)
     }
 
-    /// Load runtime settings for a command whose model tuple and orchestrator
+    /// Load runtime settings for a command whose model tuple and session
     /// compaction threshold come from a persisted session snapshot.
     ///
     /// The complete TOML document must still be syntactically valid and all

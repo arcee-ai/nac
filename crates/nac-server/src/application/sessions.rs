@@ -31,7 +31,7 @@ fn project_automatic_compaction(
             .as_deref()
             .and_then(|value| value.parse().ok())
         {
-            config.orchestrator_compaction_threshold =
+            config.compaction_threshold =
                 nac_core::model::automatic_compaction_threshold(backend, &config.model);
         }
     }

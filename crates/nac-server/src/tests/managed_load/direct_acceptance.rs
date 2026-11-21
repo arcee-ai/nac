@@ -573,11 +573,11 @@ async fn observe_busy_conflict(
         let child_id = children[0].child_session_id.clone();
         let blocker = rusqlite::Connection::open(&path).unwrap();
         blocker.execute_batch("BEGIN IMMEDIATE").unwrap();
-        nac_core::store::reset_thread_event_busy_observations();
+        nac_core::store::reset_session_event_busy_observations();
         let contender_path = path.clone();
         let (result_tx, result_rx) = std::sync::mpsc::channel();
         let contender = thread::spawn(move || {
-            let result = nac_core::store::append_thread_event_observing_busy(
+            let result = nac_core::store::append_session_event_observing_busy(
                 &contender_path,
                 &child_id,
                 "all612-busy",
@@ -586,7 +586,7 @@ async fn observe_busy_conflict(
             result_tx.send(result).unwrap();
         });
         let deadline = Instant::now() + PHASE_TIMEOUT;
-        while nac_core::store::thread_event_busy_observations() == 0 {
+        while nac_core::store::session_event_busy_observations() == 0 {
             assert!(
                 Instant::now() < deadline,
                 "direct append did not encounter SQLite busy"
@@ -602,7 +602,7 @@ async fn observe_busy_conflict(
         blocker.execute_batch("COMMIT").unwrap();
         result_rx.recv_timeout(PHASE_TIMEOUT).unwrap().unwrap();
         contender.join().unwrap();
-        nac_core::store::thread_event_busy_observations()
+        nac_core::store::session_event_busy_observations()
     });
     tokio::time::timeout(PHASE_TIMEOUT, ready_rx)
         .await

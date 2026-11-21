@@ -609,7 +609,7 @@ async fn cached_previous_config_terminate_is_conflict_after_actual_revisioned_pa
         &app,
         "PATCH",
         "/sessions/session/config",
-        json!({"orchestrator_compaction_threshold": 1}),
+        json!({"compaction_threshold": 1}),
     )
     .await;
     assert_eq!(status, StatusCode::OK);

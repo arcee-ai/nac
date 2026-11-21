@@ -104,7 +104,7 @@ pub(crate) enum RunPromptCommitStatus {
 pub struct AgentConfig {
     pub store_path: PathBuf,
     pub session_id: Option<String>,
-    pub orchestrator_compaction_threshold: Option<u64>,
+    pub compaction_threshold: Option<u64>,
     pub initial_messages: Vec<Message>,
     pub event_sink: EventSink,
     pub workspace_cwd: PathBuf,
@@ -210,7 +210,7 @@ impl Agent {
             CompactionState::new(
                 config.store_path.clone(),
                 session_id,
-                config.orchestrator_compaction_threshold,
+                config.compaction_threshold,
             )
         });
         let transcript_log = config
@@ -485,7 +485,7 @@ impl Agent {
             AgentConfig {
                 store_path: crate::store::default_store_path(),
                 session_id: None,
-                orchestrator_compaction_threshold: None,
+                compaction_threshold: None,
                 initial_messages: Vec::new(),
                 event_sink: EventSink::none(),
                 workspace_cwd: workspace_cwd.clone(),

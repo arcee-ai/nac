@@ -241,7 +241,7 @@ async fn followup_late_steer_keeps_original_run_binding_and_reaches_successor() 
         .unwrap();
     let run = old.run_id.to_string();
     let conn = crate::store::open_runtime_connection(&path).unwrap();
-    conn.execute("INSERT INTO thread_events(session_id,thread_name,event_json,created_at) VALUES('session','main','{}','now')",[]).unwrap();
+    conn.execute("INSERT INTO session_events(session_id,event_target,event_json,created_at) VALUES('session','main','{}','now')",[]).unwrap();
     let prompt = conn.last_insert_rowid();
     conn.execute("INSERT INTO session_run_recovery(session_id,run_id,submitted_message_id,status) VALUES('session',?1,?2,'active')",rusqlite::params![run,prompt]).unwrap();
     drop(conn);

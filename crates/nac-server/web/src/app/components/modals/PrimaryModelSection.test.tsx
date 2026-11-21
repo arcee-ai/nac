@@ -111,7 +111,7 @@ it.each(["chatgpt-codex-responses", "arcee-auth"] as const)(
       api_key_env: null,
       reasoning_effort: null,
       extra_headers: {},
-      orchestrator_compaction_threshold: null,
+      compaction_threshold: null,
     };
     const { view, client, onChange } = mount(initial, true);
     try {

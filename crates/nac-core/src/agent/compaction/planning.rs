@@ -11,13 +11,13 @@ use sha2::{Digest, Sha256};
 
 use crate::agent::TranscriptMessages;
 use crate::events::{CompactionReason, CompactionSkipReason};
-use crate::store::orchestrator_compaction::{
-    append_orchestrator_compaction_checkpoint, load_orchestrator_compaction_checkpoints,
-    NewOrchestratorCompactionCheckpoint, OrchestratorCompactionCheckpoint,
+use crate::store::session_compaction::{
+    append_session_compaction_checkpoint, load_session_compaction_checkpoints,
+    NewSessionCompactionCheckpoint, SessionCompactionCheckpoint,
 };
 use crate::types::{Message, ToolDefinition};
 
-pub(in crate::agent) const DIRECT_PROMPT_POLICY_VERSION: u32 = 1;
+pub(in crate::agent) const DIRECT_PROMPT_POLICY_VERSION: u32 = 2;
 
 pub(in crate::agent) const NAC_DIRECT_COMPACTION_PROMPT: &str =
     include_str!("../prompts/nac_direct_compaction.md");
@@ -72,7 +72,7 @@ pub(in crate::agent) struct CompactionState {
     session_id: String,
     threshold_tokens: Option<u64>,
     automatic_threshold: bool,
-    active_checkpoint: Option<OrchestratorCompactionCheckpoint>,
+    active_checkpoint: Option<SessionCompactionCheckpoint>,
     context_sample: Option<ContextSample>,
     selection_sources: BTreeMap<usize, crate::store::TerminalSelectionProvenance>,
     verified_prefix: Option<VerifiedPrefix>,
@@ -116,8 +116,7 @@ impl CompactionState {
     }
 
     fn restore_checkpoint_and_sources(&mut self, messages: &[Message]) -> Result<()> {
-        let checkpoints =
-            load_orchestrator_compaction_checkpoints(&self.store_path, &self.session_id)?;
+        let checkpoints = load_session_compaction_checkpoints(&self.store_path, &self.session_id)?;
         let mut restored_checkpoint = None;
         self.selection_sources.clear();
         let mut boundaries = vec![messages.len()];
@@ -335,7 +334,7 @@ impl CompactionState {
         // Normal preparation already verified this boundary. Explicit private
         // callers must establish the same metadata before recording an estimate.
         self.ensure_selection_source_async(messages.len()).await?;
-        let record = NewOrchestratorCompactionCheckpoint {
+        let record = NewSessionCompactionCheckpoint {
             session_id: self.session_id.clone(),
             previous_checkpoint_id: candidate.previous_checkpoint_id,
             summary: installed_summary,
@@ -349,12 +348,8 @@ impl CompactionState {
             new_context_estimate,
         };
         let checkpoint = match crate::store::coordinator::owner_for(&self.store_path)? {
-            Some(owner) => {
-                owner
-                    .append_orchestrator_compaction_checkpoint(record)
-                    .await?
-            }
-            None => append_orchestrator_compaction_checkpoint(&self.store_path, &record)?,
+            Some(owner) => owner.append_session_compaction_checkpoint(record).await?,
+            None => append_session_compaction_checkpoint(&self.store_path, &record)?,
         };
         // Activate exactly the acknowledged row before another await. A lost
         // acknowledgement leaves the durable checkpoint for recovery.
@@ -489,7 +484,7 @@ impl CompactionState {
         self.selection_summary_budget(&candidate, messages, tools)
     }
     #[cfg(test)]
-    pub fn active_checkpoint_for_test(&self) -> Option<&OrchestratorCompactionCheckpoint> {
+    pub fn active_checkpoint_for_test(&self) -> Option<&SessionCompactionCheckpoint> {
         self.active_checkpoint.as_ref()
     }
 }
@@ -586,7 +581,7 @@ fn transcript_has_complete_tools(messages: &[Message]) -> bool {
 fn sampled_projection_digest(
     messages: &[Message],
     canonical_message_len: usize,
-    checkpoint: Option<&OrchestratorCompactionCheckpoint>,
+    checkpoint: Option<&SessionCompactionCheckpoint>,
 ) -> Option<[u8; 32]> {
     let sampled_messages = messages.get(..canonical_message_len)?;
     let projected = match checkpoint {
@@ -601,7 +596,7 @@ fn sampled_projection_digest(
         None => sampled_messages.to_vec(),
     };
     let mut hasher = Sha256::new();
-    hasher.update(b"nac-orchestrator-compaction-context-sample-v1\0");
+    hasher.update(b"nac-session-compaction-context-sample-v1\0");
     update_serialized(&mut hasher, &projected);
     Some(hasher.finalize().into())
 }
@@ -656,7 +651,7 @@ fn source_prefix_digest(messages: &[Message], boundary: usize) -> [u8; 32] {
     #[cfg(test)]
     PREFIX_DIGESTS.with(|count| count.set(count.get() + 1));
     let mut hasher = Sha256::new();
-    hasher.update(b"nac-orchestrator-compaction-source-v1\0");
+    hasher.update(b"nac-session-compaction-source-v1\0");
     hasher.update((boundary as u64).to_be_bytes());
     for message in messages[..boundary]
         .iter()

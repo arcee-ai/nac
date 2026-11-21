@@ -121,7 +121,7 @@ function callStatus(entry: InsightSessionEntry): CardStatus | null {
  * The launch reports the session it started, but the model can put anything
  * in that report, so only a session the parent really has is shown as such.
  * Only a list that arrived can say the session is missing: while there is none
- * (loading, failed, or never fetched without NAC orchestration) or the latest
+ * (loading, failed, or not yet fetched) or the latest
  * fetch failed, the launch shows as it reported itself, with nothing to open.
  * A call that continues a session names it before it runs, so a session the
  * parent has does not mean the call went through.
@@ -216,7 +216,7 @@ export const TranscriptSessionCard = memo(function TranscriptSessionCard({
         <span>
           {entry.action === "spawn-agent" && entry.presentation.status !== "unknown"
             ? status
-            : `${entry.action === "spawn-agent" ? "Subagent" : "Managed orchestrator"} · ${status}`}
+            : `Subagent · ${status}`}
           {entry.action === "spawn-agent" && state.sessionId && !requestStatus
             ? ` · Current: ${state.label ?? (state.status === SubagentCardStatus.Running ? "Working…" : "Ready")}`
             : null}

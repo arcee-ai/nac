@@ -149,7 +149,7 @@ export function useSessionSnapshot(
       const token = beginSnapshotFetch(sessionRefreshKey(client, id!));
       const incoming = await api.getSession(id!, {
         messageLimit: SNAPSHOT_MESSAGE_LIMIT,
-        threadEventLimit: SNAPSHOT_THREAD_EVENT_LIMIT,
+        sessionEventLimit: SNAPSHOT_THREAD_EVENT_LIMIT,
         includeSessions: false,
         includeSystem: true,
         signal,

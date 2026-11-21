@@ -54,8 +54,8 @@ fn apply_task_model_selection(
         .clone()
         .map(Field::Set)
         .unwrap_or(Field::Clear);
-    request.orchestrator_compaction_threshold = selected
-        .orchestrator_compaction_threshold
+    request.compaction_threshold = selected
+        .compaction_threshold
         .map(Field::Set)
         .unwrap_or(Field::Clear);
 }
@@ -100,7 +100,7 @@ pub(crate) struct SessionCreationCommand {
     pub(crate) service_tier: Field<String>,
     pub(crate) api_key_env: Field<String>,
     pub(crate) extra_headers: Field<BTreeMap<String, String>>,
-    pub(crate) orchestrator_compaction_threshold: Field<u64>,
+    pub(crate) compaction_threshold: Field<u64>,
     pub(crate) ssh_host: Option<String>,
     pub(crate) ssh_port: Option<u16>,
     pub(crate) ssh_identity_file: Option<String>,
@@ -237,8 +237,8 @@ impl<'a> SessionCreationApplication<'a> {
             anyhow!("scheduled task predates explicit model selection; create a new schedule with a selected model")
         })?;
         apply_task_model_selection(&mut request, selected);
-        if legacy.is_some() && selected.orchestrator_compaction_threshold.is_none() {
-            request.orchestrator_compaction_threshold = Field::Unchanged;
+        if legacy.is_some() && selected.compaction_threshold.is_none() {
+            request.compaction_threshold = Field::Unchanged;
         }
         if let Some(tier) = &destination.service_tier {
             request.service_tier = Field::Set(tier.clone());
@@ -356,15 +356,15 @@ impl<'a> SessionCreationApplication<'a> {
                             model.trusted_api_key_file = profile.trusted_api_key_file();
                         }
                     }
-                    let threshold_matches = match request.orchestrator_compaction_threshold {
+                    let threshold_matches = match request.compaction_threshold {
                         Field::Unchanged => true,
                         Field::Clear | Field::Set(0) => {
                             !snapshot.automatic_compaction
-                                && snapshot.orchestrator_compaction_threshold.is_none()
+                                && snapshot.compaction_threshold.is_none()
                         }
                         Field::Set(value) => {
                             !snapshot.automatic_compaction
-                                && snapshot.orchestrator_compaction_threshold == Some(value)
+                                && snapshot.compaction_threshold == Some(value)
                         }
                     };
                     if !runtime::session_model_matches(&model, &snapshot)? || !threshold_matches {
@@ -456,8 +456,8 @@ impl<'a> SessionCreationApplication<'a> {
             );
             location.workspace_cwd = launch.workspace_path.join(&launch.source.subdirectory);
         }
-        let orchestrator_compaction_threshold =
-            create_compaction_threshold_override(request.orchestrator_compaction_threshold)?;
+        let compaction_threshold =
+            create_compaction_threshold_override(request.compaction_threshold)?;
         let mut model = model_options(
             request.model,
             request.base_url,
@@ -491,7 +491,7 @@ impl<'a> SessionCreationApplication<'a> {
                 store_path: Some(self.manager.inner.store_path.clone()),
             },
             model,
-            orchestrator_compaction_threshold,
+            compaction_threshold,
             sandbox: sandbox_options(request.sandbox),
             ssh: location.ssh,
         };

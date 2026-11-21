@@ -31,8 +31,8 @@ pub(crate) async fn session_snapshot(
     Query(query): Query<SessionSnapshotQuery>,
 ) -> std::result::Result<Json<SessionSnapshotResponse>, ApiError> {
     let mut options = FrontendSnapshotLoadOptions::default();
-    if let Some(limit) = query.thread_event_limit {
-        options.thread_event_limit = limit.clamp(1, MAX_THREAD_EVENT_PAGE_LIMIT);
+    if let Some(limit) = query.session_event_limit {
+        options.session_event_limit = limit.clamp(1, MAX_THREAD_EVENT_PAGE_LIMIT);
     }
     options.include_sessions = query.include_sessions.unwrap_or(true);
     if let Some(limit) = query.message_limit {

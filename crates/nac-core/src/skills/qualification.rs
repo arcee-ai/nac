@@ -123,7 +123,7 @@ impl Fixture {
                     api_key_env: OptionalModelOption::Value("NAC_SKILL_QUALIFICATION_KEY".into()),
                     ..Default::default()
                 },
-                orchestrator_compaction_threshold: Some(0),
+                compaction_threshold: Some(0),
                 ..Default::default()
             },
             &config,

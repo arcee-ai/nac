@@ -40,7 +40,7 @@ async fn manual_compaction_forces_disabled_and_high_threshold_without_mutating_r
         agent.last_usage = Some(TokenUsage {
             input_tokens: 91,
             output_tokens: 7,
-            orchestrator_context_tokens: 123,
+            context_tokens: 123,
             ..TokenUsage::default()
         });
         let canonical_before = serde_json::to_vec(&agent.messages).unwrap();
@@ -65,12 +65,11 @@ async fn manual_compaction_forces_disabled_and_high_threshold_without_mutating_r
             compaction::NAC_DIRECT_COMPACTION_PROMPT
         );
 
-        let checkpoints =
-            crate::store::orchestrator_compaction::load_orchestrator_compaction_checkpoints(
-                &store_path,
-                "session",
-            )
-            .unwrap();
+        let checkpoints = crate::store::session_compaction::load_session_compaction_checkpoints(
+            &store_path,
+            "session",
+        )
+        .unwrap();
         assert_eq!(checkpoints.len(), 1);
         assert_eq!(checkpoints[0].summary_prompt_tokens, Some(30));
         assert_eq!(checkpoints[0].summary_completion_tokens, Some(5));
@@ -89,7 +88,7 @@ async fn manual_compaction_forces_disabled_and_high_threshold_without_mutating_r
         assert_eq!(events.len(), 3);
         assert!(matches!(
             events[0],
-            AgentEvent::OrchestratorCompactionStarted {
+            AgentEvent::CompactionStarted {
                 compaction_id: id,
                 reason: CompactionReason::Manual,
             } if id == compaction_id
@@ -97,14 +96,14 @@ async fn manual_compaction_forces_disabled_and_high_threshold_without_mutating_r
         assert!(matches!(events[1], AgentEvent::TokenUsageUpdated { .. }));
         assert!(matches!(
             events[2],
-            AgentEvent::OrchestratorCompactionCompleted {
+            AgentEvent::CompactionCompleted {
                 compaction_id: id,
                 reason: CompactionReason::Manual,
             } if id == compaction_id
         ));
         assert!(!events.iter().any(|event| matches!(
             event,
-            AgentEvent::OrchestratorCompactionSkipped {
+            AgentEvent::CompactionSkipped {
                 cause: CompactionSkipReason::NoEligibleBoundary,
                 ..
             }
@@ -197,7 +196,7 @@ async fn manual_compaction_skips_empty_and_unsafe_history_without_model_requests
         );
         assert!(server.finish().is_empty());
         assert!(
-            crate::store::orchestrator_compaction::load_orchestrator_compaction_checkpoints(
+            crate::store::session_compaction::load_session_compaction_checkpoints(
                 &store_path,
                 "session"
             )
@@ -209,14 +208,14 @@ async fn manual_compaction_skips_empty_and_unsafe_history_without_model_requests
         assert_eq!(events.len(), 2);
         assert!(matches!(
             events[0],
-            AgentEvent::OrchestratorCompactionStarted {
+            AgentEvent::CompactionStarted {
                 compaction_id: id,
                 reason: CompactionReason::Manual,
             } if id == compaction_id
         ));
         assert!(matches!(
             events[1],
-            AgentEvent::OrchestratorCompactionSkipped {
+            AgentEvent::CompactionSkipped {
                 compaction_id: id,
                 reason: CompactionReason::Manual,
                 cause: CompactionSkipReason::NoEligibleBoundary,
@@ -296,12 +295,11 @@ async fn repeated_manual_compaction_progressively_advances_weighted_halves() {
     assert!(!second_input.contains("turn 2"));
     assert!(!second_input.contains("turn 4"));
 
-    let checkpoints =
-        crate::store::orchestrator_compaction::load_orchestrator_compaction_checkpoints(
-            &store_path,
-            "session",
-        )
-        .unwrap();
+    let checkpoints = crate::store::session_compaction::load_session_compaction_checkpoints(
+        &store_path,
+        "session",
+    )
+    .unwrap();
     assert_eq!(checkpoints.len(), 2);
     assert_eq!(checkpoints[0].tail_start_message_index, 4);
     assert_eq!(checkpoints[1].tail_start_message_index, 3);
@@ -316,7 +314,7 @@ async fn repeated_manual_compaction_progressively_advances_weighted_halves() {
             .iter()
             .filter(|event| matches!(
                 event,
-                AgentEvent::OrchestratorCompactionStarted {
+                AgentEvent::CompactionStarted {
                     reason: CompactionReason::Manual,
                     ..
                 }
@@ -329,7 +327,7 @@ async fn repeated_manual_compaction_progressively_advances_weighted_halves() {
             .iter()
             .filter(|event| matches!(
                 event,
-                AgentEvent::OrchestratorCompactionCompleted {
+                AgentEvent::CompactionCompleted {
                     reason: CompactionReason::Manual,
                     ..
                 }

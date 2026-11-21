@@ -63,7 +63,7 @@ pub fn session_model_matches(
         && selected.extra_headers == snapshot.extra_headers)
 }
 
-/// Resolve and normalize the persisted orchestrator compaction threshold for a
+/// Resolve and normalize the persisted session compaction threshold for a
 /// new session. Resume never calls this function: its value comes from the
 /// session snapshot instead.
 ///
@@ -72,7 +72,7 @@ pub fn session_model_matches(
 /// lower provider-derived automatic threshold. `Some(0)` explicitly
 /// disables compaction. Config.toml `[compaction].threshold_tokens` is no
 /// longer consulted — the section is silently ignored if present.
-pub fn effective_orchestrator_compaction_threshold(
+pub fn effective_compaction_threshold(
     requested: Option<u64>,
     context_window: u64,
 ) -> Result<Option<u64>> {
@@ -81,7 +81,7 @@ pub fn effective_orchestrator_compaction_threshold(
         .filter(|threshold| *threshold != 0);
     if threshold.is_some_and(|threshold| threshold > crate::MAX_SUPPORTED_TOKEN_COUNT) {
         anyhow::bail!(
-            "orchestrator compaction threshold must not exceed {} tokens",
+            "session compaction threshold must not exceed {} tokens",
             crate::MAX_SUPPORTED_TOKEN_COUNT
         );
     }

@@ -40,6 +40,7 @@ fn previous_schema(path: &Path) {
          INSERT INTO heartbeat_commands VALUES('legacy','request','canonical-digest','original','{\"original_response\":true}',100);
          PRAGMA user_version=47;",
     ).unwrap();
+    fixture_receipts::populate(&conn);
 }
 
 #[test]

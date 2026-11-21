@@ -29,8 +29,8 @@ mod mcp_runtime_api;
 #[cfg(feature = "native-auth-fixture")]
 #[doc(hidden)]
 pub mod native_auth_fixture;
-mod orchestration;
 mod revert;
+mod session_operations;
 pub(crate) use managed_control::running_target as managed_running_target;
 
 pub use compaction::{CompactSessionError, CompactSessionResponse};
@@ -40,9 +40,9 @@ pub use delivery::contracts::{
     InboxItemResponse, LaggedEvent, ManagedSessionSummary, MessageCycleMetadata,
     MessagePageMetadata, MessagesPageResponse, MessagesQuery, PermissionStateResponse,
     ProviderModelList, ProviderModelsRequest, RecentEventsResponse, ReplayBoundaryEvent,
-    ReplayGapEvent, ReplyPermissionRequest, RequestField, SandboxRequest, SessionLineageKind,
-    SessionLineageSnapshot, SessionSnapshotQuery, SessionSnapshotResponse, SshBrowseRequest,
-    StoreInfo, SubmitPromptRequest, SubmitPromptResponse, ThreadEventsQuery,
+    ReplayGapEvent, ReplyPermissionRequest, RequestField, SandboxRequest, SessionEventsQuery,
+    SessionLineageKind, SessionLineageSnapshot, SessionSnapshotQuery, SessionSnapshotResponse,
+    SshBrowseRequest, StoreInfo, SubmitPromptRequest, SubmitPromptResponse,
     ToolCallContentResponse, UpdateConfigRequest, UpdateGoalRequest, UpdateInboxItemRequest,
     UpdatePermissionApprovalModeRequest,
 };
@@ -1576,7 +1576,7 @@ impl SessionManager {
         child.service_tier = parent.service_tier;
         child.behavior = sessions::SessionBehavior::Direct;
         child.project_id = parent.project_id;
-        child.orchestrator_compaction_threshold = parent.orchestrator_compaction_threshold;
+        child.compaction_threshold = parent.compaction_threshold;
         child.automatic_compaction = parent.automatic_compaction;
         let path = self.inner.store_path.clone();
         let parent_id = parent_session_id.to_owned();

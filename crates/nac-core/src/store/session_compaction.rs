@@ -1,7 +1,7 @@
 use super::*;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct NewOrchestratorCompactionCheckpoint {
+pub(crate) struct NewSessionCompactionCheckpoint {
     pub session_id: String,
     pub previous_checkpoint_id: Option<i64>,
     /// Exact synthetic user-message content, including its wrapper.
@@ -17,7 +17,7 @@ pub(crate) struct NewOrchestratorCompactionCheckpoint {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct OrchestratorCompactionCheckpoint {
+pub(crate) struct SessionCompactionCheckpoint {
     pub id: i64,
     pub session_id: String,
     pub previous_checkpoint_id: Option<i64>,
@@ -41,10 +41,10 @@ const CHECKPOINT_COLUMNS: &str =
      new_context_estimate, created_at";
 
 coordinated_command! {
-pub(crate) fn append_orchestrator_compaction_checkpoint(
+pub(crate) fn append_session_compaction_checkpoint(
     path: &Path,
-    checkpoint: &NewOrchestratorCompactionCheckpoint,
-) -> Result<OrchestratorCompactionCheckpoint> {
+    checkpoint: &NewSessionCompactionCheckpoint,
+) -> Result<SessionCompactionCheckpoint> {
     validate_new_checkpoint(checkpoint)?;
 
     let tail_start_message_index = sqlite_i64_from_usize(
@@ -79,7 +79,7 @@ pub(crate) fn append_orchestrator_compaction_checkpoint(
     )?;
     if !session_exists {
         return Err(anyhow!(
-            "cannot append orchestrator compaction checkpoint: session {} does not exist",
+            "cannot append session compaction checkpoint: session {} does not exist",
             checkpoint.session_id
         ));
     }
@@ -88,7 +88,7 @@ pub(crate) fn append_orchestrator_compaction_checkpoint(
         let parent = transaction
             .query_row(
                 "SELECT session_id, tail_start_message_index
-                 FROM orchestrator_compaction_checkpoints
+                 FROM session_compaction_checkpoints
                  WHERE id = ?1",
                 params![parent_id],
                 |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
@@ -96,24 +96,24 @@ pub(crate) fn append_orchestrator_compaction_checkpoint(
             .optional()?;
         let Some((parent_session_id, parent_tail_start)) = parent else {
             return Err(anyhow!(
-                "cannot append orchestrator compaction checkpoint: parent {parent_id} does not exist"
+                "cannot append session compaction checkpoint: parent {parent_id} does not exist"
             ));
         };
         if parent_session_id != checkpoint.session_id {
             return Err(anyhow!(
-                "cannot append orchestrator compaction checkpoint: parent {parent_id} belongs to a different session"
+                "cannot append session compaction checkpoint: parent {parent_id} belongs to a different session"
             ));
         }
         if parent_tail_start >= tail_start_message_index {
             return Err(anyhow!(
-                "cannot append orchestrator compaction checkpoint: tail boundary {} must be greater than parent {parent_id} boundary {parent_tail_start}",
+                "cannot append session compaction checkpoint: tail boundary {} must be greater than parent {parent_id} boundary {parent_tail_start}",
                 checkpoint.tail_start_message_index
             ));
         }
     }
 
     transaction.execute(
-        "INSERT INTO orchestrator_compaction_checkpoints
+        "INSERT INTO session_compaction_checkpoints
              (session_id, previous_checkpoint_id, summary, tail_start_message_index,
               source_prefix_sha256, system_policy_sha256, prompt_policy_version,
               old_context_estimate, summary_prompt_tokens, summary_completion_tokens,
@@ -136,12 +136,12 @@ pub(crate) fn append_orchestrator_compaction_checkpoint(
     )?;
     let id = transaction.last_insert_rowid();
     let inserted = load_checkpoint_by_id(&transaction, id)?
-        .ok_or_else(|| anyhow!("inserted orchestrator compaction checkpoint {id} was not found"))?;
+        .ok_or_else(|| anyhow!("inserted session compaction checkpoint {id} was not found"))?;
     transaction.commit()?;
     Ok(inserted)
 }
-command AppendOrchestratorCompactionCheckpointCommand {
-    checkpoint: NewOrchestratorCompactionCheckpoint = checkpoint.clone(),
+command AppendSessionCompactionCheckpointCommand {
+    checkpoint: NewSessionCompactionCheckpoint = checkpoint.clone(),
 }
 call |command| (&command.checkpoint)
 correlation |_command| crate::telemetry::Correlation::default();
@@ -149,14 +149,14 @@ port public;
 }
 
 coordinated_command! {
-pub(crate) fn load_orchestrator_compaction_checkpoints(
+pub(crate) fn load_session_compaction_checkpoints(
     path: &Path,
     session_id: &str,
-) -> Result<Vec<OrchestratorCompactionCheckpoint>> {
+) -> Result<Vec<SessionCompactionCheckpoint>> {
     let conn = open_runtime_connection(path)?;
     let mut statement = conn.prepare(&format!(
         "SELECT {CHECKPOINT_COLUMNS}
-         FROM orchestrator_compaction_checkpoints
+         FROM session_compaction_checkpoints
          WHERE session_id = ?1
          ORDER BY id DESC"
     ))?;
@@ -166,14 +166,14 @@ pub(crate) fn load_orchestrator_compaction_checkpoints(
         match row {
             Ok(checkpoint) => checkpoints.push(checkpoint),
             Err(error) if is_checkpoint_decode_error(&error) => {
-                eprintln!("nac: skipping malformed orchestrator compaction checkpoint: {error}");
+                eprintln!("nac: skipping malformed session compaction checkpoint: {error}");
             }
             Err(error) => return Err(error.into()),
         }
     }
     Ok(checkpoints)
 }
-command LoadOrchestratorCompactionCheckpointsCommand {
+command LoadSessionCompactionCheckpointsCommand {
     session_id: String = session_id.to_owned(),
 }
 call |command| (&command.session_id)
@@ -193,12 +193,12 @@ fn is_checkpoint_decode_error(error: &rusqlite::Error) -> bool {
 fn load_checkpoint_by_id(
     conn: &Connection,
     id: i64,
-) -> Result<Option<OrchestratorCompactionCheckpoint>> {
+) -> Result<Option<SessionCompactionCheckpoint>> {
     Ok(conn
         .query_row(
             &format!(
                 "SELECT {CHECKPOINT_COLUMNS}
-                 FROM orchestrator_compaction_checkpoints
+                 FROM session_compaction_checkpoints
                  WHERE id = ?1"
             ),
             params![id],
@@ -207,10 +207,8 @@ fn load_checkpoint_by_id(
         .optional()?)
 }
 
-fn map_checkpoint_row(
-    row: &rusqlite::Row<'_>,
-) -> rusqlite::Result<OrchestratorCompactionCheckpoint> {
-    Ok(OrchestratorCompactionCheckpoint {
+fn map_checkpoint_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionCompactionCheckpoint> {
+    Ok(SessionCompactionCheckpoint {
         id: row.get(0)?,
         session_id: row.get(1)?,
         previous_checkpoint_id: row.get(2)?,
@@ -233,7 +231,7 @@ fn map_checkpoint_row(
     })
 }
 
-fn validate_new_checkpoint(checkpoint: &NewOrchestratorCompactionCheckpoint) -> Result<()> {
+fn validate_new_checkpoint(checkpoint: &NewSessionCompactionCheckpoint) -> Result<()> {
     if checkpoint.session_id.trim().is_empty() {
         return Err(anyhow!("checkpoint session id is empty"));
     }
@@ -329,8 +327,8 @@ mod tests {
         parent_id: Option<i64>,
         tail_start_message_index: usize,
         summary: &str,
-    ) -> NewOrchestratorCompactionCheckpoint {
-        NewOrchestratorCompactionCheckpoint {
+    ) -> NewSessionCompactionCheckpoint {
+        NewSessionCompactionCheckpoint {
             session_id: session_id.to_string(),
             previous_checkpoint_id: parent_id,
             summary: summary.to_string(),
@@ -352,7 +350,7 @@ mod tests {
         insert_test_session(&path, "session-a");
 
         let first_summary = "  <summary>\nfirst\n</summary>  ";
-        let first = append_orchestrator_compaction_checkpoint(
+        let first = append_session_compaction_checkpoint(
             &path,
             &checkpoint("session-a", None, 4, first_summary),
         )
@@ -360,9 +358,9 @@ mod tests {
         let mut second_input = checkpoint("session-a", Some(first.id), 9, "second");
         second_input.summary_prompt_tokens = None;
         second_input.summary_completion_tokens = None;
-        let second = append_orchestrator_compaction_checkpoint(&path, &second_input).unwrap();
+        let second = append_session_compaction_checkpoint(&path, &second_input).unwrap();
 
-        let loaded = load_orchestrator_compaction_checkpoints(&path, "session-a").unwrap();
+        let loaded = load_session_compaction_checkpoints(&path, "session-a").unwrap();
         assert_eq!(loaded, vec![second.clone(), first.clone()]);
         assert_eq!(first.summary, first_summary);
         assert_eq!(first.previous_checkpoint_id, None);
@@ -386,20 +384,20 @@ mod tests {
         initialize(&path).unwrap();
         insert_test_session(&path, "session-a");
         insert_test_session(&path, "session-b");
-        let parent = append_orchestrator_compaction_checkpoint(
+        let parent = append_session_compaction_checkpoint(
             &path,
             &checkpoint("session-a", None, 10, "parent"),
         )
         .unwrap();
 
-        let missing = append_orchestrator_compaction_checkpoint(
+        let missing = append_session_compaction_checkpoint(
             &path,
             &checkpoint("session-a", Some(parent.id + 1000), 11, "missing"),
         )
         .unwrap_err();
         assert!(missing.to_string().contains("does not exist"));
 
-        let cross_session = append_orchestrator_compaction_checkpoint(
+        let cross_session = append_session_compaction_checkpoint(
             &path,
             &checkpoint("session-b", Some(parent.id), 11, "cross-session"),
         )
@@ -407,7 +405,7 @@ mod tests {
         assert!(cross_session.to_string().contains("different session"));
 
         for boundary in [9, 10] {
-            let error = append_orchestrator_compaction_checkpoint(
+            let error = append_session_compaction_checkpoint(
                 &path,
                 &checkpoint("session-a", Some(parent.id), boundary, "not advancing"),
             )
@@ -415,9 +413,9 @@ mod tests {
             assert!(error.to_string().contains("must be greater"));
         }
 
-        let session_a = load_orchestrator_compaction_checkpoints(&path, "session-a").unwrap();
+        let session_a = load_session_compaction_checkpoints(&path, "session-a").unwrap();
         assert_eq!(session_a, vec![parent]);
-        assert!(load_orchestrator_compaction_checkpoints(&path, "session-b")
+        assert!(load_session_compaction_checkpoints(&path, "session-b")
             .unwrap()
             .is_empty());
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
@@ -429,45 +427,39 @@ mod tests {
         initialize(&path).unwrap();
         insert_test_session(&path, "session-a");
 
-        let missing_session = append_orchestrator_compaction_checkpoint(
-            &path,
-            &checkpoint("missing", None, 2, "summary"),
-        )
-        .unwrap_err();
+        let missing_session =
+            append_session_compaction_checkpoint(&path, &checkpoint("missing", None, 2, "summary"))
+                .unwrap_err();
         assert!(missing_session.to_string().contains("does not exist"));
-        assert!(load_orchestrator_compaction_checkpoints(&path, "missing")
+        assert!(load_session_compaction_checkpoints(&path, "missing")
             .unwrap()
             .is_empty());
 
-        let blank = append_orchestrator_compaction_checkpoint(
-            &path,
-            &checkpoint("session-a", None, 2, " \n "),
-        )
-        .unwrap_err();
+        let blank =
+            append_session_compaction_checkpoint(&path, &checkpoint("session-a", None, 2, " \n "))
+                .unwrap_err();
         assert!(blank.to_string().contains("summary is empty"));
-        assert!(load_orchestrator_compaction_checkpoints(&path, "session-a")
+        assert!(load_session_compaction_checkpoints(&path, "session-a")
             .unwrap()
             .is_empty());
 
-        let first = append_orchestrator_compaction_checkpoint(
-            &path,
-            &checkpoint("session-a", None, 2, "first"),
-        )
-        .unwrap();
-        append_orchestrator_compaction_checkpoint(
+        let first =
+            append_session_compaction_checkpoint(&path, &checkpoint("session-a", None, 2, "first"))
+                .unwrap();
+        append_session_compaction_checkpoint(
             &path,
             &checkpoint("session-a", Some(first.id), 5, "second"),
         )
         .unwrap();
         assert_eq!(
-            load_orchestrator_compaction_checkpoints(&path, "session-a")
+            load_session_compaction_checkpoints(&path, "session-a")
                 .unwrap()
                 .len(),
             2
         );
 
         assert!(crate::sessions::delete_session(&path, "session-a").unwrap());
-        assert!(load_orchestrator_compaction_checkpoints(&path, "session-a")
+        assert!(load_session_compaction_checkpoints(&path, "session-a")
             .unwrap()
             .is_empty());
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
@@ -478,17 +470,15 @@ mod tests {
         let path = temp_store_path("malformed_fallback");
         initialize(&path).unwrap();
         insert_test_session(&path, "session-a");
-        let valid = append_orchestrator_compaction_checkpoint(
-            &path,
-            &checkpoint("session-a", None, 2, "valid"),
-        )
-        .unwrap();
+        let valid =
+            append_session_compaction_checkpoint(&path, &checkpoint("session-a", None, 2, "valid"))
+                .unwrap();
 
         let conn = open_runtime_connection(&path).unwrap();
         conn.pragma_update(None, "ignore_check_constraints", "ON")
             .unwrap();
         conn.execute(
-            "INSERT INTO orchestrator_compaction_checkpoints
+            "INSERT INTO session_compaction_checkpoints
                  (session_id, previous_checkpoint_id, summary, tail_start_message_index,
                   source_prefix_sha256, system_policy_sha256, prompt_policy_version,
                   old_context_estimate, summary_prompt_tokens, summary_completion_tokens,
@@ -511,14 +501,14 @@ mod tests {
         drop(conn);
 
         assert_eq!(
-            load_orchestrator_compaction_checkpoints(&path, "session-a").unwrap(),
+            load_session_compaction_checkpoints(&path, "session-a").unwrap(),
             vec![valid]
         );
 
         let corrupt_path = temp_store_path("query_failure");
         std::fs::create_dir_all(corrupt_path.parent().unwrap()).unwrap();
         std::fs::write(&corrupt_path, b"not a sqlite database").unwrap();
-        assert!(load_orchestrator_compaction_checkpoints(&corrupt_path, "session-a").is_err());
+        assert!(load_session_compaction_checkpoints(&corrupt_path, "session-a").is_err());
 
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
         let _ = std::fs::remove_dir_all(corrupt_path.parent().unwrap());
@@ -544,11 +534,11 @@ mod tests {
         let mut input = checkpoint("session-a", None, 2, "summary");
         input.new_context_estimate = crate::MAX_SUPPORTED_TOKEN_COUNT + 1;
 
-        let error = append_orchestrator_compaction_checkpoint(&path, &input).unwrap_err();
+        let error = append_session_compaction_checkpoint(&path, &input).unwrap_err();
         assert!(error
             .to_string()
             .contains("exceeds supported token maximum"));
-        assert!(load_orchestrator_compaction_checkpoints(&path, "session-a")
+        assert!(load_session_compaction_checkpoints(&path, "session-a")
             .unwrap()
             .is_empty());
         let _ = std::fs::remove_dir_all(path.parent().unwrap());

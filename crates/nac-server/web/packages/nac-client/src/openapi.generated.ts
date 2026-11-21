@@ -48,24 +48,24 @@ export interface components {
       | {
           compaction_id: string;
           reason: components["schemas"]["CompactionReason"];
-          type: "orchestrator_compaction_started";
+          type: "compaction_started";
         }
       | {
           compaction_id: string;
           reason: components["schemas"]["CompactionReason"];
-          type: "orchestrator_compaction_completed";
+          type: "compaction_completed";
         }
       | {
           cause: components["schemas"]["CompactionSkipReason"];
           compaction_id: string;
           reason: components["schemas"]["CompactionReason"];
-          type: "orchestrator_compaction_skipped";
+          type: "compaction_skipped";
         }
       | {
           compaction_id: string;
           failure: components["schemas"]["CompactionFailure"];
           reason: components["schemas"]["CompactionReason"];
-          type: "orchestrator_compaction_failed";
+          type: "compaction_failed";
         }
       | {
           content: string;
@@ -221,6 +221,7 @@ export interface components {
       backend?: components["schemas"]["RequestField_String_String"];
       base_url?: components["schemas"]["RequestField_String_String"];
       behavior?: components["schemas"]["SessionBehavior"];
+      compaction_threshold?: components["schemas"]["RequestField_u64_u64"];
       cwd?: string | null;
       extra_headers?: components["schemas"]["RequestField_HeadersRequest_HeadersRequest"];
       first_chat?: boolean;
@@ -228,7 +229,6 @@ export interface components {
       first_chat_same_behavior?: boolean;
       model?: components["schemas"]["RequestField_String_String"];
       model_source?: components["schemas"]["ProjectModelSourceRef"] | null;
-      orchestrator_compaction_threshold?: components["schemas"]["RequestField_u64_u64"];
       project_id?: string | null;
       reasoning_effort?: components["schemas"]["RequestField_String_String"];
       sandbox?: components["schemas"]["SandboxRequest"];
@@ -969,11 +969,11 @@ export interface components {
       automatic_compaction?: boolean;
       backend: string | null;
       base_url: string;
+      compaction_threshold: number | null;
       config_version: number;
       diagnostics?: string[];
       extra_headers_json: string | null;
       model: string;
-      orchestrator_compaction_threshold: number | null;
       reasoning_effort: string | null;
       service_tier?: string | null;
       session_id: string;
@@ -1172,6 +1172,12 @@ export interface components {
       | { transcript_len: number; type: "transcript_appended" }
       | { transcript_len: number; type: "transcript_reverted" };
     SessionEventBoundary: { epoch_id: string; sequence_id: number };
+    SessionEventDecodeDiagnostic: {
+      created_at: string;
+      error: string;
+      event_target: string;
+      id: number;
+    };
     SessionEventEnvelope: {
       client_id?: components["schemas"]["SessionClientId"] | null;
       epoch_id: string;
@@ -1197,10 +1203,10 @@ export interface components {
       primary_tool_events?: components["schemas"]["AgentEvent"][];
       response_timing: components["schemas"]["ResponseTimingSnapshot"];
       run_failure?: components["schemas"]["RunFailure"] | null;
+      session_event_boundary: components["schemas"]["SessionEventBoundary"];
+      session_event_diagnostics?: components["schemas"]["SessionEventDecodeDiagnostic"][];
       sessions: components["schemas"]["SessionSummarySnapshot"][];
       shell_commands?: components["schemas"]["ShellCommandSnapshot"][];
-      thread_event_boundary: components["schemas"]["SessionEventBoundary"];
-      thread_event_diagnostics?: components["schemas"]["ThreadEventDecodeDiagnostic"][];
       transcript_recovery_warning?: string | null;
       workspace: components["schemas"]["WorkspaceSnapshot"];
     };
@@ -1486,12 +1492,6 @@ export interface components {
       probe?: components["schemas"]["McpProbeResult"] | null;
       tools: components["schemas"]["McpProbedTool"][];
     };
-    ThreadEventDecodeDiagnostic: {
-      created_at: string;
-      error: string;
-      id: number;
-      thread_name: string;
-    };
     TokenCostMicros: {
       cache_read?: number;
       cache_write?: number;
@@ -1562,10 +1562,10 @@ export interface components {
       api_key_env?: components["schemas"]["RequestField_String_String"];
       backend?: components["schemas"]["RequestField_String_String"];
       base_url?: components["schemas"]["RequestField_String_String"];
+      compaction_threshold?: components["schemas"]["RequestField_u64_u64"];
       expected_config_version?: number | null;
       extra_headers?: components["schemas"]["RequestField_HeadersRequest_HeadersRequest"];
       model?: components["schemas"]["RequestField_String_String"];
-      orchestrator_compaction_threshold?: components["schemas"]["RequestField_u64_u64"];
       reasoning_effort?: components["schemas"]["RequestField_String_String"];
       service_tier?: components["schemas"]["RequestField_String_String"];
     };

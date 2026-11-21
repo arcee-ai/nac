@@ -112,11 +112,9 @@ async fn selection_provenance_actual_compaction_restart_repeated_summary_and_can
     agent.set_current_run_id(Some("ordinary-1".into()));
     agent.send("current question").await.unwrap();
     let first_checkpoint =
-        crate::store::orchestrator_compaction::load_orchestrator_compaction_checkpoints(
-            &path, "session",
-        )
-        .unwrap()
-        .remove(0);
+        crate::store::session_compaction::load_session_compaction_checkpoints(&path, "session")
+            .unwrap()
+            .remove(0);
     let first = manifest(&first_checkpoint.summary);
     assert!(first["total"].as_u64().unwrap() > 4);
     assert_eq!(first["recent"].as_array().unwrap().len(), 4);
@@ -150,10 +148,8 @@ async fn selection_provenance_actual_compaction_restart_repeated_summary_and_can
     restored.set_current_run_id(Some("ordinary-2".into()));
     restored.send("another question").await.unwrap();
     let checkpoints =
-        crate::store::orchestrator_compaction::load_orchestrator_compaction_checkpoints(
-            &path, "session",
-        )
-        .unwrap();
+        crate::store::session_compaction::load_session_compaction_checkpoints(&path, "session")
+            .unwrap();
     assert_eq!(checkpoints.len(), 2);
     let second = manifest(&checkpoints[0].summary);
     assert!(second["total"].as_u64().unwrap() > first["total"].as_u64().unwrap());
@@ -168,7 +164,7 @@ async fn selection_provenance_actual_compaction_restart_repeated_summary_and_can
     // checkpoint. A source annotation removal also invalidates the source hash,
     // even though every canonical User byte is unchanged.
     let connection = crate::store::open_runtime_connection(&path).unwrap();
-    connection.execute("UPDATE orchestrator_compaction_checkpoints SET summary=replace(summary,'\"total\":','\"fabricated_total\":') WHERE session_id='session'", []).unwrap();
+    connection.execute("UPDATE session_compaction_checkpoints SET summary=replace(summary,'\"total\":','\"fabricated_total\":') WHERE session_id='session'", []).unwrap();
     restored.restore_compaction_checkpoint().unwrap();
     assert!(restored
         .compaction
@@ -182,7 +178,7 @@ async fn selection_provenance_actual_compaction_restart_repeated_summary_and_can
     );
     connection
         .execute(
-            "UPDATE orchestrator_compaction_checkpoints SET summary=?1 WHERE id=?2",
+            "UPDATE session_compaction_checkpoints SET summary=?1 WHERE id=?2",
             rusqlite::params![checkpoints[0].summary, checkpoints[0].id],
         )
         .unwrap();
@@ -193,7 +189,7 @@ async fn selection_provenance_actual_compaction_restart_repeated_summary_and_can
         .unwrap()
         .active_checkpoint_for_test()
         .is_some());
-    connection.execute("UPDATE thread_events SET event_json=json_remove(event_json,'$.nac_transcript_message.terminal_selection_attribution') WHERE session_id='session'",[]).unwrap();
+    connection.execute("UPDATE session_events SET event_json=json_remove(event_json,'$.nac_transcript_message.terminal_selection_attribution') WHERE session_id='session'",[]).unwrap();
     restored
         .compaction
         .as_mut()

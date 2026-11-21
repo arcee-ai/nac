@@ -366,10 +366,10 @@ export declare function useSessionSnapshot(id: string | null, options?: Partial<
     primary_tool_events?: import("../../types/openapi.generated").components["schemas"]["AgentEvent"][];
     response_timing: import("../../types/openapi.generated").components["schemas"]["ResponseTimingSnapshot"];
     run_failure?: import("../../types/openapi.generated").components["schemas"]["RunFailure"] | null;
+    session_event_boundary: import("../../types/openapi.generated").components["schemas"]["SessionEventBoundary"];
+    session_event_diagnostics?: import("../../types/openapi.generated").components["schemas"]["SessionEventDecodeDiagnostic"][];
     sessions: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"][];
     shell_commands?: import("../../types/openapi.generated").components["schemas"]["ShellCommandSnapshot"][];
-    thread_event_boundary: import("../../types/openapi.generated").components["schemas"]["SessionEventBoundary"];
-    thread_event_diagnostics?: import("../../types/openapi.generated").components["schemas"]["ThreadEventDecodeDiagnostic"][];
     transcript_recovery_warning?: string | null;
     workspace: import("../../types/openapi.generated").components["schemas"]["WorkspaceSnapshot"];
 } & {
@@ -386,11 +386,11 @@ export declare function useSessionConfig(id: string | null): import("@tanstack/r
     automatic_compaction?: boolean;
     backend: string | null;
     base_url: string;
+    compaction_threshold: number | null;
     config_version: number;
     diagnostics?: string[];
     extra_headers_json: string | null;
     model: string;
-    orchestrator_compaction_threshold: number | null;
     reasoning_effort: string | null;
     service_tier?: string | null;
     session_id: string;
@@ -405,10 +405,10 @@ export declare function useCreateSession(): import("@tanstack/react-query").UseM
     primary_tool_events?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["AgentEvent"][];
     response_timing: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["ResponseTimingSnapshot"];
     run_failure?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["RunFailure"] | null;
+    session_event_boundary: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionEventBoundary"];
+    session_event_diagnostics?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionEventDecodeDiagnostic"][];
     sessions: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionSummarySnapshot"][];
     shell_commands?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["ShellCommandSnapshot"][];
-    thread_event_boundary: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionEventBoundary"];
-    thread_event_diagnostics?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["ThreadEventDecodeDiagnostic"][];
     transcript_recovery_warning?: string | null;
     workspace: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["WorkspaceSnapshot"];
 } & {
@@ -423,6 +423,7 @@ export declare function useCreateSession(): import("@tanstack/react-query").UseM
     backend?: import("../../types/openapi.generated").components["schemas"]["RequestField_String_String"];
     base_url?: import("../../types/openapi.generated").components["schemas"]["RequestField_String_String"];
     behavior?: import("../../types/openapi.generated").components["schemas"]["SessionBehavior"];
+    compaction_threshold?: import("../../types/openapi.generated").components["schemas"]["RequestField_u64_u64"];
     cwd?: string | null;
     extra_headers?: import("../../types/openapi.generated").components["schemas"]["RequestField_HeadersRequest_HeadersRequest"];
     first_chat?: boolean;
@@ -430,7 +431,6 @@ export declare function useCreateSession(): import("@tanstack/react-query").UseM
     first_chat_same_behavior?: boolean;
     model?: import("../../types/openapi.generated").components["schemas"]["RequestField_String_String"];
     model_source?: import("../../types/openapi.generated").components["schemas"]["ProjectModelSourceRef"] | null;
-    orchestrator_compaction_threshold?: import("../../types/openapi.generated").components["schemas"]["RequestField_u64_u64"];
     project_id?: string | null;
     reasoning_effort?: import("../../types/openapi.generated").components["schemas"]["RequestField_String_String"];
     sandbox?: import("../../types/openapi.generated").components["schemas"]["SandboxRequest"];

@@ -107,8 +107,12 @@ pub fn control_heartbeat(path:&Path,session_id:&str,request_id:&str,action:&Hear
     let tx=conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     let prior:Option<(String,String)>=tx.query_row("SELECT canonical_digest,response_json FROM heartbeat_commands WHERE session_id=?1 AND request_id=?2",params![session_id,request_id],|row| Ok((row.get(0)?,row.get(1)?))).optional()?;
     if let Some((prior_digest,response))=prior {
-        ensure!(prior_digest==digest,"heartbeat request identity conflicts with its original arguments");
-        return Ok(serde_json::from_str(&response)?);
+        let (receipt, legacy): (HeartbeatReceipt, bool) = crate::store::legacy_task_model::decode(&tx,crate::store::legacy_task_model::Owner::Command,session_id,request_id,&response)?;
+        let legacy_matches = if legacy && matches!(action,HeartbeatAction::Create{..}|HeartbeatAction::Edit{..}) {
+            expected_binding.fresh_task.as_ref().is_some_and(|destination| v54_receipt::digest(action,destination).is_ok_and(|old|old==prior_digest))
+        } else { false };
+        ensure!(prior_digest==digest || legacy_matches,"heartbeat request identity conflicts with its original arguments");
+        return Ok(receipt);
     }
     let relinquishing=matches!(action,HeartbeatAction::Pause{..}|HeartbeatAction::Stop{..}|HeartbeatAction::Delete{..});
     if !relinquishing {

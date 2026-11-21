@@ -264,7 +264,7 @@ pub struct CreateSessionRequest {
     pub extra_headers: RequestField<HeadersRequest>,
     /// Omitted defaults to 70% of the model's context window; null or zero disables.
     #[serde(default)]
-    pub orchestrator_compaction_threshold: RequestField<u64>,
+    pub compaction_threshold: RequestField<u64>,
     /// OpenSSH target for remote sessions; `cwd` is remote and defaults to `~`.
     #[serde(default, alias = "host_id")]
     pub ssh_host: Option<String>,
@@ -330,9 +330,7 @@ impl CreateSessionRequest {
                     application::Field::Set(headers)
                 }
             },
-            orchestrator_compaction_threshold: application_field(
-                self.orchestrator_compaction_threshold,
-            ),
+            compaction_threshold: application_field(self.compaction_threshold),
             ssh_host: self.ssh_host,
             ssh_port: self.ssh_port,
             ssh_identity_file: self.ssh_identity_file,
@@ -411,7 +409,7 @@ pub struct UpdateConfigRequest {
     pub extra_headers: RequestField<HeadersRequest>,
     /// Omitted preserves; null or zero disables.
     #[serde(default)]
-    pub orchestrator_compaction_threshold: RequestField<u64>,
+    pub compaction_threshold: RequestField<u64>,
 }
 
 impl UpdateConfigRequest {
@@ -432,9 +430,7 @@ impl UpdateConfigRequest {
                     application::Field::Set(headers)
                 }
             },
-            orchestrator_compaction_threshold: application_field(
-                self.orchestrator_compaction_threshold,
-            ),
+            compaction_threshold: application_field(self.compaction_threshold),
         }
     }
 }
@@ -591,7 +587,7 @@ pub struct EventsQuery {
 #[into_params(parameter_in = Query)]
 pub struct SessionSnapshotQuery {
     pub message_limit: Option<usize>,
-    pub thread_event_limit: Option<usize>,
+    pub session_event_limit: Option<usize>,
     pub include_sessions: Option<bool>,
     #[serde(default)]
     pub include_system: bool,
@@ -608,7 +604,7 @@ pub struct MessagesQuery {
 
 #[derive(Debug, Clone, Default, Deserialize, utoipa::IntoParams)]
 #[into_params(parameter_in = Query)]
-pub struct ThreadEventsQuery {
+pub struct SessionEventsQuery {
     pub before_id: Option<i64>,
     pub limit: Option<usize>,
 }

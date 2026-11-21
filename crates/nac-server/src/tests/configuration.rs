@@ -39,6 +39,10 @@ async fn direct_config_patch_updates_selected_model_and_rejects_light_selector()
         serde_json::json!({"light_model": null})
     )
     .is_err());
+    assert!(serde_json::from_value::<UpdateConfigRequest>(
+        serde_json::json!({"orchestrator_compaction_threshold": null})
+    )
+    .is_err());
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -252,7 +256,7 @@ threshold_tokens = 64000
             reasoning_effort: RequestField::Null,
             api_key_env: RequestField::Null,
             extra_headers: RequestField::Null,
-            orchestrator_compaction_threshold: RequestField::Null,
+            compaction_threshold: RequestField::Null,
             ..CreateSessionRequest::default()
         })
         .await
@@ -264,7 +268,7 @@ threshold_tokens = 64000
     assert_eq!(stored.reasoning_effort, None);
     assert_eq!(stored.api_key_env, None);
     assert!(stored.extra_headers.is_empty());
-    assert_eq!(stored.orchestrator_compaction_threshold, None);
+    assert_eq!(stored.compaction_threshold, None);
 
     let zero_disabled = manager
         .create_session(CreateSessionRequest {
@@ -274,7 +278,7 @@ threshold_tokens = 64000
             reasoning_effort: RequestField::Null,
             api_key_env: RequestField::Null,
             extra_headers: RequestField::Null,
-            orchestrator_compaction_threshold: RequestField::Value(0),
+            compaction_threshold: RequestField::Value(0),
             ..CreateSessionRequest::default()
         })
         .await
@@ -283,7 +287,7 @@ threshold_tokens = 64000
     assert_eq!(
         sessions::load_session(&root.join("store.db"), &zero_disabled_id)
             .unwrap()
-            .orchestrator_compaction_threshold,
+            .compaction_threshold,
         None
     );
 
@@ -972,7 +976,7 @@ async fn patch_round_trips_every_state_and_rebuilds_from_persisted_settings() {
                     "X-Replaced".to_string(),
                     "true".to_string(),
                 )]))),
-                orchestrator_compaction_threshold: RequestField::Value(64_000),
+                compaction_threshold: RequestField::Value(64_000),
             },
         )
         .await
@@ -988,12 +992,12 @@ async fn patch_round_trips_every_state_and_rebuilds_from_persisted_settings() {
     assert_eq!(replaced.reasoning_effort, Some(ReasoningEffort::High));
     assert_eq!(replaced.api_key_env.as_deref(), Some("OPENAI_API_KEY"));
     assert_eq!(replaced.extra_headers.get("X-Replaced").unwrap(), "true");
-    assert_eq!(replaced.orchestrator_compaction_threshold, Some(64_000));
+    assert_eq!(replaced.compaction_threshold, Some(64_000));
     assert_eq!(
         manager
             .session_config("session")
             .unwrap()
-            .orchestrator_compaction_threshold,
+            .compaction_threshold,
         Some(64_000)
     );
 
@@ -1008,7 +1012,7 @@ async fn patch_round_trips_every_state_and_rebuilds_from_persisted_settings() {
                 reasoning_effort: RequestField::Null,
                 api_key_env: RequestField::Null,
                 extra_headers: RequestField::Null,
-                orchestrator_compaction_threshold: RequestField::Null,
+                compaction_threshold: RequestField::Null,
                 ..UpdateConfigRequest::default()
             },
         )
@@ -1019,7 +1023,7 @@ async fn patch_round_trips_every_state_and_rebuilds_from_persisted_settings() {
     assert_eq!(arcee_auth.reasoning_effort, None);
     assert_eq!(arcee_auth.api_key_env, None);
     assert!(arcee_auth.extra_headers.is_empty());
-    assert_eq!(arcee_auth.orchestrator_compaction_threshold, None);
+    assert_eq!(arcee_auth.compaction_threshold, None);
 
     manager
         .update_session_config(
@@ -1029,7 +1033,7 @@ async fn patch_round_trips_every_state_and_rebuilds_from_persisted_settings() {
                 model: RequestField::Value("trinity-large-thinking".to_string()),
                 base_url: RequestField::Value("https://api.arcee.ai/api/v1".to_string()),
                 api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
-                orchestrator_compaction_threshold: RequestField::Value(32_000),
+                compaction_threshold: RequestField::Value(32_000),
                 ..UpdateConfigRequest::default()
             },
         )
@@ -1037,7 +1041,7 @@ async fn patch_round_trips_every_state_and_rebuilds_from_persisted_settings() {
         .expect("switch to Arcee API key mode");
     let arcee_api = sessions::load_session(&root.join("store.db"), "session").unwrap();
     assert_eq!(arcee_api.backend, BackendKind::ArceeApi);
-    assert_eq!(arcee_api.orchestrator_compaction_threshold, Some(32_000));
+    assert_eq!(arcee_api.compaction_threshold, Some(32_000));
 
     manager
         .update_session_config(
@@ -1047,7 +1051,7 @@ async fn patch_round_trips_every_state_and_rebuilds_from_persisted_settings() {
                 model: RequestField::Value("gpt-5.2-codex".to_string()),
                 base_url: RequestField::Value("https://chatgpt.com/backend-api".to_string()),
                 api_key_env: RequestField::Null,
-                orchestrator_compaction_threshold: RequestField::Value(0),
+                compaction_threshold: RequestField::Value(0),
                 ..UpdateConfigRequest::default()
             },
         )
@@ -1056,7 +1060,7 @@ async fn patch_round_trips_every_state_and_rebuilds_from_persisted_settings() {
     let codex = sessions::load_session(&root.join("store.db"), "session").unwrap();
     assert_eq!(codex.backend, BackendKind::ChatGptCodexResponses);
     assert_eq!(codex.api_key_env, None);
-    assert_eq!(codex.orchestrator_compaction_threshold, None);
+    assert_eq!(codex.compaction_threshold, None);
 
     manager
         .update_session_config(
@@ -1109,9 +1113,7 @@ async fn invalid_patches_preserve_database_and_active_service() {
 
     let invalid = [
         UpdateConfigRequest {
-            orchestrator_compaction_threshold: RequestField::Value(
-                nac_core::MAX_SUPPORTED_TOKEN_COUNT + 1,
-            ),
+            compaction_threshold: RequestField::Value(nac_core::MAX_SUPPORTED_TOKEN_COUNT + 1),
             ..UpdateConfigRequest::default()
         },
         UpdateConfigRequest {
@@ -1259,7 +1261,7 @@ async fn removed_backend_updates_are_bad_requests_and_are_not_persisted() {
                     reasoning_effort: RequestField::Omitted,
                     api_key_env: RequestField::Omitted,
                     extra_headers: RequestField::Omitted,
-                    orchestrator_compaction_threshold: RequestField::Omitted,
+                    compaction_threshold: RequestField::Omitted,
                 },
             )
             .await
@@ -1308,7 +1310,7 @@ async fn server_arcee_configuration_status_and_persistence_are_consistent() {
             service_tier: RequestField::Omitted,
             api_key_env: RequestField::Omitted,
             extra_headers: RequestField::Omitted,
-            orchestrator_compaction_threshold: RequestField::Omitted,
+            compaction_threshold: RequestField::Omitted,
             ssh_host: None,
             ssh_port: None,
             ssh_identity_file: None,
@@ -1363,7 +1365,7 @@ async fn server_arcee_configuration_status_and_persistence_are_consistent() {
                     reasoning_effort: RequestField::Omitted,
                     api_key_env: RequestField::Omitted,
                     extra_headers: RequestField::Omitted,
-                    orchestrator_compaction_threshold: RequestField::Omitted,
+                    compaction_threshold: RequestField::Omitted,
                 },
             )
             .await
@@ -1394,7 +1396,7 @@ async fn server_arcee_configuration_status_and_persistence_are_consistent() {
                 reasoning_effort: RequestField::Omitted,
                 api_key_env: RequestField::Omitted,
                 extra_headers: RequestField::Omitted,
-                orchestrator_compaction_threshold: RequestField::Omitted,
+                compaction_threshold: RequestField::Omitted,
             },
         )
         .await
@@ -1417,7 +1419,7 @@ async fn server_arcee_configuration_status_and_persistence_are_consistent() {
                 reasoning_effort: RequestField::Omitted,
                 api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
                 extra_headers: RequestField::Omitted,
-                orchestrator_compaction_threshold: RequestField::Omitted,
+                compaction_threshold: RequestField::Omitted,
             },
         )
         .await
@@ -1443,7 +1445,7 @@ async fn server_arcee_configuration_status_and_persistence_are_consistent() {
             service_tier: RequestField::Omitted,
             api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
             extra_headers: RequestField::Omitted,
-            orchestrator_compaction_threshold: RequestField::Omitted,
+            compaction_threshold: RequestField::Omitted,
             ssh_host: None,
             ssh_port: None,
             ssh_identity_file: None,
@@ -1492,7 +1494,7 @@ async fn null_update_clears_legacy_arcee_api_key_env() {
                 reasoning_effort: RequestField::Omitted,
                 api_key_env: RequestField::Null,
                 extra_headers: RequestField::Omitted,
-                orchestrator_compaction_threshold: RequestField::Omitted,
+                compaction_threshold: RequestField::Omitted,
             },
         )
         .await

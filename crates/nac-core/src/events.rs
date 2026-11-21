@@ -240,20 +240,20 @@ pub enum AgentEvent {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         remote_outcome_uncertain: bool,
     },
-    OrchestratorCompactionStarted {
+    CompactionStarted {
         compaction_id: Uuid,
         reason: CompactionReason,
     },
-    OrchestratorCompactionCompleted {
+    CompactionCompleted {
         compaction_id: Uuid,
         reason: CompactionReason,
     },
-    OrchestratorCompactionSkipped {
+    CompactionSkipped {
         compaction_id: Uuid,
         reason: CompactionReason,
         cause: CompactionSkipReason,
     },
-    OrchestratorCompactionFailed {
+    CompactionFailed {
         compaction_id: Uuid,
         reason: CompactionReason,
         failure: CompactionFailure,
@@ -643,7 +643,7 @@ pub struct SessionEventReplaySubscription {
 #[derive(Clone)]
 pub struct SessionEventBus {
     session_id: Option<String>,
-    thread_event_persistence: ThreadEventPersistence,
+    session_event_persistence: SessionEventPersistence,
     epoch_id: String,
     sender: broadcast::Sender<SessionEventEnvelope>,
     delta_sender: broadcast::Sender<AssistantStreamDelta>,
@@ -654,28 +654,28 @@ pub struct SessionEventBus {
 }
 
 #[derive(Clone)]
-enum ThreadEventPersistence {
+enum SessionEventPersistence {
     Disabled,
-    Available(ThreadEventStore),
+    Available(SessionEventStore),
 }
 
 #[derive(Clone)]
-struct ThreadEventStore {
-    writer: Arc<crate::store::ThreadEventWriter>,
+struct SessionEventStore {
+    writer: Arc<crate::store::SessionEventWriter>,
     session_id: String,
 }
 
-struct PreparedThreadEvent<'a> {
-    connection: crate::store::ThreadEventConnection,
+struct PreparedSessionEvent<'a> {
+    connection: crate::store::SessionEventConnection,
     session_id: &'a str,
-    thread_name: String,
+    event_target: String,
     event_json: String,
 }
 
-impl PreparedThreadEvent<'_> {
+impl PreparedSessionEvent<'_> {
     fn persist(&self) -> anyhow::Result<()> {
         self.connection
-            .append(self.session_id, &self.thread_name, &self.event_json)
+            .append(self.session_id, &self.event_target, &self.event_json)
     }
 }
 
@@ -700,14 +700,14 @@ impl SessionEventBus {
         Self::with_limits(session_id, capacity, SESSION_EVENT_BUS_REPLAY_BYTE_CAP)
     }
 
-    pub fn with_thread_event_store(session_id: Option<String>, path: PathBuf) -> Self {
+    pub fn with_session_event_store(session_id: Option<String>, path: PathBuf) -> Self {
         let mut bus = Self::new(session_id.clone());
-        bus.thread_event_persistence = match session_id {
-            Some(session_id) => ThreadEventPersistence::Available(ThreadEventStore {
-                writer: Arc::new(crate::store::ThreadEventWriter::path_backed(&path)),
+        bus.session_event_persistence = match session_id {
+            Some(session_id) => SessionEventPersistence::Available(SessionEventStore {
+                writer: Arc::new(crate::store::SessionEventWriter::path_backed(&path)),
                 session_id,
             }),
-            None => ThreadEventPersistence::Disabled,
+            None => SessionEventPersistence::Disabled,
         };
         bus
     }
@@ -719,7 +719,7 @@ impl SessionEventBus {
         let (delta_sender, _) = broadcast::channel(ASSISTANT_DELTA_CHANNEL_CAPACITY);
         Self {
             session_id,
-            thread_event_persistence: ThreadEventPersistence::Disabled,
+            session_event_persistence: SessionEventPersistence::Disabled,
             epoch_id: Uuid::new_v4().to_string(),
             sender,
             delta_sender,
@@ -907,9 +907,9 @@ impl SessionEventBus {
     }
 
     fn has_owned_persistence(&self) -> anyhow::Result<bool> {
-        match &self.thread_event_persistence {
-            ThreadEventPersistence::Available(store) => store.writer.has_owner(),
-            ThreadEventPersistence::Disabled => Ok(false),
+        match &self.session_event_persistence {
+            SessionEventPersistence::Available(store) => store.writer.has_owner(),
+            SessionEventPersistence::Disabled => Ok(false),
         }
     }
 
@@ -948,7 +948,7 @@ impl SessionEventBus {
         run_id: Option<SessionRunId>,
         client_id: Option<SessionClientId>,
     ) -> (SessionEventEnvelope, anyhow::Result<()>) {
-        let prepared = self.prepare_thread_event(&event);
+        let prepared = self.prepare_session_event(&event);
         let _publication = self
             .publication
             .lock()
@@ -1015,7 +1015,7 @@ impl SessionEventBus {
         Some(self.emit_sanitized(SessionEvent::Agent { event }, run_id, client_id))
     }
 
-    pub fn thread_event_boundary<T>(
+    pub fn session_event_boundary<T>(
         &self,
         query: impl FnOnce() -> anyhow::Result<T>,
     ) -> anyhow::Result<(SessionEventBoundary, T)> {
@@ -1057,12 +1057,12 @@ impl SessionEventBus {
     }
 
     #[cfg(test)]
-    pub(crate) fn hold_thread_event_connection_for_test(
+    pub(crate) fn hold_session_event_connection_for_test(
         &self,
-    ) -> anyhow::Result<crate::store::ThreadEventConnection> {
-        match &self.thread_event_persistence {
-            ThreadEventPersistence::Available(store) => store.writer.checkout(),
-            ThreadEventPersistence::Disabled => {
+    ) -> anyhow::Result<crate::store::SessionEventConnection> {
+        match &self.session_event_persistence {
+            SessionEventPersistence::Available(store) => store.writer.checkout(),
+            SessionEventPersistence::Disabled => {
                 Err(anyhow::anyhow!("thread event persistence is disabled"))
             }
         }
@@ -1082,34 +1082,34 @@ impl SessionEventBus {
     /// Prepare persistence before taking the publication lock. Snapshot loading
     /// checks out SQLite before taking the same lock, so this order prevents a
     /// capacity/state inversion while preserving persistence-before-publication.
-    fn prepare_thread_event(
+    fn prepare_session_event(
         &self,
         event: &SessionEvent,
-    ) -> anyhow::Result<Option<PreparedThreadEvent<'_>>> {
+    ) -> anyhow::Result<Option<PreparedSessionEvent<'_>>> {
         let SessionEvent::Agent { event } = event else {
             return Ok(None);
         };
         let Some(event) = sanitize_external_agent_event(event.clone()) else {
             return Ok(None);
         };
-        let Some(thread_name) = persisted_thread_event_name(&event) else {
+        let Some(event_target) = persisted_session_event_name(&event) else {
             return Ok(None);
         };
-        let store = match &self.thread_event_persistence {
-            ThreadEventPersistence::Disabled => return Ok(None),
-            ThreadEventPersistence::Available(store) => store,
+        let store = match &self.session_event_persistence {
+            SessionEventPersistence::Disabled => return Ok(None),
+            SessionEventPersistence::Available(store) => store,
         };
         let event_json = serde_json::to_string(&event)?;
-        Ok(Some(PreparedThreadEvent {
+        Ok(Some(PreparedSessionEvent {
             connection: store.writer.checkout()?,
             session_id: &store.session_id,
-            thread_name: thread_name.to_string(),
+            event_target: event_target.to_string(),
             event_json,
         }))
     }
 }
 
-fn persisted_thread_event_name(event: &AgentEvent) -> Option<&str> {
+fn persisted_session_event_name(event: &AgentEvent) -> Option<&str> {
     match event {
         AgentEvent::ToolCallStarted { .. } | AgentEvent::ToolCallFinished { .. } => {
             Some(PRIMARY_TOOL_EVENT_TARGET)
@@ -1225,10 +1225,10 @@ pub(crate) fn sanitize_external_agent_event(event: AgentEvent) -> Option<AgentEv
         event @ (AgentEvent::TokenUsageUpdated { .. }
         | AgentEvent::AssistantMessage { .. }
         | AgentEvent::RunFinished { .. }
-        | AgentEvent::OrchestratorCompactionStarted { .. }
-        | AgentEvent::OrchestratorCompactionCompleted { .. }
-        | AgentEvent::OrchestratorCompactionSkipped { .. }
-        | AgentEvent::OrchestratorCompactionFailed { .. }) => event,
+        | AgentEvent::CompactionStarted { .. }
+        | AgentEvent::CompactionCompleted { .. }
+        | AgentEvent::CompactionSkipped { .. }
+        | AgentEvent::CompactionFailed { .. }) => event,
     })
 }
 
