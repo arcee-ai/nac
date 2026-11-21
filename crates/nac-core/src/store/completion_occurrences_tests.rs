@@ -114,8 +114,8 @@ impl Drop for Fixture {
 }
 
 #[test]
-fn completion_all_three_behaviors_retain_a_while_queued_or_transient_b_is_active() {
-    for behavior in ["orchestrator", "direct", "direct-with-orchestrator", ""] {
+fn direct_completion_retains_a_while_queued_or_transient_b_is_active() {
+    for behavior in ["direct"] {
         let mut fixture = Fixture::new(behavior);
         let after = fixture.cursor();
         fixture.begin("request-A");
@@ -504,7 +504,7 @@ fn runtime49_canonical_terminal_produces_one_exact_request_row() {
     )
     .unwrap();
     let count: i64 = open_runtime_connection(&path).unwrap().query_row(
-        "SELECT count(*) FROM session_completion_occurrences WHERE session_id='runtime49-session' AND run_id='runtime49-run' AND behavior='orchestrator' AND kind='request' AND goal_id IS NULL AND mark_version IS NULL", [], |row| row.get(0)
+        "SELECT count(*) FROM session_completion_occurrences WHERE session_id='runtime49-session' AND run_id='runtime49-run' AND behavior='direct' AND kind='request' AND goal_id IS NULL AND mark_version IS NULL", [], |row| row.get(0)
     ).unwrap();
     std::fs::remove_dir_all(root).unwrap();
     assert_eq!(

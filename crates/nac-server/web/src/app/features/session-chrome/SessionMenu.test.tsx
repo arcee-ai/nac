@@ -36,9 +36,6 @@ vi.mock("@/app/providers/SessionActionsProvider", () => ({
 vi.mock("@/app/providers/ToastProvider", () => ({
   useToast: () => ({ error: vi.fn(), success: vi.fn() }),
 }));
-vi.mock("@/app/features/ui-policy/UiPolicyContext", () => ({
-  useUiPolicy: () => ({ orchestrationEnabled: false }),
-}));
 vi.mock("@/app/services/queries", () => ({
   useForkSession: () => ({ isPending: false, mutateAsync: vi.fn() }),
 }));

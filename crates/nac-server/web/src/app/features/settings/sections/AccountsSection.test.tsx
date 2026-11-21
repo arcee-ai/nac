@@ -24,7 +24,7 @@ function catalog(ready: boolean): ModelCatalog {
       auth: "api_key_env",
       auth_status: ready ? "ready" : "no_credential",
       auth_hint: ready ? null : name,
-      connection: ready ? { api_key_env: name, base_url: base } : null,
+      connection: ready ? { api_key_env: name, base_url: base, allow_insecure_http: false } : null,
       managed_base_url: null,
       default_base_url: base,
       default_limits: {

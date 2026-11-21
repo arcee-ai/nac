@@ -141,22 +141,11 @@ for (const mobile of [false, true]) {
   });
 }
 
-test("the Home composer uses a saved Fast preset for the first project chat", async ({
+test("the Home composer reuses an existing project chat’s Fast Codex selection", async ({
   harness,
   page,
   request,
 }) => {
-  const presetResponse = await request.post(`${harness.baseUrl}/model-configs`, {
-    data: {
-      name: "Fast Codex setup",
-      backend: "chatgpt-codex-responses",
-      model: "gpt-6.1-sol",
-      reasoning_effort: "high",
-      service_tier: "fast",
-    },
-  });
-  expect(presetResponse.ok()).toBeTruthy();
-  const preset = await presetResponse.json();
   await page.route(`${harness.baseUrl}/providers/models`, async (route) => {
     if (route.request().postDataJSON().backend !== "chatgpt-codex-responses")
       return route.fallback();
@@ -172,16 +161,32 @@ test("the Home composer uses a saved Fast preset for the first project chat", as
     data: {
       name: "Codex speed fixture",
       cwd: path.join(harness.runRoot, "workspace"),
-      default_model_config_id: preset.config_id,
     },
   });
   expect(createdProject.ok()).toBeTruthy();
   const projectId = (await createdProject.json()).project_id;
+  const original = await request.post(`${harness.baseUrl}/sessions`, {
+    data: {
+      project_id: projectId,
+      backend: "chatgpt-codex-responses",
+      model: "gpt-6.1-sol",
+      base_url: "https://chatgpt.com/backend-api",
+      reasoning_effort: "high",
+      service_tier: "fast",
+    },
+  });
+  expect(original.ok(), await original.text()).toBeTruthy();
+  const originalId = (await original.json()).metadata.session_id;
   await page.route(
     (url) => /\/sessions\/[^/]+\/runs$/.test(url.pathname),
     (route) => (route.request().method() === "POST" ? route.abort() : route.fallback()),
   );
-  await page.goto(`${harness.baseUrl}/#/project/${projectId}`);
+  await page.goto(`${harness.baseUrl}/#/session/${originalId}`);
+  await expect(page.getByRole("combobox", { name: "Message", exact: true })).toBeVisible();
+  const modifier = await page.evaluate(() =>
+    /Mac|iPhone|iPad|iPod/.test(navigator.userAgent) ? "Meta" : "Control",
+  );
+  await page.keyboard.press(`${modifier}+Shift+O`);
   await expect(modelChip(page)).toHaveAccessibleName(/High reasoning, Fast speed/);
   const settings = await openModelSettings(page);
   await expect(settings.getByRole("button", { name: "Speed: Fast" })).toBeVisible();
@@ -194,14 +199,47 @@ test("the Home composer uses a saved Fast preset for the first project chat", as
     runAdmission: "aborted",
   });
   const response = await created;
-  expect(response.ok()).toBeTruthy();
+  expect(response.ok(), await response.text()).toBeTruthy();
+  expect(sessionId).not.toBe(originalId);
   expect(response.request().postDataJSON()).toMatchObject({
-    first_chat: true,
+    first_chat: false,
     project_id: projectId,
+    backend: "chatgpt-codex-responses",
+    model: "gpt-6.1-sol",
+    service_tier: "fast",
+    reasoning_effort: "high",
+    model_source: { project_id: projectId, session_id: originalId },
   });
   expect(
     await (await request.get(`${harness.baseUrl}/sessions/${sessionId}/config`)).json(),
   ).toMatchObject({ service_tier: "fast", reasoning_effort: "high" });
+
+  await page.route(`${harness.baseUrl}/providers/models`, async (route) => {
+    if (route.request().postDataJSON().backend !== "deepseek-chat") return route.fallback();
+    await route.fulfill({
+      json: {
+        base_url: "https://api.deepseek.com/v1",
+        api_key_env: "DEEPSEEK_API_KEY",
+        models: [{ id: "deepseek-chat", display_name: "DeepSeek Chat" }],
+      },
+    });
+  });
+  await page.keyboard.press(`${modifier}+Shift+O`);
+  await expect(modelChip(page)).toHaveAccessibleName(/Fast speed/);
+  const models = await openModelCatalog(page, "deepseek-chat");
+  await models
+    .getByRole("group", { name: "DeepSeek", exact: true })
+    .getByRole("menuitemradio", { name: /^DeepSeek Chat/ })
+    .click();
+  await expect(
+    page.getByRole("alert").filter({
+      hasText: "This model does not accept the selected speed.",
+    }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Switch model and clear speed" }).click();
+  const changed = await openModelSettings(page);
+  await expect(changed.getByRole("button", { name: "Choose model: DeepSeek Chat" })).toBeVisible();
+  await expect(changed.getByRole("button", { name: /^Speed:/ })).toBeHidden();
 });
 
 test("provider downgrade receipt and estimate warning survive reload", async ({

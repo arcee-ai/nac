@@ -423,6 +423,7 @@ async fn completed_run_reports_failure_when_snapshot_persistence_fails() {
         None,
         BTreeMap::new(),
     );
+    sessions::create_session(&store_path, &snapshot).unwrap();
     let parts = SessionService::from_session_run_config(SessionRunConfig {
         agent,
         client,
@@ -438,13 +439,11 @@ async fn completed_run_reports_failure_when_snapshot_persistence_fails() {
         resume_base_cwd: PathBuf::from("/repo"),
     });
 
-    // Inject the persistence failure: replace the store directory with a
-    // plain file so `save_session` can no longer open the database.
-    std::fs::remove_dir_all(&store_parent).unwrap();
-    std::fs::write(&store_parent, "not a directory").unwrap();
-
     let mut events = parts.service.subscribe_events();
     let active = parts.service.try_begin_run(None, "prompt").unwrap();
+    // Admit the run before injecting a failure into terminal persistence.
+    std::fs::remove_dir_all(&store_parent).unwrap();
+    std::fs::write(&store_parent, "not a directory").unwrap();
     {
         let mut agent = parts.service.agent.lock().await;
         agent.messages.push(Message::User {
@@ -515,6 +514,7 @@ async fn cancelled_run_stays_cancelled_when_snapshot_persistence_fails() {
         None,
         BTreeMap::new(),
     );
+    sessions::create_session(&store_path, &snapshot).unwrap();
     let parts = SessionService::from_session_run_config(SessionRunConfig {
         agent,
         client,
@@ -530,9 +530,9 @@ async fn cancelled_run_stays_cancelled_when_snapshot_persistence_fails() {
         resume_base_cwd: PathBuf::from("/repo"),
     });
 
+    let active = parts.service.try_begin_run(None, "cancel prompt").unwrap();
     std::fs::remove_dir_all(&store_parent).unwrap();
     std::fs::write(&store_parent, "not a directory").unwrap();
-    let active = parts.service.try_begin_run(None, "cancel prompt").unwrap();
     parts.service.request_cancel(&active.run_id).await.unwrap();
 
     let terminal_events = parts

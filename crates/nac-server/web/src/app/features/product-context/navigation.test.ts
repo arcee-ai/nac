@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { ProductNavigation } from "./navigation";
+import type { SessionTargetOutcome } from "../desktop-commands/sessionTarget";
 import type {
   ProductContext,
   ProductNavigationRequest,
@@ -70,6 +71,9 @@ describe("explicit native notification navigation", () => {
     nav.connect({
       currentSession: () => "source",
       open: menu,
+    });
+    nav.connectNotification({
+      currentSession: () => "source",
       openNotificationSessionTarget: open,
     });
     const signal = new AbortController().signal;
@@ -100,12 +104,12 @@ describe("explicit native notification navigation", () => {
         open: vi.fn(),
         openNotificationSessionTarget: open,
       };
-      nav.connect(adapter);
+      nav.connectNotification(adapter);
       const abort = new AbortController();
       const result = nav.openNotificationSessionTarget(target, abort.signal, () => allowed);
       if (change === "abort") abort.abort();
       if (change === "route") source = "elsewhere";
-      if (change === "replace") nav.connect({ ...adapter });
+      if (change === "replace") nav.connectNotification({ ...adapter });
       if (change === "close") nav.close();
       if (change === "modal") allowed = false;
       const current = targetContext();
@@ -259,5 +263,63 @@ it.each(["build", "session", "availability"] as const)(
     nav.connect({ currentSession: () => "session", open });
     await expect(nav.open(request)).rejects.toThrow("binding changed");
     expect(open).not.toHaveBeenCalled();
+  },
+);
+
+it.each(["notification-first", "product-first"] as const)(
+  "a newer explicit action fences the older pending action (%s)",
+  async (order) => {
+    let resolveProduct!: (value: ProductNavigationResolution) => void;
+    let resolveNotification!: (value: ProductContext) => void;
+    const nav = new ProductNavigation(
+      () =>
+        new Promise((resolve) => {
+          resolveProduct = resolve;
+        }),
+      () => false,
+      (sessionId) =>
+        sessionId === "target"
+          ? new Promise((resolve) => {
+              resolveNotification = resolve;
+            })
+          : Promise.resolve(context()),
+    );
+    const productOpen = vi.fn().mockReturnValue(true);
+    const notificationOpen = vi.fn();
+    nav.connect({ currentSession: () => "session", open: productOpen });
+    nav.connectNotification({
+      currentSession: () => "session",
+      openNotificationSessionTarget: notificationOpen,
+    });
+    const target = { session_id: "target", occurrence_id: "occurrence" };
+    let product!: Promise<ProductNavigationResolution>;
+    let notification!: Promise<SessionTargetOutcome>;
+    if (order === "notification-first") {
+      notification = nav.openNotificationSessionTarget(
+        target,
+        new AbortController().signal,
+        () => true,
+      );
+      product = nav.open(request);
+    } else {
+      product = nav.open(request);
+      notification = nav.openNotificationSessionTarget(
+        target,
+        new AbortController().signal,
+        () => true,
+      );
+    }
+    const productResult = product.then(
+      () => "opened",
+      () => "stale",
+    );
+    const targetContext = context();
+    targetContext.session!.session_id = "target";
+    resolveProduct(resolution());
+    resolveNotification(targetContext);
+    expect(await productResult).toBe(order === "notification-first" ? "opened" : "stale");
+    expect(await notification).toBe(order === "notification-first" ? "stale" : "opened");
+    expect(productOpen).toHaveBeenCalledTimes(order === "notification-first" ? 1 : 0);
+    expect(notificationOpen).toHaveBeenCalledTimes(order === "notification-first" ? 0 : 1);
   },
 );

@@ -27,7 +27,6 @@ export interface InsightsNavigation {
   /** Subagents with that row open; the newest row stands in until the list has it. */
   openSubagent(rowKey: DelegatedRowKey): void;
   returnToInsights(options?: InsightsOpenOptions): void;
-  openWorkset(worksetId: string): void;
   /** Files on the working tree's tree listing, with this workspace-relative file open. */
   openFile(path: string): void;
 }
@@ -70,7 +69,6 @@ export function useInsightsNavigation(): InsightsNavigation {
     selectInsight,
     selectThread,
     selectSubagent,
-    selectWorkset,
     selectRevision,
     selectFileListing,
     selectFile,
@@ -117,7 +115,6 @@ export function useInsightsNavigation(): InsightsNavigation {
             : null;
         }
       },
-      openWorkset: (worksetId) => open("worksets", () => selectWorkset(worksetId)),
       openFile: (path) =>
         open("files", () => {
           selectRevision(null);
@@ -136,7 +133,6 @@ export function useInsightsNavigation(): InsightsNavigation {
     selectInsight,
     selectThread,
     selectSubagent,
-    selectWorkset,
     selectRevision,
     selectFileListing,
     selectFile,

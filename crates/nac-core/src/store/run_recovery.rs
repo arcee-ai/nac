@@ -1434,71 +1434,61 @@ mod tests {
         let path = temp_store_path("settled_terminal");
         initialize(&path).unwrap();
         insert_test_session(&path, "parent");
-        insert_test_session(&path, "orchestrator");
-        let connection = open_runtime_connection(&path).unwrap();
-        connection
-            .execute(
-                "UPDATE sessions SET behavior = 'direct-with-orchestrator' WHERE session_id = 'parent'",
-                [],
-            )
-            .unwrap();
-        connection
-            .execute(
-                "UPDATE sessions SET behavior = 'orchestrator' WHERE session_id = 'orchestrator'",
-                [],
-            )
-            .unwrap();
-        create_managed_orchestrator_relationship(&path, "parent", "orchestrator", "review")
-            .unwrap();
-        begin_managed_orchestrator_run(
+        insert_test_session(&path, "child");
+        create_traditional_child_relationship(
             &path,
-            "orchestrator",
+            "parent",
+            "child",
+            GENERAL_CHILD_PROFILE,
+            "review",
+        )
+        .unwrap();
+        begin_traditional_child_run(
+            &path,
+            "child",
             "run-1",
-            ManagedOrchestratorExecutionMode::Background,
+            TraditionalChildExecutionMode::Background,
         )
         .unwrap();
         let writer = TranscriptLogWriter::new(&path).unwrap();
         writer
-            .append_run_prompt("orchestrator", 0, &user("prompt"), "run-1")
+            .append_run_prompt("child", 0, &user("prompt"), "run-1")
             .unwrap();
-        writer
-            .append("orchestrator", 1, &assistant("answer"))
-            .unwrap();
-        let mut update = run_state_update("orchestrator");
+        writer.append("child", 1, &assistant("answer")).unwrap();
+        let mut update = run_state_update("child");
         update.finished_run_id = Some("run-1".to_string());
         update.finished_run_disposition = Some(RunTerminalDisposition::Completed);
         crate::sessions::save_session_run_state(&path, &update).unwrap();
-        assert!(load_run_recovery(&path, "orchestrator")
+        assert!(load_run_recovery(&path, "child")
             .unwrap()
             .unwrap()
             .terminal_disposition
             .is_some());
 
-        settle_managed_orchestrator_run(
+        settle_traditional_child_run(
             &path,
-            "orchestrator",
+            "child",
             "run-1",
-            ManagedOrchestratorTerminal {
-                status: ManagedOrchestratorStatus::Completed,
+            TraditionalChildTerminal {
+                status: TraditionalChildStatus::Completed,
                 report: Some("answer".to_string()),
                 failure: None,
+                change_summary: None,
+                verification_summary: None,
             },
         )
         .unwrap();
         // Simulate a crash before clear_settled_run_recovery.
         assert_eq!(
-            reconcile_active_run(&path, "orchestrator").unwrap(),
+            reconcile_active_run(&path, "child").unwrap(),
             ActiveRunReconciliation::CanonicalTerminal
         );
-        assert!(load_run_recovery(&path, "orchestrator").unwrap().is_none());
+        assert!(load_run_recovery(&path, "child").unwrap().is_none());
         writer
-            .append_run_prompt("orchestrator", 2, &user("continue"), "run-2")
+            .append_run_prompt("child", 2, &user("continue"), "run-2")
             .unwrap();
         assert_eq!(
-            load_run_recovery(&path, "orchestrator")
-                .unwrap()
-                .unwrap()
-                .run_id,
+            load_run_recovery(&path, "child").unwrap().unwrap().run_id,
             "run-2"
         );
 

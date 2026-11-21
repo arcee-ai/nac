@@ -70,6 +70,9 @@ for (const mobile of [false, true]) {
     await expect(page).toHaveURL(capabilitiesUrl);
     await expect(context.getByText("direct", { exact: true })).toBeVisible();
     await expect(context.getByText("local", { exact: true })).toBeVisible();
+    await expect(
+      context.getByRole("button", { name: "Open Configurations", exact: true }),
+    ).toHaveCount(0);
     await expect(settingsSection(page, "MCP servers")).toHaveCount(0);
     await capture(page, `${mobile ? "phone" : "desktop"}-capabilities`);
     // Keyboard activation goes through the bounded navigation bridge, with no Markdown action bridge.
@@ -86,7 +89,6 @@ for (const mobile of [false, true]) {
     await expect(page).toHaveURL(original);
     await expect(page.getByRole("combobox", { name: "Message" })).toBeVisible();
     for (const [label, title] of [
-      ["Configurations", "Accounts & keys"],
       ["Model authentication", "Accounts & keys"],
       ["SSH configurations", "SSH hosts"],
     ]) {

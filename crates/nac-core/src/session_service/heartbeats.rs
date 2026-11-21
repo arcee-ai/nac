@@ -71,6 +71,7 @@ impl SessionService {
             let canonical = std::fs::canonicalize(&project.cwd)?;
             let destination = crate::store::FreshTaskDestination {
                 project_id: intent.project_id.clone(),
+                model_selection: None,
                 pinned_commit: None,
                 default_ref: None,
                 model: None,

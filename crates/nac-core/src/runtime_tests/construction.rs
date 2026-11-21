@@ -1,5 +1,89 @@
 use super::*;
 
+#[test]
+fn new_session_model_does_not_inherit_global_model_defaults() {
+    let config = complete_model_config();
+    assert!(effective_model_settings(&ModelOptions::default(), &config).is_err());
+    let selected = effective_model_settings(&test_openai_model_options(), &config).unwrap();
+    assert_ne!(selected.model, config.model.model.unwrap());
+    assert!(selected.extra_headers.is_empty());
+}
+
+#[tokio::test]
+async fn retired_behavior_is_rejected_before_runtime_or_store_preparation() {
+    let store_path = temp_store_path("retired_behavior_rejected");
+    let root = store_path.parent().unwrap().to_path_buf();
+    for behavior in [
+        sessions::SessionBehavior::Orchestrator,
+        sessions::SessionBehavior::DirectWithOrchestrator,
+    ] {
+        let result = prepare_run_config_for_project_with_behavior(
+            RunOptions {
+                workspace_cwd: root.clone(),
+                config_cwd: Some(root.clone()),
+                worker_executable: None,
+                store: StoreOptions {
+                    store_path: Some(store_path.clone()),
+                },
+                model: test_openai_model_options(),
+                orchestrator_compaction_threshold: None,
+                sandbox: SandboxOptions::default(),
+                ssh: SshOptions::default(),
+            },
+            &NacConfig::default(),
+            None,
+            behavior,
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(!store_path.exists());
+    }
+}
+
+#[tokio::test]
+async fn retired_worker_construction_is_rejected() {
+    let result =
+        build_managed_worker_config(ManagedWorkerOptions::default(), &NacConfig::default()).await;
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn retired_snapshot_is_rejected_before_resume_preparation() {
+    let root = temp_store_path("retired_resume_rejected")
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    let store_path = root.join("store.db");
+    let mut snapshot = sessions::new_snapshot(
+        "retired".into(),
+        root.clone(),
+        "test-model".into(),
+        "https://example.invalid".into(),
+        BackendKind::OpenAiResponses,
+        None,
+        None,
+        None,
+        Vec::new(),
+        None,
+        BTreeMap::new(),
+    );
+    snapshot.behavior = sessions::SessionBehavior::Orchestrator;
+    let result = build_resume_config_from_snapshot(
+        snapshot,
+        store_path.clone(),
+        &NacConfig::default(),
+        root,
+        None,
+        None,
+        false,
+        None,
+        ResumeModelOptions::default(),
+    )
+    .await;
+    assert!(result.is_err());
+    assert!(!store_path.exists());
+}
+
 #[cfg(unix)]
 #[test]
 fn explicitly_selected_config_is_read_only_even_when_named_config_toml() {
@@ -15,7 +99,7 @@ fn explicitly_selected_config_is_read_only_even_when_named_config_toml() {
     std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o500)).unwrap();
 
     let config = NacConfig::load_from_file(&path).expect("explicit config should be read-only");
-    assert_eq!(config.model.model.as_deref(), Some("selected-model"));
+    assert!(config.model.model.is_none());
     assert!(
         !path.with_extension("toml.lock").exists(),
         "an explicit import must not create the ambient MCP lock sidecar"
@@ -73,22 +157,13 @@ async fn create_and_resume_effort_snapshot(
 async fn direct_behavior_builds_and_resumes_a_persistent_direct_primary() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     let original_api_key = std::env::var_os("OPENAI_API_KEY");
-    let missing_light_key = "NAC_MISSING_UNUSED_DIRECT_LIGHT_KEY";
-    let original_missing_light_key = std::env::var_os(missing_light_key);
     unsafe { std::env::set_var("OPENAI_API_KEY", "test_dummy_key") };
-    unsafe { std::env::remove_var(missing_light_key) };
     let store_path = temp_store_path("direct_primary");
     let root = store_path.parent().unwrap().to_path_buf();
     std::fs::create_dir_all(&root).unwrap();
-    let light_model = LightModelSettings {
-        model: "gpt-5-mini".to_string(),
-        backend: Some(BackendKind::OpenAiResponses),
-        base_url: Some("https://api.openai.com/v1".to_string()),
-        api_key_env: Some(missing_light_key.to_string()),
-        reasoning_effort: Some(ReasoningEffort::Low),
-    };
-    let mut direct_model = test_openai_model_options();
-    direct_model.light_model = Some(light_model.clone());
+    let original_nac_home = std::env::var_os("NAC_HOME");
+    unsafe { std::env::set_var("NAC_HOME", root.join("nac-home")) };
+    let direct_model = test_openai_model_options();
 
     let created = build_run_config_for_project_with_behavior(
         RunOptions {
@@ -119,7 +194,7 @@ async fn direct_behavior_builds_and_resumes_a_persistent_direct_primary() {
     assert_eq!(tool_names, crate::tools::DIRECT_TOOL_NAMES);
     assert!(
         !created.agent.has_light_client_for_test(),
-        "plain direct sessions retain the choice without installing a consumer"
+        "direct sessions install only the primary model"
     );
     assert!(matches!(
         created.agent.messages.first(),
@@ -129,7 +204,7 @@ async fn direct_behavior_builds_and_resumes_a_persistent_direct_primary() {
     ));
     let stored = sessions::load_session(&store_path, &session_id).unwrap();
     assert_eq!(stored.behavior, sessions::SessionBehavior::Direct);
-    assert_eq!(stored.light_model.as_ref(), Some(&light_model));
+    assert!(stored.light_model.is_none());
     drop(created);
 
     let resumed = build_resume_config_for_session(
@@ -160,47 +235,8 @@ async fn direct_behavior_builds_and_resumes_a_persistent_direct_primary() {
         "resuming a direct session must not invent ALL-36 semantics"
     );
 
-    let mut delegating_model = test_openai_model_options();
-    let mut delegating_light_model = light_model;
-    delegating_light_model.api_key_env = Some("OPENAI_API_KEY".to_string());
-    delegating_model.light_model = Some(delegating_light_model);
-    let delegating = build_run_config_for_project_with_behavior(
-        RunOptions {
-            workspace_cwd: root.clone(),
-            config_cwd: Some(root.clone()),
-            worker_executable: None,
-            store: StoreOptions {
-                store_path: Some(store_path.clone()),
-            },
-            model: delegating_model,
-            orchestrator_compaction_threshold: Some(32_000),
-            sandbox: SandboxOptions::default(),
-            ssh: SshOptions::default(),
-        },
-        &NacConfig::default(),
-        None,
-        sessions::SessionBehavior::DirectWithOrchestrator,
-    )
-    .await
-    .unwrap();
-    assert_eq!(
-        delegating
-            .agent
-            .tool_definitions_for_test()
-            .iter()
-            .map(|definition| definition.function.name.as_str())
-            .collect::<Vec<_>>(),
-        crate::tools::DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES
-    );
-    assert!(delegating.agent.has_light_client_for_test());
-    assert!(matches!(
-        delegating.agent.messages.first(),
-        Some(Message::System { content })
-            if content.contains("separate durable NAC orchestrator sessions")
-    ));
-
     let _ = std::fs::remove_dir_all(root);
-    restore_env(missing_light_key, original_missing_light_key);
+    restore_env("NAC_HOME", original_nac_home);
     restore_env("OPENAI_API_KEY", original_api_key);
 }
 
@@ -270,8 +306,11 @@ fn effective_model_settings_ignore_ambient_model_and_base() {
         std::env::set_var("OPENAI_MODEL", "ambient-model");
     }
 
-    let settings =
-        effective_model_settings(&ModelOptions::default(), &complete_model_config()).unwrap();
+    let options = ModelOptions {
+        api_model: Some("gpt-5.2".into()),
+        ..ModelOptions::default()
+    };
+    let settings = effective_model_settings(&options, &complete_model_config()).unwrap();
     assert_eq!(settings.base_url, "https://api.openai.com/v1");
     assert_eq!(settings.model, "gpt-5.2");
 
@@ -280,7 +319,7 @@ fn effective_model_settings_ignore_ambient_model_and_base() {
 }
 
 #[test]
-fn explicit_model_settings_beat_config_and_config_supplies_omissions() {
+fn explicit_model_settings_do_not_inherit_config_defaults() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     let original_openai_key = std::env::var_os("OPENAI_API_KEY");
     unsafe { std::env::remove_var("OPENAI_API_KEY") };
@@ -292,16 +331,7 @@ fn explicit_model_settings_beat_config_and_config_supplies_omissions() {
         .extra_headers
         .insert("X-Config".to_string(), "config".to_string());
 
-    let inherited = effective_model_settings(&ModelOptions::default(), &config).unwrap();
-    assert_eq!(inherited.backend, BackendKind::OpenAiResponses);
-    assert_eq!(inherited.model, "gpt-5.2");
-    assert_eq!(inherited.base_url, "https://api.openai.com/v1");
-    assert_eq!(inherited.reasoning_effort, Some(ReasoningEffort::High));
-    assert_eq!(inherited.api_key_env, None);
-    assert_eq!(
-        inherited.extra_headers.get("X-Config").map(String::as_str),
-        Some("config")
-    );
+    assert!(effective_model_settings(&ModelOptions::default(), &config).is_err());
 
     let headers = BTreeMap::from([("X-Explicit".to_string(), "explicit".to_string())]);
     let explicit = effective_model_settings(
@@ -339,8 +369,14 @@ fn managed_backends_materialize_base_after_explicit_over_config_resolution() {
     // reachable only through an explicit selection.
     let mut colliding_config = NacConfig::default();
     colliding_config.model.model = Some("gpt-5.3-codex-spark".to_string());
-    let resolved = effective_model_settings(&ModelOptions::default(), &colliding_config)
-        .expect("a colliding configured model resolves the non-managed provider");
+    let resolved = effective_model_settings(
+        &ModelOptions {
+            api_model: Some("gpt-5.3-codex-spark".into()),
+            ..ModelOptions::default()
+        },
+        &colliding_config,
+    )
+    .expect("an explicitly selected colliding model resolves the non-managed provider");
     assert_eq!(resolved.backend, BackendKind::OpenAiResponses);
     assert_eq!(resolved.base_url, "https://api.openai.com/v1");
 
@@ -425,14 +461,22 @@ fn optional_model_overrides_distinguish_inherit_value_and_clear() {
     let mut config = complete_model_config();
     config.model.reasoning_effort = Some(ReasoningEffort::High);
 
-    let inherited = effective_model_settings(&ModelOptions::default(), &config).unwrap();
+    let inherited = effective_model_settings(
+        &ModelOptions {
+            api_model: Some("gpt-5.2".into()),
+            ..ModelOptions::default()
+        },
+        &config,
+    )
+    .unwrap();
     assert_eq!(inherited.api_key_env, None);
-    assert_eq!(inherited.reasoning_effort, Some(ReasoningEffort::High));
+    assert_eq!(inherited.reasoning_effort, None);
 
     let valued = effective_model_settings(
         &ModelOptions {
             api_key_env: OptionalModelOption::Value("CLI_API_KEY".to_string()),
             reasoning_effort: OptionalModelOption::Value(ReasoningEffort::None),
+            api_model: Some("gpt-5.2".into()),
             ..ModelOptions::default()
         },
         &config,
@@ -445,6 +489,7 @@ fn optional_model_overrides_distinguish_inherit_value_and_clear() {
         &ModelOptions {
             api_key_env: OptionalModelOption::Clear,
             reasoning_effort: OptionalModelOption::Clear,
+            api_model: Some("gpt-5.2".into()),
             ..ModelOptions::default()
         },
         &config,
@@ -456,11 +501,19 @@ fn optional_model_overrides_distinguish_inherit_value_and_clear() {
     // With the conventional variable set, Inherit and Clear both fall
     // through to auto-selection; an explicit Value always wins.
     unsafe { std::env::set_var("OPENAI_API_KEY", "env-key") };
-    let auto_selected = effective_model_settings(&ModelOptions::default(), &config).unwrap();
+    let auto_selected = effective_model_settings(
+        &ModelOptions {
+            api_model: Some("gpt-5.2".into()),
+            ..ModelOptions::default()
+        },
+        &config,
+    )
+    .unwrap();
     assert_eq!(auto_selected.api_key_env.as_deref(), Some("OPENAI_API_KEY"));
     let cleared = effective_model_settings(
         &ModelOptions {
             api_key_env: OptionalModelOption::Clear,
+            api_model: Some("gpt-5.2".into()),
             ..ModelOptions::default()
         },
         &config,
@@ -470,6 +523,7 @@ fn optional_model_overrides_distinguish_inherit_value_and_clear() {
     let valued = effective_model_settings(
         &ModelOptions {
             api_key_env: OptionalModelOption::Value("CLI_API_KEY".to_string()),
+            api_model: Some("gpt-5.2".into()),
             ..ModelOptions::default()
         },
         &config,
@@ -485,6 +539,7 @@ fn api_key_selectors_are_preserved_for_api_backends_and_normalized_for_managed_a
     for selector in ["", "   ", " SURROUNDED_KEY "] {
         let settings = effective_model_settings(
             &ModelOptions {
+                api_model: Some("gpt-5.2".into()),
                 api_key_env: OptionalModelOption::Value(selector.to_string()),
                 ..ModelOptions::default()
             },
@@ -539,8 +594,14 @@ fn required_model_settings_are_rejected_without_defaults() {
 
 #[test]
 fn no_reasoning_effort_is_injected() {
-    let settings =
-        effective_model_settings(&ModelOptions::default(), &complete_model_config()).unwrap();
+    let settings = effective_model_settings(
+        &ModelOptions {
+            api_model: Some("gpt-5.2".into()),
+            ..ModelOptions::default()
+        },
+        &complete_model_config(),
+    )
+    .unwrap();
     assert_eq!(settings.reasoning_effort, None);
 }
 
@@ -1006,8 +1067,8 @@ url = "https://mcp.context7.com/mcp"
         config.storage.store_path.as_deref(),
         Some(Path::new("custom/store.db"))
     );
-    assert_eq!(config.model.model.as_deref(), Some("config-model"));
-    assert_eq!(config.model.reasoning_effort, Some(ReasoningEffort::High));
+    assert!(config.model.model.is_none());
+    assert!(config.model.reasoning_effort.is_none());
     assert_eq!(config.sandbox.image.as_deref(), Some("config-image"));
     assert_eq!(config.worker.thread_timeout_secs, Some(7_200));
     assert_eq!(config.worker.command_output_max_bytes, Some(8_388_608));
@@ -1046,10 +1107,10 @@ fn non_model_config_load_ignores_invalid_model_values_but_keeps_other_sections_s
             "[model]\nbackend = \"arcee\"\napi_key_env = [\"NOT_A_SELECTOR\"]\n",
             true,
         ),
-        ("model = [\"not\", \"a\", \"table\"]\n", false),
+        ("model = [\"not\", \"a\", \"table\"]\n", true),
         (
             "[model]\nextra_headers = \"not-a-header-map\"\nreasoning_effort = 7\n",
-            false,
+            true,
         ),
     ];
     for (invalid_model, accepted) in invalid_model_sections {
@@ -1133,26 +1194,22 @@ X-Config = "yes"
     }
 
     let config = NacConfig::load().expect("removed keys parse tolerantly");
-    assert_eq!(config.model.model.as_deref(), Some("gpt-5.2"));
-    assert_eq!(config.model.reasoning_effort, Some(ReasoningEffort::High));
-    assert_eq!(
-        config
-            .model
-            .extra_headers
-            .get("X-Config")
-            .map(String::as_str),
-        Some("yes")
-    );
-
-    // The stale backend/base_url/api_key_env values play no role:
-    // gpt-5.2 resolves to openai-responses, the base URL comes from the
-    // catalog default, and the credential auto-selects the conventional
-    // variable.
-    let settings = effective_model_settings(&ModelOptions::default(), &config).unwrap();
+    assert!(config.model.model.is_none());
+    assert!(config.model.reasoning_effort.is_none());
+    assert!(config.model.extra_headers.is_empty());
+    assert!(effective_model_settings(&ModelOptions::default(), &config).is_err());
+    let settings = effective_model_settings(
+        &ModelOptions {
+            api_model: Some("gpt-5.2".into()),
+            ..ModelOptions::default()
+        },
+        &config,
+    )
+    .unwrap();
     assert_eq!(settings.backend, BackendKind::OpenAiResponses);
     assert_eq!(settings.base_url, "https://api.openai.com/v1");
     assert_eq!(settings.api_key_env.as_deref(), Some("OPENAI_API_KEY"));
-    assert_eq!(settings.reasoning_effort, Some(ReasoningEffort::High));
+    assert_eq!(settings.reasoning_effort, None);
 
     restore_env("NAC_HOME", original_nac_home);
     restore_env("OPENAI_API_KEY", original_openai_key);
@@ -1519,7 +1576,9 @@ async fn resume_and_delegated_worker_reject_arcee_api_key_env_early() {
         Err(error) => error,
     };
     assert!(
-        worker_error.to_string().contains(expected),
+        worker_error
+            .to_string()
+            .contains("retired worker construction"),
         "got: {worker_error:#}"
     );
     assert!(
@@ -1528,97 +1587,6 @@ async fn resume_and_delegated_worker_reject_arcee_api_key_env_early() {
     );
 
     let _ = std::fs::remove_dir_all(root);
-}
-
-#[tokio::test]
-async fn managed_worker_builds_user_messages_from_self_and_source_threads() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
-
-    let original_api_key = std::env::var_os("OPENAI_API_KEY");
-    unsafe {
-        std::env::set_var("OPENAI_API_KEY", "test_dummy_key");
-    }
-
-    let store_path = temp_store_path("managed_worker_messages");
-    store::initialize(&store_path).unwrap();
-
-    let session_id = "session-msg-order";
-    store::append_episode(
-        &store_path,
-        session_id,
-        "impl",
-        "step-1",
-        "impl retained episode",
-    )
-    .unwrap();
-    store::append_episode(
-        &store_path,
-        session_id,
-        "auth",
-        "inspect",
-        "auth latest episode",
-    )
-    .unwrap();
-    store::append_episode(
-        &store_path,
-        session_id,
-        "tests",
-        "inspect",
-        "tests latest episode",
-    )
-    .unwrap();
-
-    let workspace_cwd = store_path.parent().unwrap().to_path_buf();
-    let options = ManagedWorkerOptions {
-        workspace_cwd,
-        config_cwd: None,
-        dispatch: WorkerDispatchOptions {
-            session_id: session_id.to_string(),
-            thread_name: "impl".to_string(),
-            dispatch_id: "test-dispatch".to_string(),
-            action: "implement the next step".to_string(),
-            source_threads: vec!["auth".to_string(), "tests".to_string()],
-            skills: Vec::new(),
-        },
-        store: StoreOptions {
-            store_path: Some(store_path.clone()),
-        },
-        model: test_openai_model_options(),
-        sandbox: SandboxOptions::default(),
-        ssh: SshOptions::default(),
-    };
-
-    let run_config = build_managed_worker_config(options, &NacConfig::default())
-        .await
-        .unwrap();
-
-    assert_eq!(run_config.action, "implement the next step");
-    assert_eq!(run_config.agent.messages.len(), 4);
-
-    match &run_config.agent.messages[1] {
-        Message::User { content } => assert!(content.contains("impl retained episode")),
-        other => panic!("expected self-history user message, got {:?}", other),
-    }
-    match &run_config.agent.messages[2] {
-        Message::User { content } => {
-            assert!(content.contains("auth latest episode"));
-            assert!(content.contains("thread \"auth\""));
-        }
-        other => panic!("expected first source-thread user message, got {:?}", other),
-    }
-    match &run_config.agent.messages[3] {
-        Message::User { content } => {
-            assert!(content.contains("tests latest episode"));
-            assert!(content.contains("thread \"tests\""));
-        }
-        other => panic!(
-            "expected second source-thread user message, got {:?}",
-            other
-        ),
-    }
-
-    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
-    restore_env("OPENAI_API_KEY", original_api_key);
 }
 
 #[test]

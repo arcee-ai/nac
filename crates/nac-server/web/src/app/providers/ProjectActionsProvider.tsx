@@ -1,6 +1,6 @@
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 
 import { AssignToProjectModal } from "@/app/components/modals/AssignToProjectModal";
 import { CreateProjectModal } from "@/app/components/modals/CreateProjectModal";
@@ -8,7 +8,7 @@ import { DeleteProjectModal } from "@/app/components/modals/DeleteProjectModal";
 import { RenameProjectModal } from "@/app/components/modals/RenameProjectModal";
 import { primarySessions, projectForSessionLocation } from "@/app/lib/projects";
 import { humanErrorText, toRunError } from "@/app/lib/providerError";
-import { routes } from "@/app/lib/routes";
+import { routes, sessionIdFromPath } from "@/app/lib/routes";
 import { errorMessage, useToast } from "@/app/providers/ToastProvider";
 
 import {
@@ -54,6 +54,7 @@ export function ProjectActionsProvider({ children }: { children: React.ReactNode
 
   const toast = useToast();
   const navigate = useNavigate();
+  const location = useLocation();
   const sessionsQuery = useSessions();
   const sessionsLoaded = sessionsQuery.isSuccess;
   const { data: projectList } = useProjects();
@@ -83,12 +84,23 @@ export function ProjectActionsProvider({ children }: { children: React.ReactNode
 
   const newChat = useCallback(
     async (projectId: string, firstChat = false) => {
+      const sourceId = sessionIdFromPath(location.pathname);
+      const source = sessionsQuery.data?.find(
+        (entry) =>
+          entry.lineage == null &&
+          entry.summary.session_id === sourceId &&
+          entry.summary.project_id === projectId,
+      );
       navigate(routes.newSession(projectId), {
         replace: firstChat,
-        state: { focusComposer: Date.now() },
+        state: {
+          focusComposer: Date.now(),
+          sourceSessionId: source?.summary.session_id,
+          sourceProjectId: source ? projectId : undefined,
+        },
       });
     },
-    [navigate],
+    [navigate, location.pathname, sessionsQuery.data],
   );
 
   const value = useMemo<ProjectActions>(

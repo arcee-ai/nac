@@ -17,7 +17,9 @@ mod control;
 pub(crate) use attention::heartbeat_attention_with_connection;
 pub use attention::*;
 pub use cancellation::heartbeat_stop_requested;
-pub use control::control_heartbeat;
+pub use control::{
+    control_heartbeat, read_heartbeat_command_receipt, read_heartbeat_destination_at_version,
+};
 mod execution;
 mod fresh_admission;
 mod fresh_allowance;

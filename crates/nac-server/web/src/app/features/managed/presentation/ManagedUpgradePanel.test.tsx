@@ -80,9 +80,6 @@ vi.spyOn(api, "getManagedUpgrade").mockImplementation((...args) => fakes.snapsho
 vi.spyOn(api, "startManagedUpgrade").mockImplementation((...args) => fakes.start(...args));
 vi.spyOn(api, "cancelExactRun").mockImplementation((...args) => fakes.cancelExactRun(...args));
 vi.spyOn(api, "cancelTraditionalChild").mockImplementation((...args) => fakes.cancelChild(...args));
-vi.spyOn(api, "cancelManagedOrchestrator").mockImplementation((...args) =>
-  fakes.cancelOrchestrator(...args),
-);
 vi.spyOn(api, "terminateTerminal").mockImplementation((...args) =>
   fakes.terminateTerminal(...args),
 );
@@ -318,14 +315,6 @@ describe("ManagedUpgradePanel", () => {
         target: { session_id: "session-1", child_session_id: "child-1" },
       },
       {
-        selection_key: `sha256:${"3".repeat(64)}`,
-        kind: "managed_orchestrator",
-        message: "An active orchestrator must finish before maintenance can start",
-        actionable: true,
-        action: "cancel_managed_orchestrator",
-        target: { session_id: "session-1", orchestrator_session_id: "orchestrator-1" },
-      },
-      {
         selection_key: `sha256:${"4".repeat(64)}`,
         kind: "terminal_process",
         message: "An active terminal process must finish before maintenance can start",
@@ -353,23 +342,16 @@ describe("ManagedUpgradePanel", () => {
     fakes.snapshot.mockResolvedValue(snapshot(operation("blocked", blockers)));
     mount();
 
-    for (const name of [
-      "Stop run",
-      "Cancel coding agent",
-      "Cancel NAC orchestrator",
-      "Stop terminal",
-      "Cancel clone",
-    ]) {
+    for (const name of ["Stop run", "Cancel coding agent", "Stop terminal", "Cancel clone"]) {
       fireEvent.click(await screen.findByRole("button", { name }));
     }
 
     await waitFor(() => expect(fakes.cancelExactRun).toHaveBeenCalledWith("session-1", "run-1"));
     expect(fakes.cancelChild).toHaveBeenCalledWith("session-1", "child-1");
-    expect(fakes.cancelOrchestrator).toHaveBeenCalledWith("session-1", "orchestrator-1");
     expect(fakes.terminateTerminal).toHaveBeenCalledWith("session-1", "shell-1");
     expect(fakes.cancelClone).toHaveBeenCalledWith("clone-1");
     expect(screen.getByText("Wait only")).toBeTruthy();
-    await waitFor(() => expect(screen.getAllByText("Waiting for cleanup")).toHaveLength(5));
+    await waitFor(() => expect(screen.getAllByText("Waiting for cleanup")).toHaveLength(4));
   });
 
   it("binds active-run settlement directly to the exact blocker run", async () => {

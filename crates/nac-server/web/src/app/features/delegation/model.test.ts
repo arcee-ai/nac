@@ -1,10 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  presentManagedOrchestrator,
-  presentTraditionalChild,
-} from "@/app/features/delegation/model";
-import type { ManagedOrchestratorRecord, TraditionalChildRecord } from "@/app/types/api";
+import { presentTraditionalChild } from "@/app/features/delegation/model";
+import type { TraditionalChildRecord } from "@/app/types/api";
 
 const base = {
   parent_session_id: "parent",
@@ -34,12 +31,6 @@ function child(overrides: Partial<TraditionalChildRecord> = {}): TraditionalChil
   };
 }
 
-function orchestrator(
-  overrides: Partial<ManagedOrchestratorRecord> = {},
-): ManagedOrchestratorRecord {
-  return { ...base, orchestrator_session_id: "orch-1", ...overrides };
-}
-
 describe("delegated-session presentation", () => {
   it.each(["idle", "running", "completed", "failed", "cancelled", "interrupted"] as const)(
     "maps the %s lifecycle into text and actions",
@@ -56,9 +47,6 @@ describe("delegated-session presentation", () => {
     const coding = presentTraditionalChild(
       child({ status: "completed", execution_mode: "background", completion_inbox_id: 4 }),
     );
-    const managed = presentManagedOrchestrator(
-      orchestrator({ status: "running", execution_mode: "foreground" }),
-    );
     expect(coding).toMatchObject({
       kind: "coding-agent",
       typeLabel: "Subagent",
@@ -67,12 +55,6 @@ describe("delegated-session presentation", () => {
       completionNeedsAttention: true,
     });
     expect(coding.updatedLabel).not.toBe("");
-    expect(managed).toMatchObject({
-      kind: "nac-orchestrator",
-      typeLabel: "Managed orchestrator",
-      modeLabel: "Foreground",
-      completionNeedsAttention: false,
-    });
   });
 
   it("uses failure before report and child summaries without losing long text", () => {
@@ -84,10 +66,6 @@ describe("delegated-session presentation", () => {
     expect(presentTraditionalChild(child({ verification_summary: long }))).toMatchObject({
       outcomeLabel: "Verification",
       outcome: long,
-    });
-    expect(presentManagedOrchestrator(orchestrator({ report: "done" }))).toMatchObject({
-      outcomeLabel: "Outcome",
-      outcome: "done",
     });
   });
 });

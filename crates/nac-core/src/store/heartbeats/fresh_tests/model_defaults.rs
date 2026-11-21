@@ -53,24 +53,62 @@ fn configured() -> Fixture {
 }
 
 #[test]
-fn new_occurrence_uses_current_project_default_after_pointer_change() {
-    let f = configured();
-    f.create();
+fn legacy_schedule_without_selection_suspends_without_reserving_or_guessing() {
+    let root = std::env::temp_dir().join(format!("nac-legacy-schedule-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let path = root.join("store.db");
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    conn.execute_batch(include_str!(
+        "../../schema/fixtures/v53-legacy-schedule-replay.sql"
+    ))
+    .unwrap();
+    drop(conn);
+    initialize(&path).unwrap();
+    let receipt = read_heartbeat_command_receipt(
+        &path,
+        "project:project",
+        "33333333-3333-4333-8333-333333333333",
+    )
+    .unwrap()
+    .unwrap();
+    let f = Fixture {
+        root,
+        path,
+        binding: receipt.schedule.binding.clone(),
+    };
+    let schedule = receipt.schedule;
+    for id in ["model-a", "model-b"] {
+        insert_model_configuration(&f.path, id, configuration(id)).unwrap();
+    }
     select(&f, Some("model-b"));
-    let pending = f.pending();
-    let prepared =
-        reserve_fresh_heartbeat_launch(&f.path, &pending.occurrence_id, pending.revision, 61_000)
-            .unwrap()
-            .expect("changing only project model defaults must not suspend a fresh schedule");
-    assert_eq!(prepared.model_defaults().unwrap().model, "model-b");
-    assert_eq!(
-        prepared.receipt().binding.model_configuration_id.as_deref(),
-        Some("model-b")
-    );
-    assert_eq!(
-        list_heartbeats(&f.path, None).unwrap()[0].state,
-        HeartbeatState::Active
-    );
+    let pending = materialize_heartbeats(&f.path, 63_000)
+        .unwrap()
+        .into_iter()
+        .find(|occurrence| occurrence.schedule_id == schedule.schedule_id)
+        .unwrap();
+    assert!(reserve_fresh_heartbeat_launch(
+        &f.path,
+        &pending.occurrence_id,
+        pending.revision,
+        63_000
+    )
+    .unwrap()
+    .is_none());
+    assert!(read_fresh_heartbeat_launch(&f.path, &pending.occurrence_id)
+        .unwrap()
+        .is_none());
+    initialize(&f.path).unwrap();
+    let reopened = read_heartbeat(&f.path, "project:project", &schedule.schedule_id).unwrap();
+    assert_eq!(reopened.state, HeartbeatState::Suspended);
+    assert_eq!(reopened.starts, 0);
+    assert!(reopened
+        .reason
+        .as_deref()
+        .unwrap_or_default()
+        .contains("explicit model selection"));
+    assert!(fresh_heartbeat_inventory(&f.path, "project", None)
+        .unwrap()
+        .is_empty());
 }
 
 #[test]
@@ -94,11 +132,10 @@ fn absent_defaults_and_explicit_choices_do_not_change_project_identity() {
         )
         .unwrap()
         .unwrap();
+        assert!(prepared.model_defaults().is_none());
         assert_eq!(
-            prepared
-                .model_defaults()
-                .map(|record| record.model.as_str()),
-            after
+            prepared.receipt().request.model_selection,
+            destination.model_selection
         );
         assert_eq!(prepared.receipt().destination, destination);
         let saved = read_heartbeat(&f.path, "project:project", &schedule.schedule_id).unwrap();
@@ -178,7 +215,14 @@ fn publish(
 ) -> crate::sessions::SessionSnapshot {
     pin_fresh_heartbeat_workspace_mode(&f.path, &pending.occurrence_id, true).unwrap();
     let mut snapshot = prepared_shared_snapshot(f, prepared);
-    snapshot.model = prepared.model_defaults().unwrap().model.clone();
+    snapshot.model = prepared
+        .receipt()
+        .request
+        .model_selection
+        .as_ref()
+        .unwrap()
+        .model
+        .clone();
     let mut conn = open_runtime_connection(&f.path).unwrap();
     let tx = conn.transaction().unwrap();
     crate::sessions::insert_new_session_in_transaction(&tx, &f.path, &snapshot).unwrap();
@@ -193,9 +237,18 @@ fn publish(
 }
 
 #[test]
-fn reserved_defaults_survive_reopen_publication_and_initial_admission_after_pointer_changes() {
+fn reserved_session_model_survives_reopen_publication_and_initial_admission_after_pointer_changes()
+{
     let mut f = configured();
     f.binding.fresh_task.as_mut().unwrap().default_ref = None;
+    f.binding
+        .fresh_task
+        .as_mut()
+        .unwrap()
+        .model_selection
+        .as_mut()
+        .unwrap()
+        .service_tier = Some("fast".into());
     f.create();
     let pending = f.pending();
     let prepared =
@@ -210,8 +263,16 @@ fn reserved_defaults_survive_reopen_publication_and_initial_admission_after_poin
         .unwrap();
     assert_eq!(replay.receipt(), prepared.receipt());
     assert_eq!(replay.model_defaults(), prepared.model_defaults());
+    assert!(replay.model_defaults().is_none());
     assert_eq!(
-        replay.model_defaults().unwrap().service_tier.as_deref(),
+        replay
+            .receipt()
+            .request
+            .model_selection
+            .as_ref()
+            .unwrap()
+            .service_tier
+            .as_deref(),
         Some("fast")
     );
     let snapshot = publish(&f, &pending, &replay);
@@ -343,4 +404,280 @@ fn fresh_comparison_keeps_target_guards_and_does_not_relax_classic_comparison() 
         assert!(!binding.same_target(&changed), "{field}");
         assert!(!binding.same_fresh_project_target(&changed), "{field}");
     }
+}
+
+#[test]
+fn legacy_create_receipt_committing_during_retry_wins_before_model_guard() {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    let root = std::env::temp_dir().join(format!("nac-legacy-race-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let path = root.join("store.db");
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    conn.execute_batch(include_str!(
+        "../../schema/fixtures/v53-legacy-schedule-replay.sql"
+    ))
+    .unwrap();
+    drop(conn);
+    initialize(&path).unwrap();
+    let scope = "project:project";
+    let id = "11111111-1111-4111-8111-111111111111";
+    let original = read_heartbeat_command_receipt(&path, scope, id)
+        .unwrap()
+        .unwrap();
+    let action = HeartbeatAction::Create {
+        spec: original.schedule.spec.clone(),
+    };
+    let binding = original.schedule.binding.clone();
+    let mut writer = rusqlite::Connection::open(&path).unwrap();
+    let row: (String, String, String, i64) = writer.query_row(
+        "SELECT canonical_digest,schedule_id,response_json,created_at_ms FROM heartbeat_commands WHERE session_id=?1 AND request_id=?2",
+        (scope, id), |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+    ).unwrap();
+    writer
+        .execute(
+            "DELETE FROM heartbeat_commands WHERE session_id=?1 AND request_id=?2",
+            (scope, id),
+        )
+        .unwrap();
+    assert!(read_heartbeat_command_receipt(&path, scope, id)
+        .unwrap()
+        .is_none());
+    let tx = writer
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .unwrap();
+    tx.execute("INSERT INTO heartbeat_commands(session_id,request_id,canonical_digest,schedule_id,response_json,created_at_ms) VALUES (?1,?2,?3,?4,?5,?6)", rusqlite::params![scope,id,row.0,row.1,row.2,row.3]).unwrap();
+    let (started_tx, started_rx) = mpsc::channel();
+    *super::super::control::ON_CONTROL_BUSY.lock().unwrap() = Some((id.into(), started_tx));
+    let (result_tx, result_rx) = mpsc::channel();
+    let retry_path = path.clone();
+    let retry = std::thread::spawn(move || {
+        let result = control_heartbeat(&retry_path, scope, id, &action, "retry", &binding, 4_000);
+        let _ = result_tx.send(result);
+    });
+    let entered = started_rx.recv_timeout(Duration::from_secs(5));
+    let before_commit = result_rx.recv_timeout(Duration::from_millis(100));
+    // Always release the writer before asserting so a failure cannot strand the contender.
+    tx.commit().unwrap();
+    *super::super::control::ON_CONTROL_BUSY.lock().unwrap() = None;
+    let after_commit = if before_commit.is_err() {
+        Some(result_rx.recv_timeout(Duration::from_secs(5)))
+    } else {
+        None
+    };
+    retry.join().unwrap();
+    entered.unwrap();
+    assert!(matches!(
+        before_commit,
+        Err(mpsc::RecvTimeoutError::Timeout)
+    ));
+    let replay = after_commit.unwrap().unwrap().unwrap();
+    assert_eq!(replay, original);
+    assert_eq!(
+        read_heartbeat_command_receipt(&path, scope, id).unwrap(),
+        Some(original)
+    );
+    drop(writer);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn v53_writer_frozen_admission_replays_exact_model_without_rebinding() {
+    let root = std::env::temp_dir().join(format!("nac-v53-frozen-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let path = root.join("store.db");
+    let conn = Connection::open(&path).unwrap();
+    conn.execute_batch(include_str!(
+        "../../schema/fixtures/v53-admitted-frozen.sql"
+    ))
+    .unwrap();
+    let (id, original): (String, String) = conn
+        .query_row(
+            "SELECT occurrence_id, launch_json FROM heartbeat_task_launches",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    drop(conn);
+    initialize(&path).unwrap();
+    let first = read_fresh_heartbeat_launch(&path, &id).unwrap().unwrap();
+    let selection = first.legacy_frozen_model().unwrap().unwrap();
+    assert_eq!(selection.model, "model-a");
+    assert_eq!(selection.base_url, "https://fixture.invalid/v1");
+    assert_eq!(selection.service_tier.as_deref(), Some("fast"));
+    assert!(first.receipt().request.model_selection.is_none());
+    let mut pinned = first.clone();
+    pinned.receipt.binding.model_configuration_id = None;
+    assert!(pinned.legacy_frozen_model().is_err());
+    pinned.model_defaults.as_mut().unwrap().config_id =
+        format!("scheduled-defaults:{}", pinned.receipt.occurrence_id);
+    assert!(pinned.legacy_frozen_model().unwrap().is_some());
+    let mut tampered = first.clone();
+    tampered.model_defaults.as_mut().unwrap().config_id = "wrong-binding".into();
+    assert!(tampered.legacy_frozen_model().is_err());
+    let mut tampered = first.clone();
+    tampered
+        .model_defaults
+        .as_mut()
+        .unwrap()
+        .extra_headers
+        .insert("invalid header".into(), "private".into());
+    assert!(tampered.legacy_frozen_model().is_err());
+    let mut tampered = first.clone();
+    tampered
+        .model_defaults
+        .as_mut()
+        .unwrap()
+        .orchestrator_compaction_threshold = Some(0);
+    assert!(tampered.legacy_frozen_model().is_err());
+    let mut overridden = first.clone();
+    overridden.receipt.destination.model = Some("different-model".into());
+    overridden.receipt.binding.fresh_task = Some(overridden.receipt.destination.clone());
+    assert!(
+        overridden.legacy_frozen_model().is_err(),
+        "incompatible inherited tier must not silently change on a non-Codex route"
+    );
+    overridden.receipt.destination.service_tier = Some("standard".into());
+    overridden.receipt.binding.fresh_task = Some(overridden.receipt.destination.clone());
+    assert_eq!(
+        overridden
+            .legacy_frozen_model()
+            .unwrap()
+            .unwrap()
+            .service_tier
+            .as_deref(),
+        Some("standard")
+    );
+    let mut codex = first.clone();
+    let defaults = codex.model_defaults.as_mut().unwrap();
+    defaults.backend = "chatgpt-codex-responses".into();
+    defaults.model = "gpt-5.2".into();
+    defaults.base_url = "https://chatgpt.com/backend-api/codex".into();
+    codex.receipt.destination.model = Some("gpt-5.3-codex".into());
+    codex.receipt.binding.fresh_task = Some(codex.receipt.destination.clone());
+    assert_eq!(
+        codex
+            .legacy_frozen_model()
+            .unwrap()
+            .unwrap()
+            .service_tier
+            .as_deref(),
+        Some("standard")
+    );
+    codex.receipt.destination.service_tier = Some("fast".into());
+    codex.receipt.binding.fresh_task = Some(codex.receipt.destination.clone());
+    assert_eq!(
+        codex
+            .legacy_frozen_model()
+            .unwrap()
+            .unwrap()
+            .service_tier
+            .as_deref(),
+        Some("fast")
+    );
+    let mut stopped = first.clone();
+    stopped.receipt.stop_requested = true;
+    assert!(stopped.legacy_frozen_model().is_err());
+    let replay = reserve_fresh_heartbeat_launch(&path, &id, 1, 99_000)
+        .unwrap()
+        .unwrap();
+    assert_eq!(replay.receipt(), first.receipt());
+    assert_eq!(replay.legacy_frozen_model().unwrap(), Some(selection));
+    let conn = Connection::open(&path).unwrap();
+    let raw: String = conn
+        .query_row(
+            "SELECT launch_json FROM heartbeat_task_launches WHERE occurrence_id=?1",
+            [&id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(raw, original);
+    conn.execute("UPDATE heartbeat_task_launches SET launch_json=json_set(launch_json,'$.model_defaults.orchestrator_compaction_threshold',8192) WHERE occurrence_id=?1", [&id]).unwrap();
+    drop(conn);
+    let prepared = read_fresh_heartbeat_launch(&path, &id).unwrap().unwrap();
+    let mut snapshot = crate::sessions::new_snapshot(
+        prepared.receipt().session_id.clone(),
+        root.clone(),
+        "model-a".into(),
+        "https://fixture.invalid/v1".into(),
+        crate::model::BackendKind::OpenAiResponses,
+        None,
+        None,
+        None,
+        Vec::new(),
+        None,
+        std::collections::BTreeMap::new(),
+    );
+    snapshot.behavior = crate::sessions::SessionBehavior::Direct;
+    snapshot.project_id = Some("project".into());
+    snapshot.api_key_env = crate::model::auto_select_api_key_env(snapshot.backend);
+    snapshot.reasoning_effort = Some(crate::model::ReasoningEffort::High);
+    snapshot.service_tier = Some(crate::model::ServiceTier::Fast);
+    snapshot.orchestrator_compaction_threshold = Some(8192);
+    let mut variants = Vec::new();
+    let mut changed = snapshot.clone();
+    changed.api_key_env = Some("UNRELATED_SELECTOR".into());
+    variants.push(changed);
+    let mut changed = snapshot.clone();
+    changed.reasoning_effort = Some(crate::model::ReasoningEffort::Low);
+    variants.push(changed);
+    let mut changed = snapshot.clone();
+    changed.service_tier = Some(crate::model::ServiceTier::Standard);
+    variants.push(changed);
+    let mut changed = snapshot.clone();
+    changed.orchestrator_compaction_threshold = Some(8193);
+    variants.push(changed);
+    let mut changed = snapshot.clone();
+    changed
+        .extra_headers
+        .insert("x-test".into(), "changed".into());
+    variants.push(changed);
+    for changed in variants {
+        let conn = Connection::open(&path).unwrap();
+        let error = link_fresh_launch_input_with_connection(
+            &conn,
+            &prepared.receipt().request.request_id,
+            &changed,
+            1,
+        )
+        .unwrap_err();
+        assert!(format!("{error:#}").contains("does not match historical frozen model receipt"));
+    }
+    let conn = Connection::open(&path).unwrap();
+    conn.execute("UPDATE heartbeat_task_launches SET launch_json=json_set(launch_json,'$.model_defaults.reasoning_effort',NULL,'$.model_defaults.service_tier',NULL) WHERE occurrence_id=?1", [&id]).unwrap();
+    drop(conn);
+    let prepared = read_fresh_heartbeat_launch(&path, &id).unwrap().unwrap();
+    let mut changed = snapshot.clone();
+    changed.service_tier = None;
+    let conn = Connection::open(&path).unwrap();
+    assert!(link_fresh_launch_input_with_connection(
+        &conn,
+        &prepared.receipt().request.request_id,
+        &changed,
+        1
+    )
+    .unwrap_err()
+    .to_string()
+    .contains("frozen model receipt"));
+    let mut changed = snapshot.clone();
+    changed.reasoning_effort = None;
+    assert!(link_fresh_launch_input_with_connection(
+        &conn,
+        &prepared.receipt().request.request_id,
+        &changed,
+        1
+    )
+    .unwrap_err()
+    .to_string()
+    .contains("frozen model receipt"));
+    conn.execute("UPDATE heartbeat_task_launches SET launch_json=json_remove(launch_json,'$.model_defaults') WHERE occurrence_id=?1", [&id]).unwrap();
+    drop(conn);
+    assert!(read_fresh_heartbeat_launch(&path, &id)
+        .unwrap()
+        .unwrap()
+        .legacy_frozen_model()
+        .unwrap()
+        .is_none());
+    std::fs::remove_dir_all(root).unwrap();
 }

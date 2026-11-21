@@ -285,59 +285,84 @@ test("native OpenAI speed survives composer settings, protocol changes and resta
   expect((await config()).service_tier).toBe("standard");
 });
 
-test("new chats inherit project speed and can explicitly choose Standard", async ({
+test("new project chats use only their explicitly selected speed", async ({ harness, request }) => {
+  const project = await request.post(`${harness.baseUrl}/projects`, {
+    data: { name: "Speed project", cwd: path.join(harness.runRoot, "workspace") },
+  });
+  expect(project.ok(), await project.text()).toBeTruthy();
+  const projectId = (await project.json()).project_id;
+  const body = {
+    project_id: projectId,
+    backend: "openai-responses",
+    model: "gpt-6.1-sol",
+    base_url: "https://api.openai.com/v1",
+    api_key_env: "OPENAI_API_KEY",
+  };
+  for (const serviceTier of [null, "standard"]) {
+    const response = await request.post(`${harness.baseUrl}/sessions`, {
+      data: { ...body, service_tier: serviceTier },
+    });
+    expect(response.ok(), await response.text()).toBeTruthy();
+    const id = (await response.json()).metadata.session_id;
+    expect(
+      (await (await request.get(`${harness.baseUrl}/sessions/${id}/config`)).json()).service_tier ??
+        null,
+    ).toBe(serviceTier);
+  }
+});
+
+test("Home carries explicit model speed into each new project session", async ({
   harness,
   page,
   request,
 }) => {
-  const configuration = await request.post(`${harness.baseUrl}/model-configs`, {
-    data: {
-      name: "Native OpenAI speed fixture",
-      backend: "openai-chat-completions",
-      model: "gpt-6.1-sol",
-      base_url: "https://api.openai.com/v1",
-      api_key: "e2e-only",
-      reasoning_effort: "high",
-      service_tier: "fast",
-      extra_headers: {},
-      orchestrator_compaction_threshold: 0,
-    },
-  });
-  expect(configuration.ok(), await configuration.text()).toBe(true);
-  const configId = (await configuration.json()).config_id;
   const project = await request.post(`${harness.baseUrl}/projects`, {
-    data: {
-      name: "Speed project",
-      cwd: path.join(harness.runRoot, "workspace"),
-      default_model_config_id: configId,
-    },
+    data: { name: "Explicit speed", cwd: path.join(harness.runRoot, "workspace") },
   });
-  expect(project.ok(), await project.text()).toBe(true);
+  expect(project.ok(), await project.text()).toBeTruthy();
   const projectId = (await project.json()).project_id;
-  // A native endpoint is never contacted: hold Home's first-run admission.
   await page.route(
     (url) => /\/sessions\/[^/]+\/runs$/.test(url.pathname),
     (route) => (route.request().method() === "POST" ? route.abort() : route.fallback()),
   );
-  await page.goto(`${harness.baseUrl}/#/project/${projectId}`);
-  const settings = await openModelSettings(page);
-  const fast = settings.getByRole("switch", { name: "Fast speed" });
-  await expect(fast).toHaveAttribute("aria-checked", "true");
-  await fast.click();
-  await expect(fast).toHaveAttribute("aria-checked", "false");
-  await page.keyboard.press("Escape");
-  const create = page.waitForRequest(
-    (req) => req.method() === "POST" && req.url().endsWith("/sessions"),
-  );
-  const sessionId = await startSessionFromHome(page, "Speed project journey", {
-    runAdmission: "aborted",
-  });
-  const body = (await create).postDataJSON();
-  expect(body).toMatchObject({ project_id: projectId, service_tier: "standard" });
-  expect(
-    (await (await request.get(`${harness.baseUrl}/sessions/${sessionId}/config`)).json())
-      .service_tier,
-  ).toBe("standard");
+  let first = true;
+  for (const [label, tier] of [
+    ["Fast", "fast"],
+    ["Standard", "standard"],
+  ] as const) {
+    if (first) {
+      await page.goto(`${harness.baseUrl}/#/project/${projectId}`);
+      first = false;
+    } else {
+      await page.getByRole("button", { name: "New session in Explicit speed" }).click();
+    }
+    const catalog = await openModelCatalog(page, "gpt-6.1-sol");
+    await catalog
+      .getByRole("group", { name: "OpenAI", exact: true })
+      .getByRole("menuitemradio", { name: /^GPT-6\.1|^gpt-6\.1/i })
+      .click();
+    const dialog = await openModelSettings(page);
+    await dialog.getByRole("button", { name: /^Speed:/ }).click();
+    await page.getByRole("menuitemradio", { name: label, exact: true }).click();
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+    const create = page.waitForRequest(
+      (candidate) => candidate.method() === "POST" && candidate.url().endsWith("/sessions"),
+    );
+    const id = await startSessionFromHome(page, `Explicit ${label} session`, {
+      runAdmission: "aborted",
+    });
+    expect((await create).postDataJSON()).toMatchObject({
+      project_id: projectId,
+      first_chat: tier === "fast",
+      backend: "openai-responses",
+      model: "gpt-6.1-sol",
+      service_tier: tier,
+    });
+    const config = await request.get(`${harness.baseUrl}/sessions/${id}/config`);
+    expect(config.ok()).toBeTruthy();
+    expect((await config.json()).service_tier).toBe(tier);
+  }
 });
 
 test("native policy rejection remains repairable and a served receipt survives reload", async ({

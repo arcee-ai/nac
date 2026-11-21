@@ -1,8 +1,11 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { useSetupLifetime } from "@/app/features/setup/lifetime";
 import { Link, useLocation } from "react-router-dom";
 import { Button, ButtonVariant, Input, TextArea, Modal, ModalSize } from "@/app/atoms";
 import { routes, sessionIdFromPath } from "@/app/lib/routes";
 import { useTaskLaunch } from "./useTaskLaunch";
+import type { LaunchModelSelection } from "@/app/features/setup/modelSelection";
+import type { ModelOverride } from "@/app/features/home/modelChoice";
 
 const phases = {
   pinned: "Commit pinned",
@@ -15,19 +18,25 @@ const phases = {
 
 export function TaskLaunchModal({
   projectId,
+  model,
+  modelSource,
   defaultRef,
   onClose,
   onExistingCheckout,
   onLaunchAccepted,
+  validateModel,
   initialPrompt = "",
   initialTitle = "",
   initialGitRef = "",
 }: {
   projectId: string;
+  model: LaunchModelSelection;
+  modelSource?: ModelOverride["source"];
   defaultRef: string | null;
   onClose: () => void;
   onExistingCheckout: (prompt: string) => void;
   onLaunchAccepted?: () => void;
+  validateModel?: (signal: AbortSignal) => Promise<void>;
   /** Home's composer text, carried in as the brief. */
   initialPrompt?: string;
   initialTitle?: string;
@@ -41,12 +50,63 @@ export function TaskLaunchModal({
   const [branch, setBranch] = useState(defaultRef ?? "");
   const launch = useTaskLaunch(projectId);
   const frozen = launch.intent !== null;
+  const lifetime = useSetupLifetime();
+  const checking = useRef(false);
+  const [validating, setValidating] = useState(false);
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const start = async () => {
+    const lease = lifetime.current;
+    if (!lease?.current() || checking.current) return;
+    checking.current = true;
+    setValidating(true);
+    setValidationError(null);
+    const request = {
+      project_id: projectId,
+      invoking_session_id: sessionIdFromPath(location.pathname),
+      ...(modelSource
+        ? {
+            model_source: {
+              project_id: modelSource.projectId,
+              session_id: modelSource.sessionId,
+              config_version: modelSource.configVersion,
+            },
+          }
+        : {}),
+      model_selection: {
+        backend: model.backend,
+        model: model.model,
+        base_url: model.base_url,
+        allow_insecure_http: model.allow_insecure_http,
+        api_key_env: model.api_key_env,
+        reasoning_effort: model.reasoning_effort,
+        ...(model.service_tier !== undefined ? { service_tier: model.service_tier } : {}),
+        extra_headers: model.extra_headers,
+        orchestrator_compaction_threshold: model.orchestrator_compaction_threshold ?? null,
+      },
+      git_ref: gitRef.trim() || null,
+      default_ref: defaultRef ? null : branch.trim(),
+      title: title.trim(),
+      prompt: prompt.trim(),
+    };
+    try {
+      if (!frozen && validateModel) await validateModel(lease.signal);
+      if (lease.current()) launch.launch(request, onLaunchAccepted);
+    } catch (error) {
+      if (lease.current())
+        setValidationError(
+          error instanceof Error ? error.message : "Could not verify the source session.",
+        );
+    } finally {
+      checking.current = false;
+      if (lease.current()) setValidating(false);
+    }
+  };
   return (
     <Modal open title="New isolated task" size={ModalSize.Wide} onClose={onClose}>
       <div className="flex flex-col gap-3">
         <p className="text-micro text-basic-muted">
-          Start a direct agent in a retained Local Git checkout. Source edits are excluded. Your
-          project model settings apply. Repository setup remains the agent's first work.
+          Start a direct agent in a retained Local Git checkout. Source edits are excluded. The
+          selected session model applies. Repository setup remains the agent's first work.
         </p>
         {!launch.receipt && (
           <>
@@ -55,7 +115,7 @@ export function TaskLaunchModal({
               aria-label="Task title"
               value={title}
               maxLength={120}
-              isDisabled={frozen}
+              isDisabled={frozen || validating}
               onChange={(e) => setTitle(e.target.value)}
             />
             <TextArea
@@ -63,14 +123,14 @@ export function TaskLaunchModal({
               aria-label="Initial brief"
               rows={4}
               value={prompt}
-              isDisabled={frozen}
+              isDisabled={frozen || validating}
               onChange={(e) => setPrompt(e.target.value)}
             />
             <Input
               label="Git ref (optional)"
               aria-label="Git ref (optional)"
               value={gitRef}
-              isDisabled={frozen}
+              isDisabled={frozen || validating}
               onChange={(e) => setGitRef(e.target.value)}
               placeholder="Branch, tag, or commit"
             />
@@ -83,13 +143,14 @@ export function TaskLaunchModal({
                 label="Save project default branch"
                 aria-label="Save project default branch"
                 value={branch}
-                isDisabled={frozen}
+                isDisabled={frozen || validating}
                 onChange={(e) => setBranch(e.target.value)}
                 placeholder="Exact configured branch"
               />
             )}
           </>
         )}
+        {validationError && <p role="alert">{validationError}</p>}
         {launch.error && (
           <p role="alert">
             {launch.error.message}
@@ -100,20 +161,14 @@ export function TaskLaunchModal({
           <Button
             variant={ButtonVariant.Primary}
             loading={launch.start.isPending}
-            disabled={!title.trim() || !prompt.trim() || !branch.trim() || launch.start.isPending}
-            onClick={() =>
-              launch.launch(
-                {
-                  project_id: projectId,
-                  invoking_session_id: sessionIdFromPath(location.pathname),
-                  git_ref: gitRef.trim() || null,
-                  default_ref: defaultRef ? null : branch.trim(),
-                  title: title.trim(),
-                  prompt: prompt.trim(),
-                },
-                onLaunchAccepted,
-              )
+            disabled={
+              !title.trim() ||
+              !prompt.trim() ||
+              !branch.trim() ||
+              launch.start.isPending ||
+              validating
             }
+            onClick={() => void start()}
           >
             {frozen ? "Retry same request" : "Start isolated task"}
           </Button>
@@ -123,7 +178,7 @@ export function TaskLaunchModal({
         )}
         <Button
           onClick={() => onExistingCheckout(prompt.trim())}
-          disabled={frozen || (initialPrompt.length > 0 && !prompt.trim())}
+          disabled={frozen || validating || (initialPrompt.length > 0 && !prompt.trim())}
         >
           Use existing checkout
         </Button>

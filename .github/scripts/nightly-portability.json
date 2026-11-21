@@ -23,39 +23,6 @@
     "reason": "Failing local search shims prove native discovery independence."
   },
   {
-    "package": "nac-server",
-    "name": "tests::persistence_load::owned_persistence_load_scenario",
-    "disposition": "included",
-    "capabilities": [
-      "built nac-web worker",
-      "scripted provider",
-      "local SQLite",
-      "single test thread"
-    ],
-    "reason": "Genuinely omitted owned-store multi-thread/current-thread variant; existing managed-load exercises the legacy SqliteLoadStore adapter instead."
-  },
-  {
-    "package": "nac-server",
-    "name": "tests::persistence_load::owned_persistence_current_thread_load_scenario",
-    "disposition": "included",
-    "capabilities": [
-      "built nac-web worker",
-      "scripted provider",
-      "local SQLite",
-      "single test thread"
-    ],
-    "reason": "Genuinely omitted owned-store multi-thread/current-thread variant; existing managed-load exercises the legacy SqliteLoadStore adapter instead."
-  },
-  {
-    "package": "nac-server",
-    "name": "tests::managed_load::managed_load_scenario",
-    "disposition": "already-covered",
-    "capabilities": [
-      "make test-managed-load"
-    ],
-    "reason": "Required PR test-workspace and managed quality already execute this exact scenario; no duplicate nightly ignored invocation."
-  },
-  {
     "package": "nac-core",
     "name": "agent::live_tests::test_simple_prompt",
     "disposition": "excluded",

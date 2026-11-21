@@ -20,7 +20,7 @@ fn run_options(root: &Path, store_path: &Path) -> RunOptions {
 }
 
 #[tokio::test]
-async fn disconnect_refuses_mounted_direct_child_and_worker_sessions() {
+async fn disconnect_refuses_mounted_direct_and_child_sessions() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     let original_api_key = std::env::var_os("OPENAI_API_KEY");
     unsafe {
@@ -42,10 +42,27 @@ async fn disconnect_refuses_mounted_direct_child_and_worker_sessions() {
     .await
     .unwrap();
     let session_id = direct.session.session_id().unwrap().to_string();
-    // Traditional children and reattached sessions run through the resume builder.
+    let child = build_run_config_for_project_with_behavior(
+        run_options(&root, &store_path),
+        &NacConfig::default(),
+        None,
+        sessions::SessionBehavior::Direct,
+    )
+    .await
+    .unwrap();
+    let child_id = child.session.session_id().unwrap().to_string();
+    store::create_traditional_child_relationship(
+        &store_path,
+        &session_id,
+        &child_id,
+        store::GENERAL_CHILD_PROFILE,
+        "fixture child",
+    )
+    .unwrap();
+    drop(child);
     let resumed = build_resume_config_for_session(
         store_path.clone(),
-        &session_id,
+        &child_id,
         &NacConfig::default(),
         root.clone(),
         None,
@@ -53,32 +70,8 @@ async fn disconnect_refuses_mounted_direct_child_and_worker_sessions() {
     )
     .await
     .unwrap();
-    // Orchestrator workers, including those of managed orchestrators, mount here.
-    let worker = build_managed_worker_config(
-        ManagedWorkerOptions {
-            workspace_cwd: root.clone(),
-            config_cwd: None,
-            dispatch: WorkerDispatchOptions {
-                session_id: session_id.clone(),
-                thread_name: "impl".to_string(),
-                dispatch_id: "test-dispatch".to_string(),
-                action: "use the echo tool".to_string(),
-                source_threads: Vec::new(),
-                skills: Vec::new(),
-            },
-            store: StoreOptions {
-                store_path: Some(store_path.clone()),
-            },
-            model: test_openai_model_options(),
-            sandbox: SandboxOptions::default(),
-            ssh: SshOptions::default(),
-        },
-        &NacConfig::default(),
-    )
-    .await
-    .unwrap();
 
-    let captures = [&direct.agent, &resumed.agent, &worker.agent].map(|agent| {
+    let captures = [&direct.agent, &resumed.agent].map(|agent| {
         agent
             .mcp_for_test()
             .and_then(|registry| registry.capture_tool(ECHO))
@@ -114,6 +107,6 @@ async fn disconnect_refuses_mounted_direct_child_and_worker_sessions() {
         .iter()
         .all(|definition| definition.function.name != ECHO));
 
-    drop((direct, resumed, worker, after));
+    drop((direct, resumed, after));
     restore_env("OPENAI_API_KEY", original_api_key);
 }

@@ -140,6 +140,8 @@ def main():
     try:
         created = api.call("POST", "/sessions", {
             "behavior": "direct", "cwd": str(fixture),
+            "backend": "arcee-auth", "model": "trinity-large-thinking",
+            "base_url": "https://api.arcee.ai", "api_key_env": None,
             "ssh_host": None, "sandbox": {"enabled": False},
         }, expected=201)
         metadata = created["metadata"]

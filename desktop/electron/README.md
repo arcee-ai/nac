@@ -91,7 +91,10 @@ without keeping a hidden renderer busy. Delivery accounting waits for exact
 durable revision acknowledgments; opt-out/reset fence pending callbacks, and a
 save failure suspends delivery with status explaining that an older setting may
 return. Native clicks carry only a bounded current session target through the
-shared navigation guards; deferred or stale targets are discarded. Electron
+shared navigation guards; deferred or stale targets are discarded. If the
+preload positively reports that a target owner was absent before any callback,
+the original click may wait for one newer owner within its original deadline.
+An invoked or uncertain callback is never replayed. Electron
 reports permission as system-managed; runtime support or a show callback does
 not establish a visible OS banner. Signed OS show/click/withdraw proof remains
 separate qualification when unavailable in the ad-hoc development app.

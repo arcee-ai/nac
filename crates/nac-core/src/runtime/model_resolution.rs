@@ -1,18 +1,15 @@
 use super::*;
 
-/// Merge explicit new-session model options over `config.toml` settings.
+/// Resolve the model options selected for this session.
 ///
 /// This resolution never consults `OPENAI_MODEL`, `OPENAI_BASE_URL`, or any
 /// ambient backend/model/base selector. Credential values are read only from
 /// the configured `api_key_env` later when constructing the model client.
 pub fn effective_model_settings(
     model: &ModelOptions,
-    config: &NacConfig,
+    _config: &NacConfig,
 ) -> Result<EffectiveModelSettings> {
-    let model_id = model
-        .api_model
-        .clone()
-        .or_else(|| config.model.model.clone());
+    let model_id = model.api_model.clone();
     // The backend is explicit (request/CLI) or resolved from the model id
     // through the catalog (unique exact match; collisions prefer the
     // non-managed provider with a warning; unknown ids stay unresolved and
@@ -39,18 +36,31 @@ pub fn effective_model_settings(
         backend,
         model_id,
         base_url,
-        model
-            .reasoning_effort
-            .resolve(config.model.reasoning_effort),
+        model.reasoning_effort.resolve(None),
         api_key_env,
-        model
-            .extra_headers
-            .clone()
-            .unwrap_or_else(|| config.model.extra_headers.clone()),
+        model.extra_headers.clone().unwrap_or_default(),
         model.allow_insecure_http,
     )?
     .with_trusted_api_key_file(model.trusted_api_key_file.clone())?
-    .with_service_tier(model.service_tier.resolve(config.model.service_tier))
+    .with_service_tier(model.service_tier.resolve(None))
+}
+
+/// Compare an explicit new-session model request with the durable existing route.
+/// Uses the same resolver as session construction, including conventional
+/// credential selection. This check does not mutate or attach the session.
+pub fn session_model_matches(
+    model: &ModelOptions,
+    snapshot: &crate::sessions::SessionSnapshot,
+) -> Result<bool> {
+    let selected = effective_model_settings(model, &NacConfig::default())?;
+    Ok(selected.backend == snapshot.backend
+        && selected.model == snapshot.model
+        && selected.base_url == snapshot.base_url
+        && selected.allow_insecure_http == snapshot.allow_insecure_http
+        && selected.api_key_env == snapshot.api_key_env
+        && selected.reasoning_effort == snapshot.reasoning_effort
+        && selected.service_tier == snapshot.service_tier
+        && selected.extra_headers == snapshot.extra_headers)
 }
 
 /// Resolve and normalize the persisted orchestrator compaction threshold for a

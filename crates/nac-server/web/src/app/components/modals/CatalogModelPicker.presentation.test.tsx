@@ -16,7 +16,11 @@ const catalog: ModelCatalog = {
       auth: "api_key_env",
       auth_status: "ready",
       auth_hint: null,
-      connection: { base_url: "https://api.arcee.ai/api/v1", api_key_env: "ARCEE_API_KEY" },
+      connection: {
+        allow_insecure_http: false,
+        base_url: "https://api.arcee.ai/api/v1",
+        api_key_env: "ARCEE_API_KEY",
+      },
       default_base_url: "https://api.arcee.ai/api/v1",
       managed_base_url: null,
       default_limits: { context_window: 128000, max_tokens: 4096, supported_efforts: [] },

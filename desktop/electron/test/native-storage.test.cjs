@@ -53,8 +53,12 @@ function fixture() {
       throw Error("unexpected picker");
     },
   });
-  const send = (kind, extra = {}, event = { sender: contents, senderFrame: frame }) =>
+  const send = (kind, extra = {}, event = { sender: contents, senderFrame: frame }) => {
+    if (kind === "target_settled" && !Object.hasOwn(extra, "generation")) {
+      extra = { generation: messages.findLast((message) => message.kind === "session_target")?.generation, ...extra };
+    }
     ipcMain.emit("nac:native", event, { version: 1, kind, nonce, incarnation, ...extra });
+  };
   const ready = async (targetReady = true) => {
     send("ready");
     send("bound", { challenge: messages.at(-1).challenge });
@@ -373,5 +377,158 @@ test("hide and document retirement fence a click waiting for native focus", asyn
     assert.equal(f.messages.filter((message) => message.kind === "session_target").length, 0);
     f.native.dispose();
     assert.equal(f.window.listenerCount("focus"), 0);
+  }
+});
+
+test("one click crosses an owner gap only after an exact no-invocation receipt", async () => {
+  for (const order of ["retire-ack-ready", "ack-retire-ready", "retire-ready-ack"]) {
+    const f = fixture();
+    await f.ready();
+    const target = f.native.sessionTarget("fixture-session", "fixture-occurrence");
+    const first = f.messages.findLast((message) => message.kind === "session_target");
+    assert.equal(first.generation, 1);
+    const request = first.targetMessage.request;
+    const retired = () => f.send("session_target_retired", { generation: 1 });
+    const noInvocation = () => f.send("target_not_invoked", { request, generation: 1 });
+    const ready = () => f.send("session_target_ready", { generation: 2 });
+    if (order === "retire-ack-ready") { retired(); noInvocation(); ready(); }
+    if (order === "ack-retire-ready") { noInvocation(); retired(); ready(); }
+    if (order === "retire-ready-ack") { retired(); ready(); noInvocation(); }
+    const deliveries = f.messages.filter((message) => message.kind === "session_target");
+    assert.equal(deliveries.length, 2, order);
+    assert.equal(deliveries[1].generation, 2);
+    assert.deepEqual(deliveries[1].targetMessage, first.targetMessage);
+    // A duplicate or late receipt for the earlier delivery cannot re-arm or
+    // settle the newer generation.
+    noInvocation();
+    f.send("target_settled", { request, generation: 1, outcome: "opened" });
+    assert.equal(f.messages.filter((message) => message.kind === "session_target").length, 2);
+    f.send("target_settled", { request, generation: 2, outcome: "opened" });
+    assert.equal(await target, "opened");
+    f.native.dispose();
+  }
+});
+
+test("a possibly invoked callback, invalid receipt, or second owner gap never replays", async (context) => {
+  context.mock.timers.enable({ apis: ["setTimeout"] });
+  for (const mode of ["settled-stale", "no-receipt", "wrong-request", "wrong-generation", "second-gap"]) {
+    const f = fixture();
+    await f.ready();
+    const target = f.native.sessionTarget("fixture-session", "fixture-occurrence");
+    const request = f.messages.findLast((message) => message.kind === "session_target").targetMessage.request;
+    f.send("session_target_retired", { generation: 1 });
+    f.send("session_target_ready", { generation: 2 });
+    if (mode === "settled-stale") {
+      f.send("target_settled", { request, generation: 1, outcome: "opened" });
+      assert.equal(await target, "stale");
+    } else {
+      if (mode !== "no-receipt")
+        f.send("target_not_invoked", { request: mode === "wrong-request" ? request + 1 : request,
+                                        generation: mode === "wrong-generation" ? 2 : 1 });
+      if (mode === "second-gap") {
+        assert.equal(f.messages.filter((message) => message.kind === "session_target").length, 2);
+        f.send("session_target_retired", { generation: 2 });
+        f.send("session_target_ready", { generation: 3 });
+        f.send("target_not_invoked", { request, generation: 2 });
+      }
+      context.mock.timers.tick(3000);
+      assert.equal(await target, "unavailable");
+    }
+    assert.equal(f.messages.filter((message) => message.kind === "session_target").length,
+                 mode === "second-gap" ? 2 : 1);
+    f.native.dispose();
+  }
+});
+
+test("a later hide or document retirement cancels a pre-invocation gap", async () => {
+  for (const boundary of ["hide", "retire"]) {
+    const f = fixture();
+    await f.ready();
+    const target = f.native.sessionTarget("fixture-session", "fixture-occurrence");
+    const request = f.messages.findLast((message) => message.kind === "session_target").targetMessage.request;
+    f.send("session_target_retired", { generation: 1 });
+    f.send("target_not_invoked", { request, generation: 1 });
+    if (boundary === "hide") f.native.setVisible(false);
+    else {
+      const done = f.native.retire();
+      f.send("retired", { closed: true });
+      await done;
+    }
+    assert.equal(await target, "stale");
+    f.send("session_target_ready", { generation: 2 });
+    assert.equal(f.messages.filter((message) => message.kind === "session_target").length, 1);
+    f.native.dispose();
+  }
+});
+
+test("late no-invocation receipt cannot revive an expired original click", async (context) => {
+  context.mock.timers.enable({ apis: ["setTimeout"] });
+  const f = fixture();
+  await f.ready();
+  const target = f.native.sessionTarget("fixture-session", "fixture-occurrence");
+  const request = f.messages.findLast((message) => message.kind === "session_target").targetMessage.request;
+  f.send("session_target_retired", { generation: 1 });
+  context.mock.timers.tick(3000);
+  assert.equal(await target, "unavailable");
+  f.send("target_not_invoked", { request, generation: 1 });
+  f.send("session_target_ready", { generation: 2 });
+  assert.equal(f.messages.filter((message) => message.kind === "session_target").length, 1);
+  f.native.dispose();
+});
+
+
+test("a proven owner gap waits for both replacement UI and target owner", async () => {
+  for (const uiFirst of [true, false]) {
+    const f = fixture();
+    await f.ready();
+    const target = f.native.sessionTarget("fixture-session", "fixture-occurrence");
+    const first = f.messages.findLast((message) => message.kind === "session_target");
+    const request = first.targetMessage.request;
+    f.send("ui_retired");
+    f.send("session_target_retired", { generation: 1 });
+    f.send("target_not_invoked", { request, generation: 1 });
+    if (uiFirst) f.send("ui_ready");
+    else f.send("session_target_ready", { generation: 2 });
+    assert.equal(f.messages.filter((message) => message.kind === "session_target").length, 1);
+    if (uiFirst) f.send("session_target_ready", { generation: 2 });
+    else f.send("ui_ready");
+    const sent = f.messages.filter((message) => message.kind === "session_target");
+    assert.equal(sent.length, 2);
+    assert.equal(sent[1].generation, 2);
+    assert.deepEqual(sent[1].targetMessage, first.targetMessage);
+    f.send("target_settled", { request, generation: 2, outcome: "opened" });
+    assert.equal(await target, "opened");
+    f.native.dispose();
+  }
+});
+
+test("remount wait honors the original deadline and never bypasses an intervening command", async (context) => {
+  context.mock.timers.enable({ apis: ["setTimeout"] });
+  {
+    const f = fixture();
+    await f.ready();
+    const target = f.native.sessionTarget("fixture-session", "fixture-occurrence");
+    const request = f.messages.findLast((message) => message.kind === "session_target").targetMessage.request;
+    f.send("ui_retired");
+    f.send("session_target_retired", { generation: 1 });
+    f.send("target_not_invoked", { request, generation: 1 });
+    context.mock.timers.tick(3000);
+    assert.equal(await target, "unavailable");
+    f.send("session_target_ready", { generation: 2 });
+    f.send("ui_ready");
+    assert.equal(f.messages.filter((message) => message.kind === "session_target").length, 1);
+    f.native.dispose();
+  }
+  {
+    const f = fixture();
+    await f.ready();
+    const target = f.native.sessionTarget("fixture-session", "fixture-occurrence");
+    const request = f.messages.findLast((message) => message.kind === "session_target").targetMessage.request;
+    f.send("target_not_invoked", { request, generation: 1 });
+    assert.equal(f.native.command("settings"), true);
+    f.send("session_target_ready", { generation: 2 });
+    assert.equal(await target, "unavailable");
+    assert.equal(f.messages.filter((message) => message.kind === "session_target").length, 1);
+    f.native.dispose();
   }
 });

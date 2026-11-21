@@ -40,6 +40,17 @@ impl Fixture {
             &path,
             &FreshTaskDestination {
                 project_id: "project".into(),
+                model_selection: Some(crate::store::TaskModelSelection {
+                    service_tier: None,
+                    backend: "openai-responses".into(),
+                    model: "fixture-model".into(),
+                    base_url: "https://fixture.invalid/v1".into(),
+                    allow_insecure_http: false,
+                    api_key_env: None,
+                    reasoning_effort: None,
+                    extra_headers: None,
+                    orchestrator_compaction_threshold: None,
+                }),
                 pinned_commit: None,
                 default_ref: Some("refs/heads/dev".into()),
                 model: None,
@@ -109,7 +120,68 @@ pub(super) fn prepared_shared_snapshot(
     );
     snapshot.behavior = crate::sessions::SessionBehavior::Direct;
     snapshot.project_id = Some("project".into());
+    let selected = reserved
+        .receipt()
+        .destination
+        .model_selection
+        .as_ref()
+        .unwrap();
+    snapshot.backend = selected.backend.parse().unwrap();
+    snapshot.model = selected.model.trim().to_owned();
+    snapshot.base_url = selected.base_url.trim().to_owned();
+    snapshot.allow_insecure_http = selected.allow_insecure_http;
+    snapshot.api_key_env = selected
+        .api_key_env
+        .clone()
+        .or_else(|| crate::model::auto_select_api_key_env(snapshot.backend));
+    snapshot.extra_headers = selected.extra_headers.clone().unwrap_or_default();
+    snapshot.reasoning_effort = selected
+        .reasoning_effort
+        .as_ref()
+        .map(|value| serde_json::from_value(serde_json::Value::String(value.clone())).unwrap());
+    snapshot.service_tier = reserved
+        .receipt()
+        .destination
+        .service_tier
+        .as_ref()
+        .or(selected.service_tier.as_ref())
+        .map(|value| value.parse().unwrap());
+    snapshot.orchestrator_compaction_threshold = selected
+        .orchestrator_compaction_threshold
+        .filter(|value| *value != 0);
     snapshot
+}
+
+#[test]
+fn scheduled_model_selection_is_frozen_in_the_durable_launch_receipt() {
+    let mut f = Fixture::new();
+    let selection = crate::store::TaskModelSelection {
+        service_tier: None,
+        backend: "openai-responses".into(),
+        model: "fixture-model".into(),
+        base_url: "https://fixture.invalid/v1".into(),
+        allow_insecure_http: false,
+        api_key_env: Some("FIXTURE_API_KEY".into()),
+        reasoning_effort: Some("high".into()),
+        extra_headers: None,
+        orchestrator_compaction_threshold: None,
+    };
+    f.binding.fresh_task.as_mut().unwrap().model_selection = Some(selection.clone());
+    f.create();
+    let pending = f.pending();
+    let first =
+        reserve_fresh_heartbeat_launch(&f.path, &pending.occurrence_id, pending.revision, 61_000)
+            .unwrap()
+            .unwrap();
+    assert_eq!(
+        first.receipt().request.model_selection,
+        Some(selection.clone())
+    );
+    assert!(first.model_defaults().is_none());
+    let reloaded = read_fresh_heartbeat_launch(&f.path, &pending.occurrence_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(reloaded.receipt().request.model_selection, Some(selection));
 }
 
 #[test]
@@ -659,7 +731,7 @@ fn deleted_project_disables_pending_launch_and_changed_control_arguments_conflic
 }
 
 #[test]
-fn each_launch_reservation_freezes_destination_defaults_without_exposing_configuration_headers() {
+fn selected_model_ignores_project_defaults_and_keeps_configuration_headers_private() {
     let mut f = Fixture::new();
     insert_model_configuration(
         &f.path,
@@ -701,7 +773,17 @@ fn each_launch_reservation_freezes_destination_defaults_without_exposing_configu
         reserve_fresh_heartbeat_launch(&f.path, &pending.occurrence_id, pending.revision, 61_000)
             .unwrap()
             .unwrap();
-    assert_eq!(reserved.model_defaults().unwrap().model, "fixture-first");
+    assert!(reserved.model_defaults().is_none());
+    assert_eq!(
+        reserved
+            .receipt()
+            .request
+            .model_selection
+            .as_ref()
+            .unwrap()
+            .model,
+        "fixture-model"
+    );
     open_runtime_connection(&f.path).unwrap().execute("UPDATE model_configurations SET model='fixture-later' WHERE config_id='fixture-config'",[]).unwrap();
     let replay =
         reserve_fresh_heartbeat_launch(&f.path, &pending.occurrence_id, pending.revision, 99_000)
@@ -791,4 +873,186 @@ fn fresh_calendar_create_and_edit_refuse_without_durable_effects() {
     .unwrap_err();
     assert!(error.to_string().contains("interval cadence"));
     assert_eq!(snapshot(), before_edit);
+}
+
+#[test]
+fn current_scheduled_publication_binds_selected_settings_and_tier_override() {
+    for retained in [false, true] {
+        let mut f = Fixture::new();
+        let destination = f.binding.fresh_task.as_mut().unwrap();
+        destination.default_ref = None;
+        destination.service_tier = Some("standard".into());
+        let selected = destination.model_selection.as_mut().unwrap();
+        selected.api_key_env = Some("FIXTURE_API_KEY".into());
+        selected.reasoning_effort = Some("high".into());
+        selected.service_tier = Some("fast".into());
+        selected.extra_headers = Some(std::collections::BTreeMap::from([(
+            "x-fixture".into(),
+            "private".into(),
+        )]));
+        selected.orchestrator_compaction_threshold = Some(8192);
+        f.create();
+        let pending = f.pending();
+        let prepared = reserve_fresh_heartbeat_launch(
+            &f.path,
+            &pending.occurrence_id,
+            pending.revision,
+            61_000,
+        )
+        .unwrap()
+        .unwrap();
+        pin_fresh_heartbeat_workspace_mode(&f.path, &pending.occurrence_id, !retained).unwrap();
+        let mut snapshot = prepared_shared_snapshot(&f, &prepared);
+        let launch = if retained {
+            let source = crate::store::TaskLaunchSource {
+                project_cwd: f.root.clone(),
+                source_cwd: f.root.clone(),
+                repo_root: f.root.clone(),
+                common_git_dir: f.root.join(".git"),
+                repository_identity: "fixture".into(),
+                subdirectory: PathBuf::new(),
+                default_ref: "dev".into(),
+                selected_ref: "dev".into(),
+                commit: "a".repeat(40),
+                excluded_source_edits: false,
+            };
+            let launch =
+                reserve_task_launch(&f.path, prepared.receipt().request.clone(), source).unwrap();
+            update_task_launch(
+                &f.path,
+                &launch.request.request_id,
+                TaskLaunchPhase::PreparingRuntime,
+                None,
+            )
+            .unwrap();
+            snapshot.cwd = launch.workspace_path.clone();
+            Some(launch)
+        } else {
+            None
+        };
+        assert_eq!(
+            snapshot.service_tier,
+            Some(crate::model::ServiceTier::Standard)
+        );
+        let mut variants = Vec::new();
+        let mut changed = snapshot.clone();
+        changed.model = "wrong-model".into();
+        variants.push(changed);
+        let mut changed = snapshot.clone();
+        changed.backend = crate::model::BackendKind::AnthropicMessages;
+        variants.push(changed);
+        let mut changed = snapshot.clone();
+        changed.base_url = "https://other.invalid/v1".into();
+        variants.push(changed);
+        let mut changed = snapshot.clone();
+        changed.allow_insecure_http = true;
+        variants.push(changed);
+        let mut changed = snapshot.clone();
+        changed.api_key_env = Some("OTHER_KEY".into());
+        variants.push(changed);
+        let mut changed = snapshot.clone();
+        changed.extra_headers.clear();
+        variants.push(changed);
+        let mut changed = snapshot.clone();
+        changed.reasoning_effort = Some(crate::model::ReasoningEffort::Low);
+        variants.push(changed);
+        let mut changed = snapshot.clone();
+        changed.service_tier = Some(crate::model::ServiceTier::Fast);
+        variants.push(changed);
+        let mut changed = snapshot.clone();
+        changed.orchestrator_compaction_threshold = Some(8193);
+        variants.push(changed);
+        for changed in variants {
+            let mut conn = open_runtime_connection(&f.path).unwrap();
+            let tx = conn.transaction().unwrap();
+            crate::sessions::insert_new_session_in_transaction(&tx, &f.path, &changed).unwrap();
+            let result = if let Some(launch) = &launch {
+                crate::store::task_launches::publish_in_transaction(
+                    &tx,
+                    &launch.request.request_id,
+                    &changed,
+                )
+            } else {
+                publish_shared_fresh_launch_with_connection(
+                    &tx,
+                    &prepared.receipt().request.request_id,
+                    &changed,
+                )
+            };
+            assert!(result
+                .unwrap_err()
+                .to_string()
+                .contains("does not match scheduled model receipt"));
+            tx.rollback().unwrap();
+            assert!(
+                !crate::sessions::session_exists(&f.path, &prepared.receipt().session_id).unwrap()
+            );
+        }
+        let mut conn = open_runtime_connection(&f.path).unwrap();
+        let tx = conn.transaction().unwrap();
+        crate::sessions::insert_new_session_in_transaction(&tx, &f.path, &snapshot).unwrap();
+        if let Some(launch) = &launch {
+            crate::store::task_launches::publish_in_transaction(
+                &tx,
+                &launch.request.request_id,
+                &snapshot,
+            )
+            .unwrap();
+        } else {
+            publish_shared_fresh_launch_with_connection(
+                &tx,
+                &prepared.receipt().request.request_id,
+                &snapshot,
+            )
+            .unwrap();
+        }
+        tx.commit().unwrap();
+        assert_eq!(
+            fresh_heartbeat_inventory(&f.path, "project", None).unwrap()[0]
+                .first_input_id
+                .is_some(),
+            true
+        );
+    }
+}
+
+#[test]
+fn current_scheduled_publication_accepts_normalized_defaults_and_zero_threshold() {
+    for threshold in [None, Some(0)] {
+        let mut f = Fixture::new();
+        let destination = f.binding.fresh_task.as_mut().unwrap();
+        destination.default_ref = None;
+        let selected = destination.model_selection.as_mut().unwrap();
+        selected.model = " fixture-model ".into();
+        selected.base_url = " https://fixture.invalid/v1 ".into();
+        selected.orchestrator_compaction_threshold = threshold;
+        assert!(selected.extra_headers.is_none());
+        assert!(selected.api_key_env.is_none());
+        f.create();
+        let pending = f.pending();
+        let prepared = reserve_fresh_heartbeat_launch(
+            &f.path,
+            &pending.occurrence_id,
+            pending.revision,
+            61_000,
+        )
+        .unwrap()
+        .unwrap();
+        pin_fresh_heartbeat_workspace_mode(&f.path, &pending.occurrence_id, true).unwrap();
+        let snapshot = prepared_shared_snapshot(&f, &prepared);
+        assert_eq!(snapshot.model, "fixture-model");
+        assert_eq!(snapshot.base_url, "https://fixture.invalid/v1");
+        assert!(snapshot.extra_headers.is_empty());
+        assert!(snapshot.orchestrator_compaction_threshold.is_none());
+        let mut conn = open_runtime_connection(&f.path).unwrap();
+        let tx = conn.transaction().unwrap();
+        crate::sessions::insert_new_session_in_transaction(&tx, &f.path, &snapshot).unwrap();
+        publish_shared_fresh_launch_with_connection(
+            &tx,
+            &prepared.receipt().request.request_id,
+            &snapshot,
+        )
+        .unwrap();
+        tx.commit().unwrap();
+    }
 }

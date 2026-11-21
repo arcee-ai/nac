@@ -40,7 +40,7 @@ function suggestedPick(
   return { pick: null, pending: false };
 }
 
-/** A catalog model as a per-session override, on the provider's own credential. */
+/** Construct an explicit choice for this session using the provider-owned credential. */
 export function catalogOverride(catalog: ModelCatalog, pick: CatalogPick): ModelOverride {
   const provider = catalog.providers.find((entry) => entry.id === pick.backend);
   return {
@@ -49,22 +49,20 @@ export function catalogOverride(catalog: ModelCatalog, pick: CatalogPick): Model
       backend: pick.backend,
       model: pick.model,
       base_url: pick.baseUrl,
-      allow_insecure_http: false,
-      api_key_env: provider?.connection?.api_key_env ?? null,
+      allow_insecure_http:
+        provider?.connection?.base_url === pick.baseUrl
+          ? provider.connection.allow_insecure_http
+          : false,
+      api_key_env:
+        provider?.connection?.base_url === pick.baseUrl
+          ? (provider.connection.api_key_env ?? null)
+          : null,
       reasoning_effort: null,
       extra_headers: null,
-      light_model: undefined,
     },
-    light: { mode: "single", light: null },
-    selectedLight: undefined,
   };
 }
 
-/**
- * TODO(backend): the server should own this default (remember the user's last
- * model, then prefer the connected Arcee account) so a session created without
- * a model never fails with "required setting 'backend' is missing".
- */
 export function useSuggestedModel(enabled: boolean): {
   override: ModelOverride | null;
   pending: boolean;

@@ -33,9 +33,6 @@ async fn post_compact(app: Router, session_id: &str, body: Option<&str>) -> Resp
 }
 
 fn read_model_request(stream: &mut std::net::TcpStream) -> String {
-    stream
-        .set_read_timeout(Some(Duration::from_secs(5)))
-        .unwrap();
     let mut request = Vec::new();
     let mut chunk = [0_u8; 1024];
     let header_end = loop {
@@ -83,6 +80,9 @@ impl OneShotModelServer {
         let base_url = format!("http://{}", listener.local_addr().unwrap());
         let handle = std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().expect("accept model request");
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
             let request = read_model_request(&mut stream);
             write_model_response(&mut stream, status, &body);
             request
@@ -114,6 +114,9 @@ impl BlockedTwoRequestModelServer {
             let mut requests = Vec::with_capacity(2);
             for (index, body) in [first_body, second_body].into_iter().enumerate() {
                 let (mut stream, _) = listener.accept().expect("accept model request");
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
                 requests.push(read_model_request(&mut stream));
                 task_count.store(index + 1, Ordering::SeqCst);
                 if index == 0 {
@@ -302,6 +305,7 @@ impl ControlledCompactionEndpoint {
                 }
             };
             stream.set_nonblocking(false).unwrap();
+            // Configure the socket before publishing the clone that can shut it down.
             stream
                 .set_read_timeout(Some(Duration::from_secs(5)))
                 .unwrap();

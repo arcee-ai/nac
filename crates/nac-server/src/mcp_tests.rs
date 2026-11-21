@@ -33,6 +33,15 @@ fn create_session_schema_exposes_optional_project_id() {
 }
 
 #[test]
+fn direct_steer_schema_does_not_advertise_thread_targeting() {
+    let schema = serde_json::to_value(schemars::schema_for!(SteerParams)).unwrap();
+    let properties = schema["properties"].as_object().unwrap();
+    assert!(properties.contains_key("session_id"));
+    assert!(properties.contains_key("instruction"));
+    assert!(!properties.contains_key("thread_name"));
+}
+
+#[test]
 fn inbound_mcp_identity_uses_injected_product_version() {
     let info = mcp_server_info_for_version("9.8.7");
 
@@ -45,7 +54,7 @@ fn inbound_mcp_identity_uses_injected_product_version() {
 }
 
 #[test]
-fn inbound_mcp_router_preserves_orchestration_and_adds_passive_product_tools() {
+fn inbound_mcp_router_excludes_worker_tools_and_keeps_product_tools() {
     let names = NacMcpService::tool_router()
         .list_all()
         .into_iter()
@@ -59,8 +68,6 @@ fn inbound_mcp_router_preserves_orchestration_and_adds_passive_product_tools() {
             "get_messages",
             "get_product_context",
             "get_session_status",
-            "get_thread_episodes",
-            "get_thread_events",
             "list_models",
             "list_sessions",
             "resolve_product_destination",

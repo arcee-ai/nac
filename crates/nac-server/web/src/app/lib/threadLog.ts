@@ -5,7 +5,7 @@
 // same line shape here so the card tail and the side panel show one log rather
 // than two half-logs, and so the copies of one event collapse into one line.
 
-import type { AgentEvent, ThreadEventPage } from "@/app/types/api";
+import type { AgentEvent } from "@/app/types/api";
 
 export interface ThreadLogLine {
   /**
@@ -174,15 +174,6 @@ export function mergeThreadLog(persisted: ThreadLogLine[], live: ThreadLogLine[]
   // dispatch the window predates, and in both readings it comes after.
   if (first < 0) return [...persisted, ...live];
   return [...live.slice(0, first), ...persisted, ...live.slice(last + 1)];
-}
-
-/** Chronological, ID-unique event history from newest-first cursor pages. */
-export function mergeThreadEventPages(pages: ThreadEventPage[]): AgentEvent[] {
-  const byId = new Map<number, AgentEvent>();
-  for (const page of pages) {
-    for (const record of page.events) byId.set(record.id, record.event);
-  }
-  return [...byId.entries()].sort(([left], [right]) => left - right).map(([, event]) => event);
 }
 
 // ---------------------------------------------------------------------------

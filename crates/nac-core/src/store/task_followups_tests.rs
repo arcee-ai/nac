@@ -245,12 +245,10 @@ fn stale_auto_and_queue_bindings_conflict_and_task_queue_stays_unbound() {
 }
 
 #[test]
-fn remote_or_non_direct_topologies_fail_before_inbox_insertion() {
+fn remote_or_sandboxed_targets_fail_before_inbox_insertion() {
     let path = fixture();
     let request = request(TaskFollowupAction::Auto, None);
     for update in [
-        "UPDATE sessions SET behavior='orchestrator' WHERE session_id='target'",
-        "UPDATE sessions SET behavior='direct-with-orchestrator' WHERE session_id='target'",
         "UPDATE sessions SET behavior='direct',host_id='remote' WHERE session_id='target'",
         "UPDATE sessions SET host_id=NULL,sandbox_json='{}' WHERE session_id='target'",
     ] {
@@ -309,7 +307,7 @@ fn followup_scope_is_transactional_and_opaque_before_target_topology() {
     );
     let conn = open_runtime_connection(&path).unwrap();
     conn.execute(
-        "UPDATE sessions SET behavior='orchestrator' WHERE session_id='target'",
+        "UPDATE sessions SET host_id='remote' WHERE session_id='target'",
         [],
     )
     .unwrap();
@@ -329,7 +327,7 @@ fn followup_scope_is_transactional_and_opaque_before_target_topology() {
     );
     let conn = open_runtime_connection(&path).unwrap();
     conn.execute(
-        "UPDATE sessions SET behavior='direct' WHERE session_id='target'",
+        "UPDATE sessions SET host_id=NULL WHERE session_id='target'",
         [],
     )
     .unwrap();

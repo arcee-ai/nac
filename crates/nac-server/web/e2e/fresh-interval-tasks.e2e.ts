@@ -1,3 +1,4 @@
+import { chooseFixtureSessionModel } from "./model-fixture";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -274,6 +275,7 @@ test("standalone human interval schedule retries one intent and retains two inde
     expect(response.ok()).toBe(true);
     await route.abort("failed");
   });
+  await chooseFixtureSessionModel(page, form);
   await form.getByRole("button", { name: "Create task schedule", exact: true }).click();
   await expect(page.getByRole("button", { name: "Retry same request" })).toBeVisible();
   await page.unroute(pattern);
@@ -752,6 +754,7 @@ for (const lane of ["human", "model-native"] as const) {
         await form.getByRole("spinbutton", { name: "Heartbeat token allowance" }).fill("100000");
         await form.getByRole("spinbutton", { name: "Maximum scheduled tasks" }).fill("10");
         await form.getByRole("spinbutton", { name: "Retained task allowance" }).fill("2");
+        await chooseFixtureSessionModel(page, form);
         await form.getByRole("button", { name: "Create task schedule", exact: true }).click();
       } else {
         creatorSession = await createSession(request, harness, "direct", f.project);

@@ -11,7 +11,11 @@ import type {
 export interface ProductNavigationAdapter {
   currentSession(): string | null;
   open(resolution: ProductNavigationResolution): boolean;
-  openNotificationSessionTarget?(sessionId: string): void;
+}
+
+export interface NotificationNavigationAdapter {
+  currentSession(): string | null;
+  openNotificationSessionTarget(sessionId: string): void;
 }
 
 /** One runtime owns this explicit-action bridge. Nothing reads Markdown or
@@ -19,6 +23,8 @@ export interface ProductNavigationAdapter {
 export class ProductNavigation {
   private adapter: ProductNavigationAdapter | undefined;
   private version = 0;
+  private notificationAdapter: NotificationNavigationAdapter | undefined;
+  private notificationVersion = 0;
   constructor(
     private readonly resolve: (
       request: ProductNavigationRequest,
@@ -41,9 +47,22 @@ export class ProductNavigation {
     };
   }
 
+  connectNotification(adapter: NotificationNavigationAdapter): () => void {
+    this.notificationAdapter = adapter;
+    this.notificationVersion++;
+    return () => {
+      if (this.notificationAdapter === adapter) {
+        this.notificationAdapter = undefined;
+        this.notificationVersion++;
+      }
+    };
+  }
+
   close(): void {
     this.adapter = undefined;
+    this.notificationAdapter = undefined;
     this.version++;
+    this.notificationVersion++;
   }
 
   /** Reuse the normal full-chat lifecycle. It may resume already authorized
@@ -53,18 +72,18 @@ export class ProductNavigation {
     signal: AbortSignal,
     canNavigate: () => boolean,
   ): Promise<SessionTargetOutcome> {
-    const adapter = this.adapter;
-    if (this.closed() || signal.aborted || !adapter?.openNotificationSessionTarget || !this.inspect)
-      return "stale";
+    const adapter = this.notificationAdapter;
+    if (this.closed() || signal.aborted || !adapter || !this.inspect) return "stale";
     if (!canNavigate()) return "deferred";
-    const version = ++this.version;
+    this.version++;
+    const version = ++this.notificationVersion;
     const source = adapter.currentSession();
     const current = await this.inspect(target.session_id, signal);
     if (
       this.closed() ||
       signal.aborted ||
-      this.version !== version ||
-      this.adapter !== adapter ||
+      this.notificationVersion !== version ||
+      this.notificationAdapter !== adapter ||
       adapter.currentSession() !== source
     )
       return "stale";
@@ -80,6 +99,7 @@ export class ProductNavigation {
     if (this.closed()) throw new Error("Product runtime is closed.");
     const adapter = this.adapter;
     const version = ++this.version;
+    this.notificationVersion++;
     const session = adapter?.currentSession();
     const requestedSession = request.session_id ?? null;
     if (adapter && requestedSession !== session)

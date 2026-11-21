@@ -77,6 +77,54 @@ final class ExternalAuthSmoke {
         try await wait("loaded production Home composer") {
             try await self.js(Self.homeComposerScript, arguments: ["prompt": NSNull()]) as? Bool == true
         }
+        try await wait("Home model control") {
+            try await self.js(#"""
+            const chip = document.querySelector('button[aria-label="Choose a model"], button[aria-label^="Model: "]');
+            if (!chip || chip.disabled) return false;
+            chip.click();
+            return true;
+            """#) as? Bool == true
+        }
+        try await wait("Home model search") {
+            try await self.js(#"""
+            const settings = document.querySelector('[role=dialog][aria-label="Model settings"]');
+            const search = settings?.querySelector('input[aria-label="Search models"]');
+            if (search) {
+              Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(search, 'gpt-5.6-sol');
+              search.dispatchEvent(new Event('input', {bubbles:true}));
+              return true;
+            }
+            const chooser = settings?.querySelector('button[aria-label^="Choose model"]');
+            if (chooser && !chooser.disabled) chooser.click();
+            return false;
+            """#) as? Bool == true
+        }
+        try await wait("fixture OpenAI model") {
+            try await self.js(#"""
+            const row = [...document.querySelectorAll('[role=menu][aria-label="Model"] [role=group][aria-label="OpenAI"] [role=menuitemradio]')]
+              .find(button => button.firstElementChild?.textContent.trim().toLowerCase().startsWith('gpt-5.6'));
+            if (!row || row.disabled) return false;
+            row.click();
+            return true;
+            """#) as? Bool == true
+        }
+        try await wait("selected model dropdown owns Escape") {
+            try await self.js(#"""
+            const settings = document.querySelector('[role=dialog][aria-label="Model settings"]');
+            const chooser = settings?.querySelector('button[aria-label^="Choose model"]');
+            const chip = document.querySelector('button[aria-label="Choose a model"], button[aria-label^="Model: "]');
+            if (!chooser || settings?.querySelector('input[aria-label="Search models"]') || !chip?.getAttribute('aria-label')?.startsWith('Model: ')) return false;
+            chooser.focus();
+            if (document.activeElement !== chooser) throw Error('Home model chooser did not own focus');
+            chooser.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape', bubbles:true}));
+            return true;
+            """#) as? Bool == true
+        }
+        try await wait("Home model settings closed") {
+            try await self.js(#"""
+            return !document.querySelector('[role=dialog][aria-label="Model settings"]') && document.querySelector('button[aria-label="Choose a model"], button[aria-label^="Model: "]')?.getAttribute('aria-expanded') === 'false';
+            """#) as? Bool == true
+        }
         guard try await js(Self.homeComposerScript, arguments: ["prompt": "External auth fixture session"]) as? Bool == true else {
             throw PreviewError.message("Home composer did not take the first prompt")
         }

@@ -2,7 +2,6 @@ import { useEffect } from "react";
 
 import { useTaskQuestions } from "@/app/features/questions/queries";
 import { useSessionSchedules } from "@/app/features/session-chrome/queries";
-import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { useSessionTitle } from "@/app/hooks/useSessionTitle";
 import { sessionEnvLabel, tokenUsage } from "@/app/lib/format";
 import type { SessionPanel } from "@/app/lib/routes";
@@ -10,7 +9,6 @@ import { sessionPanelPolicy, type SessionPanelPolicy } from "@/app/lib/sessionBe
 import { sessionStatus, type SessionStatus } from "@/app/lib/sessionStatus";
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
 import {
-  useManagedOrchestrators,
   useProjects,
   useSessionGoal,
   useSessionPermissions,
@@ -74,7 +72,6 @@ export function useSessionFacts(
 ): SessionFacts {
   const { useRunning, useCancelArmed, liftSessionSpend } = useNativeRuntime().stores.runtimeStore;
   const { useSelectedRevision } = useNativeRuntime().stores.sessionLayoutStore;
-  const uiPolicy = useUiPolicy();
   const sessionTitle = useSessionTitle();
   const { data: sessions = [] } = useVisibleSessions();
   const { data: projectList } = useProjects();
@@ -90,10 +87,10 @@ export function useSessionFacts(
   const readOnly = lineage != null;
   const behaviorKnown = entry != null || snapshot != null;
   const behavior: SessionBehavior | null = behaviorKnown
-    ? (entry?.summary.behavior ?? snapshot?.metadata.behavior ?? "orchestrator")
+    ? (entry?.summary.behavior ?? snapshot?.metadata.behavior ?? "direct")
     : null;
   const policy = behavior == null ? null : sessionPanelPolicy(behavior, lineage?.kind);
-  const direct = behavior === "direct" || behavior === "direct-with-orchestrator";
+  const direct = behavior === "direct";
   const widePanels = policy?.widePanels ?? [];
 
   // Changes: the live tree, or the revision the panels are looking at.
@@ -105,34 +102,16 @@ export function useSessionFacts(
       ? (workspace ?? entry?.workspace_diff ?? null)
       : (changes.data ?? { total_additions: 0, total_deletions: 0 });
 
-  // Subagents: traditional children and, when orchestration is on, managed orchestrators.
   const subagents = widePanels.includes("delegated");
   const children = useTraditionalChildren(sessionId, subagents);
-  const orchestrators = useManagedOrchestrators(
-    sessionId,
-    subagents && behavior === "direct-with-orchestrator",
-  );
-  const delegated = [
-    ...(children.data ?? []),
-    ...(uiPolicy.orchestrationEnabled ? (orchestrators.data ?? []) : []),
-  ];
-  const threads = snapshot?.threads ?? [];
-  const worksetCount = snapshot?.worksets?.items.length ?? 0;
-  const agents: SessionAgents | null = subagents
-    ? delegated.length > 0
+  const delegated = children.data ?? [];
+  const agents: SessionAgents | null =
+    subagents && delegated.length > 0
       ? {
           count: delegated.length,
           running: delegated.filter((record) => RUNNING_CHILD.has(record.status)).length,
           panel: "delegated",
           noun: "agent",
-        }
-      : null
-    : widePanels.includes("worksets") && (threads.length > 0 || worksetCount > 0)
-      ? {
-          count: threads.length,
-          running: snapshot?.active_threads?.length ?? 0,
-          panel: worksetCount > 0 ? "worksets" : "insights",
-          noun: "thread",
         }
       : null;
 

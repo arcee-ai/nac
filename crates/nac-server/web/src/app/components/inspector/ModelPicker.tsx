@@ -28,6 +28,7 @@ import type {
   BackendKind,
   ModelCatalog,
   ReasoningEffort,
+  RawSessionConfig,
   SessionMetadata,
   UpdateConfigRequest,
 } from "@/app/types/api";
@@ -47,10 +48,43 @@ function captureReadback(client: QueryClient, sessionId: string) {
   );
 }
 
+function matchesConfigPatch(actual: RawSessionConfig, patch: UpdateConfigRequest): boolean {
+  for (const key of [
+    "backend",
+    "model",
+    "base_url",
+    "allow_insecure_http",
+    "api_key_env",
+    "reasoning_effort",
+    "service_tier",
+  ] as const) {
+    if (patch[key] !== undefined && (actual[key] ?? null) !== (patch[key] ?? null)) return false;
+  }
+  if (patch.extra_headers !== undefined) {
+    try {
+      const stored: unknown = JSON.parse(actual.extra_headers_json ?? "{}");
+      if (!stored || typeof stored !== "object" || Array.isArray(stored)) return false;
+      const expected = patch.extra_headers ?? {};
+      const actualHeaders = stored as Record<string, string>;
+      if (
+        Object.keys(actualHeaders).length !== Object.keys(expected).length ||
+        Object.entries(expected).some(([key, value]) => actualHeaders[key] !== value)
+      )
+        return false;
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
 function waitForModelReadback(
   client: QueryClient,
   checkpoint: ReturnType<typeof captureReadback>,
   signal: AbortSignal,
+  sessionId: string,
+  expectedVersion: number,
+  patch: UpdateConfigRequest,
 ) {
   return new Promise<boolean>((resolve) => {
     let done = false;
@@ -78,7 +112,10 @@ function waitForModelReadback(
         )
       )
         return;
-      finish(!observed.some(({ state }) => state?.status === "error"));
+      if (observed.some(({ state }) => state?.status === "error")) return finish(false);
+      const actual = client.getQueryData<RawSessionConfig>(queryKeys.sessionConfig(sessionId));
+      if (!actual || actual.config_version <= expectedVersion) return;
+      finish(matchesConfigPatch(actual, patch));
     };
     // Stream reconciliation can cancel and immediately replace the awaited readback.
     const unsubscribe = client.getQueryCache().subscribe(() => queueMicrotask(check));
@@ -170,7 +207,14 @@ export function ModelPicker({
                   expected_config_version: version,
                 });
                 const checkpoint = captureReadback(client, sessionId);
-                readback = waitForModelReadback(client, checkpoint, lease.signal);
+                readback = waitForModelReadback(
+                  client,
+                  checkpoint,
+                  lease.signal,
+                  sessionId,
+                  version,
+                  patch,
+                );
                 return { readback };
               });
               const ready = yield* Effect.promise(() => confirmation.readback);
@@ -199,9 +243,15 @@ export function ModelPicker({
   };
 
   const chooseModel = (pick: CatalogPick, clearIncompatibleSpeed: boolean) => {
-    if (!canChange || (pick.backend === currentBackend && pick.model === currentModel)) return;
+    if (
+      !canChange ||
+      (pick.backend === currentBackend &&
+        pick.model === currentModel &&
+        pick.baseUrl === current?.base_url)
+    )
+      return;
     const provider = catalog.data?.providers.find((entry) => entry.id === pick.backend);
-    const preservesRoute = pick.backend === currentBackend;
+    const preservesRoute = pick.backend === currentBackend && pick.baseUrl === current?.base_url;
     const providerReady = Boolean(
       provider?.auth_status === "ready" ||
       (managedModel.matches(pick) && managedModel.credentialReady),
@@ -219,7 +269,9 @@ export function ModelPicker({
     const compatibleEffort =
       currentEffort && supported.includes(currentEffort as ReasoningEffort)
         ? currentEffort
-        : standardEffort(supported);
+        : pick.model === currentModel
+          ? null
+          : standardEffort(supported);
     const targetSpeed = speedForCatalogRoute(catalog.data, {
       ...pick,
       baseUrl: preservesRoute ? current?.base_url : pick.baseUrl,
@@ -242,9 +294,16 @@ export function ModelPicker({
           backend: pick.backend,
           model: pick.model,
           base_url: pick.baseUrl,
+          allow_insecure_http:
+            provider?.connection?.base_url === pick.baseUrl
+              ? (provider.connection.allow_insecure_http ?? false)
+              : false,
           // Account credentials remain server-owned. A null selector asks the
           // selected backend to resolve its managed login or conventional env.
-          api_key_env: provider?.connection?.api_key_env ?? null,
+          api_key_env:
+            provider?.connection?.base_url === pick.baseUrl
+              ? (provider.connection.api_key_env ?? null)
+              : null,
           reasoning_effort: compatibleEffort,
           ...speedPatch,
           // Provider-specific headers must never leak into another backend.

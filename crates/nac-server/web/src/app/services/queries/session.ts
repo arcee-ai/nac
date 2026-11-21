@@ -6,15 +6,11 @@ import {
   stopRun,
 } from "@/app/features/direct-session/commandWorkflow";
 import { makeStopPorts } from "@/app/features/direct-session/commandAdapters";
-import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
-import { visibleSessions } from "@/app/features/ui-policy/policy";
 import { useCallback, useMemo } from "react";
 import {
   keepPreviousData,
-  useInfiniteQuery,
   useMutation,
   useQuery,
-  type InfiniteData,
   type QueryClient,
   useQueryClient,
   type UseQueryOptions,
@@ -55,7 +51,6 @@ import type {
   RawSessionConfig,
   SessionSnapshotResponse,
   SessionSummarySnapshot,
-  ThreadEventPage,
   UpdateConfigRequest,
 } from "@/app/types/api";
 
@@ -227,30 +222,6 @@ export function useLoadOlderMessages(id: string) {
     },
   });
 }
-export function useThreadEventPages(id: string | null, threadName: string | null) {
-  const { api } = useNativeRuntime();
-
-  return useInfiniteQuery<
-    ThreadEventPage,
-    Error,
-    InfiniteData<ThreadEventPage, number | null>,
-    ReturnType<typeof queryKeys.threadEvents>,
-    number | null
-  >({
-    queryKey: queryKeys.threadEvents(id ?? "", threadName ?? ""),
-    queryFn: ({ pageParam, signal }) =>
-      api.getThreadEvents(id!, threadName!, {
-        beforeId: pageParam ?? undefined,
-        limit: SNAPSHOT_THREAD_EVENT_LIMIT,
-        signal,
-      }),
-    initialPageParam: null,
-    getNextPageParam: (lastPage) => (lastPage.has_older ? lastPage.next_before_id : undefined),
-    enabled: Boolean(id && threadName),
-    staleTime: Number.POSITIVE_INFINITY,
-  });
-}
-
 export function useSessionConfig(id: string | null) {
   const { api } = useNativeRuntime();
 
@@ -486,31 +457,6 @@ export function useSubmitRun() {
   });
 }
 
-export function useSteerOrchestrator() {
-  const { api } = useNativeRuntime();
-
-  return useMutation({
-    mutationFn: ({ id, instruction }: { id: string; instruction: string }) =>
-      api.steerOrchestrator(id, instruction),
-  });
-}
-
-export function useSteerThread() {
-  const { api } = useNativeRuntime();
-
-  return useMutation({
-    mutationFn: ({
-      id,
-      threadName,
-      instruction,
-    }: {
-      id: string;
-      threadName: string;
-      instruction: string;
-    }) => api.steerThread(id, threadName, instruction),
-  });
-}
-
 export function useCancelRun() {
   const client = useQueryClient();
   return useMutation({
@@ -607,11 +553,5 @@ export function useDismissSessionFork() {
 }
 
 export function useVisibleSessions() {
-  const query = useSessions();
-  const policy = useUiPolicy();
-  const data = useMemo(
-    () => (query.data ? visibleSessions(policy, query.data) : undefined),
-    [query.data, policy],
-  );
-  return { ...query, data };
+  return useSessions();
 }

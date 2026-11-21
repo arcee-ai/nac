@@ -196,7 +196,7 @@ test.describe("passive session-name hints", () => {
     const sidebar = page.locator("[data-sidebar]");
     const candidates = await Promise.all(
       names.slice(0, 2).map(async (name, index) => {
-        const row = sidebar.getByRole("button", { name: `${name}, Agent`, exact: true });
+        const row = sidebar.getByRole("button", { name: name, exact: true });
         await expect(row).toBeVisible();
         const box = await row.boundingBox();
         expect(box).not.toBeNull();
@@ -298,7 +298,7 @@ for (const width of [1440, 768, 390])
           navigation = await showSidebar(page);
           for (const name of names.slice(0, 2)) {
             const row = navigation.getByRole("button", {
-              name: new RegExp(`^${escapeRegExp(name)},`),
+              name: new RegExp(`^${escapeRegExp(name)}(?:,|$)`),
             });
             await row.hover();
             await expect(page.getByRole("tooltip")).toContainText(name);
@@ -536,10 +536,10 @@ for (const width of [1440, 768, 390])
         await tokens(page, theme);
         for (const name of names.slice(0, 2)) {
           const tab = tabs.locator(".chat-session-tab").filter({
-            has: page.getByRole("button", { name: `${name}, Agent`, exact: true }),
+            has: page.getByRole("button", { name: name, exact: true }),
           });
           const trigger = tab.getByRole("button", {
-            name: `${name}, Agent`,
+            name: name,
             exact: true,
           });
           await trigger.scrollIntoViewIfNeeded();
@@ -558,7 +558,7 @@ for (const width of [1440, 768, 390])
             name,
           );
           const row = collection.getByRole("button", {
-            name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")},`),
+            name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:,|$)`),
           });
           if (width >= 768) await row.hover();
           await viewName(
@@ -581,7 +581,7 @@ for (const width of [1440, 768, 390])
       await tabs.getByRole("button", { name: `Close ${names[1]}`, exact: true }).click();
       await expect(tabs.locator(".chat-session-tab")).toHaveCount(2);
       await tabs.getByRole("button", { name: "All chats in this project", exact: true }).click();
-      const listRow = page.getByRole("button", { name: `${names[1]}, Agent`, exact: true }).last();
+      const listRow = page.getByRole("button", { name: names[1], exact: true }).last();
       if (width >= 768) await listRow.hover();
       await viewName(
         page,

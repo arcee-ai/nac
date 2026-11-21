@@ -1,3 +1,4 @@
+import { chooseFixtureComposerModel } from "./model-fixture";
 import { createProject, createSession, expect, test, waitForRunIdle } from "./harness";
 import type { CreateSessionRequest, ModelCatalog } from "../src/app/types/api";
 import { homeComposer, openModelList, startSessionFromHome } from "./focus-embedded-helpers";
@@ -11,7 +12,10 @@ test("offers the launch folder without creating projects until the user chooses 
 }) => {
   await page.goto(harness.baseUrl);
   await expect(page.getByRole("heading", { name: "Add a project", exact: true })).toBeVisible();
-  const launch = page.getByRole("button", { name: "Use launch folder", exact: true });
+  const launch = page.getByRole("button", {
+    name: "Use launch folder",
+    exact: true,
+  });
   await expect(launch).toBeVisible();
   const projectsUrl = `${harness.baseUrl}/projects`;
   expect((await (await request.get(projectsUrl)).json()).projects).toEqual([]);
@@ -37,11 +41,15 @@ test("a rejected Sandbox launch keeps the draft and never starts a Local session
   await page.route("**/sessions", (route) => {
     if (route.request().method() !== "POST") return route.continue();
     launches.push(route.request().postDataJSON() as CreateSessionRequest);
-    return route.fulfill({ status: 400, json: { error: "Fixture Podman launch rejected" } });
+    return route.fulfill({
+      status: 400,
+      json: { error: "Fixture Podman launch rejected" },
+    });
   });
   await page.goto(`${harness.baseUrl}/#/?project=${projectId}`);
   const draft = homeComposer(page);
   await draft.fill("Run the fixture in a sandbox");
+  await chooseFixtureComposerModel(page);
   await expect(page.getByRole("button", { name: "Start session", exact: true })).toBeEnabled();
   expect(probes).toBe(0);
   const workspace = page.getByRole("button", { name: "Additional settings" });
@@ -63,7 +71,7 @@ test("a rejected Sandbox launch keeps the draft and never starts a Local session
 });
 
 for (const mobile of [false, true]) {
-  test(`reviews inherited direct setup, session-only settings and failed saves (${mobile ? "mobile" : "desktop"})`, async ({
+  test(`reviews direct setup, session-only settings and failed saves (${mobile ? "mobile" : "desktop"})`, async ({
     harness,
     page,
     request,
@@ -72,7 +80,11 @@ for (const mobile of [false, true]) {
     const projectId = await createProject(request, harness);
     await page.goto(`${harness.baseUrl}/#/project/${projectId}`);
     await expect(page).toHaveURL(new RegExp(`#/\\?project=${projectId}$`));
+    await chooseFixtureComposerModel(page);
     const modelChip = page.getByRole("button", { name: /^Model: / });
+    await modelChip.click();
+    await page.getByRole("radio", { name: "High", exact: true }).press("Space");
+    await page.keyboard.press("Escape");
     await expect(modelChip).toHaveAccessibleName(/high reasoning/i);
     await openModelList(page);
     await page.keyboard.press("Escape");
@@ -88,20 +100,10 @@ for (const mobile of [false, true]) {
     const configUrl = `${harness.baseUrl}/sessions/${sessionId}/config`;
     const before = await (await request.get(configUrl)).json();
     expect(before).toMatchObject({ reasoning_effort: "high" });
-    const reference = await createSession(request, harness, "direct", projectId);
-    const inherited = await (
-      await request.get(`${harness.baseUrl}/sessions/${reference}/config`)
-    ).json();
-    for (const field of [
-      "backend",
-      "model",
-      "base_url",
-      "api_key_env",
-      "reasoning_effort",
-      "orchestrator_compaction_threshold",
-      "extra_headers_json",
-    ])
-      expect(before[field]).toEqual(inherited[field]);
+    expect(before).toMatchObject({
+      backend: "openai-responses",
+      model: "gpt-5.6-sol",
+    });
     const projectBefore = await (await request.get(`${harness.baseUrl}/projects`)).json();
 
     const chooseEffort = async (label: "Low" | "High") => {
@@ -163,7 +165,9 @@ for (const mobile of [false, true]) {
     });
     // OAuth itself is an external boundary. The production UI observes these deterministic account outcomes.
     await page.route(`${harness.baseUrl}/auth`, (route) =>
-      route.fulfill({ json: { providers: [auth("arcee", true), auth("codex", codexReady)] } }),
+      route.fulfill({
+        json: { providers: [auth("arcee", true), auth("codex", codexReady)] },
+      }),
     );
     await page.route(`${harness.baseUrl}/auth/arcee`, async (route) => {
       arceeLogouts += 1;
@@ -182,7 +186,9 @@ for (const mobile of [false, true]) {
     );
     await page.route(`${harness.baseUrl}/auth/codex/login/setup-login`, async (route) => {
       codexReady = true;
-      await route.fulfill({ json: { state: "complete", auth: auth("codex", true) } });
+      await route.fulfill({
+        json: { state: "complete", auth: auth("codex", true) },
+      });
     });
     await page.route(`${harness.baseUrl}/auth/codex`, async (route) => {
       codexReady = false;
@@ -215,7 +221,9 @@ for (const mobile of [false, true]) {
     });
     await page.route(`${harness.baseUrl}/providers/models`, async (route) => {
       if (route.request().postDataJSON().backend === "arcee-auth")
-        return route.fulfill({ json: { base_url: "https://api.arcee.ai/api/v1", models: [] } });
+        return route.fulfill({
+          json: { base_url: "https://api.arcee.ai/api/v1", models: [] },
+        });
       if (route.request().postDataJSON().backend !== "chatgpt-codex-responses")
         return route.continue();
       modelsRequests.push(route.request().postDataJSON());
@@ -230,7 +238,10 @@ for (const mobile of [false, true]) {
     const sessionUrl = `${harness.baseUrl}/#/session/${sessionId}/files`;
     const accountsUrl = `${harness.baseUrl}/#/settings/accounts`;
     await page.goto(accountsUrl);
-    const accounts = page.getByRole("region", { name: "Subscriptions", exact: true });
+    const accounts = page.getByRole("region", {
+      name: "Subscriptions",
+      exact: true,
+    });
     await expect(accounts.getByText("Signed in", { exact: true })).toHaveCount(1);
     const popup = page.waitForEvent("popup");
     await accounts.getByRole("button", { name: "Sign in with ChatGPT", exact: true }).click();
@@ -241,7 +252,9 @@ for (const mobile of [false, true]) {
     let models = await openModelList(page);
     await page.getByRole("textbox", { name: "Search models" }).fill("codex-setup-fixture");
     await expect(models.getByRole("menuitemradio", { name: /Codex setup fixture/ })).toBeVisible();
-    expect(modelsRequests).toContainEqual({ backend: "chatgpt-codex-responses" });
+    expect(modelsRequests).toContainEqual({
+      backend: "chatgpt-codex-responses",
+    });
 
     await page.goto(accountsUrl);
     await expect(accounts.getByText("Signed in", { exact: true })).toHaveCount(2);
@@ -259,7 +272,7 @@ for (const mobile of [false, true]) {
   });
 }
 
-test("explicitly updates a saved project default while existing children keep creation snapshots and future children inherit the accepted parent", async ({
+test("session model changes leave existing children unchanged and future children inherit the parent", async ({
   harness,
   request,
 }) => {
@@ -272,7 +285,12 @@ test("explicitly updates a saved project default while existing children keep cr
       { kind: "text", text: `${token} complete`, stream: true },
     );
     const response = await request.post(`${harness.baseUrl}/sessions/${parentId}/children`, {
-      data: { profile: "general", description: token, prompt: token, background: false },
+      data: {
+        profile: "general",
+        description: token,
+        prompt: token,
+        background: false,
+      },
     });
     expect(response.ok()).toBe(true);
     const id = (await response.json()).child_session_id;
@@ -283,60 +301,21 @@ test("explicitly updates a saved project default while existing children keep cr
   const existingBefore = await (
     await request.get(`${harness.baseUrl}/sessions/${existingChild}/config`)
   ).json();
-  const presetResponse = await request.post(`${harness.baseUrl}/model-configs`, {
-    data: {
-      name: "Explicit future default",
-      backend: "openai-responses",
-      model: "gpt-5.6-terra",
-      base_url: harness.provider.baseUrl,
-      api_key: "nac-e2e-dummy-only",
-      reasoning_effort: "low",
-      extra_headers: { "X-Setup": "future" },
-      orchestrator_compaction_threshold: 555,
-      light_model: null,
-    },
+  const update = await request.patch(`${harness.baseUrl}/sessions/${parentId}/config`, {
+    data: { model: "gpt-5.6-terra", reasoning_effort: "low" },
   });
-  expect(presetResponse.ok()).toBe(true);
-  const preset = await presetResponse.json();
-  const parentUpdate = await request.patch(`${harness.baseUrl}/sessions/${parentId}/config`, {
-    data: {
-      model: preset.model,
-      reasoning_effort: preset.reasoning_effort,
-      orchestrator_compaction_threshold: preset.orchestrator_compaction_threshold,
-      api_key_env: preset.api_key_env,
-      extra_headers: { "X-Setup": "future" },
-    },
-  });
-  expect(parentUpdate.ok()).toBe(true);
-  const defaultUpdate = await request.patch(`${harness.baseUrl}/projects/${projectId}`, {
-    data: { default_model_config_id: preset.config_id },
-  });
-  expect(defaultUpdate.ok()).toBe(true);
+  expect(update.ok()).toBe(true);
   const current = await (
     await request.get(`${harness.baseUrl}/sessions/${parentId}/config`)
   ).json();
   expect(current).toMatchObject({
     model: "gpt-5.6-terra",
     reasoning_effort: "low",
-    orchestrator_compaction_threshold: 555,
-    api_key_env: preset.api_key_env,
-    extra_headers_json: '{"X-Setup":"future"}',
   });
-  const projects = await (await request.get(`${harness.baseUrl}/projects`)).json();
-  expect(
-    projects.projects.find((project: { project_id: string }) => project.project_id === projectId)
-      .default_model_config_id,
-  ).toBe(preset.config_id);
-  const repeatDefault = await request.patch(`${harness.baseUrl}/projects/${projectId}`, {
-    data: { default_model_config_id: preset.config_id },
-  });
-  expect(repeatDefault.ok()).toBe(true);
-  expect(
-    await (await request.get(`${harness.baseUrl}/sessions/${parentId}/config`)).json(),
-  ).toEqual(current);
   expect(
     await (await request.get(`${harness.baseUrl}/sessions/${existingChild}/config`)).json(),
   ).toEqual(existingBefore);
+
   const futureChild = await child("SETUP_CHILD_AFTER");
   expect(
     await (await request.get(`${harness.baseUrl}/sessions/${futureChild}/config`)).json(),
@@ -345,7 +324,6 @@ test("explicitly updates a saved project default while existing children keep cr
     backend: current.backend,
     reasoning_effort: current.reasoning_effort,
     api_key_env: current.api_key_env,
-    orchestrator_compaction_threshold: 555,
     extra_headers_json: current.extra_headers_json,
   });
   const forbidden = await request.patch(`${harness.baseUrl}/sessions/${existingChild}/config`, {

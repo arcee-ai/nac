@@ -60,13 +60,9 @@ async fn projects(manager: &SessionManager) -> Result<Vec<SavedTaskProject>> {
     store::spawn_blocking_store_caller(move || {
         nac_core::projects::list_projects(&path)?.into_iter().map(|project| {
             let bound = store::load_project_git_source(&path, &project.project_id)?;
-            let defaults = nac_core::projects::load_project_launch_context(&path, &project.project_id)?.default_model_config;
             let eligible = project.ssh_host.is_none();
             Ok(SavedTaskProject { project_id:project.project_id, name:project.name, cwd:project.cwd,
-                ssh_host:project.ssh_host, default_model_config_id:project.default_model_config_id,
-                default_model:defaults.as_ref().map(|d|d.model.clone()),
-                default_reasoning_effort:defaults.as_ref().and_then(|d|d.reasoning_effort.clone()),
-                default_service_tier:defaults.and_then(|d|d.service_tier),
+                ssh_host:project.ssh_host,
                 default_ref:bound.map(|source| source.default_ref), eligible,
                 eligibility_detail:if eligible { "Local launch eligible; source and runtime readiness are validated at admission" } else { "SSH launch is unavailable; no Local fallback" }.into() })
         }).collect()
@@ -119,7 +115,7 @@ async fn receipt(manager: &SessionManager, caller_id: &str, id: &str) -> Result<
         let mut launch = store::load_native_task_launch(&path, &id)?
             .filter(|r| r.caller_session_id == caller_id)
             .ok_or_else(|| anyhow!("native launch not found"))?;
-        let retained_launch = if launch.retained {
+        let mut retained_launch = if launch.retained {
             store::load_task_launch(&path, &id)?
         } else {
             None
@@ -141,6 +137,10 @@ async fn receipt(manager: &SessionManager, caller_id: &str, id: &str) -> Result<
             };
             launch.first_input_id = retained.first_input_id;
             launch.updated_at.clone_from(&retained.updated_at);
+        }
+        // Model settings are launch authority, not model-visible task output.
+        if let Some(retained) = &mut retained_launch {
+            retained.request.model_selection = None;
         }
         let task = match store::load_direct_task(&path, &launch.session_id)? {
             store::TaskLookup::Found(task)
@@ -247,9 +247,11 @@ async fn prepare_retained(
     TaskLaunchApplication::new(manager)
         .start_admitted(
             store::TaskLaunchRequest {
+                model_source: None,
                 request_id: launch.request.request_id,
                 project_id: launch.project_id,
                 invoking_session_id: Some(launch.caller_session_id),
+                model_selection: launch.model_selection.clone(),
                 git_ref: launch.request.git_ref.clone(),
                 default_ref: launch.request.default_ref.clone(),
                 title: launch.request.title.clone(),

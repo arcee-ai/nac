@@ -107,8 +107,8 @@ function Contents({ className }: { className?: string }) {
 }
 
 /**
- * The Focus design system, reachable at `#/design` when orchestration is
- * enabled: tokens, the shared atoms and the product atoms, live, in whichever
+ * The Focus design system, reachable at `#/design`: tokens, the shared atoms
+ * and the product atoms, live, in whichever
  * theme the switch picks.
  */
 export default function DesignPreviewPage() {

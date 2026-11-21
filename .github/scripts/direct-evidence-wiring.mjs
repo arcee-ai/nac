@@ -24,13 +24,13 @@ export function reverseDirectEvidence(workflow, name) {
       run: 'make test-nac-guide\nmake test-source-size test-source-workflow test-source-binary\nmake test-durability test-managed-load test-managed-image-contract\n',
     });
     const clearIndex = removeExact(steps, {
-      name: 'Clear cached load evidence', id: 'evidence_cleanup', run: 'rm -rf target/managed-load target/direct-load',
+      name: 'Clear cached load evidence', id: 'evidence_cleanup', run: 'rm -rf target/direct-load',
     });
     assert.ok(clearIndex > steps.findIndex(step => step.uses?.startsWith('Swatinem/rust-cache@')));
     assert.equal(clearIndex, steps.indexOf(lane));
     const removed = removeExact(steps, {
-      name: 'Retain managed and direct load evidence', if: "always() && steps.evidence_cleanup.outcome == 'success'", uses: upload,
-      with: { name: 'load-evidence-${{ needs.prepare.outputs.sha }}-${{ github.run_id }}-${{ github.run_attempt }}', path: 'target/managed-load\ntarget/direct-load\n', 'retention-days': 14, 'if-no-files-found': 'warn' },
+      name: 'Retain direct load evidence', if: "always() && steps.evidence_cleanup.outcome == 'success'", uses: upload,
+      with: { name: 'load-evidence-${{ needs.prepare.outputs.sha }}-${{ github.run_id }}-${{ github.run_attempt }}', path: 'target/direct-load\n', 'retention-days': 14, 'if-no-files-found': 'warn' },
     });
     assert.equal(removed, steps.indexOf(lane) + 1);
     return;

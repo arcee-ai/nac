@@ -36,12 +36,7 @@ Both Arcee backends accept only `https` origins on `arcee.ai` or its subdomains 
 
 A managed login is selected explicitly in the dashboard's model picker (or with a per-session `backend = "arcee-auth"` override): the Trinity model ids collide with `arcee-api` in the catalog, and a collision resolves to the non-managed provider. The managed session's base URL defaults to `https://api.arcee.ai/api/v1`.
 
-An Arcee API-key session resolves from the model id alone when `ARCEE_API_KEY` is exported:
-
-```toml
-[model]
-model = "trinity-large-thinking"
-```
+For an Arcee API-key session, select a model when creating the session and provide a provider connection or export `ARCEE_API_KEY`.
 
 To use a different key variable, set a per-session `api_key_env = "MY_ARCEE_KEY"` override.
 

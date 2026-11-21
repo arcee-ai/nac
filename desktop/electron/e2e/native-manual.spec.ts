@@ -234,22 +234,15 @@ test("manual native acceptance holds a private relocated LaunchServices candidat
     preparation.launch();
     const receipt = await prepared;
     const api = apiAt(receipt.endpoint);
-    const model = await api("/model-configs", {
-      name: "Native fixture scripted model",
-      backend: "openai-responses",
-      model: "gpt-5.6-sol",
-      base_url: provider.baseUrl,
+    await api("/provider-connections", {
+      backend: "openai-responses", base_url: provider.baseUrl,
       api_key: "nac-native-manual-dummy-only",
-      reasoning_effort: "high",
-      extra_headers: {},
-      orchestrator_compaction_threshold: 0,
     });
-    const project = await api("/projects", {
-      name: "Native acceptance workspace",
-      cwd: workspace,
-      default_model_config_id: model.config_id,
+    const project = await api("/projects", { name: "Native acceptance workspace", cwd: workspace });
+    const session = await api("/sessions", {
+      behavior: "direct", project_id: project.project_id, backend: "openai-responses",
+      model: "gpt-5.6-sol", base_url: provider.baseUrl, api_key_env: "NAC_E2E_API_KEY",
     });
-    const session = await api("/sessions", { behavior: "direct", project_id: project.project_id });
     const credential = await api("/credentials", { value: "native-manual-public-client" });
     await api("/mcp_library/servers", {
       name: "native-browser-fixture",

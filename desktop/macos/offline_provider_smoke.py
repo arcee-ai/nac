@@ -30,7 +30,7 @@ def require_offline(record):
     need(set(result) == {'scope', 'offline_supported_local_provider', 'whole_machine_offline',
         'physical_input_qualified', 'real_vendor_qualified', 'setup_saved_read_back', 'streamed_response',
         'persisted_transcript', 'no_managed_login', 'external_open_attempts', 'store_bound_through_reload', 'binding', 'network'})
-    need(result['scope'] == 'ordinary-production-engine-local-API-key; DOM-driven; HTTP(S)-outage-only')
+    need(result['scope'] == 'ordinary-production-engine-local-API-key; API-seeded endpoint, UI-selected model; HTTP(S)-outage-only')
     for key in ('offline_supported_local_provider', 'setup_saved_read_back', 'streamed_response',
                 'persisted_transcript', 'no_managed_login', 'store_bound_through_reload'):
         need(result.get(key) is True)
@@ -100,7 +100,7 @@ def main(arguments=None):
     output.mkdir(parents=True, exist_ok=False)
     evidence = output / 'offline-provider.json'
     (output / 'metadata.json').write_text(json.dumps({'session': console, 'build_receipt': receipt,
-        'scope': 'ordinary-engine/local-provider; DOM-driven; declared HTTP(S) outage only',
+        'scope': 'ordinary-engine/local-provider; API-seeded endpoint, UI-selected model; declared HTTP(S) outage only',
         'whole_machine_offline': False, 'physical_input_qualified': False,
         'real_vendor_qualified': False}, indent=2) + '\n')
     with relocated_app(app, evidence, 'nac-offline-provider-app-') as (relocated, custody):

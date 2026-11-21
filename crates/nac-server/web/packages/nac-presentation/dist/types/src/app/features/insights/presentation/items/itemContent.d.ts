@@ -16,7 +16,6 @@ export interface ItemContext {
     sessionId: string;
     resolveSession: SessionResolver;
     openSubagent: (rowKey: DelegatedRowKey) => void;
-    openWorkset: (worksetId: string) => void;
     /** The session's roots an absolute tool path may start with, as chat links strip them. */
     workspaceRoots: (string | null | undefined)[];
     /** Session-directory prefix relative to the repository root; null when unknown. */

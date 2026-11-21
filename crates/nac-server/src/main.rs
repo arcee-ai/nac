@@ -167,7 +167,7 @@ struct ServerCli {
     /// Executable to launch for managed worker dispatch.
     ///
     /// Defaults to the running executable.
-    #[arg(long)]
+    #[arg(long, hide = true)]
     worker_executable: Option<PathBuf>,
 
     /// Explicit versioned Managed NAC host configuration document.
@@ -624,7 +624,9 @@ async fn run() -> Result<()> {
             Ok(())
         }
         Some(RootCommand::Guide(guide)) => read_guide(guide),
-        Some(RootCommand::ManagedWorker(worker)) => run_managed_worker(worker).await,
+        Some(RootCommand::ManagedWorker(_)) => {
+            anyhow::bail!("the retired worker entrypoint is unavailable")
+        }
         Some(RootCommand::GitHubCredential(helper)) => run_github_credential(helper).await,
         Some(RootCommand::CodexAuth(auth)) => run_codex_auth_cli(auth, &invocation_name).await,
         Some(RootCommand::ArceeAuth(auth)) => run_arcee_auth_cli(auth, &invocation_name).await,
@@ -720,6 +722,10 @@ async fn run_server_inner(
     invocation_name: &str,
     #[cfg(unix)] desktop: Option<&nac_server::desktop_launch::DesktopLaunch>,
 ) -> Result<()> {
+    anyhow::ensure!(
+        cli.worker_executable.is_none(),
+        "the retired --worker-executable option is unavailable"
+    );
     let bind = cli.bind_addr();
     let bind_policy = cli.bind_policy();
     #[cfg(all(feature = "native-auth-fixture", unix))]
@@ -903,6 +909,10 @@ fn should_open_dashboard(force_open: bool, no_open: bool) -> bool {
     force_open || nac_core::browser::should_open_browser()
 }
 
+#[expect(
+    dead_code,
+    reason = "worker execution is unreachable until ALL-614 removes it"
+)]
 async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
     // On Linux, harden before connecting to the authenticated parent endpoint.
     // Other Unix hosts adopt and mark the inherited endpoint close-on-exec.
@@ -1267,7 +1277,7 @@ mod tests {
     }
 
     #[test]
-    fn managed_worker_ignores_invalid_ambient_model_config() {
+    fn retired_ambient_model_config_is_ignored() {
         let _guard = CONFIG_ENV_LOCK.lock().unwrap();
         let original_nac_home = std::env::var_os("NAC_HOME");
         let root = std::env::temp_dir().join(format!(
@@ -1301,7 +1311,11 @@ thread_timeout_secs = 7200
             Some(std::path::Path::new("worker-store.db"))
         );
         assert_eq!(config.worker.thread_timeout_secs, Some(7_200));
-        assert!(runtime::NacConfig::load_from_cwd(&root).is_err());
+        let direct = runtime::NacConfig::load_from_cwd(&root).unwrap();
+        assert_eq!(
+            direct.storage.store_path.as_deref(),
+            Some(std::path::Path::new("worker-store.db"))
+        );
 
         unsafe {
             match original_nac_home {

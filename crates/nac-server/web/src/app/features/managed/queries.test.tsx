@@ -47,7 +47,11 @@ it("does not reuse Codex availability after the catalog version changes", async 
         auth: "codex_oauth",
         auth_status: "ready",
         auth_hint: null,
-        connection: { base_url: "https://chatgpt.com/backend-api", api_key_env: null },
+        connection: {
+          allow_insecure_http: false,
+          base_url: "https://chatgpt.com/backend-api",
+          api_key_env: null,
+        },
         default_base_url: null,
         managed_base_url: "https://chatgpt.com/backend-api",
         default_limits: { context_window: 128000, max_tokens: 16384, supported_efforts: [] },
@@ -118,6 +122,7 @@ it("loads all mounted-key models without sending a browser credential", async ()
         auth: "api_key_env",
         auth_status: "ready",
         connection: {
+          allow_insecure_http: false,
           base_url: "https://api.arcee.ai/api/v1",
           api_key_env: null,
         },
@@ -149,6 +154,7 @@ it("loads all mounted-key models without sending a browser credential", async ()
       {
         backend: "arcee-api",
         base_url: "https://api.arcee.ai/api/v1",
+        allow_insecure_http: false,
       },
       expect.any(AbortSignal),
     );
@@ -177,6 +183,7 @@ it("leaves the overlay absent when live entitlement discovery fails", async () =
         auth: "api_key_env",
         auth_status: "ready",
         connection: {
+          allow_insecure_http: false,
           base_url: status.model.endpoint,
           api_key_env: null,
         },
@@ -198,9 +205,11 @@ it("leaves the overlay absent when live entitlement discovery fails", async () =
   try {
     await waitFor(() =>
       expect(
-        client.getQueryState(
-          managedQueryKeys.providerModels(status.model.backend, status.model.endpoint),
-        )?.status,
+        client.getQueryState([
+          ...managedQueryKeys.providerModels(status.model.backend, status.model.endpoint),
+          null,
+          false,
+        ])?.status,
       ).toBe("error"),
     );
     expect(hook.result.current.has("arcee-api")).toBe(false);
@@ -229,6 +238,7 @@ it("keeps a successful empty entitlement index distinct from unavailable discove
         auth: "api_key_env",
         auth_status: "ready",
         connection: {
+          allow_insecure_http: false,
           base_url: status.model.endpoint,
           api_key_env: null,
         },
@@ -276,7 +286,11 @@ it("aborts obsolete entitlement reads and refreshes the active account even when
         id: "arcee-api",
         auth: "api_key_env",
         auth_status: "ready",
-        connection: { base_url: status.model.endpoint, api_key_env: null },
+        connection: {
+          allow_insecure_http: false,
+          base_url: status.model.endpoint,
+          api_key_env: null,
+        },
         models: [],
         auth_hint: null,
         default_base_url: status.model.endpoint,

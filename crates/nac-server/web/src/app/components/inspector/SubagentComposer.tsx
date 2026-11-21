@@ -10,17 +10,14 @@ import { Button, ButtonSize, ButtonVariant } from "@/app/atoms";
 import { withPromptRecovery } from "@/app/features/direct-session/promptRecovery";
 import { PromptRecoveryMessage } from "./PromptRecoveryMessage";
 import {
-  useCancelManagedOrchestrator,
   useCancelTraditionalChild,
-  useManagedOrchestrators,
-  useStartManagedOrchestrator,
   useStartTraditionalChild,
   useTraditionalChildren,
 } from "@/app/services/queries";
-import type { SessionBehavior, SessionLineage, TraditionalChildStatus } from "@/app/types/api";
+import type { SessionBehavior, TraditionalChildStatus } from "@/app/types/api";
 
 export interface SubagentTarget {
-  mode: "child" | "orchestrator";
+  mode: "child";
   id: string;
   description: string;
   status: TraditionalChildStatus;
@@ -52,9 +49,7 @@ export function SubagentComposer({
   const toast = useToast();
   const isMobile = useIsMobile();
   const startChild = useStartTraditionalChild();
-  const startOrchestrator = useStartManagedOrchestrator();
   const cancelChild = useCancelTraditionalChild();
-  const cancelOrchestrator = useCancelManagedOrchestrator();
   // Stored by durable target so status remounts and transcript trips keep the draft.
   const drafts = useNativeRuntime().stores.promptDraftStore;
   const draft = drafts.useDraft(target.id);
@@ -83,17 +78,6 @@ export function SubagentComposer({
         target.id,
         submitted,
         async () => {
-          if (target.mode === "orchestrator") {
-            return startOrchestrator.mutateAsync({
-              sessionId: parentSessionId,
-              payload: {
-                description: target.description,
-                prompt,
-                background,
-                orchestrator_session_id: target.id,
-              },
-            });
-          }
           return startChild.mutateAsync({
             sessionId: parentSessionId,
             payload: {
@@ -126,17 +110,7 @@ export function SubagentComposer({
     const finish = drafts.claimCancellation(target.id);
     if (!finish) return;
     try {
-      if (target.mode === "child") {
-        await cancelChild.mutateAsync({
-          sessionId: parentSessionId,
-          childId: target.id,
-        });
-      } else {
-        await cancelOrchestrator.mutateAsync({
-          sessionId: parentSessionId,
-          orchestratorId: target.id,
-        });
-      }
+      await cancelChild.mutateAsync({ sessionId: parentSessionId, childId: target.id });
     } catch (error) {
       toast.error(`Unable to stop the subagent: ${errorMessage(toRunError(error))}`);
     } finally {
@@ -163,7 +137,7 @@ export function SubagentComposer({
               sessionId={permissionSessionId}
               behavior={permissionBehavior}
               autoApprovalAvailable={false}
-              retryParentSessionId={target.mode === "child" ? parentSessionId : undefined}
+              retryParentSessionId={parentSessionId}
               poll={running}
               requesterLabel={requesterLabel}
               compact={isMobile}
@@ -218,24 +192,18 @@ export function SubagentComposer({
 export function SubagentSessionComposer({
   parentSessionId,
   sessionId,
-  kind,
   description,
   behavior,
 }: {
   parentSessionId: string;
   sessionId: string;
-  kind: SessionLineage["kind"];
   description: string;
   behavior: SessionBehavior | null;
 }) {
-  const orchestrator = kind === "managed-orchestrator";
-  const children = useTraditionalChildren(parentSessionId, !orchestrator);
-  const orchestrators = useManagedOrchestrators(parentSessionId, orchestrator);
-  const record = orchestrator
-    ? orchestrators.data?.find((item) => item.orchestrator_session_id === sessionId)
-    : children.data?.find((item) => item.child_session_id === sessionId);
+  const children = useTraditionalChildren(parentSessionId, true);
+  const record = children.data?.find((item) => item.child_session_id === sessionId);
   const target: SubagentTarget = {
-    mode: orchestrator ? "orchestrator" : "child",
+    mode: "child",
     id: sessionId,
     description: record?.description || description || "Subagent",
     status: record?.status ?? "idle",
@@ -247,8 +215,8 @@ export function SubagentSessionComposer({
       parentSessionId={parentSessionId}
       target={target}
       permissionSessionId={sessionId}
-      permissionBehavior={orchestrator ? "orchestrator" : (behavior ?? "direct")}
-      requesterLabel={orchestrator ? undefined : `child agent “${target.description}”`}
+      permissionBehavior={behavior ?? "direct"}
+      requesterLabel={`child agent “${target.description}”`}
       floating
     />
   );

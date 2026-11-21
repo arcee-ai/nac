@@ -2,7 +2,7 @@
 import AppKit
 import WebKit
 
-/// DOM-driven production setup and Responses requests; never a second client.
+/// API-seeded loopback route, UI-selected session, and production Responses requests.
 @MainActor
 final class OfflineProviderSmoke {
     private unowned let app: PreviewApp
@@ -43,13 +43,6 @@ final class OfflineProviderSmoke {
       e.getBoundingClientRect().width>0 && e.getBoundingClientRect().height>0;
     """#
 
-    private func click(_ title: String) async throws {
-        try await wait { try await self.js(Self.visible + #"""
-        const buttons=[...document.querySelectorAll('button')].filter(b=>visible(b)&&!b.disabled&&b.textContent.trim()===title);
-        if(buttons.length!==1)return false; buttons[0].click(); return true;
-        """#, ["title": title]) as? Bool == true }
-    }
-
     private func input(_ label: String, _ value: String) async throws {
         guard try await js(Self.visible + #"""
         const fields=[...document.querySelectorAll('input')].filter(e=>visible(e)&&e.getAttribute('aria-label')===label);
@@ -59,52 +52,57 @@ final class OfflineProviderSmoke {
         """#, ["label": label, "value": value]) as? Bool == true else { throw OfflineProviderPolicy.Refusal.invalid }
     }
 
-    private func select(_ label: String, _ title: String) async throws {
-        guard try await js(Self.visible + #"""
-        const rows=[...document.querySelectorAll('[role=group][aria-labelledby]')].filter(e=>{
-          const l=document.getElementById(e.getAttribute('aria-labelledby'));
-          return visible(e)&&l&&l.textContent.trim().replace(/\*$/,'')===label;
-        });
-        if(rows.length!==1)return false;
-        const buttons=[...rows[0].querySelectorAll('button')].filter(visible);
-        if(buttons.length!==1)return false;buttons[0].click();return true;
-        """#, ["label": label]) as? Bool == true else { throw OfflineProviderPolicy.Refusal.invalid }
-        try await click(title)
-    }
-
     private func setup() async throws {
+        // The current product exposes provider keys in Settings but does not
+        // offer custom endpoint entry. Seed the isolated loopback connection
+        // through its production API, then select its model in the real UI.
         guard try await js(#"""
-        const r=await fetch('/model-configs');if(!r.ok)return false;
-        return (await r.json()).configurations.length===0;
-        """#) as? Bool == true else { throw OfflineProviderPolicy.Refusal.invalid }
-        // The project was seeded without a model/key. Home's composer opens
-        // the actual model setup form from its model chip, for this session.
+        const r=await fetch('/provider-connections',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({backend:'openai-responses',base_url:origin,allow_insecure_http:true,api_key:key})});
+        if(r.status!==201)return false;const c=await r.json();
+        return !JSON.stringify(c).includes(key);
+        """#, ["origin": fence.origin.absoluteString, "key": OfflineProviderPolicy.key]) as? Bool == true else { throw OfflineProviderPolicy.Refusal.invalid }
+        // Refresh the production catalog after API seeding. Bind the new
+        // document to the same owned view and engine before issuing UI input.
+        let previous = document!
+        let view = try owned()
+        view.reload()
+        let end = ProcessInfo.processInfo.systemUptime + 25
+        while ProcessInfo.processInfo.systemUptime < end {
+            if let next = app.commands?.currentDocument(in: view), next != previous {
+                guard next.launch == previous.launch, next.view == previous.view else { throw OfflineProviderPolicy.Refusal.invalid }
+                document = next; break
+            }
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        guard document != previous else { throw OfflineProviderPolicy.Refusal.missingObservation }
         try await wait { try await self.js(Self.visible + #"""
         const f=document.getElementById('home-composer');
-        return !!f&&!f.disabled&&[...f.labels].some(l=>l.textContent.trim()==='What should we work on?')&&
-          [...document.querySelectorAll('button')].some(b=>visible(b)&&!b.disabled&&b.textContent.trim()==='Project default model');
+        const chip=document.querySelector('button[aria-label="Choose a model"], button[aria-label^="Model: "]');
+        return !!f&&!f.disabled&&[...f.labels].some(l=>l.textContent.trim()==='What should we work on?')&&visible(chip)&&!chip.disabled;
         """#) as? Bool == true }
-        try await click("Project default model")
-        try await click("Advanced presets and provider setup")
-        try await click("Browse Models")
-        try await click("Create New")
-        try await select("Model Provider", "Custom")
-        try await select("Protocol", "OpenAI Responses")
-        try await input("Name", OfflineProviderPolicy.setupName)
-        try await input("API Key", OfflineProviderPolicy.key)
-        try await input("Model", "gpt-5.6-sol")
-        try await input("Base URL", fence.origin.absoluteString)
-        // Verify the explicit choice; the fresh Custom form defaults to Arcee.
-        guard try await js(Self.visible + #"""
-        const rows=[...document.querySelectorAll('[role=group][aria-labelledby]')];
-        return rows.some(e=>visible(e)&&document.getElementById(e.getAttribute('aria-labelledby'))?.textContent.trim().replace(/\*$/,'')==='Protocol'&&e.textContent.includes('Responses'));
-        """#) as? Bool == true else { throw OfflineProviderPolicy.Refusal.invalid }
-        try await click("Use this model")
-        // Starting always sends the typed prompt as the session's first run,
-        // so the local response prompt is typed here and started by run().
+        _ = try await js(#"document.querySelector('button[aria-label="Choose a model"], button[aria-label^="Model: "]').click();return true;"#)
+        try await wait { try await self.js("return !!document.querySelector('[role=dialog][aria-label=\"Model settings\"] button[aria-label^=\"Choose model\"]');") as? Bool == true }
+        _ = try await js("document.querySelector('[role=dialog][aria-label=\"Model settings\"] button[aria-label^=\"Choose model\"]').click();return true;")
+        try await wait { try await self.js("return !!document.querySelector('input[aria-label=\"Search models\"]');") as? Bool == true }
+        try await input("Search models", "gpt-5.6-sol")
+        try await wait { try await self.js(Self.visible + #"""
+        const rows=[...document.querySelectorAll('[role=group][aria-label="OpenAI"] [role=menuitemradio]')]
+          .filter(b=>visible(b)&&!b.disabled&&b.textContent.toLowerCase().includes('gpt-5.6'));
+        if(rows.length!==1)return false;rows[0].click();return true;
+        """#) as? Bool == true }
+        try await wait { try await self.js(#"""
+        const settings=document.querySelector('[role=dialog][aria-label="Model settings"]');
+        const chooser=settings?.querySelector('button[aria-label^="Choose model"]');
+        const chip=document.querySelector('button[aria-label^="Model: "]');
+        if(!chooser||settings?.querySelector('input[aria-label="Search models"]')||!chip)return false;
+        chooser.focus();if(document.activeElement!==chooser)throw new Error('chooser focus');
+        chooser.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));return true;
+        """#) as? Bool == true }
+        try await wait { try await self.js(#"return !document.querySelector('[role=dialog][aria-label="Model settings"]') && document.querySelector('button[aria-label^="Model: "]')?.getAttribute('aria-expanded') === 'false';"#) as? Bool == true }
         guard try await js(#"""
         const f=document.getElementById('home-composer');
-        if(!f||document.querySelector('[role=dialog]'))return false;
+        if(!f)return false;
         Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(f,'OFFLINE_LOCAL_RESPONSE');
         f.dispatchEvent(new Event('input',{bubbles:true}));return f.value==='OFFLINE_LOCAL_RESPONSE';
         """#) as? Bool == true else { throw OfflineProviderPolicy.Refusal.invalid }
@@ -112,13 +110,12 @@ final class OfflineProviderSmoke {
 
     private func saved() async throws -> [String: Any] {
         guard let config = try await js(#"""
-        const r=await fetch('/model-configs');if(!r.ok)throw new Error('readback');
-        const rows=(await r.json()).configurations.filter(x=>x.name===name);
-        if(rows.length!==1)throw new Error('readback');
-        const c=rows[0];
-        if(c.backend!=='openai-responses'||c.model!=='gpt-5.6-sol'||c.base_url!==origin||!c.api_key_env||'api_key' in c)throw new Error('readback');
-        return {config_id:c.config_id,api_key_env:c.api_key_env,backend:c.backend,model:c.model,base_url:c.base_url};
-        """#, ["name": OfflineProviderPolicy.setupName, "origin": fence.origin.absoluteString]) as? [String: Any] else { throw OfflineProviderPolicy.Refusal.invalid }
+        const id=location.hash.split('/')[2];
+        const r=await fetch('/sessions/'+encodeURIComponent(id)+'/config');if(!r.ok)throw new Error('readback');
+        const c=await r.json();
+        if(c.backend!=='openai-responses'||c.model!=='gpt-5.6-sol'||c.base_url!==origin||c.allow_insecure_http!==true||!c.api_key_env||'api_key' in c)throw new Error('readback');
+        return {api_key_env:c.api_key_env,backend:c.backend,model:c.model,base_url:c.base_url};
+        """#, ["origin": fence.origin.absoluteString]) as? [String: Any] else { throw OfflineProviderPolicy.Refusal.invalid }
         return config
     }
 
@@ -130,7 +127,7 @@ final class OfflineProviderSmoke {
             const current=await (await fetch('/sessions/'+location.hash.split('/')[2])).json();
             if(current.metadata.behavior!=='direct')throw new Error('control');
             const created=await post('/sessions',{project_id:current.metadata.project_id,behavior:'direct',backend:config.backend,model:config.model,
-              base_url:endpoint,allow_insecure_http:true,api_key_env:config.api_key_env,light_model:null,orchestrator_compaction_threshold:0});
+              base_url:endpoint,allow_insecure_http:true,api_key_env:config.api_key_env,orchestrator_compaction_threshold:0});
             const id=created.metadata.session_id;
             const run=await post('/sessions/'+id+'/runs',{prompt:'OFFLINE_TRANSPORT_CONTROL'});
             return {session:id,run:run.run_id};
@@ -162,7 +159,7 @@ final class OfflineProviderSmoke {
         try fence.requireStore(view)
         try await setup()
         let initialDocument = binding.document
-        // Start session saves the configured setup, creates the session and
+        // Start session creates the selected direct session and
         // delivers its first prompt, so the streamed local response is
         // observed here and the outage controls follow once it has settled.
         let count = fence.policy.responseAccepted
@@ -202,7 +199,7 @@ final class OfflineProviderSmoke {
         for name in ["auth.json", "arcee_auth.json"] {
             guard !FileManager.default.fileExists(atPath: profile.root.appendingPathComponent("nac-home/" + name).path) else { throw OfflineProviderPolicy.Refusal.invalid }
         }
-        return ["scope": "ordinary-production-engine-local-API-key; DOM-driven; HTTP(S)-outage-only",
+        return ["scope": "ordinary-production-engine-local-API-key; API-seeded endpoint, UI-selected model; HTTP(S)-outage-only",
                 "offline_supported_local_provider": true, "whole_machine_offline": false,
                 "physical_input_qualified": false, "real_vendor_qualified": false,
                 "setup_saved_read_back": true, "streamed_response": true, "persisted_transcript": true,

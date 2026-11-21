@@ -416,7 +416,30 @@ test("native saved-project launches open independent named-skill tasks across Gi
       { kind: "text", stream: "request", text: `${token} accepted` },
     );
     await page.goto(`${harness.baseUrl}/#/session/${id}/insights`);
-    await send(page, token);
+    // Snapshot loading may briefly hold the local agent lock. A 409 explicitly
+    // rejects admission, so a person can retry without replaying accepted work.
+    await expect
+      .poll(
+        async () => {
+          const responsePromise = page.waitForResponse(
+            (response) =>
+              response.request().method() === "POST" &&
+              new URL(response.url()).pathname === `/sessions/${id}/runs`,
+          );
+          await send(page, token);
+          const response = await responsePromise;
+          if (response.status() === 409) {
+            expect(await response.json()).toEqual({
+              error: "session is busy with a local operation",
+            });
+            return false;
+          }
+          expect(response.ok()).toBe(true);
+          return true;
+        },
+        { timeout: 15_000, intervals: [50, 100, 250] },
+      )
+      .toBe(true);
     await expect(page.getByText(`${token} accepted`, { exact: true })).toBeVisible();
     await waitForRunIdle(request, harness, id);
   }

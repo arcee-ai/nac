@@ -14,7 +14,6 @@ export declare const queryKeys: {
     sandboxActivity: readonly ["sandbox-activity"];
     credentials: readonly ["credentials"];
     managedAuth: readonly ["managed-auth"];
-    modelConfigs: readonly ["model-configs"];
     sshConfigs: readonly ["ssh-configs"];
     sshAliases: readonly ["ssh-aliases"];
     mcpLibrary: readonly ["mcp-library"];
@@ -47,10 +46,6 @@ export declare const queryKeys: {
     modelCatalog: readonly ["model-catalog"];
     slashCommands: readonly ["slash-commands"];
     sessionCommands: (id: string) => readonly ["session", string, "commands"];
-    resolvedModelConfig: (configId: string) => readonly ["model-config-resolved", string];
-    resolvedModelConfigsAll: readonly ["model-config-resolved"];
-    resolvedConfigFile: (path: string) => readonly ["config-file-resolved", string];
-    resolvedConfigFilesAll: readonly ["config-file-resolved"];
     projects: readonly ["projects"];
     sessions: (workspaceStats: boolean) => readonly ["sessions", {
         readonly workspaceStats: boolean;

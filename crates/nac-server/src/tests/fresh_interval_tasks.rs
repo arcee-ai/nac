@@ -12,6 +12,20 @@ use nac_core::store::{
     HeartbeatSpec,
 };
 
+fn selected_model(url: &str) -> store::TaskModelSelection {
+    store::TaskModelSelection {
+        service_tier: None,
+        backend: "openai-responses".into(),
+        model: "gpt-5.2".into(),
+        base_url: url.into(),
+        allow_insecure_http: false,
+        api_key_env: Some("OPENAI_API_KEY".into()),
+        reasoning_effort: None,
+        extra_headers: None,
+        orchestrator_compaction_threshold: None,
+    }
+}
+
 fn git(repo: &std::path::Path, args: &[&str]) -> String {
     let output = std::process::Command::new("git")
         .arg("-C")
@@ -164,7 +178,7 @@ async fn fresh_interval_git_preparation_initial_input_and_retained_result_use_ex
             "task-config",
         )
         .unwrap();
-        defaults.base_url = url;
+        defaults.base_url = url.clone();
         model_configurations::update_model_configuration(
             &manager.inner.store_path,
             "task-config",
@@ -202,6 +216,7 @@ async fn fresh_interval_git_preparation_initial_input_and_retained_result_use_ex
         );
         let destination = FreshTaskDestination {
             project_id: launch.project_id.clone(),
+            model_selection: Some(selected_model(&url)),
             pinned_commit: None,
             default_ref: Some("refs/heads/dev".into()),
             model: None,

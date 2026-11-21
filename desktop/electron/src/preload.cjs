@@ -14,7 +14,7 @@ if (process.isMainFrame && origin && location.origin === origin && incarnation) 
     visibility = null,
     visible = true;
   let sessionTarget = null;
-  let targetGeneration = 0;
+  let targetGeneration = 0, lastInvokedTarget = 0;
   let externalSequence = 0,
     composing = false;
   let storageBinding = null,
@@ -230,33 +230,46 @@ if (process.isMainFrame && origin && location.origin === origin && incarnation) 
       visibility?.callback(visible);
     } else if (message.kind === "session_target" && active && !retired && !disconnected) {
       const connection = sessionTarget,
-        target = message.targetMessage;
+        target = message.targetMessage,
+        generation = message.generation;
+      if (!target || !Number.isSafeInteger(target.request) || target.request <= 0 ||
+          !Number.isSafeInteger(generation) || generation <= 0) return;
       const focused = document.activeElement;
       const unretainedEditor =
         focused instanceof HTMLElement &&
         (focused.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(focused.tagName)) &&
         !focused.hasAttribute("data-nac-retained-draft");
-      // Retained composers survive routing. The shared owner still applies its
-      // keyboard/layer guards before deciding whether this target may open.
-      if (composing || unretainedEditor || !connection) {
-        send("target_settled", {
-          request: target.request,
-          outcome: connection ? "deferred" : "unavailable",
-        });
+      // A guard refusal is final. Only absence of the exact owner proves that
+      // this request did not invoke a callback and can await a newer owner.
+      if (composing || unretainedEditor) {
+        send("target_settled", { request: target.request, generation, outcome: "deferred" });
+      } else if (target.request <= lastInvokedTarget) {
+        send("target_settled", { request: target.request, generation, outcome: "stale" });
+      } else if (!connection || connection.generation !== generation) {
+        send("target_not_invoked", { request: target.request, generation });
       } else {
+        // Consume before queuing: owner retirement or a duplicate IPC cannot
+        // turn a possibly invoked callback into a no-invocation receipt.
+        lastInvokedTarget = target.request;
         Promise.resolve()
-          .then(() => connection.callback(target))
+          .then(() => {
+            // The owner can retire between IPC receipt and this microtask.
+            // Consumption above remains final even if no callback starts.
+            if (retired || disconnected || !active || sessionTarget !== connection) return "stale";
+            return connection.callback(target);
+          })
           .then(
             (outcome) => {
               if (!retired && sessionTarget === connection)
                 send("target_settled", {
                   request: target.request,
+                  generation,
                   outcome: ["opened", "deferred", "unavailable", "stale"].includes(outcome)
                     ? outcome
                     : "unavailable",
                 });
             },
-            () => send("target_settled", { request: target.request, outcome: "unavailable" }),
+            () => send("target_settled", { request: target.request, generation, outcome: "unavailable" }),
           );
       }
     } else if (message.kind === "command" && active && !retired && !disconnected && owner) {

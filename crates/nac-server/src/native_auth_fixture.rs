@@ -242,7 +242,6 @@ fn allowed(method: &Method, path: &str) -> bool {
             path,
             "/" | "/app"
                 | "/index.html"
-                | "/ui-config"
                 | "/health"
                 | "/healthz"
                 | "/readyz"

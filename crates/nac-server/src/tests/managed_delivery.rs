@@ -1,5 +1,16 @@
 use super::*;
 
+fn selected_managed_model(manager: &SessionManager) -> CreateSessionRequest {
+    let profile = manager.managed_model().unwrap();
+    CreateSessionRequest {
+        model: RequestField::Value(profile.model_id.clone()),
+        backend: RequestField::Value(profile.backend.as_str().to_string()),
+        base_url: RequestField::Value(profile.endpoint.clone()),
+        api_key_env: RequestField::Null,
+        ..CreateSessionRequest::default()
+    }
+}
+
 fn write_imported_managed_arcee_state(
     nac_home: &std::path::Path,
     inference_base_url: &str,
@@ -292,18 +303,23 @@ async fn managed_host_secret_api_is_write_only_and_unmanaged_hosts_fail_closed()
 }
 
 #[tokio::test]
-async fn managed_host_supplies_default_model_and_mounted_credential() {
+async fn managed_host_requires_selected_model_and_supplies_mounted_credential() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let root = temp_root("managed_model_default");
     let nac_home = root.join("nac-home");
     let _env = ScopedModelEnv::isolated(&nac_home, None);
     write_managed_credential(&root.join("model-token"), "host-model-key\n");
     let manager = test_managed_manager(&root);
-
-    let created = manager
+    let missing = manager
         .create_session(CreateSessionRequest::default())
         .await
-        .expect("managed host profile should launch without user model settings");
+        .unwrap_err();
+    assert!(missing.to_string().contains("backend"), "{missing:#}");
+
+    let created = manager
+        .create_session(selected_managed_model(&manager))
+        .await
+        .expect("an explicitly selected managed model should use the mounted credential");
     let session_id = created
         .metadata
         .session_id
@@ -492,219 +508,6 @@ async fn managed_recovery_listener_stays_unready_after_external_store_repair() {
 }
 
 #[tokio::test]
-async fn mounted_key_light_model_is_route_bound_across_create_patch_and_resume() {
-    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
-    let root = temp_root("managed_mounted_light_model");
-    let nac_home = root.join("nac-home");
-    let _env = ScopedModelEnv::isolated(&nac_home, Some("independent-primary-key"));
-    unsafe {
-        std::env::set_var("ARCEE_API_KEY", "ambient-light-key-must-not-win");
-    }
-    let credential_path = root.join("model-token");
-    write_managed_credential(&credential_path, "mounted-light-key\n");
-    let manager = test_managed_manager(&root);
-    let store_path = root.join("store.db");
-    let mut session_ids = Vec::new();
-    let light = LightModelSettings {
-        model: "moonshotai/kimi-k3".to_string(),
-        backend: Some(BackendKind::ArceeApi),
-        base_url: Some("https://api.arcee.ai/api/v1".to_string()),
-        api_key_env: None,
-        reasoning_effort: None,
-    };
-
-    for behavior in [
-        sessions::SessionBehavior::Orchestrator,
-        sessions::SessionBehavior::DirectWithOrchestrator,
-    ] {
-        let created = manager
-            .create_session(CreateSessionRequest {
-                behavior,
-                model: RequestField::Value("gpt-5.2".to_string()),
-                backend: RequestField::Value("openai-responses".to_string()),
-                base_url: RequestField::Value("https://api.openai.com/v1".to_string()),
-                api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
-                light_model: RequestField::Value(light.clone()),
-                ..CreateSessionRequest::default()
-            })
-            .await
-            .expect("the exact managed light route reuses the mounted key independently");
-        let session_id = created.metadata.session_id.unwrap();
-        let stored = sessions::load_session(&store_path, &session_id).unwrap();
-        assert_eq!(stored.backend, BackendKind::OpenAiResponses);
-        assert_eq!(stored.api_key_env.as_deref(), Some("OPENAI_API_KEY"));
-        assert_eq!(stored.light_model, Some(light.clone()));
-
-        manager
-            .update_session_config(
-                &session_id,
-                UpdateConfigRequest {
-                    light_model: RequestField::Value(light.clone()),
-                    ..UpdateConfigRequest::default()
-                },
-            )
-            .await
-            .expect("PATCH validates the exact managed light route with the mounted key");
-        manager
-            .inner
-            .active_sessions
-            .write()
-            .await
-            .remove(&session_id);
-        manager
-            .attach_session(&session_id)
-            .await
-            .expect("resume reconstructs the exact managed light route with the mounted key");
-        session_ids.push(session_id);
-    }
-
-    for session_id in &session_ids {
-        manager
-            .inner
-            .active_sessions
-            .write()
-            .await
-            .remove(session_id);
-    }
-    let restarted = test_managed_manager(&root);
-    for session_id in &session_ids {
-        restarted
-            .attach_session(session_id)
-            .await
-            .expect("a restarted manager reconstructs the managed dual-model route");
-    }
-
-    let wrong_route = restarted
-        .create_session(CreateSessionRequest {
-            model: RequestField::Value("gpt-5.2".to_string()),
-            backend: RequestField::Value("openai-responses".to_string()),
-            base_url: RequestField::Value("https://api.openai.com/v1".to_string()),
-            api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
-            light_model: RequestField::Value(LightModelSettings {
-                model: "moonshotai/kimi-k3".to_string(),
-                backend: Some(BackendKind::ArceeApi),
-                base_url: Some("https://api.arcee.ai/not-the-mounted-route".to_string()),
-                api_key_env: None,
-                reasoning_effort: None,
-            }),
-            ..CreateSessionRequest::default()
-        })
-        .await
-        .expect_err("the mounted Arcee key must not cross into another route");
-    assert!(
-        format!("{wrong_route:#}").contains("invalid approved Arcee inference path"),
-        "{wrong_route:#}"
-    );
-
-    let explicit_selector = restarted
-        .create_session(CreateSessionRequest {
-            model: RequestField::Value("gpt-5.2".to_string()),
-            backend: RequestField::Value("openai-responses".to_string()),
-            base_url: RequestField::Value("https://api.openai.com/v1".to_string()),
-            api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
-            light_model: RequestField::Value(LightModelSettings {
-                model: "moonshotai/kimi-k3".to_string(),
-                backend: Some(BackendKind::ArceeApi),
-                base_url: Some("https://api.arcee.ai/api/v1".to_string()),
-                api_key_env: Some("SECOND_API_KEY".to_string()),
-                reasoning_effort: None,
-            }),
-            ..CreateSessionRequest::default()
-        })
-        .await
-        .expect_err("an explicit selector must outrank the mounted light credential");
-    assert!(
-        format!("{explicit_selector:#}").contains("SECOND_API_KEY"),
-        "{explicit_selector:#}"
-    );
-
-    let patch_candidate = restarted
-        .create_session(CreateSessionRequest {
-            behavior: sessions::SessionBehavior::Orchestrator,
-            model: RequestField::Value("gpt-5.2".to_string()),
-            backend: RequestField::Value("openai-responses".to_string()),
-            base_url: RequestField::Value("https://api.openai.com/v1".to_string()),
-            api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
-            ..CreateSessionRequest::default()
-        })
-        .await
-        .expect("create the primary-only PATCH candidate");
-    let patch_candidate_id = patch_candidate.metadata.session_id.unwrap();
-
-    std::fs::remove_file(&credential_path).unwrap();
-
-    let create_error = restarted
-        .create_session(CreateSessionRequest {
-            behavior: sessions::SessionBehavior::Orchestrator,
-            model: RequestField::Value("gpt-5.2".to_string()),
-            backend: RequestField::Value("openai-responses".to_string()),
-            base_url: RequestField::Value("https://api.openai.com/v1".to_string()),
-            api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
-            light_model: RequestField::Value(light.clone()),
-            ..CreateSessionRequest::default()
-        })
-        .await
-        .expect_err("ambient ARCEE_API_KEY must not replace the missing mounted key on create");
-    let create_error = format!("{create_error:#}");
-    assert!(
-        create_error.contains("trusted model credential file"),
-        "{create_error}"
-    );
-    assert!(!create_error.contains("ambient-light-key-must-not-win"));
-
-    let patch_error = restarted
-        .update_session_config(
-            &patch_candidate_id,
-            UpdateConfigRequest {
-                light_model: RequestField::Value(light),
-                ..UpdateConfigRequest::default()
-            },
-        )
-        .await
-        .expect_err("ambient ARCEE_API_KEY must not replace the missing mounted key on PATCH");
-    let patch_error = format!("{patch_error:#}");
-    assert!(
-        patch_error.contains("trusted model credential file"),
-        "{patch_error}"
-    );
-    assert!(!patch_error.contains("ambient-light-key-must-not-win"));
-
-    let resumed_id = &session_ids[0];
-    restarted
-        .inner
-        .active_sessions
-        .write()
-        .await
-        .remove(resumed_id);
-    let resume_error = match restarted.attach_session(resumed_id).await {
-        Ok(_) => panic!("ambient ARCEE_API_KEY must not replace the missing mounted key on resume"),
-        Err(error) => error,
-    };
-    let resume_error = format!("{resume_error:#}");
-    assert!(
-        resume_error.contains("trusted model credential file"),
-        "{resume_error}"
-    );
-    assert!(!resume_error.contains("ambient-light-key-must-not-win"));
-
-    let rehydrated = test_managed_manager(&root);
-    let rehydrate_error = match rehydrated.attach_session(resumed_id).await {
-        Ok(_) => {
-            panic!("ambient ARCEE_API_KEY must not replace the missing mounted key after restart")
-        }
-        Err(error) => error,
-    };
-    let rehydrate_error = format!("{rehydrate_error:#}");
-    assert!(
-        rehydrate_error.contains("trusted model credential file"),
-        "{rehydrate_error}"
-    );
-    assert!(!rehydrate_error.contains("ambient-light-key-must-not-win"));
-
-    let _ = std::fs::remove_dir_all(root);
-}
-
-#[tokio::test]
 async fn mounted_key_discovers_every_entitled_model_only_at_its_configured_destination() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let root = temp_root("mounted_model_discovery");
@@ -801,7 +604,7 @@ async fn managed_session_settings_override_read_only_defaults_and_resume_with_th
     let _env = ScopedModelEnv::isolated(&nac_home, None);
     let manager = test_managed_manager(&root);
     let created = manager
-        .create_session(CreateSessionRequest::default())
+        .create_session(selected_managed_model(&manager))
         .await
         .expect("the read-only deployment default should launch");
     let id = created.metadata.session_id.unwrap();
@@ -954,7 +757,7 @@ async fn managed_interactive_repair_completes_into_readiness_create_and_resume()
     );
 
     let created = manager
-        .create_session(CreateSessionRequest::default())
+        .create_session(selected_managed_model(&manager))
         .await
         .expect("repaired authorization must admit session creation");
     let session_id = created.metadata.session_id.unwrap();
@@ -1224,7 +1027,7 @@ async fn managed_preserved_legacy_auth_is_tombstoned_but_never_authorized() {
     let manager = test_managed_bootstrap_manager(&root);
 
     let create_error = manager
-        .create_session(CreateSessionRequest::default())
+        .create_session(selected_managed_model(&manager))
         .await
         .expect_err("a preserved nac-cli credential must not authorize managed creation");
     let create_error = format!("{create_error:#}");
@@ -1365,7 +1168,7 @@ async fn managed_bootstrap_corruption_blocks_create_and_resume_without_secret_ec
         .to_string(),
     );
     let auth_error = manager
-        .create_session(CreateSessionRequest::default())
+        .create_session(selected_managed_model(&manager))
         .await
         .expect_err("a malformed durable credential must block managed creation");
     let auth_error = format!("{auth_error:#}");
@@ -1469,100 +1272,6 @@ async fn managed_github_status_is_metadata_only_and_unmanaged_hosts_fail_closed(
     let _ = std::fs::remove_dir_all(root);
 }
 
-#[tokio::test]
-async fn saved_config_managed_updates_clear_inherited_light_selectors() {
-    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
-    let root = temp_root("saved_config_managed_light_clear");
-    let nac_home = root.join("nac-home");
-    write_arcee_auth(&nac_home, "https://api.arcee.ai");
-    let _env = ScopedModelEnv::isolated(&nac_home, None);
-    let manager = test_manager(&root);
-    let inherited_selector = "NAC_CONFIG_OLD_KEY";
-    let managed_light = || LightModelSettings {
-        model: "trinity-large-thinking".to_string(),
-        backend: Some(BackendKind::ArceeAuth),
-        base_url: None,
-        api_key_env: Some(inherited_selector.to_string()),
-        reasoning_effort: None,
-    };
-
-    model_configurations::insert_model_configuration(
-        &manager.inner.store_path,
-        "repair",
-        model_configurations::NewModelConfiguration {
-            service_tier: None,
-            name: "Managed repair".to_string(),
-            backend: BackendKind::ArceeAuth.to_string(),
-            model: "trinity-large-thinking".to_string(),
-            base_url: nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL.to_string(),
-            allow_insecure_http: false,
-            api_key_env: Some(inherited_selector.to_string()),
-            reasoning_effort: None,
-            extra_headers: BTreeMap::new(),
-            orchestrator_compaction_threshold: None,
-            initial_prompt: None,
-            light_model: Some(managed_light()),
-        },
-    )
-    .unwrap();
-    let Json(repaired) = delivery::model_configurations::update_handler(
-        State(manager.clone()),
-        AxumPath("repair".to_string()),
-        Ok(Json(UpdateModelConfigurationRequest::default())),
-    )
-    .await
-    .expect("managed repair clears inherited selectors");
-    assert_eq!(repaired.api_key_env, None);
-    assert_eq!(
-        repaired
-            .light_model
-            .as_ref()
-            .and_then(|light| light.api_key_env.as_deref()),
-        None
-    );
-
-    model_configurations::insert_model_configuration(
-        &manager.inner.store_path,
-        "switch",
-        model_configurations::NewModelConfiguration {
-            service_tier: None,
-            name: "Managed switch".to_string(),
-            backend: BackendKind::ArceeApi.to_string(),
-            model: "trinity-large-thinking".to_string(),
-            base_url: "https://api.arcee.ai/api/v1".to_string(),
-            allow_insecure_http: false,
-            api_key_env: Some(inherited_selector.to_string()),
-            reasoning_effort: None,
-            extra_headers: BTreeMap::new(),
-            orchestrator_compaction_threshold: None,
-            initial_prompt: None,
-            light_model: None,
-        },
-    )
-    .unwrap();
-    let Json(switched) = delivery::model_configurations::update_handler(
-        State(manager.clone()),
-        AxumPath("switch".to_string()),
-        Ok(Json(UpdateModelConfigurationRequest {
-            backend: RequestField::Value(BackendKind::ArceeAuth),
-            light_model: RequestField::Value(managed_light()),
-            ..UpdateModelConfigurationRequest::default()
-        })),
-    )
-    .await
-    .expect("managed switch clears inherited selectors");
-    assert_eq!(switched.api_key_env, None);
-    assert_eq!(
-        switched
-            .light_model
-            .as_ref()
-            .and_then(|light| light.api_key_env.as_deref()),
-        None
-    );
-
-    let _ = std::fs::remove_dir_all(root);
-}
-
 /// Naming a credential is not a way to probe for one: a name with nothing
 /// behind it is refused before any request goes out, and a provider that
 /// signs in through the browser takes no name at all.
@@ -1617,14 +1326,14 @@ async fn the_model_index_refuses_an_unresolvable_name_and_a_login_backend() {
 }
 
 #[tokio::test]
-async fn maintenance_keeps_captured_ui_bootstrap_readable_without_admitting_new_work() {
+async fn maintenance_keeps_health_readable_without_admitting_new_work() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
     let root = temp_root("maintenance_ui_bootstrap");
     let _env = ScopedModelEnv::isolated(&root.join("nac-home"), None);
     let manager = test_managed_manager(&root);
     nac_core::store::initialize(&manager.inner.store_path).unwrap();
     let app = router(manager.clone());
-    let before = get_response(app.clone(), "/ui-config", None).await;
+    let before = get_response(app.clone(), "/healthz", None).await;
     assert_eq!(before.status(), StatusCode::OK);
     let captured = response_body(before).await;
     let binding = nac_core::store::ManagedOperationBinding {
@@ -1663,14 +1372,13 @@ async fn maintenance_keeps_captured_ui_bootstrap_readable_without_admitting_new_
             .oneshot(
                 Request::builder()
                     .method(method.clone())
-                    .uri("/ui-config")
+                    .uri("/healthz")
                     .body(Body::empty())
                     .unwrap(),
             )
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK, "{method}");
-        assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
         let body = response_body(response).await;
         if method == axum::http::Method::GET {
             assert_eq!(body, captured);
@@ -1681,8 +1389,7 @@ async fn maintenance_keeps_captured_ui_bootstrap_readable_without_admitting_new_
     for (method, path) in [
         (axum::http::Method::GET, "/sessions"),
         (axum::http::Method::POST, "/sessions"),
-        (axum::http::Method::POST, "/ui-config"),
-        (axum::http::Method::GET, "/ui-config/extra"),
+        (axum::http::Method::GET, "/ui-config"),
     ] {
         let response = app
             .clone()
@@ -1703,4 +1410,101 @@ async fn maintenance_keeps_captured_ui_bootstrap_readable_without_admitting_new_
     }
     drop((app, manager));
     let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn matching_first_chat_checks_managed_model_authority() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("managed_matching_first_chat");
+    let nac_home = root.join("nac-home");
+    let workspace = root.join("workspace");
+    std::fs::create_dir_all(&workspace).unwrap();
+    let _env = ScopedModelEnv::isolated(&nac_home, None);
+    write_managed_credential(&root.join("model-token"), "host-model-key\n");
+    let manager = test_managed_manager(&root);
+    let project = manager
+        .projects()
+        .create(application::projects::CreateProject {
+            name: None,
+            description: None,
+            cwd: workspace,
+            ssh_host: None,
+            ssh_port: None,
+            ssh_identity_file: None,
+            default_model_config_id: None,
+        })
+        .await
+        .unwrap();
+    let mut request = selected_managed_model(&manager);
+    request.project_id = Some(project.project_id);
+    request.first_chat = true;
+    request.first_chat_same_behavior = true;
+    request.first_chat_require_matching_model = true;
+    let first = manager.create_session(request.clone()).await.unwrap();
+    let same = manager.create_session(request.clone()).await.unwrap();
+    assert_eq!(first.metadata.session_id, same.metadata.session_id);
+    request.api_key_env = RequestField::Value("OTHER_MANAGED_KEY".into());
+    let error = manager.create_session(request).await.unwrap_err();
+    assert!(
+        error.to_string().contains("different model settings"),
+        "{error:#}"
+    );
+    assert_eq!(
+        sessions::list_sessions(&manager.inner.store_path)
+            .unwrap()
+            .len(),
+        1
+    );
+    manager.quiesce_persistence_callers().await;
+    manager.drain_persistence().await.unwrap();
+    drop(manager);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn model_source_keeps_managed_authority_and_rejects_other_selector() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("managed_model_source");
+    let workspace = root.join("workspace");
+    std::fs::create_dir_all(&workspace).unwrap();
+    let _env = ScopedModelEnv::isolated(&root.join("nac-home"), None);
+    write_managed_credential(&root.join("model-token"), "host-model-key\n");
+    let manager = test_managed_manager(&root);
+    let project = manager
+        .projects()
+        .create(application::projects::CreateProject {
+            name: None,
+            description: None,
+            cwd: workspace,
+            ssh_host: None,
+            ssh_port: None,
+            ssh_identity_file: None,
+            default_model_config_id: None,
+        })
+        .await
+        .unwrap();
+    let mut request = selected_managed_model(&manager);
+    request.project_id = Some(project.project_id.clone());
+    request.allow_insecure_http = RequestField::Value(false);
+    let first = manager.create_session(request.clone()).await.unwrap();
+    let id = first.metadata.session_id.unwrap();
+    let config = sessions::load_session_config(&manager.inner.store_path, &id).unwrap();
+    request.model_source = Some(sessions::ProjectModelSourceRef {
+        project_id: project.project_id,
+        session_id: id,
+        config_version: config.config_version,
+    });
+    manager.create_session(request.clone()).await.unwrap();
+    request.api_key_env = RequestField::Value("OTHER_MANAGED_KEY".into());
+    let error = manager
+        .create_session(request)
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("source session changed or moved"));
+    assert!(!error.contains("host-model-key"));
+    manager.quiesce_persistence_callers().await;
+    manager.drain_persistence().await.unwrap();
+    drop(manager);
+    std::fs::remove_dir_all(root).unwrap();
 }

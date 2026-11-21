@@ -242,9 +242,6 @@ describe("direct permission controls", () => {
     expect(screen.getByRole("dialog").textContent).toContain(
       "The mode governs this session and all existing or future owned child agents",
     );
-    expect(screen.getByRole("dialog").textContent).toContain(
-      "Separately managed orchestrators are not included",
-    );
     fireEvent.click(toggle);
 
     await waitFor(() =>

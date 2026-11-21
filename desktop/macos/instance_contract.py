@@ -64,7 +64,7 @@ class OwnedEngine:
             with self.diagnostics.open('wb') as output:
                 self.process = subprocess.Popen(
                     [str(binary), '--bind', '127.0.0.1:0', '--directory', str(root),
-                     '--store-path', str(store), '--worker-executable', str(binary), '--no-open'],
+                     '--store-path', str(store), '--no-open'],
                     env=env, cwd=root, stdin=subprocess.DEVNULL, stdout=output, stderr=output,
                     pass_fds=(child.fileno(),) if child else (), start_new_session=True)
             if self.channel:

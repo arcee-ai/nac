@@ -1,19 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  mergeThreadEventPages,
   mergeThreadLog,
   persistedThreadLog,
   threadLogLine,
   toolCallFailed,
 } from "@/app/lib/threadLog";
-import type { AgentEvent, ThreadEventPage, ThreadEventRecord } from "@/app/types/api";
-
-function logEvent(line: string): AgentEvent {
-  // SAFETY: test fixture — the merge logic under test only reads `type` and
-  // `line` from thread_log events, so the remaining fields are omitted.
-  return { type: "thread_log", line } as AgentEvent;
-}
+import type { AgentEvent } from "@/app/types/api";
 
 function callEvent(callId: string): AgentEvent {
   // SAFETY: test fixture — only the tool_call_started fields the merge logic
@@ -25,18 +18,6 @@ function callEvent(callId: string): AgentEvent {
     args_preview: "file.ts",
     key_arg_preview: "file.ts",
   } as AgentEvent;
-}
-
-function record(id: number): ThreadEventRecord {
-  return { id, created_at: `t-${id}`, event: logEvent(`event-${id}`) };
-}
-
-function page(ids: number[], hasOlder: boolean): ThreadEventPage {
-  return {
-    events: ids.map(record),
-    has_older: hasOlder,
-    next_before_id: hasOlder ? Math.min(...ids) : null,
-  };
 }
 
 describe("tool-call status", () => {
@@ -134,17 +115,6 @@ describe("tool-call status", () => {
 });
 
 describe("thread history paging", () => {
-  it("normalizes newest and overlapping older pages chronologically", () => {
-    const merged = mergeThreadEventPages([page([104, 105], true), page([102, 103, 104], false)]);
-
-    expect(merged.map((event) => (event.type === "thread_log" ? event.line : null))).toEqual([
-      "event-102",
-      "event-103",
-      "event-104",
-      "event-105",
-    ]);
-  });
-
   it("collapses a live tool event once the persisted copy arrives", () => {
     const event = callEvent("call-1");
     const live = threadLogLine(event, 900);

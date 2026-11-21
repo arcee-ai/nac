@@ -261,6 +261,19 @@ pub(super) fn load_project_with_connection(
 }
 
 coordinated_command! {
+pub fn load_project(path: &Path, project_id: &str) -> ProjectResult<ProjectRecord> {
+    let conn = open_runtime_connection(path)?;
+    load_project_with_connection(&conn, project_id)
+}
+command LoadProjectCommand {
+    project_id: String = project_id.to_owned(),
+}
+call |command| (&command.project_id)
+correlation |_command| crate::telemetry::Correlation::default();
+port public;
+}
+
+coordinated_command! {
 pub fn list_projects(path: &Path) -> ProjectResult<Vec<ProjectRecord>> {
     let conn = open_runtime_connection(path)?;
     let mut statement = conn.prepare(&format!(

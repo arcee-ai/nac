@@ -12,14 +12,14 @@ import {
   InsightsNavigationContext,
   useInsightsNavigation,
 } from "@/app/features/insights/useInsightsNavigation";
-import { useManagedOrchestrators, useTraditionalChildren } from "@/app/services/queries";
+import { useTraditionalChildren } from "@/app/services/queries";
 import { queryKeys } from "@/app/services/queries/keys";
-import type { ManagedOrchestratorRecord, TraditionalChildRecord } from "@/app/types/api";
+import type { TraditionalChildRecord } from "@/app/types/api";
 
-type LaunchedRecord = TraditionalChildRecord | ManagedOrchestratorRecord;
+type LaunchedRecord = TraditionalChildRecord;
 
 function recordId(record: LaunchedRecord): string {
-  return "child_session_id" in record ? record.child_session_id : record.orchestrator_session_id;
+  return record.child_session_id;
 }
 
 function launchedRecord(
@@ -42,9 +42,7 @@ function useLaunchedRecords(entry: InsightSessionEntry, parentId: string | null)
   const client = useQueryClient();
   const agent = entry.action === "spawn-agent";
   const parent = parentId ?? "";
-  const known = client.getQueryState<LaunchedRecord[]>(
-    agent ? queryKeys.traditionalChildren(parent) : queryKeys.managedOrchestrators(parent),
-  );
+  const known = client.getQueryState<LaunchedRecord[]>(queryKeys.traditionalChildren(parent));
   const unsettled =
     entry.status === "running" ||
     entry.status === "pending" ||
@@ -58,9 +56,7 @@ function useLaunchedRecords(entry: InsightSessionEntry, parentId: string | null)
         (known?.data === undefined || (spawnedId !== undefined && record === undefined))) ||
       record?.status === "running");
   const agents = useTraditionalChildren(parent, agent && live);
-  const orchestrators = useManagedOrchestrators(parent, !agent && live);
-  const query = agent ? agents : orchestrators;
-  return { records: query.data, failed: query.isError };
+  return { records: agent ? agents.data : undefined, failed: agent && agents.isError };
 }
 
 interface CardState extends CardStatus {

@@ -28,7 +28,7 @@ fn fixture() -> (PathBuf, NativeTaskRequest) {
     insert_test_session(&path, "caller");
     let conn = open_runtime_connection(&path).unwrap();
     conn.execute(
-        "UPDATE sessions SET behavior='direct',cwd=?1 WHERE session_id='caller'",
+        "UPDATE sessions SET behavior='direct',backend='openai-responses',cwd=?1 WHERE session_id='caller'",
         params![cwd(&path).to_string_lossy()],
     )
     .unwrap();
@@ -101,6 +101,81 @@ fn native_intent_retry_reopens_original_identity_and_distinguishes_new_requests(
 }
 
 #[test]
+fn native_intent_freezes_caller_model_across_retry_and_reload() {
+    let (path, mut request) = fixture();
+    request.model = Some("explicit-task-model".into());
+    let first =
+        reserve_native_task_launch(&path, "caller", "p", &cwd(&path), false, request.clone())
+            .unwrap();
+    let selected = first.model_selection.as_ref().unwrap();
+    assert_eq!(selected.model, "explicit-task-model");
+    assert_eq!(selected.base_url, "https://example.invalid");
+    let conn = open_runtime_connection(&path).unwrap();
+    conn.execute("UPDATE sessions SET model='changed-parent-model',base_url='https://changed.invalid' WHERE session_id='caller'", []).unwrap();
+    drop(conn);
+    let retry =
+        reserve_native_task_launch(&path, "caller", "p", &cwd(&path), false, request.clone())
+            .unwrap();
+    assert_eq!(retry.model_selection, first.model_selection);
+    assert_eq!(
+        load_native_task_launch(&path, &request.request_id)
+            .unwrap()
+            .unwrap()
+            .model_selection,
+        first.model_selection
+    );
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}
+
+#[test]
+fn native_intent_rejects_missing_caller_backend_before_reservation() {
+    let (path, request) = fixture();
+    let conn = open_runtime_connection(&path).unwrap();
+    conn.execute(
+        "UPDATE sessions SET backend=NULL WHERE session_id='caller'",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+    let error =
+        reserve_native_task_launch(&path, "caller", "p", &cwd(&path), false, request.clone())
+            .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("session settings repair required"));
+    assert!(load_native_task_launch(&path, &request.request_id)
+        .unwrap()
+        .is_none());
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}
+
+#[test]
+fn legacy_native_receipt_stays_bound_without_inventing_a_model() {
+    let (path, request) = fixture();
+    let first =
+        reserve_native_task_launch(&path, "caller", "p", &cwd(&path), false, request.clone())
+            .unwrap();
+    let conn = open_runtime_connection(&path).unwrap();
+    conn.execute(
+        "UPDATE native_task_launches SET request_json=json_remove(request_json, '$._nac_model_selection') WHERE request_id=?1",
+        [&request.request_id],
+    ).unwrap();
+    drop(conn);
+    let retry =
+        reserve_native_task_launch(&path, "caller", "p", &cwd(&path), false, request.clone())
+            .unwrap();
+    assert_eq!(retry.session_id, first.session_id);
+    assert!(retry.model_selection.is_none());
+    assert_eq!(
+        load_native_task_launch(&path, &request.request_id)
+            .unwrap()
+            .unwrap(),
+        retry
+    );
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}
+
+#[test]
 fn native_intent_refuses_wrong_project_source_and_nonlocal_callers() {
     let (path, request) = fixture();
     assert!(reserve_native_task_launch(
@@ -122,11 +197,12 @@ fn native_intent_refuses_wrong_project_source_and_nonlocal_callers() {
         reserve_native_task_launch(&path, "caller", "p", &cwd(&path), false, request.clone())
             .is_err()
     );
-    conn.execute(
-        "UPDATE sessions SET host_id=NULL,behavior='orchestrator' WHERE session_id='caller'",
-        [],
-    )
-    .unwrap();
+    assert!(conn
+        .execute(
+            "UPDATE sessions SET behavior='orchestrator' WHERE session_id='caller'",
+            [],
+        )
+        .is_err());
     assert!(reserve_native_task_launch(&path, "caller", "p", &cwd(&path), false, request).is_err());
     drop(conn);
     std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
@@ -568,6 +644,17 @@ fn native_and_scheduled_reservations_reject_shared_request_identity_in_both_orde
                 &path,
                 &FreshTaskDestination {
                     project_id: "p".into(),
+                    model_selection: Some(TaskModelSelection {
+                        service_tier: None,
+                        backend: "openai-responses".into(),
+                        model: "fixture-model".into(),
+                        base_url: "https://fixture.invalid/v1".into(),
+                        allow_insecure_http: false,
+                        api_key_env: None,
+                        reasoning_effort: None,
+                        extra_headers: None,
+                        orchestrator_compaction_threshold: None,
+                    }),
                     pinned_commit: None,
                     default_ref: None,
                     model: None,
@@ -672,4 +759,49 @@ fn native_and_scheduled_reservations_reject_shared_request_identity_in_both_orde
             std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
         }
     }
+}
+
+#[test]
+fn native_task_freezes_speed_and_does_not_inherit_it_for_a_different_model() {
+    let (path, request) = fixture();
+    let conn = open_runtime_connection(&path).unwrap();
+    conn.execute("UPDATE sessions SET model='gpt-5.2',base_url='https://api.openai.com/v1',service_tier='fast' WHERE session_id='caller'", []).unwrap();
+    drop(conn);
+    let first =
+        reserve_native_task_launch(&path, "caller", "p", &cwd(&path), false, request.clone())
+            .unwrap();
+    assert_eq!(
+        first
+            .model_selection
+            .as_ref()
+            .unwrap()
+            .service_tier
+            .as_deref(),
+        Some("fast")
+    );
+    let conn = open_runtime_connection(&path).unwrap();
+    conn.execute(
+        "UPDATE sessions SET service_tier=NULL WHERE session_id='caller'",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+    let retried =
+        reserve_native_task_launch(&path, "caller", "p", &cwd(&path), false, request.clone())
+            .unwrap();
+    assert_eq!(retried.model_selection, first.model_selection);
+    let mut changed = request;
+    changed.request_id = uuid::Uuid::new_v4().to_string();
+    changed.model = Some("gpt-5.1".into());
+    let conn = open_runtime_connection(&path).unwrap();
+    conn.execute(
+        "UPDATE sessions SET service_tier='fast' WHERE session_id='caller'",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+    let other =
+        reserve_native_task_launch(&path, "caller", "p", &cwd(&path), false, changed).unwrap();
+    assert_eq!(other.model_selection.unwrap().service_tier, None);
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
 }

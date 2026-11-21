@@ -68,6 +68,99 @@ fn rejected(result: Value, expected: &str) {
     );
 }
 
+#[tokio::test]
+async fn mcp_rejects_retired_creation_and_thread_steering_inputs() {
+    let _lock = crate::tests::SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = root();
+    let _env = crate::tests::ScopedModelEnv::isolated(&root.join("home"), Some("fixture-key"));
+    let manager = crate::tests::test_manager(&root);
+    for behavior in ["orchestrator", "direct-with-orchestrator", "unknown"] {
+        rejected(
+            call(&manager, "create_session", json!({"behavior": behavior})).await,
+            "Only direct",
+        );
+    }
+    rejected(
+        call(
+            &manager,
+            "create_session",
+            json!({"light_model":{"model":"test"}}),
+        )
+        .await,
+        "light_model is no longer supported",
+    );
+    rejected(
+        call(&manager, "create_session", json!({"light_model":null})).await,
+        "light_model is no longer supported",
+    );
+    rejected(
+        call(
+            &manager,
+            "update_session",
+            json!({"session_id":"missing", "light_model":null}),
+        )
+        .await,
+        "light_model is no longer supported",
+    );
+    for thread_name in [json!("worker"), Value::Null] {
+        rejected(
+            call(
+                &manager,
+                "steer",
+                json!({"session_id":"missing", "instruction":"test", "thread_name":thread_name}),
+            )
+            .await,
+            "thread_name is retired",
+        );
+    }
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn mcp_steer_enqueues_direct_inbox() {
+    let _lock = crate::tests::SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = root();
+    let _env = crate::tests::ScopedModelEnv::isolated(&root.join("home"), Some("fixture-key"));
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let store = root.join("store.db");
+    crate::tests::seed_direct_session_with_base_url(
+        &root,
+        "direct",
+        format!("http://{}", listener.local_addr().unwrap()),
+    );
+    let manager = crate::tests::test_manager(&root);
+    let value = success(
+        call(
+            &manager,
+            "steer",
+            json!({"session_id":"direct", "instruction":"check the migration"}),
+        )
+        .await,
+    );
+    assert_eq!(value["delivery"], "steer");
+    assert_eq!(value["content"], "check the migration");
+    let records = nac_core::store::list_session_inbox(&store, "direct").unwrap();
+    assert!(records
+        .iter()
+        .any(|record| record.id == value["id"].as_i64().unwrap()));
+    let conn = rusqlite::Connection::open(&store).unwrap();
+    let review_intent: Option<String> = conn
+        .query_row(
+            "SELECT review_intent FROM session_inbox WHERE id = ?1",
+            [value["id"].as_i64().unwrap()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(
+        review_intent.is_none(),
+        "MCP input must not grant human review intent"
+    );
+    drop(conn);
+    manager.cancel_local_active_runs_for_shutdown().await;
+    drop(listener);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 fn system(content: &str) -> Message {
     Message::System {
         content: content.into(),

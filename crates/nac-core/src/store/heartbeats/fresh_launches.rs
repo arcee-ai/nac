@@ -50,9 +50,10 @@ pub(crate) fn fresh_launch_for_request_with_connection(
 
 fn validate_publication(
     conn: &Connection,
-    launch: &FreshTaskLaunchReceipt,
+    prepared: &PreparedFreshTaskLaunch,
     snapshot: &crate::sessions::SessionSnapshot,
 ) -> Result<()> {
+    let launch = prepared.receipt();
     ensure!(
         snapshot.session_id == launch.session_id
             && snapshot.behavior == crate::sessions::SessionBehavior::Direct
@@ -64,6 +65,67 @@ fn validate_publication(
     ensure!(
         !launch.stop_requested && launch.first_input_id.is_none(),
         "cancelled or already-published scheduled launch cannot publish input"
+    );
+    let legacy = prepared.legacy_frozen_model()?;
+    let selection = launch
+        .destination
+        .model_selection
+        .as_ref()
+        .or(legacy.as_ref())
+        .context("scheduled launch has no bound model selection")?;
+    if legacy.is_none() {
+        ensure!(
+            launch.request.model_selection.as_ref() == Some(selection)
+                && launch.binding.fresh_task.as_ref() == Some(&launch.destination),
+            "conflict: scheduled model selection does not match its receipt"
+        );
+    }
+    let expected_selector = selection
+        .api_key_env
+        .clone()
+        .or_else(|| crate::model::auto_select_api_key_env(snapshot.backend));
+    let expected_tier = launch
+        .destination
+        .service_tier
+        .as_deref()
+        .or(selection.service_tier.as_deref());
+    let threshold_matches = if legacy.is_some() {
+        selection
+            .orchestrator_compaction_threshold
+            .is_none_or(|threshold| {
+                snapshot.orchestrator_compaction_threshold == Some(threshold)
+                    && !snapshot.automatic_compaction
+            })
+    } else {
+        snapshot.orchestrator_compaction_threshold
+            == selection
+                .orchestrator_compaction_threshold
+                .filter(|threshold| *threshold != 0)
+            && !snapshot.automatic_compaction
+    };
+    let mismatch = if legacy.is_some() {
+        "conflict: prepared session does not match historical frozen model receipt"
+    } else {
+        "conflict: prepared session does not match scheduled model receipt"
+    };
+    ensure!(
+        snapshot.backend.to_string() == selection.backend
+            && snapshot.model == selection.model.trim()
+            && snapshot.base_url == selection.base_url.trim()
+            && snapshot.allow_insecure_http == selection.allow_insecure_http
+            && snapshot.api_key_env == expected_selector
+            && selection
+                .extra_headers
+                .as_ref()
+                .map_or(snapshot.extra_headers.is_empty(), |headers| headers
+                    == &snapshot.extra_headers)
+            && snapshot
+                .reasoning_effort
+                .map(crate::model::ReasoningEffort::as_str)
+                == selection.reasoning_effort.as_deref()
+            && snapshot.service_tier.map(crate::model::ServiceTier::as_str) == expected_tier
+            && threshold_matches,
+        "{mismatch}"
     );
     let occurrence = conn
         .query_row(
@@ -99,7 +161,7 @@ pub(crate) fn link_fresh_launch_input_with_connection(
         return Ok(());
     };
     let receipt = prepared.receipt();
-    validate_publication(conn, receipt, snapshot)?;
+    validate_publication(conn, &prepared, snapshot)?;
     conn.execute("UPDATE heartbeat_task_launches SET first_input_id=?2,launch_json=json_set(launch_json,'$.published_config_version',?3,'$.published_cwd',?4) WHERE request_id=?1",params![request_id,input_id,snapshot.config_version,snapshot.cwd.to_string_lossy()])?;
     conn.execute("UPDATE heartbeat_occurrences SET inbox_item_id=?2,expected_revision=expected_revision+1 WHERE occurrence_id=?1",params![receipt.occurrence_id,input_id])?;
     Ok(())
@@ -113,7 +175,7 @@ pub(crate) fn publish_shared_fresh_launch_with_connection(
     let prepared = fresh_launch_for_request_with_connection(conn, request_id)?
         .context("prepared launch was not found")?;
     let receipt = prepared.receipt();
-    validate_publication(conn, receipt, snapshot)?;
+    validate_publication(conn, &prepared, snapshot)?;
     let shared:Option<bool>=conn.query_row("SELECT json_extract(launch_json,'$.shared_directory') FROM heartbeat_task_launches WHERE request_id=?1",[request_id],|row|row.get(0))?;
     ensure!(
         shared == Some(true)

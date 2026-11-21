@@ -11,14 +11,10 @@ it("distinguishes an explicit provider-default clear from an omitted tier when H
     api_key_env: null,
     reasoning_effort: "high",
     extra_headers: null,
-    light_model: null,
   } as const;
   const home = {
-    policy: { orchestrationEnabled: false },
     projectId: "project",
-    behavior: "direct",
     selected,
-    light: null,
   } as Parameters<typeof configuredSessionRequest>[0];
   expect(configuredSessionRequest(home)).not.toHaveProperty("service_tier");
   expect(

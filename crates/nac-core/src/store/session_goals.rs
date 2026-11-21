@@ -1033,9 +1033,8 @@ mod tests {
     fn goal_lifecycle_is_direct_only_versioned_and_generation_safe() {
         let path = test_path("lifecycle");
         initialize(&path).unwrap();
-        crate::store::insert_test_session(&path, "orchestrator");
         direct_session(&path, "direct");
-        assert!(create_session_goal(&path, "orchestrator", "no", None, None).is_err());
+        assert!(create_session_goal(&path, "missing", "no", None, None).is_err());
 
         let first = create_session_goal(&path, "direct", " ship it ", None, None).unwrap();
         assert_eq!(first.objective, "ship it");

@@ -185,9 +185,9 @@ function PreviewProbe() {
   );
 }
 
-it("loads only the allowed design route, fences late resolution and isolates two presentation roots", async () => {
+it("loads the design route, fences late resolution and isolates two presentation roots", async () => {
   const ordinary = fixture("ordinary", "/session/one/files");
-  const direct = fixture("direct", "/design");
+  const direct = fixture("direct", "/");
   await direct.ui.findByText("Projects");
   fireEvent.change(ordinary.ui.getByRole("textbox", { name: "Session draft" }), {
     target: { value: "retained unsent draft" },

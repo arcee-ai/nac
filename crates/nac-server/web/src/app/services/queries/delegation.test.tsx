@@ -4,17 +4,12 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 
-import { ORCHESTRATION_UI_POLICY } from "@/app/features/ui-policy/policy";
-import { UiPolicyContext } from "@/app/features/ui-policy/UiPolicyContext";
 import { RuntimeContext } from "@/app/runtime/RuntimeContext";
 import { createNativeRuntime } from "@/app/runtime/nativeRuntime";
 import { createNacClient } from "@/app/services/nacClient";
-import type { ManagedOrchestratorRecord, TraditionalChildRecord } from "@/app/types/api";
+import type { TraditionalChildRecord } from "@/app/types/api";
 import {
-  useCancelManagedOrchestrator,
   useCancelTraditionalChild,
-  useManagedOrchestrators,
-  useStartManagedOrchestrator,
   useStartTraditionalChild,
   useTraditionalChildren,
 } from "./direct";
@@ -29,7 +24,6 @@ afterEach(() => {
 function record(generation: number, version: number) {
   return {
     child_session_id: "target",
-    orchestrator_session_id: "target",
     parent_session_id: "parent",
     root_session_id: "parent",
     profile: "general",
@@ -47,7 +41,7 @@ function record(generation: number, version: number) {
     completion_inbox_id: null,
     created_at: "2026-10-22T00:00:00Z",
     updated_at: "2026-10-22T00:00:00Z",
-  } satisfies TraditionalChildRecord & ManagedOrchestratorRecord;
+  } satisfies TraditionalChildRecord;
 }
 
 function mount(fetch: typeof globalThis.fetch) {
@@ -67,9 +61,7 @@ function mount(fetch: typeof globalThis.fetch) {
   const wrapper = ({ children }: { children: ReactNode }) => (
     <RuntimeContext.Provider value={runtime}>
       <QueryClientProvider client={runtime.queryClient}>
-        <UiPolicyContext.Provider value={ORCHESTRATION_UI_POLICY}>
-          {children}
-        </UiPolicyContext.Provider>
+        <>{children}</>
       </QueryClientProvider>
     </RuntimeContext.Provider>
   );
@@ -78,7 +70,6 @@ function mount(fetch: typeof globalThis.fetch) {
 
 for (const [mode, useList, key] of [
   ["child", useTraditionalChildren, queryKeys.traditionalChildren],
-  ["orchestrator", useManagedOrchestrators, queryKeys.managedOrchestrators],
 ] as const) {
   it(`${mode} cache keeps newer generations and versions when earlier commands finish late`, async () => {
     const response = Promise.withResolvers<Response>();
@@ -87,9 +78,7 @@ for (const [mode, useList, key] of [
     const hook = renderHook(
       () => ({
         startChild: useStartTraditionalChild(),
-        startOrchestrator: useStartManagedOrchestrator(),
         cancelChild: useCancelTraditionalChild(),
-        cancelOrchestrator: useCancelManagedOrchestrator(),
       }),
       { wrapper },
     );
@@ -97,27 +86,16 @@ for (const [mode, useList, key] of [
     client.setQueryData(key("parent"), [current]);
     let command!: Promise<unknown>;
     act(() => {
-      command =
-        mode === "child"
-          ? hook.result.current.startChild.mutateAsync({
-              sessionId: "parent",
-              payload: {
-                profile: "general",
-                description: current.description,
-                prompt: "a different message",
-                child_session_id: "target",
-                background: false,
-              },
-            })
-          : hook.result.current.startOrchestrator.mutateAsync({
-              sessionId: "parent",
-              payload: {
-                description: current.description,
-                prompt: "a different message",
-                orchestrator_session_id: "target",
-                background: false,
-              },
-            });
+      command = hook.result.current.startChild.mutateAsync({
+        sessionId: "parent",
+        payload: {
+          profile: "general",
+          description: current.description,
+          prompt: "a different message",
+          child_session_id: "target",
+          background: false,
+        },
+      });
     });
     await waitFor(() => expect(fetch).toHaveBeenCalledOnce());
     await act(async () => {
@@ -128,16 +106,7 @@ for (const [mode, useList, key] of [
 
     fetch.mockResolvedValueOnce(Response.json(record(3, 7)));
     await act(async () => {
-      if (mode === "child")
-        await hook.result.current.cancelChild.mutateAsync({
-          sessionId: "parent",
-          childId: "target",
-        });
-      else
-        await hook.result.current.cancelOrchestrator.mutateAsync({
-          sessionId: "parent",
-          orchestratorId: "target",
-        });
+      await hook.result.current.cancelChild.mutateAsync({ sessionId: "parent", childId: "target" });
     });
     expect(client.getQueryData(key("parent"))).toEqual([current]);
   });

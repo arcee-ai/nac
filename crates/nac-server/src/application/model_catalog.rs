@@ -4,7 +4,7 @@ use nac_core::{
         list_provider_models, provider_uses_api_key, resolve_backend_api_key, AuthStatus,
         BackendKind, ModelListing, ProviderConnection, ProviderModel,
     },
-    model_configurations,
+    store::list_provider_connections,
 };
 use nac_managed::ManagedModelCredentialSource;
 
@@ -24,7 +24,7 @@ impl<'a> ModelCatalogApplication<'a> {
         let mut listing = nac_core::model::api_listing_for_invocation(
             &crate::executable::running_invocation_name(),
         );
-        self.overlay_saved_provider_connections(&mut listing);
+        self.overlay_provider_connections(&mut listing);
 
         if let (Some(config), Some(profile)) =
             (self.manager.managed_host(), self.manager.managed_model())
@@ -40,6 +40,7 @@ impl<'a> ModelCatalogApplication<'a> {
                     provider.default_base_url = Some(profile.endpoint.clone());
                     provider.connection = Some(ProviderConnection {
                         base_url: profile.endpoint.clone(),
+                        allow_insecure_http: false,
                         api_key_env: None,
                     });
                 } else {
@@ -56,13 +57,10 @@ impl<'a> ModelCatalogApplication<'a> {
         listing
     }
 
-    /// Saved API-key setup is a durable provider account as well as an optional
-    /// launch preset. Publish the most recently updated usable route and its
-    /// non-secret selector so every unified picker reaches the same account.
-    fn overlay_saved_provider_connections(&self, listing: &mut ModelListing) {
-        let Ok(configurations) =
-            model_configurations::list_model_configurations(&self.manager.inner.store_path)
-        else {
+    /// Publish the newest usable credential route without exposing secrets or
+    /// coupling provider connections to session model choices.
+    fn overlay_provider_connections(&self, listing: &mut ModelListing) {
+        let Ok(configurations) = list_provider_connections(&self.manager.inner.store_path) else {
             return;
         };
         for provider in &mut listing.providers {
@@ -73,24 +71,21 @@ impl<'a> ModelCatalogApplication<'a> {
                 .iter()
                 .filter(|configuration| {
                     configuration.backend.parse::<BackendKind>().ok() == Some(provider.id)
-                        && configuration
-                            .api_key_env
-                            .as_deref()
-                            .is_some_and(|selector| {
-                                resolve_backend_api_key(provider.id, Some(selector)).is_ok()
-                            })
+                        && resolve_backend_api_key(provider.id, Some(&configuration.api_key_env))
+                            .is_ok()
                 })
                 .max_by(|left, right| {
                     left.updated_at
                         .cmp(&right.updated_at)
-                        .then_with(|| left.config_id.cmp(&right.config_id))
+                        .then_with(|| left.connection_id.cmp(&right.connection_id))
                 });
             if let Some(configuration) = selected {
                 provider.auth_status = AuthStatus::Ready;
                 provider.auth_hint = None;
                 provider.connection = Some(ProviderConnection {
                     base_url: configuration.base_url.clone(),
-                    api_key_env: configuration.api_key_env.clone(),
+                    allow_insecure_http: configuration.allow_insecure_http,
+                    api_key_env: Some(configuration.api_key_env.clone()),
                 });
             }
         }

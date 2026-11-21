@@ -77,6 +77,7 @@ use model_resolution::{
 pub use model_resolution::{
     effective_model_settings, effective_orchestrator_compaction_threshold,
     parse_extra_headers_json, resolve_store_path, resolve_store_path_for_track,
+    session_model_matches,
 };
 pub use prepared_session::{PreparedSessionResources, PreparedSessionRunConfig};
 pub use remote::{browse_ssh_directory, create_ssh_folder};

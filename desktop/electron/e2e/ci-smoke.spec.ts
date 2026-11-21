@@ -40,19 +40,15 @@ test("normal packaged source, launch identity and private canonical store agree"
 test("current session panel deep links retain the actual shared workspace", async ({
   candidate: c,
 }) => {
-  expect((await c.api("/ui-config")).orchestration_enabled).toBe(true);
   const project = await c.project();
   const direct = await c.session("direct", project);
-  const orchestrator = await c.session("orchestrator", project);
   for (const panel of SESSION_PANELS) {
-    const session = panel === "worksets" ? orchestrator : direct;
+    const session = direct;
     await c.page.evaluate((route) => {
       location.hash = route;
     }, `/session/${session}/${panel}`);
     await expect(c.page.getByRole("combobox", { name: "Message" })).toBeVisible();
-    // Legacy Threads/Sessions resolve to Insights. Worksets belongs to the
-    // orchestrator; delegated/terminal/heartbeats belong to the direct session.
-    const resolved = ["threads", "sessions"].includes(panel) ? "insights" : panel;
+    const resolved = panel === "sessions" ? "insights" : panel;
     await expect(c.page).toHaveURL(new RegExp(`/session/${session}/${resolved}$`));
     expect(
       await c.page.evaluate(() => ({

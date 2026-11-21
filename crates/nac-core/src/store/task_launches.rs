@@ -3,6 +3,75 @@
 use super::*;
 use serde::{Deserialize, Serialize};
 
+type ModelSourceRow = (
+    Option<String>,
+    String,
+    bool,
+    Option<String>,
+    Option<String>,
+    i64,
+);
+
+/// Model selection is frozen with the task request for retry and recovery.
+/// Credential values never enter the durable request.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct TaskModelSelection {
+    pub backend: String,
+    pub model: String,
+    pub base_url: String,
+    pub allow_insecure_http: bool,
+    pub api_key_env: Option<String>,
+    pub reasoning_effort: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service_tier: Option<String>,
+    pub extra_headers: Option<std::collections::BTreeMap<String, String>>,
+    pub orchestrator_compaction_threshold: Option<u64>,
+}
+
+impl TaskModelSelection {
+    pub fn validate(&self) -> Result<()> {
+        for value in [&self.backend, &self.model, &self.base_url] {
+            anyhow::ensure!(
+                !value.trim().is_empty() && value.len() <= 4096 && !value.contains('\0'),
+                "invalid request: model selection fields must be nonblank and bounded"
+            );
+        }
+        let backend: crate::model::BackendKind = self
+            .backend
+            .parse()
+            .map_err(|error: String| anyhow!("invalid request: {error}"))?;
+        crate::model::resolve_model_base_url_with_policy(
+            backend,
+            Some(self.base_url.clone()),
+            self.allow_insecure_http,
+        )?;
+        if let Some(selector) = &self.api_key_env {
+            anyhow::ensure!(
+                crate::model::is_valid_env_name(selector),
+                "invalid request: invalid credential selector"
+            );
+        }
+        if let Some(tier) = &self.service_tier {
+            // Durable records can be replayed after account capabilities change.
+            // The model construction/send boundary checks current route entitlement.
+            let _: crate::model::ServiceTier = tier
+                .parse()
+                .map_err(|error: String| anyhow!("invalid request: {error}"))?;
+        }
+        if let Some(headers) = &self.extra_headers {
+            crate::model::validate_extra_headers(headers)?;
+        }
+        if let Some(effort) = &self.reasoning_effort {
+            let _: crate::model::ReasoningEffort =
+                serde_json::from_value(serde_json::Value::String(effort.clone()))
+                    .map_err(|_| anyhow!("invalid request: unknown reasoning effort"))?;
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -10,6 +79,10 @@ pub struct TaskLaunchRequest {
     pub request_id: String,
     pub project_id: String,
     pub invoking_session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_selection: Option<TaskModelSelection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_source: Option<crate::sessions::ProjectModelSourceRef>,
     pub git_ref: Option<String>,
     /// Required when initially binding a project without an invoking task.
     /// The binding persists independently of the ref selected for this launch.
@@ -38,6 +111,24 @@ impl TaskLaunchRequest {
             title.as_deref() == Some(self.title.as_str()),
             "invalid request: task title must be nonblank and trimmed"
         );
+        if let Some(selection) = &self.model_selection {
+            selection.validate()?;
+        }
+        if let Some(source) = &self.model_source {
+            anyhow::ensure!(
+                source.project_id == self.project_id
+                    && !source.session_id.is_empty()
+                    && source.config_version >= 0,
+                "invalid request: invalid project model source"
+            );
+            let selection = self.model_selection.as_ref().ok_or_else(|| {
+                anyhow!("invalid request: model source requires a selected model")
+            })?;
+            anyhow::ensure!(
+                selection.extra_headers.is_none(),
+                "invalid request: model source cannot be combined with explicit headers"
+            );
+        }
         for value in [&self.git_ref, &self.default_ref, &self.invoking_session_id]
             .into_iter()
             .flatten()
@@ -103,11 +194,23 @@ impl TaskLaunchPhase {
     }
 }
 
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct FrozenTaskHeaders(pub std::collections::BTreeMap<String, String>);
+
+impl std::fmt::Debug for FrozenTaskHeaders {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("FrozenTaskHeaders([redacted])")
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct TaskLaunchRecord {
     pub request: TaskLaunchRequest,
     pub source: TaskLaunchSource,
+    #[serde(skip)]
+    #[cfg_attr(feature = "openapi", schema(ignore))]
+    pub frozen_model_headers: Option<FrozenTaskHeaders>,
     pub session_id: String,
     #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub workspace_path: PathBuf,
@@ -156,9 +259,28 @@ fn load(conn: &Connection, request_id: &str) -> Result<Option<TaskLaunchRecord>>
             created_at,
             updated_at,
         )| {
+            let request: TaskLaunchRequest = serde_json::from_str(&request)?;
+            let mut source: serde_json::Value = serde_json::from_str(&source)?;
+            let frozen = source
+                .as_object_mut()
+                .ok_or_else(|| anyhow!("invalid task source receipt"))?
+                .remove("_nac_model_headers");
+            let frozen_model_headers = if request.model_source.is_some() {
+                let value = frozen.ok_or_else(|| anyhow!("invalid task model source receipt"))?;
+                let headers: std::collections::BTreeMap<String, String> =
+                    serde_json::from_value(value)
+                        .map_err(|_| anyhow!("invalid task model source receipt"))?;
+                crate::model::validate_extra_headers(&headers)
+                    .map_err(|_| anyhow!("invalid task model source receipt"))?;
+                Some(FrozenTaskHeaders(headers))
+            } else {
+                anyhow::ensure!(frozen.is_none(), "invalid task model source receipt");
+                None
+            };
             Ok(TaskLaunchRecord {
-                request: serde_json::from_str(&request)?,
-                source: serde_json::from_str(&source)?,
+                request,
+                source: serde_json::from_value(source)?,
+                frozen_model_headers,
                 session_id: session_id.clone(),
                 workspace_path: path.into(),
                 phase: serde_json::from_value(serde_json::Value::String(phase))?,
@@ -257,6 +379,28 @@ pub fn reserve_task_launch(path: &Path, request: TaskLaunchRequest, source: Task
         tx.execute("INSERT INTO project_git_sources(project_id,source_json) VALUES (?1,?2)",
             params![request.project_id,serde_json::to_string(&source)?])?;
     }
+    let frozen_headers = if let Some(model_source) = &request.model_source {
+        let selected = request.model_selection.as_ref().ok_or_else(|| anyhow!("invalid request: model source requires a selected model"))?;
+        let row: Option<ModelSourceRow> = tx.query_row(
+            "SELECT s.backend,s.base_url,s.allow_insecure_http,s.api_key_env,s.extra_headers_json,s.config_version
+             FROM sessions s JOIN session_projects sp ON sp.session_id=s.session_id JOIN projects p ON p.project_id=sp.project_id
+             WHERE s.session_id=?1 AND p.project_id=?2 AND s.behavior='direct' AND s.cwd=p.cwd AND s.sandbox_json IS NULL
+               AND s.host_id IS p.ssh_host AND s.ssh_port IS p.ssh_port AND s.ssh_identity_file IS p.ssh_identity_file
+               AND NOT EXISTS (SELECT 1 FROM traditional_children c WHERE c.child_session_id=s.session_id)",
+            params![model_source.session_id, model_source.project_id],
+            |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?)),
+        ).optional()?;
+        let (backend, base_url, allow_insecure, api_key_env, headers_json, version) = row.ok_or_else(|| anyhow!("conflict: project model source is unavailable"))?;
+        anyhow::ensure!(version == model_source.config_version && backend.as_deref() == Some(selected.backend.as_str())
+            && base_url == selected.base_url && allow_insecure == selected.allow_insecure_http && api_key_env == selected.api_key_env,
+            "conflict: project model source changed");
+        let headers: std::collections::BTreeMap<String, String> = match headers_json {
+            Some(json) => serde_json::from_str(&json).map_err(|_| anyhow!("conflict: project model source is invalid"))?,
+            None => Default::default(),
+        };
+        crate::model::validate_extra_headers(&headers).map_err(|_| anyhow!("conflict: project model source is invalid"))?;
+        Some(headers)
+    } else { None };
     let native = super::native_task_launches::reserved_identity(&tx, &request, &source)?;
     let scheduled = super::heartbeats::fresh_launch_for_request_with_connection(&tx, &request.request_id)?;
     anyhow::ensure!(native.is_none() || scheduled.is_none(), "conflict: native and scheduled launch ownership are mutually exclusive");
@@ -269,10 +413,14 @@ pub fn reserve_task_launch(path: &Path, request: TaskLaunchRequest, source: Task
     let canonical_store = std::fs::canonicalize(path)?;
     let workspace_path = canonical_store.parent().ok_or_else(|| anyhow!("store has no parent"))?
         .join("task-worktrees").join(&session_id);
+    let mut launch_source = serde_json::to_value(&source)?;
+    if let Some(headers) = frozen_headers {
+        launch_source.as_object_mut().ok_or_else(|| anyhow!("invalid task source receipt"))?.insert("_nac_model_headers".into(), serde_json::to_value(headers)?);
+    }
     tx.execute("INSERT INTO task_launches(request_id,project_id,session_id,request_json,source_json,workspace_path,phase,created_at,updated_at)
         VALUES (?1,?2,?3,?4,?5,?6,'pinned',?7,?7)",
         params![request.request_id,request.project_id,session_id,serde_json::to_string(&request)?,
-            serde_json::to_string(&source)?, workspace_path.to_string_lossy(),now_utc()])?;
+            serde_json::to_string(&launch_source)?, workspace_path.to_string_lossy(),now_utc()])?;
     let record = load(&tx, &request.request_id)?.ok_or_else(|| anyhow!("launch insert missing"))?;
     tx.commit()?;
     Ok(record)
@@ -368,6 +516,25 @@ pub(crate) fn publish_in_transaction(
             && snapshot.cwd == launch.workspace_path.join(&launch.source.subdirectory),
         "conflict: prepared session does not match retained launch"
     );
+    if launch.request.model_source.is_some() {
+        let selected = launch
+            .request
+            .model_selection
+            .as_ref()
+            .ok_or_else(|| anyhow!("invalid task model source receipt"))?;
+        let headers = launch
+            .frozen_model_headers
+            .as_ref()
+            .ok_or_else(|| anyhow!("invalid task model source receipt"))?;
+        anyhow::ensure!(
+            snapshot.backend.to_string() == selected.backend
+                && snapshot.base_url == selected.base_url
+                && snapshot.allow_insecure_http == selected.allow_insecure_http
+                && snapshot.api_key_env == selected.api_key_env
+                && snapshot.extra_headers == headers.0,
+            "conflict: prepared session does not match frozen model route"
+        );
+    }
     let now = now_utc();
     tx.execute("INSERT INTO session_presentations(session_id,title) VALUES (?1,?2) ON CONFLICT(session_id) DO UPDATE SET title=excluded.title",
         params![launch.session_id, launch.request.title])?;

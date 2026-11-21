@@ -57,10 +57,13 @@ function fixture(tagName = "TEXTAREA", retained = true, contentEditable = false)
     ipcRenderer.emit("nac:document", {}, { version: 1, nonce, incarnation, kind, ...extra });
   receive("activate", { visible: true });
   let request = 0;
-  const target = async () => {
-    receive("session_target", { targetMessage: { request: ++request } });
+  const target = async (generation = 1) => {
+    const before = sent.length;
+    receive("session_target", { generation, targetMessage: { request: ++request } });
     await new Promise(setImmediate);
-    return sent.filter((message) => message.kind === "target_settled").at(-1)?.outcome;
+    const receipt = sent.slice(before).find((message) =>
+      message.kind === "target_settled" || message.kind === "target_not_invoked");
+    return receipt?.kind === "target_not_invoked" ? "not_invoked" : receipt?.outcome;
   };
   return { port: page.__nacDesktop, events, receive, target, sent };
 }
@@ -111,7 +114,7 @@ test("retained draft does not bypass IME, shared modal deferral, owner or docume
   assert.equal(await f.target(), "opened");
   assert.equal(calls, 2);
   disconnect();
-  assert.equal(await f.target(), "unavailable");
+  assert.equal(await f.target(), "not_invoked");
   assert.equal(calls, 2);
   f.port.connectSessionTarget(async () => {
     calls++;
@@ -120,4 +123,56 @@ test("retained draft does not bypass IME, shared modal deferral, owner or docume
   f.receive("retire");
   await f.target();
   assert.equal(calls, 2);
+});
+
+test("missing or replaced owner proves non-invocation; an invoked request cannot be rearmed", async () => {
+  const f = fixture();
+  f.receive("session_target", { generation: 1, targetMessage: { request: 1 } });
+  assert.equal(f.sent.at(-1).kind, "target_not_invoked");
+  assert.equal(f.sent.at(-1).generation, 1);
+  let calls = 0;
+  const close = f.port.connectSessionTarget(async () => { calls++; return "opened"; });
+  f.receive("session_target", { generation: 1, targetMessage: { request: 1 } });
+  await new Promise(setImmediate);
+  assert.equal(calls, 1);
+  close();
+  f.port.connectSessionTarget(async () => { calls++; return "opened"; });
+  f.receive("session_target", { generation: 2, targetMessage: { request: 1 } });
+  assert.equal(f.sent.at(-1).kind, "target_settled");
+  assert.equal(f.sent.at(-1).outcome, "stale");
+  await new Promise(setImmediate);
+  assert.equal(calls, 1);
+});
+
+test("composition and unretained editors are final deferrals even with no owner", async () => {
+  const f = fixture("INPUT", false);
+  f.receive("session_target", { generation: 1, targetMessage: { request: 1 } });
+  assert.equal(f.sent.at(-1).kind, "target_settled");
+  assert.equal(f.sent.at(-1).outcome, "deferred");
+  const composing = fixture();
+  composing.events.emit("compositionstart");
+  composing.receive("session_target", { generation: 1, targetMessage: { request: 1 } });
+  assert.equal(composing.sent.at(-1).kind, "target_settled");
+  assert.equal(composing.sent.at(-1).outcome, "deferred");
+});
+
+
+test("retirement before the callback microtask cannot invoke or rearm a consumed request", async () => {
+  const f = fixture();
+  let calls = 0;
+  const disconnect = f.port.connectSessionTarget(async () => { calls++; return "opened"; });
+  f.receive("session_target", { generation: 1, targetMessage: { request: 1 } });
+  disconnect();
+  f.port.connectSessionTarget(async () => { calls++; return "opened"; });
+  await new Promise(setImmediate);
+  assert.equal(calls, 0);
+  // A retired connection's consumed callback produces no acknowledgement;
+  // the main flight remains bounded by its original timeout.
+  assert.equal(f.sent.some((message) => message.kind === "target_settled"), false);
+  f.receive("session_target", { generation: 2, targetMessage: { request: 1 } });
+  assert.equal(f.sent.at(-1).kind, "target_settled");
+  assert.equal(f.sent.at(-1).outcome, "stale");
+  assert.equal(f.sent.some((message) => message.kind === "target_not_invoked"), false);
+  await new Promise(setImmediate);
+  assert.equal(calls, 0);
 });

@@ -1,6 +1,4 @@
 import "@/app/components/projects/navigation.css";
-import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
-import { useSessionBehaviorIconVisible } from "@/app/features/ui-policy/useSessionBehaviorIconVisible";
 import { useMemo } from "react";
 
 import { ChatSessionButton } from "@/app/atoms";
@@ -10,7 +8,6 @@ import { useNow } from "@/app/hooks/useNow";
 import { useSessionTitle } from "@/app/hooks/useSessionTitle";
 import { isActiveRun } from "@/app/lib/format";
 import { groupByRecency } from "@/app/lib/projects";
-import { sessionBehaviorPresentation } from "@/app/lib/sessionBehavior";
 import type { ManagedSessionSummary } from "@/app/types/api";
 
 /** Date buckets only shift once a day, so a minute of resolution is plenty. */
@@ -43,8 +40,6 @@ export function ChatSessionList({
   isMobile = false,
   emptyLabel = "No chats",
 }: ChatSessionListProps) {
-  const policy = useUiPolicy();
-  const showBehaviorIcon = useSessionBehaviorIconVisible();
   const now = useNow(RECENCY_TICK_MS);
   const sessionTitle = useSessionTitle();
   const groups = useMemo(
@@ -74,14 +69,11 @@ export function ChatSessionList({
           <div className="flex flex-col gap-1">
             {group.items.map((entry) => {
               const title = sessionTitle(entry.summary);
-              const behavior = sessionBehaviorPresentation(entry.summary.behavior);
               return (
                 <ChatSessionButton
                   key={entry.summary.session_id}
                   title={title}
                   behavior={entry.summary.behavior}
-                  showBehaviorIcon={showBehaviorIcon}
-                  behaviorLabel={policy.orchestrationEnabled ? behavior.label : undefined}
                   active={entry.summary.session_id === activeSessionId}
                   running={isActiveRun(entry.active_run)}
                   forkedFromTitle={entry.summary.forked_from?.title}

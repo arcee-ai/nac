@@ -64,13 +64,12 @@ export function ModelPicker({
   usableProvider = providerReady,
   onPick,
   onEffort,
-  onAdvanced,
 }: {
   /** Shown when the model is not in the catalog (an older saved setup). */
   fallbackLabel: string | null;
   pending: boolean;
   value: { backend: BackendKind; model: string } | null;
-  /** A reasoning level; "" only while there is no model. */
+  /** A reasoning level; "" uses the model default. */
   effort: string;
   supportedEfforts: readonly ReasoningEffort[];
   speed?: ReturnType<typeof speedForRoute> & {
@@ -87,8 +86,6 @@ export function ModelPicker({
     clearIncompatibleSpeed: boolean,
   ) => { error: string; confirmSpeedClear?: boolean } | { notice: string } | void;
   onEffort: (effort: string) => void;
-  /** Light-model and preset options, where orchestration still offers them. */
-  onAdvanced?: () => void;
 }) {
   const navigate = useNavigate();
   const effortGroup = useId();
@@ -415,16 +412,6 @@ export function ModelPicker({
       </div>
       <MenuSeparator />
       <Menu label="Model options">
-        {onAdvanced ? (
-          <MenuItem
-            icon={IconName.Controls}
-            label="Light model and presets…"
-            onSelect={() => {
-              close();
-              onAdvanced();
-            }}
-          />
-        ) : null}
         <MenuItem
           icon={IconName.Key}
           label="Connect more providers"

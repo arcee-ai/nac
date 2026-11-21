@@ -100,6 +100,8 @@ pub(crate) fn default_permission_reviewer(
     }
     permission_reviewer::from_environment()
 }
+pub(crate) use backend::{auto_select_api_key_env, is_valid_env_name};
+pub(crate) use client::validate_extra_headers;
 pub use providers::{
     list_managed_provider_models, list_provider_models, list_provider_models_with_http_policy,
     provider_default_base_url, provider_uses_api_key, ProviderModel,

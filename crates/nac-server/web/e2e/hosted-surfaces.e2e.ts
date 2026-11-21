@@ -34,7 +34,10 @@ async function showFiles(page: Page, mobile: boolean) {
     return;
   }
   await showSidePanel(page);
-  const panels = page.getByRole("tablist", { name: "Session panels", exact: true });
+  const panels = page.getByRole("tablist", {
+    name: "Session panels",
+    exact: true,
+  });
   const files = panels.getByRole("tab", { name: "Files", exact: true });
   await files.click();
   await expect(files).toHaveAttribute("aria-selected", "true");
@@ -153,7 +156,7 @@ for (const mobile of [false, true]) {
       harness.provider.enqueue(
         token,
         { token },
-        { kind: "text", text: token + " done", stream: true },
+        { kind: "text", text: token + " done", stream: "request" },
       );
       const submitted = await request.post(`${harness.baseUrl}/sessions/${id}/runs`, {
         data: { prompt: token },
@@ -195,7 +198,10 @@ for (const mobile of [false, true]) {
         await page.getByPlaceholder("Find or create a branch").fill("injected-feature");
         await page.getByRole("button", { name: "Create injected-feature", exact: true }).click();
         await expect(
-          page.getByRole("button", { name: "Branch: injected-feature", exact: true }),
+          page.getByRole("button", {
+            name: "Branch: injected-feature",
+            exact: true,
+          }),
         ).toBeVisible();
       });
       await openFileList(page, mobile);
@@ -207,8 +213,19 @@ for (const mobile of [false, true]) {
         .poll(async () => (await git("log", "-1", "--format=%s")).stdout.trim())
         .toBe("injected accepted commit");
       await withBranchPicker(page, mobile, async () => {
-        await page.getByRole("button", { name: "Branch: injected-feature", exact: true }).click();
+        await page
+          .getByRole("button", {
+            name: "Branch: injected-feature",
+            exact: true,
+          })
+          .click();
+        const switched = page.waitForResponse(
+          (response) =>
+            response.request().method() === "POST" &&
+            new URL(response.url()).pathname.endsWith(`/sessions/${id}/workspace/branches`),
+        );
         await page.getByRole("button", { name: "other", exact: true }).click();
+        expect((await switched).ok()).toBe(true);
         await expect(
           page.getByRole("button", { name: "Branch: other", exact: true }),
         ).toBeVisible();
@@ -218,15 +235,29 @@ for (const mobile of [false, true]) {
       harness.provider.enqueue(
         "REFRESH_DIRTY",
         { token: "REFRESH_DIRTY" },
-        { kind: "text", text: "dirty refresh done", stream: true },
+        { kind: "text", text: "dirty refresh done", stream: "request" },
       );
-      expect(
-        (
-          await request.post(`${harness.baseUrl}/sessions/${id}/runs`, {
-            data: { prompt: "REFRESH_DIRTY" },
-          })
-        ).ok(),
-      ).toBe(true);
+      // The preceding workspace operation may still hold the local admission
+      // gate. Retry only its explicit pre-admission rejection, never an
+      // accepted or uncertain submission.
+      await expect
+        .poll(
+          async () => {
+            const response = await request.post(`${harness.baseUrl}/sessions/${id}/runs`, {
+              data: { prompt: "REFRESH_DIRTY" },
+            });
+            if (response.status() === 409) {
+              expect(await response.json()).toEqual({
+                error: "session is busy with a local operation",
+              });
+              return false;
+            }
+            expect(response.status()).toBe(202);
+            return true;
+          },
+          { timeout: 15_000 },
+        )
+        .toBe(true);
       await waitForRunIdle(request, harness, id);
       await openFileList(page, mobile);
       await expect(page.getByRole("button", { name: "Commit", exact: true })).toBeEnabled();
@@ -280,16 +311,24 @@ for (const mobile of [false, true]) {
     request,
   }) => {
     if (mobile) await page.setViewportSize({ width: 390, height: 844 });
-    const project = await createProject(request, harness, { name: "Injected settings" });
+    const project = await createProject(request, harness, {
+      name: "Injected settings",
+    });
     const id = await createSession(request, harness, "direct", project);
     const presentationPath = `/sessions/${id}/presentation`;
     const projectsBefore = await (await request.get(`${harness.baseUrl}/projects`)).json();
     const fixture = await startHostedFixture(harness, id);
-    const summary = async (): Promise<{ title: string; presentation_version: number }> =>
+    const summary = async (): Promise<{
+      title: string;
+      presentation_version: number;
+    }> =>
       (await (await request.get(`${harness.baseUrl}/sessions`)).json()).find(
         (entry: { summary: { session_id: string } }) => entry.summary.session_id === id,
       ).summary;
-    const notices = page.getByRole("region", { name: "Notifications", exact: true });
+    const notices = page.getByRole("region", {
+      name: "Notifications",
+      exact: true,
+    });
     try {
       await page.goto(fixture.baseUrl);
       const dialog = await openSessionRename(page);
@@ -349,7 +388,9 @@ for (const mobile of [false, true]) {
     // This local outgoing stdio double has one inert tool; no inbound OAuth or remote service.
     const script = path.join(harness.runRoot, "outgoing-mcp.cjs");
     await fs.writeFile(script, STDIO_MCP_SERVER);
-    const project = await createProject(request, harness, { name: "Injected outgoing MCP" });
+    const project = await createProject(request, harness, {
+      name: "Injected outgoing MCP",
+    });
     const id = await createSession(request, harness, "direct", project);
     const fixture = await startHostedFixture(harness, id);
     try {
@@ -383,7 +424,10 @@ for (const mobile of [false, true]) {
       await expect(editing.getByRole("textbox", { name: "Argument 2" })).toHaveValue(allowlist);
       for (const action of ["Connect", "Reload", "Disconnect"] as const) {
         const actionPath = `/mcp_library/servers/injected_fixture/${action.toLowerCase()}`;
-        const button = editing.getByRole("button", { name: action, exact: true });
+        const button = editing.getByRole("button", {
+          name: action,
+          exact: true,
+        });
         // Reload retains "connected" while pending. Wait for this operation,
         // rather than reading the old status and clicking a newly disabled button.
         const [response] = await Promise.all([
@@ -416,7 +460,10 @@ for (const mobile of [false, true]) {
       if (mobile) {
         await page.getByRole("button", { name: "renamed_fixture", exact: true }).click();
         // Field values are available before the phone panel finishes sliding in.
-        const reopened = page.getByRole("dialog", { name: "renamed_fixture", exact: true });
+        const reopened = page.getByRole("dialog", {
+          name: "renamed_fixture",
+          exact: true,
+        });
         await expect(reopened).toHaveClass(/\btranslate-x-0\b/);
         await expect
           .poll(() =>
@@ -465,21 +512,26 @@ for (const mobile of [false, true]) {
     request,
   }) => {
     if (mobile) await page.setViewportSize({ width: 390, height: 844 });
-    const project = await createProject(request, harness, { name: "Injected saved configuration" });
+    const project = await createProject(request, harness, {
+      name: "Injected provider connection",
+    });
     const id = await createSession(request, harness, "direct", project);
-    const canary = "injected-preset-dummy-key-only";
-    const created = await request.post(`${harness.baseUrl}/model-configs`, {
+    const canary = "injected-provider-dummy-key-only";
+    const created = await request.post(`${harness.baseUrl}/provider-connections`, {
       data: {
-        name: "Injected Fireworks account",
         backend: "fireworks-chat",
-        model: "gpt-5.6-sol",
         base_url: harness.provider.baseUrl,
+        allow_insecure_http: true,
         api_key: canary,
       },
     });
     expect(created.ok()).toBe(true);
     const saved = await created.json();
-    expect(saved.api_key_env).toMatch(/^NAC_CONFIG_/);
+    const catalog = await (await request.get(`${harness.baseUrl}/models`)).json();
+    const savedSelector = catalog.providers.find(
+      (provider: { id: string }) => provider.id === "fireworks-chat",
+    )?.connection?.api_key_env;
+    expect(savedSelector).toEqual(expect.any(String));
     expect(JSON.stringify(saved)).not.toContain(canary);
     const fixture = await startHostedFixture(harness, id);
     try {
@@ -499,7 +551,7 @@ for (const mobile of [false, true]) {
       expect(payload).toMatchObject({
         backend: "fireworks-chat",
         model: "gpt-5.6-sol",
-        api_key_env: saved.api_key_env,
+        api_key_env: savedSelector,
       });
       expect(JSON.stringify(payload)).not.toContain(canary);
       expect((await (await switched).response())?.ok()).toBe(true);
@@ -511,7 +563,9 @@ for (const mobile of [false, true]) {
         rebound
           .getByText("Fireworks", { exact: true })
           .locator("..")
-          .getByRole("menuitemradio", { name: /^(?:GPT-5\.6 Sol|gpt-5\.6-sol)/i }),
+          .getByRole("menuitemradio", {
+            name: /^(?:GPT-5\.6 Sol|gpt-5\.6-sol)/i,
+          }),
       ).toHaveAttribute("aria-checked", "true");
       await expect(page.getByText(canary, { exact: true })).toHaveCount(0);
       expect(
@@ -534,13 +588,18 @@ test("composer fences configuration writes after uncertain settlement or a newer
   const id = await createSession(request, harness, "direct", project);
   const resource = `/sessions/${id}/config`;
   const configUrl = `${harness.baseUrl}${resource}`;
-  const config = async (): Promise<{ config_version: number; reasoning_effort: string }> =>
-    (await request.get(configUrl)).json();
+  const config = async (): Promise<{
+    config_version: number;
+    reasoning_effort: string;
+  }> => (await request.get(configUrl)).json();
   const initial = await config();
   expect(initial.reasoning_effort).toBe("high");
   const fixture = await startHostedFixture(harness, id);
   const chip = page.getByRole("button", { name: /^Model: / });
-  const notices = page.getByRole("region", { name: "Notifications", exact: true });
+  const notices = page.getByRole("region", {
+    name: "Notifications",
+    exact: true,
+  });
   const openEffort = async () => {
     await chip.click();
     return page.getByRole("dialog", { name: "Model settings", exact: true });
@@ -578,7 +637,10 @@ test("composer fences configuration writes after uncertain settlement or a newer
     await expect(chip).toHaveAccessibleName(/Medium reasoning/);
     await openEffort();
     const newer = await request.patch(configUrl, {
-      data: { expected_config_version: accepted.config_version, reasoning_effort: "low" },
+      data: {
+        expected_config_version: accepted.config_version,
+        reasoning_effort: "low",
+      },
     });
     expect(newer.ok()).toBe(true);
     await effort.getByRole("radio", { name: "High", exact: true }).press("Space");

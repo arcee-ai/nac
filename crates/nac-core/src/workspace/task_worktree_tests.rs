@@ -66,9 +66,11 @@ fn fixture() -> (PathBuf, crate::projects::ProjectRecord, TaskLaunchRequest) {
     )
     .unwrap();
     let request = TaskLaunchRequest {
+        model_source: None,
         request_id: uuid::Uuid::new_v4().to_string(),
         project_id: "project".into(),
         invoking_session_id: None,
+        model_selection: None,
         git_ref: Some("dev".into()),
         default_ref: Some("dev".into()),
         title: "Isolated task".into(),

@@ -9,8 +9,7 @@ test("production workspace streams, asks permission and a question, and keeps Ma
   const project = await c.project();
   const session = await c.session("direct", project);
   for (const behavior of ["orchestrator", "direct-with-orchestrator"]) {
-    const id = await c.session(behavior, project);
-    expect((await c.api(`/sessions/${id}`)).metadata.behavior).toBe(behavior);
+    await expect(c.session(behavior, project)).rejects.toThrow();
   }
   await fs.writeFile(path.join(c.directory, "outside.txt"), "Electron tool result\n");
   c.provider.enqueue(

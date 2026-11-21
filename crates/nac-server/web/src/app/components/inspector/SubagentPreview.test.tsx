@@ -5,7 +5,6 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, expect, it, vi } from "vitest";
 
-import { IconName } from "@/app/atoms";
 import { SubagentPreview } from "./SubagentPreview";
 import {
   assistant,
@@ -96,7 +95,7 @@ it("shows supplied live reasoning through settlement and reconciles the stored a
           sessionId="child"
           title="Child"
           fallbackText={null}
-          icon={IconName.Chat}
+
           onOpen={() => {}}
         />
       </MemoryRouter>
@@ -163,7 +162,7 @@ it.each([false, true])(
             title="Child"
             fallbackText={null}
             relationship={{ status, generation: 2, runId: "run" }}
-            icon={IconName.Chat}
+
             onOpen={() => {}}
           />
         </MemoryRouter>
@@ -214,7 +213,7 @@ it.each([
             sessionId="child"
             title="Child"
             fallbackText={null}
-            icon={IconName.Chat}
+
             onOpen={() => {}}
           />
         </MemoryRouter>
@@ -313,7 +312,7 @@ it("retains an explicit activity fold choice as the child's run settles", async 
           sessionId="child"
           title="Child"
           fallbackText={null}
-          icon={IconName.Chat}
+
           onOpen={() => {}}
         />
       </MemoryRouter>
@@ -379,7 +378,7 @@ it("pins a child approval-wait step without presenting a second approval prompt"
           sessionId="child"
           title="Child"
           fallbackText={null}
-          icon={IconName.Chat}
+
           onOpen={() => {}}
         />
       </MemoryRouter>
@@ -415,7 +414,7 @@ it("explains a failed child snapshot, retains Open and retries without changing 
           sessionId="child"
           title="Audit history"
           fallbackText="Retained report"
-          icon={IconName.Chat}
+
           onOpen={open}
         />
       </MemoryRouter>
@@ -483,7 +482,7 @@ it.each(["rejected", "generation-fenced"] as const)(
             sessionId="child"
             title="Audit history"
             fallbackText="Retained report"
-            icon={IconName.Chat}
+
             onOpen={open}
           />
         </MemoryRouter>

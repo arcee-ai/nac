@@ -95,6 +95,12 @@ impl<'a> TaskLaunchApplication<'a> {
             self.manager.managed_host().is_none(),
             "invalid request: retained tasks require an unmanaged Local host"
         );
+        let legacy_scheduled = scheduled
+            .as_ref()
+            .map(nac_core::store::PreparedFreshTaskLaunch::legacy_frozen_model)
+            .transpose()?
+            .flatten()
+            .is_some();
         let manager = self.manager.clone();
         let (reply, response) = tokio::sync::oneshot::channel();
         let wait_for_preparation = scheduled.is_some();
@@ -102,7 +108,9 @@ impl<'a> TaskLaunchApplication<'a> {
         // blocking store calls, Git, or publication from the serving lifetime.
         let preparation = tokio::spawn(async move {
             let _admission = admission;
-            let prepared = Self::resolve_and_reserve(&manager, request, preparation_lease).await;
+            let prepared =
+                Self::resolve_and_reserve(&manager, request, preparation_lease, legacy_scheduled)
+                    .await;
             let (mut record, lease) = match prepared {
                 Ok(prepared) => prepared,
                 Err(error) => {
@@ -203,6 +211,7 @@ impl<'a> TaskLaunchApplication<'a> {
         manager: &SessionManager,
         request: TaskLaunchRequest,
         preparation_lease: Option<sessions::SessionOperationLease>,
+        legacy_scheduled: bool,
     ) -> Result<(TaskLaunchRecord, Option<sessions::SessionOperationLease>)> {
         manager.inner.task_preparations.git.check_running()?;
         let path = manager.inner.store_path.clone();
@@ -231,6 +240,10 @@ impl<'a> TaskLaunchApplication<'a> {
                     );
                     return Ok((lease, Some(existing.clone()), None));
                 }
+                anyhow::ensure!(
+                    intent.model_selection.is_some() || legacy_scheduled,
+                    "invalid request: select a model for the task session"
+                );
                 anyhow::ensure!(
                     lease.is_some(),
                     "conflict: launch source resolution is in progress; retry the same request"

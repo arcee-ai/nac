@@ -8,7 +8,7 @@ import { reverseDirectEvidence } from './direct-evidence-wiring.mjs';
 const YAML = createRequire(import.meta.url)('yaml');
 const read = name => YAML.parse(fs.readFileSync(`.github/workflows/${name}.yml`, 'utf8'));
 const cases = [
-  ['stable-release', 'test-workspace', 'Retain managed and direct load evidence'],
+  ['stable-release', 'test-workspace', 'Retain direct load evidence'],
   ['managed-fault', 'fault', 'Retain private candidate fault evidence'],
   ['managed-quality', 'quality', 'Retain standalone private candidate evidence'],
 ];

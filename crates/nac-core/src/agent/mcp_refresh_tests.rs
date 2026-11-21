@@ -250,11 +250,7 @@ async fn mcp_mount_refresh_keeps_approval_wait_bound_and_invokes_exactly_once() 
     let second = RecordingMcpServer::start();
     let home = TestHome::new("mcp-refresh-approval", "recorded", &first.url);
     configure(&home, &first.url, "approval = \"ask\"");
-    let mut agent = direct(
-        &home,
-        crate::sessions::SessionBehavior::DirectWithOrchestrator,
-    )
-    .await;
+    let mut agent = direct(&home, crate::sessions::SessionBehavior::Direct).await;
     names(&mut agent);
     let broker = agent.configure_permission_broker(0).unwrap();
     let bus = crate::events::SessionEventBus::new(agent.tool_runtime.session_id.clone());
@@ -484,38 +480,26 @@ async fn mcp_mount_refresh_preserves_an_inflight_transport_until_its_one_settlem
 }
 
 #[tokio::test]
-async fn mcp_mount_refresh_orchestrators_propagate_only_to_their_own_worker_boundaries() {
+async fn mcp_mount_refresh_keeps_parent_and_child_mounts_independent() {
     let _env = crate::TEST_ENV_LOCK.lock().unwrap();
     let server = RecordingMcpServer::start();
     let home = TestHome::with_server(
-        "mcp-refresh-workers",
+        "mcp-refresh-children",
         "recorded",
         &server.url,
         "enabled = false",
     );
-    let mut orchestrator = direct(&home, crate::sessions::SessionBehavior::Orchestrator).await;
-    let mut separate = direct(
-        &home,
-        crate::sessions::SessionBehavior::DirectWithOrchestrator,
-    )
-    .await;
+    let mut parent = direct(&home, crate::sessions::SessionBehavior::Direct).await;
     let child = direct(&home, crate::sessions::SessionBehavior::Direct).await;
     let child_id = child.tool_runtime.session_id.clone().unwrap();
-    let parent_id = separate.tool_runtime.session_id.clone().unwrap();
+    let parent_id = parent.tool_runtime.session_id.clone().unwrap();
     let store_path = home.path.join("store.db");
-    let child_relationship = crate::store::create_traditional_child_relationship(
+    let relationship = crate::store::create_traditional_child_relationship(
         &store_path,
         &parent_id,
         &child_id,
         crate::store::GENERAL_CHILD_PROFILE,
         "fixture child",
-    )
-    .unwrap();
-    let managed_relationship = crate::store::create_managed_orchestrator_relationship(
-        &store_path,
-        &parent_id,
-        orchestrator.tool_runtime.session_id.as_deref().unwrap(),
-        "fixture orchestrator",
     )
     .unwrap();
     drop(child);
@@ -530,51 +514,12 @@ async fn mcp_mount_refresh_orchestrators_propagate_only_to_their_own_worker_boun
     .await
     .unwrap()
     .agent;
-    let owner = orchestrator.tool_runtime.session_id.clone().unwrap();
-    let options = runtime::ManagedWorkerOptions {
-        workspace_cwd: home.path.join("repo"),
-        config_cwd: Some(home.path.join("repo")),
-        dispatch: runtime::WorkerDispatchOptions {
-            session_id: owner,
-            thread_name: "fixture".to_string(),
-            dispatch_id: "fixture-dispatch".to_string(),
-            action: "fixture".to_string(),
-            source_threads: Vec::new(),
-            skills: Vec::new(),
-        },
-        store: StoreOptions {
-            store_path: Some(home.path.join("store.db")),
-        },
-        model: model_options(),
-        sandbox: Default::default(),
-        ssh: Default::default(),
-    };
-    let mut worker = runtime::build_managed_worker_config(options, &runtime::NacConfig::default())
-        .await
-        .unwrap()
-        .agent;
-    assert!(!names(&mut worker).contains(&ECHO.to_string()));
     configure(&home, &server.url, "approval = \"allow\"");
-    request(&orchestrator, 0);
-    orchestrator.admit_mcp_mount_refresh().await.unwrap();
-    assert!(
-        !names(&mut orchestrator).contains(&ECHO.to_string()),
-        "primary taxonomy must not change"
-    );
-    separate.admit_mcp_mount_refresh().await.unwrap();
-    assert!(!names(&mut separate).contains(&ECHO.to_string()));
-    worker.admit_mcp_mount_refresh().await.unwrap();
-    assert!(names(&mut worker).contains(&ECHO.to_string()));
-    assert_eq!(worker.mcp_mounts.revision(), 1);
-    assert_eq!(separate.mcp_mounts.revision(), 0);
-    request(&separate, 0);
-    separate.admit_mcp_mount_refresh().await.unwrap();
-    assert!(names(&mut separate).contains(&ECHO.to_string()));
+    request(&parent, 0);
+    parent.admit_mcp_mount_refresh().await.unwrap();
+    assert!(names(&mut parent).contains(&ECHO.to_string()));
     child.admit_mcp_mount_refresh().await.unwrap();
-    assert!(
-        !names(&mut child).contains(&ECHO.to_string()),
-        "parent refresh cannot mutate traditional children"
-    );
+    assert!(!names(&mut child).contains(&ECHO.to_string()));
     request(&child, 0);
     child.admit_mcp_mount_refresh().await.unwrap();
     assert!(names(&mut child).contains(&ECHO.to_string()));
@@ -582,16 +527,7 @@ async fn mcp_mount_refresh_orchestrators_propagate_only_to_their_own_worker_boun
         crate::store::load_traditional_child(&store_path, &child_id)
             .unwrap()
             .unwrap(),
-        child_relationship
-    );
-    assert_eq!(
-        crate::store::load_managed_orchestrator(
-            &store_path,
-            &managed_relationship.orchestrator_session_id
-        )
-        .unwrap()
-        .unwrap(),
-        managed_relationship
+        relationship
     );
 }
 
@@ -753,7 +689,7 @@ async fn mcp_mount_refresh_retains_ssh_backend_and_never_spawns_stdio() {
         &server.url,
         "enabled = false",
     );
-    let owner = direct(&home, crate::sessions::SessionBehavior::Orchestrator).await;
+    let owner = direct(&home, crate::sessions::SessionBehavior::Direct).await;
     let store = owner.tool_runtime.store_path.clone();
     let session = owner.tool_runtime.session_id.clone().unwrap();
     drop(owner);
@@ -761,31 +697,15 @@ async fn mcp_mount_refresh_retains_ssh_backend_and_never_spawns_stdio() {
     saved.ssh = Some(crate::sandbox::SshConnection::new("fixture.invalid"));
     saved.cwd = PathBuf::from("/remote/fixture");
     crate::sessions::save_session(&store, &saved).unwrap();
-    // Worker construction and HTTP MCP do not contact the SSH host. This is
+    // Resume construction and HTTP MCP do not contact the SSH host. This is
     // a construction-policy fixture, not live SSH infrastructure acceptance.
-    let mut worker = runtime::build_managed_worker_config(
-        runtime::ManagedWorkerOptions {
-            workspace_cwd: saved.cwd,
-            config_cwd: Some(home.path.clone()),
-            dispatch: runtime::WorkerDispatchOptions {
-                session_id: session,
-                thread_name: "fixture".to_string(),
-                dispatch_id: "fixture-ssh-dispatch".to_string(),
-                action: "fixture".to_string(),
-                source_threads: Vec::new(),
-                skills: Vec::new(),
-            },
-            store: StoreOptions {
-                store_path: Some(store),
-            },
-            model: model_options(),
-            sandbox: Default::default(),
-            ssh: runtime::SshOptions {
-                host: Some("fixture.invalid".to_string()),
-                ..Default::default()
-            },
-        },
+    let mut worker = runtime::build_resume_config_for_session(
+        store,
+        &session,
         &runtime::NacConfig::default(),
+        home.path.join("repo"),
+        None,
+        runtime::ResumeModelOptions::default(),
     )
     .await
     .unwrap()

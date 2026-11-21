@@ -69,7 +69,7 @@ pub fn new_snapshot(
     let now = now_utc();
     SessionSnapshot {
         session_id,
-        behavior: SessionBehavior::Orchestrator,
+        behavior: SessionBehavior::Direct,
         project_id: None,
         cwd,
         model,

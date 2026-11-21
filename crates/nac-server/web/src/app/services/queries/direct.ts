@@ -1,5 +1,4 @@
 import { useNativeRuntime } from "@/app/runtime/RuntimeContext";
-import { useUiPolicy } from "@/app/features/ui-policy/UiPolicyContext";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { queryKeys } from "@/app/services/queries/keys";
@@ -7,12 +6,10 @@ import type {
   CreateGoalRequest,
   InboxDelivery,
   InboxItem,
-  ManagedOrchestratorRecord,
   PermissionApprovalMode,
   PermissionReply,
   PermissionStateResponse,
   SessionGoalRecord,
-  StartManagedOrchestratorRequest,
   StartTraditionalChildRequest,
   TraditionalChildRecord,
   UpdateGoalRequest,
@@ -260,73 +257,6 @@ export function useCancelTraditionalChild() {
         queryKeys.traditionalChildren(variables.sessionId),
         (children = []) =>
           acceptSubagentRecord(children, child, (record) => record.child_session_id),
-      );
-    },
-  });
-}
-
-export function useManagedOrchestrators(sessionId: string, enabled: boolean) {
-  const { api } = useNativeRuntime();
-
-  const policy = useUiPolicy();
-  enabled = enabled && policy.orchestrationEnabled;
-  return useQuery<ManagedOrchestratorRecord[]>({
-    queryKey: queryKeys.managedOrchestrators(sessionId),
-    queryFn: ({ signal }) => api.listManagedOrchestrators(sessionId, signal),
-    enabled,
-    refetchInterval: enabled ? 1_000 : false,
-    retry: false,
-    structuralSharing: (previous, incoming) =>
-      acceptSubagentList(
-        previous as ManagedOrchestratorRecord[] | undefined,
-        incoming as ManagedOrchestratorRecord[],
-        (record) => record.orchestrator_session_id,
-      ),
-  });
-}
-
-export function useStartManagedOrchestrator() {
-  const { api } = useNativeRuntime();
-
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: ({
-      sessionId,
-      payload,
-    }: {
-      sessionId: string;
-      payload: StartManagedOrchestratorRequest;
-    }) => api.startManagedOrchestrator(sessionId, payload),
-    onSuccess: (orchestrator, variables) => {
-      client.setQueryData<ManagedOrchestratorRecord[]>(
-        queryKeys.managedOrchestrators(variables.sessionId),
-        (orchestrators = []) =>
-          acceptSubagentRecord(
-            orchestrators,
-            orchestrator,
-            (record) => record.orchestrator_session_id,
-          ),
-      );
-    },
-  });
-}
-
-export function useCancelManagedOrchestrator() {
-  const { api } = useNativeRuntime();
-
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: ({ sessionId, orchestratorId }: { sessionId: string; orchestratorId: string }) =>
-      api.cancelManagedOrchestrator(sessionId, orchestratorId),
-    onSuccess: (orchestrator, variables) => {
-      client.setQueryData<ManagedOrchestratorRecord[]>(
-        queryKeys.managedOrchestrators(variables.sessionId),
-        (orchestrators = []) =>
-          acceptSubagentRecord(
-            orchestrators,
-            orchestrator,
-            (record) => record.orchestrator_session_id,
-          ),
       );
     },
   });

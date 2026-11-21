@@ -22,7 +22,7 @@ import {
   useSessionPermissions,
   useTraditionalChildren,
   useWorkspaceFiles,
-  useModelConfigs,
+  useModelCatalog,
   useMcpServers,
   useStoredCredentials,
   useProviderModels,
@@ -49,8 +49,6 @@ afterEach(() => {
 function instance(name: string) {
   const fetch = vi.fn<typeof globalThis.fetch>(async (input) => {
     const path = String(input).replace(`/${name}`, "");
-    if (path === "/ui-config")
-      return Response.json({ orchestration_enabled: false, diagnostic: null });
     if (path === "/projects") return Response.json({ projects: [] });
     if (path.startsWith("/sessions?") || path === "/sessions") return Response.json([]);
     if (path === "/sessions/same/children") return Response.json([]);
@@ -87,7 +85,7 @@ function QueryOwners() {
   const permissions = useSessionPermissions("same", true);
   const children = useTraditionalChildren("same", true);
   const files = useWorkspaceFiles("same");
-  const models = useModelConfigs();
+  const models = useModelCatalog();
   const mcp = useMcpServers();
   const credentials = useStoredCredentials();
   const queries = [

@@ -19,7 +19,6 @@ function renderFile(
     sessionId: "session",
     resolveSession: vi.fn(),
     openSubagent: vi.fn(),
-    openWorkset: vi.fn(),
     workspaceRoots,
     filePathPrefix,
     openFile,

@@ -21,17 +21,6 @@ impl std::fmt::Display for RequestConfigurationError {
 
 impl std::error::Error for RequestConfigurationError {}
 
-pub(crate) fn validate_steering_instruction(
-    instruction: &str,
-) -> std::result::Result<(), RequestConfigurationError> {
-    if instruction.trim().is_empty() {
-        return Err(RequestConfigurationError(
-            "steering instruction must not be empty or whitespace-only".to_string(),
-        ));
-    }
-    Ok(())
-}
-
 pub(crate) fn request_configuration_error(message: impl Into<String>) -> anyhow::Error {
     anyhow!(RequestConfigurationError(message.into()))
 }

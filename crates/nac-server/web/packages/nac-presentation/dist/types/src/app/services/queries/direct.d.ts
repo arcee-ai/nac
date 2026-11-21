@@ -1,4 +1,4 @@
-import type { CreateGoalRequest, InboxDelivery, PermissionApprovalMode, PermissionReply, StartManagedOrchestratorRequest, StartTraditionalChildRequest, UpdateGoalRequest } from "../../types/api";
+import type { CreateGoalRequest, InboxDelivery, PermissionApprovalMode, PermissionReply, StartTraditionalChildRequest, UpdateGoalRequest } from "../../types/api";
 export declare function useSessionPermissions(sessionId: string, enabled: boolean, poll?: boolean): import("@tanstack/react-query").UseQueryResult<NoInfer<{
     approval_mode: import("../../types/openapi.generated").components["schemas"]["PermissionApprovalMode"];
     authorizable_review_ids?: string[];
@@ -175,60 +175,6 @@ export declare function useCancelTraditionalChild(): import("@tanstack/react-que
 }, Error, {
     sessionId: string;
     childId: string;
-}, unknown>;
-export declare function useManagedOrchestrators(sessionId: string, enabled: boolean): import("@tanstack/react-query").UseQueryResult<NoInfer<{
-    completion_inbox_id?: number | null;
-    created_at: string;
-    description: string;
-    execution_mode?: import("../../types/openapi.generated").components["schemas"]["TraditionalChildExecutionMode"] | null;
-    failure?: string | null;
-    generation: number;
-    orchestrator_session_id: string;
-    parent_session_id: string;
-    report?: string | null;
-    root_session_id: string;
-    run_id?: string | null;
-    status: import("../../types/openapi.generated").components["schemas"]["TraditionalChildStatus"];
-    updated_at: string;
-    version: number;
-}[]>, Error>;
-export declare function useStartManagedOrchestrator(): import("@tanstack/react-query").UseMutationResult<{
-    completion_inbox_id?: number | null;
-    created_at: string;
-    description: string;
-    execution_mode?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["TraditionalChildExecutionMode"] | null;
-    failure?: string | null;
-    generation: number;
-    orchestrator_session_id: string;
-    parent_session_id: string;
-    report?: string | null;
-    root_session_id: string;
-    run_id?: string | null;
-    status: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["TraditionalChildStatus"];
-    updated_at: string;
-    version: number;
-}, Error, {
-    sessionId: string;
-    payload: StartManagedOrchestratorRequest;
-}, unknown>;
-export declare function useCancelManagedOrchestrator(): import("@tanstack/react-query").UseMutationResult<{
-    completion_inbox_id?: number | null;
-    created_at: string;
-    description: string;
-    execution_mode?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["TraditionalChildExecutionMode"] | null;
-    failure?: string | null;
-    generation: number;
-    orchestrator_session_id: string;
-    parent_session_id: string;
-    report?: string | null;
-    root_session_id: string;
-    run_id?: string | null;
-    status: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["TraditionalChildStatus"];
-    updated_at: string;
-    version: number;
-}, Error, {
-    sessionId: string;
-    orchestratorId: string;
 }, unknown>;
 export declare function useSessionInbox(sessionId: string, enabled: boolean): import("@tanstack/react-query").UseQueryResult<NoInfer<{
     cancelled_at?: string | null;

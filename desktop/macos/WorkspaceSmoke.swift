@@ -163,25 +163,43 @@ final class WorkspaceSmoke {
 
     static let homeComposerScript = "const f = document.getElementById('home-composer'); return !!f && !f.disabled && [...f.labels].some(l => l.textContent.trim() === 'What should we work on?');"
 
-    /// Home's composer is the one new-session flow: the behavior chip, then
-    /// the first prompt; Start session creates the session and sends it.
+    /// Choose the session model before starting the first prompt.
     func createChat(_ behavior: String, prompt: String) async throws {
         try await waitJS("Home composer", Self.homeComposerScript)
-        if behavior != "direct" {
-            let text = behavior == "orchestrator" ? "Orchestrator" : "Agent + Orchestrator"
-            let chip = "document.querySelector('button[aria-label^=\"Behavior: \"]')"
-            if (try await js("const c = \(chip); if (!c) throw Error('Missing behavior choice'); return c.getAttribute('aria-label') !== 'Behavior: ' + \(quote(text));")) as? Bool == true {
-                _ = try await js("\(chip).click(); return true;")
-                let item = "[...document.querySelectorAll('[role=menu][aria-label=\"Session behavior\"] [role=menuitemradio]')].find(r => r.querySelector('.type-label')?.textContent.trim() === \(quote(text)))"
-                try await waitJS("behavior choice \(text)", "return !!(\(item));")
-                _ = try await js("\(item).click(); return true;")
-            }
-            try await waitJS("chosen behavior \(text)", "return \(chip)?.getAttribute('aria-label') === 'Behavior: ' + \(quote(text)) && !document.querySelector('[role=menu][aria-label=\"Session behavior\"]');")
-        }
+        guard behavior == "direct" else { throw PreviewError.message("Only direct sessions are supported") }
+        try await waitJS("Home model chip", #"""
+        const chip = document.querySelector('button[aria-label="Choose a model"], button[aria-label^="Model: "]');
+        if (!chip || chip.disabled) return false;
+        chip.click(); return true;
+        """#)
+        let modelMenu = #"""document.querySelector('[role=dialog][aria-label="Model settings"] button[aria-label^="Choose model"]')"""#
+        try await waitJS("model chooser", "return !!(\(modelMenu));")
+        _ = try await js("(\(modelMenu)).click(); return true;")
+        try await waitJS("model search", "return !!document.querySelector('input[aria-label=\"Search models\"]');")
+        try await fill("input[aria-label='Search models']", "gpt-5.6-sol")
+        let row = "[...document.querySelectorAll('[role=group][aria-label=\"OpenAI\"] [role=menuitemradio]')].find(b => b.textContent.toLowerCase().includes('gpt-5.6'))"
+        try await waitJS("fixture OpenAI model", "return !!(\(row));")
+        _ = try await js("(\(row)).click(); return true;")
+        try await waitJS("selected model overview", "return !!(\(modelMenu));")
+        _ = try await js("""
+        const chooser = \(modelMenu);
+        chooser.focus();
+        if (document.activeElement !== chooser) throw Error('Home model chooser did not own focus');
+        chooser.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+        return true;
+        """)
+        try await waitJS("model picker closed", #"""
+        return !document.querySelector('[role=dialog][aria-label="Model settings"]') &&
+          document.querySelector('button[aria-label^="Model: "]')?.getAttribute('aria-expanded') === 'false';
+        """#)
         try await fill("#home-composer", prompt)
         try await button("Start session")
         try await waitJS("production session", "return location.hash.includes('/session/') && !!document.querySelector('[role=combobox][aria-label=Message]');")
         sessionID = try await js("return location.hash.split('/')[2];") as! String
+        // The first-render snapshot takes the run admission gate. Wait for
+        // the scripted reply before reading the session for its mode proof.
+        let response = prompt == "WK_RICH" ? "WK_RICH_COMPLETE" : FixtureProvider.answer
+        try await waitJS("first workspace response", "return document.body.innerText.includes(\(quote(response)));")
         try await require("Immutable behavior differs", "return (await (await fetch('/sessions/' + \(quote(sessionID)))).json()).metadata.behavior === \(quote(behavior));")
     }
 

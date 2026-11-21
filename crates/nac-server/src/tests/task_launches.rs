@@ -66,9 +66,21 @@ pub(super) async fn fixture(root: &std::path::Path, manager: &SessionManager) ->
         .await
         .unwrap();
     TaskLaunchRequest {
+        model_source: None,
         request_id: uuid::Uuid::new_v4().to_string(),
         project_id: project.project_id,
         invoking_session_id: None,
+        model_selection: Some(nac_core::store::TaskModelSelection {
+            service_tier: None,
+            backend: "openai-responses".into(),
+            model: "gpt-5.2".into(),
+            base_url: "http://127.0.0.1:9/v1".into(),
+            allow_insecure_http: false,
+            api_key_env: Some("OPENAI_API_KEY".into()),
+            reasoning_effort: None,
+            extra_headers: None,
+            orchestrator_compaction_threshold: None,
+        }),
         git_ref: Some("dev".into()),
         default_ref: Some("dev".into()),
         title: "Task".into(),
@@ -342,6 +354,11 @@ async fn retained_task_restart_refuses_partial_checkout_without_admitting_initia
     );
     assert!(!record.workspace_path.join("nested/file").exists());
     assert_eq!(std::fs::read(root.join("repo/.git/index")).unwrap(), index);
+    // The failure record can be visible before its preparation owner settles.
+    drop(app);
+    manager.quiesce_persistence_callers().await;
+    manager.drain_persistence().await.unwrap();
+    drop(manager);
     std::fs::remove_dir_all(root).unwrap();
 }
 
@@ -709,4 +726,190 @@ async fn cross_project_ssh_origin_can_launch_retained_local_task() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn cross_project_podman_origin_can_launch_retained_local_task() {
     cross_project_backend_origin_launches_in_local_destination(true).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn legacy_task_retry_is_checked_before_new_model_requirement() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("legacy_task_retry_model");
+    let _env = ScopedModelEnv::isolated(&root.join("nac-home"), Some("fixture-key"));
+    let manager = test_manager(&root);
+    let mut request = fixture(&root, &manager).await;
+    request.model_selection = None;
+    let project = nac_core::projects::load_project_launch_context(
+        &manager.inner.store_path,
+        &request.project_id,
+    )
+    .unwrap()
+    .project;
+    let source = nac_core::workspace::task_worktree::TaskGit::default()
+        .resolve_source(&project, &request, None, None)
+        .await
+        .unwrap();
+    let record =
+        nac_core::store::reserve_task_launch(&manager.inner.store_path, request.clone(), source)
+            .unwrap();
+    let saved = nac_core::store::update_task_launch(
+        &manager.inner.store_path,
+        &request.request_id,
+        TaskLaunchPhase::Cancelled,
+        None,
+    )
+    .unwrap();
+    let app = router(manager.clone());
+    let response = post_json(
+        app.clone(),
+        "/task-launches",
+        serde_json::to_value(&request).unwrap(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let replay: TaskLaunchRecord = serde_json::from_slice(&response_body(response).await).unwrap();
+    assert_eq!(replay.session_id, record.session_id);
+    assert_eq!(replay.request, saved.request);
+    assert_eq!(replay.phase, TaskLaunchPhase::Cancelled);
+    let mut changed = request.clone();
+    changed.prompt.push('!');
+    let conflict = post_json(
+        app.clone(),
+        "/task-launches",
+        serde_json::to_value(&changed).unwrap(),
+    )
+    .await;
+    assert_eq!(conflict.status(), StatusCode::CONFLICT);
+    request.request_id = uuid::Uuid::new_v4().to_string();
+    let fresh = post_json(
+        app.clone(),
+        "/task-launches",
+        serde_json::to_value(&request).unwrap(),
+    )
+    .await;
+    assert_eq!(fresh.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        nac_core::store::list_task_launches(&manager.inner.store_path, &request.project_id)
+            .unwrap()
+            .len(),
+        1
+    );
+    drop(app);
+    manager.quiesce_persistence_callers().await;
+    manager.drain_persistence().await.unwrap();
+    drop(manager);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn retained_task_source_headers_survive_source_deletion_and_stay_private() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("retained_task_model_source");
+    let _env = ScopedModelEnv::isolated(&root.join("nac-home"), Some("fixture-key"));
+    let manager = owned_test_manager(&root).unwrap();
+    let mut request = fixture(&root, &manager).await;
+    let app = router(manager.clone());
+    let response = post_json(app.clone(), "/sessions", serde_json::json!({
+        "project_id": request.project_id, "behavior": "direct", "backend": "openai-responses",
+        "model": "gpt-5.2", "base_url": "http://127.0.0.1:9/v1", "api_key_env": "OPENAI_API_KEY",
+        "extra_headers": {"x-project-token": "private-canary"}
+    })).await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let created: serde_json::Value =
+        serde_json::from_slice(&response_body(response).await).unwrap();
+    let source_id = created["metadata"]["session_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let source_config = sessions::load_project_session_model_source(
+        &manager.inner.store_path,
+        &request.project_id,
+        &source_id,
+    )
+    .unwrap()
+    .unwrap();
+    request.model_source = Some(sessions::ProjectModelSourceRef {
+        project_id: request.project_id.clone(),
+        session_id: source_id.clone(),
+        config_version: source_config.config_version,
+    });
+    struct ReleaseGate(Arc<application::session_creation::CreationProjectionGate>);
+    impl Drop for ReleaseGate {
+        fn drop(&mut self) {
+            self.0.resume.notify_one();
+        }
+    }
+    let gate = Arc::new(application::session_creation::CreationProjectionGate::default());
+    let _release = ReleaseGate(gate.clone());
+    *manager
+        .inner
+        .session_creation_before_projection
+        .lock()
+        .unwrap() = Some(gate.clone());
+    let response = post_json(
+        app.clone(),
+        "/task-launches",
+        serde_json::to_value(&request).unwrap(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(!String::from_utf8_lossy(&response_body(response).await).contains("private-canary"));
+    tokio::time::timeout(Duration::from_secs(10), gate.reached.notified())
+        .await
+        .unwrap();
+    let path = manager.inner.store_path.clone();
+    let deleted_id = source_id.clone();
+    assert!(
+        nac_core::store::spawn_blocking_store_caller(move || sessions::delete_session(
+            &path,
+            &deleted_id
+        ))
+        .await
+        .unwrap()
+        .unwrap()
+    );
+    let response = post_json(
+        app.clone(),
+        "/task-launches",
+        serde_json::to_value(&request).unwrap(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(!String::from_utf8_lossy(&response_body(response).await).contains("private-canary"));
+    gate.resume.notify_one();
+    let record = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let record = launch_status(app.clone(), &request.request_id).await;
+            if record.phase == TaskLaunchPhase::Ready {
+                break record;
+            }
+            assert_ne!(record.phase, TaskLaunchPhase::Failed, "{:?}", record.error);
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let config =
+        sessions::load_session_config(&manager.inner.store_path, &record.session_id).unwrap();
+    assert!(config
+        .extra_headers_json
+        .unwrap()
+        .contains("private-canary"));
+    let status = get_response(
+        app.clone(),
+        &format!("/task-launches/{}", request.request_id),
+        None,
+    )
+    .await;
+    assert!(!String::from_utf8_lossy(&response_body(status).await).contains("private-canary"));
+    let inventory = get_response(
+        app.clone(),
+        &format!("/projects/{}/task-launches", request.project_id),
+        None,
+    )
+    .await;
+    assert_eq!(inventory.status(), StatusCode::OK);
+    assert!(!String::from_utf8_lossy(&response_body(inventory).await).contains("private-canary"));
+    drop(app);
+    manager.quiesce_persistence_callers().await;
+    manager.drain_persistence().await.unwrap();
+    drop(manager);
+    std::fs::remove_dir_all(root).unwrap();
 }

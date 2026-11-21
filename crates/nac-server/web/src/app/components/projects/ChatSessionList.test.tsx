@@ -1,7 +1,5 @@
 /** @vitest-environment jsdom */
 
-import { UiPolicyContext } from "@/app/features/ui-policy/UiPolicyContext";
-import { ORCHESTRATION_UI_POLICY } from "@/app/features/ui-policy/policy";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -46,31 +44,31 @@ vi.mock("@/app/hooks/useMediaQuery", () => ({ useIsMobile: () => false }));
 afterEach(cleanup);
 
 describe("chat session behavior identity", () => {
-  it("shows behavior icons with full accessible names in chat lists", () => {
+  it("opens sessions by their accessible names", () => {
     const onOpen = vi.fn();
     render(
-      <UiPolicyContext.Provider value={ORCHESTRATION_UI_POLICY}>
+      <>
         <ChatSessionList
           sessions={[
-            session("orchestrator", "Plan the release", "orchestrator"),
+            session("orchestrator", "Plan the release", "direct"),
             session("direct", "Fix the parser", "direct"),
-            session("hybrid", "Coordinate the migration", "direct-with-orchestrator"),
+            session("hybrid", "Coordinate the migration", "direct"),
           ]}
           onOpen={onOpen}
         />
-      </UiPolicyContext.Provider>,
+      </>,
     );
 
-    expect(screen.getByRole("button", { name: "Plan the release, Orchestrator" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Fix the parser, Agent" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Plan the release" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Fix the parser" })).toBeTruthy();
     const hybrid = screen.getByRole("button", {
-      name: "Coordinate the migration, Agent + Orchestrator",
+      name: "Coordinate the migration",
     });
     expect(hybrid).toBeTruthy();
     expect(screen.queryByText("Orchestrator")).toBeNull();
     expect(screen.queryByText("Direct")).toBeNull();
     expect(screen.queryByText("Agent + Orchestrator")).toBeNull();
-    expect(hybrid.querySelector('[data-session-behavior-icon="planeAdd"]')).toBeTruthy();
+    expect(hybrid.querySelector("[data-session-behavior-icon]")).toBeNull();
 
     fireEvent.click(hybrid);
     expect(onOpen).toHaveBeenCalledWith(

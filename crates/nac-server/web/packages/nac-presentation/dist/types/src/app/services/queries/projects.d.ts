@@ -9,7 +9,6 @@ export declare function useProjects(): import("@tanstack/react-query").UseQueryR
 export declare function useCreateProject(): import("@tanstack/react-query").UseMutationResult<{
     created_at: string;
     cwd: string;
-    default_model_config_id?: string | null;
     description?: string | null;
     name: string;
     pinned: boolean;
@@ -22,7 +21,6 @@ export declare function useCreateProject(): import("@tanstack/react-query").UseM
     updated_at: string;
 }, Error, {
     cwd: string;
-    default_model_config_id?: string | null;
     description?: string | null;
     name?: string | null;
     ssh_host?: string | null;
@@ -36,7 +34,6 @@ export interface UpdateProjectVariables {
 export declare function useUpdateProject(): import("@tanstack/react-query").UseMutationResult<{
     created_at: string;
     cwd: string;
-    default_model_config_id?: string | null;
     description?: string | null;
     name: string;
     pinned: boolean;
@@ -53,7 +50,6 @@ export declare function useToggleProjectPin(): {
     toggle: (project: ProjectRecord) => Promise<{
         created_at: string;
         cwd: string;
-        default_model_config_id?: string | null;
         description?: string | null;
         name: string;
         pinned: boolean;
@@ -76,7 +72,6 @@ export declare function useToggleProjectPin(): {
     mutate: import("@tanstack/react-query").UseMutateFunction<{
         created_at: string;
         cwd: string;
-        default_model_config_id?: string | null;
         description?: string | null;
         name: string;
         pinned: boolean;
@@ -97,7 +92,6 @@ export declare function useToggleProjectPin(): {
     mutateAsync: import("@tanstack/react-query").UseMutateAsyncFunction<{
         created_at: string;
         cwd: string;
-        default_model_config_id?: string | null;
         description?: string | null;
         name: string;
         pinned: boolean;
@@ -113,7 +107,6 @@ export declare function useToggleProjectPin(): {
     toggle: (project: ProjectRecord) => Promise<{
         created_at: string;
         cwd: string;
-        default_model_config_id?: string | null;
         description?: string | null;
         name: string;
         pinned: boolean;
@@ -136,7 +129,6 @@ export declare function useToggleProjectPin(): {
     mutate: import("@tanstack/react-query").UseMutateFunction<{
         created_at: string;
         cwd: string;
-        default_model_config_id?: string | null;
         description?: string | null;
         name: string;
         pinned: boolean;
@@ -157,7 +149,6 @@ export declare function useToggleProjectPin(): {
     mutateAsync: import("@tanstack/react-query").UseMutateAsyncFunction<{
         created_at: string;
         cwd: string;
-        default_model_config_id?: string | null;
         description?: string | null;
         name: string;
         pinned: boolean;
@@ -173,7 +164,6 @@ export declare function useToggleProjectPin(): {
     toggle: (project: ProjectRecord) => Promise<{
         created_at: string;
         cwd: string;
-        default_model_config_id?: string | null;
         description?: string | null;
         name: string;
         pinned: boolean;
@@ -196,7 +186,6 @@ export declare function useToggleProjectPin(): {
     mutate: import("@tanstack/react-query").UseMutateFunction<{
         created_at: string;
         cwd: string;
-        default_model_config_id?: string | null;
         description?: string | null;
         name: string;
         pinned: boolean;
@@ -217,7 +206,6 @@ export declare function useToggleProjectPin(): {
     mutateAsync: import("@tanstack/react-query").UseMutateAsyncFunction<{
         created_at: string;
         cwd: string;
-        default_model_config_id?: string | null;
         description?: string | null;
         name: string;
         pinned: boolean;
@@ -233,7 +221,6 @@ export declare function useToggleProjectPin(): {
     toggle: (project: ProjectRecord) => Promise<{
         created_at: string;
         cwd: string;
-        default_model_config_id?: string | null;
         description?: string | null;
         name: string;
         pinned: boolean;
@@ -248,7 +235,6 @@ export declare function useToggleProjectPin(): {
     data: {
         created_at: string;
         cwd: string;
-        default_model_config_id?: string | null;
         description?: string | null;
         name: string;
         pinned: boolean;
@@ -270,7 +256,6 @@ export declare function useToggleProjectPin(): {
     mutate: import("@tanstack/react-query").UseMutateFunction<{
         created_at: string;
         cwd: string;
-        default_model_config_id?: string | null;
         description?: string | null;
         name: string;
         pinned: boolean;
@@ -291,7 +276,6 @@ export declare function useToggleProjectPin(): {
     mutateAsync: import("@tanstack/react-query").UseMutateAsyncFunction<{
         created_at: string;
         cwd: string;
-        default_model_config_id?: string | null;
         description?: string | null;
         name: string;
         pinned: boolean;
@@ -321,7 +305,6 @@ export interface AssignSessionVariables {
 export declare function useAssignSessionToProject(): import("@tanstack/react-query").UseMutationResult<{
     created_at: string;
     cwd: string;
-    default_model_config_id?: string | null;
     description?: string | null;
     name: string;
     pinned: boolean;

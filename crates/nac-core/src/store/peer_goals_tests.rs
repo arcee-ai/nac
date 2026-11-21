@@ -237,18 +237,9 @@ fn stale_human_mutation_terminal_budget_and_accounting_are_fenced() {
 }
 
 #[test]
-fn start_rolls_back_receipt_and_goal_when_scope_or_topology_is_unsupported() {
+fn start_rolls_back_receipt_and_goal_when_scope_is_wrong() {
     let (path, mut request) = fixture();
     request.project_id = Some("wrong".into());
-    assert!(start_peer_goal(&path, &request, None, 0).is_err());
-    request.project_id = Some("project".into());
-    open_runtime_connection(&path)
-        .unwrap()
-        .execute(
-            "UPDATE sessions SET behavior = 'direct-with-orchestrator' WHERE session_id = 'target'",
-            [],
-        )
-        .unwrap();
     assert!(start_peer_goal(&path, &request, None, 0).is_err());
     assert!(lookup_peer_goal_start(&path, &request).unwrap().is_none());
     assert!(load_session_goal(&path, "target").unwrap().is_none());

@@ -20,9 +20,11 @@ pub(crate) fn fixture() -> (PathBuf, TaskLaunchRequest, TaskLaunchSource) {
     )
     .unwrap();
     let request = TaskLaunchRequest {
+        model_source: None,
         request_id: uuid::Uuid::new_v4().to_string(),
         project_id: "project".into(),
         invoking_session_id: None,
+        model_selection: None,
         git_ref: Some("topic".into()),
         default_ref: Some("dev".into()),
         title: "Retained task".into(),
@@ -215,7 +217,7 @@ fn retained_migration_rows(conn: &Connection, table: &str) -> Vec<Vec<rusqlite::
 #[test]
 fn v38_evidence_and_delegated_input_survive_retained_launch_migration() {
     let (path, request, source) = fixture();
-    for session in ["parent", "child", "orchestrator"] {
+    for session in ["parent", "child"] {
         insert_test_session(&path, session);
     }
     let conn = Connection::open(&path).unwrap();
@@ -256,31 +258,6 @@ fn v38_evidence_and_delegated_input_survive_retained_launch_migration() {
         )
         .unwrap();
     }
-    conn.execute(
-        "UPDATE sessions SET behavior = 'direct-with-orchestrator' WHERE session_id = 'parent'",
-        [],
-    )
-    .unwrap();
-    create_managed_orchestrator_relationship(&path, "parent", "orchestrator", "kept managed")
-        .unwrap();
-    begin_managed_orchestrator_run(
-        &path,
-        "orchestrator",
-        "managed-generation",
-        ManagedOrchestratorExecutionMode::Foreground,
-    )
-    .unwrap();
-    settle_managed_orchestrator_run(
-        &path,
-        "orchestrator",
-        "managed-generation",
-        ManagedOrchestratorTerminal {
-            status: ManagedOrchestratorStatus::Cancelled,
-            report: None,
-            failure: Some("kept cancellation".into()),
-        },
-    )
-    .unwrap();
     let waiter = crate::sessions::ChildInputWaitLease::new(&path).unwrap();
     let input = create_traditional_child_inbox_item(
         &path,
@@ -291,8 +268,7 @@ fn v38_evidence_and_delegated_input_survive_retained_launch_migration() {
         Some(waiter.id()),
     )
     .unwrap();
-    // The landed v38 shape contains run/goal evidence, both delegated receipt
-    // topologies and exact queued-input authority, but no retained launch tables.
+    // The landed v38 shape contains run/goal evidence, child receipts and exact queued-input authority, but no retained launch tables.
     conn.execute_batch(
         "INSERT INTO session_run_outcomes
              (id, session_id, run_id, disposition, result_excerpt, result_truncated, finished_at)
@@ -357,5 +333,225 @@ fn v38_evidence_and_delegated_input_survive_retained_launch_migration() {
     );
     drop(conn);
     drop(waiter);
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}
+
+#[test]
+fn task_model_is_frozen_and_rejects_credential_headers_before_reservation() {
+    let (path, mut request, source) = fixture();
+    request.model_selection = Some(TaskModelSelection {
+        service_tier: Some("fast".into()),
+        backend: "openai-responses".into(),
+        model: "gpt-5.2".into(),
+        base_url: "https://api.openai.com/v1".into(),
+        allow_insecure_http: false,
+        api_key_env: Some("OPENAI_API_KEY".into()),
+        reasoning_effort: None,
+        extra_headers: None,
+        orchestrator_compaction_threshold: None,
+    });
+    let first = reserve_task_launch(&path, request.clone(), source.clone()).unwrap();
+    assert_eq!(first.request.model_selection, request.model_selection);
+    let mut changed = request.clone();
+    changed.model_selection.as_mut().unwrap().model = "gpt-5.3".into();
+    assert!(reserve_task_launch(&path, changed, source.clone()).is_err());
+    let mut secret = request;
+    secret.request_id = uuid::Uuid::new_v4().to_string();
+    secret.model_selection.as_mut().unwrap().extra_headers = Some(
+        [("Authorization".to_string(), "secret-value".to_string())]
+            .into_iter()
+            .collect(),
+    );
+    assert!(reserve_task_launch(&path, secret, source).is_err());
+    let conn = open_runtime_connection(&path).unwrap();
+    let stored: String = conn
+        .query_row("SELECT request_json FROM task_launches", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert!(!stored.contains("secret-value"));
+    drop(conn);
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}
+
+#[test]
+fn task_model_tier_round_trips_and_old_records_remain_readable() {
+    let base = serde_json::json!({
+        "backend": "openai-responses",
+        "model": "gpt-5.2",
+        "base_url": "https://api.openai.com/v1",
+        "allow_insecure_http": false,
+        "api_key_env": "OPENAI_API_KEY",
+        "reasoning_effort": null,
+        "extra_headers": null,
+        "orchestrator_compaction_threshold": null
+    });
+    let old: TaskModelSelection = serde_json::from_value(base.clone()).unwrap();
+    assert_eq!(old.service_tier, None);
+    old.validate().unwrap();
+    let mut selected = old;
+    selected.service_tier = Some("fast".into());
+    selected.validate().unwrap();
+    let round_trip: TaskModelSelection =
+        serde_json::from_value(serde_json::to_value(&selected).unwrap()).unwrap();
+    assert_eq!(round_trip.service_tier.as_deref(), Some("fast"));
+    selected.service_tier = Some("unknown".into());
+    assert!(selected.validate().is_err());
+    let settings = crate::model::EffectiveModelSettings::new_with_http_policy(
+        crate::model::BackendKind::OpenAiResponses,
+        "gpt-5.2".into(),
+        "https://proxy.example.invalid/v1".into(),
+        None,
+        None,
+        Default::default(),
+        false,
+    )
+    .unwrap();
+    assert!(settings
+        .with_service_tier(Some(crate::model::ServiceTier::Fast))
+        .is_err());
+}
+
+#[test]
+fn referenced_model_headers_are_atomic_private_and_frozen_for_retry() {
+    let (path, mut request, source) = fixture();
+    insert_test_session(&path, "source");
+    let conn = Connection::open(&path).unwrap();
+    conn.execute("UPDATE sessions SET cwd='/repo/nested',backend='openai-responses',model='source-model',base_url='https://example.invalid',allow_insecure_http=0,api_key_env='SOURCE_KEY',extra_headers_json=?1,config_version=7 WHERE session_id='source'", [r#"{"x-project-token":"private-canary"}"#]).unwrap();
+    conn.execute(
+        "INSERT INTO session_projects(session_id,project_id) VALUES('source','project')",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+    request.model_selection = Some(TaskModelSelection {
+        backend: "openai-responses".into(),
+        model: "new-model".into(),
+        base_url: "https://example.invalid".into(),
+        allow_insecure_http: false,
+        api_key_env: Some("SOURCE_KEY".into()),
+        reasoning_effort: None,
+        service_tier: None,
+        extra_headers: None,
+        orchestrator_compaction_threshold: None,
+    });
+    request.model_source = Some(crate::sessions::ProjectModelSourceRef {
+        project_id: "project".into(),
+        session_id: "source".into(),
+        config_version: 7,
+    });
+    let mut stale = request.clone();
+    stale.model_source.as_mut().unwrap().config_version = 6;
+    assert!(reserve_task_launch(&path, stale, source.clone())
+        .unwrap_err()
+        .to_string()
+        .contains("source changed"));
+    assert!(load_project_git_source(&path, "project").unwrap().is_none());
+    assert!(list_task_launches(&path, "project").unwrap().is_empty());
+    for (mutation, restore) in [
+        (
+            "UPDATE sessions SET cwd='/other' WHERE session_id='source'",
+            "UPDATE sessions SET cwd='/repo/nested' WHERE session_id='source'",
+        ),
+        (
+            "UPDATE sessions SET host_id='other' WHERE session_id='source'",
+            "UPDATE sessions SET host_id=NULL WHERE session_id='source'",
+        ),
+        (
+            "UPDATE sessions SET sandbox_json='{}' WHERE session_id='source'",
+            "UPDATE sessions SET sandbox_json=NULL WHERE session_id='source'",
+        ),
+    ] {
+        let conn = Connection::open(&path).unwrap();
+        conn.execute(mutation, []).unwrap();
+        drop(conn);
+        assert!(reserve_task_launch(&path, request.clone(), source.clone())
+            .unwrap_err()
+            .to_string()
+            .contains("source is unavailable"));
+        assert!(load_project_git_source(&path, "project").unwrap().is_none());
+        let conn = Connection::open(&path).unwrap();
+        conn.execute(restore, []).unwrap();
+    }
+    insert_test_session(&path, "parent");
+    let conn = Connection::open(&path).unwrap();
+    conn.execute("INSERT INTO traditional_children(child_session_id,parent_session_id,root_session_id,profile,description,nesting_depth,created_at,updated_at) VALUES('source','parent','parent','general','child',1,'now','now')", []).unwrap();
+    drop(conn);
+    assert!(reserve_task_launch(&path, request.clone(), source.clone())
+        .unwrap_err()
+        .to_string()
+        .contains("source is unavailable"));
+    assert!(load_project_git_source(&path, "project").unwrap().is_none());
+    let conn = Connection::open(&path).unwrap();
+    conn.execute(
+        "DELETE FROM traditional_children WHERE child_session_id='source'",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+    let mut wrong_project = request.clone();
+    wrong_project.model_source.as_mut().unwrap().project_id = "other".into();
+    assert!(reserve_task_launch(&path, wrong_project, source.clone()).is_err());
+    let mut wrong_url = request.clone();
+    wrong_url.model_selection.as_mut().unwrap().base_url = "https://other.invalid".into();
+    assert!(reserve_task_launch(&path, wrong_url, source.clone()).is_err());
+    let mut wrong_route = request.clone();
+    wrong_route.model_selection.as_mut().unwrap().api_key_env = Some("OTHER_KEY".into());
+    assert!(reserve_task_launch(&path, wrong_route, source.clone()).is_err());
+    let mut conflicting_headers = request.clone();
+    conflicting_headers
+        .model_selection
+        .as_mut()
+        .unwrap()
+        .extra_headers = Some(Default::default());
+    assert!(reserve_task_launch(&path, conflicting_headers, source.clone()).is_err());
+    let first = reserve_task_launch(&path, request.clone(), source.clone()).unwrap();
+    assert_eq!(
+        first
+            .frozen_model_headers
+            .as_ref()
+            .unwrap()
+            .0
+            .get("x-project-token")
+            .unwrap(),
+        "private-canary"
+    );
+    assert!(!serde_json::to_string(&first)
+        .unwrap()
+        .contains("private-canary"));
+    assert!(!format!("{first:?}").contains("private-canary"));
+    let conn = Connection::open(&path).unwrap();
+    conn.execute("DELETE FROM sessions WHERE session_id='source'", [])
+        .unwrap();
+    drop(conn);
+    let retry = reserve_task_launch(&path, request.clone(), source.clone()).unwrap();
+    assert_eq!(first, retry);
+    assert_eq!(
+        load_task_launch(&path, &request.request_id)
+            .unwrap()
+            .unwrap(),
+        first
+    );
+    assert!(
+        !serde_json::to_string(&list_task_launches(&path, "project").unwrap())
+            .unwrap()
+            .contains("private-canary")
+    );
+    let conn = Connection::open(&path).unwrap();
+    conn.execute("UPDATE task_launches SET source_json=json_remove(source_json,'$._nac_model_headers') WHERE request_id=?1", [&request.request_id]).unwrap();
+    drop(conn);
+    assert!(load_task_launch(&path, &request.request_id)
+        .unwrap_err()
+        .to_string()
+        .contains("invalid task model source receipt"));
+    // Restore the original receipt to test conflict handling independently.
+    let conn = Connection::open(&path).unwrap();
+    conn.execute("UPDATE task_launches SET source_json=json_set(source_json,'$._nac_model_headers',json(?1)) WHERE request_id=?2", rusqlite::params![r#"{"x-project-token":"private-canary"}"#, request.request_id]).unwrap();
+    drop(conn);
+    request.model_source.as_mut().unwrap().config_version += 1;
+    assert!(reserve_task_launch(&path, request, source)
+        .unwrap_err()
+        .to_string()
+        .contains("identity"));
     std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
 }

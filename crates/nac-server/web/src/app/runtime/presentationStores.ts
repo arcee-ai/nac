@@ -1,7 +1,6 @@
 import * as dockWidth from "../hooks/useDockWidth";
 import * as panelWidth from "../hooks/usePanelListWidth";
 import * as threadLogHeight from "../hooks/useThreadLogHeight";
-import * as lastLight from "../lib/lastLight";
 import * as attentionStore from "../store/attentionStore";
 import * as chatTabsStore from "../store/chatTabsStore";
 import * as promptDraftStore from "../store/promptDraftStore";
@@ -33,7 +32,6 @@ export interface PresentationStores {
   dockWidth: ReturnType<typeof dockWidth.createDockWidth>;
   panelWidth: ReturnType<typeof panelWidth.createPanelWidth>;
   threadLogHeight: ReturnType<typeof threadLogHeight.createThreadLogHeight>;
-  lastLight: ReturnType<typeof lastLight.createLastLight>;
   attentionStore: ReturnType<typeof attentionStore.createAttentionStore>;
   chatTabsStore: ReturnType<typeof chatTabsStore.createChatTabsStore>;
   promptDraftStore: ReturnType<typeof promptDraftStore.createPromptDraftStore>;
@@ -65,7 +63,6 @@ export function createPresentationStores(
     dockWidth: dockWidth.createDockWidth(storage),
     panelWidth: panelWidth.createPanelWidth(storage),
     threadLogHeight: threadLogHeight.createThreadLogHeight(storage),
-    lastLight: lastLight.createLastLight(storage),
     attentionStore: attentionStore.createAttentionStore(storage),
     chatTabsStore: chatTabsStore.createChatTabsStore(storage),
     composerStore: composerStore.createComposerStore(storage),
@@ -87,7 +84,6 @@ export const standalonePresentationStores = {
   dockWidth,
   panelWidth,
   threadLogHeight,
-  lastLight,
   attentionStore: attentionStore,
   chatTabsStore: chatTabsStore,
   composerStore: composerStore,

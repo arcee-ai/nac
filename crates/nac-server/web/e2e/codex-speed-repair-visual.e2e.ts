@@ -85,7 +85,7 @@ for (const mobile of [false, true]) {
     expect(writes).toBe(1);
   });
 
-  test(`refresh and inherited-speed repair (${mobile ? "phone" : "desktop"})`, async ({
+  test(`refresh after interrupted readback (${mobile ? "phone" : "desktop"})`, async ({
     harness,
     page,
     request,
@@ -132,56 +132,5 @@ for (const mobile of [false, true]) {
     await page.reload();
     await expect(modelChip(page)).toBeEnabled();
     await expect(modelChip(page)).toHaveAccessibleName(/Fast speed/);
-
-    const presetResponse = await request.post(`${harness.baseUrl}/model-configs`, {
-      data: {
-        name: "Fast Codex default",
-        backend: "chatgpt-codex-responses",
-        model: "gpt-6.1-sol",
-        reasoning_effort: "high",
-        service_tier: "fast",
-      },
-    });
-    expect(presetResponse.ok()).toBeTruthy();
-    const preset = await presetResponse.json();
-    const projectResponse = await request.post(`${harness.baseUrl}/projects`, {
-      data: {
-        name: "Speed repair fixture",
-        cwd: path.join(harness.runRoot, "workspace"),
-        default_model_config_id: preset.config_id,
-      },
-    });
-    expect(projectResponse.ok()).toBeTruthy();
-    const project = await projectResponse.json();
-    await page.route(`${harness.baseUrl}/providers/models`, async (route) => {
-      if (route.request().postDataJSON().backend !== "deepseek-chat") return route.fallback();
-      await route.fulfill({
-        json: {
-          base_url: "https://api.deepseek.com/v1",
-          api_key_env: "DEEPSEEK_API_KEY",
-          models: [{ id: "deepseek-chat", display_name: "DeepSeek Chat" }],
-        },
-      });
-    });
-    await page.goto(`${harness.baseUrl}/#/project/${project.project_id}`);
-    await expect(modelChip(page)).toHaveAccessibleName(/Fast speed/);
-    const chooseDeepSeek = async () => {
-      const models = await openModelCatalog(page, "deepseek-chat");
-      await models
-        .getByRole("group", { name: "DeepSeek", exact: true })
-        .getByRole("menuitemradio", { name: /^DeepSeek Chat/ })
-        .click();
-    };
-    await chooseDeepSeek();
-    await expect(
-      page.getByRole("alert").filter({ hasText: "This model does not accept the selected speed." }),
-    ).toBeVisible();
-    await capture("inherited-speed-reconciliation");
-    await page.getByRole("button", { name: "Switch model and clear speed" }).click();
-    const settings = await openModelSettings(page);
-    await expect(
-      settings.getByRole("button", { name: "Choose model: DeepSeek Chat" }),
-    ).toBeVisible();
-    await expect(settings.getByRole("button", { name: /^Speed:/ })).toBeHidden();
   });
 }

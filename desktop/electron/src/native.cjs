@@ -64,8 +64,18 @@ function createNativeAdapters({
   const dispatchTarget = () => {
     const flight = targetFlight;
     if (!flight || flight.sent) return;
-    if (!current(flight.state) || !flight.state.uiReady || picker || commandFlight) {
+    if (performance.now() >= flight.deadline) {
       clearTarget("unavailable");
+      return;
+    }
+    if (!current(flight.state) || picker || commandFlight) {
+      clearTarget("unavailable");
+      return;
+    }
+    if (!flight.state.uiReady) {
+      // Only a proven not-invoked rearm may wait through an owner remount.
+      // A new command or picker still fences this original click above.
+      if (!flight.afterGeneration) clearTarget("unavailable");
       return;
     }
     // app.show()/window.show() may finish after the original native click.
@@ -74,9 +84,10 @@ function createNativeAdapters({
     if (!workspaceVisible(window, app)) return;
     flight.presented = true;
     if (!flight.state.targetReady || !window.isFocused()) return;
+    if (flight.afterGeneration && flight.state.targetGeneration <= flight.afterGeneration) return;
     flight.sent = true;
     flight.generation = flight.state.targetGeneration;
-    send("session_target", { targetMessage: flight.message }, flight.state);
+    send("session_target", { targetMessage: flight.message, generation: flight.generation }, flight.state);
   };
   const originMatches = (url) => {
     try {
@@ -242,13 +253,10 @@ function createNativeAdapters({
           break;
         state.targetGeneration = message.generation;
         state.targetReady = message.kind === "session_target_ready";
-        if (
-          targetFlight?.state === state &&
-          targetFlight.sent &&
-          (!state.targetReady || targetFlight.generation !== state.targetGeneration)
-        )
-          clearTarget("stale");
-        else dispatchTarget();
+        // A retired owner cannot prove whether a sent callback ran. Keep its
+        // original bounded flight only for a private, explicit no-invocation
+        // receipt; retirement alone never authorizes another dispatch.
+        if (!targetFlight?.sent) dispatchTarget();
         break;
       case "storage": {
         if (!storage || !exact(message, [...common, "operation"])) break;
@@ -294,7 +302,10 @@ function createNativeAdapters({
       case "ui_retired":
         if (exact(message, common)) {
           state.uiReady = message.kind === "ui_ready";
-          if (state.uiReady) onUIReady();
+          if (state.uiReady) {
+            onUIReady();
+            dispatchTarget();
+          }
         }
         break;
       case "connection_lost":
@@ -314,17 +325,35 @@ function createNativeAdapters({
           commandFlight = null;
         }
         break;
-      case "target_settled":
+      case "target_not_invoked":
         if (
-          exact(message, [...common, "request", "outcome"]) &&
+          exact(message, [...common, "request", "generation"]) &&
           targetFlight?.state === state &&
           targetFlight.sent &&
-          targetFlight.generation === state.targetGeneration &&
-          state.targetReady &&
+          targetFlight.request === message.request &&
+          targetFlight.generation === message.generation &&
+          targetFlight.rearms === 0
+        ) {
+          // Only preload can attest that it did not invoke any owner. Keep the
+          // original click/deadline, and wait for a strictly newer owner.
+          targetFlight.sent = false;
+          targetFlight.rearms++;
+          targetFlight.afterGeneration = message.generation;
+          dispatchTarget();
+        }
+        break;
+      case "target_settled":
+        if (
+          exact(message, [...common, "request", "generation", "outcome"]) &&
+          targetFlight?.state === state &&
+          targetFlight.sent &&
+          targetFlight.generation === message.generation &&
           targetFlight.request === message.request &&
           ["opened", "deferred", "unavailable", "stale"].includes(message.outcome)
-        )
-          clearTarget(message.outcome);
+        ) {
+          const currentOwner = state.targetReady && targetFlight.generation === state.targetGeneration;
+          clearTarget(currentOwner ? message.outcome : "stale");
+        }
         break;
       case "external_link":
         if (
@@ -433,14 +462,17 @@ function createNativeAdapters({
       return new Promise((resolve) => {
         const timer = setTimeout(() => clearTarget("unavailable"), 3000);
         // One original explicit click may wait for native unhide/focus and this
-        // document's React owner after reopen. No dispatched outcome is retried;
-        // the same deadline bounds initialization and the eventual ACK.
+        // document's React owner after reopen. A possibly invoked callback is
+        // never retried; the original deadline bounds every delivery and ACK.
         targetFlight = {
           state,
           request: number,
           resolve,
           timer,
           sent: false,
+          rearms: 0,
+          afterGeneration: 0,
+          deadline: performance.now() + 3000,
           presented: workspaceVisible(window, app),
           message: {
             version: 1,

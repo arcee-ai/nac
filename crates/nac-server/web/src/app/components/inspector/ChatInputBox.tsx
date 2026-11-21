@@ -57,7 +57,6 @@ import {
   useSessionGoal,
   useSessionInbox,
   useSshConnect,
-  useSteerOrchestrator,
   useSessionSkills,
   useSubmitRun,
   useSlashCommands,
@@ -234,7 +233,6 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   const actions = useSessionActions();
   const submitRun = useSubmitRun();
   const submitShell = useSubmitShellCommand(sessionId);
-  const steerOrchestrator = useSteerOrchestrator();
   const compactSession = useCompactSession();
   const createInboxItem = useCreateInboxItem();
   const updateInboxItem = useUpdateInboxItem();
@@ -297,13 +295,11 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   const isSsh = sessionEnvLabel(entry?.summary) === ENV_SSH;
 
   const runningDirect = running && direct && !readOnly;
-  const runningClassic = running && behavior === "orchestrator" && !readOnly;
-  const runningInteractive = runningDirect || runningClassic;
+  const runningInteractive = runningDirect;
   const mutationPending =
     submissionPending ||
     submitRun.isPending ||
     submitShell.isPending ||
-    steerOrchestrator.isPending ||
     compactSession.isPending ||
     createInboxItem.isPending ||
     updateInboxItem.isPending ||
@@ -731,15 +727,9 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
             () =>
               runCommand(
                 deliverPrompt({
-                  mode: runningDirect
-                    ? "direct-running"
-                    : runningClassic
-                      ? "classic-running"
-                      : "idle",
+                  mode: runningDirect ? "direct-running" : "idle",
                   delivery: requestedDelivery,
                   inbox: (delivery) => createInboxItem.mutateAsync({ sessionId, delivery, prompt }),
-                  steer: () =>
-                    steerOrchestrator.mutateAsync({ id: sessionId, instruction: prompt }),
                   submit: () => submitRun.mutateAsync({ id: sessionId, prompt }),
                 }),
               ),
@@ -782,9 +772,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
       backend,
       runGoalCommand,
       runningDirect,
-      runningClassic,
       createInboxItem,
-      steerOrchestrator,
       submitRun,
     ],
   );
@@ -1237,7 +1225,6 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
         <SubagentSessionComposer
           parentSessionId={lineage.parent_session_id}
           sessionId={sessionId}
-          kind={lineage.kind}
           description={lineage.description}
           behavior={behavior}
         />
