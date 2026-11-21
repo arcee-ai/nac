@@ -139,7 +139,21 @@ enum StartupEnvironmentCheck {
         }
         let kind: String, role: String
         let helper = argv.contains("__desktop-configuration"), serving = argv.contains("--bind")
-        let flags = ["argv0_matches": argv.first == executable, "helper_present": helper, "serving_present": serving]
+        // Classify the already-read argument only; never export its bytes or
+        // perform a filesystem lookup. This is not an admission predicate.
+        let argv0Kind: String = {
+            guard let value = argv.first else { return "missing" }
+            if value.isEmpty { return "empty" }
+            if value == executable { return "expected" }
+            if value == nativePath { return "native_path" }
+            if value == enginePath { return "engine_path" }
+            if value == (executable as NSString).lastPathComponent { return "expected_basename" }
+            if (executable.hasPrefix("/private/var/") && value == String(executable.dropFirst(8)))
+                || (value.hasPrefix("/private/var/") && executable == String(value.dropFirst(8))) { return "private_var_alias" }
+            return value.hasPrefix("/") ? "absolute_other" : "relative_other"
+        }()
+        let flags: [String: Any] = ["argv0_matches": argv.first == executable, "helper_present": helper,
+                                    "serving_present": serving, "argv0_kind": argv0Kind]
         if executable == nativePath {
             guard argv.first == executable, !helper, !serving else { throw rejection("native_argv", flags) }
             kind = "app"; role = "launcher"
@@ -151,7 +165,7 @@ enum StartupEnvironmentCheck {
         }
         let expected = kind == "app" ? launcher : child
         let fields: Set<String> = ["HOME", "NAC_HOME", "PATH", "LANG", "NAC_TELEMETRY",
-            "NAC_ORCHESTRATION", "GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL", "BROWSER", "MODELS_DEV_URL"]
+            "GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL", "BROWSER", "MODELS_DEV_URL"]
         for key in expected.keys.sorted() where environment[key] != expected[key] {
             throw rejection("controlled_value", ["field": fields.contains(key) ? key : "other",
                 "difference": environment[key] == nil ? "absent" : "different"])

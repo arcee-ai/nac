@@ -19,8 +19,8 @@ with that evidence before setup; never serialize batches or silently reduce it.
 Setup and aggregate each use one child at different times and do not count
 toward `n`. Keep unrelated children intact. Default `n=4` needs all four slots.
 
-The `general` profile supplies native coding tools and disables recursion,
-goals and orchestrator control. It does not accept `skills`, `mode`, or source
+The `general` profile supplies native coding tools and disables recursion and
+goals. It does not accept `skills`, `mode`, or source
 thread fields as tool arguments, and a fresh child does not inherit the parent
 conversation or activated skills. Put the role and all required context in
 `prompt`: the complete QA skill body and this adapter as literal text, absolute

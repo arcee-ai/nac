@@ -209,7 +209,7 @@ impl NativeTool for GuideTool {
         };
         let mut resource =
             PermissionResource::new(NAME, format!("pack:{}{suffix}", guide.fingerprint));
-        // Headless workers/orchestrators have no interactive broker. Preserve
+        // Headless sessions have no interactive broker. Preserve
         // explicit Deny and fail closed on Ask just like imported capabilities.
         if services.runtime.permission_broker.is_none() {
             use crate::permissions::{PermissionBackend, PermissionEffect, PermissionPolicy};

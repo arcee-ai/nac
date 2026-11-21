@@ -45,7 +45,6 @@ const cancelChild = vi.spyOn(api, "cancelTraditionalChild");
 function mount(
   behavior: "direct",
   seed = true,
-  orchestrationEnabled = true,
   { tablet = false, mobile = false }: { tablet?: boolean; mobile?: boolean } = {},
 ) {
   window.matchMedia = (query: string) =>
@@ -67,7 +66,7 @@ function mount(
   if (seed) {
     client.setQueryData(queryKeys.traditionalChildren("parent"), [child]);
   }
-  const tree = (parent: string, _enabled: boolean) => (
+  const tree = (parent: string) => (
     <QueryClientProvider client={client}>
       <>
         <MemoryRouter initialEntries={[`/sessions/${parent}`]}>
@@ -86,14 +85,14 @@ function mount(
       </>
     </QueryClientProvider>
   );
-  let view = render(tree("parent", orchestrationEnabled));
+  let view = render(tree("parent"));
   return Object.assign(client, {
-    /** Shows another parent's panel, or the same one under another policy. */
-    show: (parent: string, enabled = orchestrationEnabled) => view.rerender(tree(parent, enabled)),
+    /** Shows another parent's panel. */
+    show: (parent: string) => view.rerender(tree(parent)),
     /** Leaves the panel entirely, as opening a transcript does, then comes back. */
     remount: () => {
       view.unmount();
-      view = render(tree("parent", orchestrationEnabled));
+      view = render(tree("parent"));
     },
   });
 }
@@ -130,7 +129,7 @@ afterEach(() => {
 
 describe("delegated work", () => {
   it("keeps the phone child name dialog read-only and restores its trigger without losing the draft", async () => {
-    mount("direct", true, true, { mobile: true });
+    mount("direct", true, { mobile: true });
     act(() => showSidePanelList(false));
     const heading = await screen.findByRole("button", {
       name: "View full name: Review permissions",
@@ -625,7 +624,7 @@ describe("selection and drafts", () => {
 describe("load state in the narrow list", () => {
   it("offers the retry from a tablet list opened over a failed load", async () => {
     listChildren.mockRejectedValueOnce(new Error("503")).mockResolvedValue([child]);
-    mount("direct", false, true, { tablet: true });
+    mount("direct", false, { tablet: true });
     await screen.findByRole("alert");
     act(() => showSidePanelList(true));
 
@@ -637,7 +636,7 @@ describe("load state in the narrow list", () => {
 
   it("says the lists are loading in a tablet list opened before they answer", async () => {
     listChildren.mockReturnValue(new Promise(() => {}));
-    mount("direct", false, true, { tablet: true });
+    mount("direct", false, { tablet: true });
     act(() => showSidePanelList(true));
 
     expect(await screen.findByText("Loading subagents…")).toBeTruthy();

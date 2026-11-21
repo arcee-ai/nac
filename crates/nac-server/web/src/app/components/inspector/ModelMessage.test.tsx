@@ -1,10 +1,11 @@
 /** @vitest-environment jsdom */
 
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ModelMessage } from "@/app/components/inspector/ModelMessage";
 import type { ModelTurn } from "@/app/lib/transcript";
+import { standaloneRuntime } from "@/app/runtime/nativeRuntime";
 import { standaloneTranscriptDensityStore } from "@/app/store/transcriptDensityStore";
 
 vi.mock("@/app/hooks/useMediaQuery", () => ({ useIsMobile: () => false }));
@@ -357,3 +358,100 @@ describe("transcript topology badge navigation", () => {
     expect(screen.getByRole("button", { name: "Copy message" })).not.toBeNull();
   });
 });
+
+it("keeps an expanded live thought when a prior tool lands in its turn", () => {
+  const runtime = standaloneRuntime.stores.runtimeStore;
+  runtime.resetRuntime("s");
+  runtime.applyAssistantDelta({ run_id: "run-a", reasoning: "Live thought" });
+  const turn: ModelTurn = {
+    kind: "model",
+    key: '["pending-reply",1,"s",1]',
+    durationMs: null,
+    messageIndex: null,
+    blocks: [
+      {
+        kind: "thoughts",
+        key: "thoughts-0",
+        text: "Live thought",
+        durationMs: null,
+        streaming: true,
+      },
+    ],
+  };
+  const view = render(<ModelMessage turn={turn} model="model" active />);
+  fireEvent.click(screen.getByRole("button", { name: "Thinking…" }));
+  const steps = screen.getByRole("list", { name: "Steps" });
+  fireEvent.click(within(steps).getByRole("button", { name: "Thinking…" }));
+  expect(within(steps).getByText("Live thought")).toBeTruthy();
+  view.rerender(
+    <ModelMessage
+      turn={{
+        ...turn,
+        messageIndex: 3,
+        blocks: [
+          { kind: "tool", key: "tool-2-call", name: "glob", pending: false },
+          ...turn.blocks,
+        ],
+      }}
+      model="model"
+      active
+    />,
+  );
+  expect(screen.getByRole("list", { name: "Steps" })).toBeTruthy();
+  expect(
+    within(screen.getByRole("list", { name: "Steps" })).getByText("Live thought"),
+  ).toBeTruthy();
+});
+
+it.each(["rewind", "other run", "reopen", "canonical key"])(
+  "does not carry an open fold across %s",
+  (change) => {
+    const runtime = standaloneRuntime.stores.runtimeStore;
+    runtime.resetRuntime("s");
+    runtime.applyAssistantDelta({ run_id: "run-a", reasoning: "Old thought" });
+    const turn: ModelTurn = {
+      kind: "model",
+      key: change === "canonical key" ? "model-2" : '["pending-reply",1,"s",1]',
+      durationMs: null,
+      messageIndex: null,
+      blocks: [
+        {
+          kind: "thoughts",
+          key: "thoughts-0",
+          text: "Old thought",
+          durationMs: null,
+          streaming: true,
+        },
+      ],
+    };
+    const view = render(<ModelMessage turn={turn} model="model" active />);
+    fireEvent.click(screen.getByRole("button", { name: "Thinking…" }));
+    const steps = screen.getByRole("list", { name: "Steps" });
+    fireEvent.click(within(steps).getByRole("button", { name: "Thinking…" }));
+    act(() => {
+      if (change === "rewind")
+        runtime.applyEnvelope({ sequence_id: 1, event: { type: "transcript_reverted" } } as never);
+      if (change === "other run")
+        runtime.applyAssistantDelta({ run_id: "run-b", reasoning: "other" });
+      if (change === "reopen") {
+        runtime.release();
+        runtime.resetRuntime("s");
+        runtime.applyAssistantDelta({ run_id: "run-a", reasoning: "Old thought" });
+      }
+    });
+    view.rerender(
+      <ModelMessage
+        turn={{
+          ...turn,
+          blocks: [
+            { kind: "tool", key: "tool-2-call", name: "glob", pending: false },
+            ...turn.blocks,
+          ],
+        }}
+        model="model"
+        active
+      />,
+    );
+    expect(screen.queryByRole("list", { name: "Steps" })).toBeNull();
+  },
+);

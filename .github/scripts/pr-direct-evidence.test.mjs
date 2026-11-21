@@ -31,6 +31,13 @@ test('only exact current-attempt load evidence is removed from historical projec
   }
 });
 
+test('retirement guard is required before the historical workflow projection', () => {
+  const value = read('stable-release');
+  const lane = value.jobs['test-workspace'].steps.find(s => s.name === 'Preserve source, size, and lifecycle contracts on every PR');
+  lane.run = lane.run.replace('test-direct-retirement ', '');
+  assert.throws(() => reverseDirectEvidence(value, 'stable-release'));
+});
+
 test('cleanup cannot disappear or move after the fixture', () => {
   for (const [name, job] of cases) {
     const value = read(name);

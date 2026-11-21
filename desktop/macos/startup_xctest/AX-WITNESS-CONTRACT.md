@@ -29,18 +29,28 @@ already older than 1s may await another publication within that same ticket, but
 stale data is never accepted. Final consumption still checks <=1s age. No
 predicate-refusal retry.
 
+Before the first guard only, configured-local startup has a ten-second bounded
+admission phase under the original case cutoff. It can observe at most two
+distinct deadline refusals from otherwise successful reads, or explicit
+AXWindows cannotComplete refusals; it binds the same exact helper, target,
+window, source, sequence, generation and port. It grants no ticket, evidence or
+input, and requires a distinct fresh positive before ordinary guard entry.
+Unknown, malformed, terminal, replaced or other predicate refusals fail closed.
+The first guard then still requires a separate newly begun fresh sample, and
+all ordinary guard and post-input refusals remain sticky with no retry.
+
 The canonical actor retains real CFEqual root/panel/GoTo handles through the
 case, including disappeared sheets. Exact original-root geometry, admitted PID,
 direct root→sheet→nested-sheet topology and membership of every AXWindows object
 remain enforced. Same-shaped replacements do not rebind. Q retains its exact
-logical window/sheet counts, geometry, enabled/hittable checks, console,
+logical window/sheet counts, geometry, enabled and non-panel hittable checks, console,
 resource and process checks. GoTo keyboard focus still requires exact PID,
 AXTextField role, true focus, retained-sheet ancestry, exact frame and exact
 private String value (<=4096 UTF-8 bytes).
 
 ## Bound public interaction point
 
-Before each of the eleven configured inputs, Q selects a public XCUICoordinate
+Before each of the fifteen configured inputs, Q selects a public XCUICoordinate
 from the intended element and reads its screenPoint. The point must be finite,
 exactly representable by the public AX Float API and inside the anchor frame.
 Q publishes one closed request at the fixed derived path
@@ -92,6 +102,26 @@ public coordinate object. Keyboard input retains its public target action and
 exact focus/value preflight. Existing after-action guards and postconditions
 remain required. A failed preflight latches the client; no next input.
 
+After an input, Q reads its existing public window, sheet, geometry and field
+postconditions while the original action lease remains held, then publishes the
+completed claim. H starts the first post-action sample only after that claim;
+Q compares it to the captured surface, root frame and field and requires the
+same original cutoff, freshness and request-drain checks before any next input.
+Refusals remain terminal; neither the checks nor completion renews the ticket.
+The public root-sheet enumeration supplies the unique panel for this snapshot;
+its existence and geometry are read once and passed to the attachment predicate;
+enabled state remains required. Window and complete sheet counts and the
+separately retained witness identity and frame match remain required.
+For a panel guard, H additionally performs a global hit at an exactly
+representable point within the retained panel and root, with same-PID ancestry,
+exact panel identity and frame, and same-PID focused-descendant proof. H repeats
+the same proof after its closing process/resource/frame bookend. Q requires the
+fresh proof to match its captured panel frame and retained panel ID. Before a
+panel keyboard input the separate request-bound two-hit and focus proof remains
+mandatory at both action fences. Other elements retain their XCUI hittability
+checks. A concrete global hit and focus proof is not a claim of exact equivalence
+to XCTest's unspecified `isHittable` implementation.
+
 Coordinates are dynamic. A last-instant race between the final checks and OS
 input remains explicitly ACCEPTED. This does not claim atomic dispatch or an
 independently observed delivered-event point. Geometry, count or root presence
@@ -99,9 +129,9 @@ alone is never an interaction proof.
 
 ## Evidence and cleanup
 
-Keep the original 27 exported console observations plus eleven immediate
-pre-dispatch console rechecks, 26 canonical guard receipts, 11
-inputs and 22 dispatch records. Eleven additional private-text-free interaction
+Keep 35 exported console observations plus fifteen immediate
+pre-dispatch console rechecks, 34 canonical guard receipts, 15
+inputs and 30 dispatch records. Fifteen private-text-free interaction
 proofs record request/target tokens, intent, point/anchor and sequence/times,
 including final freshness. H verifies each lies between its existing before and
 after guard. Missing, replayed, stale, changed-intent or private-field proof fails

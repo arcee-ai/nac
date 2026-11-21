@@ -45,7 +45,7 @@ class DeviceProfile(AbstractContextManager):
                 'XDG_CONFIG_HOME': str(self.root / 'xdg'), 'NAC_NATIVE_AUTH_FIXTURE_ROOT': str(self.root),
                 'NAC_NATIVE_AUTH_FIXTURE_ORIGIN': service_origin, 'MODELS_DEV_URL': service_origin + '/models-dev',
                 'BROWSER': 'none', 'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': '/dev/null',
-                'NAC_TELEMETRY': 'disabled', 'NAC_ORCHESTRATION': '0'}
+                'NAC_TELEMETRY': 'disabled'}
             self.workspace = self.root / 'workspace'
             self.store = self.root / 'store.db'
             subprocess.run(['/usr/bin/git', '-C', str(self.workspace), 'init', '--quiet', '--initial-branch=main'],

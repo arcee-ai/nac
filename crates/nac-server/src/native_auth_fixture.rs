@@ -248,7 +248,6 @@ fn allowed(method: &Method, path: &str) -> bool {
                 | "/store"
                 | "/auth"
                 | "/models"
-                | "/model-configs"
                 | "/projects"
                 | "/sessions"
                 | "/ssh-configs"

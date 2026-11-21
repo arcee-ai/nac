@@ -496,12 +496,6 @@ async fn interleave(behavior: &str) {
             assert!(goal.is_none());
             assert_eq!(last_run.as_deref(), Some(a.as_str()));
         }
-        ("direct-with-orchestrator", AttentionPublicationSelection::IdleUnverified) => {
-            assert_eq!(
-                baseline["sources"][0]["availability"]["questions"],
-                "unsupported"
-            );
-        }
         _ => panic!("unexpected actual continuation selection for {behavior}: {selection:?}"),
     }
     eprintln!(
@@ -713,13 +707,6 @@ async fn canonical_a(
             completed,
         )
     };
-    if behavior == "direct-with-orchestrator" {
-        assert!(!questions_supported);
-        assert!(
-            !current_completed_a,
-            "DWO must not invent a current Completed(A)"
-        );
-    }
     eprintln!(
         "semantic-g2-canonical {}",
         serde_json::json!({

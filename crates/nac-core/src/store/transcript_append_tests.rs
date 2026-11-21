@@ -622,3 +622,279 @@ fn transcript_append_in_flight_transaction_retains_lease_until_commit() {
         Some(&TranscriptAppendError::StaleOwner)
     );
 }
+
+#[test]
+fn committed_prompt_receipt_is_exact_and_disappears_after_rewind() {
+    let (_dir, path) = setup();
+    let run = uuid::Uuid::new_v4().to_string();
+    let foreign = uuid::Uuid::new_v4().to_string();
+    let lease = Arc::new(SessionOperationLease::try_acquire(&path, "session").unwrap());
+    let writer = TranscriptLogWriter::for_run(&path, "session", &run, &lease).unwrap();
+    assert_eq!(
+        committed_run_prompt_index(&path, "session", &run).unwrap(),
+        None
+    );
+    writer
+        .append_run_prompt("session", 0, &message("same prompt"), &run)
+        .unwrap();
+    assert_eq!(
+        committed_run_prompt_index(&path, "session", &run).unwrap(),
+        Some(0)
+    );
+    assert_eq!(
+        committed_run_prompt_index(&path, "session", &foreign).unwrap(),
+        None
+    );
+    assert_eq!(
+        committed_run_prompt_index(&path, "other", &run).unwrap(),
+        None
+    );
+    writer.delete_from("session", 0).unwrap();
+    assert_eq!(
+        committed_run_prompt_index(&path, "session", &run).unwrap(),
+        None
+    );
+}
+
+#[test]
+fn committed_prompt_proof_does_not_initialize_or_change_journal_mode() {
+    let (_dir, path) = setup();
+    let run = uuid::Uuid::new_v4().to_string();
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    let mode: String = conn
+        .query_row("PRAGMA journal_mode=DELETE", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(mode.to_ascii_lowercase(), "delete");
+
+    // An observational read of a current store never changes its journal.
+    assert_eq!(
+        committed_run_prompt_index(&path, "session", &run).unwrap(),
+        None
+    );
+    let mode: String = conn
+        .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(mode.to_ascii_lowercase(), "delete");
+
+    // Neither an older nor a newer store is initialized or migrated by proof.
+    for version in [schema_version() - 1, schema_version() + 1] {
+        conn.pragma_update(None, "user_version", version).unwrap();
+        assert!(committed_run_prompt_index(&path, "session", &run).is_err());
+        let observed: i64 = conn
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        let mode: String = conn
+            .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(observed, version);
+        assert_eq!(mode.to_ascii_lowercase(), "delete");
+    }
+}
+
+#[test]
+fn committed_prompt_proof_reads_only_committed_state_during_rewind() {
+    let (_dir, path) = setup();
+    let run = uuid::Uuid::new_v4().to_string();
+    let lease = Arc::new(SessionOperationLease::try_acquire(&path, "session").unwrap());
+    let writer = TranscriptLogWriter::for_run(&path, "session", &run, &lease).unwrap();
+    writer
+        .append_run_prompt("session", 0, &message("prompt"), &run)
+        .unwrap();
+
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    conn.execute_batch(
+        "PRAGMA foreign_keys=ON; BEGIN IMMEDIATE;
+        DELETE FROM session_events WHERE event_target='__nac_transcript__';",
+    )
+    .unwrap();
+    // The writer has deleted its private view, but the reader can only prove
+    // the last committed state while the WAL writer remains uncommitted.
+    assert_eq!(
+        committed_run_prompt_index(&path, "session", &run).unwrap(),
+        Some(0)
+    );
+    conn.execute_batch("COMMIT").unwrap();
+    assert_eq!(
+        committed_run_prompt_index(&path, "session", &run).unwrap(),
+        None
+    );
+}
+
+#[test]
+fn malformed_and_unfenced_prompt_receipts_are_unknown() {
+    let (_dir, path) = setup();
+    let run = uuid::Uuid::new_v4().to_string();
+    let writer = TranscriptLogWriter::new(&path).unwrap();
+    writer
+        .append_run_prompt("session", 0, &message("prompt"), &run)
+        .unwrap();
+    assert_eq!(
+        committed_run_prompt_index(&path, "session", &run).unwrap(),
+        None
+    );
+    let conn = open_runtime_connection(&path).unwrap();
+    conn.execute(
+        "UPDATE transcript_append_receipts SET run_id=?1, end_idx=2",
+        [&run],
+    )
+    .unwrap();
+    assert_eq!(
+        committed_run_prompt_index(&path, "session", &run).unwrap(),
+        None
+    );
+    conn.execute(
+        "UPDATE transcript_append_receipts SET end_idx=1, operation_id='prompt:wrong:0:None'",
+        [],
+    )
+    .unwrap();
+    assert_eq!(
+        committed_run_prompt_index(&path, "session", &run).unwrap(),
+        None
+    );
+}
+
+#[test]
+fn committed_prompt_proof_refuses_corrupt_or_ambiguous_evidence() {
+    let (_dir, path) = setup();
+    let run = uuid::Uuid::new_v4().to_string();
+    let lease = Arc::new(SessionOperationLease::try_acquire(&path, "session").unwrap());
+    let writer = TranscriptLogWriter::for_run(&path, "session", &run, &lease).unwrap();
+    writer
+        .append_run_prompt("session", 0, &message("prompt"), &run)
+        .unwrap();
+    let conn = open_runtime_connection(&path).unwrap();
+    let (operation, digest): (String, String) = conn
+        .query_row(
+            "SELECT operation_id,digest FROM transcript_append_receipts",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    conn.execute("UPDATE transcript_append_receipts SET digest='bad'", [])
+        .unwrap();
+    assert_eq!(
+        committed_run_prompt_index(&path, "session", &run).unwrap(),
+        None
+    );
+    conn.execute(
+        "UPDATE transcript_append_receipts SET digest=?1, operation_id=?2",
+        params![digest, format!("{operation}extra")],
+    )
+    .unwrap();
+    assert_eq!(
+        committed_run_prompt_index(&path, "session", &run).unwrap(),
+        None
+    );
+    conn.execute(
+        "UPDATE transcript_append_receipts SET operation_id=?1",
+        [&operation],
+    )
+    .unwrap();
+    conn.execute(
+        "UPDATE transcript_append_receipts SET operation_id=?1",
+        [format!("prompt:{run}:0:Some(+1)")],
+    )
+    .unwrap();
+    assert_eq!(
+        committed_run_prompt_index(&path, "session", &run).unwrap(),
+        None
+    );
+    for version in ["-1", "+1", "01", "invalid"] {
+        let identity = format!("prompt:{run}:0:Some(1):{version}:{}", "a".repeat(64));
+        conn.execute(
+            "UPDATE transcript_append_receipts SET operation_id=?1",
+            [&identity],
+        )
+        .unwrap();
+        assert_eq!(
+            committed_run_prompt_index(&path, "session", &run).unwrap(),
+            None
+        );
+    }
+    conn.execute(
+        "UPDATE transcript_append_receipts SET operation_id=?1",
+        [&operation],
+    )
+    .unwrap();
+    conn.execute_batch(
+        "PRAGMA ignore_check_constraints=ON; UPDATE transcript_append_receipts SET start_idx=-1;",
+    )
+    .unwrap();
+    assert_eq!(
+        committed_run_prompt_index(&path, "session", &run).unwrap(),
+        None
+    );
+    conn.execute("UPDATE transcript_append_receipts SET start_idx=0", [])
+        .unwrap();
+    conn.execute("UPDATE session_events SET event_json=replace(event_json,'prompt','tampered') WHERE event_target=?1", [TRANSCRIPT_EVENT_TARGET]).unwrap();
+    assert_eq!(
+        committed_run_prompt_index(&path, "session", &run).unwrap(),
+        None
+    );
+    conn.execute("UPDATE session_events SET event_json=replace(event_json,'tampered','prompt') WHERE event_target=?1", [TRANSCRIPT_EVENT_TARGET]).unwrap();
+    conn.execute("INSERT INTO transcript_append_receipts(session_id,operation_id,digest,run_id,start_idx,end_idx,last_message_id) SELECT session_id,?1,digest,NULL,start_idx,end_idx,last_message_id FROM transcript_append_receipts", [format!("{operation}duplicate")]).unwrap();
+    assert_eq!(
+        committed_run_prompt_index(&path, "session", &run).unwrap(),
+        None
+    );
+}
+
+#[test]
+fn committed_prompt_proof_accepts_fenced_child_generation() {
+    let (_dir, path) = setup();
+    insert_test_session(&path, "parent");
+    let run = uuid::Uuid::new_v4().to_string();
+    let conn = open_runtime_connection(&path).unwrap();
+    conn.execute("INSERT INTO traditional_children
+        (child_session_id,parent_session_id,root_session_id,profile,description,nesting_depth,status,generation,run_id,execution_mode,created_at,updated_at)
+        VALUES ('session','parent','parent','general','test',1,'running',3,?1,'background','now','now')", [&run]).unwrap();
+    let lease = Arc::new(SessionOperationLease::try_acquire(&path, "session").unwrap());
+    let writer = TranscriptLogWriter::for_run(&path, "session", &run, &lease).unwrap();
+    writer
+        .append_run_prompt("session", 0, &message("prompt"), &run)
+        .unwrap();
+    let generation: i64 = conn
+        .query_row(
+            "SELECT generation FROM transcript_append_receipts",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(generation, 3);
+    assert_eq!(
+        committed_run_prompt_index(&path, "session", &run).unwrap(),
+        Some(0)
+    );
+}
+
+#[test]
+fn committed_prompt_proof_accepts_versioned_and_unversioned_fenced_inbox() {
+    for versioned in [false, true] {
+        let (_dir, path) = setup();
+        let run = uuid::Uuid::new_v4().to_string();
+        let queued =
+            create_session_inbox_item(&path, "session", InboxDelivery::Queue, "prompt", None, None)
+                .unwrap();
+        let lease = Arc::new(SessionOperationLease::try_acquire(&path, "session").unwrap());
+        let writer = TranscriptLogWriter::for_run(&path, "session", &run, &lease).unwrap();
+        if versioned {
+            writer
+                .append_admitted_inbox_run_prompt(
+                    "session",
+                    0,
+                    &message("prompt"),
+                    &run,
+                    &AdmittedInboxPrompt::from(queued),
+                )
+                .unwrap();
+        } else {
+            writer
+                .append_inbox_run_prompt("session", 0, &message("prompt"), &run, queued.id)
+                .unwrap();
+        }
+        assert_eq!(
+            committed_run_prompt_index(&path, "session", &run).unwrap(),
+            Some(0)
+        );
+    }
+}

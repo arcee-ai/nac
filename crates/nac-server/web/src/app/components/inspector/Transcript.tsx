@@ -21,6 +21,7 @@ import {
   ChatSessionMessageVariant,
   ShimmerLoader,
 } from "@/app/atoms";
+import { UnconfirmedPromptRecovery } from "@/app/components/inspector/transcript/UnconfirmedPromptNotice";
 import { InitialPrompts } from "@/app/components/inspector/InitialPrompts";
 import { DayDivider } from "@/app/components/inspector/transcript/DayDivider";
 import { dayKey } from "@/app/components/inspector/transcript/days";
@@ -129,7 +130,7 @@ export function Transcript({
     useCancelArmed,
     useActivity,
     useRunStartedAt,
-    setOptimisticUserPrompt,
+    retireOptimisticPrompt,
     pushLocalEvent,
   } = useNativeRuntime().stores.runtimeStore;
 
@@ -203,8 +204,16 @@ export function Transcript({
 
   perfRender("Transcript");
 
-  const { turns, baseTurns, running, optimisticPrompt, submitted, showPending, replyKey } =
-    useTranscriptModelContext();
+  const {
+    turns,
+    baseTurns,
+    running,
+    optimisticPrompt,
+    optimisticPromptToken,
+    submitted,
+    showPending,
+    replyKey,
+  } = useTranscriptModelContext();
   useLayoutEffect(() => {
     hadPending.current = false;
     sendFollowReady.current = false;
@@ -325,10 +334,10 @@ export function Transcript({
   }, [snapshot?.forks]);
 
   useEffect(() => {
-    if (!showPending && optimisticPrompt) {
-      setOptimisticUserPrompt(null, "committed");
+    if (!showPending && optimisticPrompt && optimisticPromptToken != null) {
+      retireOptimisticPrompt(optimisticPromptToken);
     }
-  }, [showPending, optimisticPrompt, setOptimisticUserPrompt]);
+  }, [showPending, optimisticPrompt, optimisticPromptToken, retireOptimisticPrompt]);
 
   // Once *this* run has a model message of its own, that message carries the
   // liveness — its pill spins and its header names the activity. Until then an
@@ -639,6 +648,13 @@ export function Transcript({
               );
             })}
           </PerfProfiler>
+
+          <UnconfirmedPromptRecovery
+            sessionId={sessionId}
+            showPending={showPending}
+            running={running}
+            token={optimisticPromptToken}
+          />
 
           {notice ? (
             <ChatSessionMessage

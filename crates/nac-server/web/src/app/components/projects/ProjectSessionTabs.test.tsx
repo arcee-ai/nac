@@ -54,7 +54,7 @@ afterEach(cleanup);
 describe("project session tab behavior identity", () => {
   it("sizes tabs to their titles and keeps every behavior identifiable", () => {
     const sessions = [
-      session("orchestrator", "Plan the managed deployment rollout", "direct"),
+      session("planning", "Plan the managed deployment rollout", "direct"),
       session("direct", "Implement connection status feedback", "direct"),
       session("hybrid", "Coordinate release readiness review", "direct"),
     ];

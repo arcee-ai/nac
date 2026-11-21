@@ -435,7 +435,7 @@ def run_contract(bundle, observer, root, destination, admission):
     result = dict(passed=False, root=str(root), source_head=source, cleanup=[], launches=summaries,
                   trusted_input=False, actual_crash=False, rerun_authorized=False)
     environment = dict(HOME=str(home), NAC_HOME=str(home / 'nac-home'), PATH='/usr/bin:/bin:/usr/sbin:/sbin',
-        LANG='en_US.UTF-8', BROWSER='none', NAC_TELEMETRY='disabled', NAC_ORCHESTRATION='0',
+        LANG='en_US.UTF-8', BROWSER='none', NAC_TELEMETRY='disabled',
         GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL='/dev/null', MODELS_DEV_URL=provider.endpoint + '/models-dev',
         OPENAI_API_KEY='quit-fixture-dummy-only')
     try:

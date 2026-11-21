@@ -53,7 +53,9 @@ pub fn read_heartbeat_command_receipt(path: &Path, scope: &str, request_id: &str
         "SELECT response_json FROM heartbeat_commands WHERE session_id=?1 AND request_id=?2",
         params![scope, request_id], |row| row.get(0),
     ).optional()?;
-    response.map(|value| serde_json::from_str(&value).map_err(Into::into)).transpose()
+    response.map(|value| crate::store::legacy_task_model::decode(
+        &conn, crate::store::legacy_task_model::Owner::Command, scope, request_id, &value,
+    ).map(|(receipt, _)| receipt)).transpose()
 }
 command ReadHeartbeatCommandReceiptCommand { scope:String=scope.to_owned(), request_id:String=request_id.to_owned() }
 call |c| (&c.scope,&c.request_id)
@@ -66,11 +68,14 @@ coordinated_command! {
 /// Missing or contradictory history is unknown, never the resulting binding.
 pub fn read_heartbeat_destination_at_version(path: &Path, scope: &str, schedule_id: &str, version: i64) -> Result<Option<FreshTaskDestination>> {
     let conn = open_runtime_connection(path)?;
-    let mut statement = conn.prepare("SELECT response_json FROM heartbeat_commands WHERE session_id=?1 AND schedule_id=?2")?;
-    let rows = statement.query_map(params![scope, schedule_id], |row| row.get::<_, String>(0))?;
+    let mut statement = conn.prepare("SELECT request_id,response_json FROM heartbeat_commands WHERE session_id=?1 AND schedule_id=?2")?;
+    let rows = statement.query_map(params![scope, schedule_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?;
     let mut destination = None;
     for row in rows {
-        let receipt: HeartbeatReceipt = serde_json::from_str(&row?)?;
+        let (request_id, raw) = row?;
+        let (receipt, _): (HeartbeatReceipt, bool) = crate::store::legacy_task_model::decode(
+            &conn, crate::store::legacy_task_model::Owner::Command, scope, &request_id, &raw,
+        )?;
         ensure!(receipt.schedule.schedule_id == schedule_id, "historical schedule identity mismatch");
         if receipt.schedule.version == version {
             let candidate = receipt.schedule.binding.fresh_task.context("historical fresh destination missing")?;

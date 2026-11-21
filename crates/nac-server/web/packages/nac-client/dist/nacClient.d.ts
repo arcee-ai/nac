@@ -68,6 +68,7 @@ export type CommandAdmission<T> = {
     error: unknown;
 };
 export interface SessionSnapshotOptions {
+    promptRunId?: string;
     messageLimit?: number;
     sessionEventLimit?: number;
     includeSessions?: boolean;

@@ -11,9 +11,9 @@ const YAML = require("yaml");
 const workflow = name => { const value = YAML.parse(readFileSync(`.github/workflows/${name}.yml`, "utf8")); if (name === "stable-release") reverseAdmission(value); return value; };
 // Exact reviewed nomination; file digests checked against immutable Q and R sources.
 const reviewedStartupSupplier = {
-  "source_sha": "4b7a1f3e0bf6175a77c5ebf627fe965860e99976",
-  "test_source_sha": "f671fd15f002e3bda4df5040df998e80be1f6dd8",
-  "protocol_source_sha": "7325c48b3c9ec7036e255a6bd92f31c1a98c1607",
+  "source_sha": "1638a9f36b4978bfe790859d0d42ce3bea96a5cf",
+  "test_source_sha": "5306800fd6ea70471ecd372a4f495621e0f74695",
+  "protocol_source_sha": "1638a9f36b4978bfe790859d0d42ce3bea96a5cf",
   "profile": "macos26",
   "suite": "startup",
   "scenario_count": 4,
@@ -24,22 +24,22 @@ const reviewedStartupSupplier = {
     "futureStore"
   ],
   "test_files": {
-    "README.md": "eeb6d84c341b0e68ad6af24d08f6a7a2493bf8c0d7071efc2cd67a53d3db2f00",
-    "StartupJourneys.swift": "90ccceb82d6593c5714e43078a2f35a74f7d57f890883e0ba08f4c65505738b3",
-    "contract.py": "d159672bb8eda5d3bf4e5d462813452c83a673974749ed4f7f07b3bb9341b91b",
-    "test_contract.py": "c33ac0f526d8213758970c2f671ab71b08afa2fc4fd9287f9e56942012735f5e",
-    "StartupAXGuard.swift": "266e73c6362b12f6df51ef3f4d349b3d22b71a1eab5139e71e2336b1d4c3778d",
-    "StartupAXReceipt.swift": "94e3f3512a9caaebc42841d8cffc34e8a1275cdff2bc4d43501e5deaba202247",
-    "AX-WITNESS-CONTRACT.md": "67ef84950affed7cf3ab5cff9df9127a5081b3a93d1dff1469e67a83fddb0191",
-    "test_ax_witness.py": "4400ffed7d2b30ed1613e3829d0e2d61b740f7a3fd352a092f22eac9f7fee878",
+    "README.md": "23a181bf5ddff1dcce0a06b22e438026646d55b267f0b7205c5f58d9e22dfb54",
+    "StartupJourneys.swift": "acb6f7157225cffbc8e1fd0d4f4ebd3cb22a198cf6fa7bdb66ed0725a00122e1",
+    "contract.py": "e9e5b9e477ab975acedeecdef7a8ab58da2222377630644e0d5e649009c8192e",
+    "test_contract.py": "99449dbae247c877b2a8960b4a1147c45d0c133e585cdbeec2cb4c6b57e53046",
+    "StartupAXGuard.swift": "4c13fb3fd042d55d209228186f40991e78c53506e743efb29491bb7840e0c50b",
+    "StartupAXReceipt.swift": "01521dec562cd322152f17b4578585bbca5c6edb9cd87240c97303b56393e035",
+    "AX-WITNESS-CONTRACT.md": "1c7527943668bc5731db633ef5f23c85c527be54b96c71ac0b569718f55f0837",
+    "test_ax_witness.py": "3da894fd6e8c029b41d5bd602f0f0aa56c836161765c524890c6c68d4c91898f",
     "AGENTS.md": "3e24e5b29e32356d08895b2c162407a1be5cf9d71c1740d1dcc50fc566bc89e6",
     "test_title_assertion.py": "e4389c84259f0f8dbbd3b42eef153757b8f9da26d337010b8affd1719f415cef"
   },
 
   "protocol_files": {
-    "Cargo.lock": "8eaf3c5626b70caa5c613f551b5f98ce4746a21bf438f2df13f21410c58eabfa",
-    "crates/nac-server/Cargo.toml": "b909a14e90ef379a3335a8fec6b9c0408ff6f1a2be6b56b3b22644d31e1f10c3",
-    "crates/nac-server/tests/desktop_schema_contract.rs": "0eb70e49c7aba12bdb8c8c350246e892e2a5418403ca14a55674f2419a0aab1e"
+    "Cargo.lock": "018d1117cb054541ccc62a72d7c535efb08a281071800e5061e0515ed9595277",
+    "crates/nac-server/Cargo.toml": "f59a3763521df4303c927b425ed8d0b3a804f4952248b10f4b08192e55f6f1bf",
+    "crates/nac-server/tests/desktop_schema_contract.rs": "869a863cc8d67c9707ac4f43d5cbdb58adcc827ae41f0c597dff3816dbe7439d"
   }
 };
 function assertStartupSupplier(catalog) {

@@ -26,15 +26,14 @@ workflow claim, even when browser tests exist. Browser scenarios below are in
 | `/session/:sessionId/:panel?`, default Insights | Added: `ci-smoke.spec.ts` current panel deep links, shared composer and Node absence | Admission smoke only; content and actions remain separately scoped below |
 | Legacy Sessions panel | Added: deep link resolves to Insights | Filtering, bulk actions, archived sessions deferred; browser `navigation.e2e.ts` |
 | Insights / legacy Threads panel | Added: both deep-link smoke | Complete reasoning/tool grouping/long-history variants deferred; browser `insights.e2e.ts`, `reasoning.e2e.ts` |
-| Subagents (`delegated`) | Added: deep-link smoke | Child navigation, continuation, messages and managed orchestrators deferred; browser `subagents-panel.e2e.ts`, `subagent-continuation.e2e.ts`, `subagent-orchestrators.e2e.ts` |
+| Subagents (`delegated`) | Added: deep-link smoke | Child navigation, continuation and messages deferred; browser `subagents-panel.e2e.ts`, `subagent-continuation.e2e.ts` |
 | Files panel | Covered: representative tool write and file result, `workflow.spec.ts`; added deep-link smoke | Tree/source switching, Git status/diff/stage, revisions/revert deferred; browser `files-source.e2e.ts`, `review.e2e.ts`, `inspector-revert.e2e.ts` |
 | Terminal panel | Covered: `workflow.spec.ts` trusted Chromium key input, output, resize, Ctrl-C, open-PTY Quit and parent death | Paste/multiline/selection/reconnect/retained-history workflows deferred; browser `terminal-local-acceptance.e2e.ts`, `terminal-selection.e2e.ts`, `terminal-history.e2e.ts` |
 | Heartbeats panel | Added: deep-link smoke | Create/edit/cancel/attention and calendar/interval semantics deferred; browser `heartbeats.e2e.ts`, `heartbeat-attention.e2e.ts` |
-| Worksets panel | Added: orchestrator deep-link smoke | Workset selection and context mutations deferred; browser `inspector-worksets.e2e.ts` |
 | History panel (phone bottom bar) | Added: desktop deep-link smoke only | Phone geometry/revision actions deferred; browser `inspector-panel-hydration.e2e.ts`, `inspector-revert.e2e.ts` |
 | `/design` and unknown-route fallback | Deferred | Browser `src/App.designRoute.test.tsx`; showcase is not ordinary startup |
 | Direct chat streaming/tool turn | Covered: `workflow.spec.ts`, `performance.spec.ts` | Complete large transcript, token/usage accounting and model/tool variants deferred |
-| `orchestrator`, `direct-with-orchestrator` | Partial: `workflow.spec.ts` API creation and immutable metadata assertions | End-to-end execution of these topologies deferred; browser `direct-workflow.e2e.ts`, `subagent-orchestrators.e2e.ts` |
+| Retired session behaviors | `workflow.spec.ts` verifies creation is rejected | Direct session execution remains covered separately |
 | Steering/queue/inbox | Partial: `recovery.spec.ts` canonical queued delivery after renderer loss and Rust fail-closed approval denial | Broader steering/inbox coordination deferred; browser `permission-queue.e2e.ts`, `subagent-message-recovery.e2e.ts`, `internal-completions.e2e.ts` |
 | Questions and approvals | Covered: `workflow.spec.ts` Allow once and one question; manual mode/no human-shell grant assertions | Coordination, remembered grants, hard/configured denies and other approval modes deferred; browser `task-question-coordination.e2e.ts`, `permission-queue.e2e.ts` |
 | Goal/budget controls | Deferred | Browser `goal-objective.e2e.ts`, `exact-goal-wait.e2e.ts`, `peer-goal-coordination.e2e.ts` |

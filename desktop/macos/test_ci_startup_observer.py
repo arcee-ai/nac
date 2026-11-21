@@ -790,7 +790,8 @@ class ProductionObserverControls(unittest.TestCase):
                                                                 predicate='prohibited', category='token')
                 if scenario == 'known-native-argv':
                     annotation['environment_rejection'] = dict(executable_class='native', previously_known=True,
-                        predicate='native_argv', argv0_matches=False, helper_present=False, serving_present=True)
+                        predicate='native_argv', argv0_matches=False, helper_present=False, serving_present=True,
+                        argv0_kind='absolute_other')
                 self.assertEqual(frames[-1]['producer_failure'], annotation)
                 self.assertFalse(audit['reached_settlement_barrier'])
                 self.assertFalse(owner.failure_receipt()['positive_settlement'])

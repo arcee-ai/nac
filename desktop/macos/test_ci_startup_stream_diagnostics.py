@@ -309,8 +309,11 @@ class StreamDiagnosticsTests(unittest.TestCase):
                     for category in ('token', 'api_key', 'managed_config')]
         details += [dict(predicate='native_argv', argv0_matches=False, helper_present=False, serving_present=False),
                     dict(predicate='engine_argv', argv0_matches=True, helper_present=True, serving_present=True)]
+        details += [dict(predicate='engine_argv', argv0_matches=False, helper_present=True, serving_present=False,
+                         argv0_kind=category) for category in ('missing', 'empty', 'native_path',
+                            'expected_basename', 'private_var_alias', 'absolute_other', 'relative_other')]
         details += [dict(predicate='controlled_value', field=field, difference=difference)
-                    for field in ('HOME', 'NAC_HOME', 'PATH', 'LANG', 'NAC_TELEMETRY', 'NAC_ORCHESTRATION',
+                    for field in ('HOME', 'NAC_HOME', 'PATH', 'LANG', 'NAC_TELEMETRY',
                                   'GIT_CONFIG_NOSYSTEM', 'GIT_CONFIG_GLOBAL', 'BROWSER', 'MODELS_DEV_URL', 'other')
                     for difference in ('absent', 'different')]
         for detail in details:
@@ -352,7 +355,11 @@ class StreamDiagnosticsTests(unittest.TestCase):
                dict(executable_class='bundled_engine', previously_known=False, predicate='engine_argv',
                     argv0_matches=True, helper_present=True, serving_present=False),
                dict(executable_class='native', previously_known=False, predicate='native_argv',
-                    argv0_matches=0, helper_present=False, serving_present=False)]
+                    argv0_matches=0, helper_present=False, serving_present=False),
+               dict(executable_class='bundled_engine', previously_known=False, predicate='engine_argv',
+                    argv0_matches=False, helper_present=True, serving_present=False, argv0_kind='PRIVATE-CANARY'),
+               dict(executable_class='bundled_engine', previously_known=False, predicate='engine_argv',
+                    argv0_matches=False, helper_present=True, serving_present=False, argv0_kind='expected')]
         rows = [self.environment_failure(value) for value in bad]
         rows += [self.environment_failure(good, stage='arguments'), self.environment_failure(good, kind='other')]
         for row in rows:

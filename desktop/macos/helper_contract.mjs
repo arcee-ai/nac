@@ -45,7 +45,7 @@ export async function runHelperContract(executable, destination) {
     await fs.mkdir(workspace, { recursive: true });
     await fs.mkdir(nac, { recursive: true });
     const environment = { HOME: home, NAC_HOME: nac, PATH: "/usr/bin:/bin:/usr/sbin:/sbin",
-      NAC_ORCHESTRATION: "1", NAC_TELEMETRY: "disabled", BROWSER: "none",
+      NAC_TELEMETRY: "disabled", BROWSER: "none",
       GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null" };
     const git = (...args) => execute("/usr/bin/git", ["-C", workspace, ...args], { env: environment });
     await git("init", "--quiet", "--initial-branch=main");

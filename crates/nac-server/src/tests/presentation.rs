@@ -642,3 +642,96 @@ async fn sse_route_is_never_compressed_and_preserves_boundary_ordering() {
     let boundary_frame = body.split("\n\n").next().unwrap();
     assert!(!boundary_frame.lines().any(|line| line.starts_with("id:")));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn snapshot_exposes_only_requested_retained_prompt_proof_even_outside_window() {
+    let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
+    let root = temp_root("prompt_proof_projection");
+    let nac_home = root.join("nac-home");
+    std::fs::create_dir_all(&nac_home).unwrap();
+    let _env = ScopedModelEnv::isolated(&nac_home, Some("server-route-test-key"));
+    seed_session_with_messages(
+        &root,
+        "target",
+        "2026-01-01 00:00:00.000000000",
+        vec![Message::System {
+            content: "system".into(),
+        }],
+    );
+    let path = root.join("store.db");
+    let run = uuid::Uuid::new_v4().to_string();
+    let writer = TranscriptLogWriter::new(&path).unwrap();
+    writer
+        .append_person_run_prompt(
+            "target",
+            1,
+            &Message::User {
+                content: "prompt".into(),
+            },
+            &run,
+            "prompt",
+        )
+        .unwrap();
+    writer
+        .append(
+            "target",
+            2,
+            &Message::User {
+                content: "later".into(),
+            },
+        )
+        .unwrap();
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    // The public unbound fixture writer has no run fence. Bind the test receipt
+    // explicitly; real run-fenced writes are characterized by nac-core tests.
+    conn.execute(
+        "UPDATE transcript_append_receipts SET run_id=?1 WHERE operation_id LIKE 'prompt:%'",
+        [&run],
+    )
+    .unwrap();
+    conn.execute(
+        "DELETE FROM session_run_recovery WHERE session_id='target'",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+    let manager = SessionManager::new_async(ServerOptions {
+        root_cwd: root.clone(),
+        store_path: Some(path.clone()),
+        managed_host: None,
+    })
+    .await
+    .unwrap();
+    let app = router(manager.clone());
+    let query = format!("/sessions/target?message_limit=1&include_system=true&prompt_run_id={run}");
+    let response = get_response(app.clone(), &query, None).await;
+    let status = response.status();
+    let bytes = response_body(response).await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "{}",
+        String::from_utf8_lossy(&bytes)
+    );
+    let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(
+        body["committed_prompt"],
+        serde_json::json!({"run_id":run,"canonical_index":1})
+    );
+    assert_eq!(body["message_page"]["start"], 2);
+    let response = get_response(
+        app.clone(),
+        "/sessions/target?message_limit=1&include_system=true",
+        None,
+    )
+    .await;
+    let body: serde_json::Value = serde_json::from_slice(&response_body(response).await).unwrap();
+    assert!(body.get("committed_prompt").is_none());
+    let absent_query = format!("/sessions/target?prompt_run_id={}", uuid::Uuid::new_v4());
+    let absent = get_response(app, &absent_query, None).await;
+    assert_eq!(absent.status(), StatusCode::OK);
+    let absent: serde_json::Value = serde_json::from_slice(&response_body(absent).await).unwrap();
+    assert!(absent.get("committed_prompt").is_none());
+    manager.drain_persistence().await.unwrap();
+    let _ = std::fs::remove_dir_all(root);
+}

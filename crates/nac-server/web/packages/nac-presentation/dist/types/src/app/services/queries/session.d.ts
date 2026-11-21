@@ -373,6 +373,7 @@ export declare function useSessionSnapshot(id: string | null, options?: Partial<
     transcript_recovery_warning?: string | null;
     workspace: import("../../types/openapi.generated").components["schemas"]["WorkspaceSnapshot"];
 } & {
+    committed_prompt?: import("../../types/openapi.generated").components["schemas"]["CommittedPromptEvidence"] | null;
     lineage?: import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"] | null;
     message_cycle?: import("../../types/openapi.generated").components["schemas"]["MessageCycleMetadata"] | null;
     message_page?: import("../../types/openapi.generated").components["schemas"]["MessagePageMetadata"] | null;
@@ -412,6 +413,7 @@ export declare function useCreateSession(): import("@tanstack/react-query").UseM
     transcript_recovery_warning?: string | null;
     workspace: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["WorkspaceSnapshot"];
 } & {
+    committed_prompt?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["CommittedPromptEvidence"] | null;
     lineage?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionLineageSnapshot"] | null;
     message_cycle?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["MessageCycleMetadata"] | null;
     message_page?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["MessagePageMetadata"] | null;

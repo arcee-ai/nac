@@ -285,3 +285,73 @@ export function liveFoldLabel(segments: readonly InsightSegment[]): string {
   const sentence = workSentence(segments);
   return sentence ? `Working · ${sentence}` : "Thinking";
 }
+
+function compatibleWorkStep(left: WorkStep, right: WorkStep): boolean {
+  if (left.kind !== right.kind || left.key !== right.key) return false;
+  if (left.kind === "note" && right.kind === "note") {
+    return left.text.startsWith(right.text) || right.text.startsWith(left.text);
+  }
+  if (
+    left.kind !== "segment" ||
+    right.kind !== "segment" ||
+    left.segment.kind !== right.segment.kind
+  )
+    return false;
+  if (left.segment.kind === "reasoning" && right.segment.kind === "reasoning") {
+    return (
+      left.segment.text.startsWith(right.segment.text) ||
+      right.segment.text.startsWith(left.segment.text)
+    );
+  }
+  if (left.segment.kind === "tool" && right.segment.kind === "tool")
+    return left.segment.name === right.segment.name;
+  return false;
+}
+
+/** Retain a fold only when exactly one old and one new fold share a step.
+ * A live thought may be drawn before an earlier tool reaches the snapshot;
+ * anchoring solely to the first step would remount the reader's open fold. */
+export function keepWorkFoldKeys(
+  layout: TurnLayoutItem[],
+  previous: readonly TurnLayoutItem[],
+): TurnLayoutItem[] {
+  const oldFolds = previous.filter((item): item is WorkFold => item.kind === "fold");
+  const newFolds = layout.filter((item): item is WorkFold => item.kind === "fold");
+  const oldByStep = new Map<string, Array<{ fold: WorkFold; step: WorkStep }>>();
+  for (const old of oldFolds) {
+    for (const step of old.steps) {
+      const matches = oldByStep.get(step.key) ?? [];
+      matches.push({ fold: old, step });
+      oldByStep.set(step.key, matches);
+    }
+  }
+  const candidates = newFolds.map((fold) => {
+    const matches = new Set<WorkFold>();
+    for (const step of fold.steps) {
+      for (const old of oldByStep.get(step.key) ?? []) {
+        if (compatibleWorkStep(old.step, step)) matches.add(old.fold);
+      }
+    }
+    return matches;
+  });
+  const oldCounts = new Map<WorkFold, number>();
+  for (const matches of candidates) {
+    for (const old of matches) oldCounts.set(old, (oldCounts.get(old) ?? 0) + 1);
+  }
+  const reserved = new Set(layout.map((item) => (item.kind === "session" ? item.id : item.key)));
+  const replacements = new Map<WorkFold, string>();
+  for (let index = 0; index < newFolds.length; index += 1) {
+    const fold = newFolds[index];
+    const matches = candidates[index];
+    if (matches.size !== 1) continue;
+    const old = matches.values().next().value!;
+    if (oldCounts.get(old) !== 1) continue;
+    if (old.key !== fold.key && reserved.has(old.key)) continue;
+    replacements.set(fold, old.key);
+  }
+  return layout.map((item) => {
+    if (item.kind !== "fold") return item;
+    const key = replacements.get(item);
+    return key && key !== item.key ? { ...item, key } : item;
+  });
+}

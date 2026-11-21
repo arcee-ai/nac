@@ -61,7 +61,10 @@ for (const traced of [false, true]) {
       await fold.getByRole("button").first().click();
       await expect(fold.getByRole("list", { name: "Steps" })).toBeVisible();
       if (traced) {
-        await fold.getByRole("button", { name: "Thinking…", exact: true }).click();
+        await fold
+          .getByRole("list", { name: "Steps" })
+          .getByRole("button", { name: "Thinking…", exact: true })
+          .click();
         await expect(fold.getByText(REASONING.split("\n\n")[0], { exact: true })).toBeVisible();
       }
       gate.release();

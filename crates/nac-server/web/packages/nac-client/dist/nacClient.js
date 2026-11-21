@@ -224,6 +224,8 @@ export class NacClient {
     }
     getSession(sessionId, options = {}) {
         const params = new URLSearchParams();
+        if (options.promptRunId !== undefined)
+            params.set("prompt_run_id", options.promptRunId);
         if (options.messageLimit !== undefined)
             params.set("message_limit", String(options.messageLimit));
         if (options.sessionEventLimit !== undefined) {

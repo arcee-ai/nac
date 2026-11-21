@@ -12,7 +12,7 @@ extension WorkspaceSmoke {
             try await self.waitJS("direct response", "return document.body.innerText.includes('Hello from the isolated NAC Mac preview.');")
             try await self.idle()
             try await self.snapshot("legacy.png", expecting: .transcript(id: self.sessionID, message: FixtureProvider.answer))
-            return "An obsolete environment value cannot restore retired controls; the created session is direct"
+            return "Retired controls are absent; the created session is direct"
         }
         await check("new-session") {
             let previous = self.sessionID

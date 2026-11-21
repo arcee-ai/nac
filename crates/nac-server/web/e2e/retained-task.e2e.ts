@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { APIRequestContext, Page, TestInfo } from "@playwright/test";
+import type { APIRequestContext, Page, Route, TestInfo } from "@playwright/test";
 import type { EmbeddedHarness } from "./harness";
 import type { TaskLaunchRecord } from "../src/app/types/api";
 import { createProject, createSession, expect, test, waitForRunIdle } from "./harness";
@@ -90,7 +90,10 @@ async function retainedJourney(
     .click();
   // New session is Home's composer, preset to this session's project.
   await expect(page).toHaveURL(`${harness.baseUrl}/#/?project=${project}`);
-  const prompt = page.getByRole("textbox", { name: "What should we work on?", exact: true });
+  const prompt = page.getByRole("textbox", {
+    name: "What should we work on?",
+    exact: true,
+  });
   await expect(prompt).toBeFocused();
   // Isolated checkouts use a direct session.
   const chooseAgent = async () => {
@@ -137,7 +140,9 @@ async function retainedJourney(
   await dialog
     .getByRole("textbox", { name: "Save project default branch", exact: true })
     .fill("main");
-  await page.screenshot({ path: testInfo.outputPath("retained-task-form.png") });
+  await page.screenshot({
+    path: testInfo.outputPath("retained-task-form.png"),
+  });
   harness.provider.enqueue(
     "first-retained",
     { token: "FIRST_RETAINED_BRIEF" },
@@ -169,7 +174,9 @@ async function retainedJourney(
   await expect(dialog.locator("article").filter({ hasText: "Second retained task" })).toContainText(
     "Task ready",
   );
-  await page.screenshot({ path: testInfo.outputPath("retained-task-inventory.png") });
+  await page.screenshot({
+    path: testInfo.outputPath("retained-task-inventory.png"),
+  });
   const records = (await (
     await request.get(`${harness.baseUrl}/projects/${project}/task-launches`)
   ).json()) as TaskLaunchRecord[];
@@ -191,7 +198,9 @@ async function retainedJourney(
   await expect(page.getByText("First task ready", { exact: true })).toBeVisible();
   await harness.restart(undefined, true);
   await page.reload();
-  const retry = await request.post(`${harness.baseUrl}/task-launches`, { data: first.request });
+  const retry = await request.post(`${harness.baseUrl}/task-launches`, {
+    data: first.request,
+  });
   expect(retry.ok()).toBe(true);
   expect((await retry.json()).session_id).toBe(first.session_id);
   for (const [record, token, response] of [
@@ -203,13 +212,92 @@ async function retainedJourney(
     await expect(composer).toBeVisible();
     harness.provider.enqueue(token, { token }, { kind: "text", text: response, stream: true });
     await composer.fill(token);
-    await page
+    const runPath = `/sessions/${record.session_id}/runs`;
+    let attempts = 0;
+    const trackAttempt = (sent: import("@playwright/test").Request) => {
+      if (sent.method() === "POST" && new URL(sent.url()).pathname === runPath) attempts += 1;
+    };
+    page.on("request", trackAttempt);
+    // Only the intended first POST is intercepted. Other methods pass through
+    // without consuming the forced conflict or changing server behavior.
+    const forceConflict = withoutRandomUUID && record === second;
+    let conflictInjected = false;
+    const interceptRun = async (route: Route) => {
+      if (route.request().method() !== "POST" || conflictInjected) {
+        await route.fallback();
+        return;
+      }
+      conflictInjected = true;
+      await route.fulfill({
+        status: 409,
+        json: { error: "session is busy with a local operation" },
+      });
+    };
+    if (forceConflict) {
+      await page.route(`**${runPath}`, interceptRun);
+      // A non-POST request must pass through and leave the forced POST unused.
+      const getStatus = await page.evaluate(async (path) => (await fetch(path)).status, runPath);
+      expect(getStatus).toBe(405);
+      expect(conflictInjected).toBe(false);
+    }
+    const send = page
       .locator("form")
       .filter({ has: composer })
-      .getByRole("button", { name: "Send", exact: true })
-      .click();
+      .getByRole("button", { name: "Send", exact: true });
+    const submission = () =>
+      page.waitForResponse(
+        (received) =>
+          received.request().method() === "POST" && new URL(received.url()).pathname === runPath,
+      );
+    let acknowledgement = submission();
+    await send.click();
+    let admitted = await acknowledgement;
+    if (forceConflict) {
+      expect(conflictInjected).toBe(true);
+      expect(admitted.status()).toBe(409);
+      await page.unroute(`**${runPath}`, interceptRun);
+    }
+    if (admitted.status() === 409) {
+      expect(await admitted.json()).toEqual({
+        error: "session is busy with a local operation",
+      });
+      const recovery = page.getByRole("region", { name: "Message delivery" });
+      await expect(recovery).toContainText("Message delivery is unconfirmed");
+      await expect(recovery).toContainText(token);
+      await expect(composer).toHaveValue(token);
+      // A human checks authoritative history before deciding to send again;
+      // an unconfirmed request is never silently replayed by the client.
+      const snapshot = await request.get(`${harness.baseUrl}/sessions/${record.session_id}`);
+      expect(snapshot.ok()).toBe(true);
+      const history = (await snapshot.json()) as {
+        messages: { role: string; content: unknown }[];
+      };
+      expect(
+        history.messages.some((message) => message.role === "user" && message.content === token),
+      ).toBe(false);
+      expect(attempts).toBe(1);
+      await recovery.getByRole("button", { name: "Dismiss", exact: true }).click();
+      await expect(composer).toHaveValue(token);
+      expect(attempts).toBe(1);
+      acknowledgement = submission();
+      await send.click(); // The explicit new user decision, not a transport retry.
+      admitted = await acknowledgement;
+      expect(attempts).toBe(2);
+    } else {
+      expect(attempts).toBe(1);
+    }
+    expect(admitted.status()).toBe(202);
     await expect(page.getByText(response, { exact: true })).toBeVisible();
     await waitForRunIdle(request, harness, record.session_id);
+    const settled = await request.get(`${harness.baseUrl}/sessions/${record.session_id}`);
+    expect(settled.ok()).toBe(true);
+    const history = (await settled.json()) as {
+      messages: { role: string; content: unknown }[];
+    };
+    expect(
+      history.messages.filter((message) => message.role === "user" && message.content === token),
+    ).toHaveLength(1);
+    page.off("request", trackAttempt);
   }
   await fs.writeFile(path.join(first.workspace_path, "retained-work"), "keep after delete");
   const removed = await request.delete(`${harness.baseUrl}/sessions/${first.session_id}`);

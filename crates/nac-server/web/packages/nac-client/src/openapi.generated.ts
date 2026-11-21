@@ -88,6 +88,7 @@ export interface components {
       reasoning?: string | null;
       reset?: boolean;
       retry_attempt?: number | null;
+      run_id?: components["schemas"]["SessionRunId"] | null;
       text?: string | null;
     };
     AttachUserTerminalRequest: { page_limit: number; protocol_version: number };
@@ -138,6 +139,7 @@ export interface components {
       files_changed: number;
       sha: string;
     };
+    CommittedPromptEvidence: { canonical_index: number; run_id: string };
     CommitWorkspaceRequest: { message: string };
     CompactionFailure:
       | "summary_request_failed"
@@ -1256,6 +1258,7 @@ export interface components {
     SessionReplayGap: { missing_from_sequence_id: number; missing_to_sequence_id: number };
     SessionRunId: string;
     SessionSnapshotResponse: components["schemas"]["SessionFrontendSnapshot"] & {
+      committed_prompt?: components["schemas"]["CommittedPromptEvidence"] | null;
       lineage?: components["schemas"]["SessionLineageSnapshot"] | null;
       message_cycle?: components["schemas"]["MessageCycleMetadata"] | null;
       message_page?: components["schemas"]["MessagePageMetadata"] | null;

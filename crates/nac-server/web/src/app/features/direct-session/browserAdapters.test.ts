@@ -4,7 +4,12 @@ import { afterEach, expect, it, vi } from "vitest";
 import { api } from "@/app/services/api";
 import type { subscribeToSessionEvents } from "@/app/services/eventStream";
 import { queryKeys } from "@/app/services/queries/keys";
-import { runtimeStore, resetRuntime } from "@/app/store/runtimeStore";
+import {
+  runtimeStore,
+  resetRuntime,
+  setOptimisticUserPrompt,
+  bindOptimisticPrompt,
+} from "@/app/store/runtimeStore";
 import type {
   ActiveRunSnapshot,
   MessagesPageResponse,
@@ -108,4 +113,39 @@ it("restores cached run ownership on reacquire and isolates the next endpoint", 
   next();
   cache.clear();
   nextCache.clear();
+});
+
+it("refreshes the proof after a prompt append while the run remains active, then resumes tail reads", () => {
+  const cache = new QueryClient();
+  const subscribe = vi.fn((..._args: Parameters<typeof subscribeToSessionEvents>) => vi.fn());
+  const ports = makeObservationPorts(cache, "session", {
+    readMessages: api.getMessages,
+    subscribe,
+  });
+  ports.attach();
+  const token = setOptimisticUserPrompt("prompt")!;
+  bindOptimisticPrompt(token, "run");
+  const change = vi.fn();
+  const unsubscribe = ports.subscribe({ change, epoch: vi.fn(), replayLost: vi.fn() });
+  const event = {
+    sequence_id: 1,
+    event: { type: "transcript_appended", transcript_len: 1 },
+  } as never;
+  subscribe.mock.calls[0][1].onEnvelope?.(event);
+  expect(change.mock.lastCall?.[0].refresh).toBe("snapshot");
+  cache.setQueryData(queryKeys.sessionSnapshot("session"), {
+    messages: [],
+    committed_prompt: { run_id: "run", canonical_index: 0 },
+  });
+  subscribe.mock.calls[0][1].onEnvelope?.(event);
+  expect(change.mock.lastCall?.[0].refresh).toBe("snapshot");
+  cache.setQueryData(queryKeys.sessionSnapshot("session"), {
+    messages: [{ role: "user", content: "prompt" }],
+    committed_prompt: { run_id: "run", canonical_index: 0 },
+  });
+  subscribe.mock.calls[0][1].onEnvelope?.(event);
+  expect(change.mock.lastCall?.[0].refresh).toBe("messages");
+  unsubscribe();
+  ports.detach();
+  cache.clear();
 });

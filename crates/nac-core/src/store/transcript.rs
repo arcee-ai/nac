@@ -1,16 +1,13 @@
-//! Orchestrator transcript log — the DB-direct transcript workset
-//! (research/guidance-persistence). Step 1 landed these primitives plus the
-//! guards below; step 2 wired the agent loop to them (every orchestrator
-//! message is appended here when it enters `Agent.messages`); step 3 made
-//! the read paths store-backed; step 4 made the log the ONLY growing
-//! transcript store (never-fold — see below).
+//! Session transcript log. Each message is appended when it enters
+//! `Agent.messages`; reads come from the durable log, which is the only
+//! growing transcript store (never-fold — see below).
 //!
 //! # Storage
 //!
-//! The orchestrator transcript is an append-only log in the existing
+//! The session transcript is an append-only log in the
 //! `session_events` table: one row per transcript message, written under the
-//! reserved thread name `__nac_transcript__` (`TRANSCRIPT_EVENT_TARGET`).
-//! No schema change: the table already has the needed shape (session_id FK,
+//! reserved target `__nac_transcript__` (`TRANSCRIPT_EVENT_TARGET`).
+//! The table has the needed shape (session_id FK,
 //! event_target, event_json, created_at) and index (session_id, event_target,
 //! id).
 //!
@@ -126,7 +123,7 @@ pub const TRANSCRIPT_PAYLOAD_KEY: &str = "nac_transcript_message";
 /// transcript rows through table rebuilds verbatim instead of running them
 /// through AgentEvent sanitize-drop. Deliberately loose — preserving a row
 /// that merely claims to be a transcript entry is safe, while dropping a real
-/// one destroys the orchestrator transcript. Full validation happens in
+/// one destroys the session transcript. Full validation happens in
 /// `decode_transcript_log_entry`.
 pub fn is_transcript_log_payload(event_json: &str) -> bool {
     serde_json::from_str::<serde_json::Value>(event_json)

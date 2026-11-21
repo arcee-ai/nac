@@ -1,4 +1,4 @@
-import { B as e, O as t, a as n, k as r, n as i } from "./RuntimeContext-CTYmoWxf.js";
+import { B as e, O as t, a as n, k as r, n as i } from "./RuntimeContext-D7Jge0eZ.js";
 import { a } from "./PresentationBoundary-N-ZbQb_j.js";
 import { n as o, t as s } from "./Toast-DtiCBRJD.js";
 import { Profiler as c, createContext as l, useCallback as u, useContext as d, useEffect as f, useMemo as p, useReducer as ee, useRef as m, useState as te } from "react";
@@ -6434,26 +6434,42 @@ function Rw(e) {
 	return (t, n) => n?.queryKey[1] === e ? t : void 0;
 }
 function zw(e, t) {
-	let { api: n } = i(), r = _();
-	return g({
+	let { api: n, stores: r } = i(), a = _(), o = m(null), s = g({
 		queryKey: v.sessionSnapshot(e ?? ""),
 		queryFn: async ({ signal: t }) => {
-			let i = Ow(Tw(r, e)), a = await n.getSession(e, {
+			let i = Ow(Tw(a, e)), o = await n.getSession(e, {
 				messageLimit: 24,
 				sessionEventLimit: 50,
 				includeSessions: !1,
 				includeSystem: !0,
+				promptRunId: (r.runtimeStore.runtimeStore.getState().sessionId === e ? r.runtimeStore.runtimeStore.getState().optimisticPromptRunId : null) ?? a.getQueryData(v.sessionSnapshot(e))?.active_run?.submitted_user_message?.run_id ?? void 0,
 				signal: t
 			});
-			if (!mw(a)) throw Error("The server returned an invalid snapshot message page.");
-			if (t.aborted || !Mw(Tw(r, e), i.generation)) throw new DOMException("Snapshot superseded", "AbortError");
-			return kw(Tw(r, e), i), yw(r.getQueryData(v.sessionSnapshot(e)), a, i.replace);
+			if (!mw(o)) throw Error("The server returned an invalid snapshot message page.");
+			if (t.aborted || !Mw(Tw(a, e), i.generation)) throw new DOMException("Snapshot superseded", "AbortError");
+			return kw(Tw(a, e), i), yw(a.getQueryData(v.sessionSnapshot(e)), o, i.replace);
 		},
 		enabled: !!e,
 		staleTime: 1e3,
 		placeholderData: Rw(e ?? ""),
 		...t
-	});
+	}), c = s.data?.active_run?.submitted_user_message?.run_id;
+	return f(() => {
+		if (!e || t?.enabled === !1 || !c) {
+			o.current = null;
+			return;
+		}
+		let n = `${e}:${c}`;
+		o.current !== n && (o.current = n, a.invalidateQueries({
+			queryKey: v.sessionSnapshot(e),
+			exact: !0
+		}));
+	}, [
+		c,
+		a,
+		e,
+		t?.enabled
+	]), s;
 }
 function Bw(e) {
 	let { api: t } = i(), n = _();
@@ -6551,33 +6567,36 @@ function Kw() {
 	};
 }
 function qw() {
-	let { api: t } = i(), { captureRuntimeActivation: n, setOptimisticUserPrompt: r } = i().stores.runtimeStore, a = bw(), o = _();
+	let { api: t } = i(), { captureRuntimeActivation: n, setOptimisticUserPrompt: r, bindOptimisticPrompt: a, markOptimisticPromptUncertain: o, runtimeStore: s } = i().stores.runtimeStore, c = bw(), l = _();
 	return h({
 		retry: !1,
-		mutationFn: ({ id: i, prompt: s, signal: c }) => {
-			let l = n(i);
+		mutationFn: ({ id: i, prompt: u, signal: d }) => {
+			let f = n(i), p = null;
 			return aw(tw({
 				optimistic: () => {
-					l() && r(s);
+					f() && (p = r(u));
 				},
 				admit: async () => {
-					let n = await (c ? t.submitRun(i, s, c) : t.submitRun(i, s));
-					return n.status === "accepted" ? {
+					let n = await (d ? t.submitRun(i, u, d) : t.submitRun(i, u));
+					return n.status === "accepted" ? (f() && p !== null && s.getState().optimisticPromptToken === p && (Dw(Tw(l, i)), await l.cancelQueries({
+						queryKey: v.sessionSnapshot(i),
+						exact: !0
+					}), f() && s.getState().optimisticPromptToken === p && a(p, n.response.run_id)), {
 						kind: "accepted",
 						value: n.response
-					} : n.status === "not-sent" ? {
+					}) : n.status === "not-sent" ? {
 						kind: "not-sent",
 						error: new DOMException("Prompt submission was cancelled before it was sent.", "AbortError")
-					} : {
+					} : (f() && p !== null && o(p), {
 						kind: "uncertain",
 						error: new e(n.requestId, n.error)
-					};
+					});
 				},
 				rejected: () => {
-					l() && r(null);
+					f() && s.getState().optimisticPromptToken === p && r(null);
 				},
 				reconcile: (e) => {
-					e ? (Dw(Tw(o, i), !0), a.sessionRoot(i)) : a.session(i);
+					e ? (Dw(Tw(l, i), !0), c.sessionRoot(i)) : c.session(i);
 				}
 			}));
 		}

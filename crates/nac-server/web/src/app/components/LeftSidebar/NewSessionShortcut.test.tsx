@@ -106,15 +106,12 @@ it("opens Home's composer for the project on screen", () => {
   expect(screen.getByTestId("focus").textContent).toBe("focus");
 });
 
-it.each(["direct", "orchestrator", "direct-with-orchestrator"])(
-  "keeps a %s session's project, hidden or not",
-  (behavior) => {
-    fakes.sessions = [{ summary: { session_id: "s", behavior, project_id: "project-1" } }];
-    mount("/session/s/threads");
-    press();
-    expect(location()).toBe("/?project=project-1");
-  },
-);
+it("keeps a direct session's project", () => {
+  fakes.sessions = [{ summary: { session_id: "s", behavior: "direct", project_id: "project-1" } }];
+  mount("/session/s/threads");
+  press();
+  expect(location()).toBe("/?project=project-1");
+});
 
 it("waits for an unknown session rather than guessing its project", () => {
   mount("/session/unknown/threads");

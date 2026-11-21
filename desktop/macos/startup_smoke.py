@@ -129,7 +129,7 @@ def main():
                     home.mkdir(mode=0o700)
                     workspace.mkdir(mode=0o700)
                     environment = {'HOME': str(home), 'PATH': '/usr/bin:/bin:/usr/sbin:/sbin',
-                        'LANG': 'en_US.UTF-8', 'NAC_TELEMETRY': 'disabled', 'NAC_ORCHESTRATION': '0',
+                        'LANG': 'en_US.UTF-8', 'NAC_TELEMETRY': 'disabled',
                         'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': '/dev/null', 'BROWSER': 'none',
                         'MODELS_DEV_URL': f'http://127.0.0.1:{catalog.server_port}/models-dev'}
                     if vendor:

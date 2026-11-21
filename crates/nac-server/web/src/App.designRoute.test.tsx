@@ -24,14 +24,6 @@ vi.mock("./app/providers/ThemeProvider", () => ({
   ThemeProvider: ({ children }: { children: ReactNode }) => children,
   useTheme: () => ({ resolved: "dark" }),
 }));
-vi.mock("./app/features/ui-policy/UiPolicyProvider", () => ({
-  UiPolicyProvider: ({ children }: { children: ReactNode }) => children,
-}));
-vi.mock("./app/features/ui-policy/UiPolicyContext", () => ({
-  useUiPolicy: () => ({
-    orchestrationEnabled: state.useRuntime().scope.owner !== "direct",
-  }),
-}));
 vi.mock("./app/providers/ToastProvider", () => ({
   ToastProvider: ({ children }: { children: ReactNode }) => children,
 }));

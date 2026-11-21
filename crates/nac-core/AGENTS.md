@@ -1,7 +1,7 @@
 # nac-core guide
 
-`nac-core` owns the durable agent harness: model/tool execution, immutable
-session behavior, orchestration, traditional children, permissions, execution
+`nac-core` owns the durable agent harness: model/tool execution, direct
+sessions, traditional children, permissions, execution
 backends, session lifecycle, persistence, recovery, and workspace operations.
 It must not own HTTP/React delivery or managed-host product onboarding.
 
@@ -9,15 +9,15 @@ It must not own HTTP/React delivery or managed-host product onboarding.
 
 - Preserve direct sessions, traditional children and independent tasks under
   the retirement contract in `docs/architecture/0009-direct-only-retirement.md`.
-  Legacy topology remains present pending the cutover and removal slices; do not
-  change its compatibility incidentally before those slices.
+  Historical migrations remain version-bounded; do not rewrite retained data
+  incidentally.
 - Durable state is generation-aware and restart-safe. Completion delivery,
   recovery markers, inbox/goals, relationships, leases, transcript revisions,
   and cancellation ordering are compatibility surfaces.
 - Permission evaluation and approval cannot change the selected Local, SSH, or
   Podman backend. Non-bypassable path/sandbox/mutation policy remains separate.
 - Core may depend on small inward contracts/infrastructure crates. It must not
-  depend on `nac-server` or managed-host orchestration. `nac-managed` appears
+  depend on `nac-server` or managed-host product coordination. `nac-managed` appears
   only as a dev dependency for compatibility fixtures.
 - Keep modules private unless another crate has a supported reason to call the
   contract. Add public re-exports deliberately in `src/lib.rs`.
@@ -26,14 +26,13 @@ It must not own HTTP/React delivery or managed-host product onboarding.
 
 - `src/agent/` — model loop, prompt rendering, compaction, transcript state,
   repeated tool-failure policy, and message/tool boundaries.
-- `src/runtime/` — configuration/model resolution and direct/orchestrator/
-  worker/resume/backend construction. Shared session run contracts serve both
-  direct and orchestrator paths.
+- `src/runtime/` — configuration/model resolution, session resume, and backend
+  construction.
 - `src/traditional_children/legacy_direct_prompts/` — bounded shipped prompt
   templates needed to recover exact inherited guidance from older transcripts.
   Preserve those bytes; child inheritance must not rewrite stored history.
 - `src/managed_native_credentials.rs` — managed native capture, exact redaction,
-  and startup hardening; `worker_credentials.rs` owns worker transport.
+  and startup hardening.
 - `src/session_service/AGENTS.md` — run admission through durable settlement.
 - `src/store/AGENTS.md` and `src/sessions/` — persisted domain and schema.
 - `src/permissions/AGENTS.md` — policy, binding, grants, approval broker.
@@ -79,7 +78,7 @@ listed responsibility closed; a new concern requires a real submodule/port:
   together. These fields share the same incarnation and reaping gate. Controller
   algorithms, cached process observation, output policy and tests live in focused
   sibling owners; do not add provider, transport or durable-session policy here.
-- `view.rs` is the typed read-projection facade over session/thread/workset and
+- `view.rs` is the typed read-projection facade over session and
   workspace owners; `terminal/output.rs` is the bounded output registry,
   paging/UTF-8 boundary, preview, eviction, and lease owner. Neither may acquire
   new mutation/lifecycle responsibilities.

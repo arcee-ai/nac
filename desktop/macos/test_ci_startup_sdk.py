@@ -33,6 +33,10 @@ class StartupSDKTests(unittest.TestCase):
         self.H, self.Q = self.repository(self.harness), self.repository(self.tests)
         stack = ExitStack()
         self.addCleanup(stack.close)
+        fixture_root = self.tests / 'desktop/macos/startup_xctest'
+        fixture_hashes = {name: hashlib.sha256((fixture_root / name).read_bytes()).hexdigest()
+                          for name in sdk.fixture.TEST_FILES}
+        stack.enter_context(patch.object(sdk.fixture, 'TEST_FILES', fixture_hashes))
         stack.enter_context(patch.object(sdk.fixture, 'TEST_SOURCE', self.Q))
         stack.enter_context(patch.object(ci_startup, 'TEST_SOURCE', self.Q))
         stack.enter_context(patch.object(sdk.platform, 'system', return_value='Darwin'))

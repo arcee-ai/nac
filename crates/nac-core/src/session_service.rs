@@ -597,7 +597,7 @@ pub struct SessionService {
     /// remains authoritative; this only avoids re-reading the same transcript
     /// on every snapshot while an interrupted/failed warning remains visible.
     reconciled_recovery_run_id: Arc<StdMutex<Option<String>>>,
-    /// Shared transcript log writer (orchestrator sessions only). Read paths
+    /// Shared transcript log writer. Read paths
     /// go through the same connection as the agent's appends, so store-backed
     /// transcript reads serialize against commit points (step 3).
     transcript_log: Option<Arc<crate::store::TranscriptLogWriter>>,

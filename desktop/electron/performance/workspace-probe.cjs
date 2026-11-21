@@ -55,6 +55,9 @@ async function nacWorkspaceProbe(config) {
     await frame();
   };
   const send = async (session, prompt, marker) => {
+    // Read only after failure by the fixture; never exported as raw values.
+    window.__nacPerformanceFailureContext = { session, marker,
+      mutationCount: () => results.streaming_dom_mutation_gaps_ms.length };
     fill(prompt);
     const button = await wait(() => document.querySelector('button[aria-label=Send]:not(:disabled)'), 'Send enabled');
     const began = performance.now();
@@ -67,7 +70,9 @@ async function nacWorkspaceProbe(config) {
   const octal = text => [...new TextEncoder().encode(text)].map(n => '\\' + n.toString(8).padStart(3, '0')).join('');
   const history = await create();
   await navigate(history);
+  window.__nacPerformanceFailureStage = 'history-marker';
   results.history_seed_to_dom_ms = await send(history, config.historyPrompt, config.historyMarker);
+  window.__nacPerformanceFailureStage = 'history-complete';
   for (let index = 0; index < repeats; index++) {
     location.hash = '/';
     await wait(() => !composer(), 'prior history document retired');
@@ -121,8 +126,10 @@ async function nacWorkspaceProbe(config) {
     lastMutation = now;
   });
   observer.observe(document.getElementById('root'), { childList: true, characterData: true, subtree: true });
+  window.__nacPerformanceFailureStage = 'stream-marker';
   try { results.stream_send_to_complete_dom_raf_ms = await send(stream, config.streamPrompt, config.streamMarker); }
   finally { observer.disconnect(); }
+  window.__nacPerformanceFailureStage = 'stream-complete';
   const terminalSession = await create();
   await navigate(terminalSession, 'terminal');
   const region = () => document.querySelector('[aria-label="Session terminal"]');

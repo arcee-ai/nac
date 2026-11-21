@@ -20,7 +20,7 @@ def directory_identity_contract(engine):
         root, other, selected = base / 'bootstrap with spaces', base / 'different', base / 'config'
         for directory in (root, other, selected):
             directory.mkdir()
-        (selected / 'config.toml').write_text('[worker]\nthread_timeout_secs = 342\n')
+        (selected / 'config.toml').write_text('[storage]\n')
         environment = {'HOME': str(base), 'NAC_HOME': str(selected), 'PATH': '/usr/bin:/bin',
                        'NAC_TELEMETRY': 'disabled'}
 
@@ -131,7 +131,7 @@ def run_contract(engine, destination):
                 selected.mkdir(parents=True, exist_ok=True)
                 environment['XDG_CONFIG_HOME'] = str(selected.parent) if profile.endswith('absolute') else 'selected xdg'
             config = selected / 'config.toml'
-            config.write_text('[worker]\nthread_timeout_secs = 342\n')
+            config.write_text('[storage]\n')
             # A broken credential file must not even be read by path selection.
             (selected / 'credentials.json').write_text('credential-preflight-must-not-read')
             legacy = selected / 'store.db'

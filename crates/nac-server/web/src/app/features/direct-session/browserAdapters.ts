@@ -3,6 +3,8 @@ import type { QueryClient } from "@tanstack/react-query";
 
 import { SNAPSHOT_MESSAGE_LIMIT, mergeMessageTail } from "@/app/lib/messageWindow";
 import { perfMark } from "@/app/lib/perfDebug";
+import { displayPromptFromMessageText } from "@/app/lib/format";
+import { promptCommitCovers } from "@/app/lib/promptCommitEvidence";
 import { api } from "@/app/services/api";
 import { subscribeToSessionEvents } from "@/app/services/eventStream";
 import { queryKeys } from "@/app/services/queries/keys";
@@ -37,6 +39,7 @@ export function makeObservationPorts(
     resetRuntime,
     setStreamStatus,
     syncRunFromSnapshot,
+    getRuntimeState,
   } = runtimeForQueryClient(client).stores.runtimeStore;
   const refreshKey = sessionRefreshKey(client, id);
   let active = false;
@@ -61,8 +64,21 @@ export function makeObservationPorts(
         onEnvelope: (envelope) => {
           if (!active) return;
           const event = envelope.event;
+          let refresh = applyEnvelope(envelope);
+          if (event.type === "transcript_appended") {
+            const cached = client.getQueryData<SessionSnapshotResponse>(
+              queryKeys.sessionSnapshot(id),
+            );
+            const state = getRuntimeState();
+            const submitted = cached?.active_run?.submitted_user_message;
+            const runId = state.optimisticPromptRunId ?? submitted?.run_id;
+            const prompt =
+              state.optimisticUserPrompt ??
+              (submitted ? displayPromptFromMessageText(submitted.content) : null);
+            if (runId && !promptCommitCovers(cached, runId, prompt)) refresh = "snapshot";
+          }
           callbacks.change({
-            refresh: applyEnvelope(envelope),
+            refresh,
             transcriptLength: event.type === "transcript_appended" ? event.transcript_len : 0,
             runCompleted: event.type === "run_completed",
             permissionsChanged:

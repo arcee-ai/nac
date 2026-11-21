@@ -476,7 +476,7 @@ def fixture():
                   expected_store=home + '/selected nac/dev.db', environment={
                       'HOME': home, 'NAC_HOME': home + '/selected nac',
                       'PATH': '/usr/bin:/bin:/usr/sbin:/sbin', 'LANG': 'en_US.UTF-8',
-                      'NAC_TELEMETRY': 'disabled', 'NAC_ORCHESTRATION': '0',
+                      'NAC_TELEMETRY': 'disabled',
                       'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': '/dev/null',
                       'BROWSER': 'none', 'MODELS_DEV_URL': 'http://127.0.0.1:12345/models-dev'})
     receipt = dict(source_head=BASELINE, source_dirty=False, mode='app-build',
@@ -584,7 +584,7 @@ class AdmissionTests(unittest.TestCase):
                            ('MODELS_DEV_URL', 'https://models.example.test/models-dev'),
                            ('MODELS_DEV_URL', 'http://user:password@127.0.0.1:123/models-dev'),
                            ('MODELS_DEV_URL', 'http://127.0.0.1:123/models-dev?key=no'),
-                           ('HOME', '/Users/personal'), ('NAC_ORCHESTRATION', 'true')]:
+                           ('HOME', '/Users/personal'), ('NAC_OBSOLETE_MODE', 'true')]:
             with self.subTest(key=key, value=value):
                 config, receipt = fixture()
                 config['environment'][key] = value

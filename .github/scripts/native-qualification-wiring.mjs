@@ -26,7 +26,7 @@ export function reverseStartupConsole(workflow) {
 }
 
 const jobs = {
-  'native-qualification': '30723c5c3423f741df2fea3974feaba0d178033171f67e1705c6b3e08812d40b',
+  'native-qualification': '59074d1a5f83fca79781eea95769cf04733512598428857eb4b010c83e6b61f5',
   'native-admission': '2a87a1b238954e08bab65a062fcd2c0fce7ae7c5fa3783a8bbdb66f6e9c772c1',
   'native-exact': '1b63d965b6241e01fa93db8734276b53b3bbac0539bd9a9df27a9238106af0d2',
 };
@@ -38,9 +38,9 @@ export function reverseNativeQualification(workflow) {
     delete workflow.jobs[id];
   }
   const inputs = workflow.on.workflow_dispatch.inputs;
-  assert.deepEqual(Object.keys(inputs).sort(), ['cold_caches', 'lifecycle_custody', 'native-qualification', 'native-paths-custody', 'native_qualification', 'paths_custody'].sort());
+  assert.deepEqual(Object.keys(inputs).sort(), ['cold_caches', 'lifecycle_custody', 'native-qualification', 'native-paths-custody', 'native_qualification', 'paths_custody', 'startup_product_sha'].sort());
   const added = {...inputs}; delete added.cold_caches;
-  assert.equal(digest(added), '3b829efb754305d65b1b0bc355829ac8bf632bed796de0c11bcc835b8a01ca7e', 'reviewed manual input contracts');
+  assert.equal(digest(added), '5313e3f2a7fbffae308d779bfb8b915d7826dd0367aaa0c9fd19b3373128c4d8', 'reviewed manual input contracts');
   for (const key of Object.keys(added)) delete inputs[key];
   assert.equal(workflow.jobs.prepare.if, '${{ always() && (' + nativeOrdinary + ') }}');
   workflow.jobs.prepare.if = '${{ always() }}';

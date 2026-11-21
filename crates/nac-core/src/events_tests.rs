@@ -901,6 +901,30 @@ async fn event_sink_preserves_run_and_client_context_on_session_bus() {
     assert!(!envelope.epoch_id.is_empty());
 }
 
+#[tokio::test]
+async fn assistant_delta_uses_sink_run_context_and_legacy_omits_it() {
+    let bus = SessionEventBus::new(Some("session-delta-context".to_string()));
+    let mut receiver = bus.subscribe_assistant_deltas();
+    let run_id = SessionRunId::new();
+    let sink = EventSink::bus_with_context(bus.clone(), Some(run_id.clone()), None);
+    let delta = AssistantStreamDelta {
+        run_id: Some(SessionRunId::new()),
+        text: Some("hello".into()),
+        reasoning: None,
+        reset: false,
+        retry_attempt: None,
+    };
+    sink.emit_assistant_delta(delta.clone());
+    assert_eq!(receiver.recv().await.unwrap().run_id, Some(run_id));
+    EventSink::bus(bus).emit_assistant_delta(delta);
+    let legacy = receiver.recv().await.unwrap();
+    assert_eq!(legacy.run_id, None);
+    assert!(serde_json::to_value(legacy)
+        .unwrap()
+        .get("run_id")
+        .is_none());
+}
+
 #[test]
 fn model_start_events_are_never_forwarded() {
     let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();

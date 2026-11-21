@@ -246,7 +246,7 @@ pub(crate) fn load_all_session_events_with_connection(
     if per_thread_limit == 0 {
         return Ok(HashMap::new());
     }
-    // Transcript log rows live under the reserved orchestrator target
+    // Transcript log rows live under the reserved transcript target
     // (store/transcript.rs); they must never enter the event/tile paths.
     let mut stmt = conn.prepare(
         "WITH ranked AS (
@@ -375,7 +375,7 @@ mod tests {
         initialize(&path).unwrap();
         crate::store::insert_test_session(&path, "session-a");
 
-        // Seed transcript log rows under the reserved orchestrator target.
+        // Seed transcript log rows under the reserved transcript target.
         let writer = crate::store::TranscriptLogWriter::new(&path).unwrap();
         for (idx, content) in ["zero", "one", "two"].iter().enumerate() {
             writer

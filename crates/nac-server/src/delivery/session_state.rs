@@ -17,6 +17,20 @@ use crate::{
     MAX_THREAD_EVENT_PAGE_LIMIT,
 };
 
+// Proof is optional presentation evidence; a failed read remains unknown and
+// must not turn an otherwise valid canonical snapshot into a transport error.
+fn optional_prompt_evidence(
+    run_id: String,
+    observed: anyhow::Result<Option<u64>>,
+) -> Option<super::contracts::CommittedPromptEvidence> {
+    observed.ok().flatten().map(
+        |canonical_index| super::contracts::CommittedPromptEvidence {
+            run_id,
+            canonical_index,
+        },
+    )
+}
+
 #[utoipa::path(
     get,
     path = "/sessions/{session_id}",
@@ -44,8 +58,22 @@ pub(crate) async fn session_snapshot(
     }
 
     let loaded = manager.snapshot_with_options(&session_id, options).await?;
+    let committed_prompt = if let Some(run_id) = query.prompt_run_id {
+        let path = manager.inner.store_path.clone();
+        let owner = session_id.clone();
+        let observed_run = run_id.clone();
+        let observed = nac_core::store::spawn_blocking_store_caller(move || {
+            nac_core::store::committed_run_prompt_index(&path, &owner, &observed_run)
+        })
+        .await
+        .and_then(|value| value);
+        optional_prompt_evidence(run_id, observed)
+    } else {
+        None
+    };
     let lineage = manager.session_lineage(&session_id)?;
     Ok(Json(SessionSnapshotResponse {
+        committed_prompt,
         tool_call_occurrences: loaded.tool_call_occurrences,
         terminal_selection_attributions: super::contracts::selection_message_references(
             loaded.terminal_selection_attributions,
@@ -373,4 +401,22 @@ pub(crate) async fn delete_permission_grant(
         .delete_permission_grant(&session_id, &grant_id)
         .await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[cfg(test)]
+mod prompt_proof_tests {
+    use super::optional_prompt_evidence;
+    #[test]
+    fn proof_read_failure_is_unknown() {
+        assert!(
+            optional_prompt_evidence("run".into(), Err(anyhow::anyhow!("read failed"))).is_none()
+        );
+        assert!(optional_prompt_evidence("run".into(), Ok(None)).is_none());
+        assert_eq!(
+            optional_prompt_evidence("run".into(), Ok(Some(3)))
+                .unwrap()
+                .canonical_index,
+            3
+        );
+    }
 }

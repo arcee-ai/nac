@@ -831,7 +831,6 @@ reasoning_effort = "high"
 image = "config-image"
 
 [worker]
-thread_timeout_secs = 7200
 command_output_max_bytes = 8388608
 command_output_session_max_bytes = 67108864
 
@@ -893,7 +892,7 @@ fn non_model_config_load_ignores_invalid_model_values_but_keeps_other_sections_s
         std::fs::write(
                 root.join("config.toml"),
                 format!(
-                    "{invalid_model}\n[storage]\nstore_path = \"persisted/store.db\"\n\n[sandbox]\nimage = \"runtime-image\"\n\n[worker]\nthread_timeout_secs = 7200\n\n[[permissions.rules]]\naction = \"execute\"\nresource = \"command:[curl]*\"\neffect = \"deny\"\n"
+                    "{invalid_model}\n[storage]\nstore_path = \"persisted/store.db\"\n\n[sandbox]\nimage = \"runtime-image\"\n\n[[permissions.rules]]\naction = \"execute\"\nresource = \"command:[curl]*\"\neffect = \"deny\"\n"
                 ),
             )
             .unwrap();

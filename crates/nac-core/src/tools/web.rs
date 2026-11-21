@@ -302,7 +302,7 @@ impl NativeTool for WebFetchTool {
     }
 }
 
-// Delegated orchestrators and workers have no interactive broker. Capability
+// Headless callers have no interactive broker. Capability
 // inheritance must still honor configured Deny and fail closed on Ask, using
 // the selected backend's ordinary policy, just like imported capabilities.
 fn headless_web_policy(

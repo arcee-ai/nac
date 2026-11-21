@@ -58,3 +58,7 @@ export declare function formatElapsed(ms: number): string;
 export declare function settledFoldLabel(segments: readonly InsightSegment[], turnDurationMs: number | null): string;
 /** The fold's line while the turn is still producing output. */
 export declare function liveFoldLabel(segments: readonly InsightSegment[]): string;
+/** Retain a fold only when exactly one old and one new fold share a step.
+ * A live thought may be drawn before an earlier tool reaches the snapshot;
+ * anchoring solely to the first step would remount the reader's open fold. */
+export declare function keepWorkFoldKeys(layout: TurnLayoutItem[], previous: readonly TurnLayoutItem[]): TurnLayoutItem[];

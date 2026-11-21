@@ -144,7 +144,9 @@ pub use terminal_cleanups::*;
 pub use terminal_selection::*;
 pub use traditional_children::*;
 pub use transcript::*;
-pub use transcript_append::{TranscriptAppendError, TranscriptAppendReceipt};
+pub use transcript_append::{
+    committed_run_prompt_index, TranscriptAppendError, TranscriptAppendReceipt,
+};
 pub use workspace_revisions::*;
 
 #[cfg(test)]

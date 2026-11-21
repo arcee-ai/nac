@@ -95,6 +95,7 @@ export interface components {
             reasoning?: string | null;
             reset?: boolean;
             retry_attempt?: number | null;
+            run_id?: components["schemas"]["SessionRunId"] | null;
             text?: string | null;
         };
         AttachUserTerminalRequest: {
@@ -151,6 +152,10 @@ export interface components {
             deletions: number;
             files_changed: number;
             sha: string;
+        };
+        CommittedPromptEvidence: {
+            canonical_index: number;
+            run_id: string;
         };
         CommitWorkspaceRequest: {
             message: string;
@@ -1337,6 +1342,7 @@ export interface components {
         };
         SessionRunId: string;
         SessionSnapshotResponse: components["schemas"]["SessionFrontendSnapshot"] & {
+            committed_prompt?: components["schemas"]["CommittedPromptEvidence"] | null;
             lineage?: components["schemas"]["SessionLineageSnapshot"] | null;
             message_cycle?: components["schemas"]["MessageCycleMetadata"] | null;
             message_page?: components["schemas"]["MessagePageMetadata"] | null;

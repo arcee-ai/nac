@@ -4,6 +4,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 const probe = require("../performance/workspace-probe.cjs");
+const { annotateFailure, statusClass, collectRendererFacts } = require("../performance/failure-projection.cjs");
 
 function nativeDisplay({ screen, BrowserWindow }: any) {
   const window = BrowserWindow.getAllWindows()[0];
@@ -217,7 +218,45 @@ test("bounded optimized workflow diagnostics retain long transcript streaming an
       );
     });
     enqueue(c.provider, "electron");
-    const report = await c.page.evaluate(probe, configuration(paced.baseUrl));
+    const runResponses: string[] = [];
+    const observeResponse = (response: import("@playwright/test").Response) => {
+      if (
+        runResponses.length < 9 &&
+        response.request().method() === "POST" &&
+        /^\/sessions\/[^/]+\/runs$/.test(new URL(response.url()).pathname)
+      ) {
+        runResponses.push(statusClass(response.status()));
+      }
+    };
+    c.page.on("response", observeResponse);
+    let report: any;
+    try {
+      report = await c.page.evaluate(probe, configuration(paced.baseUrl));
+    } catch (error) {
+      // The existing CI reporter preserves bounded error text, not attachments.
+      // Never collect raw renderer content or let diagnostics replace failure.
+      let stage: unknown = "unknown";
+      try {
+        stage = await Promise.race([
+          c.page.evaluate(() => (window as any).__nacPerformanceFailureStage),
+          new Promise((resolve) => setTimeout(() => resolve("unknown"), 1000)),
+        ]);
+      } catch {
+        // A closed or unresponsive renderer leaves the stage unknown.
+      }
+      let renderer: unknown = null;
+      try {
+        renderer = await Promise.race([
+          c.page.evaluate(collectRendererFacts),
+          new Promise((resolve) => setTimeout(() => resolve(null), 1000)),
+        ]);
+      } catch {
+        // A closed or unresponsive renderer leaves the facts unknown.
+      }
+      throw annotateFailure(error, stage, c.provider.requests, paced.receipts, runResponses, renderer);
+    } finally {
+      c.page.off("response", observeResponse);
+    }
     report.settled_animation_state = await c.page.evaluate(() => (window as any).__fillFacts);
     if (fillControl)
       report.fill_control = {

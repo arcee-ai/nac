@@ -50,7 +50,8 @@ class ResolverAdmissionTests(unittest.TestCase):
 
     def test_legacy_product_is_rejected_before_source_or_compiler(self):
         from ci_startup_environment import PRODUCT
-        self.assertEqual(PRODUCT, '4b7a1f3e0bf6175a77c5ebf627fe965860e99976')
+        self.assertEqual(PRODUCT, os.environ.get('NAC_STARTUP_PRODUCT_SHA') or
+                         '1638a9f36b4978bfe790859d0d42ce3bea96a5cf')
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
             with patch('ci_startup_environment.require_checkout', side_effect=RuntimeError('legacy product rejected')) as checkout, \
@@ -252,7 +253,27 @@ class ProductionEnvironmentControls(unittest.TestCase):
                             self.assertIsNotNone(self.validate(request))
                         else:
                             self.rejection(request, 'native_argv' if role == 'launcher' else 'engine_argv',
-                                           argv0_matches=matches, helper_present=helper, serving_present=serving)
+                                           argv0_matches=matches, helper_present=helper, serving_present=serving,
+                                           argv0_kind='expected' if matches else 'relative_other')
+
+    def test_argv0_classification_is_closed_redacted_and_never_admits(self):
+        for name, operand in [('missing', None), ('empty', ''), ('native_path', 'native'),
+                              ('expected_basename', 'basename'), ('private_var_alias', 'alias'),
+                              ('absolute_other', '/PRIVATE-CANARY'), ('relative_other', 'PRIVATE-CANARY')]:
+            with self.subTest(name=name):
+                request = self.request('configuration_helper')
+                if operand == 'alias':
+                    request['engine'] = '/private/var/nac342/NAC.app/Contents/Resources/nac-web'
+                    request['executable'] = request['engine']
+                path = request['executable']
+                value = request['native'] if operand == 'native' else path.rsplit('/', 1)[-1] if operand == 'basename' else path.removeprefix('/private') if operand == 'alias' else operand
+                request['argv'] = [] if value is None else [value, '__desktop-configuration']
+                self.rejection(request, 'engine_argv', argv0_matches=False, helper_present=value is not None,
+                               serving_present=False, argv0_kind=name)
+        request = self.request('launcher')
+        request['argv'] = [request['engine']]
+        self.rejection(request, 'native_argv', argv0_matches=False, helper_present=False,
+                       serving_present=False, argv0_kind='engine_path')
 
     def test_every_controlled_field_absent_or_different_is_redacted_for_each_role(self):
         for role in ('launcher', 'configuration_helper', 'engine', 'descendant'):

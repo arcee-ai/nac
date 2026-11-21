@@ -26,6 +26,11 @@ on:
           - all-342-startup-macos26
           - all-344-lifecycle-macos26
           - all-347-paths-macos26
+      startup_product_sha:
+        description: Exact direct-only startup product SHA; empty selects the initial proof candidate
+        type: string
+        required: false
+        default: ""
       lifecycle_custody:
         description: Root-admitted ALL-344 custody JSON; required only for its fixed three-case qualification
         type: string
@@ -906,7 +911,7 @@ jobs:
       - name: Preserve source, size, and lifecycle contracts on every PR
         run: |
           make test-nac-guide
-          make test-source-size test-source-workflow test-source-binary
+          make test-source-size test-direct-retirement test-source-workflow test-source-binary
           make test-durability test-managed-load test-managed-image-contract
       - name: Retain direct load evidence
         if: always() && steps.evidence_cleanup.outcome == 'success'
@@ -1182,6 +1187,7 @@ jobs:
     with:
       harness-sha: ${{ needs.prepare.outputs.sha }}
       target: ${{ inputs.native_qualification }}
+      startup-product-sha: ${{ inputs.startup_product_sha }}
       lifecycle-custody: ${{ inputs.lifecycle_custody || '' }}
       paths-custody: ${{ inputs.paths_custody || '' }}
 

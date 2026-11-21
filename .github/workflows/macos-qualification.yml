@@ -9,6 +9,10 @@ on:
       target:
         required: true
         type: string
+      startup-product-sha:
+        required: false
+        type: string
+        default: ""
       lifecycle-custody:
         required: false
         type: string
@@ -40,16 +44,18 @@ jobs:
         id: target
         env:
           QUALIFICATION: ${{ inputs.target }}
+          NAC_STARTUP_PRODUCT_SHA: ${{ inputs.startup-product-sha }}
         run: python3 -B desktop/macos/ci_qualifications.py "$QUALIFICATION" >> "$GITHUB_OUTPUT"
   native:
     needs: resolve
     name: Exact supplier AppKit and WKWebView
     runs-on: ${{ needs.resolve.outputs.runner }}
-    timeout-minutes: 40
+    timeout-minutes: ${{ inputs.target == 'all-342-startup-macos26' && 70 || 40 }}
     env:
       DEVELOPER_DIR: ${{ needs.resolve.outputs.developer_directory }}
       CARGO_BUILD_JOBS: ${{ inputs.target == 'all-347-paths-macos26' && '2' || '4' }}
       CARGO_PROFILE_DEV_DEBUG: "0"
+      NAC_STARTUP_PRODUCT_SHA: ${{ inputs.startup-product-sha }}
     steps:
       - name: Check out external CI harness
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0

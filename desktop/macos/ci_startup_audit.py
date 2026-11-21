@@ -56,11 +56,12 @@ def session_facts(base, config, model_config, *, live):
         'session_id': sid, 'project_id': project['project_id'], 'cwd': config['workspace'],
         'store_path': config['expected_store'], 'backend': 'openai-responses', 'model': 'gpt-5.6-sol',
         'base_url': config['provider_base'], 'sandbox_status': 'off'}.items()), 'selected_store_session_metadata')
-    configurations = request(base, '/model-configs').get('configurations')
-    require(isinstance(configurations, list) and len(configurations) == 1
-            and all(configurations[0].get(key) == value for key, value in {
-                'config_id': model_config['config_id'], 'backend': 'openai-responses', 'model': 'gpt-5.6-sol',
-                'base_url': config['provider_base'], 'extra_headers': {}}.items()), 'saved_dummy_model_configuration')
+    configuration = request(base, path + '/config')
+    require(all(configuration.get(key) == value for key, value in {
+                'backend': 'openai-responses', 'model': 'gpt-5.6-sol',
+                'base_url': config['provider_base'], 'api_key_env': model_config['api_key_env'],
+                'extra_headers': {}}.items()) and 'api_key' not in configuration,
+            'session_model_configuration')
     # The snapshot omits None active_run; the list above serializes it
     # explicitly. Both observations must agree, and recovery warnings fail.
     if (snapshot.get('active_run') is not None or snapshot.get('active_compaction') is not None
@@ -86,7 +87,7 @@ def session_facts(base, config, model_config, *, live):
                 and isinstance(completed[0].get('run_id'), str), 'canonical_completed_run')
         run_id = completed[0]['run_id']
     return {'session_id': sid, 'project_id': project['project_id'], 'workspace': config['workspace'],
-            'selected_store': config['expected_store'], 'model_config_id': model_config['config_id'],
+            'selected_store': config['expected_store'], 'provider_connection_id': model_config['connection_id'],
             'model': 'gpt-5.6-sol', 'provider_backend': 'openai-responses',
             'execution': {'ssh_host': None, 'sandboxed': False, 'sandbox_status': 'off'},
             'active_run': None, 'run_failure': None, 'transcript': visible, 'completed_run_id': run_id,
@@ -278,6 +279,6 @@ def persisted_audit(base, config, model_config, live):
     require(live.get('facts') is not None and live['facts'].get('completed_run_id'), 'live_settlement_required')
     facts = session_facts(base, config, model_config, live=False)
     require(facts is not None and all(facts[key] == live['facts'][key] for key in
-            ('session_id', 'project_id', 'workspace', 'selected_store', 'model_config_id', 'model',
+            ('session_id', 'project_id', 'workspace', 'selected_store', 'provider_connection_id', 'model',
              'provider_backend', 'execution', 'active_run', 'run_failure', 'transcript')), 'persisted_facts_changed')
     return facts

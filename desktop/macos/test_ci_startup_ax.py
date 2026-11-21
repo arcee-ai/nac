@@ -191,12 +191,25 @@ class GuardProofControls(unittest.TestCase):
         row['interactions'] = interaction_facts(row['rows'])
         return config,witness,row
 
-    def test_exact_26_guards_and_all_existing_11_action_phases(self):
+    def test_exact_34_guards_and_all_15_action_phases(self):
         config,witness,row=self.fixture()
-        self.assertEqual(len(row['rows']),26)
-        self.assertEqual(guard_phases(),['form','form','form','form','form','panel','panel','goTo','goTo','goTo','goTo','goTo',
-                                      'goTo','panel','panel','form','form','form','form','form','form','form','form','form','form','form'])
+        self.assertEqual(len(row['rows']),34)
+        self.assertEqual(guard_phases(), ['form', 'form', 'form', 'form', 'form', 'panel', 'panel', 'goTo', 'goTo', 'goTo', 'goTo', 'goTo', 'goTo', 'panel', 'panel'] + ['form'] * 19)
         self.assertIs(require_guard_proof(row,config,'e'*64,witness),row)
+
+    def test_search_and_composer_targets_cannot_rebind(self):
+        import copy
+        import uuid
+        config, witness, original = self.fixture()
+        for index in (9, 10):
+            row = copy.deepcopy(original)
+            row['interactions'][index]['target_id'] = str(uuid.UUID(int=999))
+            with self.subTest(index=index), self.assertRaises(RuntimeError):
+                require_guard_proof(row, config, 'e' * 64, witness)
+        row = copy.deepcopy(original)
+        row['interactions'][13]['target_id'] = str(uuid.UUID(int=999))
+        with self.assertRaises(RuntimeError):
+            require_guard_proof(row, config, 'e' * 64, witness)
 
     def test_missing_stale_replayed_replaced_private_or_wrong_source_proof_is_refused(self):
         import copy

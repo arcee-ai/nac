@@ -296,7 +296,7 @@ def run_contract(bundle, destination, observer, source_ref, deadline):
         provider.protocol.register(TOKEN)
         environment = dict(HOME=str(profile), NAC_HOME=str(profile / 'nac-home'),
                            PATH='/usr/bin:/bin:/usr/sbin:/sbin', LANG='en_US.UTF-8', BROWSER='none',
-                           NAC_TELEMETRY='disabled', NAC_ORCHESTRATION='0', GIT_CONFIG_NOSYSTEM='1',
+                           NAC_TELEMETRY='disabled', GIT_CONFIG_NOSYSTEM='1',
                            GIT_CONFIG_GLOBAL='/dev/null', MODELS_DEV_URL=provider.endpoint + '/models-dev',
                            OPENAI_API_KEY='attention-semantic-dummy-only')
         subprocess.run(['/usr/bin/git', 'init', '--quiet', '--initial-branch=main', str(profile)],

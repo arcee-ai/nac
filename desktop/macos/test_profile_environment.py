@@ -15,7 +15,7 @@ PROFILE = DIRECTORY / 'PreviewProfile.swift'
 PROBE = DIRECTORY / 'test-fixtures/ProfileEnvironmentMain.swift'
 ENVIRONMENT_NAMES = {'HOME', 'NAC_HOME', 'XDG_CONFIG_HOME', 'TMPDIR', 'PATH', 'LANG',
                      'BROWSER', 'GIT_CONFIG_NOSYSTEM', 'GIT_CONFIG_GLOBAL',
-                     'NAC_TELEMETRY', 'NAC_ORCHESTRATION'}
+                     'NAC_TELEMETRY'}
 
 
 def run_owned(argv, *, env, timeout):
@@ -65,61 +65,33 @@ class ProfileEnvironmentTests(unittest.TestCase):
                 raise RuntimeError('Actual profile component compilation failed')
             cls.binaries[smoke] = binary
 
-    def probe(self, smoke, arguments, enabled, *, ambient='1'):
-        env = {**self.environment, 'NAC_ORCHESTRATION': ambient,
+    def probe(self, smoke, arguments, *, ambient='fixture-canary'):
+        env = {**self.environment, 'PREVIEW_CANARY': ambient,
                'NAC_HOME': '/DO-NOT-USE-PERSONAL-NAC', 'OPENAI_API_KEY': 'owned-fixture-not-a-credential'}
         argv = [str(self.binaries[smoke]), *arguments]
         result = run_owned(argv, env=env, timeout=15)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         record = json.loads(result.stdout)
         print('PROFILE_ENVIRONMENT ' + json.dumps({
-            'argv': argv, 'ambient_names': ['NAC_ORCHESTRATION', 'NAC_HOME', 'OPENAI_API_KEY'],
+            'argv': argv, 'ambient_names': ['PREVIEW_CANARY', 'NAC_HOME', 'OPENAI_API_KEY'],
             'observation': record}), flush=True)
         self.assertIs(record['compiled_smoke'], smoke)
-        self.assertTrue(record['valid_orchestration_value'])
         self.assertTrue(record['private_profile_paths'])
         self.assertTrue(record['store_within_profile'])
         self.assertIs(record['profile_removed'], True)
         self.assertFalse(Path(record['owned_profile_root']).exists())
         self.assertEqual(set(record['environment_names']), ENVIRONMENT_NAMES)
-        self.assertIs(record['orchestration_enabled'], enabled)
 
-    def test_smoke_legacy_enables_orchestration(self):
-        self.probe(True, ['--smoke-scenario', 'workspace-legacy'], True)
-
-    def test_ordinary_legacy_stays_disabled(self):
-        self.probe(False, ['--smoke-scenario', 'workspace-legacy'], False)
-
-    def test_no_scenario_stays_disabled(self):
+    def test_scenarios_keep_the_same_isolated_profile(self):
         for smoke in (False, True):
-            with self.subTest(smoke=smoke):
-                self.probe(smoke, [], False)
+            for arguments in ([], ['--smoke-scenario'], ['--smoke-scenario', 'workspace-direct'],
+                              ['--smoke-scenario', 'workspace-legacy'], ['--scenario', 'workspace-legacy']):
+                with self.subTest(smoke=smoke, arguments=arguments):
+                    self.probe(smoke, arguments)
 
-    def test_direct_and_manual_stay_disabled(self):
+    def test_ambient_values_never_enter_the_profile(self):
         for smoke in (False, True):
-            for scenario in ('workspace-direct', 'workspace-manual'):
-                with self.subTest(smoke=smoke, scenario=scenario):
-                    self.probe(smoke, ['--smoke-scenario', scenario], False)
-
-    def test_missing_value_stays_disabled(self):
-        for smoke in (False, True):
-            with self.subTest(smoke=smoke):
-                self.probe(smoke, ['--smoke-scenario'], False)
-
-    def test_invalid_values_stay_disabled(self):
-        for smoke in (False, True):
-            for value in ('workspace-legacy-extra', 'WORKSPACE-LEGACY', 'unknown'):
-                with self.subTest(smoke=smoke, value=value):
-                    self.probe(smoke, ['--smoke-scenario', value], False)
-
-    def test_unrelated_flag_does_not_enable_orchestration(self):
-        for smoke in (False, True):
-            with self.subTest(smoke=smoke):
-                self.probe(smoke, ['--scenario', 'workspace-legacy'], False)
-
-    def test_explicit_legacy_overrides_ambient_disabled_only_in_smoke(self):
-        self.probe(True, ['--smoke-scenario', 'workspace-legacy'], True, ambient='0')
-        self.probe(False, ['--smoke-scenario', 'workspace-legacy'], False, ambient='0')
+            self.probe(smoke, ['--smoke-scenario', 'workspace-legacy'], ambient='other-canary')
 
 
 if __name__ == '__main__':

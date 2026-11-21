@@ -148,7 +148,7 @@ async fn completed_pty_root_kills_surviving_process_group() {
         executable.display().to_string().replace('\'', "'\"'\"'")
     );
     let command = format!(
-        "NAC_EXITED_PTY_DESCENDANT_HELPER=1 {executable} --exact terminal::session::tests::exited_pty_descendant_helper --nocapture & sleep 0.2"
+        "NAC_EXITED_PTY_DESCENDANT_HELPER=1 {executable} --exact terminal::session::tests::exited_pty_descendant_helper --nocapture & IFS= read -r -t 10 release && [ \"$release\" = NAC_EXIT_ROOT ]"
     );
     let mut session = TerminalSession::spawn(
         "exited-root".to_string(),
@@ -188,6 +188,26 @@ async fn completed_pty_root_kills_surviving_process_group() {
         process_running(child_pid),
         "background child exited too early"
     );
+    // The root must remain alive until the helper has joined its group,
+    // ignored SIGHUP and published its PID. The bounded shell read also
+    // prevents an abandoned fixture if this test fails before release.
+    session.refresh_status();
+    assert!(
+        session.exit_code().is_none(),
+        "PTY root exited before readiness"
+    );
+    let ticket = session
+        .input_control()
+        .ticket(session.output_id(), super::super::InputController::Agent)
+        .unwrap();
+    let receipt = session
+        .enqueue_input(
+            b"NAC_EXIT_ROOT\r",
+            ticket,
+            &crate::tools::RunCancellation::default(),
+        )
+        .unwrap();
+    super::super::input::await_receipt(receipt).await.unwrap();
 
     for _ in 0..40 {
         session.refresh_status();
@@ -196,7 +216,11 @@ async fn completed_pty_root_kills_surviving_process_group() {
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
-    assert!(session.exit_code().is_some(), "PTY root did not exit");
+    assert_eq!(
+        session.exit_code(),
+        Some(0),
+        "PTY root did not exit after the release handshake"
+    );
 
     let mut still_running = false;
     for _ in 0..40 {

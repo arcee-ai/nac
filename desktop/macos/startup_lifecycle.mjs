@@ -81,7 +81,7 @@ async function runCase(source, destination, scenario) {
     await fs.mkdir(nac, {recursive:true, mode:0o700});
     await fs.mkdir(workspace, {mode:0o700});
     const environment = {HOME:home, NAC_HOME:nac, PATH:"/usr/bin:/bin:/usr/sbin:/sbin",
-      LANG:"en_US.UTF-8", NAC_ORCHESTRATION:"1", NAC_TELEMETRY:"disabled", BROWSER:"none",
+      LANG:"en_US.UTF-8", NAC_TELEMETRY:"disabled", BROWSER:"none",
       GIT_CONFIG_NOSYSTEM:"1", GIT_CONFIG_GLOBAL:"/dev/null"};
     await execute("/usr/bin/git", ["-C", workspace, "init", "--quiet", "--initial-branch=main"], {env:environment});
     await execute("/usr/bin/git", ["-C", workspace, "-c", "user.name=Native lifecycle fixture",

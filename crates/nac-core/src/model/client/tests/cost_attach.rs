@@ -60,7 +60,7 @@ async fn send_turn_attaches_catalog_cost_to_the_usage() {
 }
 
 #[tokio::test]
-async fn orchestrator_1h_cache_writes_bill_at_the_1h_rate() {
+async fn one_hour_cache_writes_bill_at_the_one_hour_rate() {
     let server = anthropic_usage_server();
     let client = anthropic_cost_test_client(&server.base_url, Some("1h"));
 

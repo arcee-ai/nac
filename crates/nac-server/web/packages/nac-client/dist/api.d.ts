@@ -15,6 +15,7 @@ export interface ListSessionsOptions {
     projectId?: string | null;
 }
 interface SessionSnapshotOptions {
+    promptRunId?: string;
     messageLimit?: number;
     sessionEventLimit?: number;
     includeSessions?: boolean;
@@ -580,6 +581,7 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         transcript_recovery_warning?: string | null;
         workspace: import("./openapi.generated.js").components["schemas"]["WorkspaceSnapshot"];
     } & {
+        committed_prompt?: import("./openapi.generated.js").components["schemas"]["CommittedPromptEvidence"] | null;
         lineage?: import("./openapi.generated.js").components["schemas"]["SessionLineageSnapshot"] | null;
         message_cycle?: import("./openapi.generated.js").components["schemas"]["MessageCycleMetadata"] | null;
         message_page?: import("./openapi.generated.js").components["schemas"]["MessagePageMetadata"] | null;
@@ -603,6 +605,7 @@ export declare function createNacApi(nacClient: NacClient, options?: {
         transcript_recovery_warning?: string | null;
         workspace: import("./openapi.generated.js").components["schemas"]["WorkspaceSnapshot"];
     } & {
+        committed_prompt?: import("./openapi.generated.js").components["schemas"]["CommittedPromptEvidence"] | null;
         lineage?: import("./openapi.generated.js").components["schemas"]["SessionLineageSnapshot"] | null;
         message_cycle?: import("./openapi.generated.js").components["schemas"]["MessageCycleMetadata"] | null;
         message_page?: import("./openapi.generated.js").components["schemas"]["MessagePageMetadata"] | null;

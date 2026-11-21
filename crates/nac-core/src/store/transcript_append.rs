@@ -489,3 +489,118 @@ pub(super) enum AppendFault {
 #[cfg(test)]
 #[path = "transcript_append_tests.rs"]
 mod tests;
+
+coordinated_command! {
+/// Return the canonical index of a still-retained prompt proven committed for
+/// this exact run. This is historical evidence, not proof that a later read of
+/// the transcript still contains the row. A missing or unverifiable receipt is
+/// unknown, including for legacy/unfenced writers and after rewind.
+pub fn committed_run_prompt_index(path: &Path, session_id: &str, run_id: &str) -> Result<Option<u64>> {
+    if uuid::Uuid::parse_str(run_id).is_err() {
+        return Ok(None);
+    }
+    let mut connection = open_initialized_read_connection(path)?;
+    let snapshot = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Deferred)?;
+    let prefix = format!("prompt:{run_id}:");
+    // The primary-key range bounds the lookup even for large sessions.
+    let upper = format!("prompt:{run_id};");
+    let mut statement = snapshot.prepare(
+        "SELECT r.operation_id, r.start_idx, r.end_idx, r.digest, r.run_id, e.event_target, e.event_json
+         FROM transcript_append_receipts r
+         LEFT JOIN session_events e ON e.id=r.last_message_id AND e.session_id=r.session_id
+         WHERE r.session_id=?1 AND r.operation_id>=?2 AND r.operation_id<?3
+         LIMIT 2",
+    )?;
+    let rows = statement
+        .query_map(params![session_id, prefix, upper], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, Option<String>>(5)?,
+                row.get::<_, Option<String>>(6)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>();
+    let Ok(rows) = rows else {
+        return Ok(None);
+    };
+    if rows.len() != 1 {
+        return Ok(None);
+    }
+    let (operation, start, end, digest, receipt_run, target, payload) = &rows[0];
+    let Ok(start) = u64::try_from(*start) else {
+        return Ok(None);
+    };
+    let Ok(end) = u64::try_from(*end) else {
+        return Ok(None);
+    };
+    let Some(expected_end) = start.checked_add(1) else {
+        return Ok(None);
+    };
+    let Some(entry) = payload
+        .as_deref()
+        .and_then(super::transcript::decode_transcript_log_entry)
+    else {
+        return Ok(None);
+    };
+    let Ok(message @ Message::User { .. }) = serde_json::from_str::<Message>(&entry.message_json)
+    else {
+        return Ok(None);
+    };
+    // A client can also observe an active inbox run. Accept only the exact
+    // operation grammar used by the run-prompt writer; its fenced run id and
+    // the same-row digest remain mandatory for both sources.
+    let prefix = format!("prompt:{run_id}:{start}:");
+    let valid_operation = operation.strip_prefix(&prefix).is_some_and(|suffix| {
+        if suffix == "None" {
+            return true;
+        }
+        let Some(rest) = suffix.strip_prefix("Some(") else {
+            return false;
+        };
+        let Some((id, rest)) = rest.split_once(')') else {
+            return false;
+        };
+        if id
+            .parse::<i64>()
+            .ok()
+            .is_none_or(|value| value <= 0 || id != value.to_string())
+        {
+            return false;
+        }
+        if rest.is_empty() {
+            return true;
+        }
+        let Some((version, hash)) = rest
+            .strip_prefix(':')
+            .and_then(|value| value.split_once(':'))
+        else {
+            return false;
+        };
+        version
+            .parse::<i64>()
+            .is_ok_and(|value| value >= 0 && version == value.to_string())
+            && hash.len() == 64
+            && hash
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    });
+    let payload = serde_json::to_vec(&(Some(start), std::slice::from_ref(&message)))?;
+    let expected_digest = format!("{:x}", Sha256::digest(payload));
+    let valid = receipt_run.as_deref() == Some(run_id)
+        && end == expected_end
+        && target.as_deref() == Some(super::TRANSCRIPT_EVENT_TARGET)
+        && valid_operation
+        && entry.idx == start
+        && entry.kind == super::transcript::TranscriptMessageKind::User
+        && digest == &expected_digest;
+    Ok(valid.then_some(start))
+}
+command ReadCommittedRunPrompt { session_id: String = session_id.to_owned(), run_id: String = run_id.to_owned() }
+call |command| (&command.session_id, &command.run_id)
+correlation |command| crate::telemetry::Correlation::session(Some(&command.session_id));
+port internal;
+}

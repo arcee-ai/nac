@@ -28,7 +28,7 @@ _PRODUCER_FAILURE_KINDS = frozenset((
     'process_probe', 'ownership_invalid', 'arguments_unavailable', 'other',
 ))
 _ENVIRONMENT_FIELDS = frozenset((
-    'HOME', 'NAC_HOME', 'PATH', 'LANG', 'NAC_TELEMETRY', 'NAC_ORCHESTRATION',
+    'HOME', 'NAC_HOME', 'PATH', 'LANG', 'NAC_TELEMETRY',
     'GIT_CONFIG_NOSYSTEM', 'GIT_CONFIG_GLOBAL', 'BROWSER', 'MODELS_DEV_URL', 'other',
 ))
 
@@ -49,9 +49,17 @@ def _environment_rejection(value):
         valid = (set(value) == common | {'category'} and type(value['category']) is str
                  and value['category'] in ('token', 'api_key', 'managed_config'))
     elif predicate in ('native_argv', 'engine_argv'):
-        valid = (set(value) == common | {'argv0_matches', 'helper_present', 'serving_present'}
+        required = common | {'argv0_matches', 'helper_present', 'serving_present'}
+        valid = (required <= set(value) <= required | {'argv0_kind'}
                  and all(type(value[key]) is bool for key in ('argv0_matches', 'helper_present', 'serving_present'))
                  and value['executable_class'] == ('native' if predicate == 'native_argv' else 'bundled_engine'))
+        if valid and 'argv0_kind' in value:
+            valid = (type(value['argv0_kind']) is str
+                     and value['argv0_kind'] in ('missing', 'empty', 'expected', 'native_path', 'engine_path',
+                                                'expected_basename', 'private_var_alias', 'absolute_other', 'relative_other')
+                     and (value['argv0_kind'] == 'expected') == value['argv0_matches']
+                     and not (value['executable_class'] == 'native' and value['argv0_kind'] == 'native_path')
+                     and not (value['executable_class'] == 'bundled_engine' and value['argv0_kind'] == 'engine_path'))
         if valid:
             valid = not (value['argv0_matches'] and (
                 not value['helper_present'] and not value['serving_present'] if predicate == 'native_argv'
