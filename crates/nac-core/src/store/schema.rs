@@ -7,6 +7,8 @@ mod completion_tables;
 mod connection;
 mod delegation_receipts;
 #[cfg(test)]
+mod fresh_schema_tests;
+#[cfg(test)]
 mod fresh_task_migration_tests;
 mod fresh_task_tables;
 mod heartbeat_calendar;
@@ -94,6 +96,7 @@ use connection::{connect, connect_existing, connect_probe_read_only, connect_rea
 pub(crate) use connection::{track_connection_opens, tracked_connection_opens};
 use wal_preflight::read_schema_version_header;
 
+// 55 removes retired worker storage and saved model presets.
 // 54 retires legacy ownership trees under exclusive, cleanup-safe authority.
 // 53 retains explicit session speed selections.
 // 51 records internal completion provenance on parent inbox rows.
@@ -141,7 +144,7 @@ use wal_preflight::read_schema_version_header;
 // early whenever the stored version already equals this one. (12 carries the
 // same schema as 11, which added episodes.status; 10 added the
 // ssh_configurations table; 9 the per-session ssh port and key columns.)
-const STORE_SCHEMA_VERSION: i64 = 54;
+const STORE_SCHEMA_VERSION: i64 = 55;
 const HTTP_OPT_IN_COLUMN: &str = "INTEGER NOT NULL DEFAULT 0 CHECK (allow_insecure_http IN (0, 1))";
 pub const MINIMUM_MIGRATABLE_SCHEMA_VERSION: i64 = 0;
 
@@ -492,7 +495,7 @@ fn open_connection_with_hooks(
         return Ok(conn);
     }
     // Preserve the calendar format fence before upgrading established stores.
-    if matches!(schema_version, 50..=53) {
+    if matches!(schema_version, 50..=54) {
         heartbeat_calendar::verify_format(&transaction)?;
     }
     // A genuinely empty database has no prior session or resource authority
@@ -503,6 +506,32 @@ fn open_connection_with_hooks(
         [],
         |row| row.get(0),
     )?;
+    if schema_version == 0 && !established_store {
+        // New stores do not pass through historical worker or preset schemas.
+        // Keep this catalog in parity with the result of the v53 upgrade.
+        transaction.execute_batch(include_str!("schema/current.sql"))?;
+        transaction.execute_batch(
+            "INSERT INTO heartbeat_retained_allowance VALUES(1,100,1);
+             INSERT INTO managed_host_maintenance VALUES(1,'serving',NULL,NULL,NULL,NULL,0);",
+        )?;
+        transaction.execute(
+            "INSERT INTO session_completion_feed VALUES(1,?1)",
+            [uuid::Uuid::new_v4().to_string()],
+        )?;
+        heartbeat_calendar::verify_format(&transaction)?;
+        if transaction
+            .prepare("PRAGMA foreign_key_check")?
+            .query([])?
+            .next()?
+            .is_some()
+        {
+            return Err(anyhow!("foreign key check failed for fresh store"));
+        }
+        before_commit()?;
+        transaction.pragma_update(None, "user_version", STORE_SCHEMA_VERSION)?;
+        transaction.commit()?;
+        return Ok(conn);
+    }
     let needs_session_summary_backfill = schema_version < SESSION_SUMMARY_BACKFILL_VERSION;
     match schema_version {
         0 | 1 => {
@@ -546,7 +575,7 @@ fn open_connection_with_hooks(
             migrate_thread_events(&transaction)?;
             transaction.execute_batch("DROP TABLE IF EXISTS session_overviews")?;
         }
-        2..=53 => {}
+        2..=54 => {}
         unsupported => {
             if unsupported > STORE_SCHEMA_VERSION {
                 return Err(StoreFutureSchemaError::new(unsupported).into());
@@ -765,7 +794,7 @@ fn open_connection_with_hooks(
         "accepted_identity_json",
         "TEXT",
     )?;
-    super::worker_dispatches::create_worker_dispatches_table(&transaction)?;
+    create_worker_dispatches_table(&transaction)?;
     ensure_column(
         &transaction,
         "worker_dispatches",
@@ -809,7 +838,12 @@ fn open_connection_with_hooks(
         retirement::purge_owned_rows(&transaction, &doomed)?;
     }
     provider_connections::create_provider_connections(&transaction)?;
-    provider_connections::migrate_provider_connections(&transaction)?;
+    // Presets were copied into independent provider connections in v54. Do
+    // not replay that insert when a later migration opens an existing v54
+    // store: those connections may have been edited or deleted since then.
+    if schema_version < 54 {
+        provider_connections::migrate_provider_connections(&transaction)?;
+    }
     transaction.execute_batch(
         "CREATE TRIGGER IF NOT EXISTS session_direct_only_insert BEFORE INSERT ON sessions
          WHEN NEW.behavior <> 'direct' OR NEW.light_model_json IS NOT NULL BEGIN SELECT RAISE(ABORT, 'retired session behavior or light model'); END;
@@ -817,13 +851,116 @@ fn open_connection_with_hooks(
          WHEN NEW.behavior <> 'direct' BEGIN SELECT RAISE(ABORT, 'retired session behavior'); END;",
     )?;
     verify_auxiliary_foreign_keys(&transaction)?;
+    retire_worker_storage(&transaction)?;
 
     ensure_column(&transaction, "sessions", "service_tier", "TEXT")?;
-    ensure_column(&transaction, "model_configurations", "service_tier", "TEXT")?;
     before_commit()?;
     transaction.pragma_update(None, "user_version", STORE_SCHEMA_VERSION)?;
     transaction.commit()?;
     Ok(conn)
+}
+
+// All removals happen inside the existing migration transaction, after
+// ownership and resource retirement. The primary transcript/event ledger and
+// provider connections are deliberately retained.
+fn retire_worker_storage(conn: &Connection) -> Result<()> {
+    let retired_inbox: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM session_inbox WHERE completion_source = 'managed_orchestrator')",
+        [],
+        |row| row.get(0),
+    )?;
+    if retired_inbox {
+        return Err(anyhow!(
+            "retired managed completion remains in a surviving inbox"
+        ));
+    }
+    conn.execute_batch(
+        "CREATE TRIGGER session_direct_inbox_origin_insert BEFORE INSERT ON session_inbox
+         WHEN NEW.completion_source = 'managed_orchestrator' BEGIN SELECT RAISE(ABORT, 'retired inbox origin'); END;
+         CREATE TRIGGER session_direct_inbox_origin_update BEFORE UPDATE OF completion_source ON session_inbox
+         WHEN NEW.completion_source = 'managed_orchestrator' BEGIN SELECT RAISE(ABORT, 'retired inbox origin'); END;
+         DROP TRIGGER IF EXISTS session_direct_only_insert;
+         CREATE TRIGGER session_direct_only_insert BEFORE INSERT ON sessions
+         WHEN NEW.behavior <> 'direct' BEGIN SELECT RAISE(ABORT, 'retired session behavior'); END;
+         DROP TABLE IF EXISTS managed_orchestrator_terminal_receipts;
+         DROP TABLE IF EXISTS managed_orchestrators;
+         DROP TABLE IF EXISTS worker_dispatches;
+         DROP TABLE IF EXISTS episodes;
+         DROP TABLE IF EXISTS threads;
+         DROP TABLE IF EXISTS workset_items;
+         DROP TABLE IF EXISTS worksets;
+         DROP TABLE IF EXISTS thread_steering;
+         DROP INDEX IF EXISTS idx_projects_default_model_config;
+         ALTER TABLE projects DROP COLUMN default_model_config_id;
+         DROP TABLE IF EXISTS model_configurations;
+         ALTER TABLE sessions DROP COLUMN light_model_json;",
+    )?;
+    if conn
+        .prepare("PRAGMA foreign_key_check")?
+        .query([])?
+        .next()?
+        .is_some()
+    {
+        return Err(anyhow!(
+            "foreign key check failed after retiring worker storage"
+        ));
+    }
+    Ok(())
+}
+
+// Historical tests seed durable records through current store APIs before they
+// reconstruct an older catalog. Start with the real v53 catalog so that those
+// synthetic predecessors still contain their historical worker tables. The
+// temporary version marker permits the seeding APIs; each fixture then sets
+// its intended predecessor version before invoking the migration under test.
+#[cfg(test)]
+pub(crate) fn initialize_synthetic_predecessor(path: &Path) -> Result<()> {
+    std::fs::create_dir_all(path.parent().expect("test database has parent"))?;
+    let conn = Connection::open(path)?;
+    conn.execute_batch(include_str!("schema/fixtures/v53-fresh.sql"))?;
+    ensure_column(&conn, "sessions", "service_tier", "TEXT")?;
+    conn.pragma_update(None, "user_version", STORE_SCHEMA_VERSION)?;
+    Ok(())
+}
+
+#[cfg(test)]
+pub(super) fn surviving_test_columns(conn: &Connection, table: &str) -> String {
+    let mut statement = conn
+        .prepare(&format!("PRAGMA table_info({table})"))
+        .unwrap();
+    statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .unwrap()
+        .map(|name| name.unwrap())
+        .filter(|name| {
+            !(table == "sessions" && name == "light_model_json")
+                && !(table == "projects" && name == "default_model_config_id")
+        })
+        .map(|name| format!("\"{}\"", name.replace('"', "\"\"")))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn create_worker_dispatches_table(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS worker_dispatches (
+            dispatch_id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
+            thread_name TEXT NOT NULL,
+            generation INTEGER NOT NULL CHECK (generation > 0),
+            run_id TEXT,
+            action TEXT NOT NULL,
+            status TEXT NOT NULL CHECK (status IN ('pending', 'ok', 'error', 'timed_out', 'cancelled')),
+            episode_id INTEGER,
+            history_start_id INTEGER,
+            history_boundary_id INTEGER NOT NULL DEFAULT 0,
+            UNIQUE (session_id, thread_name, generation),
+            FOREIGN KEY (thread_name, session_id) REFERENCES threads(name, session_id) ON DELETE CASCADE,
+            CHECK ((status = 'pending' AND episode_id IS NULL) OR
+                   (status <> 'pending' AND episode_id IS NOT NULL))
+        );",
+    )?;
+    Ok(())
 }
 
 fn create_base_schema(conn: &Connection) -> Result<()> {

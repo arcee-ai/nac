@@ -532,36 +532,6 @@ impl SessionService {
             .map_err(|error| anyhow::anyhow!("workspace revision prune task failed: {error}"))??
         };
 
-        // Threads the discarded messages dispatched are work nothing can reach
-        // any more: the tool calls that named them are gone. A name the kept
-        // messages also dispatched stays whole, because the same rows carry the
-        // episodes of those earlier dispatches, which the transcript still
-        // refers to.
-        let orphaned_threads: Vec<String> = {
-            let kept_names = thread_tool_call_names(kept);
-            thread_tool_call_names(&messages[message_idx..])
-                .into_iter()
-                .filter(|name| {
-                    name != crate::store::ORCHESTRATOR_STEERING_TARGET && !kept_names.contains(name)
-                })
-                .collect()
-        };
-        let threads_removed = {
-            let store_path = store_path.clone();
-            let session_id = session_id.clone();
-            crate::store::spawn_blocking_store_caller(move || {
-                let mut removed = 0usize;
-                for name in orphaned_threads {
-                    if crate::store::delete_thread(&store_path, &session_id, &name)? {
-                        removed += 1;
-                    }
-                }
-                anyhow::Ok(removed)
-            })
-            .await
-            .map_err(|error| anyhow::anyhow!("thread prune task failed: {error}"))??
-        };
-
         self.event_bus
             .emit_with_context_async(
                 SessionEvent::TranscriptReverted {
@@ -577,7 +547,6 @@ impl SessionService {
             messages_removed: messages.len() - message_idx,
             workspace_restored,
             revisions_removed,
-            threads_removed,
         })
     }
 
@@ -681,45 +650,17 @@ impl SessionService {
         Ok(())
     }
 
-    /// Message-cycle metadata from the store transcript: counts come from
-    /// the incremental scan cache; thread names come from a bounded tail
-    /// scan of the messages after the latest user message (one cycle).
-    pub(super) async fn message_cycle_from_store(&self) -> Result<MessageCycleMetadata> {
-        let (user_count, last_user_idx) = {
-            let cache = self.lock_transcript_scan();
-            (cache.user_count, cache.last_user_idx)
+    /// Message-cycle metadata from the incremental transcript scan cache.
+    pub(super) fn message_cycle_from_store(&self) -> MessageCycleMetadata {
+        let cache = self.lock_transcript_scan();
+        let marker = match cache.last_user_idx {
+            Some(index) => format!("history:{}:{index}", cache.user_count),
+            None => "none".to_string(),
         };
-        let Some(last_user_idx) = last_user_idx else {
-            return Ok(MessageCycleMetadata {
-                marker: "none".to_string(),
-                thread_names: Vec::new(),
-            });
-        };
-        let (blob_len, mut after) = {
-            let snapshot = self.session_snapshot.lock().await;
-            let blob = snapshot
-                .as_ref()
-                .map(|snapshot| snapshot.messages.as_slice())
-                .unwrap_or_default();
-            let blob_len = blob.len();
-            let start = (last_user_idx + 1).min(blob_len);
-            (blob_len, blob[start..blob_len].to_vec())
-        };
-        let (_, rows) = self
-            .read_log_tail_window(
-                blob_len,
-                (last_user_idx + 1).saturating_sub(blob_len),
-                usize::MAX,
-            )
-            .await?;
-        after.extend(rows.into_iter().map(|(_, message)| message));
-        Ok(MessageCycleMetadata {
-            marker: format!("history:{user_count}:{last_user_idx}"),
-            thread_names: thread_tool_call_names(&after),
-        })
+        MessageCycleMetadata { marker }
     }
 
-    /// Returns the freshest orchestrator messages available without building
+    /// Returns the freshest session messages available without building
     /// the considerably larger frontend snapshot: the merged store
     /// transcript (snapshot blob ++ transcript log tail), live mid-run.
     pub async fn messages_snapshot(&self) -> Result<Vec<Message>> {

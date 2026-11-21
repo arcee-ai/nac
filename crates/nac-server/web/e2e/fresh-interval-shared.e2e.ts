@@ -78,7 +78,7 @@ test("non-Git interval task shows and retains its exact shared Local directory",
     path.join(harness.runRoot, "nac-home/config.toml"),
     "[[permissions.rules]]\naction='*'\nresource='*'\neffect='allow'\n",
   );
-  await harness.restart("1", undefined, true);
+  await harness.restart(undefined, true);
   const project = await createProject(request, harness, {
     cwd: shared,
     name: "Plain Local fixture",

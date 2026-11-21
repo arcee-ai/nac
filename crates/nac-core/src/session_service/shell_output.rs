@@ -181,9 +181,6 @@ impl nac_contracts::CommandEnvironmentProvider for UnavailableRedaction {
     fn redaction_snapshot(&self) -> Result<nac_contracts::CommandEnvironmentSnapshot> {
         anyhow::bail!("artifact-enrichment-private-error-canary")
     }
-    fn worker_environment(&self) -> nac_contracts::WorkerEnvironment {
-        Default::default()
-    }
 }
 
 pub(super) fn redacted_artifact(

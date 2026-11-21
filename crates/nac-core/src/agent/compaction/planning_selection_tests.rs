@@ -5,12 +5,7 @@ fn as_transcript(messages: &[Message]) -> crate::agent::TranscriptMessages {
 
 #[test]
 fn selection_provenance_context_samples_bind_typed_source_and_reset_with_transcript() {
-    let mut state = CompactionState::new(
-        PathBuf::from("unused.db"),
-        "session".into(),
-        None,
-        CompactionPolicy::Direct,
-    );
+    let mut state = CompactionState::new(PathBuf::from("unused.db"), "session".into(), None);
     let messages = vec![Message::User {
         content: "copied selection framing remains literal".into(),
     }];
@@ -44,12 +39,7 @@ fn selection_provenance_context_samples_bind_typed_source_and_reset_with_transcr
 
 #[test]
 fn selection_provenance_uncached_sample_boundary_is_unknown() {
-    let mut state = CompactionState::new(
-        PathBuf::from("unused.db"),
-        "session".into(),
-        None,
-        CompactionPolicy::Direct,
-    );
+    let mut state = CompactionState::new(PathBuf::from("unused.db"), "session".into(), None);
     state.selection_sources.insert(
         1,
         crate::store::TerminalSelectionProvenance {

@@ -27,10 +27,7 @@ use crate::sessions::{self, SessionSnapshot};
 use crate::skills::SkillRegistry;
 use crate::store::RunInboxPrompt;
 use crate::types::Message;
-use crate::view::{
-    self, EpisodeSnapshot, SessionSummarySnapshot, ThreadSnapshot, WorksetSnapshot,
-    WorksetSummarySnapshot, WorksetsSnapshot, WorkspaceSnapshot,
-};
+use crate::view::{self, SessionSummarySnapshot, WorkspaceSnapshot};
 use crate::workspace::GitTarget;
 
 mod admission;
@@ -266,12 +263,6 @@ pub struct SessionFrontendSnapshot {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub shell_commands: Vec<ShellCommandSnapshot>,
     pub sessions: Vec<SessionSummarySnapshot>,
-    #[serde(default)]
-    pub active_threads: Vec<String>,
-    pub threads: Vec<ThreadSnapshot>,
-    pub thread_episodes: HashMap<String, Vec<EpisodeSnapshot>>,
-    #[serde(default)]
-    pub thread_events: HashMap<String, Vec<AgentEvent>>,
     /// Sanitized, bounded lifecycle events for top-level direct tool calls.
     /// Kept separate from worker logs so primary calls cannot become a fake
     /// delegated topology and the web never needs raw transcript payloads.
@@ -280,18 +271,9 @@ pub struct SessionFrontendSnapshot {
     pub thread_event_boundary: SessionEventBoundary,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub thread_event_diagnostics: Vec<ThreadEventDecodeDiagnostic>,
-    #[serde(default)]
-    pub thread_steering: Vec<crate::store::ThreadSteeringRecord>,
-    /// Delivered orchestrator steering records whose verbatim user message is
-    /// already present in the transcript source backing this snapshot. The
-    /// frontend hides those records so guidance renders exactly once — as the
-    /// canonical user message.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub covered_orchestrator_steering_ids: Vec<i64>,
     /// Conversation forks created from a model turn in this session.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub forks: Vec<crate::store::SessionForkLink>,
-    pub worksets: WorksetsSnapshot,
     pub workspace: WorkspaceSnapshot,
 }
 
@@ -340,7 +322,6 @@ pub struct MessagePageMetadata {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MessageCycleMetadata {
     pub marker: String,
-    pub thread_names: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -381,26 +362,6 @@ pub struct SessionFrontendSnapshotLoad {
     pub message_cycle: Option<MessageCycleMetadata>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct ThreadEventPageItem {
-    pub id: i64,
-    pub created_at: String,
-    pub event: AgentEvent,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct ThreadEventPage {
-    pub events: Vec<ThreadEventPageItem>,
-    pub has_older: bool,
-    pub next_before_id: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub thread_event_boundary: Option<SessionEventBoundary>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub diagnostics: Vec<ThreadEventDecodeDiagnostic>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ThreadEventDecodeDiagnostic {
@@ -416,20 +377,15 @@ const INTERRUPTED_RUN_WARNING: &str =
 const INTERRUPTED_RUN_EVENT_MESSAGE: &str = "run interrupted by process restart";
 
 struct DecodedThreadEvents {
-    events: HashMap<String, Vec<AgentEvent>>,
     primary_tool_events: Vec<AgentEvent>,
     diagnostics: Vec<ThreadEventDecodeDiagnostic>,
 }
 
 struct FrontendSnapshotBlockingLoad {
     sessions: Vec<SessionSummarySnapshot>,
-    threads: Vec<ThreadSnapshot>,
-    thread_episodes: HashMap<String, Vec<EpisodeSnapshot>>,
     thread_events: DecodedThreadEvents,
     thread_event_boundary: SessionEventBoundary,
-    thread_steering: Vec<crate::store::ThreadSteeringRecord>,
     forks: Vec<crate::store::SessionForkLink>,
-    worksets: WorksetsSnapshot,
     run_failure: Option<crate::run_failure::RunFailure>,
     workspace: WorkspaceSnapshot,
 }
@@ -592,27 +548,6 @@ impl SessionClientHandle {
         clippy::result_large_err,
         reason = "submission errors carry the complete active-operation conflict snapshot"
     )]
-    pub fn try_submit_prepared_managed_orchestrator_prompt_with_lease(
-        &self,
-        prompt: PreparedPrompt,
-        lease: sessions::SessionOperationLease,
-        execution_mode: crate::store::ManagedOrchestratorExecutionMode,
-    ) -> std::result::Result<SessionRunHandle, SessionSubmitError> {
-        self.service.try_submit_prompt_inner(
-            Some(self.client_id.clone()),
-            prompt.agent_prompt,
-            Some(lease),
-            RunAdmissionKind {
-                managed_orchestrator_execution_mode: Some(execution_mode),
-                ..RunAdmissionKind::default()
-            },
-        )
-    }
-
-    #[expect(
-        clippy::result_large_err,
-        reason = "submission errors carry the complete active-operation conflict snapshot"
-    )]
     pub fn try_submit_prompt(
         &self,
         expanded_prompt: String,
@@ -682,7 +617,6 @@ pub struct SessionService {
     published_operation: Arc<StdMutex<Option<ActiveSessionOperationSnapshot>>>,
     attention: Arc<StdMutex<Option<attention::ServiceAttention>>>,
     stopping_admission: Arc<std::sync::atomic::AtomicBool>,
-    active_threads: Arc<crate::tools::WorkerDispatchRegistry>,
     run_admission: Arc<crate::tools::RunAdmission>,
     /// The session's skill registry, captured from the agent at construction
     /// so `prepare_user_input` can expand top-level `$skillname` references
@@ -785,7 +719,6 @@ struct RunAdmissionKind {
     review_intent: Option<String>,
     goal_continuation: bool,
     child_execution_mode: Option<crate::store::TraditionalChildExecutionMode>,
-    managed_orchestrator_execution_mode: Option<crate::store::ManagedOrchestratorExecutionMode>,
 }
 
 struct FinishingRun {
@@ -862,17 +795,13 @@ enum OperationAdmissionPreparationError {
 /// assistant-with-tool-calls and tool-result tails, never User messages and
 /// never visible responses (assistant messages without tool calls). A
 /// straggler row from an aborted append that is scanned in the cancel
-/// window before its `delete_from` would overcount — the same accepted
-/// imprecision class as `user_copies` (step 3).
+/// window before its `delete_from` would overcount.
 #[derive(Default)]
 struct TranscriptScanCache {
     /// Raw merged-transcript length scanned so far.
     scanned_len: usize,
     user_count: usize,
     last_user_idx: Option<usize>,
-    /// User message content → surviving copy count. Drives steering coverage
-    /// with newest-first pairing (see `covered_orchestrator_steering_ids`).
-    user_copies: HashMap<String, usize>,
     /// Assistant messages with no tool calls (user-visible responses).
     /// Diffed between run start and run end for the run-end token/timing
     /// bookkeeping (step 4, never-fold): the snapshot blob is never
@@ -892,10 +821,9 @@ impl TranscriptScanCache {
     }
 
     fn scan_message(&mut self, idx: usize, message: &Message) {
-        if let Message::User { content } = message {
+        if matches!(message, Message::User { .. }) {
             self.user_count += 1;
             self.last_user_idx = Some(idx);
-            *self.user_copies.entry(content.clone()).or_insert(0) += 1;
         }
         if is_visible_response(message) {
             self.visible_response_count += 1;
@@ -904,97 +832,6 @@ impl TranscriptScanCache {
 }
 
 impl SessionService {
-    pub fn active_thread_names(&self) -> Vec<String> {
-        let mut names = self.active_threads.names();
-        names.sort();
-        names
-    }
-
-    pub fn queue_thread_steering(
-        &self,
-        thread_name: &str,
-        instruction: &str,
-        origin: crate::store::InputOrigin,
-    ) -> Result<crate::store::ThreadSteeringRecord> {
-        self.queue_thread_steering_for_run(thread_name, instruction, None, origin)
-    }
-
-    pub fn queue_thread_steering_for_run(
-        &self,
-        thread_name: &str,
-        instruction: &str,
-        expected_run_id: Option<&str>,
-        origin: crate::store::InputOrigin,
-    ) -> Result<crate::store::ThreadSteeringRecord> {
-        let session_id = self
-            .metadata
-            .session_id
-            .as_deref()
-            .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
-        if self.active_run().is_none() {
-            return Err(anyhow::anyhow!("session has no active run"));
-        }
-        let record = self
-            .active_threads
-            .queue(
-                &self.metadata.store_path,
-                session_id,
-                thread_name,
-                instruction,
-                expected_run_id,
-                origin,
-            )?
-            .ok_or_else(|| {
-                anyhow::anyhow!("thread '{thread_name}' is not active in this session")
-            })?;
-        self.event_bus.emit_agent(AgentEvent::ThreadSteeringQueued {
-            name: thread_name.to_string(),
-            steering_id: record.id,
-            instruction_preview: record.instruction.chars().take(160).collect(),
-        });
-        Ok(record)
-    }
-
-    pub fn queue_orchestrator_steering(
-        &self,
-        instruction: &str,
-        origin: crate::store::InputOrigin,
-    ) -> Result<crate::store::ThreadSteeringRecord> {
-        let session_id = self
-            .metadata
-            .session_id
-            .as_deref()
-            .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
-        let active_operation = self.lock_active_operation();
-        let dispatch_id = match active_operation.as_ref() {
-            Some(ActiveSessionOperation::Run(run)) if !run.finishing => {
-                run.snapshot.run_id.as_str()
-            }
-            Some(ActiveSessionOperation::Run(_)) => {
-                return Err(anyhow::anyhow!("session active run is finishing"));
-            }
-            _ => return Err(anyhow::anyhow!("session has no active run")),
-        };
-        let queue = match origin {
-            crate::store::InputOrigin::Person => crate::store::queue_person_thread_steering,
-            crate::store::InputOrigin::Automation => crate::store::queue_thread_steering,
-        };
-        let record = queue(
-            &self.metadata.store_path,
-            session_id,
-            crate::store::ORCHESTRATOR_STEERING_TARGET,
-            dispatch_id,
-            instruction,
-        )?;
-        drop(active_operation);
-        self.event_bus
-            .emit_agent(AgentEvent::OrchestratorSteeringQueued {
-                steering_id: record.id,
-                instruction_preview: record.instruction.chars().take(160).collect(),
-            });
-        Ok(record)
-    }
-
     pub fn prepare_user_input(&self, input: &str) -> PreparedUserInput {
         commands::prepare_user_input_with_mcp(
             input,
@@ -1118,7 +955,6 @@ pub struct RevertOutcome {
     pub messages_removed: usize,
     pub workspace_restored: bool,
     pub revisions_removed: usize,
-    pub threads_removed: usize,
 }
 
 struct LoadedFrontendMessages {
@@ -1129,80 +965,6 @@ struct LoadedFrontendMessages {
     created_at: Vec<Option<String>>,
     page: Option<MessagePageMetadata>,
     cycle: Option<MessageCycleMetadata>,
-}
-
-/// Flags delivered orchestrator steering records whose verbatim user message
-/// is present in `transcript`. Steering is injected into the agent as an exact
-/// `Message::User`, so coverage is an exact-content match; only `delivered`
-/// records can ever have a canonical message. Transcript copies pair with the
-/// newest matching records first: messages are append-only (compaction rewrites
-/// the provider view, never the transcript), so the copies present are always
-/// the most recent deliveries of that instruction — relevant when a crash lost
-/// an earlier delivery of a duplicate instruction.
-///
-/// This is the reference implementation; the snapshot path computes the same
-/// result incrementally via [`covered_ids_from_scan`].
-#[cfg(test)]
-fn covered_orchestrator_steering_ids(
-    records: &[crate::store::ThreadSteeringRecord],
-    transcript: &[Message],
-) -> Vec<i64> {
-    let mut delivered: Vec<&crate::store::ThreadSteeringRecord> = records
-        .iter()
-        .filter(|record| {
-            record.thread_name == crate::store::ORCHESTRATOR_STEERING_TARGET
-                && record.status == "delivered"
-        })
-        .collect();
-    delivered.sort_by_key(|record| std::cmp::Reverse(record.id));
-    let mut consumed = vec![false; transcript.len()];
-    let mut covered = Vec::new();
-    for record in delivered {
-        let Some(index) = transcript.iter().enumerate().position(|(index, message)| {
-            !consumed[index]
-                && matches!(message, Message::User { content } if content == &record.instruction)
-        }) else {
-            continue;
-        };
-        consumed[index] = true;
-        covered.push(record.id);
-    }
-    covered.sort_unstable();
-    covered
-}
-
-/// Coverage from the incremental scan cache: per instruction, the newest
-/// `min(delivered, surviving transcript copies)` records are covered — the
-/// same newest-first pairing as [`covered_orchestrator_steering_ids`],
-/// computed without rescanning the transcript. The transcript is append-only
-/// for User messages, so once a record is covered it stays covered; guidance
-/// hides the moment its delivery is acked and appended to the log.
-fn covered_ids_from_scan(
-    records: &[crate::store::ThreadSteeringRecord],
-    scan: &TranscriptScanCache,
-) -> Vec<i64> {
-    let mut delivered: Vec<&crate::store::ThreadSteeringRecord> = records
-        .iter()
-        .filter(|record| {
-            record.thread_name == crate::store::ORCHESTRATOR_STEERING_TARGET
-                && record.status == "delivered"
-        })
-        .collect();
-    delivered.sort_by_key(|record| std::cmp::Reverse(record.id));
-    let mut by_instruction: BTreeMap<&str, Vec<i64>> = BTreeMap::new();
-    for record in delivered {
-        by_instruction
-            .entry(record.instruction.as_str())
-            .or_default()
-            .push(record.id);
-    }
-    let mut covered = Vec::new();
-    for (instruction, ids) in by_instruction {
-        let copies = scan.user_copies.get(instruction).copied().unwrap_or(0);
-        covered.extend(ids.into_iter().take(copies));
-    }
-    covered.sort_unstable();
-    covered
 }
 
 #[cfg(test)]
@@ -1234,42 +996,6 @@ fn page_messages(messages: &[Message], request: MessagePageRequest) -> MessagesP
             has_older: start > 0,
         },
     }
-}
-
-/// Names of threads dispatched via `thread` tool calls in `messages`
-/// (malformed and empty names ignored). Used for the message-cycle metadata's
-/// bounded tail scan.
-fn thread_tool_call_names(messages: &[Message]) -> Vec<String> {
-    let mut thread_names = BTreeMap::<String, ()>::new();
-    for message in messages {
-        let Message::Assistant {
-            tool_calls: Some(tool_calls),
-            ..
-        } = message
-        else {
-            continue;
-        };
-        for tool_call in tool_calls {
-            if tool_call.function.name != "thread" {
-                continue;
-            }
-            let Ok(arguments) =
-                serde_json::from_str::<serde_json::Value>(&tool_call.function.arguments)
-            else {
-                continue;
-            };
-            let Some(name) = arguments
-                .get("name")
-                .and_then(serde_json::Value::as_str)
-                .map(str::trim)
-                .filter(|name| !name.is_empty())
-            else {
-                continue;
-            };
-            thread_names.insert(name.to_string(), ());
-        }
-    }
-    thread_names.into_keys().collect()
 }
 
 fn decode_thread_event(

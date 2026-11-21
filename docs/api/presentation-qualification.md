@@ -256,7 +256,12 @@ negative diagnostic evidence remain separate immutable records.
 Set `NAC_PRESENTATION_BASELINE_MANIFEST` to a sealed JSON with `role`
 (`aggregate-D`, `owning-527-baseline`, `owning-527-final` or
 `owning-527-modal-baseline`), `frontendSource`,
-`apiSource`, `apiBinarySha256`, and `package:{path,sha256,integrity}`. Baselines
+`apiSource`, `apiBinarySha256`, `apiPolicy`, and `package:{path,sha256,integrity}`.
+Set `apiPolicy` to `retired` when that exact API revision returns 404 for
+`/ui-config`, or to `legacy-enabled` / `legacy-disabled` for a historical API
+whose policy is exercised with the corresponding environment value. This
+binding belongs to the API, independently of the frontend or capture role.
+Baselines
 also require `frontend:{directory,mapPath,mapSha256}` with the complete normal
 frontend map using relative file keys and mode/size/SHA256 rows. Unknown or
 changed assets abort; no final frontend fallback supplies a missing baseline.

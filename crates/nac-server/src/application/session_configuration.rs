@@ -2,7 +2,6 @@ use std::collections::BTreeMap;
 
 use anyhow::{anyhow, Result};
 use nac_core::{
-    light_model::LightModelSettings,
     model::{validate_model_configuration, BackendKind, EffectiveModelSettings},
     sessions,
 };
@@ -25,7 +24,6 @@ pub(crate) struct SessionConfigPatch {
     pub(crate) api_key_env: Field<String>,
     pub(crate) extra_headers: Field<BTreeMap<String, String>>,
     pub(crate) orchestrator_compaction_threshold: Field<u64>,
-    pub(crate) light_model: Field<LightModelSettings>,
 }
 
 impl SessionConfigPatch {
@@ -39,7 +37,6 @@ impl SessionConfigPatch {
             && matches!(self.api_key_env, Field::Unchanged)
             && matches!(self.extra_headers, Field::Unchanged)
             && matches!(self.orchestrator_compaction_threshold, Field::Unchanged)
-            && matches!(self.light_model, Field::Unchanged)
     }
 }
 
@@ -70,11 +67,6 @@ impl<'a> SessionConfigurationApplication<'a> {
             // store-free no-op: no cache-dependent busy result, legacy config
             // repair, revision increment, credential lookup, or ownership read.
             return Ok(());
-        }
-        if !matches!(request.light_model, Field::Unchanged) {
-            return Err(request_configuration_error(
-                "light_model is no longer supported",
-            ));
         }
         self.manager
             .validate_operation_session(

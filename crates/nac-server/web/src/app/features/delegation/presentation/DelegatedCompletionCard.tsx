@@ -20,8 +20,7 @@ export function DelegatedCompletionCard({
   interactive?: boolean;
 }) {
   const { completion } = turn;
-  const child = completion.kind === "coding-agent";
-  const type = child ? "Subagent" : "Managed orchestrator";
+  const type = "Subagent";
   const parent = useTranscriptSessionId();
   const navigation = useContext(InsightsNavigationContext);
   const { openSubagent } = useInsightsNavigation();
@@ -31,8 +30,7 @@ export function DelegatedCompletionCard({
     interactive &&
     !!parent &&
     parent === navigation.sessionId &&
-    navigation.panels.includes("delegated") &&
-    child;
+    navigation.panels.includes("delegated");
   const known = cache.getQueryState(queryKeys.traditionalChildren(parentId));
   const fetch = eligible && known?.data === undefined && known?.status !== "error";
   const query = useTraditionalChildren(parentId, fetch);

@@ -39,7 +39,7 @@ impl FreshTaskPreparationPort for TaskLaunchApplication<'_> {
                         current.receipt().request == expected.request
                             && current.receipt().session_id == expected.session_id
                             && current.receipt().destination == expected.destination
-                            && current.model_defaults() == launch.model_defaults(),
+                            && current.same_frozen_model(&launch),
                         "conflict: scheduled preparation arguments changed"
                     );
                     if current.receipt().stop_requested

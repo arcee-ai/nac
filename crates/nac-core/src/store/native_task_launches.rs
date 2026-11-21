@@ -122,9 +122,8 @@ pub fn reserve_native_task_launch(path: &Path, caller: &str, project_id: &str, s
     anyhow::ensure!(project.ssh_host.is_none() && std::fs::canonicalize(&project.cwd)? == source_cwd,
         "conflict: native launch saved Local project binding changed");
     let caller_local: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM sessions s WHERE session_id=?1
-        AND behavior IN ('direct','direct-with-orchestrator') AND host_id IS NULL AND sandbox_json IS NULL
-        AND NOT EXISTS(SELECT 1 FROM traditional_children WHERE child_session_id=s.session_id)
-        AND NOT EXISTS(SELECT 1 FROM managed_orchestrators WHERE orchestrator_session_id=s.session_id))",
+        AND behavior = 'direct' AND host_id IS NULL AND sandbox_json IS NULL
+        AND NOT EXISTS(SELECT 1 FROM traditional_children WHERE child_session_id=s.session_id))",
         params![caller], |row| row.get(0))?;
     anyhow::ensure!(caller_local, "native launch caller is not an independent Local direct task");
     if request.project_id.is_none() {

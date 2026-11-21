@@ -91,34 +91,9 @@ async fn observe_fresh(boundary: Boundary, git: bool) -> Result<()> {
     let manager = SessionManager::new_async(ServerOptions {
         root_cwd: root.clone(),
         store_path: Some(path.clone()),
-        worker_executable: None,
         managed_host: None,
     })
     .await?;
-    let setup_path = path.clone();
-    let fixture_url = url.clone();
-    store::spawn_blocking_store_caller(move || {
-        store::insert_model_configuration(
-            &setup_path,
-            "fresh-model",
-            store::NewModelConfiguration {
-                service_tier: None,
-                name: "Fresh Stop fixture".into(),
-                backend: "openai-responses".into(),
-                model: "gpt-5.2".into(),
-                base_url: fixture_url,
-                allow_insecure_http: false,
-                api_key_env: Some("OPENAI_API_KEY".into()),
-                reasoning_effort: None,
-                extra_headers: BTreeMap::new(),
-                orchestrator_compaction_threshold: None,
-                initial_prompt: None,
-                light_model: None,
-            },
-        )
-        .map_err(anyhow::Error::from)
-    })
-    .await??;
     let project = manager
         .projects()
         .create(crate::application::projects::CreateProject {
@@ -128,7 +103,6 @@ async fn observe_fresh(boundary: Boundary, git: bool) -> Result<()> {
             ssh_host: None,
             ssh_port: None,
             ssh_identity_file: None,
-            default_model_config_id: Some("fresh-model".into()),
         })
         .await?;
     let setup_path = path.clone();

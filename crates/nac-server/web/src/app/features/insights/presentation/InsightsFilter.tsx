@@ -9,7 +9,7 @@ import { useIsMobile, useIsTablet } from "@/app/hooks/useMediaQuery";
 import { AnchorPlacement } from "@/app/lib/anchor";
 import { cn } from "@/app/lib/cn";
 
-/** The phone pill names the filter itself: "Show All", "Show Threads". */
+/** The phone pill names the filter itself: "Show All", "Show Sessions". */
 function pillLabel(options: readonly InsightsFilterOption[], value: InsightsFilterValue): string {
   const current = options.find((option) => option.value === value);
   return `Show ${!current || current.value === "all" ? "All" : current.label}`;

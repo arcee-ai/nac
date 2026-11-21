@@ -27,10 +27,9 @@ pub struct AttentionStoredRun {
 pub struct AttentionStoredSession {
     pub id: String,
     pub primary: bool,
-    /// A durable traditional child relationship exists (never a managed
-    /// orchestrator). Children report decisions under their own session id.
+    /// A durable traditional child relationship exists. Children report
+    /// decisions under their own session id.
     pub traditional_child: bool,
-    pub direct: bool,
     pub questions_supported: bool,
     pub goal: Option<AttentionStoredGoal>,
     pub question: Option<AttentionDecision>,
@@ -57,7 +56,6 @@ impl AttentionStoredSession {
     /// This is necessary durable evidence, never a settlement/idle receipt by itself.
     pub fn verifies_goal_free_idle(&self, run_id: &str, config_version: Option<i64>) -> bool {
         self.primary
-            && self.direct
             && self.questions_supported
             && config_version == Some(self.config_version)
             && (self.goal.is_none() || self.goal_is_historical_for(run_id))
@@ -222,12 +220,13 @@ fn metadata_with_connection(
     connection: &Connection,
     session: Option<&str>,
 ) -> Result<Vec<AttentionStoredSession>> {
-    let mut statement = connection.prepare("SELECT substr(s.session_id,1,513),s.behavior,
-        NOT EXISTS(SELECT 1 FROM traditional_children c WHERE c.child_session_id=s.session_id)
-        AND NOT EXISTS(SELECT 1 FROM managed_orchestrators m WHERE m.orchestrator_session_id=s.session_id),
+    let mut statement = connection.prepare(
+        "SELECT substr(s.session_id,1,513),s.behavior,
+        NOT EXISTS(SELECT 1 FROM traditional_children c WHERE c.child_session_id=s.session_id),
         s.host_id IS NULL AND s.sandbox_json IS NULL, s.config_version,
         EXISTS(SELECT 1 FROM traditional_children c WHERE c.child_session_id=s.session_id)
-        FROM sessions s WHERE (?1 IS NULL OR s.session_id=?1) ORDER BY s.session_id LIMIT 1025")?;
+        FROM sessions s WHERE (?1 IS NULL OR s.session_id=?1) ORDER BY s.session_id LIMIT 1025",
+    )?;
     let rows = statement
         .query_map([session], |row| {
             Ok((
@@ -252,13 +251,16 @@ fn metadata_with_connection(
             config_version >= 0,
             "attention configuration revision unavailable"
         );
-        let direct = behavior == "direct" || behavior == "direct-with-orchestrator";
-        let goal = if primary && direct {
+        anyhow::ensure!(
+            behavior == "direct",
+            "unsupported stored session behavior '{behavior}'"
+        );
+        let goal = if primary {
             goal(connection, &id)?
         } else {
             None
         };
-        let questions_supported = primary && local && behavior == "direct";
+        let questions_supported = primary && local;
         let question = if questions_supported {
             let question = task_questions::pending_attention_with_connection(connection, &id)?;
             if let Some(AttentionDecision::Question {
@@ -304,7 +306,6 @@ fn metadata_with_connection(
             id,
             primary,
             traditional_child,
-            direct,
             questions_supported,
             goal,
             question,

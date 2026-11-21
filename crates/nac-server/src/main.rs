@@ -1,23 +1,14 @@
 use std::{
-    ffi::OsString,
     io::{self, IsTerminal, Read, Write},
     net::{IpAddr, SocketAddr},
     path::{Path, PathBuf},
     process,
-    sync::Arc,
 };
 
 use anyhow::{anyhow, Context, Result};
 use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand};
 use nac_core::{
-    model::{
-        run_arcee_auth_action, run_codex_auth_action, ArceeAuthAction, BackendKind,
-        CodexAuthAction, ReasoningEffort,
-    },
-    runtime::{
-        self, ManagedWorkerOptions, ModelOptions, OptionalModelOption, SandboxOptions,
-        StoreOptions, WorkerDispatchOptions,
-    },
+    model::{run_arcee_auth_action, run_codex_auth_action, ArceeAuthAction, CodexAuthAction},
     upgrade::{run_upgrade, UpgradeRequest},
 };
 use nac_server::{serve_with_policy, BindPolicy, ServerOptions, SessionManager};
@@ -51,10 +42,6 @@ struct Cli {
 }
 
 #[derive(Subcommand)]
-#[expect(
-    clippy::large_enum_variant,
-    reason = "Clap owns the closed root command payloads and boxing would complicate derive wiring"
-)]
 enum RootCommand {
     /// Resolve local Mac launch paths without opening the selected store.
     #[cfg(unix)]
@@ -82,9 +69,6 @@ enum RootCommand {
     /// Download and reinstall the latest stable NAC release
     #[command(version = RELEASE_VERSION, long_version = BUILD_VERSION)]
     Upgrade(UpgradeCli),
-
-    #[command(name = "__worker", hide = true)]
-    ManagedWorker(ManagedWorkerCli),
 
     #[command(name = "__github-credential", hide = true)]
     GitHubCredential(GitHubCredentialCli),
@@ -163,12 +147,6 @@ struct ServerCli {
     /// Override the server SQLite store path.
     #[arg(long)]
     store_path: Option<PathBuf>,
-
-    /// Executable to launch for managed worker dispatch.
-    ///
-    /// Defaults to the running executable.
-    #[arg(long, hide = true)]
-    worker_executable: Option<PathBuf>,
 
     /// Explicit versioned Managed NAC host configuration document.
     ///
@@ -263,61 +241,6 @@ struct UpgradeCli {
 }
 
 #[derive(Args)]
-struct ManagedWorkerCli {
-    /// Internal inherited descriptor for the private native-credential socket.
-    #[arg(long, hide = true, conflicts_with = "native_credential_socket")]
-    native_credential_fd: Option<i32>,
-
-    /// Internal filesystem endpoint for the private native-credential socket.
-    #[arg(long, hide = true, conflicts_with = "native_credential_fd")]
-    native_credential_socket: Option<PathBuf>,
-
-    /// Internal Managed NAC host-secret root used for per-command snapshots.
-    #[arg(long, hide = true)]
-    managed_secret_root: Option<PathBuf>,
-
-    /// Internal Managed NAC GitHub App client ID for worker command auth.
-    #[arg(long, hide = true, requires = "managed_secret_root")]
-    managed_github_client_id: Option<String>,
-
-    /// Internal persistent owner home used by worker commands.
-    #[arg(long, hide = true, requires = "managed_secret_root")]
-    managed_home_root: Option<PathBuf>,
-
-    /// Internal workspace cwd used for managed worker path resolution.
-    #[arg(long, hide = true)]
-    workspace_cwd: Option<PathBuf>,
-
-    /// Internal local cwd used to resolve non-model runtime config for managed workers.
-    #[arg(long, hide = true)]
-    config_cwd: Option<PathBuf>,
-
-    /// Internal OpenSSH target for remote workers.
-    #[arg(long = "ssh-host", alias = "host-id", hide = true)]
-    ssh_host: Option<String>,
-
-    /// Internal ssh port for remote workers, when the session set one.
-    #[arg(long = "ssh-port", hide = true)]
-    ssh_port: Option<u16>,
-
-    /// Internal ssh private key for remote workers, when the session set one.
-    #[arg(long = "ssh-identity-file", hide = true)]
-    ssh_identity_file: Option<PathBuf>,
-
-    #[command(flatten)]
-    dispatch: WorkerDispatchArgs,
-
-    #[command(flatten)]
-    store: StoreArgs,
-
-    #[command(flatten)]
-    model: ModelArgs,
-
-    #[command(flatten)]
-    sandbox: SandboxArgs,
-}
-
-#[derive(Args)]
 struct GitHubCredentialCli {
     #[arg(long, hide = true)]
     state_root: PathBuf,
@@ -327,230 +250,6 @@ struct GitHubCredentialCli {
 
     #[arg(hide = true)]
     operation: String,
-}
-
-#[derive(clap::Args)]
-struct StoreArgs {
-    /// Override the SQLite store path.
-    #[arg(long)]
-    store_path: Option<PathBuf>,
-}
-
-#[derive(Clone, Copy, Debug, clap::ValueEnum)]
-enum BackendArg {
-    #[value(name = "deepseek-chat")]
-    DeepSeekChat,
-    #[value(name = "fireworks-chat")]
-    FireworksChat,
-    #[value(name = "together-chat")]
-    TogetherChat,
-    #[value(name = "openai-responses")]
-    OpenAiResponses,
-    #[value(name = "openai-chat-completions")]
-    OpenAiChatCompletions,
-    #[value(name = "chatgpt-codex-responses")]
-    ChatGptCodexResponses,
-    #[value(name = "anthropic-messages")]
-    AnthropicMessages,
-    #[value(name = "arcee-auth")]
-    ArceeAuth,
-    #[value(name = "arcee-api")]
-    ArceeApi,
-}
-
-impl From<BackendArg> for BackendKind {
-    fn from(value: BackendArg) -> Self {
-        match value {
-            BackendArg::DeepSeekChat => Self::DeepSeekChat,
-            BackendArg::FireworksChat => Self::FireworksChat,
-            BackendArg::TogetherChat => Self::TogetherChat,
-            BackendArg::OpenAiResponses => Self::OpenAiResponses,
-            BackendArg::OpenAiChatCompletions => Self::OpenAiChatCompletions,
-            BackendArg::ChatGptCodexResponses => Self::ChatGptCodexResponses,
-            BackendArg::AnthropicMessages => Self::AnthropicMessages,
-            BackendArg::ArceeAuth => Self::ArceeAuth,
-            BackendArg::ArceeApi => Self::ArceeApi,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, clap::ValueEnum)]
-enum ReasoningEffortArg {
-    #[value(name = "none")]
-    None,
-    #[value(name = "minimal")]
-    Minimal,
-    #[value(name = "low")]
-    Low,
-    #[value(name = "medium")]
-    Medium,
-    #[value(name = "high")]
-    High,
-    #[value(name = "xhigh")]
-    Xhigh,
-    #[value(name = "max")]
-    Max,
-}
-
-impl From<ReasoningEffortArg> for ReasoningEffort {
-    fn from(value: ReasoningEffortArg) -> Self {
-        match value {
-            ReasoningEffortArg::None => Self::None,
-            ReasoningEffortArg::Minimal => Self::Minimal,
-            ReasoningEffortArg::Low => Self::Low,
-            ReasoningEffortArg::Medium => Self::Medium,
-            ReasoningEffortArg::High => Self::High,
-            ReasoningEffortArg::Xhigh => Self::Xhigh,
-            ReasoningEffortArg::Max => Self::Max,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, clap::ValueEnum)]
-enum ServiceTierArg {
-    Standard,
-    Fast,
-    Ultrafast,
-    ProviderDefault,
-}
-
-impl From<ServiceTierArg> for OptionalModelOption<nac_core::model::ServiceTier> {
-    fn from(value: ServiceTierArg) -> Self {
-        match value {
-            ServiceTierArg::Standard => Self::Value(nac_core::model::ServiceTier::Standard),
-            ServiceTierArg::Fast => Self::Value(nac_core::model::ServiceTier::Fast),
-            ServiceTierArg::Ultrafast => Self::Value(nac_core::model::ServiceTier::Ultrafast),
-            ServiceTierArg::ProviderDefault => Self::Clear,
-        }
-    }
-}
-
-#[derive(clap::Args, Default)]
-struct ModelArgs {
-    /// Persisted backend snapshot transported to a managed worker.
-    #[arg(long, value_enum)]
-    backend: Option<BackendArg>,
-
-    /// Persisted reasoning-effort snapshot transported to a managed worker.
-    #[arg(long = "effort", value_enum)]
-    reasoning_effort: Option<ReasoningEffortArg>,
-    /// Explicit model speed preference.
-    #[arg(long, value_enum)]
-    service_tier: Option<ServiceTierArg>,
-
-    /// Persisted API base URL snapshot transported to a managed worker.
-    #[arg(long, hide = true)]
-    api_base_url: Option<String>,
-
-    /// Persisted public-HTTP opt-in transported to a managed worker.
-    #[arg(long, hide = true)]
-    allow_insecure_http: bool,
-
-    /// Persisted model identifier snapshot transported to a managed worker.
-    #[arg(long, hide = true)]
-    api_model: Option<String>,
-
-    /// Persisted api_key_env selector snapshot transported to a managed worker.
-    #[arg(long = "api-key-env", hide = true)]
-    api_key_env: Option<String>,
-
-    /// Trusted operator-mounted API key file transported to a managed worker.
-    #[arg(long = "managed-api-key-file", hide = true)]
-    trusted_api_key_file: Option<PathBuf>,
-
-    /// Internal extra headers snapshot transport (JSON object) used by managed workers.
-    #[arg(
-        long = "extra-headers",
-        hide = true,
-        value_parser = runtime::parse_extra_headers_json
-    )]
-    extra_headers: Option<std::collections::BTreeMap<String, String>>,
-}
-
-#[derive(clap::Args)]
-struct WorkerDispatchArgs {
-    /// Session id for the managed worker dispatch.
-    #[arg(long)]
-    session_id: String,
-
-    /// Thread name for the managed worker dispatch.
-    #[arg(long)]
-    thread_name: String,
-
-    /// Exact identity for this managed worker dispatch.
-    #[arg(long, hide = true)]
-    dispatch_id: String,
-
-    /// Action for the managed worker dispatch.
-    #[arg(long)]
-    action: String,
-
-    /// Source threads whose latest retained episodes should be loaded.
-    #[arg(long = "source-thread")]
-    source_threads: Vec<String>,
-
-    /// Skill names to preload for this managed worker dispatch.
-    #[arg(long = "skill")]
-    skills: Vec<String>,
-}
-
-#[derive(clap::Args)]
-struct SandboxArgs {
-    /// Run tool execution inside a session-scoped sandbox.
-    #[arg(long)]
-    sandbox: bool,
-
-    /// Disable the implicit current-directory mount into /workspace.
-    #[arg(long)]
-    no_mount_cwd: bool,
-
-    /// Additional read-write mount in the form HOST:GUEST.
-    #[arg(long = "mount")]
-    mounts: Vec<String>,
-
-    /// Additional read-only mount in the form HOST:GUEST.
-    #[arg(long = "mount-ro")]
-    mounts_ro: Vec<String>,
-
-    /// Lossless internal read-write mount pair used by worker subprocesses.
-    #[arg(long = "sandbox-mount", hide = true, num_args = 2)]
-    sandbox_mounts: Vec<OsString>,
-
-    /// Lossless internal read-only mount pair used by worker subprocesses.
-    #[arg(long = "sandbox-mount-ro", hide = true, num_args = 2)]
-    sandbox_mounts_ro: Vec<OsString>,
-
-    /// Sandbox image to use when --sandbox is enabled.
-    #[arg(long)]
-    sandbox_image: Option<String>,
-
-    /// GPU CDI device to expose to the sandbox.
-    #[arg(long = "sandbox-gpu")]
-    sandbox_gpus: Vec<String>,
-
-    /// Sandbox /dev/shm size.
-    #[arg(long = "sandbox-shm-size")]
-    sandbox_shm_size: Option<String>,
-
-    /// Sandbox backend to use (podman).
-    #[arg(long = "sandbox-backend")]
-    sandbox_backend: Option<String>,
-
-    /// Number of CPUs to allocate for the sandbox (default: 2).
-    #[arg(long = "sandbox-cpus")]
-    sandbox_cpus: Option<u8>,
-
-    /// Memory in MiB to allocate for the sandbox (default: 2048).
-    #[arg(long = "sandbox-mem")]
-    sandbox_mem: Option<u32>,
-
-    /// Internal sandbox session key used to attach worker subprocesses.
-    #[arg(long, hide = true)]
-    sandbox_session_key: Option<String>,
-
-    /// Internal sandbox workdir used for worker subprocesses.
-    #[arg(long, hide = true)]
-    sandbox_workdir: Option<String>,
 }
 
 #[tokio::main]
@@ -624,9 +323,6 @@ async fn run() -> Result<()> {
             Ok(())
         }
         Some(RootCommand::Guide(guide)) => read_guide(guide),
-        Some(RootCommand::ManagedWorker(_)) => {
-            anyhow::bail!("the retired worker entrypoint is unavailable")
-        }
         Some(RootCommand::GitHubCredential(helper)) => run_github_credential(helper).await,
         Some(RootCommand::CodexAuth(auth)) => run_codex_auth_cli(auth, &invocation_name).await,
         Some(RootCommand::ArceeAuth(auth)) => run_arcee_auth_cli(auth, &invocation_name).await,
@@ -722,10 +418,6 @@ async fn run_server_inner(
     invocation_name: &str,
     #[cfg(unix)] desktop: Option<&nac_server::desktop_launch::DesktopLaunch>,
 ) -> Result<()> {
-    anyhow::ensure!(
-        cli.worker_executable.is_none(),
-        "the retired --worker-executable option is unavailable"
-    );
     let bind = cli.bind_addr();
     let bind_policy = cli.bind_policy();
     #[cfg(all(feature = "native-auth-fixture", unix))]
@@ -771,7 +463,6 @@ async fn run_server_inner(
     let options = ServerOptions {
         root_cwd,
         store_path: cli.store_path,
-        worker_executable: cli.worker_executable,
         managed_host,
     };
     #[cfg(unix)]
@@ -825,7 +516,7 @@ async fn run_server_inner(
 #[cfg(all(test, target_os = "linux"))]
 fn restrict_managed_server_process(managed_config_path: Option<&Path>) -> Result<()> {
     if managed_config_path.is_some() {
-        runtime::restrict_same_uid_inspection()
+        nac_core::runtime::restrict_same_uid_inspection()
             .context("failed to restrict Managed NAC process inspection")?;
     }
     Ok(())
@@ -909,124 +600,6 @@ fn should_open_dashboard(force_open: bool, no_open: bool) -> bool {
     force_open || nac_core::browser::should_open_browser()
 }
 
-#[expect(
-    dead_code,
-    reason = "worker execution is unreachable until ALL-614 removes it"
-)]
-async fn run_managed_worker(cli: ManagedWorkerCli) -> Result<()> {
-    // On Linux, harden before connecting to the authenticated parent endpoint.
-    // Other Unix hosts adopt and mark the inherited endpoint close-on-exec.
-    // Both happen before background refresh or MCP can spawn a descendant.
-    let credential_receiver = runtime::ManagedWorkerCredentialReceiver::from_private_channel(
-        cli.native_credential_fd,
-        cli.native_credential_socket,
-    )?;
-    configure_telemetry(None);
-    // Fire-and-forget models.dev catalog overlay refresh; cadence-gated via
-    // the sidecar, so usually a no-op read. Keeps the overlay fresh for
-    // worker-heavy usage even when the server is not running.
-    nac_core::model::spawn_overlay_refresh();
-    // Fire-and-forget arcee model refresh; same cadence-gated pattern.
-    nac_core::model::spawn_arcee_model_refresh();
-    // Fire-and-forget anthropic model refresh; same cadence-gated pattern.
-    nac_core::model::spawn_anthropic_model_refresh();
-    nac_core::model::spawn_codex_model_refresh();
-    let launch_cwd = std::env::current_dir()?;
-    let workspace_cwd = match (&cli.ssh_host, &cli.workspace_cwd) {
-        (Some(_), Some(remote_cwd)) => remote_cwd.clone(),
-        _ => resolve_cli_cwd(&launch_cwd, cli.workspace_cwd.as_deref())?,
-    };
-    let config_cwd = match cli.config_cwd.as_deref() {
-        Some(config_cwd) => resolve_cli_cwd(&launch_cwd, Some(config_cwd))?,
-        None if cli.ssh_host.is_some() => launch_cwd.clone(),
-        None => workspace_cwd.clone(),
-    };
-    let internal_mounts = internal_sandbox_mounts(&cli.sandbox)?;
-    let config = load_managed_worker_runtime_config(&config_cwd)?;
-    let options = ManagedWorkerOptions {
-        workspace_cwd,
-        config_cwd: Some(config_cwd),
-        dispatch: WorkerDispatchOptions {
-            session_id: cli.dispatch.session_id,
-            thread_name: cli.dispatch.thread_name,
-            dispatch_id: cli.dispatch.dispatch_id,
-            action: cli.dispatch.action,
-            source_threads: cli.dispatch.source_threads,
-            skills: cli.dispatch.skills,
-        },
-        store: StoreOptions {
-            store_path: cli.store.store_path,
-        },
-        model: ModelOptions {
-            backend: cli.model.backend.map(Into::into),
-            reasoning_effort: cli
-                .model
-                .reasoning_effort
-                .map(Into::into)
-                .map(OptionalModelOption::Value)
-                .unwrap_or_default(),
-            service_tier: cli.model.service_tier.map(Into::into).unwrap_or_default(),
-            api_base_url: cli.model.api_base_url,
-            allow_insecure_http: cli.model.allow_insecure_http,
-            api_model: cli.model.api_model,
-            api_key_env: cli
-                .model
-                .api_key_env
-                .map(OptionalModelOption::Value)
-                .unwrap_or_default(),
-            trusted_api_key_file: cli.model.trusted_api_key_file,
-            trusted_light_credential: None,
-            extra_headers: cli.model.extra_headers,
-            light_model: None,
-        },
-        sandbox: SandboxOptions {
-            sandbox: cli.sandbox.sandbox,
-            no_mount_cwd: cli.sandbox.no_mount_cwd,
-            mounts: cli.sandbox.mounts,
-            mounts_ro: cli.sandbox.mounts_ro,
-            internal_mounts,
-            sandbox_image: cli.sandbox.sandbox_image,
-            sandbox_gpus: cli.sandbox.sandbox_gpus,
-            sandbox_shm_size: cli.sandbox.sandbox_shm_size,
-            sandbox_session_key: cli.sandbox.sandbox_session_key,
-            sandbox_workdir: cli.sandbox.sandbox_workdir,
-            sandbox_backend: cli.sandbox.sandbox_backend,
-            sandbox_cpus: cli.sandbox.sandbox_cpus,
-            sandbox_mem: cli.sandbox.sandbox_mem,
-            sandbox_activity_key: None,
-        },
-        ssh: runtime::SshOptions {
-            host: cli.ssh_host,
-            port: cli.ssh_port,
-            identity_file: cli.ssh_identity_file,
-        },
-    };
-    let mut run_config = runtime::build_managed_worker_config(options, &config).await?;
-    let secret_store = cli
-        .managed_secret_root
-        .as_ref()
-        .map(nac_managed::HostSecretStore::new);
-    let github = match (
-        cli.managed_secret_root.as_ref(),
-        cli.managed_github_client_id,
-    ) {
-        (Some(root), Some(client_id)) => {
-            Some(nac_managed::ManagedGitHubAuth::new(root, client_id)?)
-        }
-        (_, None) => None,
-        (None, Some(_)) => unreachable!("clap requires a managed secret root"),
-    };
-    let command_environment = secret_store.map(|secret_store| {
-        Arc::new(nac_managed::ManagedCommandEnvironmentProvider::new(
-            Some(secret_store),
-            github,
-            cli.managed_home_root,
-        )) as Arc<dyn nac_contracts::CommandEnvironmentProvider>
-    });
-    run_config.set_command_environment_provider(command_environment);
-    runtime::run_managed_worker(run_config, credential_receiver).await
-}
-
 fn configure_telemetry(managed_host: Option<&nac_managed::ManagedHostConfig>) {
     let scenario = std::env::var("NAC_TELEMETRY_SCENARIO").ok();
     let runtime = nac_core::telemetry::RuntimeMetadata::sqlite(
@@ -1042,30 +615,6 @@ fn configure_telemetry(managed_host: Option<&nac_managed::ManagedHostConfig>) {
         eprintln!("nac: ignoring invalid NAC_TELEMETRY mode; expected stderr or disabled");
     }
 }
-fn internal_sandbox_mounts(args: &SandboxArgs) -> Result<Vec<(PathBuf, PathBuf, bool)>> {
-    let mut mounts = Vec::new();
-    for (values, read_only) in [
-        (&args.sandbox_mounts, false),
-        (&args.sandbox_mounts_ro, true),
-    ] {
-        for pair in values.as_chunks::<2>().0 {
-            let host = PathBuf::from(pair[0].clone());
-            let guest = PathBuf::from(pair[1].clone());
-            if !host.exists() {
-                return Err(anyhow!("mount source '{}' does not exist", host.display()));
-            }
-            if !guest.is_absolute() {
-                return Err(anyhow!(
-                    "mount target '{}' must be an absolute path inside the sandbox",
-                    guest.display()
-                ));
-            }
-            mounts.push((host, guest, read_only));
-        }
-    }
-    Ok(mounts)
-}
-
 async fn run_codex_auth_cli(cli: CodexAuthCli, invocation_name: &str) -> Result<()> {
     match cli.command {
         Some(command) => {
@@ -1150,10 +699,6 @@ async fn run_upgrade_cli(cli: UpgradeCli, invocation_name: &str) -> Result<()> {
     run_upgrade(request).await
 }
 
-fn load_managed_worker_runtime_config(config_cwd: &std::path::Path) -> Result<runtime::NacConfig> {
-    runtime::NacConfig::load_without_model_from_cwd(config_cwd)
-}
-
 fn resolve_cli_cwd(
     launch_cwd: &std::path::Path,
     directory: Option<&std::path::Path>,
@@ -1171,8 +716,6 @@ fn resolve_cli_cwd(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    static CONFIG_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[cfg(target_os = "linux")]
     fn linux_process_controls() -> (libc::c_int, libc::c_int) {
@@ -1276,56 +819,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn retired_ambient_model_config_is_ignored() {
-        let _guard = CONFIG_ENV_LOCK.lock().unwrap();
-        let original_nac_home = std::env::var_os("NAC_HOME");
-        let root = std::env::temp_dir().join(format!(
-            "nac_web_worker_config_{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("time went backwards")
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&root).unwrap();
-        std::fs::write(
-            root.join("config.toml"),
-            r#"
-model = ["invalid-table-shape"]
-
-[storage]
-store_path = "worker-store.db"
-
-[worker]
-thread_timeout_secs = 7200
-"#,
-        )
-        .unwrap();
-        unsafe {
-            std::env::set_var("NAC_HOME", &root);
-        }
-
-        let config = load_managed_worker_runtime_config(&root).unwrap();
-        assert_eq!(
-            config.storage.store_path.as_deref(),
-            Some(std::path::Path::new("worker-store.db"))
-        );
-        assert_eq!(config.worker.thread_timeout_secs, Some(7_200));
-        let direct = runtime::NacConfig::load_from_cwd(&root).unwrap();
-        assert_eq!(
-            direct.storage.store_path.as_deref(),
-            Some(std::path::Path::new("worker-store.db"))
-        );
-
-        unsafe {
-            match original_nac_home {
-                Some(value) => std::env::set_var("NAC_HOME", value),
-                None => std::env::remove_var("NAC_HOME"),
-            }
-        }
-        let _ = std::fs::remove_dir_all(root);
-    }
-
     fn parse_server(args: &[&str]) -> ServerCli {
         let cli = Cli::try_parse_from(args.iter().copied()).unwrap();
         assert!(cli.command.is_none());
@@ -1341,181 +834,12 @@ thread_timeout_secs = 7200
     }
 
     #[test]
-    fn worker_cli_rejects_malformed_header_json() {
-        let error = Cli::try_parse_from([
-            "nac-web",
-            "__worker",
-            "--session-id",
-            "session",
-            "--thread-name",
-            "thread",
-            "--dispatch-id",
-            "dispatch-123",
-            "--action",
-            "work",
-            "--extra-headers",
-            "not-json",
-        ])
-        .err()
-        .expect("malformed worker headers must be rejected")
-        .to_string();
-        assert!(error.contains("expected a JSON object"), "{error}");
-    }
-
-    #[test]
-    fn worker_cli_accepts_private_credential_channels_without_exposing_them_in_help() {
-        let cli = Cli::try_parse_from([
-            "nac-web",
-            "__worker",
-            "--session-id",
-            "session",
-            "--thread-name",
-            "thread",
-            "--dispatch-id",
-            "dispatch-123",
-            "--action",
-            "work",
-            "--native-credential-fd",
-            "7",
-        ])
-        .unwrap();
-        let Some(RootCommand::ManagedWorker(worker)) = cli.command else {
-            panic!("expected managed worker command");
-        };
-        assert_eq!(worker.native_credential_fd, Some(7));
-        assert!(worker.native_credential_socket.is_none());
-        let cli = Cli::try_parse_from([
-            "nac-web",
-            "__worker",
-            "--session-id",
-            "session",
-            "--thread-name",
-            "thread",
-            "--dispatch-id",
-            "dispatch-123",
-            "--action",
-            "work",
-            "--native-credential-socket",
-            "/tmp/private.sock",
-        ])
-        .unwrap();
-        let Some(RootCommand::ManagedWorker(worker)) = cli.command else {
-            panic!("expected managed worker command");
-        };
-        assert_eq!(
-            worker.native_credential_socket.as_deref(),
-            Some(Path::new("/tmp/private.sock"))
-        );
-        assert!(worker.native_credential_fd.is_none());
-        let help = rendered_help(&["nac-web", "__worker", "--help"]);
-        assert!(!help.contains("native-credential-fd"), "{help}");
-        assert!(!help.contains("native-credential-socket"), "{help}");
-    }
-
-    #[test]
-    fn worker_cli_parses_lossless_internal_mount_pairs() {
-        let host = std::env::temp_dir().join(format!("nac:worker-mount-{}", std::process::id()));
-        std::fs::create_dir_all(&host).unwrap();
-        let args = vec![
-            OsString::from("nac-web"),
-            OsString::from("__worker"),
-            OsString::from("--session-id"),
-            OsString::from("session"),
-            OsString::from("--thread-name"),
-            OsString::from("thread"),
-            OsString::from("--dispatch-id"),
-            OsString::from("dispatch-123"),
-            OsString::from("--action"),
-            OsString::from("work"),
-            OsString::from("--sandbox-mount"),
-            host.as_os_str().to_owned(),
-            OsString::from("/workspace"),
-        ];
-        let cli = Cli::try_parse_from(args).unwrap();
-        let Some(RootCommand::ManagedWorker(worker)) = cli.command else {
-            panic!("expected managed worker command");
-        };
-        assert_eq!(
-            internal_sandbox_mounts(&worker.sandbox).unwrap(),
-            vec![(host.clone(), PathBuf::from("/workspace"), false)]
-        );
-        std::fs::remove_dir_all(host).unwrap();
-    }
-
-    #[test]
-    fn worker_cli_accepts_explicit_arcee_modes_and_rejects_removed_names() {
-        let required = [
-            "--session-id",
-            "session",
-            "--thread-name",
-            "thread",
-            "--dispatch-id",
-            "dispatch-123",
-            "--action",
-            "work",
-        ];
-        for (raw, expected) in [
-            ("arcee-auth", BackendKind::ArceeAuth),
-            ("arcee-api", BackendKind::ArceeApi),
-        ] {
-            let mut args = vec!["nac-web", "__worker", "--backend", raw];
-            args.extend(required);
-            let cli = Cli::try_parse_from(args).unwrap();
-            let Some(RootCommand::ManagedWorker(worker)) = cli.command else {
-                panic!("expected managed worker command");
-            };
-            assert_eq!(worker.dispatch.dispatch_id, "dispatch-123");
-            assert_eq!(worker.model.backend.map(BackendKind::from), Some(expected));
-        }
-
-        for raw in ["arcee", "auto"] {
-            let mut args = vec!["nac-web", "__worker", "--backend", raw];
-            args.extend(required);
-            let error = Cli::try_parse_from(args)
-                .err()
-                .expect("removed backend must be rejected")
-                .to_string();
-            assert!(error.contains("invalid value"), "{error}");
-            assert!(error.contains("arcee-auth"), "{error}");
-            assert!(error.contains("arcee-api"), "{error}");
-        }
-    }
-
-    #[test]
-    fn worker_cli_speed_accepts_explicit_values_and_default_reset() {
-        let required = [
-            "--session-id",
-            "session",
-            "--thread-name",
-            "thread",
-            "--dispatch-id",
-            "dispatch-123",
-            "--action",
-            "work",
-        ];
-        for (raw, expected) in [
-            (
-                "standard",
-                OptionalModelOption::Value(nac_core::model::ServiceTier::Standard),
-            ),
-            (
-                "fast",
-                OptionalModelOption::Value(nac_core::model::ServiceTier::Fast),
-            ),
-            (
-                "ultrafast",
-                OptionalModelOption::Value(nac_core::model::ServiceTier::Ultrafast),
-            ),
-            ("provider-default", OptionalModelOption::Clear),
-        ] {
-            let mut args = vec!["nac-web", "__worker", "--service-tier", raw];
-            args.extend(required);
-            let cli = Cli::try_parse_from(args).unwrap();
-            let Some(RootCommand::ManagedWorker(worker)) = cli.command else {
-                panic!("expected worker")
-            };
-            assert_eq!(worker.model.service_tier.map(Into::into), Some(expected));
-        }
+    fn retired_worker_command_and_option_are_rejected() {
+        assert!(Cli::try_parse_from(["nac-web", "__worker"]).is_err());
+        assert!(Cli::try_parse_from(["nac-web", "--worker-executable", "worker"]).is_err());
+        let help = rendered_help(&["nac-web", "--help"]);
+        assert!(!help.contains("__worker"));
+        assert!(!help.contains("worker-executable"));
     }
 
     #[test]

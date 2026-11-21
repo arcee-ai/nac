@@ -23,13 +23,12 @@ async fn selection_provenance_transient_failures_preserve_checkpoint_and_block_p
             requests.fetch_add(1, Ordering::SeqCst);
         },
     );
-    let mut agent = compaction_test_agent_with_mode(
+    let mut agent = compaction_test_agent(
         ModelClient::new_for_test_server(server.base_url.clone()),
         path.clone(),
         Some("session"),
         None,
         EventSink::none(),
-        AgentMode::Direct,
     );
     agent.messages = original.into_iter().map(|(_, message)| message).collect();
     store_agent_snapshot(&path, &agent);

@@ -198,7 +198,6 @@ async fn cancelled_owned_child_creation_retains_relationship_lease_until_commit(
     let manager = SessionManager::new_async(ServerOptions {
         root_cwd: root.clone(),
         store_path: Some(root.join("store.db")),
-        worker_executable: None,
         managed_host: None,
     })
     .await
@@ -271,7 +270,6 @@ async fn owned_current_thread_child_launch_and_wait_use_coordinator() {
     let manager = SessionManager::new_async(ServerOptions {
         root_cwd: root.clone(),
         store_path: Some(root.join("store.db")),
-        worker_executable: None,
         managed_host: None,
     })
     .await
@@ -405,7 +403,6 @@ async fn owned_current_thread_child_cancel_endpoint_preserves_generation() {
     let manager = SessionManager::new_async(ServerOptions {
         root_cwd: root.clone(),
         store_path: Some(root.join("store.db")),
-        worker_executable: None,
         managed_host: None,
     })
     .await
@@ -1291,7 +1288,6 @@ async fn owned_child_creation_inherits_automatic_compaction_setting() {
     let manager = SessionManager::new_async(ServerOptions {
         root_cwd: root.clone(),
         store_path: Some(root.join("store.db")),
-        worker_executable: None,
         managed_host: None,
     })
     .await

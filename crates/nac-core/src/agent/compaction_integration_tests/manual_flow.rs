@@ -62,7 +62,7 @@ async fn manual_compaction_forces_disabled_and_high_threshold_without_mutating_r
         assert!(request.get("tools").is_none());
         assert_eq!(
             request["input"].as_array().unwrap().last().unwrap()["content"],
-            compaction::NAC_COMPACTION_PROMPT
+            compaction::NAC_DIRECT_COMPACTION_PROMPT
         );
 
         let checkpoints =
@@ -342,7 +342,7 @@ async fn repeated_manual_compaction_progressively_advances_weighted_halves() {
 }
 
 #[tokio::test]
-async fn sessionless_and_worker_manual_compaction_is_unavailable_without_events() {
+async fn sessionless_manual_compaction_is_unavailable_without_events() {
     let root = std::env::temp_dir().join(format!(
         "nac_compaction_unavailable_{}",
         uuid::Uuid::new_v4()
@@ -363,40 +363,5 @@ async fn sessionless_and_worker_manual_compaction_is_unavailable_without_events(
     ));
     assert!(drain_events(&mut events_rx).is_empty());
 
-    let (events_tx, mut events_rx) = tokio::sync::mpsc::unbounded_channel();
-    let mut worker = Agent::with_config(
-        ModelClient::new_for_test(),
-        AgentConfig {
-            command_output_limits: crate::terminal::CommandOutputLimits::default(),
-            mode: AgentMode::Worker,
-            session_behavior: None,
-            store_path: path,
-            session_id: Some("worker-session".to_string()),
-            orchestrator_compaction_threshold: Some(1),
-            initial_messages: Vec::new(),
-            thread_name: Some("worker".to_string()),
-            dispatch_id: None,
-            event_sink: EventSink::channel(events_tx),
-            workspace_cwd: PathBuf::from("."),
-            config_cwd: PathBuf::from("."),
-            working_directory: ".".to_string(),
-            worker_executable: None,
-            sandbox: None,
-            ssh: None,
-            mcp: None,
-            skills: None,
-            extra_tool_defs: Vec::new(),
-            agents_md_message: None,
-            thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
-            light_client: None,
-            permission_rules: Vec::new(),
-        },
-    )
-    .unwrap();
-    assert!(matches!(
-        worker.compact().await,
-        Err(CompactionError::Unavailable)
-    ));
-    assert!(drain_events(&mut events_rx).is_empty());
     let _ = std::fs::remove_dir_all(root);
 }

@@ -201,9 +201,6 @@ pub struct ProjectRecord {
     pub ssh_host: Option<String>,
     pub ssh_port: Option<u16>,
     pub ssh_identity_file: Option<String>,
-    #[serde(skip_serializing)]
-    #[cfg_attr(feature = "openapi", schema(ignore))]
-    pub default_model_config_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
     pub pinned: bool,
@@ -221,7 +218,6 @@ pub struct NewProject {
     pub ssh_host: Option<String>,
     pub ssh_port: Option<u16>,
     pub ssh_identity_file: Option<String>,
-    pub default_model_config_id: Option<String>,
 }
 
 /// Immutable command environment plus the exact secret values that must be
@@ -336,22 +332,12 @@ impl CommandEnvironmentSnapshot {
 pub type CommandEnvironmentFuture<'a> =
     Pin<Box<dyn Future<Output = anyhow::Result<CommandEnvironmentSnapshot>> + Send + 'a>>;
 
-/// Process-launch metadata needed when a worker must reconstruct the same
-/// environment provider in its own process.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct WorkerEnvironment {
-    pub secret_root: Option<PathBuf>,
-    pub github_client_id: Option<String>,
-    pub home_root: Option<PathBuf>,
-}
-
 /// Injected command-environment capability. Implementations may read mutable
 /// credential stores at spawn time, but consumers see only immutable snapshots
 /// and never provider-specific credential types.
 pub trait CommandEnvironmentProvider: Send + Sync {
     fn snapshot(&self) -> CommandEnvironmentFuture<'_>;
     fn redaction_snapshot(&self) -> anyhow::Result<CommandEnvironmentSnapshot>;
-    fn worker_environment(&self) -> WorkerEnvironment;
 }
 
 #[cfg(test)]

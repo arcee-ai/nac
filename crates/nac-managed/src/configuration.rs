@@ -18,7 +18,7 @@ use nac_credential_store::{
 };
 
 pub use nac_contracts::CommandEnvironmentSnapshot;
-use nac_contracts::{CommandEnvironmentFuture, CommandEnvironmentProvider, WorkerEnvironment};
+use nac_contracts::{CommandEnvironmentFuture, CommandEnvironmentProvider};
 
 pub const MANAGED_CONFIG_VERSION: u32 = 2;
 pub const LEGACY_MANAGED_CONFIG_VERSION: u32 = 1;
@@ -559,20 +559,6 @@ impl CommandEnvironmentProvider for ManagedCommandEnvironmentProvider {
             snapshot.insert_dedicated("GH_TOKEN", token.secret(), true);
         }
         Ok(snapshot)
-    }
-
-    fn worker_environment(&self) -> WorkerEnvironment {
-        WorkerEnvironment {
-            secret_root: self
-                .store
-                .as_ref()
-                .map(|store| store.state_root().to_path_buf()),
-            github_client_id: self
-                .github
-                .as_ref()
-                .map(|github| github.client_id().to_string()),
-            home_root: self.home_root.clone(),
-        }
     }
 }
 

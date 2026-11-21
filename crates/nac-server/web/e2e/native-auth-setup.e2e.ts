@@ -5,8 +5,6 @@ import { createProject, expect, test, waitForRunIdle } from "./harness";
 import { leaveSettings, openCommandPalette, openSettingsSection } from "./settings-focus";
 import { chooseFixtureComposerModel } from "./model-fixture";
 
-test.use({ orchestration: "0" });
-
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 const source = await fs.readFile(path.join(repo, "desktop/macos/ExternalAuthSmoke.swift"), "utf8");
 function script(name: string): string {

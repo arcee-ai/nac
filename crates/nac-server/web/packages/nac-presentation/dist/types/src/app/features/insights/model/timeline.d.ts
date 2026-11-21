@@ -1,4 +1,4 @@
-import type { InsightEntry, InsightsEmptyCopy, InsightsFilter, InsightsFilterOption, InsightsTopology, InsightTurnSection } from "./types";
+import type { InsightEntry, InsightsEmptyCopy, InsightsFilter, InsightsFilterOption, InsightTurnSection } from "./types";
 import { type TranscriptTurn } from "../../../lib/transcript";
 /**
  * One section per user turn, newest first, with its entries in chronological
@@ -18,5 +18,5 @@ export declare function flattenInsightEntries(sections: readonly InsightTurnSect
 export declare function findInsightEntry(sections: readonly InsightTurnSection[], id: string): InsightEntry | null;
 /** The entry produced last, which closes the newest section. */
 export declare function newestInsightEntry(sections: readonly InsightTurnSection[]): InsightEntry | null;
-export declare function insightFilterOptions(topology: InsightsTopology): readonly InsightsFilterOption[];
-export declare function insightFilterEmptyCopy(filter: InsightsFilter, topology: InsightsTopology): InsightsEmptyCopy;
+export declare function insightFilterOptions(): readonly InsightsFilterOption[];
+export declare function insightFilterEmptyCopy(filter: InsightsFilter): InsightsEmptyCopy;

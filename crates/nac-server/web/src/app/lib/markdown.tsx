@@ -13,7 +13,7 @@ interface MarkdownProps {
   taskReferences?: boolean;
 }
 
-/** Markdown block used by transcript messages and thread episodes. */
+/** Markdown block used by transcript messages. */
 export function Markdown({
   children,
   streaming = false,

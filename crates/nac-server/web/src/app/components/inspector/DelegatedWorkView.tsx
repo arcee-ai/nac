@@ -206,7 +206,6 @@ export function DelegatedWorkView({ sessionId }: { sessionId: string; behavior: 
                 status={row.status}
                 stateLine={subagentStateLine({
                   status: row.status,
-                  orchestrator: false,
                   background: row.background,
                   detail: row.fallbackText,
                 })}

@@ -57,15 +57,12 @@ export declare const queryKeys: {
     fleetAttention: (projectId: string | null) => readonly ["fleet-attention", {
         readonly projectId: string | null;
     }];
-    threadEventsRoot: (id: string) => readonly ["session", string, "thread-events"];
-    threadEvents: (id: string, threadName: string) => readonly ["session", string, "thread-events", string];
     toolCallContent: (id: string, callId: string, blockKey: string, occurrence?: string) => readonly ["session", string, "tool-call", string, string, string];
     sessionConfig: (id: string) => readonly ["session", string, "config"];
     sessionPermissions: (id: string) => readonly ["session", string, "permissions"];
     sessionGoal: (id: string) => readonly ["session", string, "goal"];
     sessionInbox: (id: string) => readonly ["session", string, "inbox"];
     traditionalChildren: (id: string) => readonly ["session", string, "children"];
-    managedOrchestrators: (id: string) => readonly ["session", string, "orchestrators"];
     workspaceDiff: (id: string, path: string, stage: WorkspaceDiffStage | "all", context: number, revision: number | null) => readonly ["session", string, "workspace-diff", {
         readonly path: string;
         readonly stage: WorkspaceDiffStage | "all";

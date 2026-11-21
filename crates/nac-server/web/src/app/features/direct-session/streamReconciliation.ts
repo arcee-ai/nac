@@ -4,7 +4,6 @@ import { Context, Effect, Scope } from "effect";
 export interface SessionChange {
   refresh: "none" | "messages" | "snapshot" | "replace-snapshot";
   transcriptLength: number;
-  finishedThread?: string;
   runCompleted: boolean;
   permissionsChanged: boolean;
 }
@@ -25,7 +24,7 @@ export interface ObservationPorts {
   ) => Promise<
     { kind: "accepted"; total: number } | { kind: "obsolete" } | { kind: "snapshot-required" }
   >;
-  invalidate: (kind: "permissions" | "skills" | "revisions" | "thread", thread?: string) => void;
+  invalidate: (kind: "permissions" | "skills" | "revisions") => void;
 }
 
 /** The composition root supplies the existing browser capabilities for one activation. */
@@ -151,7 +150,6 @@ export const observeSession: Effect.Effect<
       const unsubscribe = ports.subscribe({
         change: (change) => {
           if (disposed) return;
-          if (change.finishedThread) ports.invalidate("thread", change.finishedThread);
           if (change.refresh === "messages") scheduleTail(change.transcriptLength);
           else if (change.refresh === "snapshot") scheduleSnapshot(false);
           else if (change.refresh === "replace-snapshot") scheduleSnapshot(true);

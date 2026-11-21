@@ -229,7 +229,6 @@ pub(super) trait LoadStoreAdapter {
             SessionManager::new_unowned_fixture(ServerOptions {
                 root_cwd: root.to_path_buf(),
                 store_path: Some(root.join("store.db")),
-                worker_executable: None,
                 managed_host: None,
             })
             .expect("direct-load session manager")
@@ -380,7 +379,6 @@ struct TelemetryEvidence {
     api_latency_us: BTreeMap<String, LatencyDistribution>,
     max_connection_active: u64,
     max_persistence_queue_active: u64,
-    max_orchestrators_active: u64,
     max_direct_active: u64,
     max_terminal_settlement_overlap: usize,
     max_child_processes_active: u64,

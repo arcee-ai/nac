@@ -7,7 +7,6 @@ async fn frontend_snapshot_projects_sanitized_primary_tool_events_separately() {
         .service
         .event_bus
         .emit_agent(AgentEvent::ToolCallStarted {
-            thread_name: None,
             call_id: "call-primary".to_string(),
             name: "exec_command".to_string(),
             args_preview: "RAW_ARGUMENTS_MUST_NOT_SURVIVE".to_string(),
@@ -27,7 +26,6 @@ async fn frontend_snapshot_projects_sanitized_primary_tool_events_separately() {
         .service
         .event_bus
         .emit_agent(AgentEvent::ToolCallFinished {
-            thread_name: None,
             call_id: "call-primary".to_string(),
             name: "exec_command".to_string(),
             content_preview: "primary result".to_string(),
@@ -42,24 +40,8 @@ async fn frontend_snapshot_projects_sanitized_primary_tool_events_separately() {
             cleanup_duration_ms: None,
             remote_outcome_uncertain: false,
         });
-    parts
-        .service
-        .event_bus
-        .emit_agent(AgentEvent::ThreadStarted {
-            name: crate::events::PRIMARY_TOOL_EVENT_TARGET.to_string(),
-            action: "collision must remain thread-owned".to_string(),
-            source_threads: Vec::new(),
-        });
-
     let snapshot = parts.service.frontend_snapshot().await.unwrap();
 
-    assert_eq!(
-        snapshot
-            .thread_events
-            .get(crate::events::PRIMARY_TOOL_EVENT_TARGET)
-            .map(Vec::len),
-        Some(1)
-    );
     assert_eq!(snapshot.primary_tool_events.len(), 2);
     let serialized = serde_json::to_string(&snapshot.primary_tool_events).unwrap();
     assert!(serialized.contains("printf primary-preview"));
@@ -70,13 +52,49 @@ async fn frontend_snapshot_projects_sanitized_primary_tool_events_separately() {
 }
 
 #[tokio::test]
+async fn primary_tool_tail_is_bounded_and_excludes_other_targets() {
+    let (parts, store_path) = test_active_service("primary_tail", "primary-session");
+    for id in ["first", "second", "third"] {
+        parts
+            .service
+            .event_bus
+            .emit_agent(AgentEvent::ToolCallStarted {
+                call_id: id.into(),
+                name: "read".into(),
+                args_preview: String::new(),
+                key_arg_preview: None,
+                args_detail: None,
+                delegation_intent: None,
+                delegation_summary_verified: false,
+            });
+    }
+    crate::store::append_thread_event(&store_path, "primary-session", "retired-worker", "{ignored")
+        .unwrap();
+    let snapshot = parts
+        .service
+        .frontend_snapshot_with_thread_event_limit(2)
+        .await
+        .unwrap();
+    let ids: Vec<_> = snapshot
+        .primary_tool_events
+        .iter()
+        .filter_map(|event| match event {
+            AgentEvent::ToolCallStarted { call_id, .. } => Some(call_id.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(ids, ["second", "third"]);
+    assert!(snapshot.thread_event_diagnostics.is_empty());
+    let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
+}
+
+#[tokio::test]
 async fn validated_subagent_progress_survives_snapshot_projection() {
     let (parts, store_path) = test_active_service("subagent_progress", "primary-session");
     parts
         .service
         .event_bus
         .emit_agent(AgentEvent::ToolCallStarted {
-            thread_name: None,
             call_id: "child-call".into(),
             name: "subagent".into(),
             args_preview: String::new(),
@@ -89,7 +107,6 @@ async fn validated_subagent_progress_survives_snapshot_projection() {
         .service
         .event_bus
         .emit_agent(AgentEvent::ToolCallStarted {
-            thread_name: None,
             call_id: "child-call".into(),
             name: "subagent".into(),
             args_preview: String::new(),
@@ -112,7 +129,6 @@ async fn validated_subagent_progress_survives_snapshot_projection() {
         .service
         .event_bus
         .emit_agent(AgentEvent::ToolCallStarted {
-            thread_name: None,
             call_id: "child-call".into(),
             name: "subagent".into(),
             args_preview: String::new(),
@@ -135,7 +151,6 @@ async fn validated_subagent_progress_survives_snapshot_projection() {
         .service
         .event_bus
         .emit_agent(AgentEvent::ToolCallFinished {
-            thread_name: None,
             call_id: "child-call".into(),
             name: "subagent".into(),
             content_preview: "Subagent completed".into(),
@@ -166,7 +181,6 @@ async fn validated_subagent_progress_survives_snapshot_projection() {
         .service
         .event_bus
         .emit_agent(AgentEvent::tool_call_finished(
-            None,
             "denied-call".into(),
             "subagent".into(),
             &denied,
@@ -188,65 +202,33 @@ async fn validated_subagent_progress_survives_snapshot_projection() {
 async fn frontend_snapshot_uses_four_operation_scoped_connections_for_direct_sessions() {
     let (parts, store_path) =
         test_active_service("snapshot_connection_reuse", "connection-session");
-    for index in 0..3 {
-        crate::store::define_workset(
-            &store_path,
-            "connection-session",
-            &crate::store::WorksetDefinition {
-                id: format!("workset-{index}"),
-                goal: "verify connection reuse".to_string(),
-                status: "active".to_string(),
-                summary: String::new(),
-                verification_recipe: None,
-                items: Vec::new(),
-            },
-        )
-        .unwrap();
-    }
-    crate::store::append_episode(
-        &store_path,
-        "connection-session",
-        "worker",
-        "implementation",
-        "retained episode",
-    )
-    .unwrap();
-    let event_json = serde_json::to_string(&AgentEvent::AssistantMessage {
-        thread_name: Some("worker".to_string()),
-        content: "retained event".to_string(),
-        usage: None,
-    })
-    .unwrap();
-    crate::store::append_thread_event(&store_path, "connection-session", "worker", &event_json)
-        .unwrap();
-    crate::store::queue_thread_steering(
-        &store_path,
-        "connection-session",
-        "worker",
-        "dispatch",
-        "retained steering",
-    )
-    .unwrap();
+    parts
+        .service
+        .event_bus
+        .emit_agent(AgentEvent::ToolCallStarted {
+            call_id: "direct-call".into(),
+            name: "read".into(),
+            args_preview: String::new(),
+            key_arg_preview: None,
+            args_detail: None,
+            delegation_intent: None,
+            delegation_summary_verified: false,
+        });
     crate::store::track_connection_opens(&store_path);
 
     let snapshot = parts.service.frontend_snapshot().await.unwrap();
 
     assert_eq!(snapshot.sessions.len(), 1);
-    assert_eq!(snapshot.threads.len(), 1);
-    assert_eq!(snapshot.thread_episodes["worker"].len(), 1);
-    assert_eq!(snapshot.thread_events["worker"].len(), 1);
-    assert_eq!(snapshot.thread_steering.len(), 1);
-    assert_eq!(snapshot.worksets.items.len(), 3);
+    assert_eq!(snapshot.primary_tool_events.len(), 1);
     // Direct shell commands have one checkout, relational dashboard data one,
     // and the transcript writer checks out for messages and row times.
     assert_eq!(crate::store::tracked_connection_opens(&store_path), 4);
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
 
-#[test]
-fn latest_thread_event_page_waits_for_capacity_before_event_state() {
-    let (parts, store_path) =
-        test_active_service("thread_event_page_lock_order", "connection-session");
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn snapshot_waits_for_capacity_before_event_state() {
+    let (parts, store_path) = test_active_service("snapshot_lock_order", "connection-session");
     let held_connections = (0..4)
         .map(|_| {
             parts
@@ -257,23 +239,20 @@ fn latest_thread_event_page_waits_for_capacity_before_event_state() {
         })
         .collect::<Vec<_>>();
     let service = parts.service.clone();
-    let (started_sender, started_receiver) = std::sync::mpsc::channel();
-    let page = std::thread::spawn(move || {
-        started_sender.send(()).unwrap();
-        service.thread_events_page("worker", None, 10)
+    let (started, ready) = tokio::sync::oneshot::channel();
+    let snapshot = tokio::spawn(async move {
+        let _ = started.send(());
+        service.frontend_snapshot().await
     });
-
-    started_receiver.recv().unwrap();
-    std::thread::sleep(Duration::from_millis(100));
+    ready.await.unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
     assert!(
         parts.service.event_bus.event_state_is_available_for_test(),
-        "latest-page loading held event state while waiting for connection capacity"
+        "snapshot held event state while waiting for connection capacity"
     );
-
     drop(held_connections);
-    let page = page.join().unwrap().unwrap();
-    assert!(page.events.is_empty());
-    assert!(page.thread_event_boundary.is_some());
+    let snapshot = snapshot.await.unwrap().unwrap();
+    assert!(!snapshot.thread_event_boundary.epoch_id.is_empty());
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
 
@@ -327,56 +306,17 @@ async fn benchmark_frontend_snapshot_latency() {
     let metadata = Arc::make_mut(&mut parts.service.metadata);
     metadata.cwd = workspace.display().to_string();
     metadata.workspace_host_path = Some(workspace);
-    for thread_index in 0..16 {
-        let thread_name = format!("worker-{thread_index}");
-        for episode_index in 0..8 {
-            crate::store::append_episode(
-                &store_path,
-                "benchmark-session",
-                &thread_name,
-                "implementation",
-                &format!("episode {episode_index}"),
-            )
-            .unwrap();
-        }
-        for event_index in 0..32 {
-            let event_json = serde_json::to_string(&AgentEvent::AssistantMessage {
-                thread_name: Some(thread_name.clone()),
-                content: format!("event {event_index}"),
-                usage: None,
-            })
-            .unwrap();
-            crate::store::append_thread_event(
-                &store_path,
-                "benchmark-session",
-                &thread_name,
-                &event_json,
-            )
-            .unwrap();
-        }
-    }
-    for workset_index in 0..4 {
-        crate::store::define_workset(
+    for event_index in 0..512 {
+        let event_json = serde_json::to_string(&AgentEvent::AssistantMessage {
+            content: format!("event {event_index}"),
+            usage: None,
+        })
+        .unwrap();
+        crate::store::append_thread_event(
             &store_path,
             "benchmark-session",
-            &crate::store::WorksetDefinition {
-                id: format!("workset-{workset_index}"),
-                goal: "measure dashboard reads".to_string(),
-                status: "active".to_string(),
-                summary: "benchmark fixture".to_string(),
-                verification_recipe: None,
-                items: (0..8)
-                    .map(|item_index| crate::store::WorksetItemDefinition {
-                        title: format!("item-{item_index}"),
-                        scope: "crates/nac-core".to_string(),
-                        description: "exercise workset detail reads".to_string(),
-                        role: "implementation".to_string(),
-                        depends_on: Vec::new(),
-                        acceptance: "snapshot includes this item".to_string(),
-                        notes: None,
-                    })
-                    .collect(),
-            },
+            crate::events::PRIMARY_TOOL_EVENT_TARGET,
+            &event_json,
         )
         .unwrap();
     }
@@ -452,13 +392,12 @@ async fn focused_snapshot_options_page_messages_and_preserve_default_wrapper_con
         .await
         .unwrap();
     assert!(loaded.snapshot.sessions.is_empty());
-    assert!(loaded.snapshot.thread_events.is_empty());
+    assert!(loaded.snapshot.primary_tool_events.is_empty());
     assert_eq!(loaded.message_page, Some(expected_page.page));
     assert_eq!(
         loaded.message_cycle,
         Some(MessageCycleMetadata {
             marker: "history:2:5".to_string(),
-            thread_names: vec!["alpha".to_string(), "zeta".to_string()],
         })
     );
     assert_eq!(
@@ -584,7 +523,6 @@ async fn store_backed_pages_are_live_mid_run_while_the_agent_is_busy() {
         loaded.message_cycle,
         Some(MessageCycleMetadata {
             marker: format!("history:3:{}", persisted_messages.len()),
-            thread_names: Vec::new(),
         })
     );
     assert_eq!(
@@ -854,37 +792,22 @@ async fn skill_references_expand_into_the_agent_prompt_only() {
 }
 
 #[tokio::test]
-async fn malformed_internal_and_future_thread_events_are_nonfatal_and_advance_raw_cursor() {
+async fn malformed_internal_and_future_events_are_nonfatal() {
     let (parts, store_path) = test_active_service("tolerant_events", "events-session");
-    let valid = serde_json::to_string(&AgentEvent::AssistantMessage {
-        thread_name: Some("worker-a".to_string()),
-        content: "safe response".to_string(),
-        usage: None,
-    })
-    .unwrap();
-    for (thread_name, event_json) in [
-        ("worker-a", valid.as_str()),
-        ("worker-a", "{malformed event json"),
-        (
-            "worker-b",
-            r#"{"type":"model_call_started","thread_name":"worker-b","iteration":1}"#,
-        ),
-        (
-            "worker-c",
-            r#"{"type":"future_event","payload":"CANARY_UNKNOWN"}"#,
-        ),
-        (
-            "worker-d",
-            r#"{"type":"tool_call_started","thread_name":"worker-d","call_id":"call-api","name":"exec_command","args_preview":"CANARY_COMMAND","args_detail":"{\"cmd\":\"echo safe_cmd\",\"workdir\":\"/safe/api\"}"}"#,
-        ),
+    let primary = crate::events::PRIMARY_TOOL_EVENT_TARGET;
+    for event_json in [
+        "{malformed event json",
+        r#"{"type":"model_call_started","thread_name":null,"iteration":1}"#,
+        r#"{"type":"future_event","payload":"CANARY_UNKNOWN"}"#,
+        r#"{"type":"tool_call_started","thread_name":null,"call_id":"call-api","name":"exec_command","args_preview":"CANARY_COMMAND","args_detail":"{\"cmd\":\"echo safe_cmd\",\"workdir\":\"/safe/api\"}"}"#,
     ] {
-        crate::store::append_thread_event(&store_path, "events-session", thread_name, event_json)
+        crate::store::append_thread_event(&store_path, "events-session", primary, event_json)
             .unwrap();
     }
-
+    crate::store::append_thread_event(&store_path, "events-session", "retired-worker", "{ignored")
+        .unwrap();
     let snapshot = parts.service.frontend_snapshot().await.unwrap();
-    assert_eq!(snapshot.thread_events["worker-a"].len(), 1);
-    assert_eq!(snapshot.thread_events["worker-d"].len(), 1);
+    assert_eq!(snapshot.primary_tool_events.len(), 1);
     assert_eq!(snapshot.thread_event_diagnostics.len(), 3);
     assert!(!snapshot.thread_event_boundary.epoch_id.is_empty());
     let serialized = serde_json::to_string(&snapshot).unwrap();
@@ -894,29 +817,11 @@ async fn malformed_internal_and_future_thread_events_are_nonfatal_and_advance_ra
         .thread_event_diagnostics
         .iter()
         .any(|diagnostic| diagnostic.error.contains('{')));
-
-    let first_page = parts
-        .service
-        .thread_events_page("worker-a", None, 1)
-        .unwrap();
-    assert!(first_page.events.is_empty());
-    assert_eq!(first_page.diagnostics.len(), 1);
-    assert!(first_page.has_older);
-    assert!(first_page.thread_event_boundary.is_some());
-    let malformed_id = first_page.next_before_id.unwrap();
-    let older_page = parts
-        .service
-        .thread_events_page("worker-a", Some(malformed_id), 1)
-        .unwrap();
-    assert_eq!(older_page.events.len(), 1);
-    assert!(older_page.thread_event_boundary.is_none());
-    assert!(older_page.next_before_id.unwrap() < malformed_id);
-
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
 
 #[tokio::test]
-async fn frontend_snapshot_restores_persisted_thread_activity() {
+async fn frontend_snapshot_restores_persisted_primary_tool_activity() {
     let (mut parts, store_path) = test_active_service("thread_activity", "activity-session");
     Arc::make_mut(&mut parts.service.metadata)
         .extra_headers
@@ -924,16 +829,7 @@ async fn frontend_snapshot_restores_persisted_thread_activity() {
     parts
         .service
         .event_bus
-        .emit_agent(AgentEvent::ThreadStarted {
-            name: "impl/ui".to_string(),
-            action: "Build the interface".to_string(),
-            source_threads: Vec::new(),
-        });
-    parts
-        .service
-        .event_bus
         .emit_agent(AgentEvent::ToolCallStarted {
-            thread_name: Some("impl/ui".to_string()),
             call_id: "call-1".to_string(),
             name: "read".to_string(),
             args_preview: r#"{"path":"index.html"}"#.to_string(),
@@ -946,7 +842,6 @@ async fn frontend_snapshot_restores_persisted_thread_activity() {
         .service
         .event_bus
         .emit_agent(AgentEvent::ToolCallFinished {
-            thread_name: Some("impl/ui".to_string()),
             call_id: "call-1".to_string(),
             name: "read".to_string(),
             content_preview: "done".to_string(),
@@ -968,10 +863,10 @@ async fn frontend_snapshot_restores_persisted_thread_activity() {
         parts.service.metadata().extra_headers["Authorization"],
         "CANARY_HEADER"
     );
-    let events = &snapshot.thread_events["impl/ui"];
-    assert_eq!(events.len(), 3);
-    assert!(matches!(events[0], AgentEvent::ThreadStarted { .. }));
-    assert!(matches!(events[2], AgentEvent::ToolCallFinished { .. }));
+    let events = &snapshot.primary_tool_events;
+    assert_eq!(events.len(), 2);
+    assert!(matches!(events[0], AgentEvent::ToolCallStarted { .. }));
+    assert!(matches!(events[1], AgentEvent::ToolCallFinished { .. }));
 
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }

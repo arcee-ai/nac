@@ -3,7 +3,7 @@ export declare function segmentDurationMs(segment: InsightSegment): number | nul
 /**
  * Total recorded activity, not elapsed wall-clock time. Parallel calls each
  * contribute their own duration. A segment without a recorded duration, such as
- * an older tool or a workset, adds nothing; null when none is known.
+ * an older tool, adds nothing; null when none is known.
  */
 export declare function sumSegmentDurations(segments: readonly InsightSegment[]): number | null;
 /** List meta, e.g. "13.8 s". */

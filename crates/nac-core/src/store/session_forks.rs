@@ -5,7 +5,6 @@
 //! the fork name where it came from.
 
 use super::*;
-use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -91,19 +90,7 @@ pub(crate) fn insert_session_fork_with_connection(
 }
 
 coordinated_command! {
-/// Duplicate the conversation artifacts named by `prefix` onto the forked
-/// session: threads, episodes, live thread events, steering, worksets, and
-/// workspace revisions.
-///
-/// The fork writes the system head as its snapshot blob and the rest of
-/// `prefix` as new transcript-log rows, so source orchestrator log rows are
-/// not copied — their `idx` values belong to the source blob length. A
-/// prefix that is the whole source transcript copies every current artifact.
-/// A shorter prefix keeps only threads and worksets mentioned in those
-/// messages. History is cut at the last transcript-log timestamp in the
-/// prefix (or, without a log, at as many thread dispatches as that prefix
-/// recorded). Steering is copied by that same cutoff, not by tool-call ids
-/// — worker dispatch ids are a different UUID.
+/// Copy workspace revisions and settled human shell history through the forked prefix.
 pub fn clone_session_conversation_artifacts(
     path: &Path,
     source_session_id: &str,
@@ -114,17 +101,6 @@ pub fn clone_session_conversation_artifacts(
     let prefix_len = i64::try_from(prefix.len()).context("fork prefix length overflowed")?;
     let mut conn = open_connection(path)?;
     let tx = conn.transaction()?;
-    if prefix.len() == source_transcript_len {
-        clone_all_conversation_artifacts(&tx, source_session_id, fork_session_id)?;
-    } else {
-        clone_prefix_conversation_artifacts(
-            &tx,
-            source_session_id,
-            fork_session_id,
-            prefix_len,
-            &prefix_conversation_artifacts(prefix),
-        )?;
-    }
     clone_workspace_revisions(
         &tx,
         source_session_id,
@@ -151,280 +127,6 @@ command CloneSessionConversationArtifactsCommand {
 call |command| (&command.source_session_id, &command.fork_session_id, &command.prefix, command.source_transcript_len)
 correlation |command| crate::telemetry::Correlation::session(Some(&command.source_session_id));
 port public;
-}
-
-fn clone_all_conversation_artifacts(
-    tx: &Transaction<'_>,
-    source_session_id: &str,
-    fork_session_id: &str,
-) -> Result<()> {
-    tx.execute(
-        "INSERT INTO threads (name, session_id, created_at, updated_at)
-         SELECT name, ?1, created_at, updated_at
-         FROM threads
-         WHERE session_id = ?2",
-        params![fork_session_id, source_session_id],
-    )?;
-    tx.execute(
-        "INSERT INTO episodes (thread_name, session_id, action, content, status, created_at)
-         SELECT thread_name, ?1, action, content, status, created_at
-         FROM episodes
-         WHERE session_id = ?2
-         ORDER BY id ASC",
-        params![fork_session_id, source_session_id],
-    )?;
-    tx.execute(
-        "INSERT INTO thread_events (session_id, thread_name, event_json, created_at)
-         SELECT ?1, thread_name, event_json, created_at
-         FROM thread_events
-         WHERE session_id = ?2 AND thread_name != ?3
-         ORDER BY id ASC",
-        params![
-            fork_session_id,
-            source_session_id,
-            ORCHESTRATOR_STEERING_TARGET
-        ],
-    )?;
-    tx.execute(
-        "INSERT INTO thread_steering
-             (session_id, thread_name, dispatch_id, instruction, status,
-              created_at, claimed_at, delivered_at, expired_at)
-         SELECT ?1, thread_name, dispatch_id, instruction, status,
-                created_at, claimed_at, delivered_at, expired_at
-         FROM thread_steering
-         WHERE session_id = ?2
-         ORDER BY id ASC",
-        params![fork_session_id, source_session_id],
-    )?;
-    tx.execute(
-        "INSERT INTO worksets
-             (id, session_id, kind, instruction, status, summary,
-              verification_recipe, created_at, updated_at)
-         SELECT id, ?1, kind, instruction, status, summary,
-                verification_recipe, created_at, updated_at
-         FROM worksets
-         WHERE session_id = ?2",
-        params![fork_session_id, source_session_id],
-    )?;
-    tx.execute(
-        "INSERT INTO workset_items
-             (workset_id, session_id, position, title, thread_name, scope,
-              description, item_kind, status, source_threads_json, last_summary,
-              acceptance, updated_at)
-         SELECT workset_id, ?1, position, title, thread_name, scope,
-                description, item_kind, status, source_threads_json, last_summary,
-                acceptance, updated_at
-         FROM workset_items
-         WHERE session_id = ?2",
-        params![fork_session_id, source_session_id],
-    )?;
-    Ok(())
-}
-
-fn clone_prefix_conversation_artifacts(
-    tx: &Transaction<'_>,
-    source_session_id: &str,
-    fork_session_id: &str,
-    prefix_len: i64,
-    artifacts: &PrefixArtifacts,
-) -> Result<()> {
-    let cutoff = prefix_created_at_cutoff(tx, source_session_id, prefix_len)?;
-    for (thread_name, thread) in &artifacts.threads {
-        let inserted = tx.execute(
-            "INSERT INTO threads (name, session_id, created_at, updated_at)
-             SELECT name, ?1, created_at, updated_at
-             FROM threads
-             WHERE session_id = ?2 AND name = ?3",
-            params![fork_session_id, source_session_id, thread_name],
-        )?;
-        if inserted == 0 {
-            continue;
-        }
-
-        if let Some(cutoff) = cutoff.as_deref() {
-            clone_thread_rows_through(tx, source_session_id, fork_session_id, thread_name, cutoff)?;
-            continue;
-        }
-
-        // No transcript-log timestamps: copy only as many dispatches as the
-        // prefix itself recorded. A mentioned-only thread has no count, so
-        // later source history is left behind rather than leaked.
-        let episode_limit =
-            i64::try_from(thread.dispatch_count).context("thread dispatch count overflowed")?;
-        if episode_limit == 0 {
-            continue;
-        }
-        clone_thread_rows_for_dispatches(
-            tx,
-            source_session_id,
-            fork_session_id,
-            thread_name,
-            episode_limit,
-        )?;
-    }
-
-    for workset_id in &artifacts.workset_ids {
-        let inserted = tx.execute(
-            "INSERT INTO worksets
-                 (id, session_id, kind, instruction, status, summary,
-                  verification_recipe, created_at, updated_at)
-             SELECT id, ?1, kind, instruction, status, summary,
-                    verification_recipe, created_at, updated_at
-             FROM worksets
-             WHERE session_id = ?2 AND id = ?3",
-            params![fork_session_id, source_session_id, workset_id],
-        )?;
-        if inserted == 0 {
-            continue;
-        }
-        tx.execute(
-            "INSERT INTO workset_items
-                 (workset_id, session_id, position, title, thread_name, scope,
-                  description, item_kind, status, source_threads_json, last_summary,
-                  acceptance, updated_at)
-             SELECT workset_id, ?1, position, title, thread_name, scope,
-                    description, item_kind, status, source_threads_json, last_summary,
-                    acceptance, updated_at
-             FROM workset_items
-             WHERE session_id = ?2 AND workset_id = ?3",
-            params![fork_session_id, source_session_id, workset_id],
-        )?;
-    }
-    Ok(())
-}
-
-fn prefix_created_at_cutoff(
-    tx: &Transaction<'_>,
-    source_session_id: &str,
-    prefix_len: i64,
-) -> Result<Option<String>> {
-    if prefix_len <= 0 {
-        return Ok(None);
-    }
-    let cutoff: Option<String> = tx.query_row(
-        "SELECT MAX(created_at)
-         FROM thread_events
-         WHERE session_id = ?1
-           AND thread_name = ?2
-           AND json_extract(event_json, '$.nac_transcript_message.idx') IS NOT NULL
-           AND CAST(json_extract(event_json, '$.nac_transcript_message.idx') AS INTEGER) < ?3",
-        params![source_session_id, ORCHESTRATOR_STEERING_TARGET, prefix_len],
-        |row| row.get(0),
-    )?;
-    Ok(cutoff.filter(|value| !value.is_empty()))
-}
-
-fn clone_thread_rows_through(
-    tx: &Transaction<'_>,
-    source_session_id: &str,
-    fork_session_id: &str,
-    thread_name: &str,
-    cutoff: &str,
-) -> Result<()> {
-    tx.execute(
-        "INSERT INTO episodes (thread_name, session_id, action, content, status, created_at)
-         SELECT thread_name, ?1, action, content, status, created_at
-         FROM episodes
-         WHERE session_id = ?2 AND thread_name = ?3 AND created_at <= ?4
-         ORDER BY id ASC",
-        params![fork_session_id, source_session_id, thread_name, cutoff],
-    )?;
-    tx.execute(
-        "INSERT INTO thread_events (session_id, thread_name, event_json, created_at)
-         SELECT ?1, thread_name, event_json, created_at
-         FROM thread_events
-         WHERE session_id = ?2
-           AND thread_name = ?3
-           AND thread_name != ?5
-           AND created_at <= ?4
-         ORDER BY id ASC",
-        params![
-            fork_session_id,
-            source_session_id,
-            thread_name,
-            cutoff,
-            ORCHESTRATOR_STEERING_TARGET
-        ],
-    )?;
-    tx.execute(
-        "INSERT INTO thread_steering
-             (session_id, thread_name, dispatch_id, instruction, status,
-              created_at, claimed_at, delivered_at, expired_at)
-         SELECT ?1, thread_name, dispatch_id, instruction, status,
-                created_at, claimed_at, delivered_at, expired_at
-         FROM thread_steering
-         WHERE session_id = ?2 AND thread_name = ?3 AND created_at <= ?4
-         ORDER BY id ASC",
-        params![fork_session_id, source_session_id, thread_name, cutoff],
-    )?;
-    Ok(())
-}
-
-fn clone_thread_rows_for_dispatches(
-    tx: &Transaction<'_>,
-    source_session_id: &str,
-    fork_session_id: &str,
-    thread_name: &str,
-    episode_limit: i64,
-) -> Result<()> {
-    tx.execute(
-        "INSERT INTO episodes (thread_name, session_id, action, content, status, created_at)
-         SELECT thread_name, ?1, action, content, status, created_at
-         FROM episodes
-         WHERE session_id = ?2 AND thread_name = ?3
-         ORDER BY id ASC
-         LIMIT ?4",
-        params![
-            fork_session_id,
-            source_session_id,
-            thread_name,
-            episode_limit
-        ],
-    )?;
-    tx.execute(
-        "INSERT INTO thread_events (session_id, thread_name, event_json, created_at)
-         SELECT ?1, src.thread_name, src.event_json, src.created_at
-         FROM thread_events src
-         WHERE src.session_id = ?2
-           AND src.thread_name = ?3
-           AND src.thread_name != ?5
-           AND (
-               SELECT COUNT(*)
-               FROM thread_events started
-               WHERE started.session_id = src.session_id
-                 AND started.thread_name = src.thread_name
-                 AND started.id <= src.id
-                 AND json_extract(started.event_json, '$.type') = 'thread_started'
-           ) <= ?4
-         ORDER BY src.id ASC",
-        params![
-            fork_session_id,
-            source_session_id,
-            thread_name,
-            episode_limit,
-            ORCHESTRATOR_STEERING_TARGET
-        ],
-    )?;
-    tx.execute(
-        "INSERT INTO thread_steering
-             (session_id, thread_name, dispatch_id, instruction, status,
-              created_at, claimed_at, delivered_at, expired_at)
-         SELECT ?1, thread_name, dispatch_id, instruction, status,
-                created_at, claimed_at, delivered_at, expired_at
-         FROM thread_steering
-         WHERE session_id = ?2 AND thread_name = ?3
-           AND created_at <= COALESCE(
-               (SELECT MAX(created_at)
-                FROM thread_events
-                WHERE session_id = ?1 AND thread_name = ?3),
-               (SELECT MAX(created_at)
-                FROM episodes
-                WHERE session_id = ?1 AND thread_name = ?3)
-           )
-         ORDER BY id ASC",
-        params![fork_session_id, source_session_id, thread_name],
-    )?;
-    Ok(())
 }
 
 fn clone_workspace_revisions(
@@ -462,88 +164,6 @@ fn clone_workspace_revisions(
         params![fork_session_id, source_session_id, prefix_len],
     )?;
     Ok(())
-}
-
-#[derive(Default)]
-struct PrefixArtifacts {
-    threads: BTreeMap<String, ThreadPrefix>,
-    workset_ids: BTreeSet<String>,
-}
-
-#[derive(Default)]
-struct ThreadPrefix {
-    dispatch_count: usize,
-}
-
-fn prefix_conversation_artifacts(prefix: &[Message]) -> PrefixArtifacts {
-    let mut artifacts = PrefixArtifacts::default();
-    for message in prefix {
-        let Message::Assistant {
-            tool_calls: Some(tool_calls),
-            ..
-        } = message
-        else {
-            continue;
-        };
-        for call in tool_calls {
-            let arguments = serde_json::from_str::<serde_json::Value>(&call.function.arguments)
-                .unwrap_or(serde_json::Value::Null);
-            match call.function.name.as_str() {
-                "thread" => {
-                    if let Some(name) = json_nonempty_str(&arguments, "name") {
-                        artifacts.threads.entry(name).or_default().dispatch_count += 1;
-                    }
-                    if let Some(sources) =
-                        arguments.get("threads").and_then(|value| value.as_array())
-                    {
-                        for source in sources {
-                            if let Some(name) = source
-                                .as_str()
-                                .map(str::trim)
-                                .filter(|name| !name.is_empty())
-                            {
-                                remember_thread(&mut artifacts, name);
-                            }
-                        }
-                    }
-                }
-                "thread_read" => {
-                    if let Some(name) = json_nonempty_str(&arguments, "name") {
-                        remember_thread(&mut artifacts, &name);
-                    }
-                }
-                "thread_delete" => {
-                    if let Some(name) = json_nonempty_str(&arguments, "name") {
-                        artifacts.threads.remove(&name);
-                    }
-                }
-                "workset_define" | "workset_read" => {
-                    if let Some(id) = json_nonempty_str(&arguments, "id") {
-                        artifacts.workset_ids.insert(id);
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-    artifacts.threads.remove(ORCHESTRATOR_STEERING_TARGET);
-    artifacts
-}
-
-fn remember_thread(artifacts: &mut PrefixArtifacts, name: &str) {
-    if name == ORCHESTRATOR_STEERING_TARGET {
-        return;
-    }
-    artifacts.threads.entry(name.to_string()).or_default();
-}
-
-fn json_nonempty_str(value: &serde_json::Value, key: &str) -> Option<String> {
-    value
-        .get(key)
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToString::to_string)
 }
 
 coordinated_command! {
@@ -651,4 +271,55 @@ fn trimmed_non_empty(value: &str) -> Option<String> {
 
 fn nonempty_owned(value: Option<String>) -> Option<String> {
     value.and_then(|text| trimmed_non_empty(&text))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn direct_fork_retains_only_prefix_workspace_and_settled_shell_history() {
+        let dir = std::env::temp_dir().join(format!("nac-direct-fork-{}", uuid::Uuid::new_v4()));
+        let path = dir.join("store.db");
+        initialize(&path).unwrap();
+        for session in ["source", "partial", "full"] {
+            insert_test_session(&path, session);
+        }
+        let conn = open_runtime_connection(&path).unwrap();
+        for (run, length) in [("first", Some(1)), ("later", Some(3)), ("legacy", None)] {
+            conn.execute("INSERT INTO workspace_revisions (session_id, run_id, commit_sha, label, created_at, transcript_len) VALUES ('source', ?1, ?1, 'test', 'now', ?2)", params![run, length]).unwrap();
+        }
+        for (id, phase, index) in [
+            ("included", "finished", 0),
+            ("later", "finished", 2),
+            ("pending", "started", 0),
+        ] {
+            let snapshot = serde_json::json!({"transcript_index": index, "output_id": "original"});
+            conn.execute("INSERT INTO human_shell_operations (session_id, request_id, fingerprint, operation_id, phase, snapshot_json) VALUES ('source', ?1, 'fingerprint', ?1, ?2, ?3)", params![id, phase, snapshot.to_string()]).unwrap();
+        }
+        drop(conn);
+        let prefix = vec![Message::User {
+            content: "one".into(),
+        }];
+        clone_session_conversation_artifacts(&path, "source", "partial", &prefix, 3).unwrap();
+        clone_session_conversation_artifacts(&path, "source", "full", &prefix, 1).unwrap();
+        let conn = open_runtime_connection(&path).unwrap();
+        let revisions = |session: &str| -> Vec<String> {
+            conn.prepare("SELECT run_id FROM workspace_revisions WHERE session_id=?1 ORDER BY id")
+                .unwrap()
+                .query_map([session], |row| row.get(0))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap()
+        };
+        assert_eq!(revisions("partial"), ["first"]);
+        assert_eq!(revisions("full"), ["first", "later", "legacy"]);
+        for session in ["partial", "full"] {
+            let rows: Vec<(String, Option<String>)> = conn.prepare("SELECT request_id, json_extract(snapshot_json, '$.output_id') FROM human_shell_operations WHERE session_id=?1").unwrap()
+                .query_map([session], |row| Ok((row.get(0)?, row.get(1)?))).unwrap().collect::<rusqlite::Result<_>>().unwrap();
+            assert_eq!(rows, [("included".into(), None)]);
+        }
+        drop(conn);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }

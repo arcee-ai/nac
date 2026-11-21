@@ -83,7 +83,6 @@ export function useDelegatedPreviewStream(sessionId: string | null): DelegatedPr
 
     const applyDelta = (delta: AssistantStreamDelta) => {
       if (recovering) return;
-      if (delta.thread_name) return;
       if (delta.reset) {
         settled = false;
         setStream((current) => ({
@@ -222,10 +221,7 @@ export function useDelegatedPreviewStream(sessionId: string | null): DelegatedPr
           return;
         case "agent": {
           const agent = event.event;
-          if (
-            (agent.type === "tool_call_started" || agent.type === "tool_call_finished") &&
-            !agent.thread_name
-          ) {
+          if (agent.type === "tool_call_started" || agent.type === "tool_call_finished") {
             setStream((current) => ({
               ...current,
               toolEvents: [

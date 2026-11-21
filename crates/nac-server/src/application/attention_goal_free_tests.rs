@@ -68,7 +68,6 @@ async fn run(case: Case) {
     let manager = SessionManager::new_async(crate::ServerOptions {
         root_cwd: root.clone(),
         store_path: Some(path.clone()),
-        worker_executable: None,
         managed_host: None,
     })
     .await

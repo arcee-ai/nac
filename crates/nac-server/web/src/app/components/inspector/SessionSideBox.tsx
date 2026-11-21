@@ -103,9 +103,7 @@ export function SessionSideBox({
 
   const body = (
     <>
-      {active === "insights" ? (
-        <InsightsView sessionId={sessionId} snapshot={snapshot} topology="direct" />
-      ) : null}
+      {active === "insights" ? <InsightsView sessionId={sessionId} snapshot={snapshot} /> : null}
       {active === "files" ? (
         <FilesView
           sessionId={sessionId}
@@ -167,7 +165,7 @@ export function SessionSideBox({
           >
             {widePanels.map((name) => {
               const selected = active === name;
-              const badge = panelBadgeCount(name, subagentCount, 0);
+              const badge = panelBadgeCount(name, subagentCount);
               const open = () => {
                 // A tablet shows one column at a time, and a new panel opens on
                 // its selected row; a desktop split ignores the flag entirely.

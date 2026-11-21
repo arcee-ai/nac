@@ -4,14 +4,10 @@ use super::*;
 pub struct NacConfig {
     #[serde(default)]
     pub storage: StorageConfig,
-    #[serde(skip)]
-    pub model: ModelConfig,
     #[serde(default)]
     pub compaction: CompactionConfig,
     #[serde(default)]
     pub sandbox: SandboxConfig,
-    #[serde(default)]
-    pub worker: WorkerConfig,
     #[serde(default)]
     pub permissions: PermissionConfig,
 }
@@ -29,17 +25,6 @@ pub struct PermissionConfig {
     pub rules: Vec<crate::permissions::PermissionRule>,
 }
 
-/// Transitional in-memory shape for older callers. Config files no longer
-/// populate these fields or choose model settings for new sessions.
-#[derive(Debug, Clone, Default, serde::Deserialize)]
-pub struct ModelConfig {
-    pub model: Option<String>,
-    pub reasoning_effort: Option<ReasoningEffort>,
-    pub service_tier: Option<crate::model::ServiceTier>,
-    #[serde(default)]
-    pub extra_headers: BTreeMap<String, String>,
-}
-
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 pub struct CompactionConfig {
     /// Absolute orchestrator context threshold for new sessions. Zero disables it.
@@ -55,20 +40,11 @@ pub struct SandboxConfig {
 }
 
 #[derive(Debug, Clone, Default, serde::Deserialize)]
-pub struct WorkerConfig {
-    pub thread_timeout_secs: Option<u64>,
-    pub command_output_max_bytes: Option<usize>,
-    pub command_output_session_max_bytes: Option<usize>,
-}
-
-#[derive(Debug, Clone, Default, serde::Deserialize)]
 pub(super) struct NonModelNacConfig {
     #[serde(default)]
     storage: StorageConfig,
     #[serde(default)]
     sandbox: SandboxConfig,
-    #[serde(default)]
-    worker: WorkerConfig,
     #[serde(default)]
     permissions: PermissionConfig,
 }
@@ -77,10 +53,8 @@ impl From<NonModelNacConfig> for NacConfig {
     fn from(config: NonModelNacConfig) -> Self {
         Self {
             storage: config.storage,
-            model: ModelConfig::default(),
             compaction: CompactionConfig::default(),
             sandbox: config.sandbox,
-            worker: config.worker,
             permissions: config.permissions,
         }
     }
@@ -103,8 +77,7 @@ impl NacConfig {
     }
 
     /// Load runtime settings for a command whose model tuple and orchestrator
-    /// compaction threshold come from a persisted session snapshot or whose
-    /// model tuple comes from managed-worker transport.
+    /// compaction threshold come from a persisted session snapshot.
     ///
     /// The complete TOML document must still be syntactically valid and all
     /// non-model runtime sections remain strictly typed. The `model` key is
@@ -113,13 +86,15 @@ impl NacConfig {
     /// snapshot-authoritative command. MCP, workspace metadata, and other
     /// independent config consumers continue loading their own sections from
     /// the same file. The `compaction` key is also omitted so resumed sessions
-    /// and managed workers never inherit an ambient orchestrator threshold.
+    /// never inherit an ambient compaction threshold.
     pub fn load_without_model_from_cwd(cwd: &Path) -> Result<Self> {
         let paths = PathContext::new(cwd);
         let Some(path) = paths.nac_config_path() else {
             return Ok(Self::default());
         };
         let raw = Self::read_config(&path)?;
+        Self::warn_removed_model_keys(&raw);
+        Self::warn_removed_worker_settings(&raw);
         toml::from_str::<NonModelNacConfig>(&raw)
             .map(Into::into)
             .with_context(|| format!("failed to parse non-model config {}", path.display()))
@@ -130,7 +105,7 @@ impl NacConfig {
     /// Launching ignores these keys — the catalog resolves the provider from
     /// the model id — but importing a file the user pointed at is the one
     /// case where they are the only statement of intent available, so the
-    /// importer reads them directly instead of through [`ModelConfig`].
+    /// importer reads them directly from the selected file.
     pub fn load_model_identity_from_file(path: &Path) -> Result<ConfiguredModelIdentity> {
         let raw = Self::read_explicit_config(path)
             .with_context(|| format!("failed to read config {}", path.display()))?;
@@ -146,12 +121,15 @@ impl NacConfig {
     pub fn load_from_file(path: &Path) -> Result<Self> {
         let raw = Self::read_explicit_config(path)
             .with_context(|| format!("failed to read config {}", path.display()))?;
+        Self::warn_removed_model_keys(&raw);
+        Self::warn_removed_worker_settings(&raw);
         toml::from_str(&raw).with_context(|| format!("failed to parse config {}", path.display()))
     }
 
     fn load_from_path(path: PathBuf) -> Result<Self> {
         let raw = Self::read_config(&path)?;
         Self::warn_removed_model_keys(&raw);
+        Self::warn_removed_worker_settings(&raw);
         toml::from_str(&raw).with_context(|| format!("failed to parse config {}", path.display()))
     }
 
@@ -187,6 +165,23 @@ impl NacConfig {
             "nac: config: ignoring removed [model] defaults ({}); select a model and its settings for each new session",
             removed.join(", ")
         );
+    }
+
+    /// Worker settings no longer affect direct sessions. Report their presence
+    /// without rejecting unrelated supported configuration.
+    fn warn_removed_worker_settings(raw: &str) {
+        static WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if WARNED.load(std::sync::atomic::Ordering::Relaxed) {
+            return;
+        }
+        if raw
+            .parse::<toml::Value>()
+            .ok()
+            .is_some_and(|value| value.get("worker").is_some())
+        {
+            WARNED.store(true, std::sync::atomic::Ordering::Relaxed);
+            eprintln!("nac: config: ignoring removed [worker] settings; direct sessions use fixed output limits");
+        }
     }
 
     fn read_config(path: &Path) -> Result<String> {

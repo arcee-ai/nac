@@ -3,7 +3,6 @@ import { createProject, createSession, expect, test } from "./harness";
 import { startHostedFixture } from "./hosted-fixture";
 
 test.skip(!!process.env.NAC_E2E_REMOTE, "Requires the isolated local two-instance caller");
-test.use({ orchestration: "0" });
 
 test("embedded dialogs retain local Tab, dismissal, hints and shortcuts across two runtimes", async ({
   harness,

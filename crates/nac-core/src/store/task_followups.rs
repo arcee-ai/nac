@@ -212,12 +212,11 @@ pub(super) fn validate_scope(
         let state = conn.query_row(
             "SELECT s.behavior, (s.host_id IS NOT NULL OR s.sandbox_json IS NOT NULL), sp.project_id,
                     EXISTS(SELECT 1 FROM traditional_children WHERE child_session_id=s.session_id),
-                    EXISTS(SELECT 1 FROM managed_orchestrators WHERE orchestrator_session_id=s.session_id),
                     s.created_at
              FROM sessions s LEFT JOIN session_projects sp ON sp.session_id=s.session_id
              WHERE s.session_id=?1",
             params![id], |row| Ok((row.get::<_,String>(0)?,row.get::<_,bool>(1)?,
-                row.get::<_,Option<String>>(2)?,row.get::<_,bool>(3)?,row.get::<_,bool>(4)?,row.get::<_,String>(5)?)),
+                row.get::<_,Option<String>>(2)?,row.get::<_,bool>(3)?,row.get::<_,String>(4)?)),
         ).optional()?.ok_or(TaskFollowupError::Unavailable)?;
         states.push(state);
     }
@@ -227,15 +226,15 @@ pub(super) fn validate_scope(
     }
     if states
         .iter()
-        .any(|state| state.0 != "direct" || state.1 || state.3 || state.4)
+        .any(|state| state.0 != "direct" || state.1 || state.3)
     {
         return Err(TaskFollowupError::Unavailable.into());
     }
     Ok(TaskFollowupScope {
         caller_project_id: states[0].2.clone(),
         target_project_id: states[1].2.clone(),
-        caller_created_at: states[0].5.clone(),
-        target_created_at: states[1].5.clone(),
+        caller_created_at: states[0].4.clone(),
+        target_created_at: states[1].4.clone(),
     })
 }
 

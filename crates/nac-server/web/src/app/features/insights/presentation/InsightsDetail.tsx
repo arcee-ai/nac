@@ -14,7 +14,6 @@ import {
 function growthSeed(segment: InsightSegment | undefined): string {
   if (!segment) return "";
   if (segment.kind === "reasoning") return `${segment.key}:${segment.text.length}`;
-  if (segment.kind === "workset") return `${segment.key}:${segment.pending}`;
   const { presentation } = segment;
   return `${segment.key}:${presentation?.status ?? segment.pending}:${presentation?.resultPreview?.length ?? 0}`;
 }

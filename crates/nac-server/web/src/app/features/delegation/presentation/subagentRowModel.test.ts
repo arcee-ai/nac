@@ -16,14 +16,13 @@ describe("subagent row model", () => {
     expect(
       subagentStateLine({
         status: "completed",
-        orchestrator: false,
         background: true,
         detail: "\nAll checks passed.\nSecond line",
       }),
     ).toBe("Done · All checks passed.");
-    expect(
-      subagentStateLine({ status: "running", orchestrator: true, background: true, detail: "x" }),
-    ).toBe("Orchestrator · Working · background");
+    expect(subagentStateLine({ status: "running", background: true, detail: "x" })).toBe(
+      "Working · background",
+    );
   });
 
   it("formats how long ago a record changed", () => {

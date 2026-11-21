@@ -82,7 +82,6 @@ async fn native_agent_followup_lost_tool_ack_replay_and_passive_receipt_deliver_
         ModelClient::new_for_test_server(coordinator_server.base_url.clone()),
         path.clone(),
         Some("caller"),
-        AgentMode::Direct,
     );
     coordinator.tool_runtime.permission_rules =
         Arc::new(vec![crate::permissions::PermissionRule::new(

@@ -32,11 +32,6 @@ const UNSETTLED: ReadonlySet<ToolPresentationStatus> = new Set([
   "awaiting-approval",
 ]);
 
-const ROW_PREFIXES: Record<SpawnActionKind, "child" | "orchestrator"> = {
-  "spawn-agent": "child",
-  "spawn-orchestrator": "orchestrator",
-};
-
 /**
  * Key the Insights ids of a model turn hang off: the user prompt or delegated
  * completion right before it. `ModelTurn.key` cannot serve, since it moves to
@@ -72,13 +67,6 @@ function toSegment(block: TranscriptBlock): InsightSegment | null {
         durationMs: block.durationMs,
         streaming: block.streaming,
       };
-    case "workset":
-      return {
-        kind: "workset",
-        key: block.key,
-        worksetId: block.worksetId,
-        pending: block.pending,
-      };
     case "tool":
       return {
         kind: "tool",
@@ -108,7 +96,7 @@ function sessionEntry(
   presentation: ToolPresentation,
 ): InsightSessionEntry {
   const sessionId = presentation.spawnedSessionId;
-  const rowKey: DelegatedRowKey | null = sessionId ? `${ROW_PREFIXES[action]}:${sessionId}` : null;
+  const rowKey: DelegatedRowKey | null = sessionId ? `child:${sessionId}` : null;
   return {
     kind: "session",
     id,
@@ -131,7 +119,7 @@ function partition(blocks: readonly TranscriptBlock[], anchor: string): ModelTur
     open = [];
   };
   for (const block of blocks) {
-    if (block.kind === "text" || block.kind === "wave") {
+    if (block.kind === "text") {
       close();
       items.push({ kind: "block", block });
       continue;
@@ -154,8 +142,8 @@ function partition(blocks: readonly TranscriptBlock[], anchor: string): ModelTur
 const partitions = new WeakMap<ModelTurn, { anchor: string; items: readonly ModelTurnItem[] }>();
 
 /**
- * One model turn as groups of consecutive reasoning, tool and workset blocks,
- * the sessions it launched, and the text and wave blocks between them, in
+ * One model turn as groups of consecutive reasoning and tool blocks,
+ * the sessions it launched, and the text blocks between them, in
  * transcript order. `previous` is the turn before it in the same `turns`.
  *
  * Group ids are `<anchor>:<first segment key>` and session ids

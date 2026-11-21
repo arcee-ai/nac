@@ -14,14 +14,11 @@ export interface components {
         };
         AgentEvent: {
             prompt_preview: string;
-            thread_name?: string | null;
             type: "run_started";
         } | {
             iteration: number;
-            thread_name?: string | null;
             type: "model_call_started";
         } | {
-            thread_name?: string | null;
             type: "token_usage_updated";
             usage: components["schemas"]["TokenUsage"];
         } | {
@@ -32,7 +29,6 @@ export interface components {
             delegation_summary_verified?: boolean;
             key_arg_preview?: string | null;
             name: string;
-            thread_name?: string | null;
             type: "tool_call_started";
         } | {
             call_id: string;
@@ -48,44 +44,7 @@ export interface components {
             is_error: boolean;
             name: string;
             remote_outcome_uncertain?: boolean;
-            thread_name?: string | null;
             type: "tool_call_finished";
-        } | {
-            action: string;
-            name: string;
-            source_threads: string[];
-            type: "thread_started";
-        } | {
-            line: string;
-            name: string;
-            type: "thread_log";
-        } | {
-            instruction_preview: string;
-            name: string;
-            steering_id: number;
-            type: "thread_steering_queued";
-        } | {
-            instruction_preview: string;
-            name: string;
-            steering_id: number;
-            type: "thread_steering_delivered";
-        } | {
-            instruction_preview: string;
-            name: string;
-            steering_id: number;
-            type: "thread_steering_expired";
-        } | {
-            instruction_preview: string;
-            steering_id: number;
-            type: "orchestrator_steering_queued";
-        } | {
-            instruction_preview: string;
-            steering_id: number;
-            type: "orchestrator_steering_delivered";
-        } | {
-            instruction_preview: string;
-            steering_id: number;
-            type: "orchestrator_steering_expired";
         } | {
             compaction_id: string;
             reason: components["schemas"]["CompactionReason"];
@@ -105,38 +64,25 @@ export interface components {
             reason: components["schemas"]["CompactionReason"];
             type: "orchestrator_compaction_failed";
         } | {
-            exit_code: number;
-            name: string;
-            timed_out: boolean;
-            timeout_reason?: string | null;
-            type: "thread_finished";
-            usage?: components["schemas"]["TokenUsage"] | null;
-        } | {
             content: string;
-            thread_name?: string | null;
             type: "assistant_message";
             usage?: components["schemas"]["TokenUsage"] | null;
         } | {
             message: string;
-            thread_name?: string | null;
             type: "error";
         } | {
             reason: string;
             server_name: string;
-            thread_name?: string | null;
             type: "mcp_server_skipped";
         } | {
             kind: components["schemas"]["McpNotificationKind"];
             message: string;
             server_name: string;
-            thread_name?: string | null;
             type: "mcp_notification";
         } | {
             message: string;
-            thread_name?: string | null;
             type: "model_error";
         } | {
-            thread_name?: string | null;
             type: "run_finished";
         };
         ApiErrorBody: {
@@ -150,7 +96,6 @@ export interface components {
             reset?: boolean;
             retry_attempt?: number | null;
             text?: string | null;
-            thread_name?: string | null;
         };
         AttachUserTerminalRequest: {
             page_limit: number;
@@ -415,7 +360,6 @@ export interface components {
             first_chat?: boolean;
             first_chat_require_matching_model?: boolean;
             first_chat_same_behavior?: boolean;
-            light_model?: components["schemas"]["RequestField_LightModelSettings_LightModelSettings"];
             model?: components["schemas"]["RequestField_String_String"];
             model_source?: components["schemas"]["ProjectModelSourceRef"] | null;
             orchestrator_compaction_threshold?: components["schemas"]["RequestField_u64_u64"];
@@ -469,16 +413,6 @@ export interface components {
             error: string;
             state: "failed";
         };
-        EpisodeSnapshot: {
-            action: string;
-            content: string;
-            created_at: string;
-            id: number;
-            session_id: string;
-            status: components["schemas"]["EpisodeStatus"];
-            thread_name: string;
-        };
-        EpisodeStatus: "ok" | "error" | "timed_out" | "cancelled";
         ExecutionFrameResponse: {
             bytes: number[];
             caught_up: boolean;
@@ -772,7 +706,6 @@ export interface components {
             cwd: string;
             execution_cwd?: string | null;
             fresh_task?: components["schemas"]["FreshTaskDestination"] | null;
-            model_configuration_id?: string | null;
             project_id?: string | null;
             scheduling_request?: string | null;
             seen_through_sequence?: number;
@@ -893,7 +826,7 @@ export interface components {
         });
         HeartbeatState: "active" | "paused" | "suspended" | "stopped" | "finished" | "deleted";
         InboxDelivery: "steer" | "queue";
-        InboxItemOrigin: "input" | "traditional_child" | "managed_orchestrator";
+        InboxItemOrigin: "input" | "traditional_child";
         InboxItemResponse: {
             cancelled_at?: string | null;
             client_id?: string | null;
@@ -927,13 +860,6 @@ export interface components {
         LaggedEvent: {
             missed: number;
         };
-        LightModelSettings: {
-            api_key_env?: string | null;
-            backend?: components["schemas"]["BackendKind"] | null;
-            base_url?: string | null;
-            model: string;
-            reasoning_effort?: components["schemas"]["ReasoningEffort"] | null;
-        };
         LimitOrigin: "observed" | "profile" | "inherited" | "customized" | "estimated";
         ManagedAcceptedIdentity: {
             host_incarnation_id: string;
@@ -955,7 +881,7 @@ export interface components {
             provider: components["schemas"]["ManagedAuthProvider"];
             signed_in: boolean;
         };
-        ManagedBlockerKind: "active_run" | "compaction" | "traditional_child" | "managed_orchestrator" | "terminal_process" | "clone_operation" | "workspace_mutation" | "operation_lease" | "resource_lease" | "maintenance_operation";
+        ManagedBlockerKind: "active_run" | "compaction" | "traditional_child" | "terminal_process" | "clone_operation" | "workspace_mutation" | "operation_lease" | "resource_lease" | "maintenance_operation";
         ManagedCloneOperation: {
             branch: string;
             created_at_unix_ms: number;
@@ -1200,7 +1126,6 @@ export interface components {
         };
         MessageCycleMetadata: {
             marker: string;
-            thread_names: string[];
         };
         MessagePageMetadata: {
             end: number;
@@ -1363,7 +1288,7 @@ export interface components {
             feature: components["schemas"]["ProductFeatureKind"];
             label: string;
         };
-        ProductFeatureKind: "traditional_subagents" | "managed_orchestrators" | "managed_host" | "product_navigation";
+        ProductFeatureKind: "traditional_subagents" | "managed_host" | "product_navigation";
         ProductNavigationRequest: {
             destination: components["schemas"]["ProductDestination"];
             expected_build_id: string;
@@ -1506,7 +1431,6 @@ export interface components {
             config_version: number;
             diagnostics?: string[];
             extra_headers_json: string | null;
-            light_model?: components["schemas"]["LightModelSettings"] | null;
             model: string;
             orchestrator_compaction_threshold: number | null;
             reasoning_effort: string | null;
@@ -1580,13 +1504,6 @@ export interface components {
         RequestField_BTreeMap_BTreeMap_String_Option_String: null | Record<string, null | string>;
         RequestField_BTreeMap_BTreeMap_String_String: null | Record<string, string>;
         RequestField_HeadersRequest_HeadersRequest: null | (Record<string, string> | string);
-        RequestField_LightModelSettings_LightModelSettings: null | {
-            api_key_env?: string | null;
-            backend?: components["schemas"]["BackendKind"] | null;
-            base_url?: string | null;
-            model: string;
-            reasoning_effort?: components["schemas"]["ReasoningEffort"] | null;
-        };
         RequestField_McpProtocolSelection_McpProtocolSelection: null | ("legacy" | "auto" | "current");
         RequestField_McpToolApproval_McpToolApproval: null | ("allow" | "ask");
         RequestField_String_String: null | string;
@@ -1637,7 +1554,6 @@ export interface components {
         RevertSessionResponse: {
             messages_removed: number;
             revisions_removed: number;
-            threads_removed: number;
             transcript_len: number;
             workspace_restored: boolean;
         };
@@ -1691,7 +1607,7 @@ export interface components {
             requested?: components["schemas"]["ServiceTier"] | null;
             served?: string | null;
         };
-        SessionBehavior: "orchestrator" | "direct" | "direct-with-orchestrator";
+        SessionBehavior: "direct";
         SessionClientId: string;
         SessionEvent: {
             event: components["schemas"]["AgentEvent"];
@@ -1767,8 +1683,6 @@ export interface components {
         SessionFrontendSnapshot: {
             active_compaction?: components["schemas"]["ActiveCompactionSnapshot"] | null;
             active_run?: components["schemas"]["ActiveRunSnapshot"] | null;
-            active_threads?: string[];
-            covered_orchestrator_steering_ids?: number[];
             forks?: components["schemas"]["SessionForkLink"][];
             message_created_at?: (string | null)[];
             messages: components["schemas"]["Message"][];
@@ -1778,14 +1692,9 @@ export interface components {
             run_failure?: components["schemas"]["RunFailure"] | null;
             sessions: components["schemas"]["SessionSummarySnapshot"][];
             shell_commands?: components["schemas"]["ShellCommandSnapshot"][];
-            thread_episodes: Record<string, components["schemas"]["EpisodeSnapshot"][]>;
             thread_event_boundary: components["schemas"]["SessionEventBoundary"];
             thread_event_diagnostics?: components["schemas"]["ThreadEventDecodeDiagnostic"][];
-            thread_events?: Record<string, components["schemas"]["AgentEvent"][]>;
-            thread_steering?: components["schemas"]["ThreadSteeringRecord"][];
-            threads: components["schemas"]["ThreadSnapshot"][];
             transcript_recovery_warning?: string | null;
-            worksets: components["schemas"]["WorksetsSnapshot"];
             workspace: components["schemas"]["WorkspaceSnapshot"];
         };
         SessionGoalRecord: {
@@ -1807,14 +1716,14 @@ export interface components {
             updated_at: string;
             version: number;
         };
-        SessionLineageKind: "traditional-child" | "managed-orchestrator";
+        SessionLineageKind: "traditional-child";
         SessionLineageSnapshot: {
             description: string;
             kind: components["schemas"]["SessionLineageKind"];
             parent_session_id: string;
             root_session_id: string;
         };
-        SessionMcpRefreshState: "not_requested" | "current" | "pending" | "degraded" | "failed" | "scheduled_for_workers";
+        SessionMcpRefreshState: "not_requested" | "current" | "pending" | "degraded" | "failed";
         SessionMcpRefreshStatus: {
             applied_revision: number | null;
             incarnation_id: string | null;
@@ -2177,26 +2086,6 @@ export interface components {
             id: number;
             thread_name: string;
         };
-        ThreadSnapshot: {
-            created_at: string;
-            episode_count: number;
-            latest_action: string | null;
-            name: string;
-            session_id: string;
-            updated_at: string;
-        };
-        ThreadSteeringRecord: {
-            claimed_at?: string | null;
-            created_at: string;
-            delivered_at?: string | null;
-            dispatch_id: string;
-            expired_at?: string | null;
-            id: number;
-            instruction: string;
-            session_id: string;
-            status: string;
-            thread_name: string;
-        };
         TokenCostMicros: {
             cache_read?: number;
             cache_write?: number;
@@ -2274,7 +2163,6 @@ export interface components {
             base_url?: components["schemas"]["RequestField_String_String"];
             expected_config_version?: number | null;
             extra_headers?: components["schemas"]["RequestField_HeadersRequest_HeadersRequest"];
-            light_model?: components["schemas"]["RequestField_LightModelSettings_LightModelSettings"];
             model?: components["schemas"]["RequestField_String_String"];
             orchestrator_compaction_threshold?: components["schemas"]["RequestField_u64_u64"];
             reasoning_effort?: components["schemas"]["RequestField_String_String"];
@@ -2382,32 +2270,6 @@ export interface components {
             protocol_version: number;
             rows: number;
             terminal_id: string;
-        };
-        WorksetItemSnapshot: {
-            acceptance: string;
-            depends_on: string[];
-            description: string;
-            notes?: string | null;
-            position: number;
-            role: string;
-            scope: string;
-            title: string;
-            updated_at: string;
-        };
-        WorksetSnapshot: {
-            created_at: string;
-            goal: string;
-            id: string;
-            items: components["schemas"]["WorksetItemSnapshot"][];
-            session_id: string;
-            status: string;
-            summary: string;
-            updated_at: string;
-            verification_recipe?: string | null;
-        };
-        WorksetsSnapshot: {
-            error?: string | null;
-            items: components["schemas"]["WorksetSnapshot"][];
         };
         WorkspaceDiffHunk: {
             function_context: string | null;

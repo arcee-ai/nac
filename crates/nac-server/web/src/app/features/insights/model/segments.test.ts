@@ -8,13 +8,10 @@ import {
   snapshot,
   text,
   thoughts,
-  thread,
   toolCall,
   toolDetail,
   toolResult,
   userTurn,
-  wave,
-  workset,
 } from "@/app/features/insights/model/fixtures.test-support";
 import {
   insightAnchor,
@@ -73,13 +70,12 @@ function groupIds(turns: TranscriptTurn[]): string[] {
 }
 
 describe("partitionModelTurn", () => {
-  it("groups consecutive reasoning, tool and workset blocks and closes a group at text", () => {
+  it("groups consecutive reasoning and tool blocks and closes a group at text", () => {
     const list = items([
       thoughts("thoughts-0"),
       toolDetail("read", { summary: "src/app/index.tsx" }),
       text("text-0"),
-      compactTool("thread_delete-3-0", "thread_delete"),
-      workset("workset_define-3-1", "polylang"),
+      compactTool("read-3-0", "read"),
       thoughts("thoughts-1", { text: "  " }),
       toolDetail("edit"),
     ]);
@@ -87,19 +83,19 @@ describe("partitionModelTurn", () => {
     expect(shape(list)).toEqual([
       "group:thoughts-0,tool-call-read",
       "block:text-0",
-      "group:thread_delete-3-0,workset_define-3-1,tool-call-edit",
+      "group:read-3-0,tool-call-edit",
     ]);
     expect(list.map((item) => (item.kind === "block" ? item.block.key : item.id))).toEqual([
       "user-0:thoughts-0",
       "text-0",
-      "user-0:thread_delete-3-0",
+      "user-0:read-3-0",
     ]);
   });
 
-  it("emits waves and launched sessions as items of their own", () => {
+  it("emits prose and launched sessions as items of their own", () => {
     const list = items([
       thoughts("thoughts-0"),
-      wave("wave-2", [[thread("impl/calendar", "impl/calendar@2:call-a")]]),
+      text("text-2"),
       thoughts("thoughts-1"),
       toolDetail("subagent", {
         summary: "Fix the flaky test",
@@ -112,23 +108,16 @@ describe("partitionModelTurn", () => {
 
     expect(shape(list)).toEqual([
       "group:thoughts-0",
-      "block:wave-2",
+      "block:text-2",
       "group:thoughts-1",
       "session:user-0:tool-call-subagent",
-      "group:tool-call-read",
-      "session:user-0:tool-call-orchestrator_launch",
+      "group:tool-call-read,tool-call-orchestrator_launch",
     ]);
     expect(list[3]).toMatchObject({
       action: "spawn-agent",
       rowKey: `child:${CHILD_ID}`,
       title: "Fix the flaky test",
       status: "running",
-    });
-    expect(list[5]).toMatchObject({
-      action: "spawn-orchestrator",
-      rowKey: null,
-      title: "Spawn Orchestrator",
-      status: "failed",
     });
   });
 
@@ -169,7 +158,6 @@ describe("partitionModelTurn", () => {
     expect(
       groups([thoughts("thoughts-0", { streaming: true }), toolDetail("read")])[0].group.status,
     ).toBe("running");
-    expect(groups([workset("workset_define-1-0", "w", true)])[0].group.status).toBe("running");
     expect(combineStatuses([])).toBe("ready");
   });
 
@@ -187,47 +175,20 @@ describe("partitionModelTurn", () => {
   });
 
   it("turns compact orchestrator tool blocks into segments without a presentation", () => {
-    const [running] = groups([
-      thoughts("thoughts-0"),
-      compactTool("thread_delete-1-0", "thread_delete", true),
-    ]);
-    const [settled] = groups([
-      thoughts("thoughts-0"),
-      compactTool("thread_delete-1-0", "thread_delete"),
-    ]);
+    const [running] = groups([thoughts("thoughts-0"), compactTool("read-1-0", "read", true)]);
+    const [settled] = groups([thoughts("thoughts-0"), compactTool("read-1-0", "read")]);
 
     expect(running.group.segments[1]).toEqual({
       kind: "tool",
-      key: "thread_delete-1-0",
-      name: "thread_delete",
-      action: "delete-thread",
+      key: "read-1-0",
+      name: "read",
+      action: "read-file",
       presentation: null,
       pending: true,
     });
     expect(running.group.status).toBe("running");
     expect(settled.group.status).toBe("ready");
     expect(settled.group.durationMs).toBeNull();
-  });
-
-  it("never sees the orchestrator lookups the transcript drops", () => {
-    const calls = [
-      toolCall("call-threads", "threads"),
-      toolCall("call-thread-read", "thread_read", { name: "impl" }),
-      toolCall("call-workset-read", "workset_read", { id: "w" }),
-      toolCall("call-workset-list", "workset_list"),
-      toolCall("call-delete", "thread_delete", { name: "impl" }),
-    ];
-    const turns = buildTranscript(
-      snapshot([
-        { role: "user", content: "Clean up the threads" },
-        assistant({ reasoning: "Only the stale thread has to go.", calls }),
-        ...calls.map((call) => toolResult(call.id)),
-      ]),
-      {},
-    );
-
-    const list = partitionModelTurn(modelAt(turns, 1), turns[0]);
-    expect(shape(list)).toEqual(["group:thoughts-0,thread_delete-1-4"]);
   });
 
   it("keeps ids when another assistant message joins the turn", () => {
@@ -239,13 +200,12 @@ describe("partitionModelTurn", () => {
       }),
       toolResult("call-read"),
     ];
-    const before = buildTranscript(snapshot(first, "direct"), {});
+    const before = buildTranscript(snapshot(first, "direct"));
     const after = buildTranscript(
       snapshot(
         [...first, assistant({ reasoning: "Now patch it.", content: "Patched the store." })],
         "direct",
       ),
-      {},
     );
 
     expect(modelAt(before, 1).key).not.toBe(modelAt(after, 1).key);
@@ -269,7 +229,6 @@ describe("partitionModelTurn", () => {
         ],
         "direct",
       ),
-      {},
     );
 
     expect(modelAt(early, 1).key).toBe(STREAMING_TURN_KEY);

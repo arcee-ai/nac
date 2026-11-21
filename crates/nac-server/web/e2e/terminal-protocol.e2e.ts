@@ -232,7 +232,7 @@ test("human file changes retain agent revision checks and shell loss is honest a
   expect(result).toMatchObject({ error: "stale_revision", committed: false });
   expect(result.current_revision).not.toBe(revision);
   expect((await api.getUserTerminal(session, terminal.terminal_id)).alive).toBe(true);
-  await harness.restart("1");
+  await harness.restart();
   const replacement = createNacApi(
     new NacClient({ endpoint: harness.baseUrl, credentials: "omit" }),
   );

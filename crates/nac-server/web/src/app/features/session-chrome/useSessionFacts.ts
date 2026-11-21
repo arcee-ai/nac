@@ -27,10 +27,8 @@ import type {
 export interface SessionAgents {
   count: number;
   running: number;
-  /** The panel the Session menu's row opens: Subagents for a direct agent, Worksets/Insights for threads. */
+  /** The panel the Session menu's row opens. */
   panel: SessionPanel;
-  /** "agent"/"agents" for children, "thread"/"threads" for an orchestrator's workers. */
-  noun: "agent" | "thread";
 }
 
 /**
@@ -111,7 +109,6 @@ export function useSessionFacts(
           count: delegated.length,
           running: delegated.filter((record) => RUNNING_CHILD.has(record.status)).length,
           panel: "delegated",
-          noun: "agent",
         }
       : null;
 

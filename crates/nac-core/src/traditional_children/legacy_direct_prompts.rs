@@ -18,19 +18,11 @@ pub(super) const TEMPLATES: &[&str] = &[
     include_str!("legacy_direct_prompts/6a4645f0d5.md"),
 ];
 
-pub(super) fn instruction_suffix<'a>(
-    system: &'a str,
-    working_directory: &str,
-    managed_suffix: &str,
-) -> Option<&'a str> {
+pub(super) fn instruction_suffix<'a>(system: &'a str, working_directory: &str) -> Option<&'a str> {
     // Longer heads precede shorter ones: an older head can be a prefix of a
     // later one, and its extra native guidance must not become child guidance.
     for template in TEMPLATES {
         let base = template.replacen("{working_directory}", working_directory, 1);
-        let managed = format!("{base}{managed_suffix}");
-        if let Some(suffix) = system.strip_prefix(&managed) {
-            return Some(suffix);
-        }
         if let Some(suffix) = system.strip_prefix(&base) {
             return Some(suffix);
         }

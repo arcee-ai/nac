@@ -238,7 +238,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   const updateInboxItem = useUpdateInboxItem();
   const cancelInboxItem = useCancelInboxItem();
   const behavior = entry?.summary.behavior ?? snapshot?.metadata.behavior ?? null;
-  const direct = behavior === "direct" || behavior === "direct-with-orchestrator";
+  const direct = behavior === "direct";
   const lineage = entry?.lineage ?? snapshot?.lineage ?? null;
   const readOnly = lineage != null;
   const ownershipKnown = entry !== null || snapshot !== null;
@@ -371,7 +371,7 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
 
   // Prompts already sent, newest first, in the short form the bubbles show —
   // a `/plan` or `/run` message goes back to the instruction it was written as
-  // rather than to the wrapper the orchestrator reads.
+  // rather than to the wrapper the agent reads.
   const sentPrompts = useMemo(() => {
     const prompts: string[] = [];
     for (const message of snapshot?.messages ?? []) {
@@ -1197,31 +1197,25 @@ export function ChatInputBox({ sessionId, snapshot, entry }: ChatInputBoxProps) 
   }
 
   if (readOnly && lineage) {
-    // A child agent's own requests ask here too; a managed orchestrator has
-    // no direct permission broker.
-    const childAgent = lineage.kind !== "managed-orchestrator";
+    // A child agent's own requests ask here too.
     return (
       <>
-        {childAgent ? (
-          <div
-            className={cn(
-              "pointer-events-none flex flex-col items-center [&>*]:pointer-events-auto [&>*]:w-full [&>*]:max-w-[720px]",
-              isMobile ? "px-2" : "px-4",
-            )}
-          >
-            <ComposerAttention
-              sessionId={sessionId}
-              permissions
-              questions={false}
-              requesterLabel={`child agent “${lineage.description || "Subagent"}”`}
-              includeChildren={false}
-              parentSessionId={
-                lineage.kind === "traditional-child" ? lineage.parent_session_id : undefined
-              }
-              poll={running}
-            />
-          </div>
-        ) : null}
+        <div
+          className={cn(
+            "pointer-events-none flex flex-col items-center [&>*]:pointer-events-auto [&>*]:w-full [&>*]:max-w-[720px]",
+            isMobile ? "px-2" : "px-4",
+          )}
+        >
+          <ComposerAttention
+            sessionId={sessionId}
+            permissions
+            questions={false}
+            requesterLabel={`child agent “${lineage.description || "Subagent"}”`}
+            includeChildren={false}
+            parentSessionId={lineage.parent_session_id}
+            poll={running}
+          />
+        </div>
         <SubagentSessionComposer
           parentSessionId={lineage.parent_session_id}
           sessionId={sessionId}

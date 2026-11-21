@@ -114,10 +114,6 @@ struct InheritedProjectInstructions<'a> {
 }
 
 impl<'a> InheritedProjectInstructions<'a> {
-    #[expect(
-        clippy::expect_used,
-        reason = "the delegating prompt is constructed by extending the direct prompt"
-    )]
     fn from_parent_transcript(
         parent_messages: &'a [Message],
         parent_working_directory: &str,
@@ -127,26 +123,14 @@ impl<'a> InheritedProjectInstructions<'a> {
             _ => None,
         });
         let parent_base = crate::agent::render_direct_system_prompt(parent_working_directory);
-        let delegating_parent_base =
-            crate::agent::render_direct_with_orchestrator_system_prompt(parent_working_directory);
         // Schema-17 prototypes and hand-authored fixture rows may predate the
         // canonical direct system head. They still get a safe fresh child prompt,
         // but have no persisted project-instruction suffix to inherit.
-        let managed_suffix = delegating_parent_base
-            .strip_prefix(&parent_base)
-            .expect("delegating prompt extends the direct prompt");
         let project_suffix = parent_system
             .and_then(|system| {
-                system
-                    .strip_prefix(&delegating_parent_base)
-                    .or_else(|| system.strip_prefix(&parent_base))
-                    .or_else(|| {
-                        legacy_direct_prompts::instruction_suffix(
-                            system,
-                            parent_working_directory,
-                            managed_suffix,
-                        )
-                    })
+                system.strip_prefix(&parent_base).or_else(|| {
+                    legacy_direct_prompts::instruction_suffix(system, parent_working_directory)
+                })
             })
             .unwrap_or_default();
         Self {
@@ -341,27 +325,6 @@ mod tests {
     }
 
     #[test]
-    fn delegating_parent_does_not_give_managed_orchestrator_instructions_to_child() {
-        let cwd = "/workspace";
-        let parent = format!(
-            "{}\n\nProject instruction: preserve compatibility.",
-            crate::agent::render_direct_with_orchestrator_system_prompt(cwd)
-        );
-        let messages = fresh_general_child_messages(
-            &[Message::System { content: parent }],
-            cwd,
-            "review one subsystem",
-        )
-        .unwrap();
-        let Message::System { content } = &messages[0] else {
-            panic!("child must start with a system message");
-        };
-        assert!(content.contains("Project instruction: preserve compatibility."));
-        assert!(!content.contains("orchestrator_*"));
-        assert!(!content.contains("## Managed orchestration"));
-    }
-
-    #[test]
     fn sandboxed_parent_uses_the_guest_prompt_path_when_preserving_instructions() {
         let sandbox = crate::sandbox::SandboxSpec {
             workdir: PathBuf::from("/workspace"),
@@ -371,7 +334,7 @@ mod tests {
             parent_prompt_working_directory(Path::new("/host/project"), Some(&sandbox));
         let parent = format!(
             "{}\n\nProject instruction: preserve the captured suffix.",
-            crate::agent::render_direct_with_orchestrator_system_prompt(&prompt_cwd)
+            crate::agent::render_direct_system_prompt(&prompt_cwd)
         );
         let messages = fresh_general_child_messages(
             &[Message::System { content: parent }],

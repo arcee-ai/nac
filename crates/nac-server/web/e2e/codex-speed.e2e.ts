@@ -3,7 +3,7 @@ import { createDirectSession, expect, test, waitForRunIdle } from "./harness";
 import { startSessionFromHome } from "./focus-embedded-helpers";
 import { modelChip, openModelCatalog, openModelSettings } from "./speed-controls";
 
-test.use({ orchestration: "0", codexCatalogFixture: true });
+test.use({ codexCatalogFixture: true });
 
 for (const mobile of [false, true]) {
   test(`Codex speed is independent and survives reload (${mobile ? "phone" : "desktop"})`, async ({

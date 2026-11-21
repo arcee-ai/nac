@@ -14,8 +14,6 @@ import {
   serveReasoningBaseline,
 } from "./reasoning-fixture";
 
-test.use({ orchestration: "0" });
-
 for (const traced of [false, true]) {
   test(`live tool activity ${traced ? "with" : "without"} reasoning stays in one disclosure`, async ({
     harness,

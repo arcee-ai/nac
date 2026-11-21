@@ -90,12 +90,10 @@ async fn arcee_sensitive_extra_header_still_fails_before_connection() {
         reasoning_effort: None,
         service_tier: None,
         api_key_env: None,
-        trusted_api_key_file: None,
         extra_headers: std::collections::BTreeMap::from([(
             "hOsT".to_string(),
             address.to_string(),
         )]),
-        allow_insecure_http: false,
         arcee_credential_source: Some(ArceeCredentialSource::ApiKey),
         cache_ttl: None,
         prompt_cache_key: None,

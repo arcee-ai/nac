@@ -100,13 +100,12 @@ async fn selection_provenance_actual_compaction_restart_repeated_summary_and_can
         ScriptedResponse::json("200 OK",scripted_responses_text("second answer",80_000,0,5,80_005)),
     ]);
     let client = ModelClient::new_for_test_server(server.base_url.clone());
-    let mut agent = compaction_test_agent_with_mode(
+    let mut agent = compaction_test_agent(
         client.clone(),
         path.clone(),
         Some("session"),
         Some(1),
         EventSink::none(),
-        AgentMode::Direct,
     );
     agent.messages = original.iter().map(|(_, m)| m.clone()).collect();
     store_agent_snapshot(&path, &agent);
@@ -131,13 +130,12 @@ async fn selection_provenance_actual_compaction_restart_repeated_summary_and_can
         serde_json::to_value(&canonical[..24]).unwrap(),
         serde_json::to_value(&original).unwrap()
     );
-    let mut restored = compaction_test_agent_with_mode(
+    let mut restored = compaction_test_agent(
         client,
         path.clone(),
         Some("session"),
         Some(1),
         EventSink::none(),
-        AgentMode::Direct,
     );
     restored.messages = canonical.into_iter().map(|(_, m)| m).collect();
     restored.restore_compaction_checkpoint().unwrap();

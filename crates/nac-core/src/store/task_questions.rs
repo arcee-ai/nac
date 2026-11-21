@@ -186,10 +186,15 @@ fn project(conn: &Connection, session: &str) -> Result<Option<String>> {
         .optional()?)
 }
 fn plain_local(conn: &Connection, session: &str) -> Result<i64> {
-    let version=conn.query_row("SELECT config_version FROM sessions s WHERE session_id=?1 AND behavior='direct'
+    let version = conn
+        .query_row(
+            "SELECT config_version FROM sessions s WHERE session_id=?1 AND behavior='direct'
         AND host_id IS NULL AND sandbox_json IS NULL
-        AND NOT EXISTS(SELECT 1 FROM traditional_children WHERE child_session_id=s.session_id)
-        AND NOT EXISTS(SELECT 1 FROM managed_orchestrators WHERE orchestrator_session_id=s.session_id)", [session], |r|r.get(0)).optional()?;
+        AND NOT EXISTS(SELECT 1 FROM traditional_children WHERE child_session_id=s.session_id)",
+            [session],
+            |r| r.get(0),
+        )
+        .optional()?;
     version.ok_or_else(|| QuestionError::Unavailable.into())
 }
 fn compatible_identity(

@@ -233,8 +233,7 @@ fn require_direct_session(connection: &Connection, session_id: &str) -> Result<(
         )
         .optional()?;
     match behavior.as_deref() {
-        Some("direct" | "direct-with-orchestrator") => Ok(()),
-        Some("orchestrator") => Err(anyhow!("goals are only available for direct sessions")),
+        Some("direct") => Ok(()),
         Some(other) => Err(anyhow!("unsupported stored session behavior '{other}'")),
         None => Err(anyhow!("session '{session_id}' was not found")),
     }

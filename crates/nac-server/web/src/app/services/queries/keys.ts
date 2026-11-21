@@ -51,9 +51,6 @@ export const queryKeys = {
   sessionSkills: (id: string) => ["session", id, "skills"] as const,
   sessionsAll: ["sessions"] as const,
   fleetAttention: (projectId: string | null) => ["fleet-attention", { projectId }] as const,
-  threadEventsRoot: (id: string) => ["session", id, "thread-events"] as const,
-  threadEvents: (id: string, threadName: string) =>
-    ["session", id, "thread-events", threadName] as const,
   toolCallContent: (id: string, callId: string, blockKey: string, occurrence?: string) =>
     ["session", id, "tool-call", callId, blockKey, occurrence ?? ""] as const,
   sessionConfig: (id: string) => ["session", id, "config"] as const,
@@ -61,7 +58,6 @@ export const queryKeys = {
   sessionGoal: (id: string) => ["session", id, "goal"] as const,
   sessionInbox: (id: string) => ["session", id, "inbox"] as const,
   traditionalChildren: (id: string) => ["session", id, "children"] as const,
-  managedOrchestrators: (id: string) => ["session", id, "orchestrators"] as const,
   workspaceDiff: (
     id: string,
     path: string,

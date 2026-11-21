@@ -243,18 +243,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* The thread card's hover preview is a glance at the task rather than a read of
-   it, so the same prose runs at the smallest scale the design has. */
-.chat-response.task-preview {
-  --prose-size: var(--type-2xs);
-  --prose-leading: 1.6;
-  --prose-gap: 0.25rem;
-}
-
-.chat-response.task-preview li {
-  margin: 0.125rem 0;
-}
-
 /* Reasoning is quieter prose, sharing the column's scroll owner. */
 .chat-response .thinking-content,
 .reasoning-prose .chat-response {

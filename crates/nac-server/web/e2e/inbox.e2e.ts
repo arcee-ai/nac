@@ -6,7 +6,7 @@ import type { Page } from "@playwright/test";
 import { createDirectSession, expect, test } from "./harness";
 import { ScriptGate } from "./scripted-provider";
 
-// Direct-only, with orchestration unset (the shipped default).
+// Exercise the direct-only Inbox with the ordinary server environment.
 
 async function renameSession(page: Page, baseUrl: string, id: string, title: string) {
   const list = (await (await page.request.get(`${baseUrl}/sessions`)).json()) as Array<{

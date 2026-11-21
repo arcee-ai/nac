@@ -110,6 +110,7 @@ impl SkillRegistry {
             .max_by_key(|name| name.len())
     }
 
+    #[cfg(test)]
     pub fn activate(&self, name: &str) -> ToolResult {
         let Some(content) = self.render_for_prompt(name) else {
             return ToolResult {
@@ -242,10 +243,6 @@ fn bundled_help() -> SkillRecord {
         body: crate::guide::ROUTER.to_owned(),
         resources: Vec::new(),
     }
-}
-
-pub(crate) fn bundled_help_for_prompt() -> String {
-    render_skill(&bundled_help())
 }
 
 fn is_reference_boundary(remainder: &str) -> bool {

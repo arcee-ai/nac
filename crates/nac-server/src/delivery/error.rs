@@ -6,7 +6,6 @@ use axum::{
 };
 use nac_core::{
     model::ModelConfigurationError,
-    model_configurations::ModelConfigurationStoreError,
     permissions::PermissionApprovalModeUpdateError,
     projects::ProjectStoreError,
     runtime,
@@ -136,22 +135,6 @@ impl From<sessions::SessionConfigUpdateError> for ApiError {
     }
 }
 
-impl From<ModelConfigurationStoreError> for ApiError {
-    fn from(error: ModelConfigurationStoreError) -> Self {
-        let status = match &error {
-            ModelConfigurationStoreError::InvalidInput(_) => StatusCode::BAD_REQUEST,
-            ModelConfigurationStoreError::DuplicateName(_)
-            | ModelConfigurationStoreError::InUse(_) => StatusCode::CONFLICT,
-            ModelConfigurationStoreError::NotFound(_) => StatusCode::NOT_FOUND,
-            ModelConfigurationStoreError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
-        };
-        Self {
-            status,
-            message: error.to_string(),
-        }
-    }
-}
-
 impl From<ProjectStoreError> for ApiError {
     fn from(error: ProjectStoreError) -> Self {
         let status = match &error {
@@ -159,9 +142,7 @@ impl From<ProjectStoreError> for ApiError {
             ProjectStoreError::DuplicateLocation | ProjectStoreError::Conflict(_) => {
                 StatusCode::CONFLICT
             }
-            ProjectStoreError::NotFound(_) | ProjectStoreError::ModelConfigurationNotFound(_) => {
-                StatusCode::NOT_FOUND
-            }
+            ProjectStoreError::NotFound(_) => StatusCode::NOT_FOUND,
             ProjectStoreError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };
         Self {
@@ -398,7 +379,6 @@ impl From<anyhow::Error> for ApiError {
             || message.contains("unfinished goal")
             || message.contains("goal clear conflict")
             || message.contains("child concurrency limit")
-            || message.contains("managed orchestrator concurrency limit")
             || message.contains("delegated sessions accept")
             || message.contains("already has running generation")
             || message.contains("already has a running generation")
@@ -417,10 +397,6 @@ impl From<anyhow::Error> for ApiError {
             || message.contains("traditional child prompt is empty")
             || message.contains("traditional child profile")
             || message.contains("traditional child nesting limit")
-            || message.contains("managed orchestrator prompt is empty")
-            || message.contains("managed orchestrators require direct-with-orchestrator")
-            || message.contains("managed orchestrator description")
-            || message.contains("managed orchestrator sessions cannot launch")
             || message.contains("host-backed shared workspace")
             || message.contains("frontend command")
             || message.contains("traditional child sessions cannot own autonomous goals")

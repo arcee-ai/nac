@@ -76,9 +76,8 @@ coordinated_command! {
         // Exact request identity is immutable. A lost acknowledgement is read
         // back by the caller; it never causes another effect to be launched.
         let changed = conn.execute("INSERT INTO human_shell_operations (session_id, request_id, fingerprint, operation_id, phase, snapshot_json)
-            SELECT ?1,?2,?3,?4,'accepted',?5 FROM sessions WHERE session_id=?1 AND behavior IN ('direct','direct-with-orchestrator')
-            AND NOT EXISTS (SELECT 1 FROM traditional_children WHERE child_session_id=?1)
-            AND NOT EXISTS (SELECT 1 FROM managed_orchestrators WHERE orchestrator_session_id=?1)",
+            SELECT ?1,?2,?3,?4,'accepted',?5 FROM sessions WHERE session_id=?1 AND behavior = 'direct'
+            AND NOT EXISTS (SELECT 1 FROM traditional_children WHERE child_session_id=?1)",
             params![session_id, snapshot.request_id, fingerprint, snapshot.operation_id, serde_json::to_string(snapshot)?])?;
         anyhow::ensure!(changed == 1, "human shell intent requires an existing direct primary");
         Ok(())
@@ -99,8 +98,7 @@ coordinated_command! {
         anyhow::ensure!(snapshot.state == ShellCommandState::Started, "invalid shell start state");
         let conn = open_runtime_connection(path)?;
         let changed = conn.execute("UPDATE human_shell_operations SET phase='started', snapshot_json=?4 WHERE session_id=?1 AND request_id=?2 AND operation_id=?3 AND phase='accepted'
-            AND NOT EXISTS (SELECT 1 FROM traditional_children WHERE child_session_id=?1)
-            AND NOT EXISTS (SELECT 1 FROM managed_orchestrators WHERE orchestrator_session_id=?1)",
+            AND NOT EXISTS (SELECT 1 FROM traditional_children WHERE child_session_id=?1)",
             params![session_id, snapshot.request_id, snapshot.operation_id, serde_json::to_string(snapshot)?])?;
         anyhow::ensure!(changed == 1, "shell operation no longer owns accepted intent");
         Ok(())

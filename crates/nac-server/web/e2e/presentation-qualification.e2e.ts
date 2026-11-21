@@ -8,7 +8,7 @@ import { revealDesktopSidebar } from "./presentation-composed-fixture";
 import { expectExposedRowAction, recordSessionAction } from "./session-action-geometry";
 
 test.skip(!!process.env.NAC_E2E_REMOTE, "Requires the isolated local packed consumer");
-test.use({ orchestration: "0", hasTouch: true });
+test.use({ hasTouch: true });
 
 function cacheState(page: Page) {
   return page.evaluate(() => {

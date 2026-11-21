@@ -125,7 +125,7 @@ function StatusGlyph({
 }
 
 /**
- * One row of the Insights list: a thread, a session, a tool call or a group of
+ * One row of the Insights list: a session, a tool call or a group of
  * them. The caller maps the action type to icon, label and meta; the row only
  * knows its status. It is a `TabButton`, so hover, press, focus and the
  * selected highlight are the tab button's own. The phone's Large row is the
@@ -178,7 +178,7 @@ const ActionListButton: React.FC<ActionListButtonProps> = ({
 };
 
 /**
- * The child rows of an expanded group, or the threads of one wave, behind a
+ * The child rows of an expanded group, behind a
  * single guide line that runs 4px past the first and the last row. The rows
  * sit 8px in from the line's outer edge, the 1px line included.
  */

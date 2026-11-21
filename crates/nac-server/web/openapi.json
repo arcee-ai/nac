@@ -10719,12 +10719,6 @@
               "prompt_preview": {
                 "type": "string"
               },
-              "thread_name": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -10744,12 +10738,6 @@
                 "type": "integer",
                 "minimum": 0
               },
-              "thread_name": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -10765,12 +10753,6 @@
               "type"
             ],
             "properties": {
-              "thread_name": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -10824,12 +10806,6 @@
               },
               "name": {
                 "type": "string"
-              },
-              "thread_name": {
-                "type": [
-                  "string",
-                  "null"
-                ]
               },
               "type": {
                 "type": "string",
@@ -10931,217 +10907,10 @@
               "remote_outcome_uncertain": {
                 "type": "boolean"
               },
-              "thread_name": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
               "type": {
                 "type": "string",
                 "enum": [
                   "tool_call_finished"
-                ]
-              }
-            }
-          },
-          {
-            "type": "object",
-            "required": [
-              "name",
-              "action",
-              "source_threads",
-              "type"
-            ],
-            "properties": {
-              "action": {
-                "type": "string"
-              },
-              "name": {
-                "type": "string"
-              },
-              "source_threads": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "thread_started"
-                ]
-              }
-            }
-          },
-          {
-            "type": "object",
-            "required": [
-              "name",
-              "line",
-              "type"
-            ],
-            "properties": {
-              "line": {
-                "type": "string"
-              },
-              "name": {
-                "type": "string"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "thread_log"
-                ]
-              }
-            }
-          },
-          {
-            "type": "object",
-            "required": [
-              "name",
-              "steering_id",
-              "instruction_preview",
-              "type"
-            ],
-            "properties": {
-              "instruction_preview": {
-                "type": "string"
-              },
-              "name": {
-                "type": "string"
-              },
-              "steering_id": {
-                "type": "integer",
-                "format": "int64"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "thread_steering_queued"
-                ]
-              }
-            }
-          },
-          {
-            "type": "object",
-            "required": [
-              "name",
-              "steering_id",
-              "instruction_preview",
-              "type"
-            ],
-            "properties": {
-              "instruction_preview": {
-                "type": "string"
-              },
-              "name": {
-                "type": "string"
-              },
-              "steering_id": {
-                "type": "integer",
-                "format": "int64"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "thread_steering_delivered"
-                ]
-              }
-            }
-          },
-          {
-            "type": "object",
-            "required": [
-              "name",
-              "steering_id",
-              "instruction_preview",
-              "type"
-            ],
-            "properties": {
-              "instruction_preview": {
-                "type": "string"
-              },
-              "name": {
-                "type": "string"
-              },
-              "steering_id": {
-                "type": "integer",
-                "format": "int64"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "thread_steering_expired"
-                ]
-              }
-            }
-          },
-          {
-            "type": "object",
-            "required": [
-              "steering_id",
-              "instruction_preview",
-              "type"
-            ],
-            "properties": {
-              "instruction_preview": {
-                "type": "string"
-              },
-              "steering_id": {
-                "type": "integer",
-                "format": "int64"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "orchestrator_steering_queued"
-                ]
-              }
-            }
-          },
-          {
-            "type": "object",
-            "required": [
-              "steering_id",
-              "instruction_preview",
-              "type"
-            ],
-            "properties": {
-              "instruction_preview": {
-                "type": "string"
-              },
-              "steering_id": {
-                "type": "integer",
-                "format": "int64"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "orchestrator_steering_delivered"
-                ]
-              }
-            }
-          },
-          {
-            "type": "object",
-            "required": [
-              "steering_id",
-              "instruction_preview",
-              "type"
-            ],
-            "properties": {
-              "instruction_preview": {
-                "type": "string"
-              },
-              "steering_id": {
-                "type": "integer",
-                "format": "int64"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "orchestrator_steering_expired"
                 ]
               }
             }
@@ -11249,61 +11018,12 @@
           {
             "type": "object",
             "required": [
-              "name",
-              "exit_code",
-              "timed_out",
-              "type"
-            ],
-            "properties": {
-              "exit_code": {
-                "type": "integer",
-                "format": "int32"
-              },
-              "name": {
-                "type": "string"
-              },
-              "timed_out": {
-                "type": "boolean"
-              },
-              "timeout_reason": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "thread_finished"
-                ]
-              },
-              "usage": {
-                "oneOf": [
-                  {
-                    "$ref": "#/components/schemas/TokenUsage"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              }
-            }
-          },
-          {
-            "type": "object",
-            "required": [
               "content",
               "type"
             ],
             "properties": {
               "content": {
                 "type": "string"
-              },
-              "thread_name": {
-                "type": [
-                  "string",
-                  "null"
-                ]
               },
               "type": {
                 "type": "string",
@@ -11333,12 +11053,6 @@
               "message": {
                 "type": "string"
               },
-              "thread_name": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -11349,7 +11063,7 @@
           },
           {
             "type": "object",
-            "description": "A configured MCP server that could not be loaded for a worker, reported\nwith a bounded, credential-redacted reason so the user can see why the\nserver's tools are missing.",
+            "description": "A configured MCP server that could not be loaded, reported\nwith a bounded, credential-redacted reason so the user can see why the\nserver's tools are missing.",
             "required": [
               "server_name",
               "reason",
@@ -11361,12 +11075,6 @@
               },
               "server_name": {
                 "type": "string"
-              },
-              "thread_name": {
-                "type": [
-                  "string",
-                  "null"
-                ]
               },
               "type": {
                 "type": "string",
@@ -11395,12 +11103,6 @@
               "server_name": {
                 "type": "string"
               },
-              "thread_name": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -11420,12 +11122,6 @@
               "message": {
                 "type": "string"
               },
-              "thread_name": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -11440,12 +11136,6 @@
               "type"
             ],
             "properties": {
-              "thread_name": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -11501,12 +11191,6 @@
             "minimum": 0
           },
           "text": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "thread_name": {
             "type": [
               "string",
               "null"
@@ -12818,7 +12502,8 @@
             "format": "int32",
             "minimum": 0
           }
-        }
+        },
+        "additionalProperties": false
       },
       "CreateProviderConnectionRequest": {
         "type": "object",
@@ -12888,10 +12573,6 @@
             "type": "boolean",
             "description": "Opt-in first-chat admission restricted to the requested immutable behavior.\nOmission preserves newest-primary admission across all behaviors."
           },
-          "light_model": {
-            "$ref": "#/components/schemas/RequestField_LightModelSettings_LightModelSettings",
-            "description": "Retired selector. Any explicitly supplied value is rejected."
-          },
           "model": {
             "$ref": "#/components/schemas/RequestField_String_String"
           },
@@ -12949,7 +12630,8 @@
             "description": "Port and private key for the ssh target. Both are optional: omitted\nleaves the choice to ssh, which is what a host configured in\n`~/.ssh/config` wants. Supplying them is what lets a session reach a box\nnac has no config for at all.",
             "minimum": 0
           }
-        }
+        },
+        "additionalProperties": false
       },
       "CreateSshConfigurationRequest": {
         "type": "object",
@@ -13205,53 +12887,6 @@
               }
             }
           }
-        ]
-      },
-      "EpisodeSnapshot": {
-        "type": "object",
-        "required": [
-          "id",
-          "thread_name",
-          "session_id",
-          "action",
-          "content",
-          "status",
-          "created_at"
-        ],
-        "properties": {
-          "action": {
-            "type": "string"
-          },
-          "content": {
-            "type": "string"
-          },
-          "created_at": {
-            "type": "string"
-          },
-          "id": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "session_id": {
-            "type": "string"
-          },
-          "status": {
-            "$ref": "#/components/schemas/EpisodeStatus",
-            "description": "`ok` for a retained handoff, otherwise how the dispatch died. Snapshots\nwritten before dispatch outcomes were recorded only held handoffs."
-          },
-          "thread_name": {
-            "type": "string"
-          }
-        }
-      },
-      "EpisodeStatus": {
-        "type": "string",
-        "description": "How a dispatch ended.\n\nOnly [`EpisodeStatus::Ok`] episodes are retained context: they are the ones\na later dispatch reads back and the ones `thread_read` renders. The failure\nkinds exist so the panel can still show what a thread was asked to do and\nhow it died, which is otherwise lost the moment the worker is killed.",
-        "enum": [
-          "ok",
-          "error",
-          "timed_out",
-          "cancelled"
         ]
       },
       "ExecutionFrameResponse": {
@@ -14758,12 +14393,6 @@
               }
             ]
           },
-          "model_configuration_id": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "project_id": {
             "type": [
               "string",
@@ -15427,8 +15056,7 @@
         "description": "Who admitted an inbox item. `input` is anything a person, MCP client or\nNAC automation submitted; the other values are owned delegated results,\nrecorded durably when their generation settled. Only `input` items accept\nthe public update and cancel operations.",
         "enum": [
           "input",
-          "traditional_child",
-          "managed_orchestrator"
+          "traditional_child"
         ]
       },
       "InboxItemResponse": {
@@ -15593,50 +15221,6 @@
           }
         }
       },
-      "LightModelSettings": {
-        "type": "object",
-        "description": "The optional light model selection stored with a session. Orchestrator\nruntimes use it for weight-classified dispatch, and direct-with-orchestrator\nsessions pass it to the orchestrators they launch. Plain direct sessions\nretain it without a runtime consumer pending ALL-36. The model remains a\ncatalog id; backend and reasoning effort are typed before entering the\ndomain model, and the credential is always a selector name, never a key\nvalue.",
-        "required": [
-          "model"
-        ],
-        "properties": {
-          "api_key_env": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "backend": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/BackendKind"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "base_url": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "model": {
-            "type": "string"
-          },
-          "reasoning_effort": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/ReasoningEffort"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        }
-      },
       "LimitOrigin": {
         "type": "string",
         "description": "Provenance of a specific limit, independent of the model's catalog layer.",
@@ -15753,7 +15337,6 @@
           "active_run",
           "compaction",
           "traditional_child",
-          "managed_orchestrator",
           "terminal_process",
           "clone_operation",
           "workspace_mutation",
@@ -17083,18 +16666,11 @@
       "MessageCycleMetadata": {
         "type": "object",
         "required": [
-          "marker",
-          "thread_names"
+          "marker"
         ],
         "properties": {
           "marker": {
             "type": "string"
-          },
-          "thread_names": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
           }
         }
       },
@@ -17968,7 +17544,6 @@
         "type": "string",
         "enum": [
           "traditional_subagents",
-          "managed_orchestrators",
           "managed_host",
           "product_navigation"
         ]
@@ -18675,17 +18250,6 @@
               "null"
             ]
           },
-          "light_model": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/LightModelSettings",
-                "description": "Light worker model; `None` keeps single-model dispatch."
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "model": {
             "type": "string"
           },
@@ -19092,57 +18656,6 @@
           }
         ]
       },
-      "RequestField_LightModelSettings_LightModelSettings": {
-        "oneOf": [
-          {
-            "type": "null"
-          },
-          {
-            "type": "object",
-            "description": "The optional light model selection stored with a session. Orchestrator\nruntimes use it for weight-classified dispatch, and direct-with-orchestrator\nsessions pass it to the orchestrators they launch. Plain direct sessions\nretain it without a runtime consumer pending ALL-36. The model remains a\ncatalog id; backend and reasoning effort are typed before entering the\ndomain model, and the credential is always a selector name, never a key\nvalue.",
-            "required": [
-              "model"
-            ],
-            "properties": {
-              "api_key_env": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "backend": {
-                "oneOf": [
-                  {
-                    "$ref": "#/components/schemas/BackendKind"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              },
-              "base_url": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "model": {
-                "type": "string"
-              },
-              "reasoning_effort": {
-                "oneOf": [
-                  {
-                    "$ref": "#/components/schemas/ReasoningEffort"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              }
-            }
-          }
-        ]
-      },
       "RequestField_McpProtocolSelection_McpProtocolSelection": {
         "oneOf": [
           {
@@ -19501,8 +19014,7 @@
           "transcript_len",
           "messages_removed",
           "workspace_restored",
-          "revisions_removed",
-          "threads_removed"
+          "revisions_removed"
         ],
         "properties": {
           "messages_removed": {
@@ -19510,10 +19022,6 @@
             "minimum": 0
           },
           "revisions_removed": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "threads_removed": {
             "type": "integer",
             "minimum": 0
           },
@@ -19806,11 +19314,9 @@
       },
       "SessionBehavior": {
         "type": "string",
-        "description": "Immutable stored execution behavior. New sessions select direct; old values\nremain available only while the retirement migration and removal are staged.",
+        "description": "Immutable stored execution behavior for direct sessions.",
         "enum": [
-          "orchestrator",
-          "direct",
-          "direct-with-orchestrator"
+          "direct"
         ]
       },
       "SessionClientId": {
@@ -20242,10 +19748,7 @@
           "messages",
           "response_timing",
           "sessions",
-          "threads",
-          "thread_episodes",
           "thread_event_boundary",
-          "worksets",
           "workspace"
         ],
         "properties": {
@@ -20268,20 +19771,6 @@
                 "type": "null"
               }
             ]
-          },
-          "active_threads": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "covered_orchestrator_steering_ids": {
-            "type": "array",
-            "items": {
-              "type": "integer",
-              "format": "int64"
-            },
-            "description": "Delivered orchestrator steering records whose verbatim user message is\nalready present in the transcript source backing this snapshot. The\nfrontend hides those records so guidance renders exactly once — as the\ncanonical user message."
           },
           "forks": {
             "type": "array",
@@ -20341,18 +19830,6 @@
               "$ref": "#/components/schemas/ShellCommandSnapshot"
             }
           },
-          "thread_episodes": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "array",
-              "items": {
-                "$ref": "#/components/schemas/EpisodeSnapshot"
-              }
-            },
-            "propertyNames": {
-              "type": "string"
-            }
-          },
           "thread_event_boundary": {
             "$ref": "#/components/schemas/SessionEventBoundary"
           },
@@ -20362,38 +19839,11 @@
               "$ref": "#/components/schemas/ThreadEventDecodeDiagnostic"
             }
           },
-          "thread_events": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "array",
-              "items": {
-                "$ref": "#/components/schemas/AgentEvent"
-              }
-            },
-            "propertyNames": {
-              "type": "string"
-            }
-          },
-          "thread_steering": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ThreadSteeringRecord"
-            }
-          },
-          "threads": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ThreadSnapshot"
-            }
-          },
           "transcript_recovery_warning": {
             "type": [
               "string",
               "null"
             ]
-          },
-          "worksets": {
-            "$ref": "#/components/schemas/WorksetsSnapshot"
           },
           "workspace": {
             "$ref": "#/components/schemas/WorkspaceSnapshot"
@@ -20518,8 +19968,7 @@
       "SessionLineageKind": {
         "type": "string",
         "enum": [
-          "traditional-child",
-          "managed-orchestrator"
+          "traditional-child"
         ]
       },
       "SessionLineageSnapshot": {
@@ -20552,8 +20001,7 @@
           "current",
           "pending",
           "degraded",
-          "failed",
-          "scheduled_for_workers"
+          "failed"
         ]
       },
       "SessionMcpRefreshStatus": {
@@ -20573,7 +20021,7 @@
               "null"
             ],
             "format": "int64",
-            "description": "Process-local acknowledgement for this direct agent incarnation. An\norchestrator has independent workers and does not claim an aggregate acknowledgement."
+            "description": "Process-local acknowledgement for this agent incarnation."
           },
           "incarnation_id": {
             "type": [
@@ -22414,95 +21862,6 @@
           }
         }
       },
-      "ThreadSnapshot": {
-        "type": "object",
-        "required": [
-          "name",
-          "session_id",
-          "created_at",
-          "updated_at",
-          "episode_count",
-          "latest_action"
-        ],
-        "properties": {
-          "created_at": {
-            "type": "string"
-          },
-          "episode_count": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "latest_action": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "name": {
-            "type": "string"
-          },
-          "session_id": {
-            "type": "string"
-          },
-          "updated_at": {
-            "type": "string"
-          }
-        }
-      },
-      "ThreadSteeringRecord": {
-        "type": "object",
-        "required": [
-          "id",
-          "session_id",
-          "thread_name",
-          "dispatch_id",
-          "instruction",
-          "status",
-          "created_at"
-        ],
-        "properties": {
-          "claimed_at": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "created_at": {
-            "type": "string"
-          },
-          "delivered_at": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "dispatch_id": {
-            "type": "string"
-          },
-          "expired_at": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "id": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "instruction": {
-            "type": "string"
-          },
-          "session_id": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          },
-          "thread_name": {
-            "type": "string"
-          }
-        }
-      },
       "TokenCostMicros": {
         "type": "object",
         "description": "Per-response cost in micro-USD (1e-6 USD), stored as u64 so `TokenUsage`\nstays `Eq`. All-zero = unknown pricing (pi's zero-cost fallback). `total`\nis the saturating sum of the four buckets, stored so consumers read it\ndirectly. Missing fields deserialize as zero so partial records stay\nloadable.",
@@ -22896,10 +22255,6 @@
             "$ref": "#/components/schemas/RequestField_HeadersRequest_HeadersRequest",
             "description": "Prefer a JSON object. Null or an empty object clears the persisted map."
           },
-          "light_model": {
-            "$ref": "#/components/schemas/RequestField_LightModelSettings_LightModelSettings",
-            "description": "Retired selector. Any explicitly supplied value is rejected."
-          },
           "model": {
             "$ref": "#/components/schemas/RequestField_String_String"
           },
@@ -22914,7 +22269,8 @@
             "$ref": "#/components/schemas/RequestField_String_String",
             "description": "Explicit speed preference; null clears the override."
           }
-        }
+        },
+        "additionalProperties": false
       },
       "UpdateGitIdentityRequest": {
         "type": "object",
@@ -23130,7 +22486,8 @@
             "$ref": "#/components/schemas/RequestField_bool_bool",
             "description": "Toggling this moves the project to the end of the target pin group and\nbumps `presentation_version`."
           }
-        }
+        },
+        "additionalProperties": false
       },
       "UpdateSessionPresentationRequest": {
         "type": "object",
@@ -23347,123 +22704,6 @@
           },
           "terminal_id": {
             "type": "string"
-          }
-        }
-      },
-      "WorksetItemSnapshot": {
-        "type": "object",
-        "required": [
-          "position",
-          "title",
-          "scope",
-          "description",
-          "role",
-          "depends_on",
-          "acceptance",
-          "updated_at"
-        ],
-        "properties": {
-          "acceptance": {
-            "type": "string"
-          },
-          "depends_on": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "description": {
-            "type": "string"
-          },
-          "notes": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "position": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "role": {
-            "type": "string"
-          },
-          "scope": {
-            "type": "string"
-          },
-          "title": {
-            "type": "string"
-          },
-          "updated_at": {
-            "type": "string"
-          }
-        }
-      },
-      "WorksetSnapshot": {
-        "type": "object",
-        "required": [
-          "id",
-          "session_id",
-          "goal",
-          "status",
-          "summary",
-          "created_at",
-          "updated_at",
-          "items"
-        ],
-        "properties": {
-          "created_at": {
-            "type": "string"
-          },
-          "goal": {
-            "type": "string"
-          },
-          "id": {
-            "type": "string"
-          },
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/WorksetItemSnapshot"
-            }
-          },
-          "session_id": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          },
-          "summary": {
-            "type": "string"
-          },
-          "updated_at": {
-            "type": "string"
-          },
-          "verification_recipe": {
-            "type": [
-              "string",
-              "null"
-            ]
-          }
-        }
-      },
-      "WorksetsSnapshot": {
-        "type": "object",
-        "required": [
-          "items"
-        ],
-        "properties": {
-          "error": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/WorksetSnapshot"
-            }
           }
         }
       },

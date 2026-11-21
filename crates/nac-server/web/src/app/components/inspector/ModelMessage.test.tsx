@@ -33,15 +33,7 @@ describe("transcript topology badge navigation", () => {
         { requested: "ultrafast", served: "ultrafast" },
       ],
     };
-    render(
-      <ModelMessage
-        turn={turn}
-        model="model"
-        active={false}
-        selectedThreadEpisode={null}
-        onSelectThread={vi.fn()}
-      />,
-    );
+    render(<ModelMessage turn={turn} model="model" active={false} />);
     expect(screen.getByText("Requested speed: Fast; served tier: Fast")).toBeTruthy();
     expect(
       screen.getByText("Requested speed: Ultrafast; served tier: Standard (provider downgrade)"),
@@ -83,15 +75,7 @@ describe("transcript topology badge navigation", () => {
         },
       ],
     };
-    render(
-      <ModelMessage
-        turn={turn}
-        model="model"
-        active={false}
-        selectedThreadEpisode={null}
-        onSelectThread={vi.fn()}
-      />,
-    );
+    render(<ModelMessage turn={turn} model="model" active={false} />);
     expect(screen.getByRole("button", { name: "Thought" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Total time 2.3s · Thought" })).toBeTruthy();
     expect(screen.getAllByText(/Total time/)).toHaveLength(1);
@@ -100,8 +84,6 @@ describe("transcript topology badge navigation", () => {
   it("keeps visible prose and its selection in place when later work arrives and settles", () => {
     const props = {
       model: "model",
-      selectedThreadEpisode: null,
-      onSelectThread: vi.fn(),
     };
     const turn: ModelTurn = {
       kind: "model",
@@ -155,15 +137,7 @@ describe("transcript topology badge navigation", () => {
         },
       ],
     };
-    render(
-      <ModelMessage
-        turn={turn}
-        model="model"
-        active
-        selectedThreadEpisode={null}
-        onSelectThread={vi.fn()}
-      />,
-    );
+    render(<ModelMessage turn={turn} model="model" active />);
     const fold = screen.getByRole("button", { name: "Thinking…" });
     fireEvent.click(fold);
     fireEvent.click(screen.getByRole("button", { name: "Thinking…", expanded: false }));
@@ -191,8 +165,6 @@ describe("transcript topology badge navigation", () => {
     };
     const props = {
       model: "model",
-      selectedThreadEpisode: null,
-      onSelectThread: vi.fn(),
     };
     const view = render(<ModelMessage {...props} turn={turn} active />);
     const fold = screen.getByRole("button", { name: "Thinking…" });
@@ -267,8 +239,6 @@ describe("transcript topology badge navigation", () => {
   it("shows noninteractive progress without a trace and shares density with read-only turns", () => {
     const props = {
       model: "model",
-      selectedThreadEpisode: null,
-      onSelectThread: vi.fn(),
       readOnly: true,
       interactive: false,
     };
@@ -320,17 +290,7 @@ describe("transcript topology badge navigation", () => {
         },
       })),
     };
-    render(
-      <ModelMessage
-        turn={turn}
-        model="model"
-        active
-        readOnly
-        interactive={false}
-        selectedThreadEpisode={null}
-        onSelectThread={vi.fn()}
-      />,
-    );
+    render(<ModelMessage turn={turn} model="model" active readOnly interactive={false} />);
     expect(screen.getByRole("list", { name: "Steps that need attention" })).toBeTruthy();
     expect(screen.getByText("Waiting for approval")).toBeTruthy();
     expect(screen.getByText("Failed")).toBeTruthy();
@@ -349,8 +309,7 @@ describe("transcript topology badge navigation", () => {
         }}
         model="gpt-5.6-sol"
         active={false}
-        selectedThreadEpisode={null}
-        onSelectThread={vi.fn()}
+
         userMessageIndex={0}
         onRefresh={refresh}
       />,
@@ -358,64 +317,6 @@ describe("transcript topology badge navigation", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Regenerate from original prompt" }));
     expect(refresh).toHaveBeenCalledWith(0);
-  });
-
-  it("folds the workset into one line and selects the thread episode", () => {
-    const onSelectThread = vi.fn();
-    const turn: ModelTurn = {
-      kind: "model",
-      key: "model-1",
-      durationMs: 25,
-      messageIndex: 1,
-      blocks: [
-        {
-          kind: "workset",
-          key: "workset-1",
-          worksetId: "release",
-          pending: false,
-        },
-        {
-          kind: "wave",
-          key: "wave-1",
-          rows: [
-            [
-              {
-                key: "api:0",
-                name: "api",
-                action: "Verify the API",
-                weight: "light",
-                summary: "API verified",
-                log: [],
-                state: "done",
-              },
-            ],
-          ],
-        },
-      ],
-    };
-
-    render(
-      <ModelMessage
-        turn={turn}
-        model="gpt-5.6-sol"
-        active={false}
-        selectedThreadEpisode={null}
-        onSelectThread={onSelectThread}
-      />,
-    );
-
-    const fold = screen.getByRole("button", {
-      name: "Worked for <1s · Defined 1 workset",
-    });
-    expect(fold.getAttribute("aria-expanded")).toBe("false");
-    fireEvent.click(fold);
-    expect(fold.getAttribute("aria-expanded")).toBe("true");
-    expect(screen.getByText("Defined workset")).toBeTruthy();
-
-    fireEvent.click(screen.getByRole("button", { name: /api/i }));
-    expect(onSelectThread).toHaveBeenCalledWith("api", "api:0", {
-      focusDetail: true,
-    });
   });
 
   it("keeps parent-owned transcripts free of mutation affordances", () => {
@@ -432,8 +333,7 @@ describe("transcript topology badge navigation", () => {
         turn={turn}
         model="gpt-5.6-sol"
         active={false}
-        selectedThreadEpisode={null}
-        onSelectThread={vi.fn()}
+
         userMessageIndex={0}
         onRefresh={vi.fn()}
         onRevert={vi.fn()}

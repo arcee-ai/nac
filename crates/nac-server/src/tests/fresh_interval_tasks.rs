@@ -1,7 +1,7 @@
 //! Local scripted-provider qualification of the real prepared launch and run
 //! transaction. This is an isolated fixture, not vendor or remote parity proof.
-#[path = "fresh_interval_tasks/model_defaults.rs"]
-mod model_defaults;
+#[path = "fresh_interval_tasks/model_selection.rs"]
+mod model_selection;
 #[path = "fresh_interval_tasks/recovery.rs"]
 mod recovery;
 
@@ -173,31 +173,6 @@ async fn fresh_interval_git_preparation_initial_input_and_retained_result_use_ex
     let (url, requests, model) = provider(manager.inner.store_path.clone()).await;
     let mut scheduler = None;
     let primary = catch_fixture_panic(async {
-        let mut defaults = model_configurations::load_model_configuration(
-            &manager.inner.store_path,
-            "task-config",
-        )
-        .unwrap();
-        defaults.base_url = url.clone();
-        model_configurations::update_model_configuration(
-            &manager.inner.store_path,
-            "task-config",
-            model_configurations::NewModelConfiguration {
-                service_tier: None,
-                name: defaults.name,
-                backend: defaults.backend,
-                model: defaults.model,
-                base_url: defaults.base_url,
-                allow_insecure_http: false,
-                api_key_env: defaults.api_key_env,
-                reasoning_effort: defaults.reasoning_effort,
-                extra_headers: defaults.extra_headers,
-                orchestrator_compaction_threshold: None,
-                initial_prompt: None,
-                light_model: None,
-            },
-        )
-        .unwrap();
         let repo = root.join("repo");
         let cwd = repo.join("nested");
         let skill = repo.join(".agents/skills/verification");

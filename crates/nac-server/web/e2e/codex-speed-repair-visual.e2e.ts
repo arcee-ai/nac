@@ -4,7 +4,7 @@ import { createDirectSession, expect, test, type EmbeddedHarness } from "./harne
 import { ScriptGate } from "./scripted-provider";
 import { modelChip, openModelCatalog, openModelSettings } from "./speed-controls";
 
-test.use({ orchestration: "0", codexCatalogFixture: true });
+test.use({ codexCatalogFixture: true });
 
 async function openProviderDefaultSpeed(
   page: Page,

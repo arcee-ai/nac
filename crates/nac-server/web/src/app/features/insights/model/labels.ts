@@ -4,7 +4,7 @@ import {
   formatListDuration,
   segmentDurationMs,
 } from "@/app/features/insights/model/durations";
-import { entryStatus, segmentStatus } from "@/app/features/insights/model/status";
+import { segmentStatus } from "@/app/features/insights/model/status";
 import type {
   ActionKind,
   ActionStatus,
@@ -26,19 +26,6 @@ interface ActionCopy {
 
 const ACTION_COPY: Record<ActionKind, ActionCopy> = {
   reasoning: { type: "Thoughts", running: "Thinking…", live: "Thinking…", meta: null },
-  thread: { type: "Thread", running: "Running thread…", live: "Running thread…", meta: "Thread" },
-  "define-workset": {
-    type: "Define Workset",
-    running: "Defining Workset…",
-    live: "Defining workset…",
-    meta: "Workset",
-  },
-  "delete-thread": {
-    type: "Delete thread",
-    running: "Deleting…",
-    live: "Deleting thread…",
-    meta: null,
-  },
   "read-file": { type: "Read File", running: "Reading File…", live: "Reading file…", meta: "Read" },
   "write-file": {
     type: "Create File",
@@ -93,35 +80,11 @@ const ACTION_COPY: Record<ActionKind, ActionCopy> = {
     live: "Subagent request in progress…",
     meta: "Spawn",
   },
-  "spawn-orchestrator": {
-    type: "Spawn Orchestrator",
-    running: "Spawn Orchestrator…",
-    live: "Starting orchestrator…",
-    meta: "Spawn",
-  },
   "session-status": {
     type: "Check session status",
     running: "Checking session status…",
     live: "Checking session…",
     meta: "Check",
-  },
-  "session-steer": {
-    type: "Steer session",
-    running: "Steer session…",
-    live: "Steering session…",
-    meta: "Steer",
-  },
-  "session-read": {
-    type: "Read session",
-    running: "Reading session…",
-    live: "Reading session…",
-    meta: "Read",
-  },
-  "session-wait": {
-    type: "Wait for session",
-    running: "Wait for session…",
-    live: "Waiting for session…",
-    meta: "Wait",
   },
   "session-cancel": {
     type: "Cancel session",
@@ -146,11 +109,7 @@ const VERBATIM_ACTIONS: ReadonlySet<ActionKind> = new Set([
   "grep",
   "web-search",
   "spawn-agent",
-  "spawn-orchestrator",
   "session-status",
-  "session-steer",
-  "session-read",
-  "session-wait",
   "session-cancel",
 ]);
 const COMMAND_LABEL_LIMIT = 40;
@@ -218,10 +177,8 @@ export function segmentTypeLabel(segment: InsightSegment): string {
 
 /** Ready row label: the call's argument when it is known, else the type label. */
 export function segmentTitle(segment: InsightSegment): string {
-  if (segment.kind === "workset" && segment.worksetId) return `Worksets_${segment.worksetId}`;
   if (segment.kind === "tool") {
     const summary = segment.presentation?.summary;
-    if (segment.action === "delete-thread" && summary) return `Deleted: ${summary}`;
     const argument = toolArgument(segment.action, summary);
     if (argument) return argument;
   }
@@ -247,13 +204,7 @@ export function inProgressLabel(segment: InsightSegment): string {
 
 /** The first two distinct type labels, e.g. "Thoughts, Read File and more". */
 export function groupSummaryLabel(group: InsightGroup): string {
-  const labels = [
-    ...new Set(
-      group.segments.map((segment) =>
-        segment.kind === "workset" ? "Workset" : segmentTypeLabel(segment),
-      ),
-    ),
-  ];
+  const labels = [...new Set(group.segments.map(segmentTypeLabel))];
   const shown = labels.slice(0, 2).join(", ");
   return labels.length > 2 ? `${shown} and more` : shown;
 }
@@ -278,7 +229,6 @@ export function groupLiveLabel(group: InsightGroup): string | null {
 
 /** Ready row meta of an entry; a group counts its steps. */
 export function entryMeta(entry: InsightEntry): string | null {
-  if (entry.kind === "thread") return `Thread, ${entry.episodes}`;
   if (entry.kind === "session") return actionMeta(entry.action);
   return String(entry.group.segments.length);
 }
@@ -308,16 +258,8 @@ export function segmentRow(segment: InsightSegment): InsightRow {
   });
 }
 
-/** A top-level row. Thread rows keep their name and meta in every state. */
+/** A top-level row for a group or delegated session. */
 export function entryRow(entry: InsightEntry): InsightRow {
-  if (entry.kind === "thread") {
-    return {
-      action: "thread",
-      label: entry.thread.name,
-      meta: entryMeta(entry),
-      status: entryStatus(entry),
-    };
-  }
   if (entry.kind === "session") {
     return stateRow(entry.action, entry.status, {
       ready: entry.title,

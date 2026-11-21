@@ -55,7 +55,6 @@ function errorPresentation(text: string, name = "launch_task") {
       {
         type: "tool_call_finished",
         call_id: "launch",
-        thread_name: null,
         name,
         content_preview: admissionError,
         is_error: true,

@@ -128,7 +128,7 @@ export function PermissionControls({
   const [dismissedReview, setDismissedReview] = useState<string | null>(null);
   const reviewLink = requestedReview ? `${sessionId}:${location.key}:${requestedReview}` : null;
   const exactReviewLink = reviewLink !== null && dismissedReview !== reviewLink;
-  const direct = behavior === "direct" || behavior === "direct-with-orchestrator";
+  const direct = behavior === "direct";
   const queue = usePermissionQueue(sessionId, direct, requesterLabel, {
     poll,
     includeChildren: autoApprovalAvailable,

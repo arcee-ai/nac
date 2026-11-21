@@ -1,12 +1,9 @@
 import type { ToolPresentation } from "@/app/lib/toolPresentation";
-import type { TranscriptBlock, TranscriptThread } from "@/app/lib/transcript";
+import type { TranscriptBlock } from "@/app/lib/transcript";
 
 /** What an Insights row stands for; picks its icon, labels and meta. */
 export type ActionKind =
   | "reasoning"
-  | "thread"
-  | "define-workset"
-  | "delete-thread"
   | "read-file"
   | "write-file"
   | "edit-file"
@@ -21,15 +18,11 @@ export type ActionKind =
   | "get-goal"
   | "update-goal"
   | "spawn-agent"
-  | "spawn-orchestrator"
   | "session-status"
-  | "session-steer"
-  | "session-read"
-  | "session-wait"
   | "session-cancel"
   | "other";
 
-export type SpawnActionKind = Extract<ActionKind, "spawn-agent" | "spawn-orchestrator">;
+export type SpawnActionKind = Extract<ActionKind, "spawn-agent">;
 
 export type ActionStatus = "ready" | "pending" | "running" | "failed";
 
@@ -48,12 +41,11 @@ export type InsightSegment =
       /** Transport tool name. */
       name: string;
       action: ActionKind;
-      /** Null for the compact tool blocks of orchestrator sessions. */
+      /** Null when no tool presentation is available. */
       presentation: ToolPresentation | null;
       /** The call has no outcome yet. */
       pending: boolean;
-    }
-  | { kind: "workset"; key: string; worksetId: string; pending: boolean };
+    };
 
 export interface InsightGroup {
   id: string;
@@ -70,18 +62,7 @@ export interface InsightGroupEntry {
   group: InsightGroup;
 }
 
-export interface InsightThreadEntry {
-  kind: "thread";
-  /** The dispatch key, `thread.key`. */
-  id: string;
-  thread: TranscriptThread;
-  /** Key of the wave block the dispatch belongs to; rows of one wave share a guide line. */
-  waveKey: string;
-  /** Dispatches of this thread name within the loaded transcript window. */
-  episodes: number;
-}
-
-export type DelegatedRowKey = `child:${string}` | `orchestrator:${string}`;
+export type DelegatedRowKey = `child:${string}`;
 
 export interface InsightSessionEntry {
   kind: "session";
@@ -95,10 +76,10 @@ export interface InsightSessionEntry {
   presentation: ToolPresentation;
 }
 
-export type InsightEntry = InsightGroupEntry | InsightThreadEntry | InsightSessionEntry;
+export type InsightEntry = InsightGroupEntry | InsightSessionEntry;
 
 /** Transcript blocks that sit between Insights entries and close the open group. */
-export type ModelTurnBlock = Extract<TranscriptBlock, { kind: "text" | "wave" }>;
+export type ModelTurnBlock = Extract<TranscriptBlock, { kind: "text" }>;
 
 export interface ModelTurnBlockItem {
   kind: "block";
@@ -123,9 +104,7 @@ export interface InsightTurnSection {
   entries: readonly InsightEntry[];
 }
 
-export type InsightsTopology = "orchestrator" | "direct";
-
-export type InsightsFilter = "all" | "tools" | "threads" | "sessions" | "worksets";
+export type InsightsFilter = "all" | "tools" | "sessions";
 
 export interface InsightsFilterOption {
   value: InsightsFilter;

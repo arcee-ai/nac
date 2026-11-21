@@ -8,7 +8,7 @@ use super::*;
 #[test]
 fn v34_store_adds_the_human_reviewer_and_rejects_review_with_approve_all() {
     let path = temp_store_path("v34_permission_reviewer");
-    initialize(&path).unwrap();
+    initialize_synthetic_predecessor(&path).unwrap();
     let legacy = Connection::open(&path).unwrap();
     insert_legacy_session(&legacy, "manual-session");
     insert_legacy_session(&legacy, "auto-session");
@@ -87,7 +87,7 @@ fn v34_store_adds_the_human_reviewer_and_rejects_review_with_approve_all() {
 #[test]
 fn v39_task_store_adds_review_without_changing_queued_child_authority() {
     let path = temp_store_path("v39_permission_reviewer");
-    initialize(&path).unwrap();
+    initialize_synthetic_predecessor(&path).unwrap();
     insert_test_session(&path, "child");
     let item = create_session_inbox_item(
         &path,
@@ -156,7 +156,7 @@ fn v39_task_store_adds_review_without_changing_queued_child_authority() {
 #[test]
 fn historical_v35_review_store_preserves_intent_when_adding_task_schema() {
     let path = temp_store_path("v35_review_task_union");
-    initialize(&path).unwrap();
+    initialize_synthetic_predecessor(&path).unwrap();
     insert_test_session(&path, "review-session");
     let connection = Connection::open(&path).unwrap();
     connection.execute_batch(
@@ -182,7 +182,7 @@ fn historical_v35_review_store_preserves_intent_when_adding_task_schema() {
     assert!(column_exists(&connection, "session_inbox", "child_execution_mode").unwrap());
     assert!(column_exists(&connection, "session_inbox", "child_wait_id").unwrap());
     assert!(table_exists(&connection, "traditional_child_terminal_receipts").unwrap());
-    assert!(table_exists(&connection, "managed_orchestrator_terminal_receipts").unwrap());
+    assert!(!table_exists(&connection, "managed_orchestrator_terminal_receipts").unwrap());
     assert_eq!(
         connection
             .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
@@ -196,7 +196,7 @@ fn historical_v35_review_store_preserves_intent_when_adding_task_schema() {
 #[test]
 fn v24_store_adds_manual_session_permission_approval_mode() {
     let path = temp_store_path("v24_permission_approval_mode");
-    initialize(&path).unwrap();
+    initialize_synthetic_predecessor(&path).unwrap();
     let legacy = Connection::open(&path).unwrap();
     insert_legacy_session(&legacy, "legacy-session");
     legacy
@@ -248,7 +248,7 @@ fn v24_store_adds_manual_session_permission_approval_mode() {
 #[test]
 fn v25_store_adds_permission_approval_transition_revision() {
     let path = temp_store_path("v25_permission_approval_revision");
-    initialize(&path).unwrap();
+    initialize_synthetic_predecessor(&path).unwrap();
     let legacy = Connection::open(&path).unwrap();
     insert_legacy_session(&legacy, "legacy-session");
     legacy

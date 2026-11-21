@@ -3,15 +3,15 @@ use super::*;
 #[test]
 fn v28_store_adds_insecure_http_opt_in_with_fail_closed_defaults() {
     let path = temp_store_path("v28_insecure_http");
-    initialize(&path).unwrap();
+    initialize_synthetic_predecessor(&path).unwrap();
     let legacy = Connection::open(&path).unwrap();
     insert_legacy_session(&legacy, "legacy-session");
     legacy
         .execute(
             "INSERT INTO model_configurations
-             (config_id, name, backend, model, base_url, created_at, updated_at)
+             (config_id, name, backend, model, base_url, api_key_env, created_at, updated_at)
              VALUES ('legacy-config', 'Legacy', 'openai-chat-completions', 'model',
-                     'https://example.invalid/v1', 'created', 'updated')",
+                     'https://example.invalid/v1', 'LEGACY_KEY', 'created', 'updated')",
             [],
         )
         .unwrap();
@@ -35,7 +35,7 @@ fn v28_store_adds_insecure_http_opt_in_with_fail_closed_defaults() {
         .unwrap();
     let config_opt_in: bool = migrated
         .query_row(
-            "SELECT allow_insecure_http FROM model_configurations WHERE config_id = 'legacy-config'",
+            "SELECT allow_insecure_http FROM provider_connections WHERE connection_id = 'legacy-config'",
             [],
             |row| row.get(0),
         )

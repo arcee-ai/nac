@@ -1,75 +1,15 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  buildTranscript,
-  dispatchThreadName,
-  partitionThreadCalls,
-  RUN_FAILED_PARTIAL_MARKER,
-  type TranscriptThread,
-} from "@/app/lib/transcript";
-import type { RuntimeThread } from "@/app/store/runtimeStore";
+import { buildTranscript, RUN_FAILED_PARTIAL_MARKER } from "@/app/lib/transcript";
 import type {
   AgentEvent,
   Message,
   SessionBehavior,
   SessionSnapshotResponse,
-  ThreadSnapshot,
   ToolCall,
 } from "@/app/types/api";
 
 import fixture from "../../../../../../fixtures/goal-continuation-format.json";
-
-interface DispatchSpec {
-  name: string;
-  callId: string;
-  threads?: string[];
-}
-
-/** Wire shape of the orchestrator's `thread` tool arguments. */
-interface DispatchArguments {
-  name: string;
-  action: string;
-  threads?: string[];
-}
-
-function dispatchToolCall(spec: DispatchSpec): ToolCall {
-  const args: DispatchArguments = {
-    name: spec.name,
-    action: spec.callId,
-  };
-  if (spec.threads) {
-    args.threads = spec.threads;
-  }
-  return {
-    id: spec.callId,
-    type: "function",
-    function: { name: "thread", arguments: JSON.stringify(args) },
-  };
-}
-
-function rawThreadCall(argumentsJson: string): ToolCall {
-  return {
-    id: "raw-call",
-    type: "function",
-    function: { name: "thread", arguments: argumentsJson },
-  };
-}
-
-function threadCall(name: string, callId: string): Message {
-  return threadBatch([{ name, callId }]);
-}
-
-function threadBatch(calls: DispatchSpec[]): Message {
-  return {
-    role: "assistant",
-    content: null,
-    tool_calls: calls.map(dispatchToolCall),
-  };
-}
-
-function toolResult(callId: string): Message {
-  return { role: "tool", tool_call_id: callId, content: "done" };
-}
 
 function genericToolCall(name: string, callId: string, argumentsJson: string): ToolCall {
   return {
@@ -89,17 +29,6 @@ function imageToolResult(callId: string): Message {
         image: { mime_type: "image/png", data: "base64-payload" },
       },
     ],
-  };
-}
-
-function threadSnapshot(name: string, episodeCount: number): ThreadSnapshot {
-  return {
-    name,
-    session_id: "session-test",
-    created_at: "t-0",
-    updated_at: "t-0",
-    episode_count: episodeCount,
-    latest_action: null,
   };
 }
 
@@ -129,13 +58,7 @@ function snapshot(messages: Message[]): SessionSnapshotResponse {
       response_durations_ms: [],
     },
     sessions: [],
-    active_threads: [],
-    threads: [],
-    thread_episodes: {},
-    thread_events: {},
     thread_event_boundary: { epoch_id: "epoch-test", sequence_id: 0 },
-    thread_steering: [],
-    worksets: { items: [], error: null },
     workspace: {
       host_root: null,
       workspace_display: "nac-test",
@@ -158,7 +81,6 @@ it("treats the failed-run sentinel as metadata instead of copyable model prose",
         content: `useful partial answer\n\n${RUN_FAILED_PARTIAL_MARKER}`,
       },
     ]),
-    {},
   );
   expect(turns[1]).toMatchObject({
     kind: "model",
@@ -176,7 +98,6 @@ function directSnapshot(messages: Message[], behavior: SessionBehavior): Session
 function primaryStart(callId: string, name: string, preview: string): AgentEvent {
   return {
     type: "tool_call_started",
-    thread_name: null,
     call_id: callId,
     name,
     args_preview: '{"operation":"invoke"}',
@@ -187,7 +108,6 @@ function primaryStart(callId: string, name: string, preview: string): AgentEvent
 function primaryFinish(callId: string, name: string): AgentEvent {
   return {
     type: "tool_call_finished",
-    thread_name: null,
     call_id: callId,
     name,
     content_preview: "bounded result",
@@ -204,142 +124,6 @@ function toolDetails(turns: ReturnType<typeof buildTranscript>) {
       : [],
   );
 }
-
-function threadStarted(name: string): AgentEvent {
-  return {
-    type: "thread_started",
-    name,
-    action: "dispatched",
-    source_threads: [],
-  };
-}
-
-function threadFinished(name: string): AgentEvent {
-  return { type: "thread_finished", name, exit_code: 0, timed_out: false };
-}
-
-function liveThread(name: string, status: RuntimeThread["status"]): RuntimeThread {
-  return {
-    name,
-    status,
-    cancelled: false,
-    exitCode: null,
-    isError: false,
-    log: [],
-  };
-}
-
-function waveCards(turns: ReturnType<typeof buildTranscript>): TranscriptThread[] {
-  return turns.flatMap((turn) =>
-    turn.kind === "model"
-      ? turn.blocks.flatMap((block) => (block.kind === "wave" ? block.rows.flat() : []))
-      : [],
-  );
-}
-
-describe("re-dispatched thread cards", () => {
-  // The messages tail merge learns about the new dispatch's tool call right
-  // away, but the snapshot's per-thread event window only gains its
-  // thread_started on the refetch the start triggers. In between, the window
-  // still ends at the previous episode's thread_finished.
-  function redispatchSnapshot(): SessionSnapshotResponse {
-    const value = snapshot([
-      threadCall("worker", "call-1"),
-      toolResult("call-1"),
-      threadCall("worker", "call-2"),
-    ]);
-    value.threads = [threadSnapshot("worker", 1)];
-    value.thread_events = {
-      worker: [threadStarted("worker"), threadFinished("worker")],
-    };
-    return value;
-  }
-
-  it("keeps the newest card running while its start event has not reached the snapshot", () => {
-    const cards = waveCards(
-      buildTranscript(redispatchSnapshot(), {
-        worker: liveThread("worker", "running"),
-      }),
-    );
-
-    expect(cards).toHaveLength(2);
-    expect(cards[0].state).toBe("done");
-    expect(cards[1].state).toBe("running");
-  });
-
-  it("still marks the newest card done once its own dispatch finished", () => {
-    const cards = waveCards(
-      buildTranscript(redispatchSnapshot(), {
-        worker: liveThread("worker", "finished"),
-      }),
-    );
-
-    expect(cards[1].state).toBe("done");
-  });
-
-  it("reads the caught-up window without leaning on the live stream", () => {
-    const value = redispatchSnapshot();
-    value.thread_events = {
-      worker: [threadStarted("worker"), threadFinished("worker"), threadStarted("worker")],
-    };
-
-    const cards = waveCards(buildTranscript(value, {}));
-
-    expect(cards[0].state).toBe("done");
-    expect(cards[1].state).toBe("running");
-  });
-
-  it("keeps a dependent pending while its re-dispatched source is running", () => {
-    const value = snapshot([
-      threadCall("source", "call-1"),
-      toolResult("call-1"),
-      threadBatch([
-        { name: "source", callId: "call-2" },
-        { name: "dependent", callId: "call-3", threads: ["source"] },
-      ]),
-    ]);
-    value.threads = [threadSnapshot("source", 1)];
-    value.thread_events = {
-      source: [threadStarted("source"), threadFinished("source")],
-    };
-
-    const cards = waveCards(buildTranscript(value, { source: liveThread("source", "running") }));
-
-    const source = cards.filter((card) => card.name === "source").at(-1);
-    const dependent = cards.find((card) => card.name === "dependent");
-    expect(source?.state).toBe("running");
-    expect(dependent?.state).toBe("pending");
-  });
-
-  it("renders typed image results as bounded placeholders", () => {
-    const cards = waveCards(
-      buildTranscript(
-        snapshot([threadCall("worker", "call-image"), imageToolResult("call-image")]),
-        {},
-      ),
-    );
-
-    expect(cards).toHaveLength(1);
-    expect(cards[0].state).toBe("done");
-    expect(cards[0].summary).toBe("[Image: image/png]");
-    expect(cards[0].summary).not.toContain("base64-payload");
-  });
-});
-
-describe("thread call decoding", () => {
-  it("falls back when a decoded name is not a string", () => {
-    const call = rawThreadCall('{"name":{"toString":null},"action":"x"}');
-
-    expect(dispatchThreadName(call)).toBe("thread");
-  });
-
-  it("ignores non-string dependency entries", () => {
-    const first = rawThreadCall('{"name":"first","action":"x"}');
-    const second = rawThreadCall('{"name":"second","action":"y","threads":[{"toString":null}]}');
-
-    expect(partitionThreadCalls([first, second])).toEqual([[first, second]]);
-  });
-});
 
 describe("delegated completion turns", () => {
   const prefix =
@@ -363,7 +147,6 @@ describe("delegated completion turns", () => {
           })}`,
         },
       ]),
-      {},
     );
     expect(turns).toHaveLength(1);
     expect(turns[0]).toMatchObject({
@@ -397,8 +180,8 @@ describe("delegated completion turns", () => {
     const tail = snapshot(messages.slice(2));
     tail.message_created_at = ["t-2"];
     tail.message_page = { start: 10, end: 11, total: 11, has_older: true };
-    const fullTurns = buildTranscript(full, {});
-    const tailTurns = buildTranscript(tail, {});
+    const fullTurns = buildTranscript(full);
+    const tailTurns = buildTranscript(tail);
     expect(fullTurns.map((turn) => turn.key)).toEqual([
       "delegated-completion-8",
       "user-9",
@@ -417,7 +200,7 @@ describe("delegated completion turns", () => {
 
   it("keeps malformed prefix text as an ordinary user-authored turn", () => {
     const content = `${prefix}not json`;
-    expect(buildTranscript(snapshot([{ role: "user", content }]), {})[0]).toMatchObject({
+    expect(buildTranscript(snapshot([{ role: "user", content }]))[0]).toMatchObject({
       kind: "user",
       text: content,
     });
@@ -444,170 +227,165 @@ describe("delegated completion turns", () => {
       "direct",
     );
     value.primary_tool_events = [primaryStart("completion", "subagent", "Review UI")];
-    const turns = buildTranscript(value, {});
+    const turns = buildTranscript(value);
     expect(turns[0]?.kind).toBe("delegated-completion");
     expect(toolDetails(turns)).toEqual([]);
   });
 });
 
-describe.each<SessionBehavior>(["direct", "direct-with-orchestrator"])(
-  "%s primary tool transcript",
-  (behavior) => {
-    it("does not claim interruption for ambiguous settled delegation results", () => {
-      const call = genericToolCall("subagent", "reused", "{}");
-      const snapshot = directSnapshot(
-        [
-          { role: "assistant", content: null, tool_calls: [call, call] },
-          { role: "tool", tool_call_id: "reused", content: "first" },
-          { role: "tool", tool_call_id: "reused", content: "second" },
-        ],
-        behavior,
-      );
-      snapshot.tool_call_occurrences = ["log:session:store:1:digest:3", null, null];
-      const tools = toolDetails(buildTranscript(snapshot, {}));
-      expect(tools).toHaveLength(2);
-      expect(tools.every((item) => item.status === "unknown" && item.resultPreview === null)).toBe(
-        true,
-      );
+describe("direct primary tool transcript", () => {
+  const behavior: SessionBehavior = "direct";
+  it("does not claim interruption for ambiguous settled delegation results", () => {
+    const call = genericToolCall("subagent", "reused", "{}");
+    const snapshot = directSnapshot(
+      [
+        { role: "assistant", content: null, tool_calls: [call, call] },
+        { role: "tool", tool_call_id: "reused", content: "first" },
+        { role: "tool", tool_call_id: "reused", content: "second" },
+      ],
+      behavior,
+    );
+    snapshot.tool_call_occurrences = ["log:session:store:1:digest:3", null, null];
+    const tools = toolDetails(buildTranscript(snapshot));
+    expect(tools).toHaveLength(2);
+    expect(tools.every((item) => item.status === "unknown" && item.resultPreview === null)).toBe(
+      true,
+    );
+  });
+
+  it("marks two result rows for one delegation call as unavailable", () => {
+    const call = genericToolCall("subagent", "reused", "{}");
+    const snapshot = directSnapshot(
+      [
+        { role: "assistant", content: null, tool_calls: [call] },
+        { role: "tool", tool_call_id: "reused", content: "first" },
+        { role: "tool", tool_call_id: "reused", content: "second" },
+      ],
+      behavior,
+    );
+    snapshot.tool_call_occurrences = ["log:session:store:1:digest:3", null, null];
+    expect(toolDetails(buildTranscript(snapshot))).toMatchObject([
+      { status: "unknown", statusLabel: "Outcome unavailable", resultPreview: null },
+    ]);
+  });
+
+  it("keeps one semantic entry across live, settled, and reload projections", () => {
+    const call = genericToolCall(
+      "exec_command",
+      "call-primary",
+      '{"cmd":"printf SECRET_RAW_COMMAND","env":{"TOKEN":"SECRET_ENV"}}',
+    );
+    const base = directSnapshot(
+      [
+        { role: "user", content: "run it" },
+        { role: "assistant", content: null, tool_calls: [call] },
+      ],
+      behavior,
+    );
+    base.active_run = {
+      run_id: "run-primary",
+      prompt_preview: "run it",
+      started_at_epoch_ms: 1,
+    };
+    const start = primaryStart("call-primary", "exec_command", "printf safe-command");
+    const live = toolDetails(buildTranscript(base, [start]));
+    expect(live).toEqual([
+      expect.objectContaining({
+        callId: "call-primary",
+        label: "Run command",
+        summary: "printf safe-command",
+        status: "running",
+      }),
+    ]);
+
+    const awaitingApproval = toolDetails(buildTranscript(base, [start], new Set(["call-primary"])));
+    expect(awaitingApproval).toEqual([
+      expect.objectContaining({
+        callId: "call-primary",
+        status: "awaiting-approval",
+        statusLabel: "Awaiting approval",
+      }),
+    ]);
+
+    const finish = primaryFinish("call-primary", "exec_command");
+    const settled = toolDetails(buildTranscript(base, [start, finish]));
+    expect(settled).toHaveLength(1);
+    expect(settled[0]).toMatchObject({ status: "success", resultPreview: "bounded result" });
+
+    const reloaded = directSnapshot(
+      [
+        ...base.messages,
+        { role: "tool", tool_call_id: "call-primary", content: "RAW_SECRET_RESULT" },
+      ],
+      behavior,
+    );
+    reloaded.primary_tool_events = [start, finish];
+    expect(toolDetails(buildTranscript(reloaded))).toEqual(settled);
+    expect(JSON.stringify(settled)).not.toContain("SECRET_RAW_COMMAND");
+    expect(JSON.stringify(settled)).not.toContain("SECRET_ENV");
+    expect(JSON.stringify(settled)).not.toContain("RAW_SECRET_RESULT");
+  });
+
+  it("does not attach unbound lifecycle facts to a live or durable subagent invocation", () => {
+    const call = genericToolCall("subagent", "child-call", '{"prompt":"RAW_SECRET"}');
+    const base = directSnapshot(
+      [
+        { role: "user", content: "delegate" },
+        { role: "assistant", content: null, tool_calls: [call] },
+      ],
+      behavior,
+    );
+    base.active_run = { run_id: "run-child", prompt_preview: "delegate", started_at_epoch_ms: 1 };
+    const start = primaryStart("child-call", "subagent", "Review store");
+    const finish = {
+      ...primaryFinish("child-call", "subagent"),
+      delegation_outcome: "background_continued",
+      delegation_summary: "Review store",
+      content_preview: "Instructions sent to subagent",
+    } as AgentEvent;
+    expect(toolDetails(buildTranscript(base, [start]))[0]).toMatchObject({
+      label: "Subagent request outcome unavailable",
+      summary: null,
     });
-
-    it("marks two result rows for one delegation call as unavailable", () => {
-      const call = genericToolCall("subagent", "reused", "{}");
-      const snapshot = directSnapshot(
-        [
-          { role: "assistant", content: null, tool_calls: [call] },
-          { role: "tool", tool_call_id: "reused", content: "first" },
-          { role: "tool", tool_call_id: "reused", content: "second" },
-        ],
-        behavior,
-      );
-      snapshot.tool_call_occurrences = ["log:session:store:1:digest:3", null, null];
-      expect(toolDetails(buildTranscript(snapshot, {}))).toMatchObject([
-        { status: "unknown", statusLabel: "Outcome unavailable", resultPreview: null },
-      ]);
+    const settled = toolDetails(buildTranscript(base, [start, finish]));
+    expect(settled).toHaveLength(1);
+    expect(settled[0]).toMatchObject({
+      label: "Subagent request outcome unavailable",
+      summary: null,
     });
+    expect(settled[0]).not.toHaveProperty("delegationOutcome");
+    const reloaded = directSnapshot(
+      [
+        ...base.messages,
+        { role: "tool", tool_call_id: "child-call", content: "RAW_SECRET_RESULT" },
+      ],
+      behavior,
+    );
+    reloaded.primary_tool_events = [start, finish];
+    const retained = toolDetails(buildTranscript(reloaded));
+    expect(retained[0]).toMatchObject({ status: "unknown", summary: null });
+    expect(retained[0]).not.toHaveProperty("delegationOutcome");
+    expect(JSON.stringify(retained)).not.toContain("RAW_SECRET");
+  });
 
-    it("keeps one semantic entry across live, settled, and reload projections", () => {
-      const call = genericToolCall(
-        "exec_command",
-        "call-primary",
-        '{"cmd":"printf SECRET_RAW_COMMAND","env":{"TOKEN":"SECRET_ENV"}}',
-      );
-      const base = directSnapshot(
-        [
-          { role: "user", content: "run it" },
-          { role: "assistant", content: null, tool_calls: [call] },
-        ],
+  it("uses a bounded image fallback and does not render base64 payloads", () => {
+    const call = genericToolCall("mcp__vision__inspect", "call-image", "malformed secret");
+    const turns = buildTranscript(
+      directSnapshot(
+        [{ role: "assistant", content: null, tool_calls: [call] }, imageToolResult("call-image")],
         behavior,
-      );
-      base.active_run = {
-        run_id: "run-primary",
-        prompt_preview: "run it",
-        started_at_epoch_ms: 1,
-      };
-      const start = primaryStart("call-primary", "exec_command", "printf safe-command");
-      const live = toolDetails(buildTranscript(base, {}, {}, [start]));
-      expect(live).toEqual([
-        expect.objectContaining({
-          callId: "call-primary",
-          label: "Run command",
-          summary: "printf safe-command",
-          status: "running",
-        }),
-      ]);
-
-      const awaitingApproval = toolDetails(
-        buildTranscript(base, {}, {}, [start], new Set(["call-primary"])),
-      );
-      expect(awaitingApproval).toEqual([
-        expect.objectContaining({
-          callId: "call-primary",
-          status: "awaiting-approval",
-          statusLabel: "Awaiting approval",
-        }),
-      ]);
-
-      const finish = primaryFinish("call-primary", "exec_command");
-      const settled = toolDetails(buildTranscript(base, {}, {}, [start, finish]));
-      expect(settled).toHaveLength(1);
-      expect(settled[0]).toMatchObject({ status: "success", resultPreview: "bounded result" });
-
-      const reloaded = directSnapshot(
-        [
-          ...base.messages,
-          { role: "tool", tool_call_id: "call-primary", content: "RAW_SECRET_RESULT" },
-        ],
-        behavior,
-      );
-      reloaded.primary_tool_events = [start, finish];
-      expect(toolDetails(buildTranscript(reloaded, {}))).toEqual(settled);
-      expect(JSON.stringify(settled)).not.toContain("SECRET_RAW_COMMAND");
-      expect(JSON.stringify(settled)).not.toContain("SECRET_ENV");
-      expect(JSON.stringify(settled)).not.toContain("RAW_SECRET_RESULT");
-    });
-
-    it("does not attach unbound lifecycle facts to a live or durable subagent invocation", () => {
-      const call = genericToolCall("subagent", "child-call", '{"prompt":"RAW_SECRET"}');
-      const base = directSnapshot(
-        [
-          { role: "user", content: "delegate" },
-          { role: "assistant", content: null, tool_calls: [call] },
-        ],
-        behavior,
-      );
-      base.active_run = { run_id: "run-child", prompt_preview: "delegate", started_at_epoch_ms: 1 };
-      const start = primaryStart("child-call", "subagent", "Review store");
-      const finish = {
-        ...primaryFinish("child-call", "subagent"),
-        delegation_outcome: "background_continued",
-        delegation_summary: "Review store",
-        content_preview: "Instructions sent to subagent",
-      } as AgentEvent;
-      expect(toolDetails(buildTranscript(base, {}, {}, [start]))[0]).toMatchObject({
-        label: "Subagent request outcome unavailable",
-        summary: null,
-      });
-      const settled = toolDetails(buildTranscript(base, {}, {}, [start, finish]));
-      expect(settled).toHaveLength(1);
-      expect(settled[0]).toMatchObject({
-        label: "Subagent request outcome unavailable",
-        summary: null,
-      });
-      expect(settled[0]).not.toHaveProperty("delegationOutcome");
-      const reloaded = directSnapshot(
-        [
-          ...base.messages,
-          { role: "tool", tool_call_id: "child-call", content: "RAW_SECRET_RESULT" },
-        ],
-        behavior,
-      );
-      reloaded.primary_tool_events = [start, finish];
-      const retained = toolDetails(buildTranscript(reloaded, {}));
-      expect(retained[0]).toMatchObject({ status: "unknown", summary: null });
-      expect(retained[0]).not.toHaveProperty("delegationOutcome");
-      expect(JSON.stringify(retained)).not.toContain("RAW_SECRET");
-    });
-
-    it("uses a bounded image fallback and does not render base64 payloads", () => {
-      const call = genericToolCall("mcp__vision__inspect", "call-image", "malformed secret");
-      const turns = buildTranscript(
-        directSnapshot(
-          [{ role: "assistant", content: null, tool_calls: [call] }, imageToolResult("call-image")],
-          behavior,
-        ),
-        {},
-      );
-      expect(toolDetails(turns)).toEqual([
-        expect.objectContaining({
-          label: "MCP · Inspect",
-          resultPreview: "Image result",
-          status: "success",
-        }),
-      ]);
-      expect(JSON.stringify(toolDetails(turns))).not.toContain("base64-payload");
-    });
-  },
-);
+      ),
+    );
+    expect(toolDetails(turns)).toEqual([
+      expect.objectContaining({
+        label: "MCP · Inspect",
+        resultPreview: "Image result",
+        status: "success",
+      }),
+    ]);
+    expect(JSON.stringify(toolDetails(turns))).not.toContain("base64-payload");
+  });
+});
 
 describe("goal continuation turns", () => {
   const goalFixture = fixture.vectors.find((vector) => vector.name === "budget-above-slider");
@@ -620,7 +398,6 @@ describe("goal continuation turns", () => {
         { role: "assistant", content: "first step" },
         { role: "user", content: message },
       ]),
-      {},
     );
     expect(turns.map((turn) => turn.kind)).toEqual([
       "goal-continuation",
@@ -641,7 +418,7 @@ describe("goal continuation turns", () => {
   it("does not call a goal's run its first while older messages are unloaded", () => {
     const value = snapshot([{ role: "user", content: message }]);
     value.message_page = { start: 4, end: 5, total: 5, has_older: true };
-    expect(buildTranscript(value, {})[0]).toMatchObject({
+    expect(buildTranscript(value)[0]).toMatchObject({
       kind: "goal-continuation",
       first: false,
       messageIndex: 4,
@@ -666,7 +443,6 @@ it("retains every requested and served tier receipt in a model turn", () => {
         service_tier_receipt: { requested: "fast", served: "default" },
       },
     ]),
-    {},
   );
   expect(turns[1]).toMatchObject({
     serviceTierReceipts: [

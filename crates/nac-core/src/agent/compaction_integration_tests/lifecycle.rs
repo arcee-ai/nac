@@ -233,7 +233,7 @@ async fn cancellation_during_summary_keeps_the_prior_checkpoint() {
             tail_start_message_index: 2,
             source_prefix_sha256: source,
             system_policy_sha256: policy,
-            prompt_policy_version: compaction::PROMPT_POLICY_VERSION,
+            prompt_policy_version: compaction::DIRECT_PROMPT_POLICY_VERSION,
             old_context_estimate: 1_000,
             summary_prompt_tokens: None,
             summary_completion_tokens: None,
@@ -536,6 +536,11 @@ async fn manual_checkpoint_store_failure_is_hard_and_keeps_the_prior_view() {
         .join(format!("nac_agent_manual_store_failure_{unique}"))
         .join("store.db");
     crate::store::initialize(&store_path).unwrap();
+    crate::store::insert_test_session(&store_path, "session");
+    crate::store::open_runtime_connection(&store_path)
+        .unwrap()
+        .execute_batch("CREATE TRIGGER fail_manual_checkpoint BEFORE INSERT ON orchestrator_compaction_checkpoints BEGIN SELECT RAISE(ABORT, 'injected checkpoint store failure'); END;")
+        .unwrap();
     let server = ScriptedServer::start(vec![ScriptedResponse::json(
         "200 OK",
         scripted_responses_text("cannot persist", 12, 0, 3, 15),
@@ -544,7 +549,7 @@ async fn manual_checkpoint_store_failure_is_hard_and_keeps_the_prior_view() {
     let mut agent = compaction_test_agent(
         ModelClient::new_for_test_server(server.base_url.clone()),
         store_path.clone(),
-        Some("missing-session"),
+        Some("session"),
         Some(1),
         EventSink::channel(events_tx),
     );
@@ -554,7 +559,8 @@ async fn manual_checkpoint_store_failure_is_hard_and_keeps_the_prior_view() {
     let error = agent.compact().await.unwrap_err();
     assert_eq!(
         error.failure(),
-        Some(CompactionFailure::CheckpointPersistenceFailed)
+        Some(CompactionFailure::CheckpointPersistenceFailed),
+        "{error:#}"
     );
     let compaction_id = error.compaction_id().unwrap();
     assert_eq!(server.finish().len(), 1);

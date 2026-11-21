@@ -29,10 +29,6 @@ import {
 } from "@/app/features/insights/presentation/items/SearchItems";
 import { sessionContent } from "@/app/features/insights/presentation/items/SessionItems";
 import { useErrorLine } from "@/app/features/insights/presentation/items/useErrorLine";
-import {
-  deleteThreadContent,
-  worksetContent,
-} from "@/app/features/insights/presentation/items/WorksetItems";
 
 const TRAILING_ELLIPSIS = /…$/u;
 
@@ -60,13 +56,8 @@ function toolContent(segment: ToolSegment, context: ItemContext): ItemContent {
     case "get-goal":
       return getGoalContent(segment, context);
     case "session-status":
-    case "session-steer":
-    case "session-read":
-    case "session-wait":
     case "session-cancel":
       return sessionContent(segment, context);
-    case "delete-thread":
-      return deleteThreadContent(segment);
     default:
       return otherContent(segment, context);
   }
@@ -76,7 +67,6 @@ function segmentContent(
   segment: Exclude<InsightSegment, { kind: "reasoning" }>,
   context: ItemContext,
 ): ItemContent {
-  if (segment.kind === "workset") return worksetContent(segment);
   return toolContent(segment, context);
 }
 

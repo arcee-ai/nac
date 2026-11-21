@@ -95,7 +95,6 @@ async fn question_yield_case(bound_goal: bool) {
     let manager = SessionManager::new_unowned_fixture(ServerOptions {
         root_cwd: root.clone(),
         store_path: Some(path.clone()),
-        worker_executable: None,
         managed_host: None,
     })
     .unwrap();

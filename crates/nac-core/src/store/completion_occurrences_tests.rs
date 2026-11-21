@@ -10,33 +10,16 @@ mod join_tests;
 struct Fixture {
     path: PathBuf,
     next: u64,
-    behavior: String,
 }
 impl Fixture {
     fn new(behavior: &str) -> Self {
+        assert_eq!(behavior, "direct");
         let path = std::env::temp_dir()
             .join(format!("nac-completion-{}", uuid::Uuid::new_v4()))
             .join("store.db");
         initialize(&path).unwrap();
         insert_test_session(&path, "session");
-        if !behavior.is_empty() {
-            open_runtime_connection(&path)
-                .unwrap()
-                .execute(
-                    "UPDATE sessions SET behavior=?1 WHERE session_id='session'",
-                    [behavior],
-                )
-                .unwrap();
-        }
-        Self {
-            path,
-            next: 0,
-            behavior: if behavior.is_empty() {
-                "orchestrator".into()
-            } else {
-                behavior.into()
-            },
-        }
+        Self { path, next: 0 }
     }
     fn begin(&mut self, run: &str) {
         TranscriptLogWriter::new(&self.path)
@@ -74,23 +57,20 @@ impl Fixture {
             finished_run_disposition: Some(disposition),
             failed_run_id: None,
             failed_run_failure: None,
-            goal_settlement: (if self.behavior == "orchestrator" {
-                None
-            } else {
-                load_session_goal(&self.path, "session").unwrap()
-            })
-            .filter(|g| g.accounting_run_id.as_deref() == Some(run))
-            .map(|_| GoalRunSettlement {
-                run_id: run.into(),
-                final_billable_tokens: 0,
-                terminal_at_epoch_ms: 2,
-                disposition: if disposition == RunTerminalDisposition::Completed {
-                    GoalRunDisposition::Completed
-                } else {
-                    GoalRunDisposition::Cancelled
-                },
-                failure: None,
-            }),
+            goal_settlement: load_session_goal(&self.path, "session")
+                .unwrap()
+                .filter(|g| g.accounting_run_id.as_deref() == Some(run))
+                .map(|_| GoalRunSettlement {
+                    run_id: run.into(),
+                    final_billable_tokens: 0,
+                    terminal_at_epoch_ms: 2,
+                    disposition: if disposition == RunTerminalDisposition::Completed {
+                        GoalRunDisposition::Completed
+                    } else {
+                        GoalRunDisposition::Cancelled
+                    },
+                    failure: None,
+                }),
             heartbeat_settlement: None,
             finished_run_result: Some("private result".into()),
             updated_at: now_utc(),
@@ -126,14 +106,7 @@ fn direct_completion_retains_a_while_queued_or_transient_b_is_active() {
         assert_eq!(page.items.len(), 1);
         assert_eq!(page.items[0].run_id, "request-A");
         assert_eq!(page.items[0].kind, CompletionKind::Request);
-        assert_eq!(
-            page.items[0].behavior,
-            if behavior.is_empty() {
-                "orchestrator"
-            } else {
-                behavior
-            }
-        );
+        assert_eq!(page.items[0].behavior, behavior);
         assert_eq!(
             load_run_recovery(&fixture.path, "session")
                 .unwrap()

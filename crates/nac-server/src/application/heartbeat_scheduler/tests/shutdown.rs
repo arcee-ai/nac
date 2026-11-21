@@ -168,7 +168,6 @@ async fn observe(owned: bool, boundary: Boundary) -> anyhow::Result<Observation>
     let options = ServerOptions {
         root_cwd: root.clone(),
         store_path: Some(root.join("store.db")),
-        worker_executable: None,
         managed_host: None,
     };
     let manager = if owned {
@@ -400,7 +399,6 @@ async fn observe_stopped_phase() -> anyhow::Result<PhaseObservation> {
     let manager = SessionManager::new_async(ServerOptions {
         root_cwd: root.clone(),
         store_path: Some(path.clone()),
-        worker_executable: None,
         managed_host: None,
     })
     .await?;

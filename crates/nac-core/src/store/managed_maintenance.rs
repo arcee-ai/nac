@@ -100,7 +100,6 @@ pub enum ManagedBlockerKind {
     ActiveRun,
     Compaction,
     TraditionalChild,
-    ManagedOrchestrator,
     TerminalProcess,
     CloneOperation,
     WorkspaceMutation,
@@ -1577,10 +1576,6 @@ fn durable_blockers(conn: &Connection) -> Result<Vec<ManagedUpgradeBlocker>> {
                SELECT 1 FROM traditional_children c
                WHERE c.child_session_id = r.session_id AND c.status = 'running'
            )
-           AND NOT EXISTS (
-               SELECT 1 FROM managed_orchestrators o
-               WHERE o.orchestrator_session_id = r.session_id AND o.status = 'running'
-           )
          ORDER BY r.session_id",
     )?;
     for row in active.query_map([], |row| {
@@ -1600,14 +1595,6 @@ fn durable_blockers(conn: &Connection) -> Result<Vec<ManagedUpgradeBlocker>> {
         "child_session_id",
         ManagedBlockerKind::TraditionalChild,
         "traditional child session is running",
-        &mut blockers,
-    )?;
-    collect_relationship_blockers(
-        conn,
-        "managed_orchestrators",
-        "orchestrator_session_id",
-        ManagedBlockerKind::ManagedOrchestrator,
-        "managed orchestrator is running",
         &mut blockers,
     )?;
     let mut cleanups = conn.prepare(

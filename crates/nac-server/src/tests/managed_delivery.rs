@@ -524,7 +524,6 @@ async fn mounted_key_discovers_every_entitled_model_only_at_its_configured_desti
     let manager = SessionManager::new_unowned_fixture(ServerOptions {
         root_cwd: root.clone(),
         store_path: Some(root.join("store.db")),
-        worker_executable: None,
         managed_host: Some(config),
     })
     .unwrap();
@@ -1431,7 +1430,6 @@ async fn matching_first_chat_checks_managed_model_authority() {
             ssh_host: None,
             ssh_port: None,
             ssh_identity_file: None,
-            default_model_config_id: None,
         })
         .await
         .unwrap();
@@ -1479,7 +1477,6 @@ async fn model_source_keeps_managed_authority_and_rejects_other_selector() {
             ssh_host: None,
             ssh_port: None,
             ssh_identity_file: None,
-            default_model_config_id: None,
         })
         .await
         .unwrap();

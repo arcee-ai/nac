@@ -98,7 +98,6 @@ async fn model_source_is_rechecked_at_the_session_insert_boundary() {
             ssh_host: None,
             ssh_port: None,
             ssh_identity_file: None,
-            default_model_config_id: None,
         },
     )
     .unwrap();
@@ -237,7 +236,6 @@ async fn retained_command(label: &str) -> (CreateSessionWithSnapshot, PathBuf, S
             ssh_host: None,
             ssh_port: None,
             ssh_identity_file: None,
-            default_model_config_id: None,
         },
     )
     .unwrap();
@@ -371,7 +369,6 @@ async fn native_command(label: &str) -> (CreateSessionWithSnapshot, PathBuf, Str
             ssh_host: None,
             ssh_port: None,
             ssh_identity_file: None,
-            default_model_config_id: None,
         },
     )
     .unwrap();

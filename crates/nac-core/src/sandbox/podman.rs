@@ -890,45 +890,6 @@ impl PodmanSession {
         Ok(())
     }
 
-    pub(crate) fn worker_cli_args(&self) -> Vec<OsString> {
-        let mut args = vec![
-            OsString::from("--sandbox"),
-            OsString::from("--no-mount-cwd"),
-            OsString::from("--sandbox-backend"),
-            OsString::from("podman"),
-            OsString::from("--sandbox-image"),
-            OsString::from(self.spec.image.clone()),
-            OsString::from("--sandbox-workdir"),
-            OsString::from(self.spec.workdir.display().to_string()),
-            OsString::from("--sandbox-session-key"),
-            OsString::from(self.session_key.clone()),
-            OsString::from("--sandbox-cpus"),
-            OsString::from(self.spec.cpus.to_string()),
-            OsString::from("--sandbox-mem"),
-            OsString::from(self.spec.memory_mib.to_string()),
-        ];
-
-        for mount in &self.spec.mounts {
-            args.push(OsString::from(if mount.read_only {
-                "--sandbox-mount-ro"
-            } else {
-                "--sandbox-mount"
-            }));
-            args.push(mount.host.as_os_str().to_owned());
-            args.push(mount.guest.as_os_str().to_owned());
-        }
-        if let Some(shm_size) = &self.spec.shm_size {
-            args.push(OsString::from("--sandbox-shm-size"));
-            args.push(OsString::from(shm_size));
-        }
-        for device in &self.spec.gpu_devices {
-            args.push(OsString::from("--sandbox-gpu"));
-            args.push(OsString::from(device));
-        }
-
-        args
-    }
-
     pub(crate) async fn exec(
         &self,
         program: &str,

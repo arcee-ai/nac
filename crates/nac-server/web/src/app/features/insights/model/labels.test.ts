@@ -4,11 +4,8 @@ import {
   compactTool,
   modelTurn,
   thoughts,
-  thread,
   toolDetail,
   userTurn,
-  wave,
-  workset,
 } from "@/app/features/insights/model/fixtures.test-support";
 import {
   actionMeta,
@@ -53,9 +50,6 @@ function tool(name: string, overrides: Partial<ToolPresentation> = {}): InsightS
 describe("insight labels", () => {
   it.each<[ActionKind, string, string, string | null]>([
     ["reasoning", "Thoughts", "Thinking…", null],
-    ["thread", "Thread", "Running thread…", "Thread"],
-    ["define-workset", "Define Workset", "Defining Workset…", "Workset"],
-    ["delete-thread", "Delete thread", "Deleting…", null],
     ["read-file", "Read File", "Reading File…", "Read"],
     ["write-file", "Create File", "Creating File…", "Write"],
     ["edit-file", "Edit File", "Editing File…", "Edit"],
@@ -70,11 +64,7 @@ describe("insight labels", () => {
     ["get-goal", "Get goal", "Get goal…", "Read"],
     ["update-goal", "Update goal", "Updating goal…", "Edit"],
     ["spawn-agent", "Subagent", "Subagent request in progress…", "Spawn"],
-    ["spawn-orchestrator", "Spawn Orchestrator", "Spawn Orchestrator…", "Spawn"],
     ["session-status", "Check session status", "Checking session status…", "Check"],
-    ["session-steer", "Steer session", "Steer session…", "Steer"],
-    ["session-read", "Read session", "Reading session…", "Read"],
-    ["session-wait", "Wait for session", "Wait for session…", "Wait"],
     ["session-cancel", "Cancel session", "Cancelling session…", "Cancel"],
     ["other", "Tool", "Running tool…", "Tool"],
   ])("labels %s rows like the canonical table", (kind, type, running, meta) => {
@@ -104,20 +94,13 @@ describe("insight labels", () => {
     expect(
       segmentTitle(tool("web_fetch", { summary: "https://user:SECRET@internal.example:8443/x" })),
     ).toBe("internal.example:8443");
-    expect(segmentTitle(tool("orchestrator_wait", { summary: "session-7" }))).toBe("session-7");
+    expect(segmentTitle(tool("orchestrator_wait", { summary: "session-7" }))).toBe(
+      "orchestrator_wait",
+    );
     expect(segmentTitle(tool("create_goal", { summary: "Ship the revamp" }))).toBe("Create goal");
     expect(segmentTitle(tool("read"))).toBe("Read File");
     expect(segmentTitle(tool("mcp__linear__read", { label: "MCP · Read" }))).toBe("MCP · Read");
     expect(segmentTitle(group([thoughts("thoughts-0")]).segments[0])).toBe("Thoughts");
-    expect(segmentTitle(group([workset("workset_define-1-0", "polylang")]).segments[0])).toBe(
-      "Worksets_polylang",
-    );
-    expect(segmentTitle(group([workset("workset_define-1-0", "")]).segments[0])).toBe(
-      "Define Workset",
-    );
-    expect(
-      segmentTitle(group([compactTool("thread_delete-1-0", "thread_delete")]).segments[0]),
-    ).toBe("Delete thread");
   });
 
   it("puts the argument in the live badge label", () => {
@@ -158,9 +141,9 @@ describe("insight labels", () => {
     ).toBe("Thoughts, Read File and more");
     expect(
       groupSummaryLabel(
-        group([thoughts("thoughts-0"), thoughts("thoughts-1"), workset("workset_define-1-0", "w")]),
+        group([thoughts("thoughts-0"), thoughts("thoughts-1"), toolDetail("read")]),
       ),
-    ).toBe("Thoughts, Workset");
+    ).toBe("Thoughts, Read File");
     expect(
       groupSummaryLabel(group([toolDetail("read"), toolDetail("read", { callId: "call-read-2" })])),
     ).toBe("Read File");
@@ -216,17 +199,12 @@ describe("insight labels", () => {
       entries([thoughts("thoughts-0", { durationMs: 13_750 })]),
       entries([thoughts("thoughts-0")]),
     ].map((list) => list[0]);
-    const threads = entries([
-      wave("wave-1", [[thread("impl/calendar", "impl/calendar@1:a")]]),
-      wave("wave-2", [[thread("impl/calendar", "impl/calendar@2:b")]]),
-    ]);
     const [session] = entries([toolDetail("subagent", { summary: "Fix the flaky test" })]);
 
     expect(entryMeta(many)).toBe("3");
     expect(entryMeta(single)).toBe("1");
     expect(entryMeta(unknown)).toBe("1");
     expect(entryMeta(entries([toolDetail("read")])[0])).toBe("1");
-    expect(threads.map(entryMeta)).toEqual(["Thread, 2", "Thread, 2"]);
     expect(entryMeta(session)).toBe("Spawn");
   });
 
@@ -288,30 +266,12 @@ describe("insight labels", () => {
     });
   });
 
-  it("keeps a thread's name and meta in every state and rows sessions by their title", () => {
-    const rows = entries([
-      wave("wave-1", [
-        [
-          thread("impl/a", "impl/a@1:a", { state: "running" }),
-          thread("impl/b", "impl/b@1:b", { state: "pending" }),
-          thread("impl/c", "impl/c@1:c", { state: "error" }),
-          thread("impl/d", "impl/d@1:d", { state: "cancelled" }),
-          thread("impl/e", "impl/e@1:e"),
-        ],
-      ]),
-    ]).map(entryRow);
+  it("rows sessions by their title", () => {
     const [launched, launching] = [
       entries([toolDetail("subagent", { summary: "Fix the flaky test" })]),
       entries([toolDetail("orchestrator_launch", { status: "running" })]),
     ].map((list) => entryRow(list[0]));
 
-    expect(rows).toEqual([
-      { action: "thread", label: "impl/a", meta: "Thread, 1", status: "running" },
-      { action: "thread", label: "impl/b", meta: "Thread, 1", status: "pending" },
-      { action: "thread", label: "impl/c", meta: "Thread, 1", status: "failed" },
-      { action: "thread", label: "impl/d", meta: "Thread, 1", status: "failed" },
-      { action: "thread", label: "impl/e", meta: "Thread, 1", status: "ready" },
-    ]);
     expect(launched).toEqual({
       action: "spawn-agent",
       label: "Fix the flaky test",
@@ -319,8 +279,8 @@ describe("insight labels", () => {
       status: "ready",
     });
     expect(launching).toEqual({
-      action: "spawn-orchestrator",
-      label: "Spawn Orchestrator…",
+      action: "other",
+      label: "orchestrator_launch…",
       meta: null,
       status: "running",
     });

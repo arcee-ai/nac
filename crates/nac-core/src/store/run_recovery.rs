@@ -164,9 +164,6 @@ fn has_running_relationship(
         "SELECT EXISTS(
              SELECT 1 FROM traditional_children
              WHERE child_session_id = ?1 AND run_id = ?2 AND status = 'running'
-             UNION ALL
-             SELECT 1 FROM managed_orchestrators
-             WHERE orchestrator_session_id = ?1 AND run_id = ?2 AND status = 'running'
          )",
         params![session_id, run_id],
         |row| row.get(0),
@@ -380,7 +377,6 @@ fn reconcile_active_run_inner(path: &Path, session_id: &str) -> Result<ActiveRun
     let mut connection = open_runtime_connection(path)?;
     let transaction =
         connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-    super::worker_dispatches::recover_worker_dispatches(&transaction, session_id)?;
     let Some(record) = load_run_recovery_with_connection(&transaction, session_id)? else {
         transaction.commit()?;
         return Ok(ActiveRunReconciliation::None);
@@ -899,7 +895,7 @@ mod tests {
     #[test]
     fn version_thirteen_store_adds_only_the_recovery_table() {
         let path = temp_store_path("v13_migration");
-        initialize(&path).unwrap();
+        crate::store::initialize_synthetic_predecessor(&path).unwrap();
         {
             let connection = open_connection(&path).unwrap();
             connection

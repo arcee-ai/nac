@@ -141,7 +141,7 @@ test("completion pages keep exact bounded semantic shape and reject unsafe integ
         sequence: 1,
         session_id: "chat",
         run_id: "run",
-        behavior: "direct-with-orchestrator",
+        behavior: "direct",
         kind: "goal",
         goal_id: "goal",
         mark_version: 0,
@@ -156,6 +156,8 @@ test("completion pages keep exact bounded semantic shape and reject unsafe integ
     { ...page, cursor: 2 ** 53 },
     { ...page, items: [...page.items, ...page.items] },
     { ...page, items: [{ ...page.items[0], kind: "request" }] },
+    { ...page, items: [{ ...page.items[0], behavior: "orchestrator" }] },
+    { ...page, items: [{ ...page.items[0], behavior: "direct-with-orchestrator" }] },
   ])
     assert.throws(() => completionPage(bad));
 });

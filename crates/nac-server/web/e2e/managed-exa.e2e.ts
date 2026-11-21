@@ -78,7 +78,7 @@ test.describe("native Exa retrieval", () => {
     expect(JSON.stringify(malformedResult?.body)).not.toContain(EXA_CANARY);
 
     await assertCanaryAbsentFromRetainedState(harness, request, sessionId);
-    await harness.waitForNoWorkerProcesses();
+    await harness.waitForNoDescendantProcesses();
   });
 
   test("cancels a hanging request and reaps its background descendant", async ({
@@ -121,7 +121,7 @@ test.describe("native Exa retrieval", () => {
     expect(cancelled.ok()).toBe(true);
     await withTimeout(exa.hangingRequestClosed, 10_000, "cancelled Exa connection close");
     await waitForRunIdle(request, harness, sessionId);
-    await harness.waitForNoWorkerProcesses();
+    await harness.waitForNoDescendantProcesses();
     harness.provider.assertConsumed();
     expect(exa.requests).toHaveLength(1);
     expect(exa.requests[0]).toMatchObject({ path: "/search", apiKey: EXA_CANARY });

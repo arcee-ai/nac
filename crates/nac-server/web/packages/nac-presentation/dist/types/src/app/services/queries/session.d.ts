@@ -359,8 +359,6 @@ export declare function useSessionSummary(id: string | null): import("@tanstack/
 export declare function useSessionSnapshot(id: string | null, options?: Partial<UseQueryOptions<SessionSnapshotResponse>>): import("@tanstack/react-query").UseQueryResult<NoInfer<{
     active_compaction?: import("../../types/openapi.generated").components["schemas"]["ActiveCompactionSnapshot"] | null;
     active_run?: import("../../types/openapi.generated").components["schemas"]["ActiveRunSnapshot"] | null;
-    active_threads?: string[];
-    covered_orchestrator_steering_ids?: number[];
     forks?: import("../../types/openapi.generated").components["schemas"]["SessionForkLink"][];
     message_created_at?: (string | null)[];
     messages: import("../../types/openapi.generated").components["schemas"]["Message"][];
@@ -370,14 +368,9 @@ export declare function useSessionSnapshot(id: string | null, options?: Partial<
     run_failure?: import("../../types/openapi.generated").components["schemas"]["RunFailure"] | null;
     sessions: import("../../types/openapi.generated").components["schemas"]["SessionSummarySnapshot"][];
     shell_commands?: import("../../types/openapi.generated").components["schemas"]["ShellCommandSnapshot"][];
-    thread_episodes: Record<string, import("../../types/openapi.generated").components["schemas"]["EpisodeSnapshot"][]>;
     thread_event_boundary: import("../../types/openapi.generated").components["schemas"]["SessionEventBoundary"];
     thread_event_diagnostics?: import("../../types/openapi.generated").components["schemas"]["ThreadEventDecodeDiagnostic"][];
-    thread_events?: Record<string, import("../../types/openapi.generated").components["schemas"]["AgentEvent"][]>;
-    thread_steering?: import("../../types/openapi.generated").components["schemas"]["ThreadSteeringRecord"][];
-    threads: import("../../types/openapi.generated").components["schemas"]["ThreadSnapshot"][];
     transcript_recovery_warning?: string | null;
-    worksets: import("../../types/openapi.generated").components["schemas"]["WorksetsSnapshot"];
     workspace: import("../../types/openapi.generated").components["schemas"]["WorkspaceSnapshot"];
 } & {
     lineage?: import("../../types/openapi.generated").components["schemas"]["SessionLineageSnapshot"] | null;
@@ -396,7 +389,6 @@ export declare function useSessionConfig(id: string | null): import("@tanstack/r
     config_version: number;
     diagnostics?: string[];
     extra_headers_json: string | null;
-    light_model?: import("../../types/openapi.generated").components["schemas"]["LightModelSettings"] | null;
     model: string;
     orchestrator_compaction_threshold: number | null;
     reasoning_effort: string | null;
@@ -406,8 +398,6 @@ export declare function useSessionConfig(id: string | null): import("@tanstack/r
 export declare function useCreateSession(): import("@tanstack/react-query").UseMutationResult<{
     active_compaction?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["ActiveCompactionSnapshot"] | null;
     active_run?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["ActiveRunSnapshot"] | null;
-    active_threads?: string[];
-    covered_orchestrator_steering_ids?: number[];
     forks?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionForkLink"][];
     message_created_at?: (string | null)[];
     messages: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["Message"][];
@@ -417,14 +407,9 @@ export declare function useCreateSession(): import("@tanstack/react-query").UseM
     run_failure?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["RunFailure"] | null;
     sessions: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionSummarySnapshot"][];
     shell_commands?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["ShellCommandSnapshot"][];
-    thread_episodes: Record<string, import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["EpisodeSnapshot"][]>;
     thread_event_boundary: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionEventBoundary"];
     thread_event_diagnostics?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["ThreadEventDecodeDiagnostic"][];
-    thread_events?: Record<string, import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["AgentEvent"][]>;
-    thread_steering?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["ThreadSteeringRecord"][];
-    threads: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["ThreadSnapshot"][];
     transcript_recovery_warning?: string | null;
-    worksets: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["WorksetsSnapshot"];
     workspace: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["WorkspaceSnapshot"];
 } & {
     lineage?: import("../../../../packages/nac-client/src/openapi.generated").components["schemas"]["SessionLineageSnapshot"] | null;
@@ -443,7 +428,6 @@ export declare function useCreateSession(): import("@tanstack/react-query").UseM
     first_chat?: boolean;
     first_chat_require_matching_model?: boolean;
     first_chat_same_behavior?: boolean;
-    light_model?: import("../../types/openapi.generated").components["schemas"]["RequestField_LightModelSettings_LightModelSettings"];
     model?: import("../../types/openapi.generated").components["schemas"]["RequestField_String_String"];
     model_source?: import("../../types/openapi.generated").components["schemas"]["ProjectModelSourceRef"] | null;
     orchestrator_compaction_threshold?: import("../../types/openapi.generated").components["schemas"]["RequestField_u64_u64"];
@@ -934,7 +918,6 @@ export declare function useCompactSession(): import("@tanstack/react-query").Use
 export declare function useRevertSession(): import("@tanstack/react-query").UseMutationResult<{
     messages_removed: number;
     revisions_removed: number;
-    threads_removed: number;
     transcript_len: number;
     workspace_restored: boolean;
 }, Error, {

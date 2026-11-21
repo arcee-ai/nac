@@ -1,47 +1,7 @@
 use super::*;
 
-fn configuration(model: &str) -> NewModelConfiguration {
-    NewModelConfiguration {
-        name: model.into(),
-        backend: "openai-responses".into(),
-        model: model.into(),
-        base_url: "https://fixture.invalid/v1".into(),
-        allow_insecure_http: false,
-        api_key_env: None,
-        reasoning_effort: Some("high".into()),
-        service_tier: Some(
-            if model == "model-a" {
-                "fast"
-            } else {
-                "standard"
-            }
-            .into(),
-        ),
-        extra_headers: std::collections::BTreeMap::new(),
-        orchestrator_compaction_threshold: None,
-        initial_prompt: None,
-        light_model: None,
-    }
-}
-
-fn select(f: &Fixture, id: Option<&str>) {
-    update_project(
-        &f.path,
-        "project",
-        ProjectPatch {
-            default_model_config_id: Some(id.map(str::to_owned)),
-            ..ProjectPatch::default()
-        },
-    )
-    .unwrap();
-}
-
 fn configured() -> Fixture {
     let mut f = Fixture::new();
-    for id in ["model-a", "model-b"] {
-        insert_model_configuration(&f.path, id, configuration(id)).unwrap();
-    }
-    select(&f, Some("model-a"));
     f.binding = fresh_heartbeat_binding(
         &f.path,
         f.binding.fresh_task.as_ref().unwrap(),
@@ -77,10 +37,6 @@ fn legacy_schedule_without_selection_suspends_without_reserving_or_guessing() {
         binding: receipt.schedule.binding.clone(),
     };
     let schedule = receipt.schedule;
-    for id in ["model-a", "model-b"] {
-        insert_model_configuration(&f.path, id, configuration(id)).unwrap();
-    }
-    select(&f, Some("model-b"));
     let pending = materialize_heartbeats(&f.path, 63_000)
         .unwrap()
         .into_iter()
@@ -112,17 +68,16 @@ fn legacy_schedule_without_selection_suspends_without_reserving_or_guessing() {
 }
 
 #[test]
-fn absent_defaults_and_explicit_choices_do_not_change_project_identity() {
-    for (before, after) in [(None, Some("model-b")), (Some("model-a"), None)] {
+fn explicit_choices_preserve_project_and_schedule_identity() {
+    for model in ["model-a", "model-b"] {
         let mut f = configured();
-        select(&f, before);
         let mut destination = f.binding.fresh_task.clone().unwrap();
+        destination.model_selection.as_mut().unwrap().model = model.into();
         destination.model = Some("explicit-model".into());
         destination.reasoning_effort = Some("low".into());
         f.binding =
             fresh_heartbeat_binding(&f.path, &destination, None, f.root.to_str().unwrap()).unwrap();
         let schedule = f.create();
-        select(&f, after);
         let pending = f.pending();
         let prepared = reserve_fresh_heartbeat_launch(
             &f.path,
@@ -132,7 +87,6 @@ fn absent_defaults_and_explicit_choices_do_not_change_project_identity() {
         )
         .unwrap()
         .unwrap();
-        assert!(prepared.model_defaults().is_none());
         assert_eq!(
             prepared.receipt().request.model_selection,
             destination.model_selection
@@ -141,14 +95,14 @@ fn absent_defaults_and_explicit_choices_do_not_change_project_identity() {
         let saved = read_heartbeat(&f.path, "project:project", &schedule.schedule_id).unwrap();
         assert_eq!(
             saved.binding, schedule.binding,
-            "new defaults do not rewrite a schedule"
+            "reserving a launch does not rewrite a schedule"
         );
         assert_eq!(saved.starts, 1);
     }
 }
 
 #[test]
-fn resume_after_default_change_needs_no_edit_and_replays_its_original_receipt() {
+fn resume_replays_its_original_receipt() {
     let f = configured();
     let schedule = f.create();
     let paused = f.control(
@@ -158,7 +112,6 @@ fn resume_after_default_change_needs_no_edit_and_replays_its_original_receipt() 
         },
         2_000,
     );
-    select(&f, Some("model-b"));
     let binding = fresh_heartbeat_binding(
         &f.path,
         f.binding.fresh_task.as_ref().unwrap(),
@@ -184,7 +137,6 @@ fn resume_after_default_change_needs_no_edit_and_replays_its_original_receipt() 
     assert_eq!(resumed.schedule.state, HeartbeatState::Active);
     assert_eq!(resumed.schedule.spec, schedule.spec);
     assert_eq!(resumed.schedule.binding, schedule.binding);
-    select(&f, None);
     let replay = control_heartbeat(
         &f.path,
         "project:project",
@@ -237,8 +189,7 @@ fn publish(
 }
 
 #[test]
-fn reserved_session_model_survives_reopen_publication_and_initial_admission_after_pointer_changes()
-{
+fn reserved_model_survives_reopen_publication_and_initial_admission() {
     let mut f = configured();
     f.binding.fresh_task.as_mut().unwrap().default_ref = None;
     f.binding
@@ -255,15 +206,11 @@ fn reserved_session_model_survives_reopen_publication_and_initial_admission_afte
         reserve_fresh_heartbeat_launch(&f.path, &pending.occurrence_id, pending.revision, 61_000)
             .unwrap()
             .unwrap();
-    select(&f, Some("model-b"));
-    update_model_configuration(&f.path, "model-a", configuration("edited-model-a")).unwrap();
     initialize(&f.path).unwrap();
     let replay = reserve_fresh_heartbeat_launch(&f.path, &pending.occurrence_id, 1, 62_000)
         .unwrap()
         .unwrap();
     assert_eq!(replay.receipt(), prepared.receipt());
-    assert_eq!(replay.model_defaults(), prepared.model_defaults());
-    assert!(replay.model_defaults().is_none());
     assert_eq!(
         replay
             .receipt()
@@ -276,7 +223,6 @@ fn reserved_session_model_survives_reopen_publication_and_initial_admission_afte
         Some("fast")
     );
     let snapshot = publish(&f, &pending, &replay);
-    select(&f, None);
     let published = heartbeat_history(&f.path, "project:project", &pending.schedule_id)
         .unwrap()
         .remove(0);
@@ -298,7 +244,6 @@ fn reserved_session_model_survives_reopen_publication_and_initial_admission_afte
     let final_receipt = read_fresh_heartbeat_launch(&f.path, &pending.occurrence_id)
         .unwrap()
         .unwrap();
-    assert_eq!(final_receipt.model_defaults(), prepared.model_defaults());
     assert_eq!(
         final_receipt.receipt().session_id,
         prepared.receipt().session_id
@@ -333,7 +278,6 @@ fn changed_prepared_configuration_or_input_still_blocks_initial_admission() {
         )
         .unwrap()
         .unwrap();
-        select(&f, Some("model-b"));
         let snapshot = publish(&f, &pending, &prepared);
         let published = heartbeat_history(&f.path, "project:project", &pending.schedule_id)
             .unwrap()
@@ -385,12 +329,13 @@ fn changed_prepared_configuration_or_input_still_blocks_initial_admission() {
 }
 
 #[test]
-fn fresh_comparison_keeps_target_guards_and_does_not_relax_classic_comparison() {
+fn fresh_comparison_keeps_target_guards_without_retired_model_presets() {
     let f = configured();
     let binding = f.binding.clone();
-    let mut defaults = binding.clone();
-    defaults.model_configuration_id = Some("model-b".into());
-    assert!(!binding.same_target(&defaults));
+    let mut legacy = serde_json::to_value(&binding).unwrap();
+    legacy["model_configuration_id"] = serde_json::json!("retired-preset");
+    let defaults: HeartbeatBinding = serde_json::from_value(legacy).unwrap();
+    assert!(binding.same_target(&defaults));
     assert!(binding.same_fresh_project_target(&defaults));
     for field in ["configuration", "cwd", "project", "backend"] {
         let mut changed = defaults.clone();
@@ -508,7 +453,7 @@ fn v53_writer_frozen_admission_replays_exact_model_without_rebinding() {
     assert_eq!(selection.service_tier.as_deref(), Some("fast"));
     assert!(first.receipt().request.model_selection.is_none());
     let mut pinned = first.clone();
-    pinned.receipt.binding.model_configuration_id = None;
+    pinned.legacy_binding_id = None;
     assert!(pinned.legacy_frozen_model().is_err());
     pinned.model_defaults.as_mut().unwrap().config_id =
         format!("scheduled-defaults:{}", pinned.receipt.occurrence_id);
@@ -593,6 +538,26 @@ fn v53_writer_frozen_admission_replays_exact_model_without_rebinding() {
         )
         .unwrap();
     assert_eq!(raw, original);
+    let token = "\"model_configuration_id\":\"model-a\"";
+    assert_eq!(original.matches(token).count(), 1);
+    for duplicate in ["model-a", "different"] {
+        let altered = original.replacen(
+            token,
+            &format!("{token},\"model_configuration_id\":\"{duplicate}\""),
+            1,
+        );
+        conn.execute(
+            "UPDATE heartbeat_task_launches SET launch_json=?2 WHERE occurrence_id=?1",
+            params![id, altered],
+        )
+        .unwrap();
+        assert!(read_fresh_heartbeat_launch(&path, &id).is_err());
+    }
+    conn.execute(
+        "UPDATE heartbeat_task_launches SET launch_json=?2 WHERE occurrence_id=?1",
+        params![id, original],
+    )
+    .unwrap();
     conn.execute("UPDATE heartbeat_task_launches SET launch_json=json_set(launch_json,'$.model_defaults.orchestrator_compaction_threshold',8192) WHERE occurrence_id=?1", [&id]).unwrap();
     drop(conn);
     let prepared = read_fresh_heartbeat_launch(&path, &id).unwrap().unwrap();

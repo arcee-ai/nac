@@ -5,7 +5,7 @@
 
 import { createStore, standalonePreferenceStorage } from "@/app/lib/store";
 import { addTokenUsage, isActiveRun, maxBillableUsage, tokenUsageHasSpend } from "@/app/lib/format";
-import { threadLogLine, toolCallFailed, type ThreadLogLine } from "@/app/lib/threadLog";
+import { toolCallFailed } from "@/app/lib/toolPresentation";
 import type { StreamStatus } from "@/app/services/eventStream";
 import type {
   ActiveRunSnapshot,
@@ -20,7 +20,6 @@ export type RuntimeEventKind =
   | "run"
   | "tool"
   | "mcp"
-  | "thread"
   | "assistant"
   | "steering"
   | "compaction"
@@ -33,20 +32,6 @@ export interface RuntimeEvent {
   isError: boolean;
   ts: number;
   local: boolean;
-}
-
-export interface RuntimeThread {
-  name: string;
-  status: "running" | "finished";
-  /** The active dispatch ended because the parent run was stopped. */
-  cancelled: boolean;
-  exitCode: number | null;
-  isError: boolean;
-  /**
-   * The commands the thread has issued and their results, oldest first. The
-   * card tails the last few lines of it and the side panel shows all of them.
-   */
-  log: ThreadLogLine[];
 }
 
 export interface RuntimeState {
@@ -66,13 +51,6 @@ export interface RuntimeState {
   modelRetryAttempt: number | null;
   streamStatus: StreamStatus;
   events: RuntimeEvent[];
-  threads: Record<string, RuntimeThread>;
-  /**
-   * Orchestrator tool-call ids that have already emitted `tool_call_finished`.
-   * Used by the transcript so a workset badge can leave the pending state
-   * before the DAG batch commits its tool messages.
-   */
-  finishedToolCalls: Record<string, true>;
   /** Safe top-level tool lifecycle overlays, merged with durable snapshot rows by call id. */
   primaryToolEvents: AgentEvent[];
   /** Prose the current model call has produced so far. */
@@ -86,10 +64,8 @@ export interface RuntimeState {
    * the renderer drops whichever part the snapshot already covers.
    */
   streamSettled: boolean;
-  /**
-   * The buffers hold output from before the prompt sent last, and its run has
-   * neither started nor streamed since, so none of that output answers it.
-   */
+  // The buffers hold output from before the prompt sent last, and its run has
+  // neither started nor streamed since, so none of that output answers it.
   streamPredatesPrompt: boolean;
   /**
    * Prompt shown in the chat from the moment Send is pressed until the
@@ -125,7 +101,7 @@ export interface RuntimeState {
    */
   workspaceEpoch: number;
   /**
-   * Stop was painted; the HTTP cancel is still waiting on worker trees.
+   * Stop was painted; the HTTP cancel is still waiting for process cleanup.
    * Composer Send and transcript Regenerate stay blocked, and a still-live
    * `active_run` on the snapshot must not snap the chrome back to running.
    */
@@ -135,12 +111,6 @@ export interface RuntimeState {
 export type RefreshKind = "none" | "messages" | "snapshot" | "replace-snapshot";
 /** One presentation lifetime; hosted preferences are ephemeral. */
 export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem">) {
-  /**
-   * How much of a thread's log is kept. Long enough to scroll back through in the
-   * side panel, which is the only place that shows more than the newest lines.
-   */
-  const THREAD_LOG_LIMIT = 200;
-
   const runtimeStore = createStore<RuntimeState>(
     {
       sessionId: null,
@@ -152,8 +122,6 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
       modelRetryAttempt: null,
       streamStatus: "idle",
       events: [],
-      threads: {},
-      finishedToolCalls: {},
       primaryToolEvents: [],
       streamText: "",
       streamReasoning: "",
@@ -195,8 +163,6 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
       modelRetryAttempt: null,
       streamStatus: sessionId ? "connecting" : "idle",
       events: [],
-      threads: {},
-      finishedToolCalls: {},
       primaryToolEvents: [],
       streamText: "",
       streamReasoning: "",
@@ -210,10 +176,6 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
       workspaceEpoch: 0,
       cancelArmed: false,
     });
-  }
-
-  function clearRuntimeThreads(): void {
-    setState({ threads: {} });
   }
 
   /** Raise session spend to match a snapshot total; never lowers it. */
@@ -252,11 +214,9 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
   }
 
   /**
-   * Fold one slice of live model output into the buffers. Only the orchestrator's
-   * own output belongs in the chat — a thread's output is summarized on its card.
+   * Fold one slice of the session's live model output into the buffers.
    */
   function applyAssistantDelta(delta: AssistantStreamDelta): void {
-    if (delta.thread_name) return;
     if (delta.reset) {
       setState({
         streamSettled: false,
@@ -325,37 +285,6 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
     });
   }
 
-  const emptyThread = (name: string): RuntimeThread => ({
-    name,
-    status: "running",
-    cancelled: false,
-    exitCode: null,
-    isError: false,
-    log: [],
-  });
-
-  function updateThread(name: string, patch: Partial<RuntimeThread>) {
-    if (!name) return;
-    setState((state) => ({
-      threads: {
-        ...state.threads,
-        [name]: { ...(state.threads[name] ?? emptyThread(name)), ...patch },
-      },
-    }));
-  }
-
-  /** Records which threads a stop interrupted, before they are terminalized. */
-  function flagCancelledThreads(
-    threads: Record<string, RuntimeThread>,
-  ): Record<string, RuntimeThread> {
-    return Object.fromEntries(
-      Object.entries(threads).map(([name, thread]) => [
-        name,
-        thread.status === "running" ? { ...thread, cancelled: true } : thread,
-      ]),
-    );
-  }
-
   function elapsedSince(startedAt: number | null | undefined): number | null {
     if (startedAt == null || startedAt <= 0) return null;
     return Math.max(0, Date.now() - startedAt);
@@ -372,7 +301,7 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
   }
 
   /**
-   * Paint Stopping immediately. The HTTP cancel still waits for worker trees;
+   * Paint Stopping immediately. The HTTP cancel still waits for process cleanup;
    * `finishRunCancel` and SSE `run_cancelled` clear the arm without flipping
    * running back on.
    */
@@ -392,7 +321,6 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
       cancelArmed: true,
       lastElapsedMs: freezeElapsed(state),
       runStartedAt: null,
-      threads: terminalizeThreads(flagCancelledThreads(state.threads)),
     }));
     return previous;
   }
@@ -407,7 +335,6 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
       runFailure: previous.runFailure,
       modelRetryAttempt: previous.modelRetryAttempt,
       streamSettled: previous.streamSettled,
-      threads: previous.threads,
       cancelArmed: previous.cancelArmed,
       lastElapsedMs: previous.lastElapsedMs,
       runStartedAt: previous.runStartedAt,
@@ -415,7 +342,7 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
   }
 
   /**
-   * Cancel HTTP returned: worker trees are down, so Send/Regenerate are honest again.
+   * Cancel HTTP returned: cleanup is complete, so Send/Regenerate are available again.
    * SSE `run_cancelled` does the same; either may win.
    */
   function finishRunCancel(): void {
@@ -426,39 +353,6 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
       lastElapsedMs: freezeElapsed(state),
       runStartedAt: null,
     }));
-  }
-
-  /** Identifies the log lines whose events carry no id of their own. */
-  let logSequence = 0;
-
-  /**
-   * Append what an event says about a thread to that thread's log, dropping
-   * whatever has scrolled out of reach.
-   */
-  function pushThreadLog(name: string | null | undefined, event: AgentEvent) {
-    if (!name) return;
-    logSequence += 1;
-    const line = threadLogLine(event, logSequence);
-    if (!line) return;
-    setState((state) => {
-      const thread = state.threads[name] ?? emptyThread(name);
-      const log = [...thread.log, line].slice(-THREAD_LOG_LIMIT);
-      return { threads: { ...state.threads, [name]: { ...thread, log } } };
-    });
-  }
-
-  /** Marks every still-running thread finished once the run itself is over. */
-  function terminalizeThreads(
-    threads: Record<string, RuntimeThread>,
-  ): Record<string, RuntimeThread> {
-    return Object.fromEntries(
-      Object.entries(threads).map(([name, thread]) => [
-        name,
-        thread.status === "running"
-          ? { ...thread, status: "finished", exitCode: null, isError: false }
-          : thread,
-      ]),
-    );
   }
 
   /**
@@ -473,7 +367,7 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
         setState({
           running: true,
           // Keep the chat chrome as a plain live ModelMessage (pill + model);
-          // tool/thread events fill activity once there is something to name.
+          // Tool events fill activity once there is something to name.
           activity: "",
           error: null,
           modelError: null,
@@ -486,14 +380,9 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
           // Only this run's live delta resets. Session spend lives on the
           // snapshot, including unattributed usage from cancelled or rewound turns.
           runUsage: null,
-          finishedToolCalls: {},
           runStartedAt: event.started_at_epoch_ms,
           lastElapsedMs: null,
           cancelArmed: false,
-          // Stop left workers as finished+cancelled. A follow-up that reuses a
-          // name would inherit that flag and keep the new card on Close until
-          // thread_started, so this run starts with an empty live map.
-          threads: {},
         });
         pushEvent({
           seq,
@@ -506,8 +395,7 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
         // The run's own answer is the authoritative version of whatever the
         // stream last held, so it takes over until the snapshot lands; the
         // reasoning behind it stays too, or its group would drop out of both
-        // panes until then. The run outlives every worker it dispatched, so a
-        // thread still marked running here only means its finish never arrived.
+        // panes until then.
         setState((state) => ({
           running: false,
           activity: "",
@@ -518,7 +406,6 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
           cancelArmed: false,
           lastElapsedMs: freezeElapsed(state, event.duration_ms ?? null),
           runStartedAt: null,
-          threads: terminalizeThreads(state.threads),
         }));
         pushEvent({ seq, kind: "run", text: "Run completed", isError: false });
         return "snapshot";
@@ -536,15 +423,12 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
           cancelArmed: false,
           lastElapsedMs: freezeElapsed(state),
           runStartedAt: null,
-          threads: terminalizeThreads(state.threads),
         }));
         pushEvent({ seq, kind: "error", text: message, isError: true });
         return "snapshot";
       }
       case "run_cancelled":
-        // Stopping is what the user asked for: the transcript already carries the
-        // cancellation marker, so a red box would only contradict it. Terminalize
-        // only live workers; completed cards and their logs remain useful history.
+        // The transcript carries the cancellation marker, so no error is shown.
         setState((state) => ({
           running: false,
           activity: "",
@@ -556,7 +440,6 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
           cancelArmed: false,
           lastElapsedMs: freezeElapsed(state),
           runStartedAt: null,
-          threads: terminalizeThreads(flagCancelledThreads(state.threads)),
         }));
         pushEvent({ seq, kind: "run", text: "Run cancelled", isError: false });
         return "snapshot";
@@ -569,14 +452,12 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
       case "transcript_reverted":
         // The messages the buffers were catching up to no longer exist, so the
         // leftovers would be replayed against a transcript that never had them.
-        // The live threads went with those messages, and a rerun that dispatches
+        // Live tool events went with those messages, and a rerun that dispatches
         // the same name again would otherwise inherit the discarded run's log.
         setState({
           streamSettled: true,
           streamText: "",
           streamReasoning: "",
-          threads: {},
-          finishedToolCalls: {},
           primaryToolEvents: [],
         });
         return "replace-snapshot";
@@ -590,15 +471,9 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
   function applyAgent(seq: number, event: AgentEvent): RefreshKind {
     switch (event.type) {
       case "tool_call_started":
-        if (event.delegation_intent || event.delegation_summary_verified) {
-          if (!event.thread_name) pushPrimaryToolEvent(event);
-          return "none";
-        }
+        pushPrimaryToolEvent(event);
+        if (event.delegation_intent || event.delegation_summary_verified) return "none";
         setState({ activity: `Tool: ${event.name}` });
-        // A thread's own calls also feed its card in the chat and its tail in the
-        // side panel, which is why they are kept per thread as well as below.
-        pushThreadLog(event.thread_name, event);
-        if (!event.thread_name) pushPrimaryToolEvent(event);
         pushEvent({
           seq,
           kind: "tool",
@@ -606,108 +481,44 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
           isError: false,
         });
         return "none";
-      case "thread_log":
-        // Deliberately not in the log below: the worker prints these as it works,
-        // and at that rate they would push everything else out of the events tab.
-        pushThreadLog(event.name, event);
-        return "none";
       case "mcp_server_skipped":
-        // A configured server the worker could not load; show it in the thread
-        // log so the missing tools are explained rather than silent.
-        pushThreadLog(event.thread_name, event);
+        pushEvent({
+          seq,
+          kind: "mcp",
+          text: `MCP ${event.server_name}: ${event.reason}`,
+          isError: true,
+        });
         return "none";
-      case "mcp_notification": {
-        const failed = event.kind === "catalog_refresh_failed";
-        pushThreadLog(event.thread_name, event);
+      case "mcp_notification":
         pushEvent({
           seq,
           kind: "mcp",
           text: `MCP ${event.server_name}: ${event.message}`,
-          isError: failed,
+          isError: event.kind === "catalog_refresh_failed",
         });
         return "none";
-      }
       case "tool_call_finished": {
         const failed = toolCallFailed(event);
-        pushThreadLog(event.thread_name, event);
-        if (!event.thread_name) pushPrimaryToolEvent(event);
+        pushPrimaryToolEvent(event);
         pushEvent({
           seq,
           kind: "tool",
           text: `${failed ? "✕" : "✓"} ${event.name}: ${event.content_preview}`,
           isError: failed,
         });
-        const orchestratorCall = !event.thread_name;
-        setState((state) => ({
-          workspaceEpoch: state.workspaceEpoch + 1,
-          ...(orchestratorCall
-            ? { finishedToolCalls: { ...state.finishedToolCalls, [event.call_id]: true as const } }
-            : {}),
-        }));
-        // Worksets land in SQLite as soon as `workset_define` returns, but the
-        // tool message waits for the rest of the DAG batch. Refetch so the
-        // panel and the badge see the saved plan without waiting on threads.
-        return event.name === "workset_define" ? "snapshot" : "none";
+        setState((state) => ({ workspaceEpoch: state.workspaceEpoch + 1 }));
+        return "none";
       }
       case "token_usage_updated":
         setState((state) => ({
-          runUsage: addTokenUsage(
-            state.runUsage,
-            event.usage,
-            // The gauge measures the orchestrator's own context window, so a
-            // worker's reading of its private one must not stand in for it.
-            event.thread_name ? (state.runUsage?.total_tokens ?? 0) : event.usage.total_tokens,
-          ),
+          runUsage: addTokenUsage(state.runUsage, event.usage, event.usage.total_tokens),
           sessionSpend: addTokenUsage(
             state.sessionSpend,
             event.usage,
-            event.thread_name
-              ? (state.sessionSpend?.total_tokens ?? 0)
-              : event.usage.total_tokens || (state.sessionSpend?.total_tokens ?? 0),
+            event.usage.total_tokens || (state.sessionSpend?.total_tokens ?? 0),
           ),
         }));
         return "none";
-      case "thread_started":
-        // The action is not carried here: event sanitization replaces it with a
-        // placeholder. The task text comes from the orchestrator's tool call.
-        setState({ activity: `Thread ${event.name} dispatched` });
-        pushEvent({
-          seq,
-          kind: "thread",
-          text: `⌥ thread "${event.name}" dispatched`,
-          isError: false,
-        });
-        updateThread(event.name, {
-          status: "running",
-          cancelled: false,
-          exitCode: null,
-          isError: false,
-          // A name can be dispatched again, and the previous run's commands are
-          // not this one's.
-          log: [],
-        });
-        // A re-dispatched name already has a persisted episode ending in
-        // thread_finished, and the transcript lines episodes up with dispatch
-        // cards newest-first. Until the refetch brings this dispatch's own
-        // thread_started into that window, the new card inherits the previous
-        // episode's finish and reads as done while the worker is still running.
-        return "snapshot";
-      case "thread_finished":
-        pushEvent({
-          seq,
-          kind: "thread",
-          text: `⌦ thread "${event.name}" (exit ${event.exit_code ?? "?"})`,
-          isError: Boolean(event.exit_code),
-        });
-        updateThread(event.name, {
-          status: "finished",
-          exitCode: event.exit_code,
-          isError: Boolean(event.exit_code),
-        });
-        // The dispatch's episode is written as it ends, and the snapshot is the
-        // only thing that carries episodes. Waiting for the run to finish would
-        // hold every one of them back until the whole orchestration was over.
-        return "snapshot";
       case "assistant_message":
         setState({ activity: "" });
         pushEvent({
@@ -715,26 +526,6 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
           kind: "assistant",
           text: "New assistant message",
           isError: false,
-        });
-        return "none";
-      case "thread_steering_queued":
-      case "thread_steering_delivered":
-      case "thread_steering_expired":
-        pushEvent({
-          seq,
-          kind: "steering",
-          text: `${steeringVerb(event.type)} → ${event.name}: ${event.instruction_preview}`,
-          isError: event.type === "thread_steering_expired",
-        });
-        return "none";
-      case "orchestrator_steering_queued":
-      case "orchestrator_steering_delivered":
-      case "orchestrator_steering_expired":
-        pushEvent({
-          seq,
-          kind: "steering",
-          text: `${steeringVerb(event.type)} → orchestrator: ${event.instruction_preview}`,
-          isError: event.type === "orchestrator_steering_expired",
         });
         return "none";
       case "orchestrator_compaction_started":
@@ -801,12 +592,6 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
     });
   }
 
-  function steeringVerb(type: string): string {
-    if (type.endsWith("queued")) return "Steering queued";
-    if (type.endsWith("delivered")) return "Steering delivered";
-    return "Steering expired";
-  }
-
   const useRunning = (sessionId: string | null) =>
     useStore((state) => state.sessionId === sessionId && state.running);
   const useCancelArmed = (sessionId: string | null) =>
@@ -817,8 +602,6 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
   const useModelRetryAttempt = () => useStore((s) => s.modelRetryAttempt);
   const useLiveEvents = () => useStore((s) => s.events);
   const useStreamStatus = () => useStore((s) => s.streamStatus);
-  const useLiveThreads = () => useStore((s) => s.threads);
-  const useFinishedToolCalls = () => useStore((s) => s.finishedToolCalls);
   const usePrimaryToolEvents = () => useStore((s) => s.primaryToolEvents);
   const useRunUsage = () => useStore((s) => s.runUsage);
   const useSessionSpend = () => useStore((s) => s.sessionSpend);
@@ -835,7 +618,6 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
     runtimeStore,
     captureRuntimeActivation,
     resetRuntime,
-    clearRuntimeThreads,
     liftSessionSpend,
     setOptimisticUserPrompt,
     applyAssistantDelta,
@@ -854,8 +636,6 @@ export function createRuntimeStore(_storage?: Pick<Storage, "getItem" | "setItem
     useModelRetryAttempt,
     useLiveEvents,
     useStreamStatus,
-    useLiveThreads,
-    useFinishedToolCalls,
     usePrimaryToolEvents,
     useRunUsage,
     useSessionSpend,
@@ -874,7 +654,6 @@ export const {
   runtimeStore,
   captureRuntimeActivation,
   resetRuntime,
-  clearRuntimeThreads,
   liftSessionSpend,
   setOptimisticUserPrompt,
   applyAssistantDelta,
@@ -893,8 +672,6 @@ export const {
   useModelRetryAttempt,
   useLiveEvents,
   useStreamStatus,
-  useLiveThreads,
-  useFinishedToolCalls,
   usePrimaryToolEvents,
   useRunUsage,
   useSessionSpend,

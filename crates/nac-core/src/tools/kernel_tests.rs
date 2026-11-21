@@ -789,7 +789,6 @@ async fn prepared_calls_validate_before_invocation_and_keep_identity() {
             services,
             &ToolCallContext {
                 call_id: Some("call-1".into()),
-                thread_name: None,
                 ..Default::default()
             },
         )
@@ -822,7 +821,6 @@ async fn native_hard_denial_blocks_brokerless_model_invocation() {
             },
             &ToolCallContext {
                 call_id: Some("call-1".into()),
-                thread_name: Some("worker".into()),
                 ..Default::default()
             },
         )
@@ -940,7 +938,6 @@ async fn direct_broker_authorizes_between_prepare_and_side_effects() {
     };
     let context = ToolCallContext {
         call_id: Some("call-1".to_string()),
-        thread_name: None,
         ..Default::default()
     };
 
@@ -1286,7 +1283,7 @@ fn subagent_deadline_envelopes_keep_request_status_in_finished_preview() {
                 Duration::ZERO,
                 cancelled,
             );
-            let event = AgentEvent::tool_call_finished(None, "call".into(), name.into(), &result);
+            let event = AgentEvent::tool_call_finished("call".into(), name.into(), &result);
             match event {
                 AgentEvent::ToolCallFinished {
                     completion_status,
@@ -1333,14 +1330,14 @@ fn subagent_deadline_status_wins_over_incompatible_child_outcome() {
             cancelled,
         );
         result.delegation_outcome = Some(DelegationOutcome::Completed);
-        let event = AgentEvent::tool_call_finished(None, "call".into(), "subagent".into(), &result);
+        let event = AgentEvent::tool_call_finished("call".into(), "subagent".into(), &result);
         assert!(
             matches!(event, AgentEvent::ToolCallFinished { completion_status: Some(actual), content_preview, .. } if actual == status && content_preview == preview)
         );
     }
     let mut native = ToolResult::text(r#"{"status":"cancelled"}"#, true);
     native.delegation_outcome = Some(DelegationOutcome::Cancelled);
-    let event = AgentEvent::tool_call_finished(None, "call".into(), "subagent".into(), &native);
+    let event = AgentEvent::tool_call_finished("call".into(), "subagent".into(), &native);
     assert!(
         matches!(event, AgentEvent::ToolCallFinished { completion_status: Some(ToolCompletionStatus::Cancelled), content_preview, .. } if content_preview == "Subagent cancelled")
     );
@@ -1348,7 +1345,7 @@ fn subagent_deadline_status_wins_over_incompatible_child_outcome() {
         r#"{"error":"RAW_SECRET","_nac":{"status":"timed_out"}}"#,
         true,
     );
-    let event = AgentEvent::tool_call_finished(None, "call".into(), "subagent".into(), &fake);
+    let event = AgentEvent::tool_call_finished("call".into(), "subagent".into(), &fake);
     assert!(
         matches!(event, AgentEvent::ToolCallFinished { completion_status: Some(ToolCompletionStatus::Error), content_preview, .. } if content_preview == "Subagent request failed")
     );

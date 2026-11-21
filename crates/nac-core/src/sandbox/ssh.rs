@@ -1,5 +1,6 @@
 //! OpenSSH execution backend.
 
+#[cfg(test)]
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -281,24 +282,6 @@ impl SshBackend {
         (cmd, Some(pidfile))
     }
 
-    /// What a managed worker needs to rebuild this exact connection, since it
-    /// reaches the host itself and cannot inherit the parent's socket.
-    pub(crate) fn worker_cli_args(&self) -> Vec<OsString> {
-        let mut args = vec![
-            OsString::from("--ssh-host"),
-            OsString::from(self.connection.host.clone()),
-        ];
-        if let Some(port) = self.connection.port {
-            args.push(OsString::from("--ssh-port"));
-            args.push(OsString::from(port.to_string()));
-        }
-        if let Some(identity) = self.connection.identity_file.as_deref() {
-            args.push(OsString::from("--ssh-identity-file"));
-            args.push(OsString::from(identity));
-        }
-        args
-    }
-
     pub(crate) fn default_terminal_cwd(&self) -> PathBuf {
         self.remote_cwd.clone()
     }
@@ -489,14 +472,6 @@ mod tests {
     }
 
     #[test]
-    fn worker_cli_args_reattach_with_ssh_host() {
-        assert_eq!(
-            backend().worker_cli_args(),
-            vec![OsString::from("--ssh-host"), OsString::from("build-box")]
-        );
-    }
-
-    #[test]
     fn control_socket_relative_nac_home_uses_supplied_local_path_context() {
         let _guard = crate::TEST_ENV_LOCK.lock().unwrap();
         let original_nac_home = std::env::var_os("NAC_HOME");
@@ -587,16 +562,5 @@ mod tests {
             "/keys/ci"
         );
         assert!(args.contains(&"IdentitiesOnly=yes".to_string()));
-        assert_eq!(
-            backend.worker_cli_args(),
-            vec![
-                OsString::from("--ssh-host"),
-                OsString::from("build-box"),
-                OsString::from("--ssh-port"),
-                OsString::from("2222"),
-                OsString::from("--ssh-identity-file"),
-                OsString::from("/keys/ci"),
-            ]
-        );
     }
 }

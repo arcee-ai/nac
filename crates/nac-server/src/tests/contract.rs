@@ -53,6 +53,14 @@ async fn project_model_defaults_are_rejected() {
         .await;
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
+    for default in [serde_json::Value::Null, serde_json::json!("legacy")] {
+        assert!(
+            serde_json::from_value::<crate::delivery::projects::UpdateProjectRequest>(
+                serde_json::json!({"default_model_config_id": default})
+            )
+            .is_err()
+        );
+    }
     let _ = std::fs::remove_dir_all(root);
 }
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Owned worker characterization, using the shared scripted provider. This is
+// Owned direct-session characterization, using the shared scripted provider. This is
 // CLI/process evidence; it does not substitute for AppKit/WKWebView acceptance.
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
@@ -11,7 +11,7 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { ScriptedProvider } from "../../crates/nac-server/web/e2e/scripted-provider.ts";
 
-import { exerciseOwnedWorker } from "./owned_worker_fixture.mjs";
+import { exerciseOwnedDirect } from "./owned_direct_fixture.mjs";
 
 const execute = promisify(execFile);
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -26,7 +26,7 @@ async function bounded(promise, ms, label) {
 
 export async function runHelperContract(executable, destination) {
   executable = await fs.realpath(executable);
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "nac-finder-worker-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "nac-finder-direct-"));
   const workspace = path.join(root, "workspace with spaces");
   const home = path.join(root, "home");
   const nac = path.join(home, "selected nac");
@@ -71,7 +71,7 @@ export async function runHelperContract(executable, destination) {
       if (endpoint) ready(endpoint);
     });
     const base = await bounded(listening, 15000, "owned fixture readiness");
-    Object.assign(evidence, await exerciseOwnedWorker({provider, base, workspace, store,
+    Object.assign(evidence, await exerciseOwnedDirect({provider, base, workspace, store,
       executable, enginePID: server.pid}));
   } finally {
     let cleanupError;
@@ -81,11 +81,6 @@ export async function runHelperContract(executable, destination) {
       catch (error) { safeToRemove = false; cleanupError = error; }
     }
     await provider.stop();
-    const { stdout } = await execute("/bin/ps", ["-ww", "-axo", "command="]);
-    if (stdout.split("\n").some((line) => line.trimStart().startsWith(executable + " __worker ") && line.includes(store))) {
-      safeToRemove = false;
-      cleanupError = new Error("Owned worker remained after engine shutdown; fixture profile retained");
-    }
     if (safeToRemove) {
       await fs.rm(root, { recursive: true, force: true });
       evidence.cleaned = true;

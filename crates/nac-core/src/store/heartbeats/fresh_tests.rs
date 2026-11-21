@@ -24,7 +24,6 @@ impl Fixture {
                 ssh_host: None,
                 ssh_port: None,
                 ssh_identity_file: None,
-                default_model_config_id: None,
             },
         )
         .unwrap();
@@ -177,11 +176,50 @@ fn scheduled_model_selection_is_frozen_in_the_durable_launch_receipt() {
         first.receipt().request.model_selection,
         Some(selection.clone())
     );
-    assert!(first.model_defaults().is_none());
     let reloaded = read_fresh_heartbeat_launch(&f.path, &pending.occurrence_id)
         .unwrap()
         .unwrap();
     assert_eq!(reloaded.receipt().request.model_selection, Some(selection));
+}
+
+#[test]
+fn legacy_receipt_defaults_remain_in_storage_but_never_replace_the_selection() {
+    let f = Fixture::new();
+    f.create();
+    let pending = f.pending();
+    let original =
+        reserve_fresh_heartbeat_launch(&f.path, &pending.occurrence_id, pending.revision, 61_000)
+            .unwrap()
+            .unwrap();
+    let conn = open_runtime_connection(&f.path).unwrap();
+    conn.execute(
+        "UPDATE heartbeat_task_launches SET launch_json=json_set(launch_json,'$.model_defaults',json('{\"model\":\"retired-preset\"}')) WHERE occurrence_id=?1",
+        [&pending.occurrence_id],
+    ).unwrap();
+    drop(conn);
+    let replay = read_fresh_heartbeat_launch(&f.path, &pending.occurrence_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        replay.receipt().request.model_selection,
+        original.receipt().request.model_selection
+    );
+    assert!(replay.legacy_frozen_model().unwrap().is_none());
+    let conn = open_runtime_connection(&f.path).unwrap();
+    let retained: String = conn.query_row(
+        "SELECT json_extract(launch_json,'$.model_defaults.model') FROM heartbeat_task_launches WHERE occurrence_id=?1",
+        [&pending.occurrence_id], |row| row.get(0),
+    ).unwrap();
+    assert_eq!(retained, "retired-preset");
+    // Without either explicit selection the same payload is the legacy
+    // recovery authority, so its incomplete structure must fail closed.
+    conn.execute(
+        "UPDATE heartbeat_task_launches SET launch_json=json_remove(launch_json,'$.receipt.request.model_selection','$.receipt.destination.model_selection') WHERE occurrence_id=?1",
+        [&pending.occurrence_id],
+    )
+    .unwrap();
+    drop(conn);
+    assert!(read_fresh_heartbeat_launch(&f.path, &pending.occurrence_id).is_err());
 }
 
 #[test]
@@ -292,7 +330,6 @@ fn initial_publication_run_and_outcome_survive_later_human_run_task_and_history_
             ssh_host: None,
             ssh_port: None,
             ssh_identity_file: None,
-            default_model_config_id: None,
         },
     )
     .unwrap();
@@ -731,39 +768,8 @@ fn deleted_project_disables_pending_launch_and_changed_control_arguments_conflic
 }
 
 #[test]
-fn selected_model_ignores_project_defaults_and_keeps_configuration_headers_private() {
+fn selected_model_is_preserved_on_reservation_replay() {
     let mut f = Fixture::new();
-    insert_model_configuration(
-        &f.path,
-        "fixture-config",
-        NewModelConfiguration {
-            name: "Fixture model".into(),
-            backend: "openai-responses".into(),
-            model: "fixture-first".into(),
-            base_url: "https://fixture.invalid/v1".into(),
-            allow_insecure_http: false,
-            api_key_env: None,
-            reasoning_effort: Some("high".into()),
-            service_tier: None,
-            extra_headers: std::collections::BTreeMap::from([(
-                "X-Fixture".into(),
-                "private-configuration-value".into(),
-            )]),
-            orchestrator_compaction_threshold: None,
-            initial_prompt: None,
-            light_model: None,
-        },
-    )
-    .unwrap();
-    update_project(
-        &f.path,
-        "project",
-        ProjectPatch {
-            default_model_config_id: Some(Some("fixture-config".into())),
-            ..ProjectPatch::default()
-        },
-    )
-    .unwrap();
     let destination = f.binding.fresh_task.clone().unwrap();
     f.binding =
         fresh_heartbeat_binding(&f.path, &destination, None, f.root.to_str().unwrap()).unwrap();
@@ -773,7 +779,6 @@ fn selected_model_ignores_project_defaults_and_keeps_configuration_headers_priva
         reserve_fresh_heartbeat_launch(&f.path, &pending.occurrence_id, pending.revision, 61_000)
             .unwrap()
             .unwrap();
-    assert!(reserved.model_defaults().is_none());
     assert_eq!(
         reserved
             .receipt()
@@ -784,16 +789,13 @@ fn selected_model_ignores_project_defaults_and_keeps_configuration_headers_priva
             .model,
         "fixture-model"
     );
-    open_runtime_connection(&f.path).unwrap().execute("UPDATE model_configurations SET model='fixture-later' WHERE config_id='fixture-config'",[]).unwrap();
     let replay =
         reserve_fresh_heartbeat_launch(&f.path, &pending.occurrence_id, pending.revision, 99_000)
             .unwrap()
             .unwrap();
-    assert_eq!(replay.model_defaults(), reserved.model_defaults());
-    assert!(
-        !encode(&fresh_heartbeat_inventory(&f.path, "project", None).unwrap())
-            .unwrap()
-            .contains("private-configuration-value")
+    assert_eq!(
+        replay.receipt().request.model_selection,
+        reserved.receipt().request.model_selection
     );
 }
 

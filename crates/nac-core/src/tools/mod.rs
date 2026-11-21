@@ -2,10 +2,10 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex as StdMutex, Weak as StdWeak};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde_json::Value;
-use tokio::sync::{Mutex, Notify, RwLock};
+use tokio::sync::{Notify, RwLock};
 
 use crate::events::EventSink;
 use crate::mcp::{McpRegistry, McpToolCapture};
@@ -30,7 +30,6 @@ pub(crate) mod guide;
 pub mod kernel;
 mod mcp_adapter;
 pub(crate) mod mutation;
-pub(crate) mod orchestrator;
 mod peer_goals;
 pub(crate) mod product_context;
 pub mod read;
@@ -46,11 +45,8 @@ mod run_cancellation;
 mod task_wait;
 mod task_wait_state;
 mod terminal_tools;
-pub mod thread;
 pub(crate) mod user_terminal;
 pub(crate) mod web;
-mod worker_dispatch;
-pub mod workset;
 pub mod write;
 
 pub(crate) use run_admission::RunAdmission;
@@ -58,15 +54,13 @@ pub(crate) use run_cancellation::RunCancellation;
 use runtime_context::shared_workspace_gate;
 pub(crate) use runtime_context::{remote_file_lock_busy, resolve_workspace_path};
 pub use runtime_context::{shared_workspace_gate_for, ToolRuntime};
-pub use worker_dispatch::WorkerDispatchRegistry;
 
 #[derive(Debug)]
 pub struct ToolResult {
     pub content: ToolContent,
     pub is_error: bool,
     /// Wall-clock time of the call's work, set by the execution kernel once an
-    /// authorized call has run, or by a thread or workset control tool once
-    /// its authorized work has started. Every exit before that leaves it empty.
+    /// authorized call has run. Every exit before that leaves it empty.
     pub(crate) execution_duration_ms: Option<u64>,
     /// Kernel-owned provenance: this measurement excludes an internal
     /// authorization span and supersedes the deadline's unadjusted wall clock
@@ -87,13 +81,6 @@ impl ToolResult {
             delegation_outcome: None,
             delegation_summary: None,
         }
-    }
-
-    /// Records that the call ran, timed from `started`. Exits before a call
-    /// starts its work must not use it.
-    pub(crate) fn executed_since(mut self, started: Instant) -> Self {
-        self.execution_duration_ms = Some(started.elapsed().as_millis() as u64);
-        self
     }
 }
 
@@ -197,6 +184,7 @@ pub(crate) fn product_context_tool_definitions() -> Vec<ToolDefinition> {
 }
 
 pub(crate) const GOAL_TOOL_NAMES: [&str; 3] = ["create_goal", "get_goal", "update_goal"];
+pub(crate) const WEB_TOOL_NAMES: [&str; 2] = ["web_search", "web_fetch"];
 mod fresh_task_schedules;
 pub(crate) mod heartbeat;
 pub(crate) const DIRECT_TOOL_NAMES: [&str; 35] = [
@@ -236,54 +224,6 @@ pub(crate) const DIRECT_TOOL_NAMES: [&str; 35] = [
     "fresh_task_schedule_control",
     "fresh_task_schedule_read",
 ];
-pub(crate) const ORCHESTRATOR_CONTROL_TOOL_NAMES: [&str; 6] = [
-    "orchestrator_launch",
-    "orchestrator_status",
-    "orchestrator_steer",
-    "orchestrator_read",
-    "orchestrator_wait",
-    "orchestrator_cancel",
-];
-pub(crate) const WEB_TOOL_NAMES: [&str; 2] = ["web_search", "web_fetch"];
-pub(crate) const DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES: [&str; 36] = [
-    "nac_guide",
-    "read",
-    "write",
-    "edit",
-    "glob",
-    "grep",
-    "exec_command",
-    "write_stdin",
-    "read_command_output",
-    "list_executions",
-    "list_projects",
-    "launch_task",
-    "task_launch_status",
-    "find_tasks",
-    "read_task",
-    "wait_tasks",
-    "task_goal",
-    "create_goal",
-    "get_goal",
-    "update_goal",
-    "subagent",
-    "subagent_status",
-    "subagent_cancel",
-    "heartbeat_control",
-    "list_heartbeats",
-    "read_heartbeat",
-    "preview_heartbeat",
-    "report_heartbeat",
-    "fresh_task_schedule_control",
-    "fresh_task_schedule_read",
-    "orchestrator_launch",
-    "orchestrator_status",
-    "orchestrator_steer",
-    "orchestrator_read",
-    "orchestrator_wait",
-    "orchestrator_cancel",
-];
-
 fn native_tool_registry(
     image_read: bool,
 ) -> Result<kernel::ToolRegistry, kernel::ToolRegistryError> {
@@ -325,12 +265,6 @@ fn native_tool_registry(
         .register(subagent::SubagentTool)
         .register(subagent::SubagentStatusTool)
         .register(subagent::SubagentCancelTool)
-        .register(orchestrator::LaunchTool)
-        .register(orchestrator::StatusTool)
-        .register(orchestrator::SteerTool)
-        .register(orchestrator::ReadTool)
-        .register(orchestrator::WaitTool)
-        .register(orchestrator::CancelTool)
         .register(web::WebSearchTool)
         .register(web::WebFetchTool)
         .finish()?;
@@ -342,7 +276,7 @@ fn native_tool_registry(
 
 #[expect(
     clippy::expect_used,
-    reason = "the static first-party tool registry and worker capability list are collision-checked"
+    reason = "the static first-party tool registry is collision-checked"
 )]
 pub fn coding_tool_definitions(image_read: bool) -> Vec<ToolDefinition> {
     native_tool_registry(image_read)
@@ -378,39 +312,8 @@ pub(crate) fn direct_tool_definitions_with_web(
     definitions
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "the static direct-with-orchestrator capability list is covered by registry tests"
-)]
-pub fn direct_with_orchestrator_tool_definitions(image_read: bool) -> Vec<ToolDefinition> {
-    let snapshot = native_tool_registry(image_read)
-        .expect("built-in direct tool registration must be collision-free")
-        .snapshot(DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES)
-        .expect("direct-with-orchestrator capability selection must be complete");
-    debug_assert!(
-        ORCHESTRATOR_CONTROL_TOOL_NAMES
-            .iter()
-            .all(|name| snapshot.contains(name)),
-        "orchestrator runtime must expose every orchestrator control capability"
-    );
-    snapshot.definitions()
-}
-
-#[cfg(test)]
-pub(crate) fn direct_with_orchestrator_tool_definitions_with_web(
-    image_read: bool,
-    web_enabled: bool,
-) -> Vec<ToolDefinition> {
-    let mut definitions = direct_with_orchestrator_tool_definitions(image_read);
-    if web_enabled {
-        definitions.extend(web::definitions());
-    }
-    definitions
-}
-
 fn is_complete_direct_capability(name: &str) -> bool {
     DIRECT_TOOL_NAMES.contains(&name)
-        || DIRECT_WITH_ORCHESTRATOR_TOOL_NAMES.contains(&name)
         || WEB_TOOL_NAMES.contains(&name)
         || PRODUCT_CONTEXT_TOOL_NAMES.contains(&name)
 }
@@ -424,70 +327,6 @@ pub(crate) fn direct_tool_admission(name: &str) -> Option<kernel::ToolAdmission>
         .expect("built-in direct tool registration must be collision-free")
         .snapshot_where(|descriptor| is_complete_direct_capability(descriptor.name()))
         .admission(name)
-}
-
-pub fn orchestrator_tool_definitions(
-    skills: Option<&SkillRegistry>,
-    light: Option<&crate::model::ModelClient>,
-) -> Vec<ToolDefinition> {
-    vec![
-        guide::definition(),
-        thread::dispatch_definition(skills, light),
-        thread::threads_definition(),
-        thread::thread_read_definition(),
-        thread::thread_delete_definition(),
-        workset::define_definition(),
-        workset::read_definition(),
-        workset::list_definition(),
-    ]
-}
-
-pub fn require_str(args: &Value, key: &str) -> Result<String, ToolResult> {
-    args.get(key)
-        .and_then(|value| value.as_str())
-        .map(std::string::ToString::to_string)
-        .ok_or_else(|| ToolResult {
-            content: (format!("Error: '{key}' argument required")).into(),
-            is_error: true,
-            execution_duration_ms: None,
-            execution_duration_excludes_authorization: false,
-            delegation_outcome: None,
-            delegation_summary: None,
-        })
-}
-
-pub fn require_string_array(args: &Value, key: &str) -> Result<Vec<String>, ToolResult> {
-    let Some(value) = args.get(key) else {
-        return Ok(Vec::new());
-    };
-
-    let Some(items) = value.as_array() else {
-        return Err(ToolResult {
-            content: (format!("Error: '{key}' must be an array of strings")).into(),
-            is_error: true,
-            execution_duration_ms: None,
-            execution_duration_excludes_authorization: false,
-            delegation_outcome: None,
-            delegation_summary: None,
-        });
-    };
-
-    let mut out = Vec::with_capacity(items.len());
-    for item in items {
-        let Some(value) = item.as_str() else {
-            return Err(ToolResult {
-                content: (format!("Error: '{key}' must be an array of strings")).into(),
-                is_error: true,
-                execution_duration_ms: None,
-                execution_duration_excludes_authorization: false,
-                delegation_outcome: None,
-                delegation_summary: None,
-            });
-        };
-        out.push(value.to_string());
-    }
-
-    Ok(out)
 }
 
 #[cfg(test)]
@@ -564,22 +403,13 @@ pub async fn execute_tool_with_context(
             .await;
     }
 
-    match name {
-        "thread" => thread::execute_dispatch(args, runtime, client).await,
-        "threads" => thread::execute_threads(runtime).await,
-        "thread_read" => thread::execute_thread_read(args, runtime).await,
-        "thread_delete" => thread::execute_thread_delete(args, runtime).await,
-        "workset_define" => workset::execute_define(args, runtime).await,
-        "workset_read" => workset::execute_read(args, runtime).await,
-        "workset_list" => workset::execute_list(args, runtime).await,
-        unknown => ToolResult {
-            content: (format!("Error: unknown tool '{unknown}'")).into(),
-            is_error: true,
-            execution_duration_ms: None,
-            execution_duration_excludes_authorization: false,
-            delegation_outcome: None,
-            delegation_summary: None,
-        },
+    ToolResult {
+        content: (format!("Error: unknown tool '{name}'")).into(),
+        is_error: true,
+        execution_duration_ms: None,
+        execution_duration_excludes_authorization: false,
+        delegation_outcome: None,
+        delegation_summary: None,
     }
 }
 
@@ -588,12 +418,12 @@ pub async fn execute_tool_with_context(
 mod tests;
 
 // ------------------------------------------------------------------
-// Test helpers (shared across agent::dag, agent::tool_exec, tools::thread)
+// Test helpers for direct tool execution
 // ------------------------------------------------------------------
 
 /// Create a `ToolRuntime` suitable for unit tests.  Uses the current
 /// directory as the workspace, an empty store path, a dummy session id,
-/// and no MCP / skills / worker executable.
+/// and no MCP or skills.
 #[cfg(any(test, feature = "test-support"))]
 pub(crate) fn test_runtime() -> ToolRuntime {
     let workspace_cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
@@ -608,18 +438,13 @@ pub(crate) fn test_runtime() -> ToolRuntime {
         workspace_cwd,
         store_path: PathBuf::new(),
         session_id: Some("test-session".to_string()),
-        worker_executable: None,
-        active_threads: Arc::new(WorkerDispatchRegistry::new(Arc::clone(&run_admission))),
         run_admission,
         event_sink: EventSink::none(),
         backend,
         mcp: None,
         mcp_tools: Arc::new(HashMap::new()),
         skills: None,
-        terminal_manager: TerminalManager::new(),
-        thread_timeout_secs: thread::DEFAULT_THREAD_TIMEOUT_SECS,
-        worker_usage: Arc::new(Mutex::new(crate::model::TokenUsage::default())),
-        light_client: None,
+        terminal_manager: TerminalManager::for_direct(),
         allowed_tools: None,
         permission_broker: None,
         permission_reviewer: None,

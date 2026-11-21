@@ -13,10 +13,7 @@ interface SessionBehaviorIconProps {
     className?: string;
 }
 /**
- * The session type as a glyph: a plane for a direct agent, a plane with a plus
- * for a direct agent that can launch orchestrators, and the orchestrator graph
- * otherwise. It always draws; callers decide visibility with
- * The caller decides where an identity glyph is useful.
+ * The session identity glyph. The caller decides where it is useful.
  *
  * Decorative: the parent's accessible name carries the type. Its states use the
  * `fill-btn-secondary*` tokens: inside a `.btn` the button stylesheet colors it,

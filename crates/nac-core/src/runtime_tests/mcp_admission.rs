@@ -8,7 +8,7 @@ fn run_options(root: &Path, store_path: &Path) -> RunOptions {
     RunOptions {
         workspace_cwd: root.to_path_buf(),
         config_cwd: Some(root.to_path_buf()),
-        worker_executable: None,
+
         store: StoreOptions {
             store_path: Some(store_path.to_path_buf()),
         },
@@ -33,23 +33,15 @@ async fn disconnect_refuses_mounted_direct_and_child_sessions() {
     let store_path = home.path.join("store.db");
     store::initialize(&store_path).unwrap();
 
-    let direct = build_run_config_for_project_with_behavior(
-        run_options(&root, &store_path),
-        &NacConfig::default(),
-        None,
-        sessions::SessionBehavior::Direct,
-    )
-    .await
-    .unwrap();
+    let direct =
+        build_run_config_for_project(run_options(&root, &store_path), &NacConfig::default(), None)
+            .await
+            .unwrap();
     let session_id = direct.session.session_id().unwrap().to_string();
-    let child = build_run_config_for_project_with_behavior(
-        run_options(&root, &store_path),
-        &NacConfig::default(),
-        None,
-        sessions::SessionBehavior::Direct,
-    )
-    .await
-    .unwrap();
+    let child =
+        build_run_config_for_project(run_options(&root, &store_path), &NacConfig::default(), None)
+            .await
+            .unwrap();
     let child_id = child.session.session_id().unwrap().to_string();
     store::create_traditional_child_relationship(
         &store_path,
@@ -65,7 +57,6 @@ async fn disconnect_refuses_mounted_direct_and_child_sessions() {
         &child_id,
         &NacConfig::default(),
         root.clone(),
-        None,
         ResumeModelOptions::default(),
     )
     .await
@@ -93,14 +84,10 @@ async fn disconnect_refuses_mounted_direct_and_child_sessions() {
     }
     assert_eq!(server.authorizations("tools/call").len(), captures.len());
 
-    let after = build_run_config_for_project_with_behavior(
-        run_options(&root, &store_path),
-        &NacConfig::default(),
-        None,
-        sessions::SessionBehavior::Direct,
-    )
-    .await
-    .unwrap();
+    let after =
+        build_run_config_for_project(run_options(&root, &store_path), &NacConfig::default(), None)
+            .await
+            .unwrap();
     assert!(after
         .agent
         .tool_definitions_for_test()

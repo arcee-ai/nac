@@ -84,13 +84,11 @@ async fn resume_config_restores_messages_without_changing_process_cwd() {
     .unwrap();
 
     let caller_cwd = original_cwd.canonicalize().unwrap();
-    let mut changed_config = complete_model_config();
-    changed_config.model.model = Some("changed-config-model".to_string());
-    changed_config.model.reasoning_effort = Some(ReasoningEffort::High);
+    let changed_config = NacConfig::default();
     let mut run_config = build_resume_config(
         ResumeOptions {
             lookup_cwd: session_cwd.clone(),
-            worker_executable: None,
+
             session_id: Some("resume-session".to_string()),
             last: false,
             store: StoreOptions {
@@ -222,7 +220,6 @@ async fn resume_rejects_ssh_snapshot_with_sandbox_metadata_before_restore() {
         &NacConfig::default(),
         PathBuf::from("/local/resume/base"),
         None,
-        None,
         true,
         None,
         ResumeModelOptions::default(),
@@ -259,9 +256,8 @@ async fn invalid_legacy_snapshot_requires_settings_repair_without_persistence() 
     let error = match build_resume_config_from_snapshot(
         snapshot,
         store_path.clone(),
-        &complete_model_config(),
+        &NacConfig::default(),
         PathBuf::from("/local/resume/base"),
-        None,
         None,
         true,
         None,
@@ -385,7 +381,7 @@ async fn resume_remote_session_skips_local_path_checks_and_rebuilds_system_promp
     let run_config = build_resume_config(
         ResumeOptions {
             lookup_cwd: std::env::temp_dir(),
-            worker_executable: None,
+
             session_id: Some("remote-session".to_string()),
             last: false,
             store: StoreOptions {
@@ -456,7 +452,7 @@ async fn create_remote_session_with_ssh_host_skips_local_checks_and_persists_tar
         RunOptions {
             workspace_cwd: remote_cwd.clone(),
             config_cwd: None,
-            worker_executable: None,
+
             store: StoreOptions {
                 store_path: Some(store_path.clone()),
             },
@@ -551,7 +547,7 @@ async fn ssh_fresh_run_resume_base_and_resume_control_socket_use_local_config_cw
         RunOptions {
             workspace_cwd: remote_cwd.clone(),
             config_cwd: Some(config_cwd.clone()),
-            worker_executable: None,
+
             store: StoreOptions::default(),
             model: test_openai_model_options(),
             orchestrator_compaction_threshold: None,
@@ -589,7 +585,6 @@ async fn ssh_fresh_run_resume_base_and_resume_control_socket_use_local_config_cw
         &session_id,
         &NacConfig::default(),
         resume_base_cwd,
-        None,
         ResumeModelOptions::default(),
     )
     .await
@@ -632,7 +627,7 @@ async fn invalid_ssh_sandbox_configs_do_not_initialize_store() {
         RunOptions {
             workspace_cwd: PathBuf::from("~"),
             config_cwd: Some(std::env::temp_dir()),
-            worker_executable: None,
+
             store: StoreOptions {
                 store_path: Some(run_store_path.clone()),
             },
@@ -681,7 +676,7 @@ async fn create_remote_session_defaults_blank_cwd_to_home_and_rejects_sandbox_co
     let options = |workspace_cwd: PathBuf, sandbox: SandboxOptions| RunOptions {
         workspace_cwd,
         config_cwd: None,
-        worker_executable: None,
+
         store: StoreOptions {
             store_path: Some(store_path.clone()),
         },

@@ -658,7 +658,7 @@ fn codex_request_preserves_nullable_new_delegation_contracts() {
     }];
     let levels =
         catalog::resolve(BackendKind::ChatGptCodexResponses, "gpt-5.6-sol").thinking_level_map;
-    let definitions = crate::tools::direct_with_orchestrator_tool_definitions(false);
+    let definitions = crate::tools::direct_tool_definitions(false);
     let request = codex_responses_request(
         "gpt-5.6-sol",
         None,
@@ -669,10 +669,7 @@ fn codex_request_preserves_nullable_new_delegation_contracts() {
     );
     let tools = request["tools"].as_array().expect("Codex request tools");
 
-    for (tool_name, session_id) in [
-        ("subagent", "child_session_id"),
-        ("orchestrator_launch", "orchestrator_session_id"),
-    ] {
+    for (tool_name, session_id) in [("subagent", "child_session_id")] {
         let tool = tools
             .iter()
             .find(|tool| tool["name"] == tool_name)
@@ -1411,7 +1408,7 @@ fn codex_native_task_launch_wire_schema_preserves_the_native_decoder_contract() 
 
 #[test]
 fn codex_wait_wire_schema_keeps_discriminated_nullable_targets() {
-    let definitions = crate::tools::direct_with_orchestrator_tool_definitions(false);
+    let definitions = crate::tools::direct_tool_definitions(false);
     let levels =
         catalog::resolve(BackendKind::ChatGptCodexResponses, "gpt-5.6-sol").thinking_level_map;
     let request = codex_responses_request("gpt-5.6-sol", None, &[], &definitions, &levels, None);

@@ -16,8 +16,6 @@ const STATE_LABEL: Record<SessionMcpRefreshStatus["state"], string> = {
   not_requested: "Refresh to apply current MCP settings to this chat.",
   current: "Integrations are current for this chat.",
   pending: "Changes will apply before the next model request.",
-  scheduled_for_workers:
-    "Changes will apply to this orchestrator’s workers before their next model request.",
   degraded: "Some integrations are unavailable.",
   failed: "Integrations could not refresh.",
 };

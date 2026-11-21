@@ -6,7 +6,7 @@ use nac_core::{
     permissions::{PermissionApprovalMode, PermissionReply, PermissionRequest},
     session_service::{
         FrontendSnapshotLoadOptions, MessagePageRequest, MessagesPageSnapshot,
-        SessionFrontendSnapshot, SessionFrontendSnapshotLoad, ThreadEventPage, ToolCallContent,
+        SessionFrontendSnapshot, SessionFrontendSnapshotLoad, ToolCallContent,
     },
     sessions,
     store::{
@@ -335,16 +335,6 @@ impl<'a> SessionStateApplication<'a> {
                 description: child.description,
             }));
         }
-        if let Some(orchestrator) =
-            nac_core::store::load_managed_orchestrator(&self.manager.inner.store_path, session_id)?
-        {
-            return Ok(Some(SessionLineageSnapshot {
-                kind: SessionLineageKind::ManagedOrchestrator,
-                parent_session_id: orchestrator.parent_session_id,
-                root_session_id: orchestrator.root_session_id,
-                description: orchestrator.description,
-            }));
-        }
         Ok(None)
     }
 
@@ -415,19 +405,6 @@ impl<'a> SessionStateApplication<'a> {
 
     pub(crate) async fn direct_goal(&self, session_id: &str) -> Result<Option<SessionGoalRecord>> {
         self.manager.attach_session(session_id).await?.direct_goal()
-    }
-
-    pub(crate) async fn thread_events(
-        &self,
-        session_id: &str,
-        thread_name: &str,
-        before_id: Option<i64>,
-        limit: usize,
-    ) -> Result<ThreadEventPage> {
-        self.manager
-            .attach_session(session_id)
-            .await?
-            .thread_events_page(thread_name, before_id, limit)
     }
 
     pub(crate) async fn skills(

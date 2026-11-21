@@ -5,8 +5,6 @@ import { homeComposer } from "./focus-embedded-helpers";
 import { ScriptGate } from "./scripted-provider";
 import { chooseFixtureComposerModel } from "./model-fixture";
 
-test.use({ orchestration: "0" });
-
 test("Home waits for the owning interactive stream before its first permission request", async ({
   harness,
   page,

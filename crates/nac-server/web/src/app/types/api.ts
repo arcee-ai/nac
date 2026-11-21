@@ -11,17 +11,10 @@ export type BackendKind = ApiSchema<"BackendKind">;
 export type ReasoningEffort = ApiSchema<"ReasoningEffort">;
 
 /** Dispatch weight class when a light model is configured, serialized lowercase. */
-export type DispatchWeight = "light" | "heavy";
 
 /** Immutable execution topology selected when a session is created. */
 export type SessionBehavior = ApiSchema<"SessionBehavior">;
 export type SessionMcpRefreshStatus = ApiSchema<"SessionMcpRefreshStatus">;
-
-/**
- * The optional light worker model. Same shape on records and requests: the
- * credential is always a selector name, never a key value.
- */
-export type LightModelSettings = ApiSchema<"LightModelSettings">;
 
 export type StoreInfo = ApiSchema<"StoreInfo">;
 
@@ -82,19 +75,6 @@ export type ResponseTimingSnapshot = ApiSchema<"ResponseTimingSnapshot">;
 
 export type SessionMetadata = ApiSchema<"SessionMetadata">;
 
-export type ThreadSnapshot = ApiSchema<"ThreadSnapshot">;
-
-/** How a dispatch ended; only `ok` is retained context for later dispatches. */
-export type EpisodeStatus = ApiSchema<"EpisodeStatus">;
-
-export type EpisodeSnapshot = ApiSchema<"EpisodeSnapshot">;
-
-export type WorksetItemSnapshot = ApiSchema<"WorksetItemSnapshot">;
-
-export type WorksetSnapshot = ApiSchema<"WorksetSnapshot">;
-
-export type WorksetsSnapshot = ApiSchema<"WorksetsSnapshot">;
-
 export type ChangedFileStat = ApiSchema<"ChangedFileStat">;
 
 export type WorkspaceSnapshot = ApiSchema<"WorkspaceSnapshot">;
@@ -140,8 +120,6 @@ export type WorkspaceDiffSection = ApiSchema<"WorkspaceDiffSection">;
 export type WorkspaceFileDiff = ApiSchema<"WorkspaceFileDiff">;
 
 export type SteeringStatus = "queued" | "claimed" | "delivered" | "expired";
-
-export type ThreadSteeringRecord = ApiSchema<"ThreadSteeringRecord">;
 
 export interface SessionOverviewRecord {
   session_id: string;

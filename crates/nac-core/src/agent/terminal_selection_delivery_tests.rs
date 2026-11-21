@@ -49,7 +49,6 @@ async fn terminal_selection_active_steer_delivery_is_literal_with_no_skill_or_co
         ModelClient::new_for_test_server(server.base_url.clone()),
         path.clone(),
         Some("session"),
-        AgentMode::Direct,
     );
     store_snapshot_messages(&path, &agent.messages);
     agent.tool_runtime.skills = Some(Arc::new(crate::skills::SkillRegistry::load_for_test(vec![

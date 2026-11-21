@@ -21,7 +21,6 @@ pub use attention::{
     SettledWorkDisposition,
 };
 
-pub const STDERR_EVENT_PREFIX: &str = "__NAC_EVENT__";
 pub const SESSION_EVENT_BUS_CAPACITY: usize = 1024;
 pub const SESSION_EVENT_BUS_REPLAY_BYTE_CAP: usize = 256 * 1024;
 /// Deltas are coalesced before they reach the bus, so this holds many seconds
@@ -30,10 +29,9 @@ pub const ASSISTANT_DELTA_CHANNEL_CAPACITY: usize = 256;
 
 /// Internal thread-event target for sanitized top-level tool lifecycle rows.
 ///
-/// Primary direct calls have no worker `thread_name`, but their safe event
-/// projection must survive reload so the transcript does not fall back to raw
-/// durable tool payloads. This target is never exposed as a worker thread; the
-/// frontend snapshot projection separates its events into `primary_tool_events`.
+/// Direct tool calls have a safe event projection that survives reload so the
+/// transcript does not fall back to raw durable tool payloads. The frontend
+/// snapshot projection separates these events into `primary_tool_events`.
 pub(crate) const PRIMARY_TOOL_EVENT_TARGET: &str = "__nac_primary_tools__";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -197,19 +195,15 @@ pub enum McpNotificationKind {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum AgentEvent {
     RunStarted {
-        thread_name: Option<String>,
         prompt_preview: String,
     },
     ModelCallStarted {
-        thread_name: Option<String>,
         iteration: usize,
     },
     TokenUsageUpdated {
-        thread_name: Option<String>,
         usage: crate::model::TokenUsage,
     },
     ToolCallStarted {
-        thread_name: Option<String>,
         call_id: String,
         name: String,
         args_preview: String,
@@ -223,7 +217,6 @@ pub enum AgentEvent {
         delegation_summary_verified: bool,
     },
     ToolCallFinished {
-        thread_name: Option<String>,
         call_id: String,
         name: String,
         content_preview: String,
@@ -247,42 +240,6 @@ pub enum AgentEvent {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         remote_outcome_uncertain: bool,
     },
-    ThreadStarted {
-        name: String,
-        action: String,
-        source_threads: Vec<String>,
-    },
-    ThreadLog {
-        name: String,
-        line: String,
-    },
-    ThreadSteeringQueued {
-        name: String,
-        steering_id: i64,
-        instruction_preview: String,
-    },
-    ThreadSteeringDelivered {
-        name: String,
-        steering_id: i64,
-        instruction_preview: String,
-    },
-    ThreadSteeringExpired {
-        name: String,
-        steering_id: i64,
-        instruction_preview: String,
-    },
-    OrchestratorSteeringQueued {
-        steering_id: i64,
-        instruction_preview: String,
-    },
-    OrchestratorSteeringDelivered {
-        steering_id: i64,
-        instruction_preview: String,
-    },
-    OrchestratorSteeringExpired {
-        steering_id: i64,
-        instruction_preview: String,
-    },
     OrchestratorCompactionStarted {
         compaction_id: Uuid,
         reason: CompactionReason,
@@ -301,30 +258,18 @@ pub enum AgentEvent {
         reason: CompactionReason,
         failure: CompactionFailure,
     },
-    ThreadFinished {
-        name: String,
-        exit_code: i32,
-        timed_out: bool,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        timeout_reason: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        usage: Option<crate::model::TokenUsage>,
-    },
     AssistantMessage {
-        thread_name: Option<String>,
         content: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         usage: Option<crate::model::TokenUsage>,
     },
     Error {
-        thread_name: Option<String>,
         message: String,
     },
-    /// A configured MCP server that could not be loaded for a worker, reported
+    /// A configured MCP server that could not be loaded, reported
     /// with a bounded, credential-redacted reason so the user can see why the
     /// server's tools are missing.
     McpServerSkipped {
-        thread_name: Option<String>,
         server_name: String,
         reason: String,
     },
@@ -332,7 +277,6 @@ pub enum AgentEvent {
     /// are live-only because older durable event readers do not know this
     /// vocabulary and catalog state is reconstructed from the server.
     McpNotification {
-        thread_name: Option<String>,
         server_name: String,
         kind: McpNotificationKind,
         message: String,
@@ -348,17 +292,13 @@ pub enum AgentEvent {
     /// the event leaves the process. Live-only, like the other events whose
     /// absence keeps the persisted stream readable by older builds.
     ModelError {
-        thread_name: Option<String>,
         message: String,
     },
-    RunFinished {
-        thread_name: Option<String>,
-    },
+    RunFinished {},
 }
 
 impl AgentEvent {
     pub(crate) fn tool_call_finished(
-        thread_name: Option<String>,
         call_id: String,
         name: String,
         result: &crate::tools::ToolResult,
@@ -413,11 +353,7 @@ impl AgentEvent {
                     return None;
                 }
                 let content = result.content.as_text()?;
-                if name == "thread" && content.contains(" timed out after ") {
-                    Some(ToolCompletionStatus::TimedOut)
-                } else if (name == "thread" && content.to_ascii_lowercase().contains("cancelled"))
-                    || durable_result_reports_cancelled(&name, content)
-                {
+                if durable_result_reports_cancelled(&name, content) {
                     Some(ToolCompletionStatus::Cancelled)
                 } else {
                     None
@@ -445,7 +381,6 @@ impl AgentEvent {
                 .and_then(serde_json::Value::as_u64)
         };
         Self::ToolCallFinished {
-            thread_name,
             call_id,
             name: name.clone(),
             content_preview: preview_tool_result_with_completion(&name, result, completion_status),
@@ -508,10 +443,7 @@ fn trusted_deadline_metadata(name: &str, value: &serde_json::Value) -> Option<se
 }
 
 fn durable_result_reports_cancelled(name: &str, content: &str) -> bool {
-    if !matches!(
-        name,
-        "subagent" | "subagent_cancel" | "orchestrator_launch" | "orchestrator_cancel"
-    ) {
+    if !matches!(name, "subagent" | "subagent_cancel") {
         return false;
     }
     serde_json::from_str::<serde_json::Value>(content)
@@ -656,7 +588,6 @@ pub enum SessionEvent {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct AssistantStreamDelta {
-    pub thread_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -669,12 +600,8 @@ pub struct AssistantStreamDelta {
 }
 
 impl AssistantStreamDelta {
-    pub(crate) fn from_model(
-        thread_name: Option<String>,
-        delta: crate::model::ModelStreamDelta,
-    ) -> Self {
+    pub(crate) fn from_model(delta: crate::model::ModelStreamDelta) -> Self {
         Self {
-            thread_name,
             text: (!delta.text.is_empty()).then_some(delta.text),
             reasoning: (!delta.reasoning.is_empty()).then_some(delta.reasoning),
             reset: delta.reset,
@@ -1184,67 +1111,33 @@ impl SessionEventBus {
 
 fn persisted_thread_event_name(event: &AgentEvent) -> Option<&str> {
     match event {
-        AgentEvent::ToolCallStarted {
-            thread_name: None,
-            name,
-            ..
-        }
-        | AgentEvent::ToolCallFinished {
-            thread_name: None,
-            name,
-            ..
-        } if !matches!(
-            name.as_str(),
-            "thread"
-                | "threads"
-                | "thread_read"
-                | "thread_delete"
-                | "workset_define"
-                | "workset_read"
-                | "workset_list"
-        ) =>
-        {
+        AgentEvent::ToolCallStarted { .. } | AgentEvent::ToolCallFinished { .. } => {
             Some(PRIMARY_TOOL_EVENT_TARGET)
         }
-        AgentEvent::RunStarted { thread_name, .. }
-        | AgentEvent::ToolCallStarted { thread_name, .. }
-        | AgentEvent::ToolCallFinished { thread_name, .. }
-        | AgentEvent::AssistantMessage { thread_name, .. }
-        | AgentEvent::Error { thread_name, .. }
-        | AgentEvent::RunFinished { thread_name } => thread_name.as_deref(),
-        AgentEvent::ThreadStarted { name, .. }
-        | AgentEvent::ThreadSteeringQueued { name, .. }
-        | AgentEvent::ThreadSteeringDelivered { name, .. }
-        | AgentEvent::ThreadSteeringExpired { name, .. }
-        | AgentEvent::ThreadFinished { name, .. } => Some(name),
-        // Usage updates are deliberately live-only. Persisting them would
-        // consume slots in the user-facing thread-event pages and make a DB
-        // written by this version unreadable by older AgentEvent enums.
-        AgentEvent::ModelCallStarted { .. }
-        | AgentEvent::TokenUsageUpdated { .. }
-        | AgentEvent::ThreadLog { .. }
-        | AgentEvent::McpServerSkipped { .. }
-        | AgentEvent::McpNotification { .. }
-        | AgentEvent::ModelError { .. }
-        | AgentEvent::OrchestratorSteeringQueued { .. }
-        | AgentEvent::OrchestratorSteeringDelivered { .. }
-        | AgentEvent::OrchestratorSteeringExpired { .. }
-        | AgentEvent::OrchestratorCompactionStarted { .. }
-        | AgentEvent::OrchestratorCompactionCompleted { .. }
-        | AgentEvent::OrchestratorCompactionSkipped { .. }
-        | AgentEvent::OrchestratorCompactionFailed { .. } => None,
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn test_primary_tool_started(id: &str) -> AgentEvent {
+    AgentEvent::ToolCallStarted {
+        call_id: id.to_owned(),
+        name: "read".to_owned(),
+        args_preview: String::new(),
+        key_arg_preview: None,
+        args_detail: None,
+        delegation_intent: None,
+        delegation_summary_verified: false,
     }
 }
 
 pub(crate) fn sanitize_external_agent_event(event: AgentEvent) -> Option<AgentEvent> {
     Some(match event {
-        AgentEvent::ModelCallStarted { .. } | AgentEvent::ThreadLog { .. } => return None,
-        AgentEvent::RunStarted { thread_name, .. } => AgentEvent::RunStarted {
-            thread_name,
+        AgentEvent::ModelCallStarted { .. } => return None,
+        AgentEvent::RunStarted { .. } => AgentEvent::RunStarted {
             prompt_preview: "run started".to_string(),
         },
         AgentEvent::ToolCallStarted {
-            thread_name,
             call_id,
             name,
             args_preview,
@@ -1264,7 +1157,6 @@ pub(crate) fn sanitize_external_agent_event(event: AgentEvent) -> Option<AgentEv
             let key = bounded_tool_preview(&redact_credentials(&key, &[]));
             let safe_args = safe_tool_arguments(&name, args_detail.as_deref(), &args_preview);
             AgentEvent::ToolCallStarted {
-                thread_name,
                 call_id,
                 args_preview: safe_args,
                 key_arg_preview: Some(key),
@@ -1275,7 +1167,6 @@ pub(crate) fn sanitize_external_agent_event(event: AgentEvent) -> Option<AgentEv
             }
         }
         AgentEvent::ToolCallFinished {
-            thread_name,
             call_id,
             name,
             content_preview,
@@ -1290,7 +1181,6 @@ pub(crate) fn sanitize_external_agent_event(event: AgentEvent) -> Option<AgentEv
             cleanup_duration_ms,
             remote_outcome_uncertain,
         } => AgentEvent::ToolCallFinished {
-            thread_name,
             call_id,
             name: safe_tool_name(&name),
             content_preview: bounded_tool_preview(&redact_credentials(&content_preview, &[])),
@@ -1306,96 +1196,26 @@ pub(crate) fn sanitize_external_agent_event(event: AgentEvent) -> Option<AgentEv
             cleanup_duration_ms,
             remote_outcome_uncertain,
         },
-        AgentEvent::ThreadStarted {
-            name,
-            source_threads,
-            ..
-        } => AgentEvent::ThreadStarted {
-            name,
-            action: "thread dispatched".to_string(),
-            source_threads,
-        },
-        AgentEvent::ThreadSteeringQueued {
-            name, steering_id, ..
-        } => AgentEvent::ThreadSteeringQueued {
-            name,
-            steering_id,
-            instruction_preview: "steering queued".to_string(),
-        },
-        AgentEvent::ThreadSteeringDelivered {
-            name, steering_id, ..
-        } => AgentEvent::ThreadSteeringDelivered {
-            name,
-            steering_id,
-            instruction_preview: "steering delivered".to_string(),
-        },
-        AgentEvent::ThreadSteeringExpired {
-            name, steering_id, ..
-        } => AgentEvent::ThreadSteeringExpired {
-            name,
-            steering_id,
-            instruction_preview: "steering expired".to_string(),
-        },
-        AgentEvent::OrchestratorSteeringQueued { steering_id, .. } => {
-            AgentEvent::OrchestratorSteeringQueued {
-                steering_id,
-                instruction_preview: "steering queued".to_string(),
-            }
-        }
-        AgentEvent::OrchestratorSteeringDelivered { steering_id, .. } => {
-            AgentEvent::OrchestratorSteeringDelivered {
-                steering_id,
-                instruction_preview: "steering delivered".to_string(),
-            }
-        }
-        AgentEvent::OrchestratorSteeringExpired { steering_id, .. } => {
-            AgentEvent::OrchestratorSteeringExpired {
-                steering_id,
-                instruction_preview: "steering expired".to_string(),
-            }
-        }
-        AgentEvent::ThreadFinished {
-            name,
-            exit_code,
-            timed_out,
-            usage,
-            ..
-        } => AgentEvent::ThreadFinished {
-            name,
-            exit_code,
-            timed_out,
-            timeout_reason: timed_out.then(|| "thread timed out".to_string()),
-            usage,
-        },
-        AgentEvent::Error { thread_name, .. } => AgentEvent::Error {
-            thread_name,
+        AgentEvent::Error { .. } => AgentEvent::Error {
             message: "operation failed".to_string(),
         },
         AgentEvent::McpServerSkipped {
-            thread_name,
             server_name,
             reason,
         } => AgentEvent::McpServerSkipped {
-            thread_name,
             server_name,
             reason: bounded_provider_message(&redact_credentials(&reason, &[])),
         },
         AgentEvent::McpNotification {
-            thread_name,
             server_name,
             kind,
             message,
         } => AgentEvent::McpNotification {
-            thread_name,
             server_name: safe_tool_name(&server_name),
             kind,
             message: bounded_provider_message(&redact_credentials(&message, &[])),
         },
-        AgentEvent::ModelError {
-            thread_name,
-            message,
-        } => AgentEvent::ModelError {
-            thread_name,
+        AgentEvent::ModelError { message } => AgentEvent::ModelError {
             // Provider bodies can be long; the actionable part is at the front.
             // Credential shapes are masked first as defense in depth: the exact
             // secret is not known here, but header-shaped credential lines and
@@ -1476,10 +1296,6 @@ fn safe_tool_arguments(name: &str, detail: Option<&str>, preview: &str) -> Strin
                     }
                 }
                 "read_command_output" => "read_command_output",
-                "thread" => "dispatch",
-                "threads" => "list_threads",
-                "thread_read" => "read_thread",
-                "thread_delete" => "delete_thread",
                 _ => "invoke",
             }
             .to_string(),
@@ -1521,15 +1337,6 @@ fn safe_tool_arguments(name: &str, detail: Option<&str>, preview: &str) -> Strin
             copy_safe_u64(object, &mut safe, "offset");
             copy_safe_u64(object, &mut safe, "limit");
         }
-        "thread" => {
-            copy_safe_string(object, &mut safe, "name");
-            copy_array_length(object, &mut safe, "threads", "source_count");
-            copy_safe_u64(object, &mut safe, "source_count");
-            copy_array_length(object, &mut safe, "skills", "skill_count");
-            copy_safe_u64(object, &mut safe, "skill_count");
-            copy_safe_u64(object, &mut safe, "timeout");
-        }
-        "thread_read" | "thread_delete" => copy_safe_string(object, &mut safe, "name"),
         _ => {}
     }
     serde_json::Value::Object(safe).to_string()
@@ -1627,23 +1434,6 @@ fn copy_edit_lengths(
         "new_text_chars".to_string(),
         serde_json::Value::from(new_chars),
     );
-}
-
-fn copy_array_length(
-    source: Option<&serde_json::Map<String, serde_json::Value>>,
-    target: &mut serde_json::Map<String, serde_json::Value>,
-    source_key: &str,
-    target_key: &str,
-) {
-    if let Some(value) = source
-        .and_then(|source| source.get(source_key))
-        .and_then(serde_json::Value::as_array)
-    {
-        target.insert(
-            target_key.to_string(),
-            serde_json::Value::from(value.len() as u64),
-        );
-    }
 }
 
 fn recent_events_from_state(
@@ -1749,8 +1539,6 @@ pub struct EventSink {
     bus: Option<SessionEventBus>,
     run_id: Option<SessionRunId>,
     client_id: Option<SessionClientId>,
-    stderr_prefixed: bool,
-    defer_worker_finish: bool,
 }
 
 impl EventSink {
@@ -1785,40 +1573,13 @@ impl EventSink {
         }
     }
 
-    pub fn stderr_prefixed() -> Self {
-        Self {
-            stderr_prefixed: true,
-            ..Self::default()
-        }
-    }
-
-    pub(crate) fn worker_stderr_prefixed() -> Self {
-        Self {
-            defer_worker_finish: true,
-            ..Self::stderr_prefixed()
-        }
-    }
-
     pub fn emit(&self, event: AgentEvent) {
-        if self.defer_worker_finish && matches!(event, AgentEvent::RunFinished { .. }) {
-            return;
-        }
         if matches!(event, AgentEvent::ModelCallStarted { .. }) {
-            if self.stderr_prefixed {
-                if let Ok(encoded) = serde_json::to_string(&event) {
-                    eprintln!("{STDERR_EVENT_PREFIX}{encoded}");
-                }
-            }
             return;
         }
         let Some(event) = sanitize_external_agent_event(event) else {
             return;
         };
-        if self.stderr_prefixed {
-            if let Ok(encoded) = serde_json::to_string(&event) {
-                eprintln!("{STDERR_EVENT_PREFIX}{encoded}");
-            }
-        }
         if let Some(bus) = &self.bus {
             let _ = bus.emit_agent_with_context(
                 event.clone(),
@@ -1841,9 +1602,6 @@ impl EventSink {
         event: AgentEvent,
         retry_caller_overload: bool,
     ) -> anyhow::Result<()> {
-        if self.defer_worker_finish && matches!(event, AgentEvent::RunFinished { .. }) {
-            return Ok(());
-        }
         if matches!(event, AgentEvent::ModelCallStarted { .. }) {
             self.emit(event);
             return Ok(());
@@ -1866,9 +1624,6 @@ impl EventSink {
                 bus.emit_with_context_async(event, self.run_id.clone(), self.client_id.clone())
                     .await?;
             }
-        }
-        if self.stderr_prefixed {
-            eprintln!("{STDERR_EVENT_PREFIX}{}", serde_json::to_string(&event)?);
         }
         if let Some(channel) = &self.channel {
             let _ = channel.send(event);
@@ -1987,11 +1742,6 @@ impl EventSink {
             }
         }
     }
-}
-
-pub fn decode_stderr_event(line: &str) -> Option<AgentEvent> {
-    let encoded = line.strip_prefix(STDERR_EVENT_PREFIX)?;
-    serde_json::from_str(encoded).ok()
 }
 
 #[cfg(test)]

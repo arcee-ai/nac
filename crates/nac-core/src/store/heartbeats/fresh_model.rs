@@ -90,10 +90,35 @@ pub struct FreshTaskLaunchReceipt {
 
 /// Issued only after durable schedule/version, ownership and retained-resource
 /// admission. Deserializing a passive receipt cannot manufacture this port input.
+#[derive(Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub(super) struct LegacyFrozenModel {
+    pub(super) config_id: String,
+    pub(super) name: String,
+    pub(super) backend: String,
+    pub(super) model: String,
+    pub(super) base_url: String,
+    #[serde(default)]
+    pub(super) allow_insecure_http: bool,
+    pub(super) api_key_env: Option<String>,
+    pub(super) reasoning_effort: Option<String>,
+    #[serde(default)]
+    pub(super) service_tier: Option<String>,
+    pub(super) extra_headers: std::collections::BTreeMap<String, String>,
+    #[serde(rename = "orchestrator_compaction_threshold")]
+    pub(super) orchestrator_compaction_threshold: Option<u64>,
+    pub(super) initial_prompt: Option<String>,
+    #[serde(default)]
+    pub(super) light_model: Option<serde_json::Value>,
+    pub(super) created_at: String,
+    pub(super) updated_at: String,
+}
+
 #[derive(Clone)]
 pub struct PreparedFreshTaskLaunch {
     pub(super) receipt: FreshTaskLaunchReceipt,
-    pub(super) model_defaults: Option<ModelConfigurationRecord>,
+    pub(super) model_defaults: Option<LegacyFrozenModel>,
+    pub(super) legacy_binding_id: Option<String>,
 }
 
 impl PreparedFreshTaskLaunch {
@@ -125,7 +150,7 @@ impl PreparedFreshTaskLaunch {
                 && receipt.binding.project_id.as_deref()
                     == Some(receipt.destination.project_id.as_str())
                 && receipt.binding.fresh_task.as_ref() == Some(&receipt.destination)
-                && match receipt.binding.model_configuration_id.as_deref() {
+                && match self.legacy_binding_id.as_deref() {
                     Some(id) => id == frozen.config_id,
                     None =>
                         frozen.config_id == format!("scheduled-defaults:{}", receipt.occurrence_id),
@@ -217,9 +242,10 @@ impl PreparedFreshTaskLaunch {
         Ok(Some(selection))
     }
 
-    /// Saved defaults are preparation input, excluded from passive inventory.
-    pub fn model_defaults(&self) -> Option<&ModelConfigurationRecord> {
-        self.model_defaults.as_ref()
+    /// Compare private frozen inputs when re-reading the same leased launch.
+    pub fn same_frozen_model(&self, other: &Self) -> bool {
+        self.model_defaults == other.model_defaults
+            && self.legacy_binding_id == other.legacy_binding_id
     }
 }
 

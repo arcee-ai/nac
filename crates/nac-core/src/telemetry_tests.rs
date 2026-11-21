@@ -10,7 +10,7 @@ fn runtime() -> RuntimeMetadata {
         "revision-test",
         crate::store::schema_version(),
         Some("host-sensitive-identity"),
-        Some("four-orchestrator"),
+        Some("four-direct"),
     )
 }
 
@@ -76,7 +76,7 @@ fn terminal_settlement_activity_reports_real_overlap_and_retires() {
 }
 
 #[test]
-fn in_memory_exporter_redacts_content_and_correlates_four_orchestrators() {
+fn in_memory_exporter_redacts_content_and_correlates_four_direct_runs() {
     let _lock = telemetry_test_lock();
     let exporter = Arc::new(InMemoryExporter::default());
     let recorder = TelemetryRecorder::bounded(exporter.clone(), runtime(), 4_096);
@@ -94,9 +94,22 @@ fn in_memory_exporter_redacts_content_and_correlates_four_orchestrators() {
     let store_path = root.join("store.db");
     crate::store::initialize(&store_path).unwrap();
     crate::store::insert_test_session(&store_path, canaries[0]);
-    crate::store::append_thread_event(&store_path, canaries[0], "worker", canaries[2]).unwrap();
-    crate::store::append_episode(&store_path, canaries[0], "worker", canaries[3], canaries[4])
-        .unwrap();
+    crate::store::append_thread_event(
+        &store_path,
+        canaries[0],
+        crate::events::PRIMARY_TOOL_EVENT_TARGET,
+        canaries[2],
+    )
+    .unwrap();
+    crate::store::create_session_inbox_item(
+        &store_path,
+        canaries[0],
+        crate::store::InboxDelivery::Queue,
+        &format!("{} {}", canaries[3], canaries[4]),
+        None,
+        None,
+    )
+    .unwrap();
     crate::store::TranscriptLogWriter::new(&store_path)
         .unwrap()
         .append(
@@ -119,8 +132,8 @@ fn in_memory_exporter_redacts_content_and_correlates_four_orchestrators() {
                     .with_run(Some(&run))
                     .with_generation(generation);
                 barrier.wait();
-                let _orchestrator =
-                    RuntimeActivityGuard::start(RuntimeActivity::Orchestrator, correlation.clone());
+                let _direct =
+                    RuntimeActivityGuard::start(RuntimeActivity::Direct, correlation.clone());
                 barrier.wait();
                 emit_store_duration(
                     StoreOperation::ManagedMonitorPoll,
@@ -156,7 +169,7 @@ fn in_memory_exporter_redacts_content_and_correlates_four_orchestrators() {
         .collect::<HashSet<_>>();
     assert_eq!(generations, HashSet::from([1, 2, 3, 4]));
     assert!(events.iter().any(|event| {
-        event.activity == Some(RuntimeActivity::Orchestrator) && event.value == Some(4)
+        event.activity == Some(RuntimeActivity::Direct) && event.value == Some(4)
     }));
     let encoded = serde_json::to_string(&events).unwrap();
     for canary in canaries {
@@ -180,7 +193,6 @@ fn in_memory_exporter_redacts_content_and_correlates_four_orchestrators() {
         .collect::<HashSet<_>>();
     assert!(operations.contains(&StoreOperation::TranscriptAppend));
     assert!(operations.contains(&StoreOperation::EventPersistence));
-    assert!(operations.contains(&StoreOperation::WorkerEpisodeCommit));
     assert!(operations.contains(&StoreOperation::ConnectionAcquire));
     assert!(operations.contains(&StoreOperation::Transaction));
     assert!(operations.contains(&StoreOperation::Commit));
@@ -289,21 +301,22 @@ fn disabled_exporter_preserves_store_results() {
     let exercise = |path: &std::path::Path| {
         crate::store::initialize(path).unwrap();
         crate::store::insert_test_session(path, "session-correctness");
-        crate::store::append_episode(
+        crate::store::create_session_inbox_item(
             path,
             "session-correctness",
-            "worker",
-            "inspect",
+            crate::store::InboxDelivery::Queue,
             "durable result",
+            None,
+            None,
         )
         .unwrap();
-        let episodes = crate::store::thread_read(path, "session-correctness", "worker").unwrap();
+        let records = crate::store::list_session_inbox(path, "session-correctness").unwrap();
         (
-            episodes.len(),
-            episodes[0].thread_name.clone(),
-            episodes[0].action.clone(),
-            episodes[0].content.clone(),
-            episodes[0].status.clone(),
+            records.len(),
+            records[0].delivery,
+            records[0].content.clone(),
+            records[0].status,
+            records[0].version,
         )
     };
     let root = std::env::temp_dir().join(format!(

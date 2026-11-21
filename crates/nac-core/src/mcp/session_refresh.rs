@@ -12,7 +12,6 @@ pub enum SessionMcpRefreshState {
     Pending,
     Degraded,
     Failed,
-    ScheduledForWorkers,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -21,8 +20,7 @@ pub struct SessionMcpRefreshStatus {
     pub revision: i64,
     #[cfg_attr(feature = "openapi", schema(required))]
     pub requested_at: Option<String>,
-    /// Process-local acknowledgement for this direct agent incarnation. An
-    /// orchestrator has independent workers and does not claim an aggregate acknowledgement.
+    /// Process-local acknowledgement for this agent incarnation.
     #[cfg_attr(feature = "openapi", schema(required))]
     pub applied_revision: Option<i64>,
     #[cfg_attr(feature = "openapi", schema(required))]
@@ -42,12 +40,11 @@ struct MountState {
 
 pub(crate) struct SessionMcpMounts {
     state: RwLock<MountState>,
-    workers: bool,
     incarnation: String,
 }
 
 impl SessionMcpMounts {
-    pub(crate) fn new(registry: Option<Arc<McpRegistry>>, workers: bool) -> Self {
+    pub(crate) fn new(registry: Option<Arc<McpRegistry>>) -> Self {
         Self {
             state: RwLock::new(MountState {
                 revision: 0,
@@ -56,7 +53,6 @@ impl SessionMcpMounts {
                 state: SessionMcpRefreshState::Current,
                 message: None,
             }),
-            workers,
             incarnation: uuid::Uuid::new_v4().to_string(),
         }
     }
@@ -116,12 +112,10 @@ impl SessionMcpMounts {
         SessionMcpRefreshStatus {
             revision: request.revision,
             requested_at: request.requested_at,
-            applied_revision: (!self.workers).then_some(state.applied_revision).flatten(),
-            incarnation_id: (!self.workers).then(|| self.incarnation.clone()),
+            applied_revision: state.applied_revision,
+            incarnation_id: Some(self.incarnation.clone()),
             state: if request.revision == 0 {
                 SessionMcpRefreshState::NotRequested
-            } else if self.workers {
-                SessionMcpRefreshState::ScheduledForWorkers
             } else if request.revision > state.revision {
                 SessionMcpRefreshState::Pending
             } else {
@@ -227,7 +221,7 @@ mod tests {
         let home = TestHome::new("mcp-catalog-versus-mount", "recorded", &first.url);
         let old = load(&home).await;
         let capture = old.capture_tool("mcp__recorded__echo").unwrap();
-        let mounts = SessionMcpMounts::new(Some(old.clone()), false);
+        let mounts = SessionMcpMounts::new(Some(old.clone()));
         // ALL-130 notifications commit into the existing registry. They can
         // change its catalog without a session mount refresh request.
         old.sync

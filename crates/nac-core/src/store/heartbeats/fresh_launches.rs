@@ -2,33 +2,6 @@
 //! participate in the existing creation transaction; they never perform effects.
 use super::*;
 
-coordinated_command! {
-/// Pin effective destination defaults when ordinary launch inheritance used a
-/// sibling chat or config-file fallback. Headers remain private preparation data.
-pub fn pin_fresh_heartbeat_model_defaults(path:&Path,occurrence_id:&str,model_defaults:ModelConfigurationRecord)->Result<PreparedFreshTaskLaunch> {
-    let mut conn=open_runtime_connection(path)?;
-    let tx=conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-    let current=fresh_admission::load_reserved(&tx,occurrence_id)?.context("fresh launch reservation was not found")?;
-    ensure!(!current.receipt().stop_requested && current.receipt().first_input_id.is_none(),"scheduled model selection is cancelled or already published");
-    if let Some(prior)=current.model_defaults() {
-        let mut comparable=model_defaults;
-        comparable.config_id=prior.config_id.clone();comparable.name=prior.name.clone();
-        comparable.created_at=prior.created_at.clone();comparable.updated_at=prior.updated_at.clone();
-        comparable.initial_prompt=prior.initial_prompt.clone();
-        ensure!(&comparable==prior,"conflict: scheduled model defaults were resolved concurrently; retry the original reservation");
-        return Ok(current);
-    }
-    tx.execute("UPDATE heartbeat_task_launches SET launch_json=json_set(launch_json,'$.model_defaults',json(?2)) WHERE occurrence_id=?1",params![occurrence_id,encode(&model_defaults)?])?;
-    let pinned=fresh_admission::load_reserved(&tx,occurrence_id)?.context("fresh model selection disappeared")?;
-    tx.commit()?;
-    Ok(pinned)
-}
-command PinFreshHeartbeatModelDefaultsCommand {occurrence_id:String=occurrence_id.to_owned(),model_defaults:ModelConfigurationRecord=model_defaults}
-call |c| (&c.occurrence_id,c.model_defaults)
-correlation |_c| crate::telemetry::Correlation::default();
-port public;
-}
-
 pub(crate) fn fresh_launch_for_request_with_connection(
     conn: &Connection,
     request_id: &str,

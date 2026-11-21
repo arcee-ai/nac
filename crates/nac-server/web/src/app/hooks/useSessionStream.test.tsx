@@ -106,8 +106,6 @@ function snapshot(messages: Message[], total = messages.length): SessionSnapshot
     message_created_at: messages.map((_, index) => `t-${index}`),
     message_page: messagePage,
     response_timing: timing,
-    thread_events: {},
-    thread_episodes: {},
   } as SessionSnapshotResponse;
 }
 
@@ -398,10 +396,6 @@ describe("session stream request coordination", () => {
     });
     const accepted = snapshot([user("accepted")]);
     client.setQueryData(queryKeys.sessionSnapshot(SESSION_ID), accepted);
-    client.setQueryData(queryKeys.threadEvents(SESSION_ID, "worker"), {
-      pages: [{ events: [{ id: 1 }], has_older: false }],
-      pageParams: [null],
-    });
     const late = deferred<MessagesPageResponse>();
     stream.getPage.mockImplementation(() => late.promise);
     const renderer = await mount(client);
@@ -418,7 +412,6 @@ describe("session stream request coordination", () => {
     await act(async () => {
       stream_source.emit("replay_gap", { missing_from_sequence_id: 1 });
     });
-    expect(client.getQueryData(queryKeys.threadEvents(SESSION_ID, "worker"))).toBeUndefined();
 
     await act(async () => {
       late.resolve(page([user("stale")], 1));

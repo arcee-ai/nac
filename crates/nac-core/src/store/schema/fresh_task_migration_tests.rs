@@ -13,7 +13,7 @@ fn rows(conn: &Connection, table: &str) -> Vec<Vec<rusqlite::types::Value>> {
 }
 
 fn previous_schema(path: &Path) {
-    initialize(path).unwrap();
+    initialize_synthetic_predecessor(path).unwrap();
     insert_test_session(path, "legacy");
     insert_test_session(path, "creator");
     let conn = open_runtime_connection(path).unwrap();

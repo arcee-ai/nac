@@ -53,29 +53,8 @@ fn deserialize_token_accounting(
     }
 }
 
-pub(super) fn serialize_light_model(
-    light: Option<&crate::light_model::LightModelSettings>,
-) -> Result<Option<String>> {
-    light
-        .map(|config| {
-            serde_json::to_string(config).context("failed to serialize session light model")
-        })
-        .transpose()
-}
-
-pub(super) fn deserialize_light_model(
-    raw: Option<&str>,
-) -> Result<Option<crate::light_model::LightModelSettings>> {
-    raw.map(|json| {
-        serde_json::from_str::<crate::light_model::LightModelSettings>(json)
-            .context("failed to parse stored session light model")
-    })
-    .transpose()
-}
-
 coordinated_command! {
 pub fn create_session(path: &Path, snapshot: &SessionSnapshot) -> Result<()> {
-    validate_new_session(snapshot)?;
     crate::store::retry_busy_correlated(
         crate::telemetry::Correlation::session(Some(&snapshot.session_id)),
         || create_session_once(path, snapshot),
@@ -103,7 +82,6 @@ pub(crate) fn insert_new_session_in_transaction(
     path: &Path,
     snapshot: &SessionSnapshot,
 ) -> Result<()> {
-    validate_new_session(snapshot)?;
     let existing: Option<String> = tx
         .query_row(
             "SELECT session_id FROM sessions WHERE session_id = ?1",
@@ -126,18 +104,6 @@ pub(crate) fn insert_new_session_in_transaction(
             params![snapshot.session_id, project_id],
         )?;
     }
-    Ok(())
-}
-
-fn validate_new_session(snapshot: &SessionSnapshot) -> Result<()> {
-    anyhow::ensure!(
-        snapshot.behavior == SessionBehavior::Direct,
-        "only direct session behavior is supported"
-    );
-    anyhow::ensure!(
-        snapshot.light_model.is_none(),
-        "light_model is no longer supported"
-    );
     Ok(())
 }
 
@@ -413,7 +379,6 @@ pub fn update_session_config(
             service_tier: snapshot.service_tier.map(|tier| tier.as_str().to_string()),
             api_key_env: snapshot.api_key_env.clone(),
             extra_headers_json,
-            light_model: snapshot.light_model.clone(),
             orchestrator_compaction_threshold: snapshot.orchestrator_compaction_threshold,
             automatic_compaction: snapshot.automatic_compaction,
             config_version: snapshot.config_version,
@@ -538,7 +503,7 @@ pub fn load_session(path: &Path, session_id: &str) -> Result<SessionSnapshot> {
                     s.created_at, s.updated_at, s.host_id, s.api_key_env,
                     s.extra_headers_json, s.token_usages_json, s.config_version,
                     s.orchestrator_compaction_threshold, s.ssh_port,
-                    s.ssh_identity_file, s.light_model_json, sp.project_id, s.behavior, s.automatic_compaction, s.service_tier
+                    s.ssh_identity_file, sp.project_id, s.behavior, s.automatic_compaction, s.service_tier
              FROM sessions s
              LEFT JOIN session_projects sp ON sp.session_id = s.session_id
              WHERE s.session_id = ?1",
@@ -634,8 +599,7 @@ pub fn load_session_config(path: &Path, session_id: &str) -> Result<RawSessionCo
                         reasoning_effort: row.get(5)?,
                         api_key_env: row.get(6)?,
                         extra_headers_json: row.get(7)?,
-                        light_model: None,
-                        config_version: row.get(8)?,
+                                    config_version: row.get(8)?,
                         orchestrator_compaction_threshold: row.get(9)?,
                         automatic_compaction: row.get(10)?,
                         service_tier: row.get(11)?,
@@ -690,7 +654,7 @@ pub(crate) fn read_project_session_model_source(
             allow_insecure_http: row.get(3)?, backend: row.get(4)?, reasoning_effort: row.get(5)?,
             api_key_env: row.get(6)?, extra_headers_json: row.get(7)?, config_version: row.get(8)?,
             orchestrator_compaction_threshold: row.get(9)?, automatic_compaction: row.get(10)?,
-            service_tier: row.get(11)?, light_model: None, diagnostics: Vec::new(),
+            service_tier: row.get(11)?, diagnostics: Vec::new(),
         }),
     ).optional()?;
     row.map(|mut config| {
@@ -1041,7 +1005,7 @@ pub fn load_last_session(path: &Path) -> Result<SessionSnapshot> {
                     s.created_at, s.updated_at, s.host_id, s.api_key_env,
                     s.extra_headers_json, s.token_usages_json, s.config_version,
                     s.orchestrator_compaction_threshold, s.ssh_port,
-                    s.ssh_identity_file, s.light_model_json, sp.project_id, s.behavior, s.automatic_compaction, s.service_tier
+                    s.ssh_identity_file, sp.project_id, s.behavior, s.automatic_compaction, s.service_tier
              FROM sessions s
              LEFT JOIN session_projects sp ON sp.session_id = s.session_id
              ORDER BY s.updated_at DESC, s.created_at DESC
@@ -1068,24 +1032,7 @@ coordinated_command! {
 pub fn delete_session(path: &Path, session_id: &str) -> Result<bool> {
     let mut conn = crate::store::open_connection(path)?;
     let tx = conn.transaction()?;
-    // Delete non-cascading child tables before their parents. Session-owned
-    // auxiliary rows are intentionally left to their session foreign keys.
-    tx.execute(
-        "DELETE FROM episodes WHERE session_id = ?1",
-        params![session_id],
-    )?;
-    tx.execute(
-        "DELETE FROM workset_items WHERE session_id = ?1",
-        params![session_id],
-    )?;
-    tx.execute(
-        "DELETE FROM threads WHERE session_id = ?1",
-        params![session_id],
-    )?;
-    tx.execute(
-        "DELETE FROM worksets WHERE session_id = ?1",
-        params![session_id],
-    )?;
+    // Session-owned auxiliary rows are removed by their session foreign keys.
     let deleted = tx.execute(
         "DELETE FROM sessions WHERE session_id = ?1",
         params![session_id],
@@ -1125,11 +1072,10 @@ fn map_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow> {
         orchestrator_compaction_threshold: row.get(19)?,
         ssh_port: row.get(20)?,
         ssh_identity_file: row.get(21)?,
-        light_model_json: row.get(22)?,
-        project_id: row.get(23)?,
-        behavior: row.get(24)?,
-        automatic_compaction: row.get(25)?,
-        service_tier: row.get(26)?,
+        project_id: row.get(22)?,
+        behavior: row.get(23)?,
+        automatic_compaction: row.get(24)?,
+        service_tier: row.get(25)?,
     })
 }
 
@@ -1647,8 +1593,6 @@ pub(crate) fn insert_or_replace_session(
         &snapshot.token_usages,
         snapshot.unattributed_token_usage.as_ref(),
     )?;
-    let light_model_json = serialize_light_model(snapshot.light_model.as_ref())?;
-
     // The legacy `store_path` column is kept physically (NOT NULL in existing
     // stores) but is informational only: it records the store that was
     // actually opened for this write and is never read back.
@@ -1660,10 +1604,10 @@ pub(crate) fn insert_or_replace_session(
              response_durations_ms_json, created_at, updated_at, host_id, api_key_env,
              extra_headers_json, token_usages_json, config_version,
              orchestrator_compaction_threshold, ssh_port, ssh_identity_file,
-             light_model_json, behavior, automatic_compaction, service_tier
+             behavior, automatic_compaction, service_tier
          ) VALUES (
              ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
-             ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29
+             ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28
          )
          ON CONFLICT(session_id) DO UPDATE SET
              cwd = excluded.cwd,
@@ -1708,7 +1652,6 @@ pub(crate) fn insert_or_replace_session(
             snapshot.orchestrator_compaction_threshold,
             stored_ssh_port(snapshot.ssh.as_ref()),
             stored_ssh_identity_file(snapshot.ssh.as_ref()),
-            light_model_json,
             snapshot.behavior.as_str(),
             snapshot.automatic_compaction,
             snapshot.service_tier.map(|tier| tier.as_str().to_string()),
@@ -1741,7 +1684,6 @@ struct SessionRow {
     orchestrator_compaction_threshold: Option<u64>,
     ssh_port: Option<u16>,
     ssh_identity_file: Option<String>,
-    light_model_json: Option<String>,
     behavior: String,
     automatic_compaction: bool,
     service_tier: Option<String>,
@@ -1762,13 +1704,6 @@ impl SessionRow {
         let backend = parse_backend(self.backend)?;
         let extra_headers = parse_extra_headers(self.extra_headers_json.as_deref())?;
         let behavior: SessionBehavior = self.behavior.parse()?;
-        // Direct sessions have no consumer for the retired selector. Leave its
-        // stored bytes alone and do not let malformed inert data block resume.
-        let light_model = if behavior == SessionBehavior::Direct {
-            None
-        } else {
-            deserialize_light_model(self.light_model_json.as_deref())?
-        };
         let (token_usages, unattributed_token_usage) =
             deserialize_token_accounting(self.token_usages_json.as_deref())?;
         Ok(SessionSnapshot {
@@ -1790,7 +1725,6 @@ impl SessionRow {
             ssh: stored_ssh_connection(self.ssh_host, self.ssh_port, self.ssh_identity_file),
             api_key_env: self.api_key_env,
             extra_headers,
-            light_model,
             orchestrator_compaction_threshold: validate_stored_compaction_threshold(
                 self.orchestrator_compaction_threshold,
             )?,

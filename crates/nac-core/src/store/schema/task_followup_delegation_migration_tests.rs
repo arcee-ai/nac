@@ -32,7 +32,7 @@ fn rows(conn: &Connection, table: &str) -> Vec<Vec<rusqlite::types::Value>> {
         .query_map([], |row| row.get::<_, String>(1))
         .unwrap()
         .map(Result::unwrap)
-        .filter(|c| c != "delegation_id")
+        .filter(|c| c != "delegation_id" && !(table == "sessions" && c == "light_model_json"))
         .collect::<Vec<_>>();
     let mut query = conn
         .prepare(&format!(
@@ -98,7 +98,7 @@ fn followup_schema47_upgrades_each_allocated_predecessor_without_inventing_autho
         let path = std::env::temp_dir()
             .join(format!("nac-delegation-migration-{}", uuid::Uuid::new_v4()))
             .join("store.db");
-        initialize(&path).unwrap();
+        initialize_synthetic_predecessor(&path).unwrap();
         for id in ["caller", "target"] {
             insert_test_session(&path, id);
             open_runtime_connection(&path)
@@ -240,6 +240,7 @@ fn followup_schema47_upgrades_each_allocated_predecessor_without_inventing_autho
                 .unwrap(),
             STORE_SCHEMA_VERSION
         );
+        assert_eq!(STORE_SCHEMA_VERSION, 55);
         assert_eq!(
             heartbeat_layout(&conn),
             current_heartbeat_layout,
@@ -262,13 +263,16 @@ fn followup_schema47_upgrades_each_allocated_predecessor_without_inventing_autho
         }
         for (table, definition) in definitions {
             let expected = if table.starts_with("heartbeat_") {
-                &current_heartbeat_layout
+                current_heartbeat_layout
                     .iter()
                     .find(|(name, _)| name == table)
                     .unwrap()
                     .1
+                    .clone()
+            } else if table == "sessions" {
+                definition.replace(", light_model_json TEXT", "")
             } else {
-                &definition
+                definition
             };
             assert_eq!(
                 conn.query_row(
@@ -277,7 +281,7 @@ fn followup_schema47_upgrades_each_allocated_predecessor_without_inventing_autho
                     |r| r.get::<_, String>(0)
                 )
                 .unwrap(),
-                *expected
+                expected
             );
         }
         for (_, tables) in ALLOCATIONS {

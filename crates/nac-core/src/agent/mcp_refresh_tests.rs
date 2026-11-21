@@ -25,14 +25,13 @@ fn model_options() -> ModelOptions {
     }
 }
 
-async fn direct(home: &TestHome, behavior: crate::sessions::SessionBehavior) -> Agent {
+async fn direct(home: &TestHome) -> Agent {
     let root = home.path.join("repo");
     std::fs::create_dir_all(&root).unwrap();
-    runtime::build_run_config_for_project_with_behavior(
+    runtime::build_run_config_for_project(
         RunOptions {
             workspace_cwd: root.clone(),
             config_cwd: Some(root),
-            worker_executable: None,
             store: StoreOptions {
                 store_path: Some(home.path.join("store.db")),
             },
@@ -43,7 +42,6 @@ async fn direct(home: &TestHome, behavior: crate::sessions::SessionBehavior) -> 
         },
         &runtime::NacConfig::default(),
         None,
-        behavior,
     )
     .await
     .unwrap()
@@ -80,7 +78,7 @@ async fn mcp_mount_refresh_add_replace_remove_and_restart_preserve_captured_roun
         &first.url,
         "enabled = false",
     );
-    let mut agent = direct(&home, crate::sessions::SessionBehavior::Direct).await;
+    let mut agent = direct(&home).await;
     let (events, mut observations) = tokio::sync::mpsc::unbounded_channel();
     agent.set_event_sink(EventSink::channel(events));
     let backend = Arc::clone(&agent.tool_runtime.backend);
@@ -226,7 +224,6 @@ async fn mcp_mount_refresh_add_replace_remove_and_restart_preserve_captured_roun
         &id,
         &runtime::NacConfig::default(),
         home.path.join("repo"),
-        None,
         runtime::ResumeModelOptions::default(),
     )
     .await
@@ -250,7 +247,7 @@ async fn mcp_mount_refresh_keeps_approval_wait_bound_and_invokes_exactly_once() 
     let second = RecordingMcpServer::start();
     let home = TestHome::new("mcp-refresh-approval", "recorded", &first.url);
     configure(&home, &first.url, "approval = \"ask\"");
-    let mut agent = direct(&home, crate::sessions::SessionBehavior::Direct).await;
+    let mut agent = direct(&home).await;
     names(&mut agent);
     let broker = agent.configure_permission_broker(0).unwrap();
     let bus = crate::events::SessionEventBus::new(agent.tool_runtime.session_id.clone());
@@ -304,7 +301,7 @@ async fn mcp_mount_refresh_required_failure_invalidates_old_mounts_until_explici
     let _env = crate::TEST_ENV_LOCK.lock().unwrap();
     let server = RecordingMcpServer::start();
     let home = TestHome::new("mcp-refresh-failure", "recorded", &server.url);
-    let mut agent = direct(&home, crate::sessions::SessionBehavior::Direct).await;
+    let mut agent = direct(&home).await;
     names(&mut agent);
     std::fs::write(home.path.join("config.toml"), "[mcp_servers.broken]\nrequired = true\ntransport = \"stdio\"\ncommand = \"/nonexistent/nac-mcp-fixture\"\n").unwrap();
     request(&agent, 0);
@@ -343,7 +340,7 @@ async fn mcp_mount_refresh_invalid_configuration_fails_closed_until_explicit_ret
     let _env = crate::TEST_ENV_LOCK.lock().unwrap();
     let server = RecordingMcpServer::start();
     let home = TestHome::new("mcp-refresh-invalid-config", "recorded", &server.url);
-    let mut agent = direct(&home, crate::sessions::SessionBehavior::Direct).await;
+    let mut agent = direct(&home).await;
     assert!(names(&mut agent).contains(&ECHO.to_string()));
     std::fs::write(home.path.join("config.toml"), "[mcp_servers.recorded\n").unwrap();
     request(&agent, 0);
@@ -382,7 +379,7 @@ async fn mcp_mount_refresh_superseded_load_cannot_publish_an_older_revision() {
         &first.url,
         "enabled = false",
     );
-    let mut agent = direct(&home, crate::sessions::SessionBehavior::Direct).await;
+    let mut agent = direct(&home).await;
     configure(&home, &first.url, "approval = \"allow\"");
     request(&agent, 0);
     let store = agent.tool_runtime.store_path.clone();
@@ -421,7 +418,7 @@ async fn mcp_mount_refresh_cancellation_retains_pending_intent_without_replaying
         &server.url,
         "enabled = false",
     );
-    let mut agent = direct(&home, crate::sessions::SessionBehavior::Direct).await;
+    let mut agent = direct(&home).await;
     configure(&home, &server.url, "approval = \"allow\"");
     request(&agent, 0);
     let cancellation = agent.command_cancellation();
@@ -450,7 +447,7 @@ async fn mcp_mount_refresh_preserves_an_inflight_transport_until_its_one_settlem
     let (first, arrived, release) = RecordingMcpServer::start_holding_first_call();
     let second = RecordingMcpServer::start();
     let home = TestHome::new("mcp-refresh-inflight", "recorded", &first.url);
-    let mut agent = direct(&home, crate::sessions::SessionBehavior::Direct).await;
+    let mut agent = direct(&home).await;
     names(&mut agent);
     let round = agent.tool_runtime.clone();
     let client = agent.client.clone();
@@ -489,8 +486,8 @@ async fn mcp_mount_refresh_keeps_parent_and_child_mounts_independent() {
         &server.url,
         "enabled = false",
     );
-    let mut parent = direct(&home, crate::sessions::SessionBehavior::Direct).await;
-    let child = direct(&home, crate::sessions::SessionBehavior::Direct).await;
+    let mut parent = direct(&home).await;
+    let child = direct(&home).await;
     let child_id = child.tool_runtime.session_id.clone().unwrap();
     let parent_id = parent.tool_runtime.session_id.clone().unwrap();
     let store_path = home.path.join("store.db");
@@ -508,7 +505,6 @@ async fn mcp_mount_refresh_keeps_parent_and_child_mounts_independent() {
         &child_id,
         &runtime::NacConfig::default(),
         home.path.join("repo"),
-        None,
         runtime::ResumeModelOptions::default(),
     )
     .await
@@ -540,7 +536,7 @@ async fn mcp_mount_refresh_during_compaction_applies_before_the_following_model_
     let replacement =
         RecordingMcpServer::start_with_guidance("replacement definition", "replacement guidance");
     let home = TestHome::new("mcp-refresh-compaction", "recorded", &original.url);
-    let mut agent = direct(&home, crate::sessions::SessionBehavior::Direct).await;
+    let mut agent = direct(&home).await;
     let store = agent.tool_runtime.store_path.clone();
     let session = agent.tool_runtime.session_id.clone().unwrap();
     let mut history = agent.messages.to_vec();
@@ -570,7 +566,6 @@ async fn mcp_mount_refresh_during_compaction_applies_before_the_following_model_
         store.clone(),
         session.clone(),
         Some(1),
-        CompactionPolicy::Direct,
     ));
     configure(&home, &replacement.url, "approval = \"allow\"");
     request(&agent, 0);
@@ -637,7 +632,7 @@ async fn mcp_mount_refresh_rebinds_expanded_tool_visibility_and_exact_tool_polic
     let server = RecordingMcpServer::start();
     let home = TestHome::new("mcp-refresh-tool-policy", "recorded", &server.url);
     configure(&home, &server.url, "allowed_tools = []\napproval = \"ask\"");
-    let mut agent = direct(&home, crate::sessions::SessionBehavior::Direct).await;
+    let mut agent = direct(&home).await;
     assert!(!names(&mut agent).contains(&ECHO.to_string()));
     configure(
         &home,
@@ -689,7 +684,7 @@ async fn mcp_mount_refresh_retains_ssh_backend_and_never_spawns_stdio() {
         &server.url,
         "enabled = false",
     );
-    let owner = direct(&home, crate::sessions::SessionBehavior::Direct).await;
+    let owner = direct(&home).await;
     let store = owner.tool_runtime.store_path.clone();
     let session = owner.tool_runtime.session_id.clone().unwrap();
     drop(owner);
@@ -704,7 +699,6 @@ async fn mcp_mount_refresh_retains_ssh_backend_and_never_spawns_stdio() {
         &session,
         &runtime::NacConfig::default(),
         home.path.join("repo"),
-        None,
         runtime::ResumeModelOptions::default(),
     )
     .await
@@ -740,7 +734,7 @@ async fn mcp_mount_refresh_manual_compaction_does_not_inherit_a_cancelled_run() 
         &server.url,
         "enabled = false",
     );
-    let mut agent = direct(&home, crate::sessions::SessionBehavior::Direct).await;
+    let mut agent = direct(&home).await;
     let prior_run = agent.begin_run_cancellation();
     prior_run.cancel();
     let mut history = agent.messages.to_vec();

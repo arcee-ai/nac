@@ -96,8 +96,7 @@ fn require_peer(connection: &Connection, session_id: &str) -> Result<()> {
     let eligible: bool = connection.query_row(
         "SELECT EXISTS(SELECT 1 FROM sessions s WHERE s.session_id = ?1 AND s.behavior = 'direct'
          AND s.sandbox_json IS NULL AND s.host_id IS NULL
-         AND NOT EXISTS(SELECT 1 FROM traditional_children c WHERE c.child_session_id = s.session_id)
-         AND NOT EXISTS(SELECT 1 FROM managed_orchestrators m WHERE m.orchestrator_session_id = s.session_id))",
+         AND NOT EXISTS(SELECT 1 FROM traditional_children c WHERE c.child_session_id = s.session_id))",
         [session_id], |row| row.get(0),
     )?;
     anyhow::ensure!(

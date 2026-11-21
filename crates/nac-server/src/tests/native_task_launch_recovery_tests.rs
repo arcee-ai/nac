@@ -40,7 +40,6 @@ async fn fixture_context(
             ssh_host: None,
             ssh_port: None,
             ssh_identity_file: None,
-            default_model_config_id: Some("task-config".into()),
         })
         .await
         .unwrap();
@@ -1157,7 +1156,6 @@ async fn native_failure_receipt_settles_before_owned_store_drain() {
             SessionManager::new_async(ServerOptions {
                 root_cwd: root.clone(),
                 store_path: Some(root.join("store.db")),
-                worker_executable: None,
                 managed_host: None,
             })
             .await
@@ -1299,7 +1297,6 @@ async fn native_failure_receipt_settles_before_owned_store_drain() {
             let restarted = SessionManager::new_async(ServerOptions {
                 root_cwd: root.clone(),
                 store_path: Some(root.join("store.db")),
-                worker_executable: None,
                 managed_host: None,
             })
             .await

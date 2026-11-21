@@ -1,7 +1,7 @@
 //! Owned-store approval cancellation must remain responsive and fail closed
 //! while a separate durable event is waiting for the persistence executor.
 use super::*;
-use crate::events::{AgentEvent, EventSink, SessionEvent, SessionEventBus};
+use crate::events::{EventSink, SessionEvent, SessionEventBus};
 use crate::store::coordinator::PersistenceCommand;
 
 struct Gate {
@@ -63,11 +63,7 @@ async fn aborted_owned_approval_removes_authority_without_waiting_for_event_pers
     observed.recv_timeout(Duration::from_secs(1)).unwrap();
     let publisher = tokio::spawn(async move {
         EventSink::bus(bus)
-            .emit_async(AgentEvent::ThreadStarted {
-                name: "worker".into(),
-                action: "wait for persistence".into(),
-                source_threads: Vec::new(),
-            })
+            .emit_async(crate::events::test_primary_tool_started("persistence-gate"))
             .await;
     });
     tokio::time::timeout(Duration::from_secs(1), async {

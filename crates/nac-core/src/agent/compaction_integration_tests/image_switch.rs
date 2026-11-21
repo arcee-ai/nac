@@ -99,38 +99,18 @@ fn next_operation_refreshes_codex_capability_and_read_definition() {
         .join("store.db");
     crate::store::initialize(&store_path).unwrap();
     crate::store::insert_test_session(&store_path, "session");
-    let mut agent = compaction_test_agent_with_mode(
-        client,
-        store_path,
-        Some("session"),
-        None,
-        EventSink::none(),
-        AgentMode::Direct,
-    );
+    let mut agent =
+        compaction_test_agent(client, store_path, Some("session"), None, EventSink::none());
     agent.enable_automatic_compaction();
     let before_threshold = agent.compaction.as_ref().unwrap().threshold_for_test();
     assert!(!agent.client.supports_image_tool_results());
     agent.client.model = "gpt-5.6-sol".into();
-    let mut light = agent.client.clone();
-    light.model = "gpt-6.1-sol".into();
-    let previous_light = std::sync::Arc::new(light);
-    agent.tool_runtime.light_client = Some(previous_light.clone());
     assert!(
         !agent.client.supports_image_tool_results(),
         "the current operation keeps its snapshot"
     );
     agent.refresh_model_at_operation_boundary();
     assert!(agent.client.supports_image_tool_results());
-    assert!(agent
-        .tool_runtime
-        .light_client
-        .as_ref()
-        .unwrap()
-        .supports_image_tool_results());
-    assert!(
-        !previous_light.supports_image_tool_results(),
-        "in-flight clients keep their snapshot"
-    );
     assert_ne!(
         agent.compaction.as_ref().unwrap().threshold_for_test(),
         before_threshold
@@ -210,14 +190,8 @@ async fn switched_codex_model_replays_image_in_normal_run_and_compaction() {
     let switched = crate::sessions::load_session_config(&store_path, "session").unwrap();
     assert_eq!(switched.model, "gpt-6.1-sol");
     let client = ModelClient::new_for_codex_test_server(server.base_url.clone(), &switched.model);
-    let mut agent = compaction_test_agent_with_mode(
-        client,
-        store_path,
-        Some("session"),
-        None,
-        EventSink::none(),
-        AgentMode::Direct,
-    );
+    let mut agent =
+        compaction_test_agent(client, store_path, Some("session"), None, EventSink::none());
     agent.restore_messages(history);
     agent.set_current_run_id(Some(uuid::Uuid::new_v4().to_string()));
     assert_eq!(agent.send("continue").await.unwrap(), "normal");

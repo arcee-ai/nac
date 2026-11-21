@@ -160,7 +160,7 @@ describe("work fold layout", () => {
     ]);
   });
 
-  it("keeps activity after a thread wave after that wave", () => {
+  it("keeps activity after intervening prose", () => {
     const group = (id: string, segment: InsightSegment): ModelTurnItem => ({
       kind: "group",
       id,
@@ -168,19 +168,19 @@ describe("work fold layout", () => {
     });
     const layout = layoutModelTurn([
       group("first", read("a", "a.ts")),
-      { kind: "block", block: { kind: "wave", key: "wave", rows: [] } },
+      { kind: "block", block: { kind: "text", key: "separator", text: "Continuing." } },
       group("second", run("b", "npm test")),
     ]);
     expect(layout.map((entry) => entry.kind)).toEqual(["fold", "block", "fold"]);
   });
 
-  it("does not label prose before a wave as thought because work follows the wave", () => {
+  it("does not label prose as thought when work follows", () => {
     const layout = layoutModelTurn([
       {
         kind: "block",
-        block: { kind: "text", key: "note", text: "Starting a thread." },
+        block: { kind: "text", key: "note", text: "Starting work." },
       },
-      { kind: "block", block: { kind: "wave", key: "wave", rows: [] } },
+      { kind: "block", block: { kind: "text", key: "separator", text: "Continuing." } },
       {
         kind: "group",
         id: "later",

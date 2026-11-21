@@ -141,7 +141,7 @@ fn fixture(predecessor: Predecessor) -> Fixture {
             uuid::Uuid::new_v4()
         ))
         .join("store.db");
-    initialize(&path).unwrap();
+    initialize_synthetic_predecessor(&path).unwrap();
     for id in ["session", "child"] {
         crate::store::insert_test_session(&path, id);
     }
@@ -227,10 +227,17 @@ fn retained(connection: &Connection) -> Vec<Vec<Vec<Value>>> {
         "transcript_append_receipts",
         "session_run_recovery",
         "traditional_children",
-        "managed_orchestrators",
         "sqlite_sequence",
     ]
-    .map(|table| rows(connection, &format!("SELECT * FROM {table} ORDER BY rowid")))
+    .map(|table| {
+        rows(
+            connection,
+            &format!(
+                "SELECT {} FROM {table} ORDER BY rowid",
+                surviving_test_columns(connection, table)
+            ),
+        )
+    })
     .to_vec();
     facts.push(rows(connection, "SELECT id,session_id,delivery,status,content,target_run_id,client_id,delivered_run_id,created_at,updated_at,delivered_at,cancelled_at,version FROM session_inbox ORDER BY id"));
     facts.push(if column_exists(connection, "session_inbox", "admission_id").unwrap() {

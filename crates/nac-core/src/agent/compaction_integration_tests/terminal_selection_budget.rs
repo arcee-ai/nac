@@ -45,13 +45,12 @@ async fn selection_provenance_tight_actual_provider_budget_with_ten_thousand_ref
     let intents = (0..22_000).map(|_| intent()).collect::<Vec<_>>();
     let messages =
         crate::store::seed_selection_provenance_history_for_test(&path, &intents).unwrap();
-    let mut agent = compaction_test_agent_with_mode(
+    let mut agent = compaction_test_agent(
         ModelClient::new_for_test(),
         path.clone(),
         Some("session"),
         Some(1),
         EventSink::none(),
-        AgentMode::Direct,
     );
     agent.messages = messages.clone().into();
     store_agent_snapshot(&path, &agent);
@@ -88,13 +87,12 @@ async fn selection_provenance_tight_actual_provider_budget_with_ten_thousand_ref
         .unwrap()
         .unwrap();
     assert!((128..132).contains(&budget));
-    let mut rejected = compaction_test_agent_with_mode(
+    let mut rejected = compaction_test_agent(
         ModelClient::new_for_test(),
         path.clone(),
         Some("session"),
         Some(1),
         EventSink::none(),
-        AgentMode::Direct,
     );
     rejected.messages = messages.clone().into();
     rejected
@@ -105,13 +103,12 @@ async fn selection_provenance_tight_actual_provider_budget_with_ten_thousand_ref
         .await
         .unwrap();
     record(&mut rejected, tight_context);
-    let mut insufficient = compaction_test_agent_with_mode(
+    let mut insufficient = compaction_test_agent(
         ModelClient::new_for_test(),
         path.clone(),
         Some("session"),
         Some(1),
         EventSink::none(),
-        AgentMode::Direct,
     );
     insufficient.messages = messages.clone().into();
     insufficient

@@ -37,7 +37,7 @@ test("native information answer resolves a dormant exact owner after restart", a
   const question = (
     await (await request.get(`${harness.baseUrl}/sessions/${peer}/questions`)).json()
   )[0];
-  await harness.restart("1");
+  await harness.restart();
   // This read is deliberately passive; no target run/view attaches its owner.
   expect(
     (await (await request.get(`${harness.baseUrl}/sessions/${peer}/questions`)).json())[0],
@@ -145,7 +145,7 @@ test("exact human question survives restart, gates a goal, and resumes its reser
     harness.provider.requests.filter((entry) => entry.matchedStep === "human-question"),
   ).toHaveLength(1);
 
-  await harness.restart("1");
+  await harness.restart();
   questions = await (await request.get(`${harness.baseUrl}/sessions/${peer}/questions`)).json();
   expect(questions[0].request).toEqual(question.request);
   expect(questions[0].status).toBe("pending");

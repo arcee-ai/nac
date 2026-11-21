@@ -61,12 +61,8 @@ export type EmbeddedHarness = {
   output: string[];
   provider: ScriptedProvider;
   runRoot: string;
-  waitForNoWorkerProcesses: () => Promise<void>;
-  restart: (
-    orchestration: string | null,
-    nativeCredential?: string | null,
-    preserveOrigin?: boolean,
-  ) => Promise<void>;
+  waitForNoDescendantProcesses: () => Promise<void>;
+  restart: (nativeCredential?: string | null, preserveOrigin?: boolean) => Promise<void>;
 };
 
 type RunningHarness = Omit<EmbeddedHarness, "restart"> & {
@@ -83,7 +79,6 @@ type Fixtures = {
 
 type Options = {
   exaCredential: string | undefined;
-  orchestration: string | null;
   /** Extra server environment for fixture-only builds, such as a scripted reviewer. */
   serverEnvironment: Record<string, string>;
   managedNativeWeb: boolean;
@@ -92,19 +87,11 @@ type Options = {
 
 export const test = base.extend<Fixtures & Options>({
   exaCredential: [undefined, { option: true }],
-  orchestration: ["1", { option: true }],
   serverEnvironment: [{}, { option: true }],
   managedNativeWeb: [true, { option: true }],
   codexCatalogFixture: [false, { option: true }],
   harness: async (
-    {
-      request,
-      exaCredential,
-      orchestration,
-      serverEnvironment,
-      managedNativeWeb,
-      codexCatalogFixture,
-    },
+    { request, exaCredential, serverEnvironment, managedNativeWeb, codexCatalogFixture },
     use,
     testInfo,
   ) => {
@@ -112,7 +99,6 @@ export const test = base.extend<Fixtures & Options>({
     let running = await startHarness(
       testInfo,
       exaCredential,
-      orchestration,
       serverEnvironment,
       undefined,
       managedNativeWeb,
@@ -122,13 +108,12 @@ export const test = base.extend<Fixtures & Options>({
     );
     const harness: EmbeddedHarness = {
       ...running,
-      restart: async (nextGate, nativeCredential, preserveOrigin = false) => {
+      restart: async (nativeCredential, preserveOrigin = false) => {
         const previousOutput = running.output;
         await running.stopServer();
         running = await startHarness(
           testInfo,
           nativeCredential === undefined ? exaCredential : (nativeCredential ?? undefined),
-          nextGate,
           serverEnvironment,
           running.provider,
           managedNativeWeb,
@@ -344,7 +329,6 @@ export async function waitForRunIdle(
 async function startHarness(
   testInfo: TestInfo,
   exaCredential: string | undefined,
-  orchestration: string | null,
   serverEnvironment: Record<string, string>,
   existingProvider?: ScriptedProvider,
   managedNativeWeb = true,
@@ -464,7 +448,6 @@ async function startHarness(
         ALL_PROXY: "http://127.0.0.1:1",
         NO_PROXY: "localhost,127.0.0.1,::1",
         RUST_BACKTRACE: "1",
-        ...(orchestration === null ? {} : { NAC_ORCHESTRATION: orchestration }),
         NAC_E2E_API_KEY: "nac-e2e-dummy-only",
         // Conventional selectors make two independent provider routes
         // available to the unified model picker without placing either value
@@ -576,7 +559,7 @@ async function startHarness(
     exa,
     provider,
     runRoot,
-    waitForNoWorkerProcesses: async () => {
+    waitForNoDescendantProcesses: async () => {
       const pid = server.pid;
       if (pid == null) throw new Error("nac-web has no process ID");
       const deadline = Date.now() + 10_000;
@@ -586,7 +569,7 @@ async function startHarness(
         descendants = await processDescendants(pid, cleanupMarker);
       }
       if (descendants.length > 0) {
-        throw new Error(`managed worker descendants remained after cancellation: ${descendants}`);
+        throw new Error(`session descendants remained after cancellation: ${descendants}`);
       }
     },
     server,

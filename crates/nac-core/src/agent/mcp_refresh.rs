@@ -9,9 +9,6 @@ impl Agent {
     /// Runs only between completed tool rounds, never from a dashboard
     /// connection callback or while a captured tool is waiting for approval.
     pub(super) async fn admit_mcp_mount_refresh(&mut self) -> Result<()> {
-        if self.mode == AgentMode::Orchestrator {
-            return Ok(());
-        }
         let Some(session) = self.tool_runtime.session_id.clone() else {
             return Ok(());
         };
@@ -108,19 +105,17 @@ impl Agent {
         self.fallback_tool_defs.clone_from(&self.base_tool_defs);
         self.mcp_observation = registry
             .as_ref()
-            .map(|mcp| mcp.register_event_sink(self.event_sink.clone(), self.thread_name.clone()));
+            .map(|mcp| mcp.register_event_sink(self.event_sink.clone()));
         self.mcp_mounts
             .install(request.revision, registry, state, message.clone());
         if let Some(message) = message {
             self.emit(AgentEvent::McpServerSkipped {
-                thread_name: self.thread_name.clone(),
                 server_name: "session integrations".to_string(),
                 reason: message,
             })
             .await;
         } else {
             self.emit(AgentEvent::McpNotification {
-                thread_name: self.thread_name.clone(),
                 server_name: "session integrations".to_string(),
                 kind: crate::events::McpNotificationKind::CatalogRefreshed,
                 message: format!(

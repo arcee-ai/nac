@@ -107,8 +107,7 @@ function TitleBlock({
   facts: SessionFacts;
   compact: boolean;
 }) {
-  const managed = facts.lineage?.kind === "managed-orchestrator";
-  const meta = managed ? ["Managed orchestrator", ...facts.meta] : facts.meta;
+  const meta = facts.meta;
   return (
     <div className="flex min-w-0 flex-1 flex-col justify-center">
       <div className="flex min-w-0 items-center gap-2">

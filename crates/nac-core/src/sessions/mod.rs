@@ -6,7 +6,6 @@ use anyhow::{anyhow, Context, Result};
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
-use crate::light_model::LightModelSettings;
 use crate::model::{BackendKind, ReasoningEffort};
 use crate::sandbox::{SandboxBackendType, SandboxSpec, SshConnection};
 use crate::types::Message;
@@ -100,24 +99,19 @@ pub async fn reviewable_intent(path: std::path::PathBuf, session_id: String) -> 
     .unwrap_or(ReviewIntent::Unavailable)
 }
 
-/// Immutable stored execution behavior. New sessions select direct; old values
-/// remain available only while the retirement migration and removal are staged.
+/// Immutable stored execution behavior for direct sessions.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "kebab-case")]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum SessionBehavior {
-    Orchestrator,
     #[default]
     Direct,
-    DirectWithOrchestrator,
 }
 
 impl SessionBehavior {
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::Orchestrator => "orchestrator",
             Self::Direct => "direct",
-            Self::DirectWithOrchestrator => "direct-with-orchestrator",
         }
     }
 }
@@ -133,9 +127,7 @@ impl std::str::FromStr for SessionBehavior {
 
     fn from_str(value: &str) -> Result<Self> {
         match value {
-            "orchestrator" => Ok(Self::Orchestrator),
             "direct" => Ok(Self::Direct),
-            "direct-with-orchestrator" => Ok(Self::DirectWithOrchestrator),
             _ => Err(anyhow!("unsupported stored session behavior '{value}'")),
         }
     }
@@ -160,9 +152,6 @@ pub struct RawSessionConfig {
     pub api_key_env: Option<String>,
     #[cfg_attr(feature = "openapi", schema(required))]
     pub extra_headers_json: Option<String>,
-    /// Light worker model; `None` keeps single-model dispatch.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub light_model: Option<LightModelSettings>,
     #[cfg_attr(feature = "openapi", schema(required))]
     pub orchestrator_compaction_threshold: Option<u64>,
     /// New sessions may follow the locally resolved model's automatic budget.
@@ -225,7 +214,7 @@ pub struct SessionSnapshot {
     pub cwd: PathBuf,
     pub model: String,
     pub base_url: String,
-    /// Explicit opt-in allowing public plaintext HTTP for primary and light endpoints.
+    /// Explicit opt-in allowing public plaintext HTTP for the session model.
     pub allow_insecure_http: bool,
     pub backend: BackendKind,
     pub reasoning_effort: Option<ReasoningEffort>,
@@ -241,8 +230,6 @@ pub struct SessionSnapshot {
     /// Custom HTTP headers captured at session creation time.
     /// Stored per-session so resume uses the same headers, not current config.
     pub extra_headers: BTreeMap<String, String>,
-    /// Light worker model; `None` keeps single-model dispatch.
-    pub light_model: Option<LightModelSettings>,
     /// Absolute compaction threshold captured for this orchestrator session.
     /// `None` disables new checkpoint generation; valid stored checkpoints still project.
     pub orchestrator_compaction_threshold: Option<u64>,

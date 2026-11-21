@@ -467,59 +467,6 @@ impl SessionService {
         Ok(ChildInputTransition::Accepted(terminal))
     }
 
-    /// Queue against a live local managed run, or await its exact finishing
-    /// boundary and let the controller revalidate continuation admission.
-    pub async fn steer_managed_orchestrator_input(
-        &self,
-        parent_session_id: &str,
-        instruction: &str,
-    ) -> Result<Option<crate::store::ThreadSteeringRecord>> {
-        let service = self.clone();
-        let parent = parent_session_id.to_owned();
-        let instruction = instruction.to_owned();
-        let transition = crate::store::call_legacy_store(&self.metadata.store_path, move || {
-            let session_id = service
-                .metadata
-                .session_id
-                .as_deref()
-                .ok_or_else(|| anyhow::anyhow!("session id is unavailable"))?;
-            let _host_admission = service.delegated_work_admission()?;
-            let guard = service.lock_active_operation();
-            if service
-                .stopping_admission
-                .load(std::sync::atomic::Ordering::Acquire)
-            {
-                return Err(anyhow::anyhow!(
-                    "session is shutting down; new input is rejected"
-                ));
-            }
-            match guard.as_ref() {
-                Some(ActiveSessionOperation::Run(run)) if run.finishing => {
-                    Ok((None, Some(run.settlement.subscribe())))
-                }
-                Some(ActiveSessionOperation::Run(_)) => {
-                    let steering = crate::store::queue_managed_orchestrator_steering(
-                        &service.metadata.store_path,
-                        &parent,
-                        session_id,
-                        &instruction,
-                    )?;
-                    Ok((Some(steering), None))
-                }
-                _ => Ok((None, None)),
-            }
-        })
-        .await??;
-        if let Some(mut settlement) = transition.1 {
-            if !*settlement.borrow_and_update() {
-                settlement.changed().await.map_err(|_| {
-                    anyhow::anyhow!("run settlement ended without releasing admission")
-                })?;
-            }
-        }
-        Ok(transition.0)
-    }
-
     // The shared host lease protects the durable input mutation only. It must
     // not remain held while a foreground caller waits for delivery/settlement.
     fn delegated_work_admission(&self) -> Result<Option<crate::store::ManagedWorkAdmission>> {

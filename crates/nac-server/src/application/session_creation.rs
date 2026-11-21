@@ -2,7 +2,6 @@ use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 
 use anyhow::{anyhow, Result};
 use nac_core::{
-    light_model::{LightModelError, LightModelSettings},
     projects,
     runtime::{self, NacConfig, OptionalModelOption, RunOptions, StoreOptions},
     session_service::{SessionFrontendSnapshot, SessionService},
@@ -10,7 +9,7 @@ use nac_core::{
 };
 
 use crate::{
-    create_compaction_threshold_override, model_options, nonblank, request_configuration_error,
+    create_compaction_threshold_override, model_options, nonblank,
     request_configuration_error_from, sandbox_options, sandbox_requested, ResolvedLaunchLocation,
     SessionManager, SshRequest,
 };
@@ -102,7 +101,6 @@ pub(crate) struct SessionCreationCommand {
     pub(crate) api_key_env: Field<String>,
     pub(crate) extra_headers: Field<BTreeMap<String, String>>,
     pub(crate) orchestrator_compaction_threshold: Field<u64>,
-    pub(crate) light_model: Field<LightModelSettings>,
     pub(crate) ssh_host: Option<String>,
     pub(crate) ssh_port: Option<u16>,
     pub(crate) ssh_identity_file: Option<String>,
@@ -256,11 +254,6 @@ impl<'a> SessionCreationApplication<'a> {
         native: Option<nac_core::task_launch_control::NativeTaskLaunch>,
         scheduled: Option<nac_core::store::PreparedFreshTaskLaunch>,
     ) -> Result<SessionFrontendSnapshot> {
-        if request.behavior != SessionBehavior::Direct {
-            return Err(request_configuration_error(
-                "only direct session behavior is supported",
-            ));
-        }
         if let Some(source) = &request.model_source {
             anyhow::ensure!(
                 request.project_id.as_deref() == Some(source.project_id.as_str())
@@ -300,11 +293,6 @@ impl<'a> SessionCreationApplication<'a> {
                 .map_err(|_| anyhow!("conflict: source session changed or moved"))?
                 .unwrap_or_default();
             request.extra_headers = Field::Set(headers);
-        }
-        if !matches!(request.light_model, Field::Unchanged) {
-            return Err(request_configuration_error(
-                "light_model is no longer supported",
-            ));
         }
         anyhow::ensure!(
             native.is_none() || (retained.is_none() && scheduled.is_none()),
@@ -387,7 +375,6 @@ impl<'a> SessionCreationApplication<'a> {
             }
         }
         self.manager.sweep_idle_sessions(None).await;
-        let behavior = request.behavior;
         let project_context = request
             .project_id
             .as_deref()
@@ -483,7 +470,6 @@ impl<'a> SessionCreationApplication<'a> {
         model.service_tier =
             crate::application::request_validation::service_tier_option(request.service_tier)?;
         if let Some(profile) = self.manager.managed_model() {
-            model.trusted_light_credential = profile.trusted_light_credential();
             let uses_host_credentials = model.backend == Some(profile.backend)
                 && model.api_base_url.as_deref() == Some(profile.endpoint.as_str())
                 && matches!(model.api_key_env, OptionalModelOption::Clear);
@@ -497,11 +483,10 @@ impl<'a> SessionCreationApplication<'a> {
                 model.trusted_api_key_file = profile.trusted_api_key_file();
             }
         }
-        model.light_model = None;
         let options = RunOptions {
             workspace_cwd: location.workspace_cwd,
             config_cwd: Some(location.config_cwd.clone()),
-            worker_executable: Some(self.manager.inner.worker_executable.clone()),
+
             store: StoreOptions {
                 store_path: Some(self.manager.inner.store_path.clone()),
             },
@@ -521,23 +506,10 @@ impl<'a> SessionCreationApplication<'a> {
             } else if let Some(scheduled) = &scheduled {
                 runtime::prepare_scheduled_shared_task_run_config(options, &config, scheduled).await
             } else {
-                runtime::prepare_run_config_for_project_with_behavior(
-                    options, &config, project_id, behavior,
-                )
-                .await
+                runtime::prepare_run_config_for_project(options, &config, project_id).await
             }
         };
-        let mut prepared = preparation.await.map_err(|error| {
-            // A broken light model fails here, at launch resolution. Route it
-            // through the configuration-error boundary so the response names
-            // the actionable cause.
-            match error.downcast_ref::<LightModelError>() {
-                Some(light_error) if light_error.is_invalid_settings() => {
-                    request_configuration_error_from(error)
-                }
-                _ => error,
-            }
-        })?;
+        let mut prepared = preparation.await?;
         if let Err(error) = self
             .manager
             .attach_managed_command_environment(prepared.run_config_mut())

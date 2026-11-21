@@ -177,7 +177,7 @@ fn openai_chat_completions_backend_round_trips_without_inference() {
 }
 
 #[test]
-fn behavior_round_trips_lists_and_cannot_change_during_state_save() {
+fn direct_behavior_round_trips_and_retired_values_are_rejected() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     let store_path = temp_store_path("behavior_round_trip");
 
@@ -192,31 +192,22 @@ fn behavior_round_trips_lists_and_cannot_change_during_state_save() {
         load_session_behavior(&store_path, "direct").unwrap(),
         SessionBehavior::Direct
     );
-    for (session_id, behavior) in [
-        ("orchestrator", SessionBehavior::Orchestrator),
-        (
-            "direct-with-orchestrator",
-            SessionBehavior::DirectWithOrchestrator,
-        ),
-    ] {
-        let mut retired = test_snapshot(session_id, "created", "updated");
-        retired.behavior = behavior;
-        assert!(create_session(&store_path, &retired).is_err());
-    }
     let summaries = list_sessions(&store_path).unwrap();
     assert_eq!(summaries.len(), 1);
     assert_eq!(summaries[0].behavior, SessionBehavior::Direct);
-
-    let mut stale = load_session(&store_path, "direct").unwrap();
-    stale.behavior = SessionBehavior::Orchestrator;
-    assert!(save_session(&store_path, &stale).is_err());
-    assert_eq!(
-        load_session(&store_path, "direct").unwrap().behavior,
-        SessionBehavior::Direct
-    );
+    let conn = rusqlite::Connection::open(&store_path).unwrap();
+    for value in ["orchestrator", "direct-with-orchestrator"] {
+        assert!(conn
+            .execute(
+                "UPDATE sessions SET behavior = ?1 WHERE session_id = 'direct'",
+                [value]
+            )
+            .is_err());
+    }
+    drop(conn);
     let conn = rusqlite::Connection::open(&store_path).unwrap();
     conn.execute(
-        "UPDATE sessions SET light_model_json = '{broken' WHERE session_id = 'direct'",
+        "UPDATE sessions SET extra_headers_json = '{broken' WHERE session_id = 'direct'",
         [],
     )
     .unwrap();
@@ -272,7 +263,6 @@ fn project_link_is_atomic_authoritative_and_session_owned() {
             ssh_host: None,
             ssh_port: None,
             ssh_identity_file: None,
-            default_model_config_id: None,
         },
     )
     .unwrap();
@@ -330,52 +320,28 @@ fn project_link_is_atomic_authoritative_and_session_owned() {
 }
 
 #[test]
-fn direct_sessions_preserve_but_do_not_load_or_rewrite_inert_light_data() {
+fn direct_session_model_updates_without_retired_light_column() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
-    let store_path = temp_store_path("inert_light_model");
-    let snapshot = test_snapshot(
-        "light",
-        "2026-01-01 00:00:00.000000000",
-        "2026-01-01 00:00:00.000000000",
-    );
-    let mut rejected = snapshot.clone();
-    rejected.session_id = "new-light".into();
-    rejected.light_model = Some(LightModelSettings {
-        model: "test".into(),
-        backend: None,
-        base_url: None,
-        api_key_env: None,
-        reasoning_effort: None,
-    });
-    assert!(create_session(&store_path, &rejected).is_err());
-    assert!(!store_path.exists());
+    let store_path = temp_store_path("selected_model_only");
+    let snapshot = test_snapshot("selected", "created", "updated");
     create_session(&store_path, &snapshot).unwrap();
-    let legacy = "{broken";
-    let conn = rusqlite::Connection::open(&store_path).unwrap();
-    conn.execute(
-        "UPDATE sessions SET light_model_json=?1 WHERE session_id='light'",
-        [legacy],
-    )
-    .unwrap();
-    drop(conn);
-    assert!(load_session(&store_path, "light")
-        .unwrap()
-        .light_model
-        .is_none());
-    let mut config = load_session_config(&store_path, "light").unwrap();
-    assert!(config.light_model.is_none());
+    let mut config = load_session_config(&store_path, "selected").unwrap();
     assert!(config.diagnostics.is_empty());
     config.model = "replacement-model".into();
     assert_eq!(update_raw_session_config(&store_path, &config).unwrap(), 1);
     let conn = rusqlite::Connection::open(&store_path).unwrap();
-    let retained: String = conn
+    let light_columns: i64 = conn
         .query_row(
-            "SELECT light_model_json FROM sessions WHERE session_id='light'",
+            "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name='light_model_json'",
             [],
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(retained, legacy);
+    assert_eq!(light_columns, 0);
+    assert_eq!(
+        load_session_config(&store_path, "selected").unwrap().model,
+        "replacement-model"
+    );
     drop(conn);
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
 }
@@ -970,12 +936,13 @@ fn config_and_history_writes_preserve_each_other_in_both_orders() {
         );
         initial.orchestrator_compaction_threshold = Some(4_096);
         create_session(&store_path, &initial).unwrap();
-        crate::store::append_episode(
+        crate::store::create_session_inbox_item(
             &store_path,
             session_id,
-            "worker",
-            "progress",
-            "retained episode",
+            crate::store::InboxDelivery::Queue,
+            "retained input",
+            None,
+            None,
         )
         .unwrap();
 
@@ -1055,9 +1022,9 @@ fn config_and_history_writes_preserve_each_other_in_both_orders() {
         assert_eq!(stored.response_durations_ms, Some(vec![Some(250)]));
         assert_eq!(stored.token_usages.len(), 1);
         assert_eq!(stored.updated_at, completed_run.updated_at);
-        let episodes = crate::store::thread_read(&store_path, session_id, "worker").unwrap();
-        assert_eq!(episodes.len(), 1);
-        assert_eq!(episodes[0].content, "retained episode");
+        let inbox = crate::store::list_session_inbox(&store_path, session_id).unwrap();
+        assert_eq!(inbox.len(), 1);
+        assert_eq!(inbox[0].content, "retained input");
     }
 
     let _ = std::fs::remove_dir_all(store_path.parent().unwrap());
@@ -1204,73 +1171,34 @@ fn delete_session_uses_cascades_for_owned_auxiliary_rows() {
     );
     create_session(&store_path, &snapshot).unwrap();
 
-    // Add threads with episodes
-    crate::store::append_episode(
+    // Direct inbox and primary tool events are session-owned durable state.
+    let queued = crate::store::create_session_inbox_item(
         &store_path,
         "session-del",
-        "auth",
-        "inspect",
-        "auth episode",
-    )
-    .unwrap();
-    crate::store::append_episode(&store_path, "session-del", "tests", "scan", "test episode")
-        .unwrap();
-
-    // Add a workset with items
-    let workset = crate::store::WorksetDefinition {
-        id: "ws-1".to_string(),
-        goal: "refresh".to_string(),
-        status: "planned".to_string(),
-        summary: "summary".to_string(),
-        verification_recipe: None,
-        items: vec![crate::store::WorksetItemDefinition {
-            title: "item-1".to_string(),
-            scope: "src/main.rs".to_string(),
-            description: "do thing".to_string(),
-            role: "implement".to_string(),
-            depends_on: Vec::new(),
-            acceptance: "done".to_string(),
-            notes: None,
-        }],
-    };
-    crate::store::define_workset(&store_path, "session-del", &workset).unwrap();
-    crate::store::queue_thread_steering(
-        &store_path,
-        "session-del",
-        "auth",
-        "auth-dispatch",
+        crate::store::InboxDelivery::Queue,
         "check the failure path",
+        None,
+        None,
     )
     .unwrap();
     crate::store::append_thread_event(
         &store_path,
         "session-del",
-        "auth",
-        r#"{"type":"model_call_started","thread_name":"auth","iteration":1}"#,
+        crate::events::PRIMARY_TOOL_EVENT_TARGET,
+        r#"{"type":"model_call_started","thread_name":null,"iteration":1}"#,
     )
     .unwrap();
-
-    // Verify data exists
-    assert!(!crate::store::list_threads(&store_path, "session-del")
-        .unwrap()
-        .is_empty());
-    assert!(
-        crate::store::list_worksets(&store_path, "session-del")
-            .unwrap()
-            .len()
-            == 1
-    );
-    assert!(list_sessions(&store_path).unwrap().len() == 1);
     assert_eq!(
-        crate::store::list_thread_steering(&store_path, "session-del")
-            .unwrap()
+        crate::store::list_session_inbox(&store_path, "session-del").unwrap(),
+        vec![queued]
+    );
+    assert_eq!(
+        crate::store::load_all_thread_events(&store_path, "session-del", 20).unwrap()
+            [crate::events::PRIMARY_TOOL_EVENT_TARGET]
             .len(),
         1
     );
-    assert_eq!(
-        crate::store::load_all_thread_events(&store_path, "session-del", 20).unwrap()["auth"].len(),
-        1
-    );
+    assert_eq!(list_sessions(&store_path).unwrap().len(), 1);
 
     // Delete the session
     let deleted = delete_session(&store_path, "session-del").unwrap();
@@ -1279,19 +1207,11 @@ fn delete_session_uses_cascades_for_owned_auxiliary_rows() {
         "delete_session should return true for existing session"
     );
 
-    // Verify all related rows are gone
-    assert!(crate::store::list_threads(&store_path, "session-del")
-        .unwrap()
-        .is_empty());
-    assert!(crate::store::list_worksets(&store_path, "session-del")
-        .unwrap()
-        .is_empty());
+    // Verify all session-owned rows are gone.
     assert!(list_sessions(&store_path).unwrap().is_empty());
-    assert!(
-        crate::store::list_thread_steering(&store_path, "session-del")
-            .unwrap()
-            .is_empty()
-    );
+    assert!(crate::store::list_session_inbox(&store_path, "session-del")
+        .unwrap()
+        .is_empty());
     assert!(
         crate::store::load_all_thread_events(&store_path, "session-del", 20)
             .unwrap()

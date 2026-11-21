@@ -1,25 +1,13 @@
 use super::*;
 
 #[tokio::test]
-async fn direct_config_patch_preserves_inert_legacy_light_bytes_and_rejects_selector() {
+async fn direct_config_patch_updates_selected_model_and_rejects_light_selector() {
     let _lock = SERVER_MODEL_ENV_LOCK.lock().unwrap();
-    let root = temp_root("inert_light_preserved");
+    let root = temp_root("selected_model_only");
     let nac_home = root.join("nac-home");
     let _env = ScopedModelEnv::isolated(&nac_home, Some("server-test-key"));
     seed_editable_session(&root, "session");
     let store = root.join("store.db");
-    let raw = "malformed legacy light bytes";
-    let conn = rusqlite::Connection::open(&store).unwrap();
-    conn.execute(
-        "UPDATE sessions SET light_model_json=?1 WHERE session_id='session'",
-        [raw],
-    )
-    .unwrap();
-    drop(conn);
-    assert!(sessions::load_session(&store, "session")
-        .unwrap()
-        .light_model
-        .is_none());
     let manager = test_manager(&root);
     manager
         .update_session_config(
@@ -32,26 +20,25 @@ async fn direct_config_patch_preserves_inert_legacy_light_bytes_and_rejects_sele
         .await
         .unwrap();
     let conn = rusqlite::Connection::open(&store).unwrap();
-    let retained: String = conn
+    let light_columns: i64 = conn
         .query_row(
-            "SELECT light_model_json FROM sessions WHERE session_id='session'",
+            "SELECT count(*) FROM pragma_table_info('sessions') WHERE name='light_model_json'",
             [],
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(retained, raw);
+    assert_eq!(light_columns, 0);
+    assert_eq!(
+        sessions::load_session_config(&store, "session")
+            .unwrap()
+            .model,
+        "replacement-model"
+    );
     drop(conn);
-    let error = manager
-        .update_session_config(
-            "session",
-            UpdateConfigRequest {
-                light_model: RequestField::Null,
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap_err();
-    assert_eq!(ApiError::from(error).status, StatusCode::BAD_REQUEST);
+    assert!(serde_json::from_value::<UpdateConfigRequest>(
+        serde_json::json!({"light_model": null})
+    )
+    .is_err());
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -519,25 +506,9 @@ async fn empty_patch_never_repairs_or_revisions_uncached_managed_config() {
     let store_path = root.join("store.db");
     let manager = test_manager(&root);
 
-    for (session_id, backend, expected_base, light_api_key_env) in [
-        (
-            "repair-codex",
-            BackendKind::ChatGptCodexResponses,
-            nac_core::model::CHATGPT_CODEX_CANONICAL_BASE_URL,
-            Some("STALE_API_KEY"),
-        ),
-        (
-            "repair-arcee",
-            BackendKind::ArceeAuth,
-            nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL,
-            Some("STALE_API_KEY"),
-        ),
-        (
-            "repair-arcee-without-light-selector",
-            BackendKind::ArceeAuth,
-            nac_core::model::ARCEE_AUTH_CANONICAL_BASE_URL,
-            None,
-        ),
+    for (session_id, backend) in [
+        ("repair-codex", BackendKind::ChatGptCodexResponses),
+        ("repair-arcee", BackendKind::ArceeAuth),
     ] {
         seed_session(&root, session_id, "2026-01-01 00:00:00.000000000");
         let mut incomplete = sessions::load_session(&store_path, session_id).unwrap();
@@ -547,18 +518,6 @@ async fn empty_patch_never_repairs_or_revisions_uncached_managed_config() {
         }
         incomplete.base_url.clear();
         incomplete.api_key_env = Some("STALE_API_KEY".to_string());
-        incomplete.light_model = Some(LightModelSettings {
-            model: match backend {
-                BackendKind::ArceeAuth => "trinity-large-thinking",
-                BackendKind::ChatGptCodexResponses => "gpt-5.2-codex",
-                _ => unreachable!("test only covers managed backends"),
-            }
-            .to_string(),
-            backend: Some(backend),
-            base_url: Some(expected_base.to_string()),
-            api_key_env: light_api_key_env.map(str::to_string),
-            reasoning_effort: None,
-        });
         sessions::update_session_config(&store_path, &incomplete).unwrap();
         let before = sessions::load_session(&store_path, session_id).unwrap();
 
@@ -569,7 +528,6 @@ async fn empty_patch_never_repairs_or_revisions_uncached_managed_config() {
         let after = sessions::load_session(&store_path, session_id).unwrap();
         assert_eq!(after.base_url, before.base_url);
         assert_eq!(after.api_key_env, before.api_key_env);
-        assert_eq!(after.light_model, before.light_model);
         assert_eq!(after.config_version, before.config_version);
         assert_eq!(after.updated_at, before.updated_at);
     }
@@ -1015,7 +973,6 @@ async fn patch_round_trips_every_state_and_rebuilds_from_persisted_settings() {
                     "true".to_string(),
                 )]))),
                 orchestrator_compaction_threshold: RequestField::Value(64_000),
-                light_model: RequestField::Omitted,
             },
         )
         .await
@@ -1303,7 +1260,6 @@ async fn removed_backend_updates_are_bad_requests_and_are_not_persisted() {
                     api_key_env: RequestField::Omitted,
                     extra_headers: RequestField::Omitted,
                     orchestrator_compaction_threshold: RequestField::Omitted,
-                    light_model: RequestField::Omitted,
                 },
             )
             .await
@@ -1353,7 +1309,6 @@ async fn server_arcee_configuration_status_and_persistence_are_consistent() {
             api_key_env: RequestField::Omitted,
             extra_headers: RequestField::Omitted,
             orchestrator_compaction_threshold: RequestField::Omitted,
-            light_model: RequestField::Omitted,
             ssh_host: None,
             ssh_port: None,
             ssh_identity_file: None,
@@ -1409,7 +1364,6 @@ async fn server_arcee_configuration_status_and_persistence_are_consistent() {
                     api_key_env: RequestField::Omitted,
                     extra_headers: RequestField::Omitted,
                     orchestrator_compaction_threshold: RequestField::Omitted,
-                    light_model: RequestField::Omitted,
                 },
             )
             .await
@@ -1441,7 +1395,6 @@ async fn server_arcee_configuration_status_and_persistence_are_consistent() {
                 api_key_env: RequestField::Omitted,
                 extra_headers: RequestField::Omitted,
                 orchestrator_compaction_threshold: RequestField::Omitted,
-                light_model: RequestField::Omitted,
             },
         )
         .await
@@ -1465,7 +1418,6 @@ async fn server_arcee_configuration_status_and_persistence_are_consistent() {
                 api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
                 extra_headers: RequestField::Omitted,
                 orchestrator_compaction_threshold: RequestField::Omitted,
-                light_model: RequestField::Omitted,
             },
         )
         .await
@@ -1492,7 +1444,6 @@ async fn server_arcee_configuration_status_and_persistence_are_consistent() {
             api_key_env: RequestField::Value("OPENAI_API_KEY".to_string()),
             extra_headers: RequestField::Omitted,
             orchestrator_compaction_threshold: RequestField::Omitted,
-            light_model: RequestField::Omitted,
             ssh_host: None,
             ssh_port: None,
             ssh_identity_file: None,
@@ -1542,7 +1493,6 @@ async fn null_update_clears_legacy_arcee_api_key_env() {
                 api_key_env: RequestField::Null,
                 extra_headers: RequestField::Omitted,
                 orchestrator_compaction_threshold: RequestField::Omitted,
-                light_model: RequestField::Omitted,
             },
         )
         .await

@@ -16,7 +16,7 @@ vi.mock("@/app/hooks/useMediaQuery", () => ({
 const options: readonly InsightsFilterOption[] = [
   { value: "all", label: "All actions" },
   { value: "tools", label: "Tools & reasoning" },
-  { value: "threads", label: "Threads" },
+  { value: "sessions", label: "Sessions" },
 ];
 
 beforeEach(() => {
@@ -56,7 +56,7 @@ describe("Insights filter controls", () => {
     fireEvent.click(trigger, { detail: 0 });
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByRole("button", { name: "All actions" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Threads" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Sessions" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Tools & reasoning" }));
     expect(onChange).toHaveBeenCalledExactlyOnceWith("tools");
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
@@ -70,10 +70,10 @@ describe("Insights filter controls", () => {
     const onChange = vi.fn();
     render(
       <MemoryRouter>
-        <InsightsFilter options={options} value="threads" onChange={onChange} />
+        <InsightsFilter options={options} value="sessions" onChange={onChange} />
       </MemoryRouter>,
     );
-    const trigger = screen.getByRole("button", { name: "Show Threads" });
+    const trigger = screen.getByRole("button", { name: "Show Sessions" });
     trigger.focus();
     fireEvent.click(trigger, { detail: 0 });
     const row = screen.getByRole("button", { name: "Tools & reasoning" });
@@ -82,7 +82,7 @@ describe("Insights filter controls", () => {
     await waitFor(() => expect(trigger.getAttribute("aria-expanded")).toBe("false"));
     await waitFor(() => expect(document.activeElement).toBe(trigger));
     expect(onChange).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "Show Threads" })).toBe(trigger);
+    expect(screen.getByRole("button", { name: "Show Sessions" })).toBe(trigger);
   });
 
   it.each([false, true])(
@@ -100,8 +100,8 @@ describe("Insights filter controls", () => {
       const trigger = screen.getByRole("button", { name: "All actions" });
       expect(trigger.getAttribute("aria-expanded")).toBe("false");
       fireEvent.click(trigger);
-      fireEvent.click(screen.getByRole("button", { name: "Threads" }));
-      expect(onChange).toHaveBeenCalledExactlyOnceWith("threads");
+      fireEvent.click(screen.getByRole("button", { name: "Sessions" }));
+      expect(onChange).toHaveBeenCalledExactlyOnceWith("sessions");
       expect(trigger.getAttribute("aria-expanded")).toBe("false");
     },
   );

@@ -590,9 +590,7 @@ async fn subscribe_agent_events_filters_agent_envelopes() {
         resume_base_cwd: PathBuf::from("/repo"),
     });
     let mut agent_events = parts.service.subscribe_agent_events();
-    let agent_event = AgentEvent::RunFinished {
-        thread_name: Some("impl".to_string()),
-    };
+    let agent_event = AgentEvent::RunFinished {};
 
     parts.service.event_bus.emit(SessionEvent::SnapshotSaved {
         session_id: session_id.clone(),
@@ -616,9 +614,7 @@ async fn client_subscribers_receive_same_events_with_unique_identity() {
     assert_eq!(&second_events.client_id, second_client.client_id());
     assert_ne!(first_events.subscription_id, second_events.subscription_id);
 
-    let agent_event = AgentEvent::RunFinished {
-        thread_name: Some("impl".to_string()),
-    };
+    let agent_event = AgentEvent::RunFinished {};
     parts.service.event_bus.emit_agent(agent_event.clone());
 
     let first = first_events.receiver.recv().await.unwrap();
@@ -631,8 +627,8 @@ async fn client_subscribers_receive_same_events_with_unique_identity() {
 #[tokio::test]
 async fn frontend_snapshot_does_not_wait_for_agent_lock_while_active_run() {
     let parts = test_picker_service("snapshot_nonblocking");
-    let agent_guard = parts.service.agent.lock().await;
     let active = parts.service.try_begin_run(None, "blocked prompt").unwrap();
+    let agent_guard = parts.service.agent.lock().await;
 
     let snapshot = tokio::time::timeout(
         std::time::Duration::from_secs(2),
@@ -1229,26 +1225,6 @@ async fn request_cancel_persists_marker_and_emits_terminal_event() {
     });
     let mut events = parts.service.subscribe_events();
     let active = parts.service.try_begin_run(None, "cancel prompt").unwrap();
-    assert!(parts
-        .service
-        .active_threads
-        .mark("worker", "worker-dispatch"));
-    crate::store::queue_thread_steering(
-        &store_path,
-        &session_id,
-        "worker",
-        "worker-dispatch",
-        "worker direction",
-    )
-    .unwrap();
-    crate::store::queue_thread_steering(
-        &store_path,
-        &session_id,
-        crate::store::ORCHESTRATOR_STEERING_TARGET,
-        active.run_id.as_str(),
-        "orchestrator direction",
-    )
-    .unwrap();
     {
         let mut agent = parts.service.agent.lock().await;
         agent
@@ -1283,22 +1259,6 @@ async fn request_cancel_persists_marker_and_emits_terminal_event() {
         appended.event,
         SessionEvent::TranscriptAppended { transcript_len: 2 }
     );
-    let steering_events = [
-        events.recv().await.unwrap().event,
-        events.recv().await.unwrap().event,
-    ];
-    assert!(steering_events.iter().any(|event| matches!(
-        event,
-        SessionEvent::Agent {
-            event: AgentEvent::OrchestratorSteeringExpired { .. }
-        }
-    )));
-    assert!(steering_events.iter().any(|event| matches!(
-        event,
-        SessionEvent::Agent {
-            event: AgentEvent::ThreadSteeringExpired { .. }
-        }
-    )));
     // The cancellation marker is a transcript commit point: the live
     // signal fires before the snapshot save (the cancel path runs outside
     // send(), so it carries no run context).
@@ -1320,11 +1280,9 @@ async fn request_cancel_persists_marker_and_emits_terminal_event() {
             .is_none(),
         "the cancellation marker and run-state save clear the durable active marker"
     );
-    assert!(parts.service.active_thread_names().is_empty());
-    assert!(crate::store::list_thread_steering(&store_path, &session_id)
+    assert!(crate::store::list_session_inbox(&store_path, &session_id)
         .unwrap()
-        .iter()
-        .all(|record| record.status == "expired"));
+        .is_empty());
 
     // Never-fold (step 4): the cancel path persists bookkeeping only —
     // the blob keeps the system head and the cancellation marker lives

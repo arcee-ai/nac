@@ -46,7 +46,7 @@ function parsedBudget(value: string): number | null | undefined {
 
 /** Direct-only durable goal state and user controls. */
 export function GoalControls({ sessionId, behavior, openRequest = 0 }: GoalControlsProps) {
-  const direct = behavior === "direct" || behavior === "direct-with-orchestrator";
+  const direct = behavior === "direct";
   const goalQuery = useSessionGoal(sessionId, direct);
   const createGoal = useCreateGoal();
   const updateGoal = useUpdateGoal();

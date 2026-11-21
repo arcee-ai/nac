@@ -25,7 +25,6 @@ pub(super) fn create_and_seed(connection: &Connection) -> Result<()> {
          );",
     )?;
     super::super::traditional_children::seed_terminal_receipts(connection)?;
-    super::super::managed_orchestrators::seed_terminal_receipts(connection)?;
     Ok(())
 }
 

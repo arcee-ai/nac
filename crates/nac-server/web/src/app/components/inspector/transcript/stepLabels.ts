@@ -23,9 +23,6 @@ export interface StepLabel {
 
 const VERBS: Record<ActionKind, { done: string; live: string }> = {
   reasoning: { done: "Thought", live: "Thinking" },
-  thread: { done: "Ran thread", live: "Running thread" },
-  "define-workset": { done: "Defined workset", live: "Defining workset" },
-  "delete-thread": { done: "Deleted thread", live: "Deleting thread" },
   "read-file": { done: "Read", live: "Reading" },
   "write-file": { done: "Created", live: "Creating" },
   "edit-file": { done: "Edited", live: "Editing" },
@@ -40,11 +37,7 @@ const VERBS: Record<ActionKind, { done: string; live: string }> = {
   "get-goal": { done: "Read goal", live: "Reading goal" },
   "update-goal": { done: "Updated goal", live: "Updating goal" },
   "spawn-agent": { done: "Started subagent", live: "Starting subagent" },
-  "spawn-orchestrator": { done: "Started orchestrator", live: "Starting orchestrator" },
   "session-status": { done: "Checked subagent", live: "Checking subagent" },
-  "session-steer": { done: "Steered subagent", live: "Steering subagent" },
-  "session-read": { done: "Read subagent", live: "Reading subagent" },
-  "session-wait": { done: "Waited for subagent", live: "Waiting for subagent" },
   "session-cancel": { done: "Cancelled subagent", live: "Cancelling subagent" },
   other: { done: "Used", live: "Using" },
 };
@@ -65,7 +58,6 @@ function host(value: string): string {
 }
 
 function argumentOf(segment: InsightSegment, action: ActionKind): string | null {
-  if (segment.kind === "workset") return segment.worksetId || null;
   if (segment.kind !== "tool") return null;
   if (action === "other") return segment.presentation?.label ?? segment.name;
   const summary = segment.presentation?.summary?.replace(/\s+/g, " ").trim();
@@ -105,8 +97,7 @@ export function stepLabel(segment: InsightSegment): StepLabel {
 
 /**
  * What the live status line says about a running turn, read off whatever it
- * produced last: its newest step, a subagent it is starting, threads it
- * dispatched, or the prose it is writing.
+ * produced last: its newest step, a subagent it is starting, or the prose it is writing.
  */
 export function liveTurnLabel(items: readonly ModelTurnItem[]): string {
   const last = items.at(-1);
@@ -115,9 +106,8 @@ export function liveTurnLabel(items: readonly ModelTurnItem[]): string {
   if (last.kind === "session") {
     if (last.status === "pending") return "Waiting for approval…";
     if (last.status !== "running") return "Thinking…";
-    return last.action === "spawn-agent" ? last.presentation.label : `${VERBS[last.action].live}…`;
+    return last.presentation.label;
   }
-  if ("block" in last && last.block.kind === "wave") return "Running threads…";
   return "Writing…";
 }
 

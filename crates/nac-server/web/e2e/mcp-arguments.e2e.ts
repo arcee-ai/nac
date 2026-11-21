@@ -37,7 +37,6 @@ test.skip(
   !!process.env.NAC_E2E_REMOTE,
   "Requires disposable local workspaces and scripted providers",
 );
-test.use({ orchestration: "0" });
 
 const ALLOWLIST = "linear_add_comment,linear_read_issue,linear_update_issue";
 const SPACED = `--label="${"a long spaced value ".repeat(8).trim()}"`;

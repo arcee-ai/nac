@@ -20,6 +20,6 @@ export declare const InsightsTurnSection: import("react").MemoExoticComponent<({
     /** Heading for a section with neither a time nor a prompt of its own. */
     fallbackPrompt: string;
     controller: InsightsRowController;
-    /** Large on a phone, whose waves also take more room above and below. */
+    /** Large on a phone. */
     size: ActionListButtonSize;
 }) => import("react").JSX.Element>;

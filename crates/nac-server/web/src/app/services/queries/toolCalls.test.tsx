@@ -63,7 +63,7 @@ it("keeps absolute block identity across overlapping pages and separates reused 
     message_page: { start: 25, end: 26, total: 26, has_older: true },
   };
   const keys = (value: typeof full) =>
-    buildTranscript(value, {}).flatMap((turn) =>
+    buildTranscript(value).flatMap((turn) =>
       turn.kind === "model"
         ? turn.blocks.flatMap((block) => (block.kind === "tool-detail" ? [block.key] : []))
         : [],

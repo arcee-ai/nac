@@ -12,8 +12,6 @@ import {
   serveReasoningBaseline,
 } from "./reasoning-fixture";
 
-test.use({ orchestration: "0" });
-
 test("reasoning reading controls work at actual 200 percent tab zoom", async ({
   harness,
   request,

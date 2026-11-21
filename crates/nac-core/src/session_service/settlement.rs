@@ -23,19 +23,17 @@ impl SessionService {
     }
 
     pub(super) async fn finish_run_once(&self, run_id: &SessionRunId, outcome: RunOutcome) -> bool {
-        if self.metadata.behavior != sessions::SessionBehavior::Orchestrator {
-            if let Err(error) = self.terminal_manager.settle_run().await {
-                EventSink::bus(self.event_bus.clone())
+        if let Err(error) = self.terminal_manager.settle_run().await {
+            EventSink::bus(self.event_bus.clone())
                     .emit_async(AgentEvent::Error {
-                        thread_name: None,
                         message: format!(
                             "run {run_id} remains active because terminal cleanup is incomplete: {error:#}"
                         ),
                     })
                     .await;
-                return false;
-            }
+            return false;
         }
+
         let id = run_id.clone();
         let finishing = self
             .coordinate_local(move |service| service.mark_run_finishing(&id))
@@ -43,7 +41,6 @@ impl SessionService {
         let Some(finishing_run) = finishing.ok().flatten() else {
             return false;
         };
-        self.expire_orchestrator_steering(run_id).await;
         let (completed_duration_ms, completed_usage) = match &outcome {
             RunOutcome::Completed(_, usage) => (Some(finishing_run.duration_ms), usage.clone()),
             RunOutcome::Failed(_, usage) => (None, usage.clone()),
@@ -127,21 +124,13 @@ impl SessionService {
         let goal_attention = self
             .settle_direct_goal_run(run_id, goal_usage, goal_disposition, run_failure.as_ref())
             .await;
-        let durable_goal_failure = if self.metadata.behavior
-            != sessions::SessionBehavior::Orchestrator
-        {
-            if let Some(session_id) = self.metadata.session_id.as_deref() {
-                let goal = match crate::store::coordinator::owner_for(&self.metadata.store_path) {
-                    Ok(Some(owner)) => owner.load_session_goal(session_id.to_owned()).await,
-                    Ok(None) => {
-                        crate::store::load_session_goal(&self.metadata.store_path, session_id)
-                    }
-                    Err(error) => Err(error),
-                };
-                goal.ok().flatten().and_then(|goal| goal.last_failure)
-            } else {
-                None
-            }
+        let durable_goal_failure = if let Some(session_id) = self.metadata.session_id.as_deref() {
+            let goal = match crate::store::coordinator::owner_for(&self.metadata.store_path) {
+                Ok(Some(owner)) => owner.load_session_goal(session_id.to_owned()).await,
+                Ok(None) => crate::store::load_session_goal(&self.metadata.store_path, session_id),
+                Err(error) => Err(error),
+            };
+            goal.ok().flatten().and_then(|goal| goal.last_failure)
         } else {
             None
         };
@@ -187,41 +176,39 @@ impl SessionService {
             eprintln!("nac: terminal local cleanup failed: {error:#}");
             return false;
         }
-        if self.metadata.behavior != sessions::SessionBehavior::Orchestrator {
-            let selection =
-                if attention_success && goal_attention.known && goal_attention.goal.is_none() {
-                    self.select_direct_continuation_after_settlement(&run_id)
-                        .await
-                } else {
-                    self.select_next_direct_inbox_item().await
-                };
-            match selection {
-                Ok(selection) => {
-                    #[cfg(any(test, feature = "test-support"))]
-                    // Selection has returned: no store transaction, operation
-                    // lease, inbox wake lock or attention hub lock is held.
-                    // The nonshipping owner accepts only actual Idle/IdleUnverified.
-                    let publication = self
-                        .wait_attention_publication_for_test(&run_id, &selection.disposition)
-                        .await;
-                    self.publish_attention_completion(
-                        &run_id,
-                        attention_success,
-                        goal_attention,
-                        selection.disposition,
-                    );
-                    #[cfg(any(test, feature = "test-support"))]
-                    if let Some(publication) = publication {
-                        publication.publication_attempted();
-                    }
-                }
-                Err(error) => {
-                    eprintln!(
-                        "nac: failed to promote direct inbox after run settlement: {error:#}"
-                    );
+
+        let selection =
+            if attention_success && goal_attention.known && goal_attention.goal.is_none() {
+                self.select_direct_continuation_after_settlement(&run_id)
+                    .await
+            } else {
+                self.select_next_direct_inbox_item().await
+            };
+        match selection {
+            Ok(selection) => {
+                #[cfg(any(test, feature = "test-support"))]
+                // Selection has returned: no store transaction, operation
+                // lease, inbox wake lock or attention hub lock is held.
+                // The nonshipping owner accepts only actual Idle/IdleUnverified.
+                let publication = self
+                    .wait_attention_publication_for_test(&run_id, &selection.disposition)
+                    .await;
+                self.publish_attention_completion(
+                    &run_id,
+                    attention_success,
+                    goal_attention,
+                    selection.disposition,
+                );
+                #[cfg(any(test, feature = "test-support"))]
+                if let Some(publication) = publication {
+                    publication.publication_attempted();
                 }
             }
+            Err(error) => {
+                eprintln!("nac: failed to promote direct inbox after run settlement: {error:#}");
+            }
         }
+
         true
     }
 
@@ -262,9 +249,6 @@ impl SessionService {
             known: true,
             goal: None,
         };
-        if self.metadata.behavior == sessions::SessionBehavior::Orchestrator {
-            return receipt;
-        }
         if let Some(session_id) = self.metadata.session_id.clone() {
             let path = self.metadata.store_path.clone();
             let owned_run_id = run_id.to_string();
@@ -473,81 +457,9 @@ impl SessionService {
     /// (log-first: those messages are in neither store).
     pub(super) async fn normalize_failed_run_transcript(&self) {
         let mut agent = self.agent.lock().await;
-        let result = if self.metadata.behavior == sessions::SessionBehavior::Orchestrator {
-            agent.normalize_dangling_tail().await
-        } else {
-            agent.normalize_failed_tail_preserving_partial().await
-        };
+        let result = agent.normalize_failed_tail_preserving_partial().await;
         if let Err(error) = result {
             eprintln!("nac: failed to normalize transcript after run failure: {error:#}");
-        }
-    }
-
-    pub(super) async fn expire_orchestrator_steering(&self, run_id: &SessionRunId) {
-        if crate::store::coordinator::owner_for(&self.metadata.store_path)
-            .is_ok_and(|owner| owner.is_none())
-        {
-            self.expire_orchestrator_steering_sync(run_id);
-            return;
-        }
-        let service = self.clone();
-        let run_id = run_id.clone();
-        if let Err(error) = crate::store::spawn_blocking_store_caller(move || {
-            service.expire_orchestrator_steering_sync(&run_id);
-        })
-        .await
-        {
-            eprintln!("nac: steering expiry caller failed: {error:#}");
-        }
-    }
-
-    pub(super) async fn emit_steering_expired_async(
-        &self,
-        records: Vec<crate::store::ThreadSteeringRecord>,
-    ) {
-        let service = self.clone();
-        if let Err(error) = crate::store::spawn_blocking_store_caller(move || {
-            service.emit_steering_expired(records);
-        })
-        .await
-        {
-            eprintln!("nac: steering expiry publication failed: {error:#}");
-        }
-    }
-
-    fn expire_orchestrator_steering_sync(&self, run_id: &SessionRunId) {
-        let Some(session_id) = self.metadata.session_id.as_deref() else {
-            return;
-        };
-        match crate::store::expire_thread_steering(
-            &self.metadata.store_path,
-            session_id,
-            run_id.as_str(),
-        ) {
-            Ok(records) => self.emit_steering_expired(records),
-            Err(error) => {
-                eprintln!("nac: failed to expire orchestrator steering: {error:#}");
-            }
-        }
-    }
-
-    pub(super) fn emit_steering_expired(&self, records: Vec<crate::store::ThreadSteeringRecord>) {
-        for record in records {
-            let instruction_preview = record.instruction.chars().take(160).collect();
-            if record.thread_name == crate::store::ORCHESTRATOR_STEERING_TARGET {
-                self.event_bus
-                    .emit_agent(AgentEvent::OrchestratorSteeringExpired {
-                        steering_id: record.id,
-                        instruction_preview,
-                    });
-            } else {
-                self.event_bus
-                    .emit_agent(AgentEvent::ThreadSteeringExpired {
-                        name: record.thread_name,
-                        steering_id: record.id,
-                        instruction_preview,
-                    });
-            }
         }
     }
 
@@ -772,24 +684,24 @@ impl SessionService {
                 update.failed_run_failure = failure.clone();
             }
         }
-        if self.metadata.behavior != sessions::SessionBehavior::Orchestrator {
-            update.goal_settlement = Some(crate::store::GoalRunSettlement {
-                run_id: active_run.run_id.to_string(),
-                final_billable_tokens: goal_final_billable_tokens,
-                terminal_at_epoch_ms: now_epoch_ms(),
-                disposition: match durable_terminal {
-                    DurableRunTerminal::Completed => crate::store::GoalRunDisposition::Completed,
-                    DurableRunTerminal::Cancelled => crate::store::GoalRunDisposition::Cancelled,
-                    DurableRunTerminal::Failed
-                        if failure.as_ref().is_some_and(|failure| failure.transient) =>
-                    {
-                        crate::store::GoalRunDisposition::RetryableFailed
-                    }
-                    DurableRunTerminal::Failed => crate::store::GoalRunDisposition::Failed,
-                },
-                failure,
-            });
-        }
+
+        update.goal_settlement = Some(crate::store::GoalRunSettlement {
+            run_id: active_run.run_id.to_string(),
+            final_billable_tokens: goal_final_billable_tokens,
+            terminal_at_epoch_ms: now_epoch_ms(),
+            disposition: match durable_terminal {
+                DurableRunTerminal::Completed => crate::store::GoalRunDisposition::Completed,
+                DurableRunTerminal::Cancelled => crate::store::GoalRunDisposition::Cancelled,
+                DurableRunTerminal::Failed
+                    if failure.as_ref().is_some_and(|failure| failure.transient) =>
+                {
+                    crate::store::GoalRunDisposition::RetryableFailed
+                }
+                DurableRunTerminal::Failed => crate::store::GoalRunDisposition::Failed,
+            },
+            failure,
+        });
+
         update.finished_run_result = run_result;
         update.heartbeat_settlement = heartbeat_settlement;
         let saved_session_id = update.session_id.clone();

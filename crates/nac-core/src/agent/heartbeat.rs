@@ -43,7 +43,7 @@ impl Agent {
     pub(super) async fn refresh_heartbeat_request_from_guidance(&mut self) {
         let (Some(session), Some(run)) = (
             self.tool_runtime.session_id.clone(),
-            self.tool_runtime.active_threads.run_id(),
+            self.tool_runtime.run_admission.run_id(),
         ) else {
             return;
         };

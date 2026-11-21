@@ -32,14 +32,6 @@ describe("segment durations", () => {
     expect(segmentDurationMs(tool({ status: "timed-out", durationMs: 30_000 }))).toBe(30_000);
     expect(segmentDurationMs(tool({}))).toBeNull();
     expect(segmentDurationMs(tool(null))).toBeNull();
-    expect(
-      segmentDurationMs({
-        kind: "workset",
-        key: "workset_define-1-0",
-        worksetId: "w",
-        pending: false,
-      }),
-    ).toBeNull();
   });
 
   it("sums the durations that are known", () => {

@@ -1161,7 +1161,6 @@ async fn owned_current_thread_manual_compaction_acknowledges_checkpoint() {
     let manager = SessionManager::new_async(ServerOptions {
         root_cwd: root.clone(),
         store_path: Some(root.join("store.db")),
-        worker_executable: None,
         managed_host: None,
     })
     .await

@@ -143,7 +143,6 @@ async fn journey(mode: Journey) {
     let manager = SessionManager::new_async(crate::ServerOptions {
         root_cwd: root.clone(),
         store_path: Some(path),
-        worker_executable: None,
         managed_host: None,
     })
     .await

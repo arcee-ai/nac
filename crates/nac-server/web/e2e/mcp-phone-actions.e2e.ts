@@ -23,7 +23,7 @@ import {
   type Geometry,
 } from "./mcp-phone-actions-fixture";
 
-test.use({ orchestration: "0", hasTouch: true });
+test.use({ hasTouch: true });
 test.skip(
   !!process.env.NAC_E2E_REMOTE,
   "Requires disposable disabled MCP fixtures and loopback egress guard",

@@ -34,28 +34,6 @@ describe("delegated completion envelopes", () => {
     });
   });
 
-  it("recognizes managed failures without collapsing their topology", () => {
-    expect(
-      parseDelegatedCompletion(
-        `${ORCHESTRATOR_PREFIX}${JSON.stringify({
-          source: "managed_orchestrator",
-          orchestrator_session_id: "orch-1",
-          generation: 4,
-          status: "failed",
-          description: "Coordinate release",
-          report: null,
-          failure: "provider failed",
-        })}`,
-      ),
-    ).toMatchObject({
-      kind: "nac-orchestrator",
-      sessionId: "orch-1",
-      generation: 4,
-      status: "failed",
-      outcome: "provider failed",
-    });
-  });
-
   it.each([
     `${CHILD_PREFIX}not json`,
     `${CHILD_PREFIX}${JSON.stringify({ source: "traditional_child", status: "completed" })}`,
@@ -93,8 +71,8 @@ describe("delegated completion envelopes", () => {
       source: "managed_orchestrator",
       orchestrator_session_id: "orch-1",
       generation: 1,
-      status: "running",
-      description: "not a completion",
+      status: "completed",
+      description: "retired managed completion",
       report: null,
       failure: null,
     })}`,

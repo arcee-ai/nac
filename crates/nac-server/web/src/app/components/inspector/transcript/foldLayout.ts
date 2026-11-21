@@ -132,10 +132,7 @@ type Phrase =
   | "command"
   | "spawn"
   | "delegate"
-  | "orchestrator"
-  | "thread"
   | "check"
-  | "workset"
   | "goal"
   | "tool";
 
@@ -150,15 +147,8 @@ const PHRASE_OF: Partial<Record<ActionKind, Phrase>> = {
   "run-command": "command",
   "write-command": "command",
   "spawn-agent": "spawn",
-  "spawn-orchestrator": "orchestrator",
-  thread: "thread",
   "session-status": "check",
-  "session-read": "check",
-  "session-wait": "check",
-  "session-steer": "check",
   "session-cancel": "check",
-  "define-workset": "workset",
-  "delete-thread": "thread",
   "create-goal": "goal",
   "get-goal": "goal",
   "update-goal": "goal",
@@ -174,10 +164,7 @@ const ORDER: readonly Phrase[] = [
   "command",
   "spawn",
   "delegate",
-  "orchestrator",
-  "thread",
   "check",
-  "workset",
   "goal",
   "tool",
 ];
@@ -199,10 +186,7 @@ const PHRASES: Record<Phrase, (count: number) => string> = {
   command: (n) => `ran ${plural(n, "command")}`,
   spawn: (n) => `started ${plural(n, "subagent")}`,
   delegate: (n) => `made ${plural(n, "subagent request")}`,
-  orchestrator: (n) => `requested ${plural(n, "orchestrator")}`,
-  thread: (n) => `ran ${plural(n, "thread")}`,
   check: (n) => `checked on subagents${times(n)}`,
-  workset: (n) => `defined ${plural(n, "workset")}`,
   goal: () => "updated the goal",
   tool: (n) => `used ${plural(n, "tool")}`,
 };

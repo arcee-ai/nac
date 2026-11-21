@@ -199,7 +199,6 @@ async fn observe() -> Result<()> {
     let manager = SessionManager::new_async(ServerOptions {
         root_cwd: root.clone(),
         store_path: Some(path.clone()),
-        worker_executable: None,
         managed_host: None,
     })
     .await?;

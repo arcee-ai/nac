@@ -2,8 +2,7 @@
 
 NAC is a Rust coding-agent harness with a React web client. The selected
 product direction is persistent direct sessions, traditional children and
-independent direct tasks. Legacy orchestration internals remain pending removal;
-managed-host deployment remains additive and opt-in.
+independent direct tasks. Managed-host deployment remains additive and opt-in.
 
 Read the nearest nested `AGENTS.md` before changing a subsystem. This root file
 defines repository-wide constraints; nested guides add ownership-specific
@@ -60,14 +59,13 @@ and [generated API contract](docs/architecture/0002-generated-api-contract.md).
 ## Product and compatibility invariants
 
 - The direct-only retirement in [ADR 0009](docs/architecture/0009-direct-only-retirement.md)
-  authorizes removal of legacy modes and their owned session trees in the
-  planned transactional migration. Until cutover, preserve existing wire and
-  stored behavior semantics; do not claim that legacy internals are removed.
+  authorizes removal of legacy modes and their owned session trees in a
+  transactional migration. New sessions use the direct behavior.
 - Preserve direct session IDs, transcripts, children, independent tasks,
   receipts, workspace ownership, safety, and restart-safe lifecycle state.
-- Preserve prompts, defaults, thread/workset behavior, MCP semantics, API
-  shapes, configuration values, and supported migrations except where the
-  deliberate retirement decision authorizes their removal.
+- Preserve direct prompts, MCP semantics, supported configuration, and
+  migrations except where a deliberate product decision changes them. Models
+  are selected at the session layer; provider credentials remain independent.
 - Durable inbox, goals, transcripts, relationships, leases, recovery,
   cancellation, and completion delivery must remain restart-safe and
   generation-aware.

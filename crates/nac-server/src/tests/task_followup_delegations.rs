@@ -186,7 +186,6 @@ async fn task_followup_retained_human_delegation_survives_coordinator_end_and_se
     let options = || ServerOptions {
         root_cwd: root.clone(),
         store_path: Some(root.join("store.db")),
-        worker_executable: None,
         managed_host: None,
     };
     let manager = SessionManager::new_async(options()).await.unwrap();

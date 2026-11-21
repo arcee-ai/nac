@@ -80,69 +80,6 @@ impl OrchestrationOperations {
         self.manager.messages_page(session_id, request).await
     }
 
-    pub(crate) async fn thread_episodes(
-        &self,
-        session_id: &str,
-        thread_name: Option<String>,
-    ) -> Result<Value> {
-        let store_path = self.manager.store_info().store_path;
-        let session_id = session_id.to_string();
-        nac_core::store::spawn_blocking_store_caller(move || {
-            let mut all = if let Some(thread_name) = thread_name {
-                nac_core::store::thread_read(&store_path, &session_id, &thread_name)?
-            } else {
-                nac_core::store::load_all_retained_episodes(&store_path, &session_id)?
-                    .into_values()
-                    .flatten()
-                    .collect()
-            };
-            all.sort_by(|left, right| {
-                left.thread_name
-                    .cmp(&right.thread_name)
-                    .then(left.id.cmp(&right.id))
-            });
-            Ok(json!({
-                "episodes": all.into_iter().map(|episode| json!({
-                    "id": episode.id,
-                    "thread_name": episode.thread_name,
-                    "action": episode.action,
-                    "content": episode.content,
-                    "status": episode.status,
-                    "created_at": episode.created_at,
-                })).collect::<Vec<_>>()
-            }))
-        })
-        .await
-        .map_err(|error| anyhow!("episode read task failed: {error}"))?
-    }
-
-    pub(crate) async fn thread_events(
-        &self,
-        session_id: &str,
-        thread_name: Option<String>,
-        before_id: Option<i64>,
-        limit: usize,
-    ) -> Result<Value> {
-        if let Some(thread_name) = thread_name {
-            let page = self
-                .manager
-                .thread_events(session_id, &thread_name, before_id, limit)
-                .await?;
-            Ok(json!({
-                "events": page.events.into_iter().map(|item| json!({
-                    "id": item.id,
-                    "created_at": item.created_at,
-                    "event": item.event,
-                })).collect::<Vec<_>>(),
-                "has_older": page.has_older,
-                "next_before_id": page.next_before_id,
-            }))
-        } else {
-            let snapshot = self.manager.snapshot(session_id).await?;
-            Ok(json!({ "thread_events": snapshot.thread_events }))
-        }
-    }
-
     pub(crate) async fn session_action(
         &self,
         session_id: &str,

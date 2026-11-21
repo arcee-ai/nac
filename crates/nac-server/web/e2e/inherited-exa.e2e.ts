@@ -69,7 +69,7 @@ test.describe("inherited native web", () => {
     });
     expect(initial.ok()).toBe(true);
     const { child_session_id } = (await initial.json()) as { child_session_id: string };
-    await harness.restart("1", `${CANARY}-rotated`);
+    await harness.restart(`${CANARY}-rotated`);
     // Reattach the child before reconstructing its parent's trusted source.
     expect((await request.get(`${harness.baseUrl}/sessions/${child_session_id}`)).ok()).toBe(true);
     enqueueResearch(harness, "after", "INHERITED_AFTER", forbidden);
@@ -90,7 +90,7 @@ test.describe("inherited native web", () => {
       `${CANARY}-rotated`,
       `${CANARY}-rotated`,
     ]);
-    await harness.restart("1", null);
+    await harness.restart(null);
     harness.provider.enqueue(
       "revoked",
       {

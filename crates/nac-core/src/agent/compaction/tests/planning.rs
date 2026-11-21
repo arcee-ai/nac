@@ -51,7 +51,7 @@ fn boundary_projection_preserves_systems_and_exact_weighted_suffix() {
             {"role":"assistant","content":"old assistant"},
             {"role":"user","content":"recent user"},
             {"role":"assistant","content":null,"reasoning_text":"reasoning","reasoning_details":[{"type":"reasoning","id":"r1"}]},
-            {"role":"user","content":NAC_COMPACTION_PROMPT}
+            {"role":"user","content":NAC_DIRECT_COMPACTION_PROMPT}
         ])
     );
     let projected = provider_view_with_summary(&messages, preferred.boundary, "summary");
@@ -310,7 +310,7 @@ fn active_end_checkpoint_without_new_messages_is_already_compacted() {
             tail_start_message_index: boundary,
             source_prefix_sha256: source,
             system_policy_sha256: policy,
-            prompt_policy_version: PROMPT_POLICY_VERSION,
+            prompt_policy_version: DIRECT_PROMPT_POLICY_VERSION,
             old_context_estimate: 100,
             summary_prompt_tokens: None,
             summary_completion_tokens: None,

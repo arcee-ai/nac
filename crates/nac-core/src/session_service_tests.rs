@@ -1,5 +1,5 @@
 use super::*;
-use crate::agent::{AgentConfig, AgentMode};
+use crate::agent::AgentConfig;
 use crate::model::ModelClient;
 use crate::types::{FunctionCall, ToolCall};
 use std::collections::BTreeMap;
@@ -183,23 +183,6 @@ fn paged_messages_match_legacy_windows_for_mixed_history_and_cursor_bounds() {
     assert_eq!(beyond_end.messages.len(), 4);
 }
 
-#[test]
-fn thread_tool_call_names_ignore_malformed_and_non_thread_calls() {
-    let messages = mixed_message_history();
-    // Names come from `thread` tool calls only; malformed arguments,
-    // blank names, and non-thread calls are ignored, and names are
-    // sorted and deduplicated.
-    assert_eq!(
-        thread_tool_call_names(&messages[6..]),
-        vec!["alpha".to_string(), "zeta".to_string()]
-    );
-    assert!(thread_tool_call_names(&messages[..2]).is_empty());
-    assert!(thread_tool_call_names(&[Message::System {
-        content: "only system".to_string(),
-    }])
-    .is_empty());
-}
-
 pub(super) fn test_store_path(label: &str) -> PathBuf {
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -215,14 +198,7 @@ pub(super) fn test_agent(
     store_path: PathBuf,
     session_id: Option<String>,
 ) -> Agent {
-    build_test_agent(
-        client,
-        store_path,
-        session_id,
-        AgentMode::Orchestrator,
-        None,
-        None,
-    )
+    build_test_agent(client, store_path, session_id, None, None)
 }
 
 pub(super) fn test_agent_with_compaction_threshold(
@@ -235,7 +211,6 @@ pub(super) fn test_agent_with_compaction_threshold(
         client,
         store_path,
         session_id,
-        AgentMode::Orchestrator,
         orchestrator_compaction_threshold,
         None,
     )
@@ -247,49 +222,33 @@ pub(super) fn test_agent_with_skills(
     session_id: Option<String>,
     skills: Option<Arc<SkillRegistry>>,
 ) -> Agent {
-    build_test_agent(
-        client,
-        store_path,
-        session_id,
-        AgentMode::Orchestrator,
-        None,
-        skills,
-    )
+    build_test_agent(client, store_path, session_id, None, skills)
 }
 
-fn build_test_agent(
+pub(super) fn build_test_agent(
     client: ModelClient,
     store_path: PathBuf,
     session_id: Option<String>,
-    mode: AgentMode,
     orchestrator_compaction_threshold: Option<u64>,
     skills: Option<Arc<SkillRegistry>>,
 ) -> Agent {
     Agent::with_config(
         client,
         AgentConfig {
-            command_output_limits: crate::terminal::CommandOutputLimits::default(),
-            mode,
-            session_behavior: None,
             store_path,
             session_id,
             orchestrator_compaction_threshold,
             initial_messages: Vec::new(),
-            thread_name: None,
-            dispatch_id: None,
             event_sink: EventSink::none(),
             workspace_cwd: PathBuf::from("/repo"),
             config_cwd: PathBuf::from("/repo"),
             working_directory: "/repo".to_string(),
-            worker_executable: None,
             sandbox: None,
             ssh: None,
             mcp: None,
             skills,
             extra_tool_defs: Vec::new(),
             agents_md_message: None,
-            thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
-            light_client: None,
             permission_rules: Vec::new(),
         },
     )
@@ -333,7 +292,6 @@ pub(crate) fn test_direct_active_service_at(
         client.clone(),
         store_path.clone(),
         Some(session_id.to_string()),
-        AgentMode::Direct,
         None,
         None,
     );
@@ -428,24 +386,19 @@ fn has_sandbox_reflects_the_agent_execution_backend() {
     let _ = std::fs::remove_dir_all(local_store.parent().unwrap());
 
     let store_path = test_store_path("has_sandbox_sandboxed");
+    crate::store::initialize(&store_path).unwrap();
     let client = ModelClient::new_for_test();
     let agent = Agent::with_config(
         client.clone(),
         AgentConfig {
-            command_output_limits: crate::terminal::CommandOutputLimits::default(),
-            mode: AgentMode::Orchestrator,
-            session_behavior: None,
             store_path: store_path.clone(),
             session_id: Some("has-sandbox-sandboxed".to_string()),
             orchestrator_compaction_threshold: None,
             initial_messages: Vec::new(),
-            thread_name: None,
-            dispatch_id: None,
             event_sink: EventSink::none(),
             workspace_cwd: PathBuf::from("/repo"),
             config_cwd: PathBuf::from("/repo"),
             working_directory: "/repo".to_string(),
-            worker_executable: None,
             sandbox: Some(crate::sandbox::SandboxSession::new_for_test(
                 crate::sandbox::SandboxSpec {
                     backend: crate::sandbox::SandboxBackendType::Podman,
@@ -464,8 +417,6 @@ fn has_sandbox_reflects_the_agent_execution_backend() {
             skills: None,
             extra_tool_defs: Vec::new(),
             agents_md_message: None,
-            thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
-            light_client: None,
             permission_rules: Vec::new(),
         },
     )
@@ -581,6 +532,7 @@ async fn sandbox_container_destruction_preserves_worktree_until_durable_delete()
     }
     unsafe { std::env::set_var("PATH", std::env::join_paths(paths).unwrap()) };
 
+    crate::store::initialize(&store_path).unwrap();
     let client = ModelClient::new_for_test();
     let sandbox_spec = crate::sandbox::SandboxSpec {
         worktree: Some(worktree.clone()),
@@ -589,28 +541,20 @@ async fn sandbox_container_destruction_preserves_worktree_until_durable_delete()
     let agent = Agent::with_config(
         client.clone(),
         AgentConfig {
-            command_output_limits: crate::terminal::CommandOutputLimits::default(),
-            mode: AgentMode::Orchestrator,
-            session_behavior: None,
             store_path: store_path.clone(),
             session_id: Some("destroy-preserves-worktree".to_string()),
             orchestrator_compaction_threshold: None,
             initial_messages: Vec::new(),
-            thread_name: None,
-            dispatch_id: None,
             event_sink: EventSink::none(),
             workspace_cwd: worktree.path.clone(),
             config_cwd: repo_root.clone(),
             working_directory: worktree.path.display().to_string(),
-            worker_executable: None,
             sandbox: Some(crate::sandbox::SandboxSession::new_for_test(sandbox_spec)),
             ssh: None,
             mcp: None,
             skills: None,
             extra_tool_defs: Vec::new(),
             agents_md_message: None,
-            thread_timeout_secs: crate::tools::thread::DEFAULT_THREAD_TIMEOUT_SECS,
-            light_client: None,
             permission_rules: Vec::new(),
         },
     )
@@ -770,10 +714,12 @@ pub(super) fn test_compaction_service(
     client: ModelClient,
 ) -> (SessionServiceParts, PathBuf) {
     let store_path = test_store_path(label);
-    let mut agent = test_agent(
+    let mut agent = build_test_agent(
         client.clone(),
         store_path.clone(),
         Some(session_id.to_string()),
+        None,
+        None,
     );
     agent.messages = compaction_messages().into();
     agent.last_usage = Some(crate::model::TokenUsage {

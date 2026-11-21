@@ -87,13 +87,9 @@ impl PermissionBroker {
                     && config.diagnostics.is_empty(),
                 "execution unavailable"
             );
+            crate::sessions::load_session_behavior(&broker.store_path, &broker.session_id)?;
             anyhow::ensure!(
-                crate::sessions::load_session_behavior(&broker.store_path, &broker.session_id)?
-                    != crate::sessions::SessionBehavior::Orchestrator
-                    && crate::store::load_traditional_child(
-                        &broker.store_path,
-                        &broker.session_id
-                    )?
+                crate::store::load_traditional_child(&broker.store_path, &broker.session_id)?
                     .is_none(),
                 "execution unavailable"
             );

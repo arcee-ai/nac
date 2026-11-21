@@ -186,7 +186,8 @@ class Engine:
         self.workspace.mkdir(exist_ok=True)
         self.env = {k: v for k, v in os.environ.items() if k in ('PATH', 'LANG', 'TMPDIR')}
         self.env.update(HOME=str(self.root), NAC_HOME=str(self.root / 'nac'), BROWSER='none',
-                        NAC_TELEMETRY='disabled', GIT_CONFIG_NOSYSTEM='1')
+                        NAC_TELEMETRY='disabled', GIT_CONFIG_NOSYSTEM='1',
+                        OPENAI_API_KEY='fixture-dummy-only')
         subprocess.run(['git', 'init', '-q', str(self.workspace)], env=self.env, check=True)
         subprocess.run(['git', '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
                         'commit', '--allow-empty', '-qm', 'Fixture'], cwd=self.workspace, env=self.env, check=True)
@@ -233,14 +234,15 @@ class Engine:
                 self.log.close()
             raise
     def session(self, provider):
-        config = request(self.base, '/model-configs', dict(name='Attention fixture '+self.incarnation, backend='openai-responses',
-            model='gpt-5.6-sol', base_url=provider.base, api_key='fixture-dummy-only',
-            reasoning_effort='high', extra_headers={}, orchestrator_compaction_threshold=0), expected=201)
-        project = request(self.base, '/projects', dict(name='Attention fixture '+self.incarnation, cwd=str(self.workspace),
-                          default_model_config_id=config['config_id']), expected=201)
+        project = request(self.base, '/projects', dict(name='Attention fixture '+self.incarnation,
+                          cwd=str(self.workspace)), expected=201)
         self.project_id = project['project_id']
-        session = request(self.base, '/sessions', dict(behavior='direct', project_id=project['project_id'],
-                          light_model=None), expected=201)
+        return self.new_session(provider, self.project_id)
+    def new_session(self, provider, project_id):
+        session = request(self.base, '/sessions', dict(behavior='direct', project_id=project_id,
+                          backend='openai-responses', model='gpt-5.6-sol', base_url=provider.base,
+                          api_key_env='OPENAI_API_KEY', reasoning_effort='high', extra_headers={},
+                          orchestrator_compaction_threshold=0), expected=201)
         return session['metadata']['session_id']
     def stop(self):
         if self.process.poll() is None:
@@ -412,7 +414,7 @@ def real_case(kind, binary, swift, root, artifact):
             replacement = Engine(binary, profile)
             replacement.profile = engine.profile
             assert replacement.ready['store'] == engine.ready['store'] and replacement.incarnation != engine.incarnation
-            next_sid = request(replacement.base, '/sessions', dict(behavior='direct', project_id=engine.project_id, light_model=None), expected=201)['metadata']['session_id']
+            next_sid = replacement.new_session(provider, engine.project_id)
             rebound = consumer.bind(replacement)
             assert len(rebound['notices']) == 1
             consumer.command('click', index=0)
@@ -468,7 +470,7 @@ def real_case(kind, binary, swift, root, artifact):
                 assert before['grants'] == restored['grants'] and before['approval_mode'] == restored['approval_mode']
                 # Public creation owns the real cache sweep; observation itself
                 # never attaches or pins the now-idle review service.
-                request(engine.base, '/sessions', dict(behavior='direct', project_id=engine.project_id, light_model=None), expected=201)
+                engine.new_session(provider, engine.project_id)
                 lost = consumer.wait(lambda s: sid in s['status']['unknown_decision_sessions'])
                 assert len(lost['notices']) == 1 and lost['active'] == 0
                 consumer.command('click', index=0)

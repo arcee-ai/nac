@@ -65,13 +65,9 @@ fn followup_capability_surface_is_plain_direct_only() {
             .collect::<Vec<_>>()
     };
     let direct = names(crate::tools::direct_tool_definitions(false));
-    let dwo = names(crate::tools::direct_with_orchestrator_tool_definitions(
-        false,
-    ));
     let child = names(crate::tools::coding_tool_definitions(false));
     for name in ["send_task_followup", "read_task_followup"] {
         assert!(direct.iter().any(|value| value == name));
-        assert!(!dwo.iter().any(|value| value == name));
         assert!(!child.iter().any(|value| value == name));
         assert!(crate::tools::direct_tool_admission(name).is_some());
     }

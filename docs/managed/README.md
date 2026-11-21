@@ -31,13 +31,10 @@ fails closed if that bit appears in the inheritable, permitted, effective,
 bounding, or ambient capability set, or if those sets cannot be parsed. The
 server captures `EXA_API_KEY` into its native-web-only memory and removes it
 from the environment before loading configuration, constructing MCP servers,
-or starting background work. The server and legacy worker transport retain
-platform-specific credential hardening until ALL-614 removes the old engine.
-On Linux the managed server and legacy worker become non-dumpable and set
-`no_new_privs` before untrusted descendants. The legacy credential socket
-checks both peer PIDs and sends the credential only after MCP construction;
-credentials are not inherited by MCP descendants. A same-UID process can
-still disrupt the socket. These controls do not protect against privileged
+or starting background work. On Linux the managed server becomes non-dumpable
+and sets `no_new_privs` before starting untrusted descendants. The captured
+credential is not inherited through the environment by MCP descendants.
+These controls do not protect against privileged
 ptrace, kernel compromise or a fully compromised NAC process. Do not grant
 `CAP_SYS_PTRACE` or weaken host process-inspection controls. A stronger boundary
 requires separate UIDs or an external credential broker. macOS does not have
